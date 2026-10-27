@@ -755,13 +755,15 @@ def texto_edicao(config):
         "dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, o vídeo vai sem os "
         "textos.\n\n"
         "<b>Editor 3</b> (em teste, só no exemplo): o Editor 1 em até 3 versões diferentes do mesmo vídeo. "
-        "Cada versão abre com um momento diferente, que a IA escolhe vendo o vídeo, e segue com o resto na ordem; "
-        "sem textos, nada cortado nem acelerado.\n\n"
+        "Cada versão abre com um momento diferente, que a IA escolhe vendo o vídeo, e segue dali (o que vinha "
+        "antes vai para o fim); sem textos e nada acelerado.\n\n"
         "<b>Editor 4</b> (em teste, só no exemplo): o Editor 2 em até 3 versões diferentes do mesmo vídeo. Cada "
-        "versão abre com um momento diferente, mostra na tela a vantagem desse momento e termina com uma chamada "
-        "diferente para o produto; a segunda é mais curta, sem os trechos calmos.\n\n"
-        "Nos Editores 3 e 4, só sai versão com um momento que as outras não têm: vídeo curto, ou com fala do "
-        "começo ao fim, rende menos versões. Compare os quatro e diga qual fica.\n\n"
+        "versão abre com um momento diferente e segue dali (o que vinha antes vai para o fim), mostra na tela a "
+        "vantagem desse momento e termina com uma chamada diferente para o produto.\n\n"
+        "Nos Editores 3 e 4, cada versão tem um tamanho: a 1ª é o vídeo inteiro, a 2ª uns 3/4 e a 3ª a mais "
+        f"curta (pelo menos {edicao_video.MINIMO_DO_REMONTADO} s; sai o fim, nunca o meio de uma fala). Só sai "
+        f"versão com um momento a pelo menos {edicao_video.ENTRE_VERSOES:.0f} s dos das outras: vídeo curto, ou "
+        "com fala do começo ao fim, rende menos versões. Compare os quatro e diga qual fica.\n\n"
         f"Agora: {rotulo_edicao(config)} (Editor 1)\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado, já editado e sem postar, o próximo vídeo que "
@@ -990,6 +992,15 @@ def _momento(segundos):
     return f"{segundos:.1f} s".replace(".", ",")
 
 
+def _tamanho_da_versao(versoes, indice, inteiro):
+    """O fim da linha do tamanho na legenda: ": o vídeo inteiro" ou ": N% do vídeo inteiro" (e ", a mais curta")."""
+    remontado = versoes[indice].get("remontado", 0)
+    if not inteiro or not versoes[indice].get("curta"):
+        return ": o vídeo inteiro" if inteiro else ""
+    mais_curta = len(versoes) > 1 and remontado <= min(v.get("remontado", 0) for v in versoes)
+    return f": {round(100 * remontado / inteiro)}% do vídeo inteiro" + (", a mais curta" if mais_curta else "")
+
+
 def legenda_das_versoes(nome, resumo, indice, editor):
     """A legenda de uma versão do exemplo do Editor 3 ou 4; a última diz também o que vale para todas."""
     versoes = resumo["versoes"]
@@ -999,11 +1010,12 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     gancho = versao.get("gancho")
     if gancho:
         mostra = f" (o que ele mostra: “{html_escape(versao['vantagem'])}”)" if editor == 3 and versao.get("vantagem") else ""
-        linhas.append(f"▶️ Abre com o trecho de {_momento(gancho[0])} a {_momento(gancho[1])} do vídeo original{mostra}")
+        linhas.append(f"▶️ Abre com o trecho de {_momento(gancho[0])} a {_momento(gancho[1])} do vídeo original{mostra}"
+                      + (" e segue dali; o que vinha antes vai para o fim" if gancho[0] >= 0.5 else ""))
     else:
         linhas.append("▶️ Na ordem do vídeo original")
     linhas.append(f"⏱️ {_segundos(versao.get('remontado', 0))} (mais os {edicao_video.SEGUNDOS_DA_FOTO} s da foto)"
-                  + (", a mais curta: sem os trechos calmos" if versao.get("curta") else ""))
+                  + _tamanho_da_versao(versoes, indice, resumo.get("inteiro")))
     if versao.get("textos"):
         linhas.append(_linha_dos_textos(versao["textos"]))
     if indice < total - 1:
@@ -1011,7 +1023,7 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     if total < edicao_video.VERSOES_POR_VIDEO:
         porque = ("a IA não sugeriu momentos diferentes" if not resumo.get("versoes_da_ia")
                   else "onde alguém fala, o vídeo fica inteiro e na ordem" if resumo.get("com_fala", 0) >= 0.5
-                  else "os outros momentos repetiam estes ou eram curtos demais")
+                  else "os outros momentos ficavam perto demais destes ou eram curtos demais")
         linhas.append(f"🔢 Este vídeo rendeu {total} {'versão diferente' if total == 1 else 'versões diferentes'} "
                       f"de verdade ({porque}).")
     linhas += _linha_do_lugar(resumo, any(v.get("textos") for v in versoes))

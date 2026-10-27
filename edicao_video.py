@@ -16,8 +16,8 @@ o vídeo remontado sem as partes paradas, com trechos acelerados e uma câmera l
 e os textos da tela (nome, vantagem e preço). O Rafael compara os dois exemplos e escolhe
 qual fica (pedido de 27/10/2026: DECISOES.md, Shopee Vídeo). Os Editores 3 (editar_3, a partir
 do Editor 1) e 4 (editar_4, a partir do Editor 2), também só no exemplo, fazem do mesmo vídeo até
-3 versões diferentes de verdade, cada uma abrindo com um momento diferente; no 4, com outra
-vantagem na tela e outra chamada no fim.
+3 versões diferentes de verdade, cada uma abrindo com um momento diferente e seguindo dali,
+cada uma de um tamanho; no 4, com outra vantagem na tela e outra chamada no fim.
 
 Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao rascunho) e
 pelo painel da Shopee Vídeo (os exemplos).
@@ -668,19 +668,27 @@ def exemplo_editor_2(destino):
 # exemplo (pedido do Rafael de 27/10/2026, depois do que a Rafaela contou no grupo sobre as
 # ferramentas que "multiplicam" um vídeo: DECISOES.md, Shopee Vídeo). Cada versão abre com um
 # momento diferente do vídeo (o gancho), que a IA aponta com a vantagem que ele mostra, e
-# segue com o resto do vídeo na ordem. O Editor 3 parte do Editor 1: sem textos, nada cortado
-# nem acelerado. O Editor 4 parte do Editor 2: com os textos na tela (a vantagem do gancho e
-# uma chamada diferente no fim de cada versão), e a segunda versão é a mais curta, sem os
-# trechos calmos. Não são cópias quase iguais para a Shopee não reconhecer o mesmo vídeo (a
-# regra 9 pune mensagens repetitivas): versão só sai com um momento que as outras não têm, e
-# o vídeo curto, ou com fala do começo ao fim, rende menos versões.
+# segue dali; o que vinha antes do gancho vai para o fim. E cada uma tem um tamanho: a 1ª é o
+# vídeo inteiro, a 2ª uns 3/4 e a 3ª a mais curta (escolha do Rafael, P49: nas versões do
+# conjunto de jardim, todas voltavam ao começo do vídeo depois do gancho e terminavam iguais,
+# com o mesmo tamanho). Assim, em nenhum segundo duas versões mostram a mesma parte. O Editor 3
+# parte do Editor 1: sem textos e nada acelerado. O Editor 4 parte do Editor 2: com os textos na
+# tela (a vantagem do gancho e uma chamada diferente no fim de cada versão). Não são cópias
+# quase iguais para a Shopee não reconhecer o mesmo vídeo (a regra 9 pune mensagens
+# repetitivas): versão só sai com um gancho longe dos das outras, e o vídeo curto, ou com fala
+# do começo ao fim, rende menos versões.
 VERSOES_POR_VIDEO = 3
+# O tamanho de cada versão, em fração da versão inteira, na ordem; nenhuma fica com menos de
+# MINIMO_DO_REMONTADO. O que sai é o fim da versão, nunca o meio de uma fala (P45).
+TAMANHO_DAS_VERSOES = (1.0, 0.75, 0.5)
 # O gancho tem pelo menos isto do vídeo original e não tem fala: a fala fica inteira e na
-# ordem (P45). Gancho que repete mais da metade de outro não vira versão.
+# ordem (P45). O começo de uma versão fica a pelo menos ENTRE_VERSOES do começo das outras, no
+# vídeo original (contando a volta do fim ao começo): mais perto, as duas mostram quase a
+# mesma coisa o tempo todo.
 GANCHO_MINIMO = 1.0
-GANCHO_REPETIDO = 0.5
-# Pedaço que sobra menor que isto, ao tirar o gancho do meio de um trecho, sai (emenda curta
-# demais só soluça).
+ENTRE_VERSOES = 3.0
+# Pedaço que sobra menor que isto, ao dividir um trecho no começo do gancho ou no corte do fim,
+# sai (emenda curta demais só soluça).
 PEDACO_MINIMO = 0.2
 MAXIMO_DA_CHAMADA = 32
 
@@ -691,7 +699,8 @@ PROMPT_DAS_VERSOES = (
     + _NOME_NO_PROMPT
     + "- \"versoes\": até 3, cada uma com \"vantagem\" (uma vantagem do produto que o vídeo mostra naquele "
     f"momento, até {MAXIMO_DA_VANTAGEM} caracteres), \"inicio\" e \"fim\" (os segundos do vídeo em que ela "
-    "aparece melhor, de 1 a 4 segundos, sem ninguém falando) e \"chamada\" (uma frase curta para o fim do "
+    "aparece melhor, de 1 a 4 segundos, sem ninguém falando, com pelo menos "
+    f"{ENTRE_VERSOES:.0f} segundos entre o começo de um momento e o de outro) e \"chamada\" (uma frase curta para o fim do "
     f"vídeo, chamando para o produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, diferente em cada "
     "versão, sem mandar para fora da Shopee). Só ponha uma versão com um momento e uma vantagem que as outras "
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
@@ -728,40 +737,67 @@ def textos_das_versoes(video, nome):
 def planejar_versoes(trechos, ganchos, com_fala):
     """
     As versões do vídeo, [{"gancho": n do gancho em ganchos ou None, "trechos", "curta"}]:
-    cada uma abre com o seu gancho ((início, fim) no vídeo original), cortado dos trechos, e
-    segue com o resto na ordem. A segunda é a curta: sem os trechos calmos (acelerados), se
-    ficar mais curta e com pelo menos MINIMO_DO_REMONTADO (sem trecho acelerado, como no
-    Editor 3, não há curta). Gancho com fala, menor que GANCHO_MINIMO dentro dos trechos ou que
-    repete mais de GANCHO_REPETIDO de outro fica de fora; sem nenhum, uma versão só, com os
-    trechos como estão.
+    cada uma abre no seu gancho ((início, fim) no vídeo original) e segue dali até o fim dos
+    trechos, e o que vinha antes do gancho vai para o fim. A n-ésima tem uns
+    TAMANHO_DAS_VERSOES[n] da inteira, nunca menos que MINIMO_DO_REMONTADO ("curta" quando
+    saiu o fim dela). Gancho com fala, menor que GANCHO_MINIMO dentro dos trechos ou que começa
+    a menos de ENTRE_VERSOES do começo de outra versão fica de fora; sem nenhum, uma versão só,
+    com os trechos como estão.
     """
-    versoes, usados = [], []
+    guardado = sum(b - a for a, b, _ in trechos)
+    inteira = _segundos_remontados(trechos)
+    versoes, comecos = [], []
     for n, (inicio, fim) in enumerate(ganchos):
         if len(versoes) >= VERSOES_POR_VIDEO:
             break
         if any(i * JANELA < fim and (i + 1) * JANELA > inicio for i in com_fala):
             continue
-        if any(min(fim, b) - max(inicio, a) > GANCHO_REPETIDO * min(fim - inicio, b - a) for a, b in usados):
+        if sum(max(0.0, min(b, fim) - max(a, inicio)) for a, b, _ in trechos) < GANCHO_MINIMO:
             continue
-        abertura, resto = [], []
+        # Onde a versão começa, em segundos do vídeo original que ficaram nos trechos; a
+        # distância conta a volta do fim ao começo, porque cada versão segue até o fim e
+        # recomeça do começo.
+        comeco = sum(max(0.0, min(b, inicio) - a) for a, b, _ in trechos)
+        if any(min(abs(comeco - outro), guardado - abs(comeco - outro)) < ENTRE_VERSOES for outro in comecos):
+            continue
+        depois, antes = [], []
         for a, b, v in trechos:
-            if min(b, fim) - max(a, inicio) > 1e-6:
-                abertura.append((max(a, inicio), min(b, fim), v))
-            for pedaco in ((a, min(b, inicio)), (max(a, fim), b)):
-                if pedaco[1] - pedaco[0] >= PEDACO_MINIMO:
-                    resto.append((pedaco[0], pedaco[1], v))
-        if sum(b - a for a, b, _ in abertura) < GANCHO_MINIMO:
-            continue
-        resto.sort(key=lambda trecho: trecho[0])
-        curta = False
-        if len(versoes) == 1:
-            sem_calmos = [trecho for trecho in resto if trecho[2] <= 1.0]
-            completa = _segundos_remontados(abertura + resto)
-            if MINIMO_DO_REMONTADO <= _segundos_remontados(abertura + sem_calmos) < completa - 0.5:
-                resto, curta = sem_calmos, True
-        usados.append((inicio, fim))
-        versoes.append({"gancho": n, "trechos": abertura + resto, "curta": curta})
+            if inicio <= a:
+                depois.append((a, b, v))
+            elif inicio >= b:
+                antes.append((a, b, v))
+            else:
+                if b - inicio >= PEDACO_MINIMO:
+                    depois.append((inicio, b, v))
+                if inicio - a >= PEDACO_MINIMO:
+                    antes.append((a, inicio, v))
+        girada = depois + antes
+        alvo = max(MINIMO_DO_REMONTADO, inteira * TAMANHO_DAS_VERSOES[len(versoes)])
+        encurtada = _sem_o_fim(girada, alvo, com_fala)
+        curta = _segundos_remontados(encurtada) < _segundos_remontados(girada) - 0.5
+        comecos.append(comeco)
+        versoes.append({"gancho": n, "trechos": encurtada if curta else girada, "curta": curta})
     return versoes or [{"gancho": None, "trechos": list(trechos), "curta": False}]
+
+
+def _sem_o_fim(trechos, alvo, com_fala):
+    """Os trechos do começo até dar alvo segundos remontados; o corte não cai no meio de uma fala."""
+    ficam, tempo = [], 0.0
+    for a, b, v in trechos:
+        if tempo + (b - a) / v <= alvo + 1e-6:
+            ficam.append((a, b, v))
+            tempo += (b - a) / v
+            continue
+        corte = a + (alvo - tempo) * v
+        # A fala que o corte pegaria no meio fica inteira: o corte vai para o fim dela.
+        while corte < b and int(corte // JANELA) in com_fala:
+            corte = (int(corte // JANELA) + 1) * JANELA
+        if b - corte < PEDACO_MINIMO:
+            corte = b
+        if corte - a >= PEDACO_MINIMO:
+            ficam.append((a, corte, v))
+        break
+    return ficam
 
 
 def arquivo_da_versao(destino, numero):
@@ -786,8 +822,8 @@ def _resumo_da_versao(arquivo, plano, da_ia, textos=()):
 def editar_3(video, foto, destino, versoes_da_ia=(), falas=None):
     """
     O Editor 3: as versões do vídeo (planejar_versoes) em arquivo_da_versao(destino, n), cada
-    uma só com o gancho dela na frente e o Editor 1 por cima: sem textos, nada cortado nem
-    acelerado. versoes_da_ia = [{"vantagem", "inicio", "fim", ...}]. Devolve (motivo,
+    uma só começando no gancho dela, no tamanho dela, e com o Editor 1 por cima: sem textos e
+    nada acelerado. versoes_da_ia = [{"vantagem", "inicio", "fim", ...}]. Devolve (motivo,
     resumo): motivo "" quando todas saíram.
     """
     import tempfile
@@ -797,7 +833,8 @@ def editar_3(video, foto, destino, versoes_da_ia=(), falas=None):
     com_fala = janelas_com_fala(falas, original, videos.som_por_janela(video, JANELA) if falas is None else ())
     inteiro = [(0.0, original, 1.0)]
     planos = planejar_versoes(inteiro, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala)
-    resumo = {"original": original, "com_fala": _segundos_com_fala(com_fala, original), "versoes": []}
+    resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
+              "versoes": []}
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         for numero, plano in enumerate(planos, 1):
             arquivo = arquivo_da_versao(destino, numero)
@@ -827,8 +864,8 @@ def editar_4(video, foto, destino, nome="", versoes_da_ia=(), preco=None, falas=
     com_fala, trechos = _remontagem(video, original, falas)
     lugar = _lugar(lugar)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala)
-    resumo = {"original": original, "lugar": lugar, "com_fala": _segundos_com_fala(com_fala, original),
-              "versoes": []}
+    resumo = {"original": original, "inteiro": _segundos_remontados(trechos), "lugar": lugar,
+              "com_fala": _segundos_com_fala(com_fala, original), "versoes": []}
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         for numero, plano in enumerate(planos, 1):
             da_ia = _versao_da_ia(plano, versoes_da_ia)
