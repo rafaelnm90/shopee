@@ -163,12 +163,19 @@ MINIMO_DO_REMONTADO = 8
 # caixa ocupa uns 7% da tela, e em cada vídeo a IA escolhe o lugar em que ela não cobre o
 # produto nem o rosto de alguém (escolha do Rafael, P46: a letra grande, logo abaixo da
 # miniatura, cobria o alto do móvel e o decote do vestido). Os lugares, em (x, topo, largura
-# máxima das linhas; a caixa tem mais 56 px de margem) no vídeo de 720x1280; x None =
-# centralizado:
+# máxima das linhas, quantas linhas; a caixa tem mais 56 px de margem) no vídeo de 720x1280;
+# x None = centralizado, x negativo = encostado na direita, a -x px da borda:
 # - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 486 a 666);
-# - "meio": logo abaixo da miniatura (que vai até uns 250 px), centralizado.
-LUGARES_DOS_TEXTOS = {"alto": (24, 110, 390), "meio": (None, 280, 480)}
+# - "meio": logo abaixo da miniatura (que vai até uns 250 px), centralizado;
+# - "esquerda" e "direita": nos lados, numa caixa estreita de até 3 linhas, no meio da
+#   altura: acima da seta (que começa em y 776) e da coluna de botões do app à direita.
+# Nenhum lugar livre do rosto e do produto (SEM_LUGAR), o vídeo vai sem os textos (escolha
+# do Rafael, P47: no vídeo do conjunto, o alto cobriu o rosto da modelo e o meio cobriria o
+# conjunto).
+LUGARES_DOS_TEXTOS = {"alto": (24, 110, 390, 2), "meio": (None, 280, 480, 2),
+                      "esquerda": (16, 400, 170, 3), "direita": (-16, 400, 170, 3)}
 LUGAR_PADRAO = "alto"
+SEM_LUGAR = "nenhum"
 TOPO_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][1]
 LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
 LETRA_DOS_TEXTOS = (40, 28)         # a maior e a menor
@@ -193,8 +200,10 @@ PROMPT_DOS_TEXTOS = (
     "Diga também onde alguém fala no vídeo (voz de gente, não música): \"falas\", a lista dos trechos em "
     "segundos desde o começo do vídeo, como [[início, fim], ...]; [] se ninguém fala.\n"
     "E onde os textos podem ficar sem cobrir o produto nem o rosto de alguém, na maior parte do vídeo: "
-    "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 8% e 18% da altura) ou \"meio\" (centralizado, "
-    "entre uns 22% e 33% da altura).\n"
+    "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 8% e 19% da altura e até uns 65% da largura), "
+    "\"meio\" (centralizado, entre uns 22% e 33% da altura), \"esquerda\" (encostado na borda esquerda, até "
+    "uns 33% da largura, entre uns 31% e 44% da altura) ou \"direita\" (o mesmo, na borda direita); "
+    f"\"{SEM_LUGAR}\" se todos esses cobrem o produto ou um rosto.\n"
     "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"falas\": [[0.0, 0.0]], "
     "\"lugar\": \"alto\"}}"
 )
@@ -327,10 +336,10 @@ def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO, com_fala=frozen
     return trechos
 
 
-def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None):
+def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=2):
     """
     O texto da tela (PNG com fundo transparente, bytes): letras brancas numa caixa de cantos
-    redondos, com as linhas até largura_maxima (padrão: LARGURA_DOS_TEXTOS).
+    redondos, em até linhas_maximas linhas de até largura_maxima (padrão: LARGURA_DOS_TEXTOS).
     """
     import io
 
@@ -352,7 +361,7 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None):
                 linhas.append(linha)
                 linha = palavra
         linhas.append(linha)
-        if len(linhas) <= 2 and all(rascunho.textlength(t, font=fonte) <= limite for t in linhas):
+        if len(linhas) <= linhas_maximas and all(rascunho.textlength(t, font=fonte) <= limite for t in linhas):
             break
     altura_da_linha = round(tamanho * 1.25)
     largura = round(max(rascunho.textlength(t, font=fonte) for t in linhas)) + 2 * 28
@@ -396,7 +405,7 @@ def textos_da_tela(video, nome):
     textos = {"nome": _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME),
               "vantagem": _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)}
     textos = {chave: valor for chave, valor in textos.items() if valor}
-    if dados.get("lugar") in LUGARES_DOS_TEXTOS:
+    if dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
         textos["lugar"] = dados["lugar"]
     falas = _falas(dados.get("falas"))
     if falas is not None:
@@ -419,13 +428,16 @@ def _falas(bruto):
     return falas
 
 
-# Entre o "R$" e o número, para os dois não ficarem em linhas diferentes.
+# Dentro do "A partir de" e entre o "R$" e o número, para não se quebrarem em linhas
+# diferentes (na caixa estreita dos lados, o preço fica em 2 linhas: "A partir de" e o valor).
 ESPACO_FIXO = "\u00a0"
 
 
 def texto_do_preco(preco):
     """O preço da tela, do jeito que fica certo mesmo com variações de preço no anúncio."""
-    return f"A partir de {assistente._reais(preco).replace(' ', ESPACO_FIXO)}" if preco and preco > 0 else ""
+    if not preco or preco <= 0:
+        return ""
+    return " ".join(parte.replace(" ", ESPACO_FIXO) for parte in ("A partir de", assistente._reais(preco)))
 
 
 def horarios_dos_textos(textos, duracao):
@@ -443,9 +455,9 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None,
     """
     O Editor 2 em destino: o vídeo remontado (ritmo), com os textos da tela, e depois o
     Editor 1 por cima. falas: os trechos com fala da IA ([(início, fim)]); None = sem a
-    resposta dela (aí vale o som). lugar: onde vão os textos ("alto" ou "meio", da IA; sem
-    ela, LUGAR_PADRAO). Devolve (motivo, resumo): motivo "" quando deu certo; resumo diz o
-    que mudou, para o Rafael comparar.
+    resposta dela (aí vale o som). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da
+    IA; SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Devolve (motivo, resumo): motivo
+    "" quando deu certo; resumo diz o que mudou, para o Rafael comparar.
     """
     import tempfile
     original = videos.duracao(video)
@@ -457,14 +469,19 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None,
     fundos = {texto: FUNDO_DOS_TEXTOS for texto in (nome, vantagem) if texto}
     if texto_do_preco(preco):
         fundos[texto_do_preco(preco)] = FUNDO_DO_PRECO
-    lugar = lugar if lugar in LUGARES_DOS_TEXTOS else LUGAR_PADRAO
-    x_do_lugar, topo, largura_maxima = LUGARES_DOS_TEXTOS[lugar]
+    lugar = lugar if lugar in LUGARES_DOS_TEXTOS or lugar == SEM_LUGAR else LUGAR_PADRAO
+    if lugar == SEM_LUGAR:
+        fundos = {}
     letreiros = []
     for texto, inicio, fim in horarios_dos_textos(list(fundos), remontado):
-        imagem = letreiro(texto, fundos[texto], largura_maxima)
+        x_do_lugar, topo, largura_maxima, linhas_maximas = LUGARES_DOS_TEXTOS[lugar]
+        imagem = letreiro(texto, fundos[texto], largura_maxima, linhas_maximas)
         # A largura está no cabeçalho do PNG (bytes 16 a 20).
         largura = int.from_bytes(imagem[16:20], "big")
-        x = (TELA[0] - largura) // 2 if x_do_lugar is None else x_do_lugar
+        if x_do_lugar is None:
+            x = (TELA[0] - largura) // 2
+        else:
+            x = TELA[0] + x_do_lugar - largura if x_do_lugar < 0 else x_do_lugar
         letreiros.append((imagem, inicio, fim, x, topo))
     resumo = {"original": original, "remontado": remontado,
               "cortado": original - sum(fim - inicio for inicio, fim, _ in trechos),
