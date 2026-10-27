@@ -592,3 +592,13 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     for imagem, _, _, x, topo in montados[-1]:
         # Encostado na direita: a caixa termina a 16 px da borda.
         assert topo == 400 and x + int.from_bytes(imagem[16:20], "big") == 720 - 16
+
+
+def test_texto_da_ia_comprido_nao_termina_em_palavra_de_ligacao():
+    # Exemplo do Editor 2 de 27/10: a vantagem passou do limite e o corte deixou
+    # "Caimento fluido e amarração na" na tela.
+    corta = edicao_video._so_letras
+    assert corta("Caimento fluido e amarração na cintura", 36) == "Caimento fluido e amarração"
+    assert corta("Mantém gelado por muito tempo com tampa", 36) == "Mantém gelado por muito tempo"
+    assert corta("Copo Térmico", 28) == "Copo Térmico"
+    assert edicao_video.MAXIMO_DA_VANTAGEM == 36

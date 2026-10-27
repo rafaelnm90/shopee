@@ -377,13 +377,25 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=
     return saida.getvalue()
 
 
+# Palavra que não pode fechar o texto cortado: "amarração na" fica "amarração".
+PALAVRAS_DE_LIGACAO = {"a", "o", "as", "os", "ao", "aos", "à", "às", "e", "ou", "de", "da", "do", "das", "dos",
+                       "em", "na", "no", "nas", "nos", "com", "sem", "para", "pra", "por", "um", "uma", "que"}
+
+
 def _so_letras(texto, maximo):
-    """O texto da IA só com letras, números e pontuação simples (a fonte não tem emoji), até `maximo` caracteres."""
+    """
+    O texto da IA só com letras, números e pontuação simples (a fonte não tem emoji), até
+    `maximo` caracteres. Maior que isso, é cortado na última palavra inteira, sem terminar
+    numa palavra de ligação.
+    """
     import re
     limpo = " ".join(re.sub(r"[^\w\s.,!?%/+\-:()]", " ", texto or "").split())
     if len(limpo) <= maximo:
         return limpo
-    return limpo[:maximo].rsplit(" ", 1)[0].rstrip(" ,.-:")
+    palavras = limpo[:maximo].rsplit(" ", 1)[0].rstrip(" ,.-:").split()
+    while palavras and palavras[-1].lower().strip(",.-:") in PALAVRAS_DE_LIGACAO:
+        palavras.pop()
+    return " ".join(palavras).rstrip(" ,.-:")
 
 
 def textos_da_tela(video, nome):
