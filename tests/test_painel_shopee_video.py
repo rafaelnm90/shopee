@@ -290,9 +290,11 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "todos os vídeos que o robô usa" in texto and "Viral" in texto and "Grupo Público" in texto
     assert "desligada" in texto and "O que cada botão faz" in texto
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
-        "Ver Exemplo Editor 1 👀", "Ver Exemplo Editor 2 ✨", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
-    # Pedido do Rafael (27/10): o Editor 2 só no exemplo, até ele escolher qual fica.
+        "Ver Exemplo Editor 1 👀", "Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 3 🔀", "Ligar Edição ✅",
+        "Voltar ao Robô 🔙"]
+    # Pedido do Rafael (27/10): os Editores 2 e 3 só no exemplo, até ele escolher qual fica.
     assert "Editor 1</b> (o que vale nos rascunhos)" in texto and "Editor 2</b> (em teste, só no exemplo)" in texto
+    assert "Editor 3</b> (em teste, só no exemplo)" in texto and "até 3 versões diferentes de verdade" in texto
     rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
     assert sv.ler_config()["edicao_ligada"] and sv.edicao_video.vale_para("autorais")
     assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
@@ -956,3 +958,42 @@ def test_exemplo_cortado_por_um_reinicio_e_avisado_ao_ligar(bm, Msg, Est, monkey
     monkeypatch.setattr(sv.edicao_video, "exemplo", lambda destino: (None, "nenhum vídeo dos Autorais"))
     rodar(sv.exemplo_edicao_handler(MsgComMidia(Msg, "Ver Exemplo Editor 1 👀"), est))
     assert not sv.db.ler_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {})
+    # O do Editor 3 também avisa, com o botão dele.
+    sv.db.salvar_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": 3, "desde": (agora - timedelta(minutes=5)).isoformat()})
+    rodar(sv.avisar_exemplo_interrompido())
+    assert "Editor 3 foi interrompido" in enviados[-1][1] and "Ver Exemplo Editor 3 🔀" in enviados[-1][1]
+
+
+def test_exemplo_do_editor_3_manda_cada_versao_com_o_que_mudou(bm, Msg, Est, monkeypatch):
+    # Pedido do Rafael (27/10): o Editor 3 faz do mesmo vídeo até 3 versões diferentes de
+    # verdade (outro começo, outra vantagem, outra chamada; a segunda mais curta), só no exemplo.
+    sv, est = _painel(bm), Est()
+
+    def exemplo_editor_3(destino):
+        versoes = []
+        for numero, gancho, curta in ((1, (9.0, 10.5), False), (2, (1.0, 2.0), True)):
+            arquivo = sv.edicao_video.arquivo_da_versao(destino, numero)
+            with open(arquivo, "wb") as saida:
+                saida.write(b"editado")
+            versoes.append({"arquivo": arquivo, "remontado": 10.7 if numero == 1 else 8.0, "curta": curta,
+                            "gancho": gancho, "textos": [f"Vantagem {numero}", "Bolsa de Palha", f"Chamada {numero}"]})
+        return "Bolsa <palha>", "", {"original": 12.0, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
+                                     "versoes_da_ia": 3, "versoes": versoes}
+
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_3", exemplo_editor_3)
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 3 🔀")
+    rodar(sv.exemplo_editor_3_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "video"]
+    primeira, segunda = msg.midias[0][2], msg.midias[1][2]
+    assert "versão 1 de 2 (não foi postado): Bolsa &lt;palha&gt;" in primeira
+    assert "Abre com o trecho de 9,0 s a 10,5 s do vídeo original" in primeira and "“Vantagem 1”" in primeira
+    assert "Lugar do texto" not in primeira
+    assert "versão 2 de 2" in segunda and "a mais curta: sem os trechos calmos" in segunda
+    assert "rendeu 2 versões diferentes de verdade" in segunda and "Lugar do texto: no alto" in segunda
+    assert not any(os.path.exists(m[1]) for m in msg.midias)
+    assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
+        "edição do vídeo: exemplo do editor 3", "mandado")
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_3", lambda destino: (None, "o vídeo não abre", None))
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 3 🔀")
+    rodar(sv.exemplo_editor_3_handler(msg, est))
+    assert not msg.midias and any("O exemplo do Editor 3 não saiu: o vídeo não abre" in t for t in msg.saidas)
