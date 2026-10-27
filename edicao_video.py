@@ -182,15 +182,41 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres.\n"
     "Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; sem preço, "
     "desconto, promoção, emoji ou hashtag.\n"
-    "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\"}}"
+    "Diga também onde alguém fala no vídeo (voz de gente, não música): \"falas\", a lista dos trechos em "
+    "segundos desde o começo do vídeo, como [[início, fim], ...]; [] se ninguém fala.\n"
+    "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"falas\": [[0.0, 0.0]]}}"
 )
 
+# Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
+# ou câmera lenta (escolha do Rafael, P45: o 1º exemplo cortou o começo da fala junto com a
+# parte parada). Os trechos com fala vêm da IA, com esta folga de cada lado; sem a resposta
+# dela, vale todo trecho com som acima de SILENCIO (pode ser música: na dúvida, não mexe).
+FOLGA_DA_FALA = 0.3
+SILENCIO = -40.0                    # dBFS
 
-def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO):
+
+def janelas_com_fala(falas, duracao, volumes=()):
+    """
+    As janelas (de JANELA segundos) em que alguém fala: pelos trechos da IA (falas, [(início,
+    fim)]) ou, sem eles (None), pelas janelas com som (volumes, dBFS por janela).
+    """
+    janelas = max(1, int(-(-duracao // JANELA))) if duracao > 0 else 0
+    if falas is None:
+        return frozenset(i for i, volume in enumerate(volumes) if i < janelas and volume > SILENCIO)
+    protegidas = set()
+    for inicio, fim in falas:
+        for i in range(janelas):
+            if i * JANELA < fim + FOLGA_DA_FALA and (i + 1) * JANELA > inicio - FOLGA_DA_FALA:
+                protegidas.add(i)
+    return frozenset(protegidas)
+
+
+def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO, com_fala=frozenset()):
     """
     [(início, fim, velocidade)] do vídeo remontado, pelo movimento de cada janela: parado
     de PARADO_QUE_SAI ou mais sai, calmo vai a ACELERADO, o resto a 1, e o segundo de mais
-    ação em CAMERA_LENTA. Sem medição, o vídeo fica inteiro como está.
+    ação em CAMERA_LENTA. As janelas com_fala ficam inteiras, a 1. Sem medição, o vídeo fica
+    inteiro como está.
     """
     if duracao <= 0:
         return []
@@ -219,7 +245,8 @@ def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO):
     def tamanho(i):
         return min(JANELA, duracao - i * JANELA)
 
-    tipo = ["parado" if quietude[i] < parado else "calmo" if suave[i] < calmo else "acao" for i in range(janelas)]
+    tipo = ["fala" if i in com_fala else "parado" if quietude[i] < parado else "calmo" if suave[i] < calmo
+            else "acao" for i in range(janelas)]
     # Parado curto não sai: fica como calmo.
     i = 0
     while i < janelas:
@@ -255,7 +282,8 @@ def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO):
                 i = fim
             mudou = False
             for n, (inicio, fim, v) in enumerate(corridas):
-                if v not in (1.0, ACELERADO) or sum(tamanho(j) for j in range(inicio, fim)) >= TRECHO_MINIMO:
+                if (v not in (1.0, ACELERADO) or sum(tamanho(j) for j in range(inicio, fim)) >= TRECHO_MINIMO
+                        or any(tipo[j] == "fala" for j in range(inicio, fim))):
                     continue
                 vizinhos = [corridas[k][2] for k in (n - 1, n + 1)
                             if 0 <= k < len(corridas) and corridas[k][2] in (1.0, ACELERADO)]
@@ -351,7 +379,26 @@ def textos_da_tela(video, nome):
         return {}
     textos = {"nome": _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME),
               "vantagem": _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)}
-    return {chave: valor for chave, valor in textos.items() if valor}
+    textos = {chave: valor for chave, valor in textos.items() if valor}
+    falas = _falas(dados.get("falas"))
+    if falas is not None:
+        textos["falas"] = falas
+    return textos
+
+
+def _falas(bruto):
+    """Os trechos com fala que a IA deu ([(início, fim)], em segundos); None quando não vieram certos."""
+    if not isinstance(bruto, list):
+        return None
+    falas = []
+    for trecho in bruto:
+        try:
+            inicio, fim = float(trecho[0]), float(trecho[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if fim > inicio >= 0:
+            falas.append((inicio, fim))
+    return falas
 
 
 # Entre o "R$" e o número, para os dois não ficarem em linhas diferentes.
@@ -374,17 +421,19 @@ def horarios_dos_textos(textos, duracao):
             for i, texto in enumerate(textos)]
 
 
-def editar_2(video, foto, destino, nome="", vantagem="", preco=None):
+def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None):
     """
     O Editor 2 em destino: o vídeo remontado (ritmo), com os textos da tela, e depois o
-    Editor 1 por cima. Devolve (motivo, resumo): motivo "" quando deu certo; resumo diz o
-    que mudou, para o Rafael comparar.
+    Editor 1 por cima. falas: os trechos com fala da IA ([(início, fim)]); None = sem a
+    resposta dela (aí vale o som). Devolve (motivo, resumo): motivo "" quando deu certo;
+    resumo diz o que mudou, para o Rafael comparar.
     """
     import tempfile
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
-    trechos = ritmo(videos.movimento(video, QUADROS_DO_MOVIMENTO), original)
+    com_fala = janelas_com_fala(falas, original, videos.som_por_janela(video, JANELA) if falas is None else ())
+    trechos = ritmo(videos.movimento(video, QUADROS_DO_MOVIMENTO), original, com_fala=com_fala)
     remontado = sum((fim - inicio) / vel for inicio, fim, vel in trechos)
     fundos = {texto: FUNDO_DOS_TEXTOS for texto in (nome, vantagem) if texto}
     if texto_do_preco(preco):
@@ -399,6 +448,7 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None):
               "cortado": original - sum(fim - inicio for inicio, fim, _ in trechos),
               "acelerados": sum(1 for *_, v in trechos if v > 1),
               "camera_lenta": sum(1 for *_, v in trechos if v < 1),
+              "com_fala": sum(min(JANELA, original - i * JANELA) for i in com_fala),
               "textos": [texto for texto, *_ in horarios_dos_textos(list(fundos), remontado)]}
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "remontado.mp4")
@@ -503,8 +553,8 @@ def exemplo_editor_2(destino):
         produto = _produto_do_link(link)
         textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
         motivo, resumo = editar_2(arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                                  produto.get("preco"))
-        resumo["textos_da_ia"] = bool(textos)
+                                  produto.get("preco"), textos.get("falas"))
+        resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem"))
         return motivo, resumo
 
     return _exemplo("ids_2", editar_um)

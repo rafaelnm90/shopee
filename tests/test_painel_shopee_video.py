@@ -343,14 +343,16 @@ def test_exemplo_do_editor_2_chega_com_o_que_mudou_no_video(bm, Msg, Est, monkey
     assert "Vídeo de 24 s → 15 s" in legenda and "Partes paradas tiradas: 6 s" in legenda
     assert "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in legenda and "“Mantém gelado”" in legenda
     assert "A IA não escreveu" not in legenda and not os.path.exists(msg.midias[0][1])
+    assert "Com fala" not in legenda
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
         "edição do vídeo: exemplo do editor 2", "mandado")
-    # Sem os textos da IA, o exemplo sai com o preço e avisa.
-    resumo.update(textos=["A partir de R$\u00a039,90"], textos_da_ia=False, cortado=0)
+    # Sem os textos da IA, o exemplo sai com o preço e avisa; a fala mantida aparece (P45).
+    resumo.update(textos=["A partir de R$\u00a039,90"], textos_da_ia=False, cortado=0, com_fala=7.5)
     msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
     rodar(sv.exemplo_editor_2_handler(msg, est))
     assert "A IA não escreveu o nome e a vantagem" in msg.midias[0][2]
     assert "Nenhuma parte parada para tirar" in msg.midias[0][2]
+    assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in msg.midias[0][2]
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
     msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
     rodar(sv.exemplo_editor_2_handler(msg, est))
