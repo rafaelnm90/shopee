@@ -16,8 +16,9 @@ o vídeo remontado sem as partes paradas, com trechos acelerados e uma câmera l
 e os textos da tela (nome, vantagem e preço). O Rafael compara os dois exemplos e escolhe
 qual fica (pedido de 27/10/2026: DECISOES.md, Shopee Vídeo). Os Editores 3 (editar_3, a partir
 do Editor 1) e 4 (editar_4, a partir do Editor 2), também só no exemplo, fazem do mesmo vídeo até
-3 versões diferentes de verdade, cada uma abrindo com um momento diferente e seguindo dali,
-cada uma de um tamanho; no 4, com outra vantagem na tela e outra chamada no fim.
+3 vídeos: o completo, como o Editor 1 ou o 2 entrega, e versões diferentes de verdade, cada
+uma abrindo com um momento diferente e seguindo dali, cada uma de um tamanho; no 4, com outra
+vantagem na tela e outra chamada no fim.
 
 Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao rascunho) e
 pelo painel da Shopee Vídeo (os exemplos).
@@ -538,13 +539,17 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None,
     IA; SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Devolve (motivo, resumo): motivo
     "" quando deu certo; resumo diz o que mudou, para o Rafael comparar.
     """
-    import tempfile
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     com_fala, trechos = _remontagem(video, original, falas)
+    return _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, _lugar(lugar))
+
+
+def _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, lugar):
+    """O Editor 2 em destino com a remontagem já medida (o Editor 4 usa no vídeo completo)."""
+    import tempfile
     remontado = _segundos_remontados(trechos)
-    lugar = _lugar(lugar)
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (texto_do_preco(preco), FUNDO_DO_PRECO)], lugar, remontado)
     resumo = {"original": original, "remontado": remontado,
@@ -664,27 +669,29 @@ def exemplo_editor_2(destino):
 
 
 # --- Editores 3 e 4: versões do mesmo vídeo ---
-# Os Editores 3 e 4 fazem, de um vídeo, até 3 versões diferentes de verdade, em teste só no
-# exemplo (pedido do Rafael de 27/10/2026, depois do que a Rafaela contou no grupo sobre as
-# ferramentas que "multiplicam" um vídeo: DECISOES.md, Shopee Vídeo). Cada versão abre com um
-# momento diferente do vídeo (o gancho), que a IA aponta com a vantagem que ele mostra, e
-# segue dali; o que vinha antes do gancho vai para o fim. E cada uma tem um tamanho: a 1ª é o
-# vídeo inteiro, a 2ª uns 3/4 e a 3ª a mais curta (escolha do Rafael, P49: nas versões do
-# conjunto de jardim, todas voltavam ao começo do vídeo depois do gancho e terminavam iguais,
-# com o mesmo tamanho). Assim, em nenhum segundo duas versões mostram a mesma parte. O Editor 3
-# parte do Editor 1: sem textos e nada acelerado. O Editor 4 parte do Editor 2: com os textos na
-# tela (a vantagem do gancho e uma chamada diferente no fim de cada versão). Não são cópias
-# quase iguais para a Shopee não reconhecer o mesmo vídeo (a regra 9 pune mensagens
-# repetitivas): versão só sai com um gancho longe dos das outras, e o vídeo curto, ou com fala
-# do começo ao fim, rende menos versões.
+# Os Editores 3 e 4 entregam, de um vídeo, o vídeo completo e até 2 versões diferentes de
+# verdade, em teste só no exemplo (pedido do Rafael de 27/10/2026, depois do que a Rafaela
+# contou no grupo sobre as ferramentas que "multiplicam" um vídeo: DECISOES.md, Shopee Vídeo).
+# O 1º é o vídeo completo, como o Editor 1 (no 3) ou o Editor 2 (no 4) entrega (pedido do
+# Rafael, 27/10). Cada versão abre com um momento diferente do vídeo (o gancho), que a IA
+# aponta com a vantagem que ele mostra, e segue dali; o que vinha antes do gancho vai para o
+# fim. E cada uma tem um tamanho: a 1ª uns 3/4 do completo e a 2ª a mais curta (escolha do
+# Rafael, P49: nas versões do conjunto de jardim, todas voltavam ao começo do vídeo depois do
+# gancho e terminavam iguais, com o mesmo tamanho). Assim, em nenhum segundo dois vídeos
+# mostram a mesma parte. O Editor 3 parte do Editor 1: sem textos e nada acelerado. O Editor 4
+# parte do Editor 2: com os textos na tela (nas versões, a vantagem do gancho e uma chamada
+# diferente no fim). Não são cópias quase iguais para a Shopee não reconhecer o mesmo vídeo (a
+# regra 9 pune mensagens repetitivas): versão só sai com um gancho longe do começo do vídeo e
+# dos das outras, e o vídeo curto, ou com fala do começo ao fim, rende menos versões.
 VERSOES_POR_VIDEO = 3
-# O tamanho de cada versão, em fração da versão inteira, na ordem; nenhuma fica com menos de
-# MINIMO_DO_REMONTADO. O que sai é o fim da versão, nunca o meio de uma fala (P45).
+# O tamanho de cada vídeo entregue, em fração do completo, na ordem (o completo e as versões);
+# nenhum fica com menos de MINIMO_DO_REMONTADO. O que sai é o fim da versão, nunca o meio de
+# uma fala (P45).
 TAMANHO_DAS_VERSOES = (1.0, 0.75, 0.5)
 # O gancho tem pelo menos isto do vídeo original e não tem fala: a fala fica inteira e na
-# ordem (P45). O começo de uma versão fica a pelo menos ENTRE_VERSOES do começo das outras, no
-# vídeo original (contando a volta do fim ao começo): mais perto, as duas mostram quase a
-# mesma coisa o tempo todo.
+# ordem (P45). O começo de uma versão fica a pelo menos ENTRE_VERSOES do começo do vídeo (onde
+# o completo começa) e das outras versões, no vídeo original, contando a volta do fim ao
+# começo: mais perto, os dois mostram quase a mesma coisa o tempo todo.
 GANCHO_MINIMO = 1.0
 ENTRE_VERSOES = 3.0
 # Pedaço que sobra menor que isto, ao dividir um trecho no começo do gancho ou no corte do fim,
@@ -694,29 +701,36 @@ MAXIMO_DA_CHAMADA = 32
 
 PROMPT_DAS_VERSOES = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
-    "Vamos fazer até 3 versões diferentes deste vídeo: cada uma abre com um momento diferente e destaca uma "
-    "vantagem diferente do produto. Em português do Brasil, escreva:\n"
+    "Vamos entregar o vídeo completo e versões diferentes dele: cada versão abre com um momento diferente e "
+    "destaca uma vantagem diferente do produto. Em português do Brasil, escreva:\n"
     + _NOME_NO_PROMPT
-    + "- \"versoes\": até 3, cada uma com \"vantagem\" (uma vantagem do produto que o vídeo mostra naquele "
+    + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra, para o vídeo completo, diferente das "
+    f"vantagens das versões, até {MAXIMO_DA_VANTAGEM} caracteres;\n"
+    "- \"versoes\": até 3, cada uma com \"vantagem\" (uma vantagem do produto que o vídeo mostra naquele "
     f"momento, até {MAXIMO_DA_VANTAGEM} caracteres), \"inicio\" e \"fim\" (os segundos do vídeo em que ela "
     "aparece melhor, de 1 a 4 segundos, sem ninguém falando, com pelo menos "
-    f"{ENTRE_VERSOES:.0f} segundos entre o começo de um momento e o de outro) e \"chamada\" (uma frase curta para o fim do "
+    f"{ENTRE_VERSOES:.0f} segundos entre o começo do vídeo e o começo de um momento, e entre o começo de um "
+    "momento e o de outro) e \"chamada\" (uma frase curta para o fim do "
     f"vídeo, chamando para o produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, diferente em cada "
     "versão, sem mandar para fora da Shopee). Só ponha uma versão com um momento e uma vantagem que as outras "
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
     + _REGRAS_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"versoes\": [{{\"vantagem\": \"...\", \"inicio\": 0.0, "
-    "\"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\"}}"
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"versoes\": [{{\"vantagem\": \"...\", "
+    "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\"}}"
 )
 
 
 def textos_das_versoes(video, nome):
     """
-    {"nome", "lugar", "falas", "versoes": [{"vantagem", "chamada", "inicio", "fim"}]} que a IA
-    escreveu vendo o vídeo, só o que veio certo; {} quando ela não respondeu.
+    {"nome", "vantagem" (a do vídeo completo), "lugar", "falas", "versoes": [{"vantagem",
+    "chamada", "inicio", "fim"}]} que a IA escreveu vendo o vídeo, só o que veio certo; {}
+    quando ela não respondeu.
     """
     dados = _resposta_da_ia(video, PROMPT_DAS_VERSOES.format(nome=nome))
     textos = _nome_lugar_e_falas(dados)
+    vantagem = _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
+    if vantagem:
+        textos["vantagem"] = vantagem
     versoes = []
     for bruta in dados.get("versoes") if isinstance(dados.get("versoes"), list) else []:
         if not isinstance(bruta, dict):
@@ -736,19 +750,20 @@ def textos_das_versoes(video, nome):
 
 def planejar_versoes(trechos, ganchos, com_fala):
     """
-    As versões do vídeo, [{"gancho": n do gancho em ganchos ou None, "trechos", "curta"}]:
-    cada uma abre no seu gancho ((início, fim) no vídeo original) e segue dali até o fim dos
-    trechos, e o que vinha antes do gancho vai para o fim. A n-ésima tem uns
-    TAMANHO_DAS_VERSOES[n] da inteira, nunca menos que MINIMO_DO_REMONTADO ("curta" quando
-    saiu o fim dela). Gancho com fala, menor que GANCHO_MINIMO dentro dos trechos ou que começa
-    a menos de ENTRE_VERSOES do começo de outra versão fica de fora; sem nenhum, uma versão só,
-    com os trechos como estão.
+    As versões do vídeo, além do completo, [{"gancho": n do gancho em ganchos, "trechos",
+    "curta"}], no máximo VERSOES_POR_VIDEO - 1: cada uma abre no seu gancho ((início, fim) no
+    vídeo original) e segue dali até o fim dos trechos, e o que vinha antes do gancho vai para
+    o fim. A n-ésima tem uns TAMANHO_DAS_VERSOES[n] do completo, nunca menos que
+    MINIMO_DO_REMONTADO ("curta" quando saiu o fim dela). Gancho com fala, menor que
+    GANCHO_MINIMO dentro dos trechos ou que começa a menos de ENTRE_VERSOES do começo do vídeo
+    ou de outra versão fica de fora; sem nenhum, [] (só o completo).
     """
     guardado = sum(b - a for a, b, _ in trechos)
     inteira = _segundos_remontados(trechos)
-    versoes, comecos = [], []
+    # O completo começa no começo do vídeo.
+    versoes, comecos = [], [0.0]
     for n, (inicio, fim) in enumerate(ganchos):
-        if len(versoes) >= VERSOES_POR_VIDEO:
+        if len(versoes) >= VERSOES_POR_VIDEO - 1:
             break
         if any(i * JANELA < fim and (i + 1) * JANELA > inicio for i in com_fala):
             continue
@@ -772,12 +787,12 @@ def planejar_versoes(trechos, ganchos, com_fala):
                 if inicio - a >= PEDACO_MINIMO:
                     antes.append((a, inicio, v))
         girada = depois + antes
-        alvo = max(MINIMO_DO_REMONTADO, inteira * TAMANHO_DAS_VERSOES[len(versoes)])
+        alvo = max(MINIMO_DO_REMONTADO, inteira * TAMANHO_DAS_VERSOES[len(versoes) + 1])
         encurtada = _sem_o_fim(girada, alvo, com_fala)
         curta = _segundos_remontados(encurtada) < _segundos_remontados(girada) - 0.5
         comecos.append(comeco)
         versoes.append({"gancho": n, "trechos": encurtada if curta else girada, "curta": curta})
-    return versoes or [{"gancho": None, "trechos": list(trechos), "curta": False}]
+    return versoes
 
 
 def _sem_o_fim(trechos, alvo, com_fala):
@@ -801,48 +816,46 @@ def _sem_o_fim(trechos, alvo, com_fala):
 
 
 def arquivo_da_versao(destino, numero):
-    """O arquivo da versão (1, 2, 3) ao lado de destino: exemplo.mp4 → exemplo_2.mp4."""
+    """O arquivo do vídeo entregue (1 o completo; 2 e 3 as versões) ao lado de destino: exemplo.mp4 → exemplo_2.mp4."""
     raiz, extensao = os.path.splitext(destino)
     return f"{raiz}_{numero}{extensao}"
 
 
-def _versao_da_ia(plano, versoes_da_ia):
-    """A versão da IA de onde vêm o gancho e os textos do plano ({} sem nenhuma)."""
-    if plano["gancho"] is not None:
-        return versoes_da_ia[plano["gancho"]]
-    return versoes_da_ia[0] if versoes_da_ia else {}
+def _resumo_do_completo(arquivo, remontado, textos=(), vantagem=""):
+    return {"arquivo": arquivo, "remontado": remontado, "curta": False, "textos": list(textos),
+            "vantagem": vantagem, "gancho": None}
 
 
 def _resumo_da_versao(arquivo, plano, da_ia, textos=()):
     return {"arquivo": arquivo, "remontado": _segundos_remontados(plano["trechos"]), "curta": plano["curta"],
-            "textos": list(textos), "vantagem": da_ia.get("vantagem", ""),
-            "gancho": (da_ia["inicio"], da_ia["fim"]) if plano["gancho"] is not None else None}
+            "textos": list(textos), "vantagem": da_ia.get("vantagem", ""), "gancho": (da_ia["inicio"], da_ia["fim"])}
 
 
 def editar_3(video, foto, destino, versoes_da_ia=(), falas=None):
     """
-    O Editor 3: as versões do vídeo (planejar_versoes) em arquivo_da_versao(destino, n), cada
-    uma só começando no gancho dela, no tamanho dela, e com o Editor 1 por cima: sem textos e
-    nada acelerado. versoes_da_ia = [{"vantagem", "inicio", "fim", ...}]. Devolve (motivo,
-    resumo): motivo "" quando todas saíram.
+    O Editor 3 em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o Editor 1, e os
+    seguintes as versões (planejar_versoes), cada uma só começando no gancho dela, no tamanho
+    dela, e com o Editor 1 por cima: sem textos e nada acelerado. versoes_da_ia = [{"vantagem",
+    "inicio", "fim", ...}]. Devolve (motivo, resumo): motivo "" quando todos saíram.
     """
     import tempfile
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     com_fala = janelas_com_fala(falas, original, videos.som_por_janela(video, JANELA) if falas is None else ())
-    inteiro = [(0.0, original, 1.0)]
-    planos = planejar_versoes(inteiro, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala)
+    planos = planejar_versoes([(0.0, original, 1.0)], [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala)
+    completo = arquivo_da_versao(destino, 1)
     resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
-              "versoes": []}
+              "versoes": [_resumo_do_completo(completo, original)]}
+    motivo = editar(video, foto, completo)
+    if motivo:
+        return motivo, resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
-        for numero, plano in enumerate(planos, 1):
+        for numero, plano in enumerate(planos, 2):
             arquivo = arquivo_da_versao(destino, numero)
-            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, _versao_da_ia(plano, versoes_da_ia)))
-            corpo, motivo = video, ""
-            if plano["trechos"] != inteiro:
-                corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
-                motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, (), ESPERA_MAXIMA)
+            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, versoes_da_ia[plano["gancho"]]))
+            corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
+            motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, (), ESPERA_MAXIMA)
             if not motivo:
                 motivo = editar(corpo, foto, arquivo)
             if motivo:
@@ -850,12 +863,13 @@ def editar_3(video, foto, destino, versoes_da_ia=(), falas=None):
     return "", resumo
 
 
-def editar_4(video, foto, destino, nome="", versoes_da_ia=(), preco=None, falas=None, lugar=None):
+def editar_4(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None, lugar=None):
     """
-    O Editor 4: as versões do vídeo (planejar_versoes) em arquivo_da_versao(destino, n), cada
-    uma remontada como no Editor 2, com os seus textos (a vantagem do gancho, o nome, o preço
-    e a chamada, nessa ordem) e com o Editor 1 por cima. versoes_da_ia = [{"vantagem",
-    "chamada", "inicio", "fim"}]. Devolve (motivo, resumo): motivo "" quando todas saíram.
+    O Editor 4 em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o Editor 2 (o
+    nome, a vantagem e o preço), e os seguintes as versões (planejar_versoes), cada uma
+    remontada como no Editor 2, com os seus textos (a vantagem do gancho, o nome, o preço e a
+    chamada, nessa ordem) e com o Editor 1 por cima. versoes_da_ia = [{"vantagem", "chamada",
+    "inicio", "fim"}]. Devolve (motivo, resumo): motivo "" quando todos saíram.
     """
     import tempfile
     original = videos.duracao(video)
@@ -864,11 +878,17 @@ def editar_4(video, foto, destino, nome="", versoes_da_ia=(), preco=None, falas=
     com_fala, trechos = _remontagem(video, original, falas)
     lugar = _lugar(lugar)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala)
-    resumo = {"original": original, "inteiro": _segundos_remontados(trechos), "lugar": lugar,
-              "com_fala": _segundos_com_fala(com_fala, original), "versoes": []}
+    completo = arquivo_da_versao(destino, 1)
+    motivo, do_completo = _montar_editor_2(video, foto, completo, original, com_fala, trechos, nome, vantagem,
+                                           preco, lugar)
+    resumo = {"original": original, "inteiro": do_completo["remontado"], "lugar": lugar,
+              "com_fala": do_completo["com_fala"],
+              "versoes": [_resumo_do_completo(completo, do_completo["remontado"], do_completo["textos"], vantagem)]}
+    if motivo:
+        return motivo, resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
-        for numero, plano in enumerate(planos, 1):
-            da_ia = _versao_da_ia(plano, versoes_da_ia)
+        for numero, plano in enumerate(planos, 2):
+            da_ia = versoes_da_ia[plano["gancho"]]
             letreiros, textos = _letreiros([(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
                                             (texto_do_preco(preco), FUNDO_DO_PRECO),
                                             (da_ia.get("chamada", ""), FUNDO_DOS_TEXTOS)], lugar,
@@ -903,8 +923,8 @@ def _exemplo_das_versoes(destino, lista, editar_versoes):
 
 def exemplo_editor_3(destino):
     """
-    O exemplo do Editor 3: as versões em arquivo_da_versao(destino, n) (a lista em
-    resumo["versoes"]). Tem a lista própria dos já mostrados. Devolve (nome do produto, "",
+    O exemplo do Editor 3: o completo e as versões em arquivo_da_versao(destino, n) (a lista
+    em resumo["versoes"]). Tem a lista própria dos já mostrados. Devolve (nome do produto, "",
     resumo) quando deu certo, ou (None, motivo, resumo ou None).
     """
     return _exemplo_das_versoes(destino, "ids_3", lambda arquivo, foto, textos, produto: editar_3(
@@ -914,5 +934,5 @@ def exemplo_editor_3(destino):
 def exemplo_editor_4(destino):
     """O exemplo do Editor 4, como o do Editor 3, com os textos na tela e o preço da API."""
     return _exemplo_das_versoes(destino, "ids_4", lambda arquivo, foto, textos, produto: editar_4(
-        arquivo, foto, destino, textos.get("nome", ""), textos.get("versoes", []), produto.get("preco"),
-        textos.get("falas"), textos.get("lugar")))
+        arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
+        produto.get("preco"), textos.get("falas"), textos.get("lugar")))
