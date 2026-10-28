@@ -210,6 +210,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - pôr os modelos novos de texto que a chave enxerga e respondem, o melhor primeiro (modelo de vídeo, imagem ou voz não entra: `FORA_DOS_ROBOS`);
   - subir do PR ao deploy sem perguntar e avisar numa tabela curta, com as fontes; semana sem mudança: uma linha só.
 - Toda pergunta ao Rafael tem de ser respondida: nunca passa despercebida nem expira.
+  - A pergunta aparece primeiro aqui, pelo seletor; o privado do bot é só a cópia de segurança, para quando o seletor some antes da resposta (pedido do Rafael, 28/10). A cópia e o seletor saem na mesma resposta, sem esperar o código P; nunca terminar a resposta só com a cópia.
   - Toda pergunta do seletor vai também, na hora, para o privado do bot: um JSON no scratchpad (`pergunta`, `opcoes` com `rotulo` e `descricao`, a recomendada primeiro, e `link` = link da sessão), `python3 perguntas_rafael.py cifrar ARQUIVO`, e o `avisar.yml` com `acao=pergunta` e `dados` = o texto cifrado. Ler no log o código (P…).
   - O bot lembra de hora em hora, a qualquer hora (de dia e de noite), sozinho no servidor, mesmo sem crédito do Claude.
   - O Rafael responde pelo seletor ou colando aqui o texto do aviso (começa com "[P…] Vc me enviou anteriormente a pergunta"). Respondida: `avisar.yml` com `acao=respondida` e `dados` = o código, e ela sai da lista do lembrete diário.
