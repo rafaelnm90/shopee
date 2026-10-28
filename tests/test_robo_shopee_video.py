@@ -25,6 +25,8 @@ def momento(texto):
 SAUDE_DO_DIA = robo.saude_do_dia_pendente
 # A busca do mesmo produto com mais comissão (P33) também: ela vai à API de afiliado.
 TROCAR = robo.trocar_pela_maior_comissao
+# E o vídeo postado que vai à fila do Canal Afiliados (P62 a P64), com testes no fim.
+LEVAR_AO_CANAL = robo.levar_ao_canal
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +35,7 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
+    monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: None)
     # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
     monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
@@ -3025,3 +3028,107 @@ def test_rascunho_que_nao_sai_deixa_o_caso_completo_para_o_checkup(monkeypatch, 
     assert (caso["resultado"], caso["passo"]) == ("pulado", "anexar o produto")
     assert caso["rascunho"]["titulo"] == TITULO and caso["rascunho"]["produtos"] == [VESTIDO]
     assert caso["video"]["link"] == LINK and os.path.exists(os.path.join(robo.casos_robo.PASTA, casos[0], "tela.xml"))
+
+
+# --- Canal Afiliados: o vídeo postado vai à fila do canal (P62 a P64) ---
+
+LINK_DO_POST = "https://sv.shopee.com.br/share-video/abc"
+
+
+def _postado_com_video(tmp_path, **campos):
+    video = tmp_path / "rascunho.mp4"
+    video.write_bytes(b"video aprovado")
+    ident = _rascunho("postado", arquivo=str(video))
+    if campos:
+        robo.atualizar(ident, **campos)
+    return robo.pegar(ident)
+
+
+def _resultado_no_registro():
+    return consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?", robo.PROCESSO_DO_CANAL)
+
+
+def test_postado_vai_ao_canal_com_o_link_do_post(monkeypatch, avisos, caminho_do_rascunho):
+    ident = _aprovado(monkeypatch)
+    levados = []
+    monkeypatch.setattr(robo, "link_do_post", lambda d: LINK_DO_POST)
+    monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: levados.append((rascunho["id"], link_post)))
+    app = AppComQuadros()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
+    assert levados == [(ident, LINK_DO_POST)]
+
+
+def test_pedido_ao_canal_leva_a_copia_do_video_e_o_link_do_produto_com_a_etiqueta_do_canal(monkeypatch, avisos,
+                                                                                            tmp_path):
+    # Pedido do Rafael (28/10): o vídeo aprovado, o link do post e os links dos produtos.
+    convertidos = []
+
+    async def link_para_converter(link):
+        return "https://shopee.com.br/product/1/2"
+
+    async def converter(endereco, etiqueta="geral", **kw):
+        convertidos.append((endereco, etiqueta))
+        return "https://s.shopee.com.br/canal1"
+
+    monkeypatch.setattr(robo, "link_para_converter", link_para_converter)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    rascunho = _postado_com_video(tmp_path)
+    LEVAR_AO_CANAL(rascunho, LINK_DO_POST)
+    [pedido] = robo.pedidos_do_canal.pendentes()
+    assert (pedido["id"], pedido["link_post"], pedido["links"], pedido["produto"]) == (
+        rascunho["id"], LINK_DO_POST, ["https://s.shopee.com.br/canal1"], VESTIDO)
+    assert convertidos == [("https://shopee.com.br/product/1/2", robo.api_shopee.ETIQUETA_CANAL_AFILIADOS)]
+    # A cópia é só do canal: a do rascunho o robô apaga no fim da rodada.
+    assert pedido["arquivo"] != rascunho["arquivo"] and open(pedido["arquivo"], "rb").read() == b"video aprovado"
+    assert avisos == [] and _resultado_no_registro() == ("pedido", 1)
+
+    # A API que falha devolve o link original: vai ele (06/10: DECISOES.md, Canal Viral), e o
+    # mesmo rascunho pedido de novo troca o pedido, sem dobrar.
+    async def falhou(endereco, etiqueta="geral", **kw):
+        return endereco
+
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", falhou)
+    LEVAR_AO_CANAL(rascunho, LINK_DO_POST)
+    assert [p["links"] for p in robo.pedidos_do_canal.pendentes()] == [["https://shopee.com.br/product/1/2"]]
+
+
+def test_ver_produtos_vai_ao_canal_com_cada_produto_achado_na_api_pelo_nome(monkeypatch, avisos, tmp_path):
+    ofertas = [{"productName": "Mini Saia Plissada Feminina Cintura Alta", "productLink": "https://shopee.com.br/product/1/1"},
+               {"productName": "Blusa Cropped Canelada Manga Curta", "productLink": "https://shopee.com.br/product/2/2"}]
+
+    async def link_para_converter(link):
+        return "https://sv.shopee.com.br/share-video/xyz?jumpType=1"
+
+    async def buscar(termo, limite=10, app_id=None, app_secret=None, sort_type=2):
+        return ofertas
+
+    async def converter(endereco, etiqueta="geral", **kw):
+        return endereco.replace("https://shopee.com.br/product/", "https://s.shopee.com.br/canal-")
+
+    monkeypatch.setattr(robo, "link_para_converter", link_para_converter)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    produtos = ["Mini Saia Plissada Feminina Cintura Alta", "Blusa Cropped Canelada Manga Curta",
+                "Brinco Argola Dourado Grande"]
+    LEVAR_AO_CANAL(_postado_com_video(tmp_path, produtos=produtos), LINK_DO_POST)
+    # O que a API não acha pelo nome fica de fora.
+    assert robo.pedidos_do_canal.pendentes()[0]["links"] == ["https://s.shopee.com.br/canal-1/1",
+                                                             "https://s.shopee.com.br/canal-2/2"]
+
+
+def test_sem_o_link_do_post_o_video_nao_vai_ao_canal_e_o_rafael_fica_sabendo(avisos, tmp_path):
+    # Escolha do Rafael (28/10, P63): sem o link do post, não vai.
+    LEVAR_AO_CANAL(_postado_com_video(tmp_path), "")
+    assert robo.pedidos_do_canal.pendentes() == []
+    assert len(avisos) == 1 and "não foi para a fila do canal" in avisos[0] and "sem o link" in avisos[0]
+    assert _resultado_no_registro() == ("de fora - sem o link do post", 0)
+
+
+def test_erro_ao_guardar_o_pedido_avisa_sem_derrubar_o_post(monkeypatch, avisos, tmp_path):
+    monkeypatch.setattr(robo, "links_para_o_canal", lambda rascunho: ["https://s.shopee.com.br/canal1"])
+    rascunho = robo.pegar(_rascunho("postado", arquivo=str(tmp_path / "sumiu.mp4")))
+    LEVAR_AO_CANAL(rascunho, LINK_DO_POST)
+    assert robo.pedidos_do_canal.pendentes() == []
+    assert len(avisos) == 1 and "o pedido não foi guardado" in avisos[0]
+    assert _resultado_no_registro() == ("erro (FileNotFoundError)", 0)

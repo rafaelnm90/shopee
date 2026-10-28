@@ -72,6 +72,49 @@ def test_padrao_do_grupo_publico_tem_credito_nome_um_bloco_por_plataforma_e_hash
         f"<b>Copo 🥤</b>\n\n⬛ <b>TIKTOK</b> ⬛\n🔗 Link do Produto:\n{tiktok}")
 
 
+def test_padrao_do_canal_afiliados_como_os_posts_do_canal():
+    # O padrão que o Rafael mostrou em vídeo em 28/10 (P64): o título numa linha, a linha
+    # divisória, o bloco da Shopee Vídeo com o link do vídeo, o texto de apoio e os links numerados.
+    video, links = "https://sv.shopee.com.br/share-video/abc", ["https://s.shopee.com.br/1", "https://s.shopee.com.br/2"]
+    assert legendas.legenda_do_canal("Vídeo 120\n📦 Item: Copo & Tampa", shopee=(video, links)) == (
+        "<b>Vídeo 120 | 📦 Item: Copo &amp; Tampa</b>\n\n━━━━━━━━━━━━━━━\n\n"
+        f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n🎬 Link do Vídeo:\n{video}\n" + legendas.APOIO_LONGO
+        + f"🔗 Links dos Produtos:\n👉 1º: {links[0]}\n👉 2º: {links[1]}\n\n")
+    # O "&" do link copiado do post não quebra o HTML.
+    assert "share-video/abc?a=1&amp;b=2\n" in legendas.legenda_do_canal("Vídeo 1", shopee=(video + "?a=1&b=2", []))
+    # As duas plataformas, a Shopee em cima, separadas pela linha.
+    tiktok = ("https://vm.tiktok.com/ZMabc123/", [])
+    duas = legendas.legenda_do_canal("Vídeo 120\n📦 Item: Copo", shopee=(video, links), tiktok=tiktok)
+    assert duas.index("SHOPEE VÍDEO") < duas.index("━━━━━━━━━━━━━━━\n\n⬛ <b>TIKTOK</b> ⬛") < duas.index(tiktok[0])
+
+
+def test_legenda_do_canal_encurta_o_apoio_ate_caber_no_telegram():
+    video, tiktok = "https://sv.shopee.com.br/share-video/abc", "https://vm.tiktok.com/ZMabc123/"
+
+    def com(n, tamanho=100, duas=False):
+        links = ["https://s.shopee.com.br/" + "x" * tamanho] * n
+        return legendas.legenda_do_canal_que_cabe("Vídeo 1\n📦 Item: Copo", shopee=(video, links),
+                                                  tiktok=(tiktok, links) if duas else None)
+    longa, coube = com(1)
+    assert legendas.APOIO_LONGO in longa and coube
+    curta, coube = com(6)
+    assert legendas.APOIO_CURTO in curta and legendas.APOIO_LONGO not in curta and coube
+    # Com as duas plataformas, o texto de apoio vai uma vez só, no fim.
+    rodape, coube = com(2, tamanho=140, duas=True)
+    assert rodape.endswith(legendas.APOIO_RODAPE) and rodape.count("Grupo 100% gratuito") == 1 and coube
+    assert len(rodape) <= legendas.LIMITE_DA_LEGENDA
+    assert com(7)[1] is False
+
+
+def test_titulo_do_item_pela_ia_e_sem_ela_pelo_nome_do_produto():
+    assert legendas.titulo_do_item("Vídeo 99\n📦 Item: Copo Térmico", 7) == "Vídeo 7\n📦 Item: Copo Térmico"
+    comprido = "Copo Térmico Inox Com Tampa E Canudo 500ml Para Café Chá Água Gelada Quente"
+    item = legendas.titulo_do_item("", 7, comprido).split("Item: ")[1]
+    assert len(item) <= legendas.TAMANHO_DO_ITEM and comprido.startswith(item) and comprido[len(item)] == " "
+    assert legendas.titulo_do_item(None, 7) == f"Vídeo 7\n📦 Item: {legendas.NOME_SEM_IA}"
+    assert "Vídeo 7" in legendas.prompt_do_item(7) and "📦 Item: " in legendas.prompt_do_item(7)
+
+
 def test_prompt_pede_o_emoji_no_fim_e_traz_todas_as_hashtags():
     prompt = legendas.PROMPT_NOME_E_HASHTAGS
     assert "emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟)" in prompt
@@ -111,7 +154,8 @@ def test_nenhum_arquivo_tem_a_propria_copia_do_prompt_ou_da_legenda():
         if os.path.basename(arquivo) == "legendas.py":
             continue
         texto = open(arquivo, encoding="utf-8").read()
-        for receita in ("#JogosEConsoles", "produto demonstrado", "linhas_ia", "🔶 <b>SHOPEE</b> 🔶"):
+        for receita in ("#JogosEConsoles", "produto demonstrado", "linhas_ia", "🔶 <b>SHOPEE</b> 🔶",
+                        "🔶 <b>SHOPEE VÍDEO</b> 🔶", "100% gratuito", "identificar o produto ou kit principal"):
             if receita in texto:
                 copias.append((os.path.basename(arquivo), receita))
     assert copias == []

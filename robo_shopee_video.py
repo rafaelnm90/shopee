@@ -68,6 +68,7 @@ import celular_robo
 import db
 import edicao_video
 import interacoes_shopee_video as interacoes
+import pedidos_do_canal
 import postador_shopee_video as ps
 import registro_processos
 from api_shopee import eh_video, link_para_converter
@@ -2361,24 +2362,34 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
         raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))
 
 
+def oferta_pelo_nome(nome):
+    """
+    A oferta da API de afiliado de um produto anexado num vídeo de Ver Produtos (o link é do
+    vídeo, não do produto): a busca pelo nome, por relevância, e vale a de nome mais
+    parecido, com pelo menos PARECIDO_DA_FOTO% das palavras. {} quando não acha.
+    """
+    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(nome), limite=OFERTAS_NA_BUSCA,
+                                                           sort_type=1))
+    parecidos = [(ps.parecido_entre([oferta.get("productName") or ""], nome)[0], i)
+                 for i, oferta in enumerate(ofertas)]
+    parecido, melhor = max(parecidos, default=(0, None))
+    if melhor is None or parecido < PARECIDO_DA_FOTO:
+        return {}
+    return ofertas[melhor]
+
+
 def anuncio_do_ver_produtos(nome):
     """
-    {"foto", "nome", "preco"} do anúncio do 1º produto anexado num vídeo de Ver Produtos (o
-    link é do vídeo, não do produto): a API de afiliado busca pelo nome, por relevância, e vale
-    a oferta de nome mais parecido, com pelo menos PARECIDO_DA_FOTO% das palavras. {} quando
-    não acha, e foto None quando ela não baixa: o vídeo fica de lado (só vídeo editado vai). A
-    IA já conferiu esse produto com o vídeo, e o nome fica o do app (o que ela conferiu).
+    {"foto", "nome", "preco"} do anúncio do 1º produto anexado num vídeo de Ver Produtos,
+    achado pelo nome (oferta_pelo_nome). {} quando não acha, e foto None quando ela não
+    baixa: o vídeo fica de lado (só vídeo editado vai). A IA já conferiu esse produto com o
+    vídeo, e o nome fica o do app (o que ela conferiu).
     Escolha do Rafael (25/10, P39): DECISOES.md, Shopee Vídeo.
     """
     try:
-        ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(nome), limite=OFERTAS_NA_BUSCA,
-                                                               sort_type=1))
-        parecidos = [(ps.parecido_entre([oferta.get("productName") or ""], nome)[0], i)
-                     for i, oferta in enumerate(ofertas)]
-        parecido, melhor = max(parecidos, default=(0, None))
-        if melhor is None or parecido < PARECIDO_DA_FOTO:
+        oferta = oferta_pelo_nome(nome)
+        if not oferta:
             return {}
-        oferta = ofertas[melhor]
         return {"foto": ps.baixar_foto(oferta.get("imageUrl") or ""), "nome": nome,
                 "preco": assistente._numero(oferta.get("priceMin"))}
     except Exception as e:
@@ -2586,6 +2597,7 @@ def publicar(d, rascunho, agora=None):
     if rascunho["comentario"]:
         avisar(ps.AVISO_COMENTARIO)
         avisar(rascunho["comentario"])
+    levar_ao_canal(rascunho, link)
     return "rascunho aprovado postado"
 
 
@@ -2644,6 +2656,55 @@ def link_do_post(d):
 def tem_texto_no_quadro(d, quadro, texto):
     return any(ps._dentro(ps._centro(el), quadro["caixa"]) and texto.casefold() in el["texto"].casefold()
                for el in ps.elementos(d.dump_hierarchy()))
+
+
+# --- Canal Afiliados: o vídeo postado vai à fila do canal ---
+
+PROCESSO_DO_CANAL = "canal afiliados: vídeo para a fila"
+
+
+def levar_ao_canal(rascunho, link_post):
+    """
+    O vídeo aprovado e postado vai à fila do Canal Afiliados, com o link do post e os links
+    dos produtos: o robô deixa o pedido (pedidos_do_canal), e o bot_mestre põe na fila no
+    padrão do canal. Sem o link do post, não vai, e o aviso diz (P63). Nada aqui desfaz
+    nem segura o post. Decisões do Rafael (28/10, P62 a P64): DECISOES.md, Shopee Vídeo.
+    """
+    try:
+        if not link_post:
+            # Falha do robô (o caminho do Copiar link): o checkup cobra a que se repete.
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_CANAL, "de fora - sem o link do post", ok=False)
+            avisar("📺 Canal Afiliados: o vídeo que postei não foi para a fila do canal, porque não consegui "
+                   "copiar o link do post na Shopee Vídeo (sem o link, ele não vai).")
+            return
+        pedidos_do_canal.pedir(rascunho["id"], rascunho["arquivo"], link_post, links_para_o_canal(rascunho),
+                               (rascunho["produtos"] or [""])[0])
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CANAL, "pedido", ok=True)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O vídeo não foi para o Canal Afiliados: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CANAL, f"erro ({type(e).__name__})", ok=False)
+        avisar("📺 Canal Afiliados: o vídeo que postei não foi para a fila do canal (o pedido não foi guardado).")
+
+
+def links_para_o_canal(rascunho):
+    """
+    Os links de afiliado dos produtos do rascunho, com a etiqueta do Canal Afiliados. No
+    link de produto, o do produto anexado (o do link ou o da troca, P33); no vídeo de Ver
+    Produtos, cada produto anexado, achado na API pelo nome (como a foto da edição, P39),
+    e o que não se acha fica de fora. A API que falha deixa o link original, e o Rafael
+    fica sabendo, como em todo robô que troca link (06/10: DECISOES.md, Canal Viral).
+    """
+    destino = asyncio.run(link_para_converter(rascunho["link"]))
+    if eh_video(destino):
+        enderecos = [oferta_pelo_nome(nome).get("productLink") for nome in rascunho["produtos"] or []]
+    else:
+        enderecos = [destino]
+    links = []
+    for endereco in filter(None, enderecos):
+        link = asyncio.run(api_shopee.converter_link_shopee(endereco, api_shopee.ETIQUETA_CANAL_AFILIADOS)) or endereco
+        if link not in links:
+            links.append(link)
+    return links
 
 
 def apagar_do_app(d, rascunho):

@@ -229,6 +229,9 @@ ETIQUETA_BUSCA = "busca"
 # O link que o robô da Shopee Vídeo abre no celular para curtir o produto de maior comissão
 # (o app não abre o endereço /product/ direto; o link curto, sim).
 ETIQUETA_SHOPEE_VIDEO = "shopeevideo"
+# Os links dos produtos do vídeo do robô da Shopee Vídeo que vai ao Canal Afiliados depois
+# de postado (pedidos_do_canal.py).
+ETIQUETA_CANAL_AFILIADOS = "canalafiliados"
 
 
 def etiquetas(sub_ids):

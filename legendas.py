@@ -3,7 +3,9 @@ Legenda dos posts de vídeo com link de afiliado e o pedido à IA de nome e hash
 produto, iguais em todos os robôs que postam: Espião (motor_userbot na análise
 antecipada e bot_mestre no disparo), Espelhador (motor_userbot), Autorais
 (espelhador_videos_autorais) e Parceiros (bot_mestre). O Grupo Público tem o padrão
-próprio (legenda_grupo_publico), usado pelo bot_mestre em todo vídeo que vai para lá.
+próprio (legenda_grupo_publico), usado pelo bot_mestre em todo vídeo que vai para lá, e o
+Canal Afiliados também (legenda_do_canal), usado pelo Criar Postagem 📝 e pelos vídeos do
+robô da Shopee Vídeo que vão ao canal depois de postados (bot_mestre).
 O assistente da Shopee Vídeo lê o nome do produto de volta da legenda (nome_da_legenda).
 
 Um lugar só para que mudar o formato ou uma categoria valha para todos os canais
@@ -128,3 +130,98 @@ def hashtags_da_legenda(legenda):
         if tags:
             return " ".join(tags)
     return ""
+
+
+# --- O padrão do Canal Afiliados ---
+
+# Os posts do Canal Afiliados (o canal principal, Acervo Afiliados Shopee): o título "Vídeo
+# N | 📦 Item: ..." numa linha, uma linha divisória e o bloco de cada plataforma (o link do
+# vídeo, o texto de apoio e os links dos produtos numerados). O mesmo no Criar Postagem 📝
+# e nos vídeos do robô da Shopee Vídeo. Decisão do Rafael (28/10, P64, com o vídeo das
+# postagens do canal): DECISOES.md, Canal principal.
+LINHA_DO_CANAL = "━━━━━━━━━━━━━━━"
+APOIO_LONGO = ("<i>(💡 O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por "
+               "favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda "
+               "muito!)</i>\n\n")
+APOIO_CURTO = "<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>\n\n"
+APOIO_RODAPE = "\n<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>"
+# O limite da legenda de um vídeo no Telegram.
+LIMITE_DA_LEGENDA = 1024
+# O item que vem do nome do produto (sem a resposta da IA) fica até este tamanho.
+TAMANHO_DO_ITEM = 60
+
+
+def prompt_do_item(numero):
+    """O pedido à IA do título do post do canal, vendo o vídeo: "Vídeo N" e "📦 Item: ..."."""
+    return (
+        f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+        f"Sua resposta deve conter EXATAMENTE duas linhas. "
+        f"Na primeira linha, escreva estritamente: 'Vídeo {numero}'. "
+        f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+        f"Exemplo de saída esperada:\n"
+        f"Vídeo {numero}\n"
+        f"📦 Item: Kit Dove Reconstrução\n"
+        f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
+    )
+
+
+def titulo_do_item(resposta_ia, numero, produto=""):
+    """
+    O título do post do canal ("Vídeo N" e "📦 Item: ..." em duas linhas), com o item da
+    resposta da IA. Sem ela, ou fora do formato, o item é o nome do produto, até
+    TAMANHO_DO_ITEM caracteres sem cortar palavra (sem nome, o genérico NOME_SEM_IA).
+    """
+    achado = re.search(r"📦\s*Item:\s*(.+)", resposta_ia or "")
+    item = achado.group(1).strip() if achado else ""
+    if not item:
+        palavras, item = (produto or "").split(), ""
+        for palavra in palavras:
+            if len(f"{item} {palavra}".strip()) > TAMANHO_DO_ITEM:
+                break
+            item = f"{item} {palavra}".strip()
+        item = item or NOME_SEM_IA
+    return f"Vídeo {numero}\n📦 Item: {item}"
+
+
+def legenda_do_canal(titulo, shopee=None, tiktok=None, apoio=APOIO_LONGO, rodape=False):
+    """
+    A legenda de um post do Canal Afiliados. shopee e tiktok: (link do vídeo, [links dos
+    produtos]) de cada plataforma, ou None. O título vai numa linha só (as quebras viram
+    " | ") e escapado; com rodape=True, o texto de apoio vai uma vez só, no fim.
+    """
+    titulo_limpo = html.escape((titulo or "").replace("\n", " | "), quote=False)
+    legenda = f"<b>{titulo_limpo}</b>\n\n{LINHA_DO_CANAL}\n\n"
+    if shopee:
+        legenda += _bloco_do_canal("🔶 <b>SHOPEE VÍDEO</b> 🔶", shopee, apoio, rodape)
+        legenda += f"\n{LINHA_DO_CANAL}\n\n" if tiktok else "\n"
+    if tiktok:
+        legenda += _bloco_do_canal("⬛ <b>TIKTOK</b> ⬛", tiktok, apoio, rodape) + "\n"
+    if rodape:
+        legenda += apoio
+    return legenda
+
+
+def _bloco_do_canal(cabecalho, plataforma, apoio, rodape):
+    # Os links também escapados: o link copiado de um post pode trazer "&" nos parâmetros.
+    link_do_video, links = plataforma
+    bloco = f"{cabecalho}\n\n🎬 Link do Vídeo:\n{html.escape(link_do_video or '', quote=False)}\n"
+    if not rodape:
+        bloco += apoio
+    if links:
+        bloco += "🔗 Links dos Produtos:\n" + "".join(f"👉 {n}º: {html.escape(link, quote=False)}\n"
+                                                   for n, link in enumerate(links, 1))
+    return bloco
+
+
+def legenda_do_canal_que_cabe(titulo, shopee=None, tiktok=None):
+    """
+    A legenda do canal que cabe nos LIMITE_DA_LEGENDA caracteres do Telegram, nos níveis do
+    canal: o texto de apoio longo, o curto e só um rodapé. Devolve (legenda, coube); sem
+    caber nem com o rodapé, vem a do rodapé (com as duas plataformas, o Criar Postagem
+    divide em dois posts).
+    """
+    for apoio, rodape in ((APOIO_LONGO, False), (APOIO_CURTO, False), (APOIO_RODAPE, True)):
+        legenda = legenda_do_canal(titulo, shopee, tiktok, apoio, rodape)
+        if len(legenda) <= LIMITE_DA_LEGENDA:
+            return legenda, True
+    return legenda, False
