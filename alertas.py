@@ -110,6 +110,8 @@ def _robo_sem_rodar(agora):
     if not (int(inicio) <= agora.hour < int(fim)) or agora - comeco < SEM_RODADA:
         return None
     ultima = (db.ler_config(CHAVE_ESTADO_SV, {}) or {}).get("ultima_rodada_em") or ""
+    # Retomado há pouco, conta da retomada: a última rodada é de antes da pausa.
+    ultima = max(ultima, config.get("robo_retomado_em") or "")
     try:
         parada = agora - datetime.strptime(ultima, "%Y-%m-%d %H:%M:%S").replace(tzinfo=agora.tzinfo)
     except ValueError:
