@@ -77,6 +77,44 @@ def test_log_do_robo_conta_quedas_rastros_avisos_e_erros():
     assert "privado" not in texto and "{…}" in texto
 
 
+def test_queda_e_so_o_reinicio_automatico_e_o_systemd_diz_o_que_foi():
+    # Checkup de 27/10: "bot_mestre_bot: caiu e o systemd reiniciou 1 vez" sem reinício
+    # automático nenhum (0 no diagnóstico): o "Failed with result" também sai quando o deploy
+    # mata o robô que demorou a parar. A queda conta só o reinício que o systemd fez sozinho,
+    # e os eventos dizem o que foi e a que horas.
+    import inventario
+    morto = ["bot_mestre_bot.service: State 'stop-sigterm' timed out. Killing.",
+             "bot_mestre_bot.service: Failed with result 'timeout'.",
+             "Started bot_mestre_bot.service - Bot Mestre."]
+    assert checkup.resumo_do_log(morto, inventario.modelos_de_log())["quedas"] == 0
+    linhas = [
+        "2026-10-27T22:09:31-0300 servidor systemd[1]: Stopping bot_mestre_bot.service - Bot Mestre...",
+        "2026-10-27T22:11:01-0300 servidor systemd[1]: bot_mestre_bot.service: State 'stop-sigterm' timed out. "
+        "Killing.",
+        "2026-10-27T22:11:01-0300 servidor systemd[1]: bot_mestre_bot.service: Main process exited, code=killed, "
+        "status=9/KILL",
+        "2026-10-27T22:11:01-0300 servidor systemd[1]: bot_mestre_bot.service: Failed with result 'timeout'.",
+        "2026-10-27T22:11:02-0300 servidor python3[123]: texto do robô com dado secreto",
+        "2026-10-27T23:00:00-0300 servidor systemd[1]: bot_mestre_bot.service: Main process exited, code=killed, "
+        "status=15/TERM",
+        "2026-10-28T03:15:00-0300 servidor systemd[1]: bot_mestre_bot.service: Main process exited, code=exited, "
+        "status=1/FAILURE",
+        "2026-10-28T03:15:00-0300 servidor systemd[1]: bot_mestre_bot.service: Failed with result 'exit-code'.",
+        "2026-10-28T03:15:10-0300 servidor systemd[1]: bot_mestre_bot.service: Scheduled restart job, restart "
+        "counter is at 1.",
+    ]
+    eventos = checkup.eventos_do_systemd(linhas)
+    assert eventos == [("22:11", checkup.MORTO_AO_PARAR), ("22:11", "o processo saiu (killed, KILL)"),
+                       ("22:11", "terminou com falha (timeout)"), ("03:15", "o processo saiu (exited, FAILURE)"),
+                       ("03:15", "terminou com falha (exit-code)"), ("03:15", checkup.REINICIO_AUTOMATICO)]
+    assert "secreto" not in str(eventos)
+    logs = {"bot_mestre_bot": {"quedas": 0, "rastros": 0, "erros": 0, "avisos": 0, "problemas": [],
+                               "eventos": eventos[:3]}}
+    pontos = checkup.pontos_de_atencao([], logs, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA)
+    assert pontos == ["bot_mestre_bot: não parou no tempo ao ser parado e o systemd o matou 1 vez(es)"]
+
+
 def test_rastros_agrupados_pelo_tipo_e_pelo_lugar_do_codigo():
     rastro_do_projeto = [
         "Traceback (most recent call last):",
@@ -338,9 +376,13 @@ def test_saida_completa_sem_dado_privado(monkeypatch, capsys):
     _erro(1, "buscador_produtos (produto secreto): falhou")
     monkeypatch.setattr(checkup, "ler_journal", lambda servico: [
         "2026-10-23 10:00:00.123 -0300 - ❌ [Métricas] Falha na coleta diária: conteúdo secreto"])
+    monkeypatch.setattr(checkup, "ler_eventos_do_systemd", lambda servico: [
+        ("22:09", checkup.MORTO_AO_PARAR)] if servico == "bot_mestre_bot" else [])
     monkeypatch.setattr(checkup.backup_dados, "ultimo_backup", lambda: None)
     checkup.main()
     saida = capsys.readouterr().out
+    assert "   systemd: 22:09 não parou no tempo e foi morto" in saida
+    assert "bot_mestre_bot: não parou no tempo ao ser parado e o systemd o matou 1 vez(es)" in saida
     for secao in ("== Erros registrados", "== Log de cada robô", "== Processos dos robôs", "== Postagens de hoje",
                   "== Robô da Shopee Vídeo",
                   "== Baixador e backup", "== Pontos de atenção"):
