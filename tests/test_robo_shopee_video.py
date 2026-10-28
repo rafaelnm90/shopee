@@ -1313,6 +1313,26 @@ def test_treino_percorre_o_caminho_sem_salvar_nem_postar(monkeypatch, avisos):
     assert robo.ler_estado()["treino_resultado"] == "ok" and vistos == [""]
 
 
+def test_treino_abre_o_produto_do_rascunho_de_link_de_produto_pelo_nome_guardado(monkeypatch, avisos):
+    # 28/10: o rascunho mais novo era de link de vídeo (ou a oferta do link saiu), a API não
+    # disse o produto, e o treino acusou "algo mudou no app" sem o app ter mudado.
+    async def sem_produto_na_api(link):
+        return [], link
+
+    async def link_para_converter(link):
+        return link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", sem_produto_na_api)
+    monkeypatch.setattr(robo, "link_para_converter", link_para_converter)
+    _rascunho("postado", criado="2026-10-20 10:00:00")
+    robo.atualizar(_rascunho("rascunho", criado="2026-10-21 10:00:00"), link="https://sv.shopee.com.br/share-video/abc")
+    app = AppDeMentira()
+    assert robo.rodada(treino=True, d=app, agora=momento("2026-10-22 03:00")) == "treino: caminho OK"
+    # Abriu o produto do rascunho de link de produto, pelo nome guardado nele, sem curtir.
+    assert VESTIDO in app.toques and "@buttonItemLike" not in app.toques
+    assert "caminho OK" in avisos[-1]
+
+
 def test_treino_avisa_com_print_quando_uma_tela_mudou(monkeypatch, avisos):
     TELAS["camera_nova"] = [_no("Galeria", caixa=(800, 2100, 1000, 2200))]
     CAMINHO[("perfil", "Postar vídeo")] = "camera_nova"

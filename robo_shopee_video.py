@@ -2764,6 +2764,23 @@ def faxina_dos_arquivos(d):
 
 # --- Treino ---
 
+# Quantos rascunhos usados, do mais novo para o mais velho, o treino olha atrás de um de
+# link de produto: o de link de vídeo (Ver Produtos) abre o vídeo, não a página do produto.
+RASCUNHOS_DO_TREINO = 5
+
+
+def rascunho_do_treino():
+    """
+    O rascunho usado mais novo com link de produto, para o treino abrir a página completa
+    do produto; None sem nenhum.
+    """
+    usados = listar(*NO_APP, "postado", "apagado")
+    for rascunho in list(reversed(usados))[:RASCUNHOS_DO_TREINO]:
+        if rascunho["link"] and rascunho["produtos"] and not eh_video(asyncio.run(link_para_converter(rascunho["link"]))):
+            return rascunho
+    return None
+
+
 def treinar(d, agora=None):
     """
     Percorre o caminho todo até a tela final sem salvar nem postar, conferindo cada tela
@@ -2776,12 +2793,15 @@ def treinar(d, agora=None):
     gravar_estado(treino_semana=semana(agora), treino_em=_momento(agora), treino_resultado="",
                   treino_depois_da_suspensao=False)
     try:
-        ultimo = (listar(*NO_APP, "postado", "apagado") or [None])[-1]
+        ultimo = rascunho_do_treino()
         if ultimo:
             ir_ao_inicio(d)
             ps.abrir_link(d, ultimo["link"])
             pausa(12)
-            ok, motivo, _ = ps.abrir_pagina_completa(d, video_do_rascunho(ultimo))
+            # O nome guardado no rascunho, o que o app mostrou: a API pode não dizer mais o
+            # produto de um link antigo (a oferta saiu), e o treino acusaria uma mudança no app.
+            video = dict(video_do_rascunho(ultimo), produto=ultimo["produtos"][0])
+            ok, motivo, _ = ps.abrir_pagina_completa(d, video)
             if not ok:
                 raise Parada(f"página do produto: {motivo}")
         # O quadro "Rascunhos: N" só aparece com algum rascunho salvo: o treino não o exige.
