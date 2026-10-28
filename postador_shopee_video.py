@@ -857,14 +857,29 @@ def foto_do_produto(video):
     (link de vídeo com Ver Produtos, a API fora, a foto não baixou): aí a conferência segue
     só pelo nome, como antes.
     """
+    return anuncio_do_produto(video).get("foto")
+
+
+def anuncio_do_produto(video):
+    """
+    {"foto" (bytes ou None), "nome", "preco"} do anúncio do produto do link, pela API de
+    afiliado; {} quando o link é de vídeo (Ver Produtos) ou a API não diz o produto.
+    """
     if (video or {}).get("produto") or not (video or {}).get("link"):
-        return None
+        return {}
     try:
         produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
-        return baixar_foto(produtos[0].get("imagem") if produtos else "")
     except Exception as e:
         logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
-        return None
+        return {}
+    if not produtos:
+        return {}
+    try:
+        foto = baixar_foto(produtos[0].get("imagem"))
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
+        foto = None
+    return {"foto": foto, "nome": produtos[0]["nome"], "preco": produtos[0]["preco"]}
 
 
 def baixar_foto(endereco):

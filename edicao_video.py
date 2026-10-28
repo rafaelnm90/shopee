@@ -11,16 +11,19 @@ privado e ligar no painel (Shopee Vídeo 🎬 → Robô Automático 🤖 → Edi
 chave edicao_ligada de shopee_video). Escolhas do Rafael (25/10/2026, P37 e depois da
 P38): DECISOES.md, Shopee Vídeo.
 
-O Editor 2 (editar_2, "com legendas") é esta edição com três acréscimos, em teste só no
-exemplo do painel: o vídeo remontado sem as partes paradas, com trechos acelerados e uma
-câmera lenta curta, e os textos da tela (nome, vantagem e preço). O exemplo de cada editor
-(exemplo_editor_1 e exemplo_editor_2) entrega o vídeo completo e até 2 versões diferentes de
-verdade, cada uma abrindo com um momento diferente e seguindo dali, cada uma de um tamanho; no
-Editor 2, com outra vantagem na tela e outra chamada no fim. O Rafael compara os dois e
-escolhe qual fica (pedidos de 27/10/2026: DECISOES.md, Shopee Vídeo).
+O Editor 2 (editar_2, "com legendas") é esta edição com três acréscimos: o vídeo remontado
+sem as partes paradas, com trechos acelerados e uma câmera lenta curta, e os textos da tela
+(nome, vantagem e preço). É o que vai ao ar (editar_para_postar): o Rafael escolheu o Editor 2
+nos rascunhos do robô e no modo assistente, e o vídeo em que ele não sai vai com o Editor 1
+(28/10/2026, P50 e P51). O exemplo de cada editor (exemplo_editor_1 e exemplo_editor_2)
+entrega o vídeo completo e até 2 versões diferentes de verdade, cada uma abrindo com um
+momento diferente e seguindo dali, cada uma de um tamanho; no Editor 2, com outra vantagem
+na tela e outra chamada no fim. As versões ficam só no exemplo: nada delas vai ao ar
+(pedidos de 27 e 28/10/2026: DECISOES.md, Shopee Vídeo).
 
-Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao rascunho) e
-pelo painel da Shopee Vídeo (os exemplos).
+Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao rascunho), pelo
+modo assistente (assistente_shopee_video, no vídeo que vai ao privado do Rafael) e pelo
+painel da Shopee Vídeo (os exemplos).
 """
 import os
 
@@ -132,10 +135,10 @@ def editar(video, foto, destino, avisos=False):
 
 
 # --- Editor 2 ---
-# O Editor 1 (sem legendas) é a edição de cima, a que vale nos rascunhos. O Editor 2 (com
-# legendas) é o Editor 1 com três acréscimos, em teste: o Rafael vê os dois exemplos no painel
-# e decide qual fica (pedido de 27/10/2026: DECISOES.md, Shopee Vídeo). Antes da foto, da miniatura e da seta, o vídeo
-# é remontado: as partes paradas saem, os trechos calmos ficam mais rápidos, o de mais ação
+# O Editor 1 (sem legendas) é a edição de cima. O Editor 2 (com legendas) é o Editor 1 com
+# três acréscimos, e é o que vai ao ar (editar_para_postar; escolha do Rafael de 28/10/2026,
+# P50 e P51: DECISOES.md, Shopee Vídeo). Antes da foto, da miniatura e da seta, o vídeo é
+# remontado: as partes paradas saem, os trechos calmos ficam mais rápidos, o de mais ação
 # ganha uma câmera lenta curta, e os textos da tela (nome, vantagem e preço) entram por cima.
 
 # O vídeo é olhado em janelas de meio segundo.
@@ -204,6 +207,18 @@ _FALAS_E_LUGAR_NO_PROMPT = (
     "uns 33% da largura, entre uns 31% e 44% da altura) ou \"direita\" (o mesmo, na borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem o produto ou um rosto.\n"
 )
+# Os textos do vídeo que vai ao ar: só o completo, sem as versões do exemplo.
+PROMPT_DOS_TEXTOS = (
+    "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
+    "Escreva dois textos curtos para aparecer na tela do vídeo, em português do Brasil:\n"
+    + _NOME_NO_PROMPT
+    + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
+    f"até {MAXIMO_DA_VANTAGEM} caracteres.\n"
+    + _REGRAS_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"falas\": [[0.0, 0.0]], "
+    "\"lugar\": \"alto\"}}"
+)
+
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
 # ou câmera lenta (escolha do Rafael, P45: o 1º exemplo cortou o começo da fala junto com a
 # parte parada). Os trechos com fala vêm da IA, com esta folga de cada lado; sem a resposta
@@ -427,6 +442,16 @@ def _nome_lugar_e_falas(dados):
     return textos
 
 
+def textos_da_tela(video, nome):
+    """{"nome", "vantagem", "lugar", "falas"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta."""
+    dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
+    textos = _nome_lugar_e_falas(dados)
+    vantagem = _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
+    if vantagem:
+        textos["vantagem"] = vantagem
+    return textos
+
+
 def _falas(bruto):
     """Os trechos com fala que a IA deu ([(início, fim)], em segundos); None quando não vieram certos."""
     if not isinstance(bruto, list):
@@ -509,22 +534,24 @@ def _letreiros(textos, lugar, duracao):
     return letreiros, [texto for texto, *_ in horarios]
 
 
-def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None, lugar=None):
+def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None, lugar=None, avisos=False):
     """
     O Editor 2 em destino: o vídeo remontado (ritmo), com os textos da tela, e depois o
-    Editor 1 por cima. falas: os trechos com fala da IA ([(início, fim)]); None = sem a
-    resposta dela (aí vale o som). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da
-    IA; SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Devolve (motivo, resumo): motivo
-    "" quando deu certo; resumo diz o que mudou, para o Rafael comparar.
+    Editor 1 por cima (com avisos=True, a capa dos avisos da bebida alcoólica no lugar da
+    foto). falas: os trechos com fala da IA ([(início, fim)]); None = sem a resposta dela (aí
+    vale o som). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA; SEM_LUGAR = sem
+    os textos; sem ela, LUGAR_PADRAO). Devolve (motivo, resumo): motivo "" quando deu certo;
+    resumo diz o que mudou.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     com_fala, trechos = _remontagem(video, original, falas)
-    return _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, _lugar(lugar))
+    return _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, _lugar(lugar),
+                            avisos)
 
 
-def _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, lugar):
+def _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, lugar, avisos=False):
     """O Editor 2 em destino com a remontagem já medida (editar_2_e_versoes usa no vídeo completo)."""
     import tempfile
     remontado = _segundos_remontados(trechos)
@@ -540,7 +567,50 @@ def _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, va
         motivo = videos.com_cortes_e_ritmo(video, trechos, corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino), resumo
+        return editar(corpo, foto, destino, avisos), resumo
+
+
+# Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
+COM_LEGENDAS = "editado com legendas (Editor 2)"
+SEM_LEGENDAS_NA_TELA = "editado com o Editor 2, sem legendas na tela"
+SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
+COM_OS_AVISOS = ", com os avisos"
+# O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
+SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
+SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome e a vantagem"
+
+
+def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+    """
+    O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
+    vídeo completo com o Editor 2, com os textos que a IA escreve vendo o vídeo (produto: o
+    nome do produto para ela; sem ele, só o preço na tela) e o preço "A partir de" da API.
+    As versões ficam só no exemplo. Se o Editor 2 não sai, o vídeo vai com o Editor 1 (foto,
+    miniatura e seta, sem legendas). Escolhas do Rafael (28/10/2026, P50 e P51): DECISOES.md,
+    Shopee Vídeo. Com avisos=True (bebida alcoólica), a capa dos avisos abre o vídeo nos dois.
+    Devolve (motivo, como, detalhe): motivo "" quando o vídeo saiu editado; como, o jeito
+    (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
+    o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada).
+    """
+    avisado = COM_OS_AVISOS if avisos else ""
+    if not foto:
+        # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
+        return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + avisado, ""
+    textos = textos_da_tela(video, produto) if produto else {}
+    try:
+        motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), preco,
+                                    textos.get("falas"), textos.get("lugar"), avisos)
+    except Exception as e:
+        # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
+        motivo_2, resumo = f"erro ({type(e).__name__})", {}
+    if not motivo_2:
+        detalhe = ""
+        if resumo.get("lugar") == SEM_LUGAR:
+            detalhe = SEM_LUGAR_LIVRE
+        elif not (textos.get("nome") or textos.get("vantagem")):
+            detalhe = SEM_OS_TEXTOS_DA_IA
+        return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
+    return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}"
 
 
 def _fontes_do_exemplo():

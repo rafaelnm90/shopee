@@ -717,8 +717,8 @@ def texto_robo(config, agora=None, celular=None):
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
-        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo, a miniatura no canto e a seta vermelha; ver os "
-        "exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
+        f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo com o Editor 2 (a foto do produto no começo, a miniatura no canto, a "
+        "seta vermelha e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
@@ -736,40 +736,41 @@ def rotulo_edicao(config):
 
 
 def texto_edicao(config):
-    """A tela da Edição dos Vídeos. Escolhas do Rafael (25 e 27/10): DECISOES.md, Shopee Vídeo."""
+    """A tela da Edição dos Vídeos. Escolhas do Rafael (25, 27 e 28/10): DECISOES.md, Shopee Vídeo."""
     return (
         "✂️ <b>Edição dos Vídeos</b>\n"
-        f"<b>Editor 1 sem legendas</b> (o que vale nos rascunhos): o robô edita o vídeo antes do rascunho, como "
-        f"você faz no LumaFusion: a foto do anúncio do produto "
-        f"nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela no canto "
-        "de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à esquerda, "
-        "no lugar em que você põe no LumaFusion.\n\n"
-        "Vale para todos os vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): "
-        "todos os seus grupos e vídeos são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto é a do "
-        "1º produto que o robô anexou.\n\n"
-        "<b>Editor 2 com legendas</b> (em teste, só no exemplo): o Editor 1 e mais três coisas. As partes "
+        f"<b>Editor 1 sem legendas</b>: o robô edita o vídeo como você faz no LumaFusion: a foto do anúncio do "
+        f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
+        "no canto de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à "
+        "esquerda, no lugar em que você põe no LumaFusion.\n\n"
+        "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e mais três coisas. As partes "
         "paradas do vídeo saem; os trechos calmos ficam mais rápidos e o segundo de mais ação vai em câmera "
         "lenta (onde alguém fala, o vídeo fica inteiro e na velocidade normal); e entram textos "
         "na tela, um de cada vez: o nome do produto e uma vantagem que o vídeo mostra (escritos pela IA, sem "
         "marca) e o preço (\"A partir de\", pela API), em letra média, no alto, logo abaixo da miniatura ou num "
         "dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, o vídeo vai sem os "
         "textos.\n\n"
+        "<b>O que vai ao ar</b>: o vídeo completo do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
+        "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
+        "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
+        "são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto e o preço são os do 1º produto que o "
+        "robô anexou.\n\n"
         "<b>O exemplo de cada editor</b>: primeiro o vídeo completo, como o editor entrega, e depois até 2 "
         "versões diferentes dele. Cada versão abre com um momento diferente, que a IA escolhe vendo o vídeo, e "
         "segue dali (o que vinha antes vai para o fim); a 1ª versão tem uns 3/4 do vídeo completo e a 2ª é a "
         f"mais curta (pelo menos {edicao_video.MINIMO_DO_REMONTADO} s; sai o fim, nunca o meio de uma fala). "
         "No Editor 2, cada versão mostra na tela a vantagem do seu momento e termina com uma chamada diferente "
         f"para o produto. Só sai versão com um momento a pelo menos {edicao_video.ENTRE_VERSOES:.0f} s do começo "
-        "do vídeo e dos das outras: vídeo curto, ou com fala do começo ao fim, rende menos versões. Compare os "
-        "dois e diga qual fica.\n\n"
-        f"Agora: {rotulo_edicao(config)} (Editor 1, só o vídeo completo)\n\n"
+        "do vídeo e dos das outras: vídeo curto, ou com fala do começo ao fim, rende menos versões. As versões "
+        "ficam só no exemplo: nada delas vai ao ar.\n\n"
+        f"Agora: {rotulo_edicao(config)} (Editor 2, só o vídeo completo)\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EDITOR_1}</b>: manda no seu privado, já editados e sem postar, o vídeo completo e as "
         "versões do próximo vídeo que o robô pegaria, sem legendas; cada toque mostra um vídeo novo.\n"
         f"✨ <b>{BOTAO_EDITOR_2}</b>: o mesmo, com o Editor 2 e as legendas, e o que ele mudou no vídeo.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
-        "próximos rascunhos. Com a edição ligada, só vai vídeo editado: o vídeo que não sair editado fica de "
-        "lado e o robô pega o próximo."
+        "próximos rascunhos e nos vídeos do modo assistente. Com a edição ligada, só vai vídeo editado: o vídeo "
+        "que não sair editado fica de lado e o robô pega o próximo."
     )
 
 
@@ -905,7 +906,7 @@ async def voltar_ao_robo(message: types.Message, state: FSMContext):
 
 # --- Edição dos vídeos ---
 
-# Um exemplo de cada vez (Editor 1, 2, 3 ou 4): cada um baixa a foto e passa o vídeo pelo ffmpeg.
+# Um exemplo de cada vez (Editor 1 ou 2): cada um baixa a foto e passa o vídeo pelo ffmpeg.
 _exemplo_da_edicao = asyncio.Lock()
 # O exemplo leva minutos, e um deploy no meio reinicia o bot e o corta sem aviso (27/10: o
 # Rafael tocou no Editor 2 às 23:05 e o bot reiniciou às 23:07). O exemplo em andamento fica

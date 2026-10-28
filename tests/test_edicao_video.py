@@ -781,6 +781,102 @@ def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatc
     assert [m[1] for m in montados] == [0, 0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
 
 
+def _textos_da_tela(monkeypatch, textos):
+    """A IA de mentira dos textos da tela; devolve os nomes de produto que ela recebeu."""
+    pedidos = []
+    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: pedidos.append(nome) or dict(textos))
+    return pedidos
+
+
+def test_o_que_vai_ao_ar_e_o_completo_do_editor_2_com_as_legendas(monkeypatch, tmp_path):
+    # Escolha do Rafael (28/10, P50): os rascunhos do robô e o modo assistente vão com o vídeo
+    # completo do Editor 2 (a foto, a miniatura, a seta, as partes paradas tiradas e as
+    # legendas); as versões ficam só no exemplo.
+    montados, editados = _versoes_de_mentira(monkeypatch)
+    pedidos = _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "falas": [],
+                                            "lugar": "alto"})
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa Palha Marca X", 25.8) == (
+        "", edicao_video.COM_LEGENDAS, "")
+    # Um vídeo só: a remontagem inteira com o nome, a vantagem e o preço, e o Editor 1 por cima.
+    assert pedidos == ["Bolsa Palha Marca X"]
+    assert montados == [([(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)], 3)]
+    assert editados == [("remontado.mp4", "rascunho.mp4")]
+    # Sem lugar livre do produto e do rosto (P47), o Editor 2 vai sem os textos, e o registro diz por quê.
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "nenhum"})
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+        "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_LUGAR_LIVRE)
+    # Sem a resposta da IA, só o preço na tela.
+    montados.clear()
+    _textos_da_tela(monkeypatch, {})
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+        "", edicao_video.COM_LEGENDAS, edicao_video.SEM_OS_TEXTOS_DA_IA)
+    assert montados[0][1] == 1
+
+
+def test_sem_o_editor_2_o_que_vai_ao_ar_e_o_editor_1(monkeypatch, tmp_path):
+    # Escolha do Rafael (28/10, P51): se o Editor 2 não sai, o vídeo vai com o Editor 1 (foto,
+    # miniatura e seta, sem legendas), e o detalhe diz por quê.
+    montados, editados = _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa", "vantagem": "Leve", "falas": [], "lugar": "alto"})
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
+                        lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+        "", edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: o ffmpeg falhou")
+    assert editados == [("v.mp4", "rascunho.mp4")]
+
+    # Um erro no meio do Editor 2 também.
+    def quebra(*args, **kwargs):
+        raise RuntimeError("quebrou")
+    monkeypatch.setattr(edicao_video, "editar_2", quebra)
+    editados.clear()
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+        "", edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: erro (RuntimeError)")
+    assert editados == [("v.mp4", "rascunho.mp4")]
+
+
+def test_sem_a_foto_nada_vai_ao_ar_e_a_ia_nem_e_chamada(monkeypatch, tmp_path):
+    _programas(monkeypatch)
+    pedidos = _textos_da_tela(monkeypatch, {"nome": "Bolsa"})
+    motivo, _, _ = edicao_video.editar_para_postar("v.mp4", None, str(tmp_path / "r.mp4"), "Bolsa", 25.8)
+    assert motivo == "a foto do anúncio não veio" and pedidos == [] and not os.path.exists(tmp_path / "r.mp4")
+
+
+def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monkeypatch, tmp_path):
+    # Escolha do Rafael (26/10, P43): a capa com os avisos abre o vídeo, com o Editor 2 também.
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Vinho Tinto", "vantagem": "Encorpado", "falas": [], "lugar": "alto"})
+    avisos = []
+
+    def editar(video, foto, destino, com_avisos=False):
+        avisos.append(com_avisos)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    destino = str(tmp_path / "r.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vinho", 39.9, avisos=True)[1] == (
+        edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS)
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
+                        lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vinho", 39.9, avisos=True)[1] == (
+        edicao_video.SO_COM_O_EDITOR_1 + edicao_video.COM_OS_AVISOS)
+    assert avisos == [True, True]
+
+
+def test_textos_da_tela_pede_so_o_do_video_completo(monkeypatch):
+    import api_gemini
+    pedidos = []
+
+    async def analisar(video, prompt, imagens=None):
+        pedidos.append(prompt)
+        return '{"nome": "Copo Térmico", "vantagem": "Mantém gelado 🧊", "falas": [], "lugar": "meio"}'
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    assert edicao_video.textos_da_tela("v.mp4", "Copo Marca X") == {
+        "nome": "Copo Térmico", "vantagem": "Mantém gelado", "falas": [], "lugar": "meio"}
+    assert "Copo Marca X" in pedidos[0] and "versoes" not in pedidos[0]
+
+
 def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
     # Os Editores 3 e 4 abrem cada versão com um momento do meio do vídeo: o ffmpeg monta na ordem da lista.
     if not shutil.which("ffmpeg"):
