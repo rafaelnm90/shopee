@@ -78,6 +78,10 @@ FONTE_PADRAO = "autorais"
 # editado; e a frase do resultado do que fica de lado por isso.
 VIDEOS_POR_ENVIO = 5
 SEM_EDICAO = "vídeo de lado: a edição não saiu (só vídeo editado vai)"
+# O link que não diz o produto (link de vídeo do Ver Produtos, ou produto sem oferta): sem o
+# celular, o assistente não tem a foto do anúncio para a edição. Fica de lado, como o que não
+# sai editado, mas não é falha: o robô, com o celular, acha os produtos do Ver Produtos.
+SEM_PRODUTO_NO_LINK = "vídeo de lado: o link não diz o produto (link de vídeo ou sem oferta), sem a foto para a edição"
 
 PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee. Analise \
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
@@ -599,8 +603,9 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
             raise
         # As frases do resultado são fixas (_preparar_e_enviar).
         registro_processos.registrar("shopee_video", "assistente: envio", resultado,
-                                     ok=resultado == "postagem mandada no seu privado")
-        if resultado not in (SEM_EDICAO, SEM_AVISOS):
+                                     ok=None if resultado == SEM_PRODUTO_NO_LINK
+                                     else resultado == "postagem mandada no seu privado")
+        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK):
             return resultado
     return f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos saiu editado (só vídeo editado vai); tento de novo no próximo horário"
 
@@ -641,6 +646,9 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     produtos, link = await produtos_do_link(video["link"])
     arquivo = video["arquivo"]
     if pasta and _edicao_ligada(fonte):
+        if not produtos:
+            registrar(video["id"], "sem_edicao", SEM_PRODUTO_NO_LINK, agora)
+            return SEM_PRODUTO_NO_LINK
         arquivo = os.path.join(pasta, os.path.basename(video["arquivo"]))
         motivo = await asyncio.to_thread(_editar, video, produtos, arquivo)
         if motivo:
