@@ -130,6 +130,7 @@ def test_pausa_do_robo_automatico_e_separada_e_o_botao_troca(bm, Msg, Est, monke
     rodar(sv.salvar_pausa_robo(Msg("Confirmar Retomada ✅"), est))
     config = sv.ler_config()
     assert config["robo_pausado"] is False and config["pausado"] is True
+    assert config["robo_retomado_em"]               # o alerta de robô sem rodar conta daqui
     assert "Pausar Postagem ⏸️" in _textos(sv.teclado_robo(config))
     assert "Retomar Assistente ▶️" in _textos(sv.teclado_assistente(config))
     rodar(sv.pedir_pausa_robo(Msg("Pausar Postagem ⏸️"), est))

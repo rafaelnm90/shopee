@@ -1916,7 +1916,9 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
             "mandando as postagens aqui.", parse_mode="HTML")
         await mostrar_robo(message, state)
         return
-    alterar_config(robo_pausado=False, robo_pausa_motivo="")
+    # A hora da retomada: o alerta de robô sem rodar conta dela, não da rodada de antes da pausa.
+    alterar_config(robo_pausado=False, robo_pausa_motivo="",
+                   robo_retomado_em=datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
     logger.info("✅ Robô automático da Shopee Vídeo retomado.")
     config = ler_config()
     suspensao = (f"\n\n⛔ A conta de Shopee Vídeo está suspensa pela Shopee até "

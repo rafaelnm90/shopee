@@ -58,6 +58,11 @@ def test_disco_backup_erros_e_robo_da_shopee_video_parado(monkeypatch):
     assert "robo_sv" not in alertas.graves([], AGORA)
     db.salvar_config("shopee_video", {"robo_pausado": False, "robo_inicio": 9, "robo_fim": 21})
     assert "robo_sv" not in alertas.graves([], AGORA.replace(hour=22))
+    # Retomado há pouco depois de uma pausa longa: conta da retomada, não da rodada de antes.
+    db.salvar_config("shopee_video", {"robo_pausado": False, "robo_inicio": 9, "robo_fim": 21,
+                                      "robo_retomado_em": "2026-10-24 14:50:00"})
+    assert "robo_sv" not in alertas.graves([], AGORA)
+    assert "70 min" in alertas.graves([], AGORA + timedelta(minutes=60))["robo_sv"]
 
 
 def test_saida_so_com_rotulos(monkeypatch, capsys):
