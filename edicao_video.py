@@ -720,9 +720,10 @@ def _produto_do_link(link):
 # segue dali; o que vinha antes do gancho vai para o fim. E cada uma tem um tamanho: a 1ª uns
 # 3/4 do completo e a 2ª a mais curta (escolha do Rafael, P49: nas versões do conjunto de
 # jardim, todas voltavam ao começo do vídeo depois do gancho e terminavam iguais, com o mesmo
-# tamanho). Assim, em nenhum segundo dois vídeos mostram a mesma parte. As versões do Editor 1
-# vão sem textos e nada acelerado; as do Editor 2 são remontadas (sem as partes paradas, com o
-# ritmo), com os textos na tela (a vantagem do gancho e uma chamada diferente no fim). Não são cópias quase iguais para
+# tamanho). Assim, em nenhum segundo dois vídeos mostram a mesma parte. As versões dos dois
+# editores são remontadas (sem as partes paradas, com o ritmo; o Editor 1 no mesmo padrão do
+# Editor 2, só sem legendas, pedido do Rafael de 28/10); as do Editor 2 têm os textos na tela
+# (a vantagem do gancho e uma chamada diferente no fim). Não são cópias quase iguais para
 # a Shopee não reconhecer o mesmo vídeo (a regra 9 pune mensagens repetitivas): versão só sai
 # com um gancho longe do começo do vídeo e dos das outras, e o vídeo curto, ou com fala do
 # começo ao fim, rende menos versões.
@@ -872,7 +873,7 @@ def _resumo_do_completo(arquivo, remontado, textos=(), vantagem=""):
 
 
 def _resumo_da_remontagem(trechos, original, com_fala):
-    """O que a remontagem das versões do Editor 2 muda no vídeo original (números, para a legenda)."""
+    """O que a remontagem das versões muda no vídeo original (números, para a legenda)."""
     return {"cortado": original - sum(fim - inicio for inicio, fim, _ in trechos),
             "acelerados": sum(1 for *_, v in trechos if v > 1),
             "camera_lenta": sum(1 for *_, v in trechos if v < 1),
@@ -884,37 +885,51 @@ def _resumo_da_versao(arquivo, plano, da_ia, textos=()):
             "textos": list(textos), "vantagem": da_ia.get("vantagem", ""), "gancho": (da_ia["inicio"], da_ia["fim"])}
 
 
-def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
+def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, textos_da_versao):
     """
-    O Editor 1 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o
-    Editor 1, e os seguintes as versões (planejar_versoes), cada uma só começando no gancho
-    dela, no tamanho dela, e com o Editor 1 por cima: sem textos e nada acelerado.
-    versoes_da_ia = [{"vantagem", "inicio", "fim", ...}]. Devolve (motivo, resumo): motivo ""
-    quando todos saíram.
+    As versões modificadas (planos de planejar_versoes) em arquivo_da_versao(destino, 2, 3...):
+    cada uma remontada com os trechos dela, com os letreiros de textos_da_versao(plano, da_ia)
+    → (letreiros, textos), e o Editor 1 por cima; cada uma entra em resumo["versoes"].
+    Devolve (motivo, resumo): motivo "" quando todas saíram.
     """
     import tempfile
-    original = videos.duracao(video)
-    if not original:
-        return "o vídeo não abre", {}
-    com_fala = janelas_com_fala(falas, original, videos.som_por_janela(video, JANELA) if falas is None else ())
-    planos = planejar_versoes([(0.0, original, 1.0)], [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala)
-    completo = arquivo_da_versao(destino, 1)
-    resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
-              "versoes": [_resumo_do_completo(completo, original)]}
-    motivo = editar(video, foto, completo)
-    if motivo:
-        return motivo, resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         for numero, plano in enumerate(planos, 2):
+            da_ia = versoes_da_ia[plano["gancho"]]
+            letreiros, textos = textos_da_versao(plano, da_ia)
             arquivo = arquivo_da_versao(destino, numero)
-            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, versoes_da_ia[plano["gancho"]]))
+            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, da_ia, textos))
             corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
-            motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, (), ESPERA_MAXIMA)
+            motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, letreiros, ESPERA_MAXIMA)
             if not motivo:
                 motivo = editar(corpo, foto, arquivo)
             if motivo:
                 return motivo, resumo
     return "", resumo
+
+
+def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
+    """
+    O Editor 1 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
+    cortes, com o Editor 1; os seguintes são as versões modificadas, remontadas como as do
+    Editor 2 (sem as partes paradas, com o ritmo), mas sem textos (pedido do Rafael, 28/10:
+    DECISOES.md, Shopee Vídeo). versoes_da_ia = [{"vantagem", "inicio", "fim", ...}].
+    Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas
+    versões fica em resumo["remontagem"].
+    """
+    original = videos.duracao(video)
+    if not original:
+        return "o vídeo não abre", {}
+    com_fala, trechos = _remontagem(video, original, falas)
+    planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
+    completo = arquivo_da_versao(destino, 1)
+    resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
+              "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
+              "versoes": [_resumo_do_completo(completo, original)]}
+    motivo = editar(video, foto, completo)
+    if motivo:
+        return motivo, resumo
+    return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: ((), []))
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None,
@@ -928,7 +943,6 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas versões
     fica em resumo["remontagem"].
     """
-    import tempfile
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
@@ -943,22 +957,10 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
               "versoes": [_resumo_do_completo(completo, original, do_completo["textos"], vantagem)]}
     if motivo:
         return motivo, resumo
-    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
-        for numero, plano in enumerate(planos, 2):
-            da_ia = versoes_da_ia[plano["gancho"]]
-            letreiros, textos = _letreiros([(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
-                                            (texto_do_preco(preco), FUNDO_DO_PRECO),
-                                            (da_ia.get("chamada", ""), FUNDO_DOS_TEXTOS)], lugar,
-                                           _segundos_remontados(plano["trechos"]))
-            arquivo = arquivo_da_versao(destino, numero)
-            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, da_ia, textos))
-            corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
-            motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, letreiros, ESPERA_MAXIMA)
-            if not motivo:
-                motivo = editar(corpo, foto, arquivo)
-            if motivo:
-                return motivo, resumo
-    return "", resumo
+    return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: _letreiros(
+        [(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
+         (texto_do_preco(preco), FUNDO_DO_PRECO), (da_ia.get("chamada", ""), FUNDO_DOS_TEXTOS)],
+        lugar, _segundos_remontados(plano["trechos"])))
 
 
 def _exemplo_das_versoes(destino, lista, editar_versoes):

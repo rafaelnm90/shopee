@@ -929,6 +929,7 @@ def test_exemplo_do_editor_1_manda_o_completo_e_as_versoes_sem_legendas(bm, Msg,
             {"remontado": 12.0, "curta": False, "textos": [], "gancho": None, "vantagem": ""},
             {"remontado": 9.0, "curta": True, "textos": [], "gancho": (4.0, 6.0), "vantagem": "Fechamento com zíper"}])
         return "Bolsa", "", {"original": 12.0, "inteiro": 12.0, "com_fala": 0, "versoes_da_ia": 1, "lugar_da_ia": False,
+                             "remontagem": {"cortado": 2.0, "acelerados": 1, "camera_lenta": 1, "com_fala": 0},
                              "versoes": versoes}
 
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_1", exemplo_editor_1)
@@ -946,7 +947,10 @@ def test_exemplo_do_editor_1_manda_o_completo_e_as_versoes_sem_legendas(bm, Msg,
     assert "do vídeo original (o que ele mostra: “Fechamento com zíper”) e segue dali; o que vinha antes vai para o fim" in versao
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in versao
     assert not any("Textos na tela" in legenda or "Lugar do texto" in legenda for legenda in (completo, versao))
-    assert "Partes paradas" not in versao
+    # Pedido do Rafael (vídeo de 28/10, 00:12): as versões do Editor 1 seguem o padrão do Editor 2
+    # (remontadas), só sem legendas; a legenda diz o que cada uma mudou.
+    assert "Partes paradas tiradas: 2 s" in versao and "Trechos acelerados: 1 | 🐢 Em câmera lenta: 1" in versao
+    assert "Partes paradas" not in completo
     assert "rendeu o vídeo original e mais 1 versão modificada, diferentes de verdade" in versao
     assert "compare com o Editor 2 com Legendas ✨" in versao
     assert not any(os.path.exists(m[1]) for m in msg.midias)
