@@ -65,8 +65,41 @@ EXEMPLOS_LEMBRADOS = 100
 SEM_FOTO_LEMBRADOS = 300
 
 
+# A música de fundo do vídeo sem som: 3 músicas instrumentais feitas pelo Claude do zero, por
+# síntese (.claude/scripts/gerar_musicas.py), sem pedaço de música de ninguém, porque a regra 7
+# da Shopee pune música de terceiros sem licença. Cada vídeo mudo leva a próxima, em rodízio
+# (a vez fica em MUSICA_DA_VEZ, na chave shopee_video), e no exemplo cada versão modificada
+# leva outra. Escolha do Rafael (28/10, P55): DECISOES.md, Shopee Vídeo.
+MUSICAS = (("animada", "musica_animada.m4a"), ("calma", "musica_calma.m4a"),
+           ("divertida", "musica_divertida.m4a"))
+PASTA_DA_MIDIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia")
+MUSICA_DA_VEZ = "musica_de_fundo_da_vez"
+
+
 def ligada():
     return bool((db.ler_config("shopee_video", {}) or {}).get("edicao_ligada"))
+
+
+def musicas_de_fundo(video, quantas=1):
+    """
+    A música (nome, caminho) de cada um dos `quantas` vídeos que saem deste (o original e as
+    versões), a partir da da vez, que anda uma casa; [None] * quantas quando o vídeo tem som.
+    """
+    if not videos.mudo(video):
+        return [None] * quantas
+
+    def andar(dados):
+        vez = int(dados.get(MUSICA_DA_VEZ) or 0) % len(MUSICAS)
+        dados[MUSICA_DA_VEZ] = (vez + 1) % len(MUSICAS)
+        return vez
+
+    vez = db.atualizar_config("shopee_video", andar) or 0
+    escolhidas = [MUSICAS[(vez + n) % len(MUSICAS)] for n in range(quantas)]
+    return [(nome, os.path.join(PASTA_DA_MIDIA, arquivo)) for nome, arquivo in escolhidas]
+
+
+def _caminho(musica):
+    return musica[1] if musica else None
 
 
 def vale_para(fonte):
@@ -120,10 +153,11 @@ def capa_com_avisos(foto):
     return saida.getvalue()
 
 
-def editar(video, foto, destino, avisos=False):
+def editar(video, foto, destino, avisos=False, musica=None):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto.
+    Com a musica (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55).
     """
     capa = None
     if avisos and foto:
@@ -132,7 +166,7 @@ def editar(video, foto, destino, avisos=False):
             return "a capa com os avisos da bebida alcoólica não saiu"
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, LARGURA_DA_MINIATURA,
                                        CENTRO_DA_MINIATURA, SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA,
-                                       capa)
+                                       capa, musica)
 
 
 # --- Editor 2 ---
@@ -556,36 +590,39 @@ def _letreiros(textos, lugar, duracao):
     return letreiros, [texto for texto, *_ in horarios]
 
 
-def editar_2(video, foto, destino, nome="", vantagem="", preco=None, lugar=None, avisos=False):
+def editar_2(video, foto, destino, nome="", vantagem="", preco=None, lugar=None, avisos=False, musica=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
     alcoólica no lugar da foto). Nada é cortado nem acelerado: isso fica para as versões
     modificadas do exemplo (pedido do Rafael de 28/10/2026: DECISOES.md, Shopee Vídeo). lugar:
     onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA; SEM_LUGAR = sem os textos; sem ela,
-    LUGAR_PADRAO). Devolve (motivo, resumo {original, lugar, textos}): motivo "" quando deu certo.
+    LUGAR_PADRAO). Com a musica (caminho), ela é o som do vídeo inteiro. Devolve (motivo,
+    resumo {original, lugar, textos}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
-    return _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, _lugar(lugar), avisos)
+    return _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, _lugar(lugar), avisos,
+                                 musica)
 
 
-def _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, lugar, avisos=False):
+def _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, lugar, avisos=False,
+                          musica=None):
     """O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo)."""
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (texto_do_preco(preco), FUNDO_DO_PRECO)], lugar, original)
     resumo = {"original": original, "lugar": lugar, "textos": textos}
     if not letreiros:
-        return editar(video, foto, destino, avisos), resumo
+        return editar(video, foto, destino, avisos, musica), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
         motivo = videos.com_cortes_e_ritmo(video, [(0.0, original, 1.0)], corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino, avisos), resumo
+        return editar(corpo, foto, destino, avisos, musica), resumo
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -593,6 +630,7 @@ COM_LEGENDAS = "editado com legendas (Editor 2)"
 SEM_LEGENDAS_NA_TELA = "editado com o Editor 2, sem legendas na tela"
 SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
+COM_MUSICA = ", com música de fundo"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
 TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
@@ -609,16 +647,18 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
     Shopee Vídeo. Com avisos=True (bebida alcoólica), a capa dos avisos abre o vídeo nos dois.
     Devolve (motivo, como, detalhe): motivo "" quando o vídeo saiu editado; como, o jeito
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
-    o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada).
+    o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
+    som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA.
     """
-    avisado = COM_OS_AVISOS if avisos else ""
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
-        return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + avisado, ""
+        return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), ""
+    musica = _caminho(musicas_de_fundo(video)[0])
+    avisado = (COM_OS_AVISOS if avisos else "") + (COM_MUSICA if musica else "")
     textos = textos_da_tela(video, produto) if produto else {}
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), preco,
-                                    lugar_dos_textos(textos), avisos)
+                                    lugar_dos_textos(textos), avisos, musica)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -631,7 +671,8 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
         elif not (textos.get("nome") or textos.get("vantagem")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}"
+    return (editar(video, foto, destino, avisos, musica), SO_COM_O_EDITOR_1 + avisado,
+            f"o Editor 2 não saiu: {motivo_2}")
 
 
 def _fontes_do_exemplo():
@@ -867,9 +908,9 @@ def arquivo_da_versao(destino, numero):
     return f"{raiz}_{numero}{extensao}"
 
 
-def _resumo_do_completo(arquivo, remontado, textos=(), vantagem=""):
+def _resumo_do_completo(arquivo, remontado, textos=(), vantagem="", musica=None):
     return {"arquivo": arquivo, "remontado": remontado, "curta": False, "textos": list(textos),
-            "vantagem": vantagem, "gancho": None}
+            "vantagem": vantagem, "gancho": None, "musica": musica[0] if musica else ""}
 
 
 def _resumo_da_remontagem(trechos, original, com_fala):
@@ -880,29 +921,31 @@ def _resumo_da_remontagem(trechos, original, com_fala):
             "com_fala": _segundos_com_fala(com_fala, original)}
 
 
-def _resumo_da_versao(arquivo, plano, da_ia, textos=()):
+def _resumo_da_versao(arquivo, plano, da_ia, textos=(), musica=None):
     return {"arquivo": arquivo, "remontado": _segundos_remontados(plano["trechos"]), "curta": plano["curta"],
-            "textos": list(textos), "vantagem": da_ia.get("vantagem", ""), "gancho": (da_ia["inicio"], da_ia["fim"])}
+            "textos": list(textos), "vantagem": da_ia.get("vantagem", ""), "gancho": (da_ia["inicio"], da_ia["fim"]),
+            "musica": musica[0] if musica else ""}
 
 
-def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, textos_da_versao):
+def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, textos_da_versao, musicas):
     """
     As versões modificadas (planos de planejar_versoes) em arquivo_da_versao(destino, 2, 3...):
     cada uma remontada com os trechos dela, com os letreiros de textos_da_versao(plano, da_ia)
-    → (letreiros, textos), e o Editor 1 por cima; cada uma entra em resumo["versoes"].
-    Devolve (motivo, resumo): motivo "" quando todas saíram.
+    → (letreiros, textos), e o Editor 1 por cima, com a sua música (musicas, uma por versão,
+    None no vídeo com som); cada uma entra em resumo["versoes"]. Devolve (motivo, resumo):
+    motivo "" quando todas saíram.
     """
     import tempfile
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
-        for numero, plano in enumerate(planos, 2):
+        for numero, (plano, musica) in enumerate(zip(planos, musicas), 2):
             da_ia = versoes_da_ia[plano["gancho"]]
             letreiros, textos = textos_da_versao(plano, da_ia)
             arquivo = arquivo_da_versao(destino, numero)
-            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, da_ia, textos))
+            resumo["versoes"].append(_resumo_da_versao(arquivo, plano, da_ia, textos, musica))
             corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
             motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, letreiros, ESPERA_MAXIMA)
             if not motivo:
-                motivo = editar(corpo, foto, arquivo)
+                motivo = editar(corpo, foto, arquivo, musica=_caminho(musica))
             if motivo:
                 return motivo, resumo
     return "", resumo
@@ -922,14 +965,16 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
         return "o vídeo não abre", {}
     com_fala, trechos = _remontagem(video, original, falas)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
+    musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
     resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
-              "versoes": [_resumo_do_completo(completo, original)]}
-    motivo = editar(video, foto, completo)
+              "versoes": [_resumo_do_completo(completo, original, musica=musicas[0])]}
+    motivo = editar(video, foto, completo, musica=_caminho(musicas[0]))
     if motivo:
         return motivo, resumo
-    return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: ((), []))
+    return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: ((), []),
+                                musicas[1:])
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None,
@@ -949,18 +994,20 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     com_fala, trechos = _remontagem(video, original, falas)
     lugar = _lugar(lugar)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
+    musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
-    motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, preco, lugar)
+    motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, preco, lugar,
+                                                musica=_caminho(musicas[0]))
     resumo = {"original": original, "inteiro": original, "lugar": lugar,
               "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
-              "versoes": [_resumo_do_completo(completo, original, do_completo["textos"], vantagem)]}
+              "versoes": [_resumo_do_completo(completo, original, do_completo["textos"], vantagem, musicas[0])]}
     if motivo:
         return motivo, resumo
     return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: _letreiros(
         [(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
          (texto_do_preco(preco), FUNDO_DO_PRECO), (da_ia.get("chamada", ""), FUNDO_DOS_TEXTOS)],
-        lugar, _segundos_remontados(plano["trechos"])))
+        lugar, _segundos_remontados(plano["trechos"])), musicas[1:])
 
 
 def _exemplo_das_versoes(destino, lista, editar_versoes):

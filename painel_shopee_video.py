@@ -1056,6 +1056,8 @@ def legenda_das_versoes(nome, resumo, indice, editor):
         linhas += _linhas_da_remontagem(resumo.get("remontagem") or {})
     if versao.get("textos"):
         linhas.append(_linha_dos_textos(versao["textos"]))
+    if versao.get("musica"):
+        linhas.append(f"🎵 Música de fundo: {versao['musica']} (o vídeo original não tem som)")
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
         linhas.append("⚠️ A IA não escreveu o nome e a vantagem desta vez.")
     if indice < total - 1:
