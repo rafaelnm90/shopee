@@ -463,6 +463,19 @@ def test_com_a_edicao_ligada_o_assistente_manda_o_video_editado(monkeypatch):
     assert set(ias) == {"archive/novo.mp4"}
 
 
+def test_com_a_edicao_ligada_o_som_e_conferido_no_video_que_vai(monkeypatch):
+    # Escolha do Rafael (28/10, P55): o vídeo editado já leva a música de fundo; o lembrete da
+    # música da Shopee (P48) só vem quando o vídeo que vai ainda está sem som.
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+    conferidos = []
+    monkeypatch.setattr(asv.videos, "mudo", lambda caminho, timeout=120: conferidos.append(caminho) or False)
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert len(conferidos) == 1 and conferidos[0] != "archive/novo.mp4"
+    assert "Vídeo sem som" not in bot.mensagens[-1][1]
+
+
 def test_sem_o_editor_2_o_assistente_manda_com_o_editor_1_e_o_registro_anota(monkeypatch):
     # Escolha do Rafael (28/10, P51): se o Editor 2 não sai, o vídeo vai com o Editor 1, sem
     # legendas; o registro anota (como falha, para o checkup ver).

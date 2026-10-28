@@ -151,10 +151,13 @@ def tem_audio(caminho):
 
 
 QUADROS_POR_SEGUNDO = 30
+# A música de fundo entra e sai devagar, em segundos.
+ENTRADA_DA_MUSICA = 0.3
+SAIDA_DA_MUSICA = 1.5
 
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
-                             centro_seta=None, pulso_da_seta=(0, 1), capa=None):
+                             centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -163,7 +166,9 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     com o centro em `centro_seta`, do começo do vídeo, logo depois da foto, até o fim;
     `pulso_da_seta` = (primeiro quadro, quantos quadros) é o trecho do fim da animação que
     se repete até o fim do vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
-    vídeo sem som sai sem som.
+    vídeo sem som sai sem som. Com a `musica` (caminho de um arquivo de áudio), ela é o som do
+    vídeo inteiro, foto incluída (`total` segundos), em laço se o vídeo for mais longo,
+    entrando e saindo devagar; o som do vídeo não entra.
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     filtro = (f"[0:v]{tela.replace('color=black', 'color=white')}[foto];"
@@ -181,7 +186,13 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     else:
         filtro += "[foto][comfoto]concat=n=2:v=1:a=0[v]"
     saida = ["-map", "[v]"]
-    if com_audio:
+    if musica:
+        entradas += ["-stream_loop", "-1", "-i", musica]
+        filtro += (f";[{4 if seta else 3}:a]aresample=44100,aformat=channel_layouts=stereo,"
+                   f"atrim=0:{total:.3f},asetpts=PTS-STARTPTS,afade=t=in:d={ENTRADA_DA_MUSICA},"
+                   f"afade=t=out:st={max(0.0, total - SAIDA_DA_MUSICA):.3f}:d={SAIDA_DA_MUSICA}[a]")
+        saida += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
+    elif com_audio:
         silencio = 4 if seta else 3
         entradas += ["-f", "lavfi", "-t", str(segundos), "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
         filtro += (";[1:a]aresample=44100,aformat=channel_layouts=stereo[som];"
@@ -192,12 +203,13 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
-                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None):
+                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
-    uma imagem), ela abre o vídeo no lugar da foto. Devolve "" quando deu certo, ou o motivo
-    fixo de não ter dado (o destino não fica pela metade).
+    uma imagem), ela abre o vídeo no lugar da foto. Com a `musica` (caminho de um arquivo de
+    áudio), ela é o som do vídeo inteiro. Devolve "" quando deu certo, ou o motivo fixo de não
+    ter dado (o destino não fica pela metade).
     """
     if not foto:
         return "a foto do anúncio não veio"
@@ -216,8 +228,10 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
             if not imagem_abre(caminho_da_capa):
                 return "a capa não é uma imagem que abre"
         temporario = os.path.join(pasta, "editado.mp4")
+        total = segundos + duracao(video) if musica else 0.0
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
-                                           tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa)
+                                           tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
+                                           musica if total > segundos else None, total)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

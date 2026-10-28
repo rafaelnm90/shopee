@@ -596,7 +596,7 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     # o meio cobriria o conjunto. A IA ganha os lados e, sem lugar livre, o vídeo vai sem texto.
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
-    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino, avisos=False: "")
+    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino, avisos=False, musica=None: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -713,8 +713,11 @@ def test_versoes_da_ia(monkeypatch):
     assert edicao_video.textos_das_versoes("v.mp4", "Bolsa") == {}
 
 
-def _versoes_de_mentira(monkeypatch):
-    """Vídeo de 12 s com 4 s acelerados no meio, e o que o ffmpeg e o Editor 1 receberam."""
+def _versoes_de_mentira(monkeypatch, musicas=None):
+    """
+    Vídeo de 12 s com 4 s acelerados no meio, e o que o ffmpeg e o Editor 1 receberam (em
+    musicas, se vier, a música de fundo de cada vídeo editado).
+    """
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
     monkeypatch.setattr(edicao_video, "ritmo", lambda movimentos, duracao, por_segundo=10, com_fala=frozenset(): [
         (0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)])
@@ -725,8 +728,10 @@ def _versoes_de_mentira(monkeypatch):
         montados.append((list(trechos), len(letreiros)))
         return ""
 
-    def editar(video, foto, destino, avisos=False):
+    def editar(video, foto, destino, avisos=False, musica=None):
         editados.append((os.path.basename(video), os.path.basename(destino)))
+        if musicas is not None:
+            musicas.append(os.path.basename(musica) if musica else None)
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -877,7 +882,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     _textos_da_tela(monkeypatch, {"nome": "Vinho Tinto", "vantagem": "Encorpado", "falas": [], "lugar": "alto"})
     avisos = []
 
-    def editar(video, foto, destino, com_avisos=False):
+    def editar(video, foto, destino, com_avisos=False, musica=None):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -931,3 +936,89 @@ def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
     assert verde > 100 and vermelho < 80
     vermelho, verde, _ = cor(3.0)
     assert vermelho > 150 and verde < 80
+
+
+def test_as_tres_musicas_de_fundo_estao_na_midia():
+    # Escolha do Rafael (28/10, P55): 3 músicas feitas pelo Claude do zero (animada, calma e
+    # divertida), sem música de ninguém, para os vídeos sem som.
+    assert [nome for nome, _ in edicao_video.MUSICAS] == ["animada", "calma", "divertida"]
+    for _, arquivo in edicao_video.MUSICAS:
+        caminho = os.path.join(edicao_video.PASTA_DA_MIDIA, arquivo)
+        assert os.path.getsize(caminho) > 100_000
+
+
+def test_video_sem_som_ganha_a_musica_da_vez_e_o_rodizio_anda(monkeypatch):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {"edicao_ligada": True})
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
+    assert edicao_video.musicas_de_fundo("com_som.mp4", 3) == [None, None, None]
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
+    nomes = [edicao_video.musicas_de_fundo("mudo.mp4")[0][0] for _ in range(4)]
+    assert nomes == ["animada", "calma", "divertida", "animada"]
+    # Cada versão do exemplo leva outra música, a partir da da vez.
+    assert [m[0] for m in edicao_video.musicas_de_fundo("mudo.mp4", 3)] == ["calma", "divertida", "animada"]
+    assert edicao_video.musicas_de_fundo("mudo.mp4")[0][1].endswith(os.path.join("midia", "musica_divertida.m4a"))
+    # A vez fica junto da configuração, sem apagar o resto.
+    assert db.ler_config("shopee_video", {})["edicao_ligada"]
+
+
+def test_o_que_vai_ao_ar_sem_som_leva_a_musica_e_o_registro_diz(monkeypatch, tmp_path):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    musicas = []
+    _versoes_de_mentira(monkeypatch, musicas)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "alto"})
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+        "", edicao_video.COM_LEGENDAS + edicao_video.COM_MUSICA, "")
+    assert musicas == ["musica_animada.m4a"]
+    # Com som, nada muda.
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8)[1] == edicao_video.COM_LEGENDAS
+    assert musicas[-1] is None
+
+
+def test_exemplo_sem_som_tem_uma_musica_em_cada_video(monkeypatch, tmp_path):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    musicas = []
+    _versoes_de_mentira(monkeypatch, musicas)
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
+    _, resumo = edicao_video.editar_1_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), VERSOES_DA_IA,
+                                                falas=[])
+    assert musicas == ["musica_animada.m4a", "musica_calma.m4a", "musica_divertida.m4a"]
+    assert [v["musica"] for v in resumo["versoes"]] == ["animada", "calma", "divertida"]
+    musicas.clear()
+    _, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
+                                                VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
+    assert musicas == ["musica_calma.m4a", "musica_divertida.m4a", "musica_animada.m4a"]
+    assert [v["musica"] for v in resumo["versoes"]] == ["calma", "divertida", "animada"]
+
+
+def test_comando_com_musica_poe_ela_no_video_inteiro_em_laco(monkeypatch, tmp_path):
+    comandos = _programas(monkeypatch, audio="")
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 10.0)
+    assert edicao_video.editar("video.mp4", b"foto", str(tmp_path / "r.mp4"), musica="musica.m4a") == ""
+    ffmpeg = comandos[-1]
+    texto = " ".join(ffmpeg)
+    filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
+    assert "-stream_loop -1 -i musica.m4a" in texto and "anullsrc" not in texto
+    # A música é a 5ª entrada (foto, vídeo, miniatura, seta), do começo da foto ao fim: 2 + 10 s.
+    assert "[4:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:12.000" in filtro
+    assert "afade=t=in:d=0.3" in filtro and "afade=t=out:st=10.500:d=1.5[a]" in filtro
+    assert "[1:a]" not in filtro and "[a]" in ffmpeg
+
+
+def test_edicao_de_verdade_do_video_sem_som_sai_com_a_musica(tmp_path):
+    if not shutil.which("ffmpeg"):
+        return
+    video, foto = tmp_path / "v.mp4", tmp_path / "foto.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=3",
+                    str(video)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
+                    "-frames:v", "1", str(foto)], check=True)
+    assert edicao_video.videos.mudo(str(video))
+    destino = tmp_path / "editado.mp4"
+    musica = os.path.join(edicao_video.PASTA_DA_MIDIA, "musica_calma.m4a")
+    assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), musica=musica) == ""
+    assert not edicao_video.videos.mudo(str(destino))
+    assert abs(edicao_video.videos.duracao(str(destino)) - 5.0) < 0.3

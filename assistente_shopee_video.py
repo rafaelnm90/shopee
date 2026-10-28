@@ -530,8 +530,9 @@ def montar_mensagem(textos, produtos, link, mudo=False):
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
     copiar com um toque: salvar o vídeo, favoritar o produto, postar e comentar.
     Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
-    Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo original
-    não tem som), o passo de postar lembra de pôr uma música da Shopee (P48).
+    Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo que vai não
+    tem som: o editado já leva a música de fundo, P55), o passo de postar lembra de pôr uma
+    música da Shopee (P48).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if len(produtos) == 1:
@@ -668,9 +669,9 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         if motivo:
             registrar(video["id"], "sem_edicao", motivo, agora)
             return SEM_AVISOS
-    # O vídeo mudo ganha uma música da Shopee na hora de postar (escolha do Rafael, P48).
-    # Quem diz se há som é o original: a edição põe uma trilha de silêncio no vídeo mudo.
-    mudo = await asyncio.to_thread(videos.mudo, video["arquivo"])
+    # O vídeo que vai sem som ganha uma música da Shopee na hora de postar (escolha do Rafael,
+    # P48). O editado já leva a música de fundo (P55); só o que vai sem a edição chega mudo.
+    mudo = await asyncio.to_thread(videos.mudo, arquivo)
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo), parse_mode="HTML",
