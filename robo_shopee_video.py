@@ -2307,9 +2307,9 @@ MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a ediç�
 
 def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
     """
-    A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: a foto
-    do produto no começo, a miniatura e a seta (todos os vídeos do Rafael são autorais), as
-    partes paradas tiradas e as legendas (nome, vantagem e o preço da API); se o Editor 2 não
+    A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
+    original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
+    do Rafael são autorais) e as legendas (nome, vantagem e o preço da API); se o Editor 2 não
     sai, com o Editor 1, sem legendas (edicao_video.editar_para_postar). No vídeo de Ver
     Produtos, a foto e o preço são os do 1º produto anexado (nomes[0]). Com a edição ligada,
     só vai vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo;

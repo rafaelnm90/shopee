@@ -295,12 +295,15 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
         "Editor 1 sem Legendas 👀", "Editor 2 com Legendas ✨", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
     assert "Editor 2 com legendas</b> (o que vai ao ar)" in texto
-    assert "o vídeo completo do Editor 2, nos rascunhos do robô e no modo assistente" in texto
+    assert "o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente" in texto
     assert "ele vai com o Editor 1, sem legendas" in texto and "nada delas vai ao ar" in texto
-    assert "(Editor 2, só o vídeo completo)" in texto and "em teste" not in texto
-    assert "O exemplo de cada editor</b>: primeiro o vídeo completo, como o editor entrega" in texto
+    assert "(Editor 2, só o vídeo original, sem cortes)" in texto and "em teste" not in texto
+    # Pedido do Rafael (vídeo de 28/10): o 1º vídeo é o original, sem cortes; as versões são modificadas.
+    assert "vídeo original, sem cortar nada nem mudar a velocidade" in texto
+    assert ("O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições do "
+            "editor, como vai ao ar; depois até 2 versões modificadas dele") in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
-    assert "a 1ª versão tem uns 3/4 do vídeo completo e a 2ª é a mais curta (pelo menos 8 s" in texto
+    assert "a 1ª tem até uns 3/4 do vídeo original e a 2ª é a mais curta (pelo menos 8 s" in texto
     assert "Editor 3" not in texto and "Editor 4" not in texto
     rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
     assert sv.ler_config()["edicao_ligada"] and sv.edicao_video.vale_para("autorais")
@@ -933,19 +936,24 @@ def test_exemplo_do_editor_1_manda_o_completo_e_as_versoes_sem_legendas(bm, Msg,
     assert any("Montando o exemplo do Editor 1 (sem legendas)" in t for t in msg.saidas)
     completo, versao = msg.midias[0][2], msg.midias[1][2]
     assert "Exemplo do Editor 1 (sem legendas), vídeo 1 de 2 (não foi postado): Bolsa." in completo
-    assert "▶️ O vídeo completo, na ordem" in completo and "(mais os 2 s da foto): o vídeo inteiro" in completo
+    # Pedido do Rafael (vídeo de 28/10): fica claro qual é o original e qual é versão modificada.
+    assert ("🎬 VÍDEO ORIGINAL: inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
+            "pediu (a foto no começo, a miniatura e a seta).") in completo
+    assert "vai ao ar" not in completo and "(mais os 2 s da foto): o vídeo inteiro" in completo
     assert "Exemplo do Editor 1 (sem legendas), vídeo 2 de 2" in versao
+    assert "✂️ VERSÃO MODIFICADA 1 de 1 (só no exemplo, não vai ao ar): abre com o trecho de 4,0 s a 6,0 s" in versao
     assert "do vídeo original (o que ele mostra: “Fechamento com zíper”) e segue dali; o que vinha antes vai para o fim" in versao
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in versao
     assert not any("Textos na tela" in legenda or "Lugar do texto" in legenda for legenda in (completo, versao))
-    assert "rendeu o completo e mais 1 versão diferente de verdade" in versao
+    assert "Partes paradas" not in versao
+    assert "rendeu o vídeo original e mais 1 versão modificada, diferentes de verdade" in versao
     assert "compare com o Editor 2 com Legendas ✨" in versao
     assert not any(os.path.exists(m[1]) for m in msg.midias)
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
         "edição do vídeo: exemplo do editor 1", "mandado")
     so_completo = {"inteiro": 12.0, "versoes_da_ia": 0,
                    "versoes": [{"remontado": 12.0, "curta": False, "gancho": None, "textos": []}]}
-    assert "rendeu só o vídeo completo, sem versões (a IA não sugeriu momentos diferentes)" in sv.legenda_das_versoes(
+    assert "rendeu só o vídeo original, sem versões modificadas (a IA não sugeriu momentos diferentes)" in sv.legenda_das_versoes(
         "Bolsa", so_completo, 0, 1)
     # Os botões de antes, que ainda podem estar no teclado, valem como o Editor 1.
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_1", lambda destino: (None, "nenhum vídeo dos Autorais", None))
@@ -958,19 +966,19 @@ def test_exemplo_do_editor_1_manda_o_completo_e_as_versoes_sem_legendas(bm, Msg,
 
 
 def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, Msg, Est, monkeypatch):
-    # Pedidos do Rafael (27/10): o Editor 2 com legendas manda o vídeo completo, como ele entrega
-    # (sem as partes paradas, com trechos acelerados e textos na tela), e as versões.
+    # Pedidos do Rafael (27/10): o Editor 2 com legendas manda o vídeo completo e as versões; (vídeo
+    # de 28/10) o 1º é o vídeo original, sem cortes, com as legendas, como vai ao ar, e as versões
+    # modificadas dizem o que a remontagem mudou.
     sv, est = _painel(bm), Est()
-    completo = {"original": 24.0, "remontado": 15.2, "cortado": 6.4, "acelerados": 3, "camera_lenta": 1,
-                "com_fala": 0}
-    resumo = {"original": 24.0, "inteiro": 15.2, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
-              "textos_da_ia": True, "versoes_da_ia": 3, "completo": completo}
+    remontagem = {"cortado": 6.4, "acelerados": 3, "camera_lenta": 1, "com_fala": 0}
+    resumo = {"original": 24.0, "inteiro": 24.0, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
+              "textos_da_ia": True, "versoes_da_ia": 3, "remontagem": remontagem}
 
     def exemplo_editor_2(destino):
         resumo["versoes"] = _exemplo_com_versoes(sv, destino, [
-            {"remontado": 15.2, "curta": False, "gancho": None, "vantagem": "Mantém gelado",
+            {"remontado": 24.0, "curta": False, "gancho": None, "vantagem": "Mantém gelado",
              "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$ 39,90"]},
-            {"remontado": 11.4, "curta": True, "gancho": (9.0, 10.5), "vantagem": "Tampa firme",
+            {"remontado": 18.0, "curta": True, "gancho": (9.0, 10.5), "vantagem": "Tampa firme",
              "textos": ["Tampa firme", "Copo Térmico", "Chamada 2"]}])
         return "Copo Térmico <inox>", "", resumo
 
@@ -980,27 +988,32 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     assert [m[0] for m in msg.midias] == ["video", "video"]
     primeira, segunda = msg.midias[0][2], msg.midias[1][2]
     assert "Exemplo do Editor 2 (com legendas), vídeo 1 de 2 (não foi postado): Copo Térmico &lt;inox&gt;" in primeira
-    assert "▶️ O vídeo completo, na ordem" in primeira and "(mais os 2 s da foto): o vídeo inteiro" in primeira
-    assert "Partes paradas tiradas: 6 s" in primeira and "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in primeira
+    assert ("🎬 VÍDEO ORIGINAL: inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
+            "pediu (a foto no começo, a miniatura e a seta, e as legendas). É assim que ele vai ao ar.") in primeira
+    assert "(mais os 2 s da foto): o vídeo inteiro" in primeira
     assert "“Mantém gelado”" in primeira and "Com fala" not in primeira and "A IA não escreveu" not in primeira
-    assert "Lugar do texto" not in primeira and "Partes paradas" not in segunda
-    assert "vídeo 2 de 2" in segunda and "Abre com o trecho de 9,0 s a 10,5 s do vídeo original e segue dali" in segunda
+    # O original não tem partes paradas tiradas: isso é das versões modificadas.
+    assert "Lugar do texto" not in primeira and "Partes paradas" not in primeira and "acelerados" not in primeira
+    assert "Partes paradas tiradas: 6 s" in segunda and "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in segunda
+    assert "vídeo 2 de 2" in segunda and "✂️ VERSÃO MODIFICADA 1 de 1 (só no exemplo, não vai ao ar)" in segunda
+    assert "abre com o trecho de 9,0 s a 10,5 s do vídeo original e segue dali" in segunda
     assert "(o que ele mostra" not in segunda and "“Tampa firme”" in segunda
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in segunda
-    assert "rendeu o completo e mais 1 versão diferente de verdade" in segunda
+    assert "rendeu o vídeo original e mais 1 versão modificada, diferentes de verdade" in segunda
     assert "Lugar do texto: no alto, ao lado da miniatura (a IA escolheu)" in segunda
     assert "compare com o Editor 1 sem Legendas 👀" in segunda
     assert not any(os.path.exists(m[1]) for m in msg.midias)
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
         "edição do vídeo: exemplo do editor 2", "mandado")
-    # Sem os textos da IA, o completo sai com o preço e avisa; a fala mantida aparece (P45).
-    completo.update(cortado=0, com_fala=7.5)
+    # Sem os textos da IA, o original sai com o preço e avisa; na versão, a fala mantida aparece (P45).
+    remontagem.update(cortado=0, com_fala=7.5)
     resumo.update(textos_da_ia=False)
     msg = MsgComMidia(Msg, "Ver Exemplo Editor 4 🎬")
     rodar(sv.exemplo_editor_2_handler(msg, est))
-    primeira = msg.midias[0][2]
-    assert "A IA não escreveu o nome e a vantagem" in primeira and "Nenhuma parte parada para tirar" in primeira
-    assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in primeira
+    primeira, segunda = msg.midias[0][2], msg.midias[1][2]
+    assert "A IA não escreveu o nome e a vantagem" in primeira
+    assert "Nenhuma parte parada para tirar" in segunda
+    assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in segunda
     # Escolha do Rafael (P47): os lados também valem e, sem lugar livre, o vídeo vai sem texto.
     resumo.update(lugar="direita")
     assert "Lugar do texto: do lado direito, no meio da altura (a IA escolheu)" in sv.legenda_das_versoes(

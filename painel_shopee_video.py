@@ -717,8 +717,8 @@ def texto_robo(config, agora=None, celular=None):
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
-        f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo com o Editor 2 (a foto do produto no começo, a miniatura no canto, a "
-        "seta vermelha e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
+        f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
+        "canto, a seta vermelha e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
@@ -743,31 +743,32 @@ def texto_edicao(config):
         f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
         "no canto de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion.\n\n"
-        "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e mais três coisas. As partes "
-        "paradas do vídeo saem; os trechos calmos ficam mais rápidos e o segundo de mais ação vai em câmera "
-        "lenta (onde alguém fala, o vídeo fica inteiro e na velocidade normal); e entram textos "
-        "na tela, um de cada vez: o nome do produto e uma vantagem que o vídeo mostra (escritos pela IA, sem "
-        "marca) e o preço (\"A partir de\", pela API), em letra média, no alto, logo abaixo da miniatura ou num "
-        "dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, o vídeo vai sem os "
-        "textos.\n\n"
-        "<b>O que vai ao ar</b>: o vídeo completo do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
+        "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
+        "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto e uma vantagem que o vídeo "
+        "mostra (escritos pela IA, sem marca) e o preço (\"A partir de\", pela API), em letra média, no alto, logo "
+        "abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, "
+        "o vídeo vai sem os textos.\n\n"
+        "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
         "são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto e o preço são os do 1º produto que o "
         "robô anexou.\n\n"
-        "<b>O exemplo de cada editor</b>: primeiro o vídeo completo, como o editor entrega, e depois até 2 "
-        "versões diferentes dele. Cada versão abre com um momento diferente, que a IA escolhe vendo o vídeo, e "
-        "segue dali (o que vinha antes vai para o fim); a 1ª versão tem uns 3/4 do vídeo completo e a 2ª é a "
-        f"mais curta (pelo menos {edicao_video.MINIMO_DO_REMONTADO} s; sai o fim, nunca o meio de uma fala). "
-        "No Editor 2, cada versão mostra na tela a vantagem do seu momento e termina com uma chamada diferente "
-        f"para o produto. Só sai versão com um momento a pelo menos {edicao_video.ENTRE_VERSOES:.0f} s do começo "
+        "<b>O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições "
+        "do editor, como vai ao ar; depois até 2 versões modificadas dele. Cada versão abre com um momento "
+        "diferente, que a IA escolhe vendo o vídeo, e segue dali (o que vinha antes vai para o fim); a 1ª tem "
+        "até uns 3/4 do vídeo original e a 2ª é a mais curta (pelo menos "
+        f"{edicao_video.MINIMO_DO_REMONTADO} s; sai o fim, nunca o meio de uma fala). No Editor 2, as versões "
+        "também ficam sem as partes paradas, com os trechos calmos mais rápidos e uma câmera lenta curta (onde "
+        "alguém fala, nada muda), e cada uma mostra na tela a vantagem do seu momento e termina com uma chamada "
+        "diferente para o produto. Só sai versão com um momento a pelo menos "
+        f"{edicao_video.ENTRE_VERSOES:.0f} s do começo "
         "do vídeo e dos das outras: vídeo curto, ou com fala do começo ao fim, rende menos versões. As versões "
         "ficam só no exemplo: nada delas vai ao ar.\n\n"
-        f"Agora: {rotulo_edicao(config)} (Editor 2, só o vídeo completo)\n\n"
+        f"Agora: {rotulo_edicao(config)} (Editor 2, só o vídeo original, sem cortes)\n\n"
         "<b>O que cada botão faz</b>\n"
-        f"👀 <b>{BOTAO_EDITOR_1}</b>: manda no seu privado, já editados e sem postar, o vídeo completo e as "
-        "versões do próximo vídeo que o robô pegaria, sem legendas; cada toque mostra um vídeo novo.\n"
-        f"✨ <b>{BOTAO_EDITOR_2}</b>: o mesmo, com o Editor 2 e as legendas, e o que ele mudou no vídeo.\n"
+        f"👀 <b>{BOTAO_EDITOR_1}</b>: manda no seu privado, já editados e sem postar, o vídeo original e as "
+        "versões modificadas do próximo vídeo que o robô pegaria, sem legendas; cada toque mostra um vídeo novo.\n"
+        f"✨ <b>{BOTAO_EDITOR_2}</b>: o mesmo, com o Editor 2 e as legendas, e o que cada versão mudou.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
         "próximos rascunhos e nos vídeos do modo assistente. Com a edição ligada, só vai vídeo editado: o vídeo "
         "que não sair editado fica de lado e o robô pega o próximo."
@@ -1000,17 +1001,24 @@ def _tamanho_da_versao(versoes, indice, inteiro):
     return f": {round(100 * remontado / inteiro)}% do vídeo completo" + (", a mais curta" if mais_curta else "")
 
 
-def _linhas_da_remontagem(completo):
-    """O que o Editor 2 mudou no vídeo completo (números), para a legenda do exemplo."""
+def _linhas_da_remontagem(remontagem):
+    """O que a remontagem das versões do Editor 2 muda no vídeo original (números), para a legenda."""
     linhas = []
-    cortado = completo.get("cortado", 0)
+    cortado = remontagem.get("cortado", 0)
     linhas.append(f"✂️ Partes paradas tiradas: {_segundos(cortado)}" if cortado >= 0.5
                   else "✂️ Nenhuma parte parada para tirar")
-    linhas.append(f"⏩ Trechos acelerados: {completo.get('acelerados', 0)} | "
-                  f"🐢 Em câmera lenta: {completo.get('camera_lenta', 0)}")
-    if completo.get("com_fala", 0) >= 0.5:
-        linhas.append(f"🗣️ Com fala, ficou inteiro e na velocidade normal: {_segundos(completo['com_fala'])}")
+    linhas.append(f"⏩ Trechos acelerados: {remontagem.get('acelerados', 0)} | "
+                  f"🐢 Em câmera lenta: {remontagem.get('camera_lenta', 0)}")
+    if remontagem.get("com_fala", 0) >= 0.5:
+        linhas.append(f"🗣️ Com fala, ficou inteiro e na velocidade normal: {_segundos(remontagem['com_fala'])}")
     return linhas
+
+
+def _linha_do_original(editor):
+    """A linha que diz que o 1º vídeo do exemplo é o original, sem cortes (pedido do Rafael, 28/10)."""
+    edicoes = "a foto no começo, a miniatura e a seta" + (", e as legendas" if editor == 2 else "")
+    return ("🎬 VÍDEO ORIGINAL: inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
+            f"pediu ({edicoes})." + (" É assim que ele vai ao ar." if editor == 2 else ""))
 
 
 def legenda_das_versoes(nome, resumo, indice, editor):
@@ -1025,14 +1033,15 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     gancho = versao.get("gancho")
     if gancho:
         mostra = f" (o que ele mostra: “{html_escape(versao['vantagem'])}”)" if editor == 1 and versao.get("vantagem") else ""
-        linhas.append(f"▶️ Abre com o trecho de {_momento(gancho[0])} a {_momento(gancho[1])} do vídeo original{mostra}"
+        linhas.append(f"✂️ VERSÃO MODIFICADA {indice} de {total - 1} (só no exemplo, não vai ao ar): abre com o "
+                      f"trecho de {_momento(gancho[0])} a {_momento(gancho[1])} do vídeo original{mostra}"
                       + (" e segue dali; o que vinha antes vai para o fim" if gancho[0] >= 0.5 else ""))
     else:
-        linhas.append("▶️ O vídeo completo, na ordem")
+        linhas.append(_linha_do_original(editor))
     linhas.append(f"⏱️ {_segundos(versao.get('remontado', 0))} (mais os {edicao_video.SEGUNDOS_DA_FOTO} s da foto)"
                   + _tamanho_da_versao(versoes, indice, resumo.get("inteiro")))
-    if not gancho and editor == 2:
-        linhas += _linhas_da_remontagem(resumo.get("completo") or {})
+    if gancho and editor == 2:
+        linhas += _linhas_da_remontagem(resumo.get("remontagem") or {})
     if versao.get("textos"):
         linhas.append(_linha_dos_textos(versao["textos"]))
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
@@ -1045,8 +1054,8 @@ def legenda_das_versoes(nome, resumo, indice, editor):
                   else "os outros momentos ficavam perto demais do começo do vídeo ou de outro momento, ou eram "
                   "curtos demais")
         extras = total - 1
-        rendeu = (f"o completo e mais {extras} {'versão diferente' if extras == 1 else 'versões diferentes'} "
-                  "de verdade" if extras else "só o vídeo completo, sem versões")
+        rendeu = (f"o vídeo original e mais {extras} {'versão modificada' if extras == 1 else 'versões modificadas'}, "
+                  "diferentes de verdade" if extras else "só o vídeo original, sem versões modificadas")
         linhas.append(f"🔢 Este vídeo rendeu {rendeu} ({porque}).")
     linhas += _linha_do_lugar(resumo, any(v.get("textos") for v in versoes))
     outro = 2 if editor == 1 else 1

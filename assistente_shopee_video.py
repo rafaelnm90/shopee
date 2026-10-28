@@ -14,8 +14,8 @@ Para cada vídeo:
   vê no próprio vídeo.
 
 Com a edição dos vídeos ligada no painel do robô (edicao_video), o vídeo vai já editado,
-com o Editor 2, como nos rascunhos do robô (a foto do anúncio no começo, a miniatura, a
-seta, as partes paradas tiradas e as legendas; se ele não sai, com o Editor 1, sem
+com o Editor 2, como nos rascunhos do robô (o vídeo original, sem cortes, com a foto do
+anúncio no começo, a miniatura, a seta e as legendas; se ele não sai, com o Editor 1, sem
 legendas), e o que não dá para editar (link de vídeo, sem uma foto só, ou sem a foto na
 API) fica de lado: o assistente tenta o próximo na mesma hora, até VIDEOS_POR_ENVIO.
 Pedidos do Rafael (25/10, P40): só vídeo editado; (28/10, P50): o Editor 2 aqui também.
