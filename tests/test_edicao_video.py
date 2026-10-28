@@ -403,7 +403,9 @@ def test_textos_da_ia_vem_limpos_e_curtos(monkeypatch):
     assert edicao_video.textos_das_versoes("v.mp4", "Copo") == {}
 
 
-def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
+def test_editor_2_de_verdade_e_o_video_original_sem_cortes_com_os_textos(tmp_path):
+    # Pedido do Rafael (vídeo de 28/10): o 1º vídeo do Editor 2, o que vai ao ar, é o vídeo
+    # original, inteiro e na velocidade dele, só com a foto, a miniatura, a seta e as legendas.
     if not shutil.which("ffmpeg"):
         assert edicao_video.editar_2(str(tmp_path / "nao_existe.mp4"), b"foto", str(tmp_path / "r.mp4"))[0] != ""
         return
@@ -416,40 +418,35 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
                     "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]", "-map", "3:a",
                     "-shortest", str(video)], check=True)
     destino = tmp_path / "editado.mp4"
-    # A IA disse que ninguém fala (o som é só um apito): os parados podem sair.
     motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "", 39.9,
-                                           falas=[], lugar="meio")
+                                           lugar="meio")
     assert motivo == ""
-    # Os 6 s parados saem; dos 9 s mexendo, 1 s vai em câmera lenta. A foto continua no começo.
-    assert resumo["cortado"] == 6 and resumo["camera_lenta"] == 1 and resumo["acelerados"] == 0
-    assert abs(resumo["remontado"] - (8 + 1 / edicao_video.CAMERA_LENTA)) < 0.01
-    assert abs(edicao_video.videos.duracao(str(destino)) - (resumo["remontado"] + edicao_video.SEGUNDOS_DA_FOTO)) < 0.3
+    # Nada sai: o vídeo inteiro, mais a foto no começo.
+    assert abs(edicao_video.videos.duracao(str(destino)) - (15 + edicao_video.SEGUNDOS_DA_FOTO)) < 0.3
     assert edicao_video.videos.tem_audio(str(destino))
     assert resumo["textos"] == ["Copo Térmico", "A\u00a0partir\u00a0de R$\u00a039,90"]
     from PIL import Image
 
-    def caixa_do_texto(segundo, ponto=(360, edicao_video.LUGARES_DOS_TEXTOS["meio"][1] + 6)):
+    def ponto(segundo, onde):
         quadro = tmp_path / f"quadro_{segundo}.ppm"
         subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
                         str(quadro)], check=True)
         with Image.open(quadro) as imagem:
-            return imagem.convert("RGB").getpixel(ponto)
+            return imagem.convert("RGB").getpixel(onde)
 
-    # O nome logo depois da foto (caixa escura) e o preço no fim (caixa laranja).
-    assert max(caixa_do_texto(3.0)) < 80
-    vermelho, verde, azul = caixa_do_texto(8.5)
+    caixa = (360, edicao_video.LUGARES_DOS_TEXTOS["meio"][1] + 6)
+    # Os 3 s parados do começo e do fim continuam lá, com a cor deles.
+    meio_da_tela = (360, 700)
+    assert all(abs(a - b) < 30 for a, b in zip(ponto(2.5, meio_da_tela), (0xd0, 0xc0, 0xa0)))
+    assert all(abs(a - b) < 30 for a, b in zip(ponto(16.5, meio_da_tela), (0xa0, 0xc0, 0xd0)))
+    # O nome logo depois da foto (caixa escura) e o preço na 2ª metade (caixa laranja).
+    assert max(ponto(3.0, caixa)) < 80
+    vermelho, verde, azul = ponto(11.0, caixa)
     assert vermelho > 180 and verde < 120 and azul < 100
-    # Escolha do Rafael (P45): onde alguém fala, nada sai. Fala nos 3 s parados do começo:
-    # só os 3 s parados do fim saem.
-    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None,
-                                           falas=[(0.5, 2.5)])
-    assert motivo == "" and resumo["cortado"] == 3 and resumo["com_fala"] == 3
     # Sem o lugar da IA, o texto vai no padrão: no alto, à esquerda, ao lado da miniatura (P46).
-    x, topo, *_ = edicao_video.LUGARES_DOS_TEXTOS[edicao_video.LUGAR_PADRAO]
-    assert resumo["lugar"] == "alto" and max(caixa_do_texto(2.8, (x + 12, topo + 6))) < 80
-    # Sem a resposta da IA, todo trecho com som conta como fala: nada é cortado.
     motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None)
-    assert motivo == "" and resumo["cortado"] == 0 and resumo["acelerados"] == 0
+    x, topo, *_ = edicao_video.LUGARES_DOS_TEXTOS[edicao_video.LUGAR_PADRAO]
+    assert motivo == "" and resumo["lugar"] == "alto" and max(ponto(2.8, (x + 12, topo + 6))) < 80
 
 
 def test_remontar_sem_som_nao_mexe_no_som(monkeypatch, tmp_path):
@@ -603,13 +600,14 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     destino = str(tmp_path / "r.mp4")
 
     motivo, resumo = edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "Modelo elegante",
-                                           50.99, falas=[], lugar="nenhum")
-    assert motivo == "" and montados[-1] == [] and resumo["textos"] == [] and resumo["lugar"] == "nenhum"
+                                           50.99, lugar="nenhum")
+    # Sem texto, o vídeo vai direto ao Editor 1, sem passar pelo ffmpeg dos textos.
+    assert motivo == "" and montados == [] and resumo["textos"] == [] and resumo["lugar"] == "nenhum"
 
-    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, falas=[], lugar="esquerda")
+    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, lugar="esquerda")
     assert [(x, topo) for _, _, _, x, topo in montados[-1]] == [(16, 400), (16, 400)]
 
-    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, falas=[], lugar="direita")
+    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, lugar="direita")
     for imagem, _, _, x, topo in montados[-1]:
         # Encostado na direita: a caixa termina a 16 px da borda.
         assert topo == 400 and x + int.from_bytes(imagem[16:20], "big") == 720 - 16
@@ -754,20 +752,25 @@ def test_editor_1_entrega_o_completo_e_as_versoes_sem_textos_nem_acelerar(monkey
 
 
 def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
-    # Pedidos do Rafael (27/10): o Editor 2 com legendas entrega o vídeo completo e as versões.
+    # Pedidos do Rafael (27/10): o Editor 2 com legendas entrega o vídeo completo e as versões;
+    # (vídeo de 28/10) o 1º é o vídeo original, sem cortes nem mudança de velocidade, só com as
+    # edições; as versões é que são modificadas.
     montados, editados = _versoes_de_mentira(monkeypatch)
     motivo, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
                                            "Leve e resistente", VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
     assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4", "exemplo_3.mp4"]
-    # O completo é a remontagem do Editor 2, inteira, com os 3 textos dele.
-    assert montados[0] == ([(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)], 3)
+    # O 1º é o vídeo inteiro, numa parte só e na velocidade dele, com os 3 textos.
+    assert montados[0] == ([(0.0, 12.0, 1.0)], 3)
+    # As versões são remontadas (o trecho calmo acelerado) e abrem no seu momento.
     assert [m[0][0] for m in montados[1:]] == [(9.0, 12.0, 1.0), (4.5, 8.0, edicao_video.ACELERADO)]
     assert [m[1] for m in montados[1:]] == [4, 4]
-    assert all(edicao_video._segundos_remontados(m[0]) == pytest.approx(edicao_video.MINIMO_DO_REMONTADO)
-               for m in montados[1:])
+    # Até uns 3/4 e 1/2 do vídeo original (12 s), nunca menos de 8 s.
+    assert [edicao_video._segundos_remontados(m[0]) for m in montados[1:]] == [
+        pytest.approx(9.0), pytest.approx(edicao_video.MINIMO_DO_REMONTADO)]
     completo, segunda, terceira = resumo["versoes"]
-    # O resumo do completo, como o do Editor 2, para a legenda (o que ele mudou no vídeo).
-    assert resumo["completo"]["acelerados"] == 1 and resumo["completo"]["cortado"] == 0
+    assert resumo["inteiro"] == 12.0 and completo["remontado"] == 12.0
+    # O que a remontagem muda nas versões, para a legenda delas.
+    assert resumo["remontagem"]["acelerados"] == 1 and resumo["remontagem"]["cortado"] == 0
     preco = edicao_video.texto_do_preco(25.8)
     assert completo["gancho"] is None and completo["textos"] == ["Bolsa de Palha", "Leve e resistente", preco]
     # Nas versões, a vantagem do gancho abre e a chamada fecha.
@@ -778,7 +781,8 @@ def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatc
     montados.clear()
     _, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
                                       VERSOES_DA_IA, 25.8, falas=[], lugar="nenhum")
-    assert [m[1] for m in montados] == [0, 0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
+    # O original vai direto ao Editor 1 (sem texto, nada a pôr por cima); as versões, sem texto.
+    assert [m[1] for m in montados] == [0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
 
 
 def _textos_da_tela(monkeypatch, textos):
@@ -789,9 +793,9 @@ def _textos_da_tela(monkeypatch, textos):
 
 
 def test_o_que_vai_ao_ar_e_o_completo_do_editor_2_com_as_legendas(monkeypatch, tmp_path):
-    # Escolha do Rafael (28/10, P50): os rascunhos do robô e o modo assistente vão com o vídeo
-    # completo do Editor 2 (a foto, a miniatura, a seta, as partes paradas tiradas e as
-    # legendas); as versões ficam só no exemplo.
+    # Escolhas do Rafael (28/10, P50 e o vídeo seguinte): os rascunhos do robô e o modo
+    # assistente vão com o vídeo original do Editor 2 (a foto, a miniatura, a seta e as
+    # legendas, sem cortes); as versões modificadas ficam só no exemplo.
     montados, editados = _versoes_de_mentira(monkeypatch)
     pedidos = _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "falas": [],
                                             "lugar": "alto"})
@@ -800,8 +804,9 @@ def test_o_que_vai_ao_ar_e_o_completo_do_editor_2_com_as_legendas(monkeypatch, t
         "", edicao_video.COM_LEGENDAS, "")
     # Um vídeo só: a remontagem inteira com o nome, a vantagem e o preço, e o Editor 1 por cima.
     assert pedidos == ["Bolsa Palha Marca X"]
-    assert montados == [([(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)], 3)]
-    assert editados == [("remontado.mp4", "rascunho.mp4")]
+    # O vídeo original inteiro, sem cortes nem mudança de velocidade (pedido do Rafael, 28/10).
+    assert montados == [([(0.0, 12.0, 1.0)], 3)]
+    assert editados == [("com_textos.mp4", "rascunho.mp4")]
     # Sem lugar livre do produto e do rosto (P47), o Editor 2 vai sem os textos, e o registro diz por quê.
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "nenhum"})
     assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
