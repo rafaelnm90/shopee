@@ -14,10 +14,18 @@ Os robôs já avisam na hora os graves que eles mesmos veem (conta suspensa, cel
 desconectado, resposta no lugar errado, comentário sem resposta); aqui ficam os que
 nenhum robô vê sozinho: robô fora do ar, disco cheio, backup atrasado, erros demais na
 última hora e o robô da Shopee Vídeo sem rodar.
+
+O GitHub pula boa parte das rodadas agendadas do diagnóstico (em 27 e 28/10, 8 de 37), e o
+aviso "na hora" chegava com horas de atraso. Por isso o bot_mestre também confere, de hora
+em hora no próprio servidor, os dois graves que só este módulo vê (robô fora do ar e o robô
+da Shopee Vídeo sem rodar): servicos_fora + verificar(..., so=GRAVES_DO_SERVIDOR). Disco,
+backup e erros o monitor de saúde do bot_mestre já confere sozinho.
 """
 import shutil
 import sqlite3
+import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 
 import avisar_rafael
@@ -38,6 +46,31 @@ CHAVE_CONFIG_SV, CHAVE_ESTADO_SV = "shopee_video", "shopee_video_robo"
 NOMES = {"bot_mestre_bot": "bot principal (bot_mestre)", "divulgacao_canal_bot": "da divulgação",
          "motor_userbot_bot": "do Espião e do Espelhador", "espelhador_videos_autorais_bot": "dos Autorais",
          "downloader_bot": "Baixador"}
+
+
+# O que o bot_mestre confere sozinho de hora em hora (o começo da chave de cada grave).
+GRAVES_DO_SERVIDOR = ("fora:", "robo_sv")
+# Como o diagnóstico: um serviço parado é conferido de novo depois disto, porque o systemd
+# o religa sozinho em segundos e o reinício não é grave.
+ESPERA_PARA_CONFIRMAR = 60
+
+
+def servicos_fora(espera=ESPERA_PARA_CONFIRMAR):
+    """
+    Os serviços de NOMES fora do ar, conferidos duas vezes (com `espera` s entre elas), como
+    o diagnóstico; None quando o systemctl não responde (aí não se sabe quem está no ar).
+    """
+    def fora():
+        return [s for s in NOMES if subprocess.run(["systemctl", "is-active", "--quiet", f"{s}.service"],
+                                                   timeout=30).returncode != 0]
+    try:
+        caidos = fora()
+        if caidos and espera:
+            time.sleep(espera)
+            caidos = fora()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return caidos
 
 
 def _agora(agora=None):
@@ -119,20 +152,25 @@ def rotulo(chave):
     return ROTULOS.get(chave, chave)
 
 
-def verificar(caidos=(), agora=None, mandar=None):
+def verificar(caidos=(), agora=None, mandar=None, so=None):
     """
     Avisa os graves novos (e de novo os que passam de REPETIR_DEPOIS) e o que voltou ao
-    normal. Devolve as chaves dos graves de agora.
+    normal. Com so (começos de chave, como GRAVES_DO_SERVIDOR), confere só esses: os outros
+    avisados ficam como estão. Devolve as chaves dos graves de agora (os conferidos).
     """
     agora = _agora(agora)
     mandar = mandar or avisar_rafael.mandar_texto
-    atuais = graves(caidos, agora)
+
+    def conferido(chave):
+        return so is None or chave.startswith(tuple(so))
+
+    atuais = {c: t for c, t in graves(caidos, agora).items() if conferido(c)}
     avisados = db.ler_config(CHAVE, {}) or {}
     for chave, texto in atuais.items():
         if avisados.get(chave, "") <= _momento(agora - REPETIR_DEPOIS):
             if mandar(texto):
                 avisados[chave] = _momento(agora)
-    for chave in [c for c in avisados if c not in atuais]:
+    for chave in [c for c in avisados if c not in atuais and conferido(c)]:
         mandar(f"✅ Voltou ao normal: {rotulo(chave)}.")
         del avisados[chave]
     db.salvar_config(CHAVE, avisados)
