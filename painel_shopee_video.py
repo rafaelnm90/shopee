@@ -1018,10 +1018,18 @@ def _linhas_da_remontagem(remontagem):
 
 
 def _linha_do_original(editor):
-    """A linha que diz que o 1º vídeo do exemplo é o original, sem cortes (pedido do Rafael, 28/10)."""
+    """A linha que explica o 1º vídeo do exemplo: o original, sem cortes (pedido do Rafael, 28/10)."""
     edicoes = "a foto no começo, a miniatura e a seta" + (", e as legendas" if editor == 2 else "")
-    return ("🎬 VÍDEO ORIGINAL: inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
+    return ("Inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
             f"pediu ({edicoes})." + (" É assim que ele vai ao ar." if editor == 2 else ""))
+
+
+def _titulo_do_video(indice, total, gancho):
+    """
+    O título no alto da legenda, numa linha só e com uma linha em branco depois (pedido do
+    Rafael, vídeo de 28/10, 00:30): o original ou a versão modificada N de M.
+    """
+    return f"✂️ <b>VERSÃO MODIFICADA {indice} de {total - 1}</b>" if gancho else "🎬 <b>VÍDEO ORIGINAL</b>"
 
 
 def legenda_das_versoes(nome, resumo, indice, editor):
@@ -1031,13 +1039,14 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     """
     versoes = resumo["versoes"]
     versao, total = versoes[indice], len(versoes)
-    linhas = [f"{'👀' if editor == 1 else '✨'} Exemplo do {NOME_DO_EDITOR[editor]}, vídeo {indice + 1} de "
-              f"{total} (não foi postado): {html_escape(nome)}."]
     gancho = versao.get("gancho")
+    linhas = [_titulo_do_video(indice, total, gancho), "",
+              f"{'👀' if editor == 1 else '✨'} Exemplo do {NOME_DO_EDITOR[editor]}, vídeo {indice + 1} de "
+              f"{total} (não foi postado): {html_escape(nome)}."]
     if gancho:
         mostra = f" (o que ele mostra: “{html_escape(versao['vantagem'])}”)" if editor == 1 and versao.get("vantagem") else ""
-        linhas.append(f"✂️ VERSÃO MODIFICADA {indice} de {total - 1} (só no exemplo, não vai ao ar): abre com o "
-                      f"trecho de {_momento(gancho[0])} a {_momento(gancho[1])} do vídeo original{mostra}"
+        linhas.append(f"Só no exemplo, não vai ao ar: abre com o trecho de {_momento(gancho[0])} a "
+                      f"{_momento(gancho[1])} do vídeo original{mostra}"
                       + (" e segue dali; o que vinha antes vai para o fim" if gancho[0] >= 0.5 else ""))
     else:
         linhas.append(_linha_do_original(editor))
@@ -1078,11 +1087,12 @@ async def _mandar_exemplo(message, state, editor):
                              "minutos.")
         db.salvar_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": editor, "desde": datetime.now(fuso_horario).isoformat()})
         try:
-            saiu = await _montar_e_mandar_exemplo(message, editor)
+            await _montar_e_mandar_exemplo(message, editor)
         finally:
             db.salvar_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {})
-    if saiu:
-        await mostrar_edicao(message, state)
+    # O texto da Edição dos Vídeos não volta depois do exemplo: ele empurrava os vídeos para
+    # cima, e o teclado do painel continua embaixo (pedido do Rafael, vídeo de 28/10, 00:30).
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
 
 
 async def _montar_e_mandar_exemplo(message, editor):
