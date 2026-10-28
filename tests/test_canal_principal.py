@@ -1,4 +1,7 @@
-"""Canal principal e Grupo Público: pausa, novas tentativas, Publicar Agora, saldo, limpeza."""
+"""
+Canal principal e Grupo Público: pausa, novas tentativas, Publicar Agora, saldo, limpeza,
+a legenda do Criar Postagem e os vídeos do robô da Shopee Vídeo na fila do canal.
+"""
 import os
 import sqlite3
 import time
@@ -171,3 +174,100 @@ def test_zerar_uma_fila_nao_apaga_arquivos_das_outras(bm, Msg, Est):
     rodar(bm.processar_zerar_filas_tarefas(Msg("Aprovar Exclusão ✅"),
                                            Est({"tipo_limpeza": "Limpar Fila Autorais 🎥"})))
     assert sorted(os.listdir("temp")) == ["baixando.mp4", "clone.mp4", "publico.mp4"]
+
+
+# --- A legenda do Criar Postagem e os vídeos do robô da Shopee Vídeo (P62 a P64) ---
+
+LINK_DO_POST = "https://sv.shopee.com.br/share-video/abc"
+LINKS = ["https://s.shopee.com.br/canal1", "https://s.shopee.com.br/canal2"]
+
+
+def test_criar_postagem_usa_o_padrao_do_canal_e_o_numero_reservado(bm, Msg, Est, monkeypatch):
+    import legendas
+    monkeypatch.setattr(bm, "agendar_fila_postagens", lambda: None)
+    # O robô tirou o 42 do contador enquanto o Rafael montava o 41.
+    bm.salvar_contador(43)
+    nome = "Vídeo 41\n📦 Item: Copo & Tampa"
+    msg = Msg("Finalizar ✅")
+    rodar(bm.finalizar_postagem(msg, Est({
+        "nome_produto": nome, "video_id": "fileid", "video_path": None, "plataforma_escolhida": "Apenas Shopee 🛒",
+        "link_video_shopee": LINK_DO_POST, "links_shopee": LINKS, "numero_reservado": 41})))
+    legenda, video_id = consultar("SELECT legenda, video_id FROM fila_postagens")
+    assert legenda == legendas.legenda_do_canal(nome, shopee=(LINK_DO_POST, LINKS)) and video_id == "fileid"
+    assert legenda.startswith("<b>Vídeo 41 | 📦 Item: Copo &amp; Tampa</b>")
+    assert "Vídeo #41 entrou na fila" in msg.saidas[-1]
+
+
+@pytest.fixture
+def canal(bm, monkeypatch, tmp_path):
+    """O que o bot manda no privado, o que a IA responde e um pedido do robô com a cópia do vídeo."""
+    import pedidos_do_canal
+    estado = SimpleNamespace(avisos=[], prompts=[], resposta="Vídeo 99\n📦 Item: Copo Térmico", agendados=0)
+
+    async def send_message(chat_id, texto, **k):
+        estado.avisos.append(texto)
+
+    async def analisar(caminho, prompt):
+        estado.prompts.append(prompt)
+        return estado.resposta
+
+    def agendar():
+        estado.agendados += 1
+
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(bm, "agendar_fila_postagens", agendar)
+    bm.salvar_contador(7)
+
+    def pedir(links=LINKS, produto="Copo Térmico Inox Com Tampa 500ml Para Café"):
+        video = tmp_path / "rascunho.mp4"
+        video.write_bytes(b"video aprovado")
+        return pedidos_do_canal.pedir(5, str(video), LINK_DO_POST, links, produto)
+
+    estado.pedir, estado.pedidos = pedir, pedidos_do_canal
+    return estado
+
+
+def test_video_do_robo_entra_na_fila_do_canal_com_o_numero_e_o_padrao(bm, canal):
+    import legendas
+    copia = canal.pedir()
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    legenda, caminho, video_id, data_alvo = consultar("SELECT legenda, caminho_video, video_id, data_alvo "
+                                                      "FROM fila_postagens")
+    # O número é o do contador, nunca o que a IA escreveu.
+    assert legenda == legendas.legenda_do_canal("Vídeo 7\n📦 Item: Copo Térmico", shopee=(LINK_DO_POST, LINKS))
+    assert (caminho, video_id, data_alvo) == (copia, None, "2000-01-01")   # o Bom Dia de hoje não saiu
+    assert canal.prompts == [legendas.prompt_do_item(7)] and bm.ler_contador() == 8
+    assert canal.pedidos.pendentes() == [] and canal.agendados == 1
+    assert len(canal.avisos) == 1 and "Vídeo #7</b>" in canal.avisos[0] and "Publica" in canal.avisos[0]
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
+                     bm.PROCESSO_ROBO_NO_CANAL) == ("na fila", 1)
+
+
+def test_sem_a_ia_o_item_e_o_nome_do_produto_e_sem_links_o_aviso_diz(bm, canal):
+    canal.resposta = None
+    canal.pedir(links=[])
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    legenda = consultar("SELECT legenda FROM fila_postagens")[0]
+    assert legenda.startswith("<b>Vídeo 7 | 📦 Item: Copo Térmico Inox Com Tampa 500ml Para Café</b>")
+    assert "Links dos Produtos" not in legenda and LINK_DO_POST in legenda
+    assert "sem os links dos produtos" in canal.avisos[0]
+
+
+def test_fila_que_nao_grava_tenta_de_novo_com_o_mesmo_numero_e_desiste_na_terceira(bm, canal, monkeypatch):
+    monkeypatch.setattr(bm, "adicionar_na_fila_do_canal", lambda *a: None)
+    canal.pedir()
+    for tentativa in (1, 2):
+        rodar(bm.levar_videos_do_robo_ao_canal())
+        [pedido] = canal.pedidos.pendentes()
+        assert (pedido["tentativas"], pedido["numero"]) == (tentativa, 7) and canal.avisos == []
+    assert bm.ler_contador() == 8          # o número não pula a cada tentativa
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert canal.pedidos.pendentes() == [] and "depois de 3 tentativas" in canal.avisos[0]
+
+
+def test_copia_que_sumiu_sai_dos_pedidos_com_aviso(bm, canal):
+    os.remove(canal.pedir())
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert canal.pedidos.pendentes() == [] and "a cópia do vídeo sumiu" in canal.avisos[0]
+    assert consultar("SELECT COUNT(*) FROM fila_postagens")[0] == 0 and bm.ler_contador() == 7

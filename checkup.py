@@ -20,13 +20,15 @@ assunto repetido em seguida e o que saiu contra o configurado), postagens de
 hoje por fila, captura por grupo de origem (Espião, Espelhador e parceiros, pela
 posição na lista do painel), produto repetido entre parceiros ou com a conta
 principal, a verificação semanal do Grupo Público (só os números), robô da Shopee
-Vídeo (com as respostas aos comentários e o feed), as sobreposições (uma tarefa no
+Vídeo (com as respostas aos comentários, o feed e os vídeos postados que esperam a fila
+do Canal Afiliados), as sobreposições (uma tarefa no
 horário de outra), Baixador e backup, e a meta de cada job (esperado × feito). No fim, os pontos de atenção, cada um marcado como novo,
 repetido há N dias ou que voltou, e os que se resolveram desde o checkup anterior.
 
 Com `robo-agora`, só as linhas do robô da Shopee Vídeo que o diagnostico.yml mostra de
 hora em hora para a retomada do Claude (a cada 3 h): paradas, erros e pulados nas
-últimas 3 h e 12 h e os aprovados que passaram da hora de ir ao ar.
+últimas 3 h e 12 h, os aprovados que passaram da hora de ir ao ar e os postados que
+esperam a fila do Canal Afiliados.
 """
 import os
 import re
@@ -41,6 +43,7 @@ import casos_robo
 import db
 import inventario
 import links_shopee
+import pedidos_do_canal
 import perguntas_rafael
 import registro_processos
 import rotas_espelhador
@@ -80,6 +83,9 @@ FOLGA_DA_SUSPENSAO_SV = timedelta(minutes=15)
 RESULTADOS_RUINS = ("erro", "parou", "verificação", "treino parou")
 # O aprovado que passou da hora de ir ao ar há mais que isso (a rodada é a cada 15 min).
 ATRASO_DO_APROVADO = timedelta(minutes=30)
+# O vídeo postado pelo robô que espera mais que isso (em minutos) para entrar na fila do
+# Canal Afiliados: o bot_mestre confere os pedidos a cada 5 min.
+ESPERA_DO_CANAL = 30
 # As janelas que a retomada do Claude lê no diagnóstico (a cada 3 h; às 8h, a noite toda).
 JANELAS_DA_RETOMADA = (3, 12)
 # A hora em que o robô da Shopee Vídeo só descurte (P25); o tests/test_checkup.py confere
@@ -329,7 +335,8 @@ SEM_META = {
     ("autorais", "captura para o canal"), ("autorais", "repostagem ao grupo"), ("autorais", "checagem da conta"),
     ("baixador", "Shopee pela Apify"), ("baixador", "conferência semanal da Shopee Vídeo"),
     ("baixador", "mensagem sem link"), ("baixador", "pedido "),
-    ("bot_mestre", "garimpo de ofertas"), ("bot_mestre", "lembrete de pergunta do Claude"),
+    ("bot_mestre", "canal afiliados: "), ("bot_mestre", "garimpo de ofertas"),
+    ("bot_mestre", "lembrete de pergunta do Claude"),
     ("bot_mestre", "relatório semanal de vendas"),
     ("bot_mestre", "postagem "), ("bot_mestre", "rotina "),
     ("divulgacao", "envio ("), ("divulgacao", "verificação semanal do Grupo Público"),
@@ -338,6 +345,7 @@ SEM_META = {
     ("espiao", "captura de vídeo"), ("espiao", "vídeo com link no grupo vigiado"), ("espiao", "IA: nome do produto"),
     ("notas", "envio de nota fiscal"),
     ("shopee_video", "anexar o produto"), ("shopee_video", "assistente: envio"),
+    ("shopee_video", "canal afiliados: "),
     ("shopee_video", "conferência da IA (produto × vídeo)"),
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
     ("shopee_video", "curtir o produto"), ("shopee_video", "descurtir no fim do rascunho"),
@@ -765,7 +773,7 @@ def robo_da_shopee_video(agora=None):
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
             "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
-            "postados": postados}
+            "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora)}
 
 
 def aprovados_postados(agora=None):
@@ -848,8 +856,9 @@ def _linha_da_tentativa(tentativa):
 def robo_agora(agora=None):
     """
     As linhas do diagnóstico de hora em hora para a retomada do Claude (a cada 3 h): as
-    paradas, os erros e os pulados do robô da Shopee Vídeo nas janelas de 3 h e 12 h e os
-    aprovados que passaram da hora de ir ao ar. Só ações, passos fixos, horas e números.
+    paradas, os erros e os pulados do robô da Shopee Vídeo nas janelas de 3 h e 12 h, os
+    aprovados que passaram da hora de ir ao ar e os postados que esperam a fila do Canal
+    Afiliados. Só ações, passos fixos, horas e números.
     Pedido do Rafael: DECISOES.md, Trabalho com o Claude.
     """
     agora = _agora(agora)
@@ -865,7 +874,8 @@ def robo_agora(agora=None):
     situacao = "pausada" if config.get("robo_pausado", True) else "ativa"
     linhas.append(f"Aprovados que passaram da hora (mais de {int(ATRASO_DO_APROVADO.total_seconds() // 60)} min): "
                   f"{atrasados}" + (f" (o mais atrasado há {minutos} min)" if atrasados else "")
-                  + f" | Postagem: {situacao}")
+                  + f" | Postagem: {situacao} | Canal Afiliados, postados esperando a fila há mais de "
+                  f"{ESPERA_DO_CANAL} min: {pedidos_do_canal.parados(ESPERA_DO_CANAL, agora)}")
     return linhas
 
 
@@ -1085,6 +1095,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
     if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv.get("atrasados"):
         pontos.append(f"Robô da Shopee Vídeo: {robo_sv['atrasados']} aprovado(s) passaram da hora de ir ao ar "
                       f"(o mais atrasado há {robo_sv['minutos_de_atraso']} min)")
+    if robo_sv.get("canal_parados"):
+        pontos.append(f"Canal Afiliados: {robo_sv['canal_parados']} vídeo(s) postado(s) pelo robô da Shopee Vídeo "
+                      f"esperando há mais de {ESPERA_DO_CANAL} min para entrar na fila do canal")
     if interacoes:
         respostas = interacoes["respostas"]
         if respostas.get("resposta no lugar errado"):
@@ -1304,6 +1317,8 @@ def main():
           + (f" (o mais atrasado há {robo_sv['minutos_de_atraso']} min)" if robo_sv["atrasados"] else ""))
     for aprovado, previsto, postado, atraso in robo_sv.get("postados", []):
         print(f"   aprovado {aprovado} → previsto {previsto} → postado {postado} (atraso {atraso} min)")
+    print(f"Canal Afiliados: postados esperando a fila do canal há mais de {ESPERA_DO_CANAL} min: "
+          f"{robo_sv['canal_parados']}")
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))

@@ -281,6 +281,27 @@ def test_robo_agora_mostra_as_falhas_recentes_e_o_aprovado_que_passou_da_hora():
     assert "Postagem: pausada" in checkup.robo_agora(AGORA)[-1]
 
 
+def test_video_postado_que_nao_entra_na_fila_do_canal_e_cobrado(tmp_path):
+    # Pedido do Rafael (28/10, P62): o vídeo que o robô postou vai à fila do Canal Afiliados;
+    # o que fica esperando (o bot_mestre confere a cada 5 min) vira ponto de atenção.
+    import pedidos_do_canal
+    video = tmp_path / "rascunho.mp4"
+    video.write_bytes(b"video")
+    pedidos_do_canal.pedir(1, str(video), "https://sv.shopee.com.br/share-video/abc", [],
+                           agora=AGORA - timedelta(minutes=checkup.ESPERA_DO_CANAL + 5))
+    pedidos_do_canal.pedir(2, str(video), "https://sv.shopee.com.br/share-video/abc", [], agora=AGORA)
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert r["canal_parados"] == 1
+    pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
+    assert ("Canal Afiliados: 1 vídeo(s) postado(s) pelo robô da Shopee Vídeo esperando há mais de "
+            f"{checkup.ESPERA_DO_CANAL} min para entrar na fila do canal") in pontos
+    assert checkup.robo_agora(AGORA)[-1].endswith(
+        f"Canal Afiliados, postados esperando a fila há mais de {checkup.ESPERA_DO_CANAL} min: 1")
+    pedidos_do_canal.concluir(1)
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert not any("Canal Afiliados" in p for p in checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA))
+
+
 def test_aprovados_postados_mostram_o_atraso_sobre_o_previsto():
     # 25/10: o Rafael viu um aprovado que "ficou de postar agora" sair depois; o checkup
     # mostra o aprovado, o previsto e o postado de cada um, e cobra o que atrasou demais.

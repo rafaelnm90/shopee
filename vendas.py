@@ -34,6 +34,7 @@ NOMES_DOS_CANAIS = {
     "achadinhos": "Achadinhos (garimpo de ofertas)",
     "busca": "Buscador do Grupo Público",
     "shopeevideo": "Shopee Vídeo (link aberto no celular do robô)",
+    "canalafiliados": "Canal Afiliados (vídeos do robô da Shopee Vídeo)",
     "geral": "Links de antes das etiquetas",
     "": "Sem etiqueta (Shopee Vídeo e compras fora dos links dos robôs)",
 }

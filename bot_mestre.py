@@ -79,6 +79,7 @@ import conferencia_espiao  # o nome que a IA do Espião deu confere com o produt
 import perguntas_rafael  # as perguntas do Claude no privado, lembradas de hora em hora
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 import exemplos  # os exemplos das perguntas dos painéis, com o que está valendo agora
+import pedidos_do_canal  # os vídeos do robô da Shopee Vídeo que vão ao Canal Afiliados
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
 logger = configurar_logs(__name__)
@@ -963,6 +964,142 @@ def agendar_fila_postagens():
         
         tempo_acumulado += timedelta(minutes=espacamento_bloco)
 
+def data_na_fila_do_canal(agora=None):
+    """
+    A data da fila do canal principal para um vídeo que entra agora: hoje ("2000-01-01",
+    a marca de hoje) se o Bom Dia de hoje ainda não saiu, senão amanhã; e nunca antes do
+    último vídeo da fila (ninguém fura a fila).
+    """
+    agora = agora or datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    if ler_config_rotina().get("ultimo_bom_dia") == hoje_str:
+        data_alvo = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
+    else:
+        data_alvo = "2000-01-01"
+        logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
+    fila = ler_fila_postagens().get("fila", [])
+    if fila:
+        ultima = fila[-1].get("data_adicao", "2000-01-01")
+        if ultima != "2000-01-01" and ultima > data_alvo:
+            data_alvo = ultima
+            logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_alvo}")
+    return data_alvo
+
+
+def adicionar_na_fila_do_canal(caminho_video, video_id, legenda, data_alvo):
+    """Põe o vídeo no fim do dia data_alvo da fila do canal principal. Devolve o id, ou None se o banco falhou."""
+    logger.info(f"📅 Inserindo no Banco SQLite de forma concorrente. Data alvo: {data_alvo}")
+    id_unico = f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
+    try:
+        with db.conexao() as conexao:
+            cursor = conexao.cursor()
+            # Próxima posição dentro do dia.
+            cursor.execute("SELECT MAX(prioridade) FROM fila_postagens WHERE data_alvo = ?", (data_alvo,))
+            proxima_prioridade = (cursor.fetchone()[0] or 0) + 1
+            cursor.execute(
+                "INSERT INTO fila_postagens (id_unico, caminho_video, video_id, legenda, data_alvo, prioridade) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (id_unico, caminho_video, video_id, legenda, data_alvo, proxima_prioridade))
+        logger.info(f"✅ Vídeo blindado no SQLite com prioridade {proxima_prioridade}.")
+        return id_unico
+    except Exception as e:
+        logger.error(f"❌ Erro grave ao inserir vídeo direto no banco: {e}")
+        return None
+
+
+def quando_publica_no_canal(data_alvo, agora=None):
+    """O dia em que o vídeo da fila do canal sai, para o recibo: hoje, amanhã ou o dia da semana."""
+    agora = agora or datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+    if data_alvo == "2000-01-01" or data_alvo <= hoje_str:
+        return f"🟢 <b>hoje</b> — {agora.strftime('%d/%m')}"
+    try:
+        dia = datetime.strptime(data_alvo, "%Y-%m-%d")
+    except ValueError:
+        return f"🔵 {data_alvo}"
+    dias = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+    rotulo = "amanhã" if data_alvo == amanha_str else dias[dia.weekday()]
+    cor = "🟡" if data_alvo == amanha_str else "🔵"
+    return f"{cor} <b>{rotulo}</b> — {dia.strftime('%d/%m')}"
+
+
+# Os vídeos do robô da Shopee Vídeo que o Rafael aprovou e o robô postou entram na fila do
+# canal no padrão dele, como no Criar Postagem 📝. Decisões do Rafael (28/10, P62 a P64):
+# DECISOES.md, Canal principal.
+PROCESSO_ROBO_NO_CANAL = "canal afiliados: vídeo do robô"
+# Erro ao pôr na fila (o banco, o Telegram): tenta de novo nas próximas voltas, até estas.
+TENTATIVAS_DO_ROBO_NO_CANAL = 3
+
+
+async def levar_videos_do_robo_ao_canal():
+    """
+    Cada pedido do robô da Shopee Vídeo (pedidos_do_canal: a cópia do vídeo postado, o
+    link do post e os links dos produtos) entra no fim da fila do Canal Afiliados: o
+    número do contador do Criar Postagem, o item pela IA vendo o vídeo e a legenda do
+    canal. O Rafael recebe no privado o número e o dia em que sai.
+    """
+    for pedido in pedidos_do_canal.pendentes():
+        try:
+            await _levar_video_do_robo_ao_canal(pedido)
+        except Exception as e:
+            tentativas = int(pedido.get("tentativas") or 0) + 1
+            logger.error(f"❌ [Canal Afiliados] O vídeo do robô não entrou na fila ({tentativas}/"
+                         f"{TENTATIVAS_DO_ROBO_NO_CANAL}): {type(e).__name__}")
+            registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_CANAL, f"erro ({type(e).__name__})", ok=False)
+            if tentativas < TENTATIVAS_DO_ROBO_NO_CANAL:
+                pedidos_do_canal.atualizar(pedido["id"], tentativas=tentativas)
+                continue
+            pedidos_do_canal.concluir(pedido["id"])
+            await _avisar_do_canal("📺 <b>Canal Afiliados:</b> o vídeo que o robô postou na Shopee Vídeo não "
+                                   f"entrou na fila do canal depois de {tentativas} tentativas ({type(e).__name__}).")
+
+
+async def _levar_video_do_robo_ao_canal(pedido):
+    arquivo = pedido.get("arquivo") or ""
+    if not os.path.exists(arquivo):
+        pedidos_do_canal.concluir(pedido["id"])
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_CANAL, "de fora - vídeo perdido", ok=False)
+        await _avisar_do_canal("📺 <b>Canal Afiliados:</b> o vídeo que o robô postou na Shopee Vídeo não entrou "
+                               "na fila do canal: a cópia do vídeo sumiu do servidor.")
+        return
+    # O número fica no pedido: uma nova tentativa usa o mesmo, sem pular número.
+    numero = pedido.get("numero")
+    if not numero:
+        async with _lock_contador:
+            numero = ler_contador()
+            salvar_contador(numero + 1)
+        pedidos_do_canal.atualizar(pedido["id"], numero=numero)
+    try:
+        resposta = await analisar_video_gemini(arquivo, legendas.prompt_do_item(numero))
+    except Exception as e:
+        logger.warning(f"⚠️ [Canal Afiliados] A IA não deu o item do vídeo do robô: {type(e).__name__}")
+        resposta = ""
+    titulo = legendas.titulo_do_item(resposta, numero, pedido.get("produto", ""))
+    legenda, _ = legendas.legenda_do_canal_que_cabe(titulo, shopee=(pedido["link_post"], pedido.get("links") or []))
+    agora = datetime.now(fuso_horario)
+    data_alvo = data_na_fila_do_canal(agora)
+    if not adicionar_na_fila_do_canal(arquivo, None, legenda, data_alvo):
+        raise RuntimeError("a fila do canal não gravou")
+    pedidos_do_canal.concluir(pedido["id"])
+    registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_CANAL, "na fila", ok=True)
+    if data_alvo == "2000-01-01" or data_alvo <= agora.strftime("%Y-%m-%d"):
+        agendar_fila_postagens()
+    sem_links = "" if pedido.get("links") else ("\n\n⚠️ Foi sem os links dos produtos (a API de afiliado não os "
+                                                 "achou), só com o link do vídeo.")
+    await _avisar_do_canal(f"📺 <b>Canal Afiliados:</b> o vídeo que o robô postou na Shopee Vídeo entrou na fila "
+                           f"do canal como <b>Vídeo #{numero}</b>.\n\n📅 Publica {quando_publica_no_canal(data_alvo, agora)}"
+                           f"{sem_links}")
+
+
+async def _avisar_do_canal(texto):
+    try:
+        await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"⚠️ [Canal Afiliados] O aviso não chegou ao Rafael: {type(e).__name__}")
+
+
 async def motor_fila_minuto():
     """
     Fiscal de 1 em 1 minuto: no expediente (Bom Dia já saiu, Boa Noite não), se há
@@ -1494,6 +1631,15 @@ def limpar_arquivos_orfaos():
                     bytes_liberados += tamanho
                 except Exception:
                     pass
+
+        # As cópias dos vídeos do robô da Shopee Vídeo que saíram da fila do canal sem ir ao
+        # ar (a postada a fila apaga na hora).
+        try:
+            quantos, tamanho = pedidos_do_canal.faxina()
+            removidos += quantos
+            bytes_liberados += tamanho
+        except Exception as e:
+            logger.warning(f"⚠️ [Faxina] As cópias do Canal Afiliados não foram limpas: {type(e).__name__}")
 
         if removidos:
             logger.info(f"🧹 [Faxina] {removidos} arquivo(s) órfão(s) removido(s) — "
@@ -9990,16 +10136,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         await bot.download_file(file_info.file_path, destination=video_path)
 
         # 2. A IA identifica o produto ("Vídeo N" + "📦 Item: ...")
-        prompt_ia = (
-            f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
-            f"Sua resposta deve conter EXATAMENTE duas linhas. "
-            f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
-            f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
-            f"Exemplo de saída esperada:\n"
-            f"Vídeo {numero_atual}\n"
-            f"📦 Item: Kit Dove Reconstrução\n"
-            f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
-        )
+        prompt_ia = legendas.prompt_do_item(numero_atual)
         
         chamada_gerada = await analisar_video_gemini(video_path, prompt_ia)
         if not chamada_gerada:
@@ -10060,16 +10197,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             
         msg_status = await message.answer("🔄 Reenviando vídeo para a IA analisar... Aguarde. ⏳", reply_markup=teclado_cancelar)
         
-        prompt_ia = (
-            f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
-            f"Sua resposta deve conter EXATAMENTE duas linhas. "
-            f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
-            f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
-            f"Exemplo de saída esperada:\n"
-            f"Vídeo {numero_atual}\n"
-            f"📦 Item: Kit Dove Reconstrução\n"
-            f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
-        )
+        prompt_ia = legendas.prompt_do_item(numero_atual)
         
         try:
             chamada_gerada = await analisar_video_gemini(video_path, prompt_ia)
@@ -10246,71 +10374,16 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_shopee = data.get('links_shopee', [])
     links_tiktok = data.get('links_tiktok', [])
     
-    logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
-    
-    # Título: "Vídeo N | 📦 Item: ..." numa linha só.
-    titulo_limpo = nome.replace('\n', ' | ')
-    linha_divisoria = "━━━━━━━━━━━━━━━"
-    cabecalho = f"<b>{titulo_limpo}</b>\n\n{linha_divisoria}\n\n"
-    
-    texto_longo = "<i>(💡 O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!)</i>\n\n"
-    texto_curto = "<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>\n\n"
-    texto_rodape = "\n<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>"
-
-    def montar_legenda(mensagem_apoio, is_rodape=False, plataforma_alvo=None):
-        plat_atual = plataforma_alvo if plataforma_alvo else plataforma
-        legenda_temp = cabecalho
-        
-        if plat_atual in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-            legenda_temp += "🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n"
-            legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
-            if not is_rodape:
-                legenda_temp += mensagem_apoio
-            if links_shopee:
-                legenda_temp += "🔗 Links dos Produtos:\n"
-                for i, link in enumerate(links_shopee, 1):
-                    legenda_temp += f"👉 {i}º: {link}\n"
-            if plat_atual == "Ambos 🛒🎵":
-                legenda_temp += f"\n{linha_divisoria}\n\n"
-            else:
-                legenda_temp += "\n"
-                
-        if plat_atual in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-            legenda_temp += "⬛ <b>TIKTOK</b> ⬛\n\n"
-            legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
-            if not is_rodape:
-                legenda_temp += mensagem_apoio
-            if links_tiktok:
-                legenda_temp += "🔗 Links dos Produtos:\n"
-                for i, link in enumerate(links_tiktok, 1):
-                    legenda_temp += f"👉 {i}º: {link}\n"
-            legenda_temp += "\n"
-        
-        if is_rodape:
-            legenda_temp += mensagem_apoio
-            
-        return legenda_temp
-
-    # Legenda em níveis até caber nos 1024 caracteres do Telegram: 1) texto de apoio
-    # longo; 2) curto; 3) só um rodapé; 4) com as duas plataformas, dois posts.
-    legenda_final = montar_legenda(texto_longo, is_rodape=False)
-    logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
-    
-    nivel_4_ativado = False
-
-    if len(legenda_final) > 1024:
-        logger.warning("⚠️ Limite excedido no Nível 1. Ativando Nível 2 (texto curto duplo).")
-        legenda_final = montar_legenda(texto_curto, is_rodape=False)
-        logger.info(f"📏 Avaliando Nível 2: {len(legenda_final)} caracteres.")
-        
-        if len(legenda_final) > 1024:
-            logger.warning("⚠️ Limite excedido no Nível 2. Ativando Nível 3 (rodapé simples).")
-            legenda_final = montar_legenda(texto_rodape, is_rodape=True)
-            logger.info(f"📏 Avaliando Nível 3: {len(legenda_final)} caracteres.")
-            
-            if len(legenda_final) > 1024 and plataforma == "Ambos 🛒🎵":
-                logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
-                nivel_4_ativado = True
+    # A legenda no padrão do canal (legendas.legenda_do_canal), em níveis até caber nos
+    # 1024 caracteres do Telegram: o texto de apoio longo, o curto e só um rodapé; com as
+    # duas plataformas sem caber, dois posts.
+    shopee = (link_vid_shopee, links_shopee) if plataforma in ("Ambos 🛒🎵", "Apenas Shopee 🛒") else None
+    tiktok = (link_vid_tiktok, links_tiktok) if plataforma in ("Ambos 🛒🎵", "Apenas TikTok 🎵") else None
+    legenda_final, coube = legendas.legenda_do_canal_que_cabe(nome, shopee, tiktok)
+    nivel_4_ativado = not coube and plataforma == "Ambos 🛒🎵"
+    logger.info(f"📏 Legenda do canal: {len(legenda_final)} caracteres.")
+    if nivel_4_ativado:
+        logger.warning("🚨 A legenda das duas plataformas não cabe: vão dois posts (Shopee e TikTok).")
 
     # Renova a data do arquivo (sem recomprimir).
     caminho_processado = None
@@ -10320,50 +10393,10 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
 
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
-    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    # Data da fila (FIFO)
-    dados_rotina = ler_config_rotina()
-    
-    # 1. Bom Dia de hoje já saiu: o vídeo vai para amanhã; senão, hoje ("2000-01-01").
-    if dados_rotina.get("ultimo_bom_dia") == hoje_str:
-        data_agendamento_base = amanha_str
-        logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
-    else:
-        data_agendamento_base = "2000-01-01"  # marca de "hoje"
-        logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
-        
-    # 2. Ninguém fura a fila: se o último vídeo já está num dia futuro, o novo vai junto.
-    fila_data_temp = ler_fila_postagens()
-    fila_temp = fila_data_temp.get("fila", [])
-    if fila_temp:
-        ultima_data_str = fila_temp[-1].get("data_adicao", "2000-01-01")
-        
-        if ultima_data_str != "2000-01-01" and ultima_data_str > data_agendamento_base:
-            data_agendamento_base = ultima_data_str
-            logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
-    
+    data_agendamento_base = data_na_fila_do_canal(agora)
+
     def adicionar_a_fila(caminho_vid, vid_id, caption):
-        logger.info(f"📅 Inserindo no Banco SQLite de forma concorrente. Data alvo: {data_agendamento_base}")
-        id_unico = f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
-        
-        try:
-            with db.conexao() as conexao:
-                cursor = conexao.cursor()
-            
-                # Próxima posição dentro do dia.
-                cursor.execute("SELECT MAX(prioridade) FROM fila_postagens WHERE data_alvo = ?", (data_agendamento_base,))
-                resultado = cursor.fetchone()[0]
-                proxima_prioridade = (resultado if resultado else 0) + 1
-            
-                cursor.execute('''
-                    INSERT INTO fila_postagens (id_unico, caminho_video, video_id, legenda, data_alvo, prioridade)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (id_unico, caminho_vid, vid_id, caption, data_agendamento_base, proxima_prioridade))
-            
-            logger.info(f"✅ Vídeo blindado no SQLite com prioridade {proxima_prioridade}.")
-        except Exception as e:
-            logger.error(f"❌ Erro grave ao inserir vídeo direto no banco: {e}")
+        adicionar_na_fila_do_canal(caminho_vid, vid_id, caption, data_agendamento_base)
 
     caminho_final = caminho_processado if caminho_processado and os.path.exists(caminho_processado) else caminho_video_original
     
@@ -10373,11 +10406,11 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     logger.info("🚀 Aplicando blindagem: Assegurando persistência do video_id para o fallback de segurança...")
 
     if nivel_4_ativado:
-        legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
+        legenda_shopee = legendas.legenda_do_canal(nome, shopee=shopee)
         logger.info(f"📦 A agendar vídeo 1/2 (Shopee) na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, video_id_fallback, legenda_shopee)
         
-        legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
+        legenda_tiktok = legendas.legenda_do_canal(nome, tiktok=tiktok)
         logger.info(f"📦 A agendar vídeo 2/2 (TikTok) na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, video_id_fallback, legenda_tiktok)
     else:
@@ -10397,22 +10430,11 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     else:
         logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
 
-    # Recibo: o contador aponta para o PRÓXIMO número, então o vídeo criado é o anterior.
-    numero_criado = max(1, proximo_numero - 1)
+    # Recibo: o número reservado na entrada do vídeo. O contador aponta para o PRÓXIMO, e
+    # o robô da Shopee Vídeo também tira números dele (levar_videos_do_robo_ao_canal).
+    numero_criado = data.get('numero_reservado') or max(1, proximo_numero - 1)
     detalhe_posts = "2 posts · Shopee + TikTok" if nivel_4_ativado else "1 post"
-
-    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-    DIAS_PT = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
-    if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
-        quando = f"🟢 <b>hoje</b> — {agora.strftime('%d/%m')}"
-    else:
-        try:
-            d = datetime.strptime(data_agendamento_base, "%Y-%m-%d")
-            rotulo = "amanhã" if data_agendamento_base == amanha_str else DIAS_PT[d.weekday()]
-            cor = "🟡" if data_agendamento_base == amanha_str else "🔵"
-            quando = f"{cor} <b>{rotulo}</b> — {d.strftime('%d/%m')}"
-        except Exception:
-            quando = f"🔵 {data_agendamento_base}"
+    quando = quando_publica_no_canal(data_agendamento_base, agora)
 
     # Quantos já estão na fila desse dia (contando os que acabaram de entrar).
     try:
@@ -17555,6 +17577,10 @@ async def main():
     scheduler.add_job(conferir_graves_do_servidor, 'cron', minute=37, timezone=FUSO_STR,
                       id='graves_do_servidor_loop', replace_existing=True,
                       misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
+
+    # Os vídeos do robô da Shopee Vídeo, aprovados e postados, para a fila do Canal Afiliados.
+    scheduler.add_job(levar_videos_do_robo_ao_canal, 'interval', minutes=5, id='robo_no_canal_loop',
+                      replace_existing=True, coalesce=True)
 
     # Perguntas do Claude sem resposta: confere a cada 5 min e lembra de hora em hora,
     # contando do último aviso (um restart não adianta nem atrasa o lembrete).
