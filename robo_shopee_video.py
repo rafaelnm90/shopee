@@ -108,10 +108,14 @@ MAXIMO_PRODUTOS_DO_VIDEO = 6
 # estes, entram só os de nome parecido (PARECIDO_NA_BUSCA% das palavras do nome do link),
 # e a IA confere com o vídeo até CANDIDATOS_NA_IA deles (cada um custa até 2 conferências).
 # A busca usa as primeiras PALAVRAS_DA_BUSCA palavras do nome: o nome inteiro traz pouco.
+# "Paga mais" é o que o Rafael recebe numa venda, o preço vezes a comissão, e só entra
+# anúncio até MAIS_CARO_NA_TROCA% mais caro que o do link: o bem mais caro paga mais por
+# venda, mas vende menos (P58).
 OFERTAS_NA_BUSCA = 20
 PARECIDO_NA_BUSCA = 60
 CANDIDATOS_NA_IA = 2
 PALAVRAS_DA_BUSCA = 6
+MAIS_CARO_NA_TROCA = 20
 # Na foto do Ver Produtos (P39), a oferta achada pelo nome tem de ser quase o mesmo nome do
 # produto anexado: a foto vai em tela cheia no começo do vídeo e na miniatura.
 PARECIDO_DA_FOTO = 80
@@ -2118,36 +2122,50 @@ def termo_da_busca(nome):
     return " ".join(palavras[:PALAVRAS_DA_BUSCA])
 
 
+def valor_por_venda(preco, comissao):
+    """O que o Rafael recebe numa venda: o preço vezes a comissão (em %, com a Comissão Extra)."""
+    return preco * comissao / 100
+
+
 def candidatos_de_mais_comissao(original, ofertas):
     """
-    Das ofertas da busca, as que pagam mais que o produto do link e têm o nome parecido
-    com o dele, da maior comissão para a menor: [{nome, link, comissao}]. O próprio produto
-    do link nunca entra: a comissão dele não é maior que ela mesma.
+    Das ofertas da busca, as que pagam mais por venda que o produto do link, custam até
+    MAIS_CARO_NA_TROCA% a mais que ele e têm o nome parecido com o dele, da que paga mais
+    por venda para a que paga menos: [{nome, link, comissao, preco, valor, vendas}]. O preço
+    é o "a partir de" dos dois lados. O próprio produto do link nunca entra: ele não paga
+    mais que ele mesmo. Sem o preço do produto do link, nenhuma: não há com o que comparar.
+    Escolha do Rafael (28/10, P58): DECISOES.md, Shopee Vídeo.
     """
+    antes = valor_por_venda(original["preco"], original["comissao"])
+    # Em centavos, como o preço: o anúncio exatamente MAIS_CARO_NA_TROCA% mais caro ainda entra.
+    teto = round(original["preco"] * (1 + MAIS_CARO_NA_TROCA / 100), 2)
     candidatos = []
     for oferta in ofertas:
         nome = (oferta.get("productName") or "").strip()
         link = oferta.get("productLink") or ""
+        preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
         comissao = assistente._numero(oferta.get("commissionRate")) * 100
-        if not nome or not link or comissao <= original["comissao"]:
+        valor = valor_por_venda(preco, comissao)
+        if not nome or not link or not preco or preco > teto or valor <= antes:
             continue
         if ps.parecido_entre([nome], original["nome"])[0] < PARECIDO_NA_BUSCA:
             continue
-        candidatos.append({"nome": nome, "link": link, "comissao": comissao,
+        candidatos.append({"nome": nome, "link": link, "comissao": comissao, "preco": preco, "valor": valor,
                            "vendas": int(assistente._numero(oferta.get("sales")))})
-    return sorted(candidatos, key=lambda c: (-c["comissao"], -c["vendas"]))
+    return sorted(candidatos, key=lambda c: (-c["valor"], -c["vendas"]))
 
 
 def trocar_pela_maior_comissao(video):
     """
-    O mesmo produto do link, de outra loja, que paga mais comissão (contando a Comissão
-    Extra), como o Rafael faz pela busca por foto com o filtro Comissão: a API busca pelo
-    nome por maior comissão, ficam os de nome parecido que pagam mais, e a IA confere cada
-    um com o vídeo pela foto do anúncio, com a mesma régua do produto do link (o mesmo item,
-    da mesma cor). O primeiro confirmado vale: {nome, link, comissao, antes, vistos}, com o
-    link curto que o celular abre. Nenhum: None, e o robô segue com o produto do link. A
-    troca é um ganho a mais: um erro nela nunca derruba o rascunho.
-    Escolha do Rafael (25/10, P33): DECISOES.md, Shopee Vídeo.
+    O mesmo produto do link, de outra loja, que paga mais por venda (o preço vezes a
+    comissão, contando a Comissão Extra) sem custar bem mais, como o Rafael faz pela busca
+    por foto com o filtro Comissão: a API busca pelo nome por maior comissão, ficam os de
+    nome e preço parecidos que pagam mais por venda, e a IA confere cada um com o vídeo pela
+    foto do anúncio, com a mesma régua do produto do link (o mesmo item, da mesma cor). O
+    primeiro confirmado vale: {nome, link, comissao, preco, valor, antes, valor_antes,
+    vistos}, com o link curto que o celular abre. Nenhum: None, e o robô segue com o produto
+    do link. A troca é um ganho a mais: um erro nela nunca derruba o rascunho.
+    Escolhas do Rafael (25/10, P33; 28/10, P58): DECISOES.md, Shopee Vídeo.
     """
     try:
         return _trocar_pela_maior_comissao(video)
@@ -2166,11 +2184,14 @@ def _trocar_pela_maior_comissao(video):
         anotar("mantido - a API não disse o produto do link")
         return None
     original = produtos[0]
+    if not original["preco"]:
+        anotar("mantido - a API não disse o preço do produto do link")
+        return None
     ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(original["nome"]), limite=OFERTAS_NA_BUSCA,
                                                            sort_type=5))
     candidatos = candidatos_de_mais_comissao(original, ofertas)
     if not candidatos:
-        anotar("mantido - nenhum com mais comissão" if ofertas else "mantido - a busca não trouxe nada")
+        anotar("mantido - nenhum que pague mais por venda" if ofertas else "mantido - a busca não trouxe nada")
         return None
     for candidato in candidatos[:CANDIDATOS_NA_IA]:
         link = asyncio.run(api_shopee.converter_link_shopee(candidato["link"], api_shopee.ETIQUETA_SHOPEE_VIDEO,
@@ -2182,7 +2203,8 @@ def _trocar_pela_maior_comissao(video):
         ok, _ = ps.ia_confere_produto(dict(video, link=link), vistos, avisar=False)
         if ok:
             anotar("trocado", ok=True)
-            return {**candidato, "link": link, "antes": original["comissao"], "vistos": vistos}
+            return {**candidato, "link": link, "antes": original["comissao"],
+                    "valor_antes": valor_por_venda(original["preco"], original["comissao"]), "vistos": vistos}
     anotar("mantido - a IA não confirmou nenhum")
     return None
 
@@ -2204,9 +2226,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         nome = ps.nome_do_produto(video)
         if not nome:
             raise Parada("o link não diz o produto do vídeo", do_video=True)
-        # O mesmo produto de outra loja que paga mais, já conferido pela IA com o vídeo, toma
-        # o lugar do produto do link (o video muda aqui: curtir, anexar e descurtir usam o
-        # novo). Escolha do Rafael (25/10, P33): DECISOES.md, Shopee Vídeo.
+        # O mesmo produto de outra loja que paga mais por venda, já conferido pela IA com o
+        # vídeo, toma o lugar do produto do link (o video muda aqui: curtir, anexar e descurtir
+        # usam o novo). Escolhas do Rafael (25/10, P33; 28/10, P58): DECISOES.md, Shopee Vídeo.
         troca = trocar_pela_maior_comissao(video)
         if troca:
             video["link"] = troca["link"]
@@ -2214,8 +2236,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
             vistos.extend(troca["vistos"])
         # Antes de tocar no celular, o Rafael sabe qual vídeo e qual produto o robô pegou.
         avisar(f"🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProduto: {nome}\n"
-               + (f"Comissão: {troca['comissao']:.1f}% (o produto do link pagava {troca['antes']:.1f}%: troquei "
-                  "pelo mesmo produto de outra loja, conferido pela IA com o vídeo)\n" if troca else "")
+               + (f"Comissão: {troca['comissao']:.1f}%, {assistente._reais(troca['valor'])} por venda (o produto do "
+                  f"link pagava {troca['antes']:.1f}%, {assistente._reais(troca['valor_antes'])}: troquei pelo mesmo "
+                  "produto de outra loja, conferido pela IA com o vídeo)\n" if troca else "")
                + f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
         if not troca:
             _conferir(ps.ia_confere_produto(video, vistos))
