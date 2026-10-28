@@ -180,6 +180,25 @@ def test_explorar_nunca_toca_nos_botoes_de_comprar(passo, capsys):
     assert "nunca toca em Postar nem nos botões de comprar" in capsys.readouterr().out
 
 
+# A página de afiliado que abre do resultado da busca pela foto (vídeo do Rafael, 28/10/2026):
+# o Favoritar e, no lugar do Compre Agora, o Compartilhe para Ganhar.
+TELA_AFILIADO = """<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">
+  <node text="Favoritar" class="android.widget.TextView" clickable="true" bounds="[300,2280][520,2380]" />
+  <node text="" class="android.view.ViewGroup" clickable="true" bounds="[540,2262][1080,2400]">
+    <node text="Compartilhe para&#10;Ganhar" class="android.widget.TextView" bounds="[640,2290][980,2370]" />
+  </node>
+</node></hierarchy>"""
+
+
+@pytest.mark.parametrize("passo", ["tocar:Compartilhe para Ganhar", "xy:800,2330"])
+def test_explorar_nunca_toca_no_compartilhe_para_ganhar(passo, capsys):
+    aparelho = Aparelho(tela=TELA_AFILIADO)
+    assert not ps.explorar(passo, aparelho)
+    assert aparelho.toques == []
+    assert "nem no Compartilhe para Ganhar" in capsys.readouterr().out
+    assert ps.explorar("tocar:Favoritar", aparelho) and aparelho.toques == [(410, 2330)]
+
+
 def test_curtir_toca_so_no_coracao():
     aparelho = Aparelho(tela=TELA_PRODUTO)
     assert ps.explorar("tocar:@buttonItemLike", aparelho)

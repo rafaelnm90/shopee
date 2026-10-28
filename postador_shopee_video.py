@@ -357,12 +357,15 @@ AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a 
 # Botões que tocar e xy nunca tocam: o que publica o vídeo (só o passo postar chega nele) e
 # os de comprar (Compre agora, carrinho e chat na página do produto; "Comprar com cupom"
 # no player de um vídeo, visto no Motorola em 23/10/2026): todo texto que começa com
-# "comprar" ou "compre". "Postar vídeo" não entra: só abre a câmera. Postar: DECISOES.md,
-# Shopee Vídeo.
-TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho"})
+# "comprar" ou "compre". "Postar vídeo" não entra: só abre a câmera. Também o "Compartilhe
+# para Ganhar" da página de afiliado do produto, a que abre da busca pela foto (vídeo do
+# Rafael de 28/10/2026), no lugar do Compre Agora: o robô só compartilha o link do post.
+# Postar: DECISOES.md, Shopee Vídeo.
+TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho",
+                              "compartilhe para ganhar"})
 COMECOS_PROIBIDOS = ("comprar", "compre")
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
-RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar"
+RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar (nem no Compartilhe para Ganhar)"
 
 
 def texto_proibido(texto):
