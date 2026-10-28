@@ -160,6 +160,40 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     o `investigar_robo.yml` mostra: o link não abriu o player (`rn_vod_player_view_with_surface`),
     o player tem o cartão de um produto (com o botão de comprar) sem o Ver Produtos, ou nem
     isso. O cartão de um produto só ainda não foi mapeado no celular.
+- **Busca pela foto (o Rafael mostrou em vídeo em 28/10/2026; falta mapear no Motorola):** é
+  como ele acha o mesmo produto em outras lojas, para os espaços livres até 6 (P59, P66) e a
+  troca de loja (P57). O caminho, como ele faz no celular dele:
+  1. a foto: ele abre o produto do post, passa para a 2ª foto do anúncio (a 1ª costuma ser
+     vídeo) e tira print. O robô usa a foto do anúncio que a API de afiliado dá: o passo
+     `foto` do explorar a põe na galeria, como a mais nova, e o `foto:apagar` tira;
+  2. Eu → Criadores & Afiliados → a barra **"Pesquisar produtos e lojas"**, no alto da área
+     de afiliado (aba Oferta), tem uma **câmera** à direita, antes do ícone de chat;
+  3. a câmera abre com "Clique no botão para buscar" (o botão de tirar foto, que o robô não
+     usa) e, embaixo, **"Pesquisar na galeria"** (com "Ver tudo"): o toque na foto faz a busca;
+  4. abre por cima **"Resultados da busca por imagem"** (X para fechar). No alto, os
+     **recortes** que o app achou na foto (cada parte da foto, um produto) e uma câmera para
+     outra foto: o recorte escolhido muda os resultados, e às vezes é preciso passar de um a
+     outro até chegar ao produto. Embaixo dos recortes, as ordens **Comissão (%)**,
+     **Vendas Populares**, **Preço** (com setas) e uma quarta, cortada na borda
+     ("Comissão…"). Trocar de recorte desfaz a ordem;
+  5. cada resultado (grade de 2 colunas): o selo da loja (Oficial, Indicado, Full), o nome em
+     2 linhas, o selo **COMISSÃO EXTRA** quando tem, o preço, a nota com "N vendas" (na ordem
+     Vendas Populares, "N vendas/mês") e "Taxa de comissão N%" (cortada quando não cabe), com
+     um ícone vermelho de compartilhar (nunca tocar);
+  6. o toque no resultado abre a **página de afiliado** do produto: foto, preço, **COMISSÃO
+     EXTRA N%** (quando tem), o nome com a seta ">", "N Afiliados promoveram", a nota e "N
+     Vendido", "Aprenda Com Outros Criadores", a loja ("Comissão de até N%", Visitar) e, na
+     barra de baixo, Chat, **Favoritar** e **Compartilhe para Ganhar** (nunca tocar: o
+     explorar recusa, como o Compre Agora);
+  7. o toque no nome abre a página completa do produto (a mesma do curtir, com o coração e o
+     "Compre com cupom", que nunca se toca); o coração curte ("Adicionado aos Meus Favoritos
+     com sucesso!") e o voltar volta aos resultados.
+  - **Como o Rafael escolhe:** na ordem Comissão (%) vêm os de comissão alta, mas muito caros;
+    por isso ele prefere **Vendas Populares** e, ali, pega os que têm **COMISSÃO EXTRA**, que
+    vendem mais. A ordem que o robô usa entre os resultados foi perguntada a ele em 28/10.
+  - **Falta mapear no Motorola:** os ids e textos da câmera da barra, da galeria, dos recortes,
+    das ordens e dos resultados; se o "Taxa de comissão" cortado vem inteiro na leitura da
+    tela; e o "Ver Mais (N)" do Ver Produtos (P66), quando a fonte trouxer um vídeo com ele.
 
 ## Onde paramos
 
