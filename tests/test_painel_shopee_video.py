@@ -938,12 +938,14 @@ def test_exemplo_do_editor_1_manda_o_completo_e_as_versoes_sem_legendas(bm, Msg,
     assert any("Montando o exemplo do Editor 1 (sem legendas)" in t for t in msg.saidas)
     completo, versao = msg.midias[0][2], msg.midias[1][2]
     assert "Exemplo do Editor 1 (sem legendas), vídeo 1 de 2 (não foi postado): Bolsa." in completo
-    # Pedido do Rafael (vídeo de 28/10): fica claro qual é o original e qual é versão modificada.
-    assert ("🎬 VÍDEO ORIGINAL: inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
+    # Pedidos do Rafael (vídeos de 28/10): fica claro qual é o original e qual é versão
+    # modificada, com o título no alto da legenda e uma linha em branco antes do resto.
+    assert completo.startswith("🎬 <b>VÍDEO ORIGINAL</b>\n\n👀 Exemplo do Editor 1")
+    assert ("\nInteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
             "pediu (a foto no começo, a miniatura e a seta).") in completo
     assert "vai ao ar" not in completo and "(mais os 2 s da foto): o vídeo inteiro" in completo
-    assert "Exemplo do Editor 1 (sem legendas), vídeo 2 de 2" in versao
-    assert "✂️ VERSÃO MODIFICADA 1 de 1 (só no exemplo, não vai ao ar): abre com o trecho de 4,0 s a 6,0 s" in versao
+    assert versao.startswith("✂️ <b>VERSÃO MODIFICADA 1 de 1</b>\n\n👀 Exemplo do Editor 1 (sem legendas), vídeo 2 de 2")
+    assert "\nSó no exemplo, não vai ao ar: abre com o trecho de 4,0 s a 6,0 s" in versao
     assert "do vídeo original (o que ele mostra: “Fechamento com zíper”) e segue dali; o que vinha antes vai para o fim" in versao
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in versao
     assert not any("Textos na tela" in legenda or "Lugar do texto" in legenda for legenda in (completo, versao))
@@ -991,16 +993,22 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     msg = MsgComMidia(Msg, "Editor 2 com Legendas ✨")
     rodar(sv.exemplo_editor_2_handler(msg, est))
     assert [m[0] for m in msg.midias] == ["video", "video"]
+    # Pedido do Rafael (vídeo de 28/10, 00:30): depois dos vídeos, o texto da Edição dos Vídeos
+    # não volta (ele escondia os vídeos); o teclado do painel continua embaixo.
+    assert not any("O que cada botão faz" in t for t in msg.saidas)
+    assert all(len(m[2]) <= 1024 for m in msg.midias)
     primeira, segunda = msg.midias[0][2], msg.midias[1][2]
     assert "Exemplo do Editor 2 (com legendas), vídeo 1 de 2 (não foi postado): Copo Térmico &lt;inox&gt;" in primeira
-    assert ("🎬 VÍDEO ORIGINAL: inteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
+    assert primeira.startswith("🎬 <b>VÍDEO ORIGINAL</b>\n\n✨ Exemplo do Editor 2")
+    assert ("\nInteiro, na ordem e na velocidade dele, sem cortes; só com as edições que você "
             "pediu (a foto no começo, a miniatura e a seta, e as legendas). É assim que ele vai ao ar.") in primeira
     assert "(mais os 2 s da foto): o vídeo inteiro" in primeira
     assert "“Mantém gelado”" in primeira and "Com fala" not in primeira and "A IA não escreveu" not in primeira
     # O original não tem partes paradas tiradas: isso é das versões modificadas.
     assert "Lugar do texto" not in primeira and "Partes paradas" not in primeira and "acelerados" not in primeira
     assert "Partes paradas tiradas: 6 s" in segunda and "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in segunda
-    assert "vídeo 2 de 2" in segunda and "✂️ VERSÃO MODIFICADA 1 de 1 (só no exemplo, não vai ao ar)" in segunda
+    assert segunda.startswith("✂️ <b>VERSÃO MODIFICADA 1 de 1</b>\n\n✨ Exemplo do Editor 2 (com legendas), vídeo 2 de 2")
+    assert "\nSó no exemplo, não vai ao ar: abre" in segunda
     assert "abre com o trecho de 9,0 s a 10,5 s do vídeo original e segue dali" in segunda
     assert "(o que ele mostra" not in segunda and "“Tampa firme”" in segunda
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in segunda
