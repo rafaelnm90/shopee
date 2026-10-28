@@ -303,6 +303,7 @@ def processos_do_dia(agora=None):
 # hora têm folga para um reinício no minuto do job.
 METAS = {
     ("bot_mestre", "monitor de saúde"): (24, 21),
+    ("bot_mestre", "graves: robôs fora do ar"): (24, 21),
     ("bot_mestre", "botão de ofertas"): (24, 21),
     ("bot_mestre", "financeiro (API da Shopee)"): (24, 21),
     ("bot_mestre", "faxina do disco"): (4, 3),

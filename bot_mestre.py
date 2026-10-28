@@ -72,6 +72,7 @@ import blacklist_captura  # de quem os userbots nunca capturam
 import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
+import alertas  # os graves avisados na hora (robô fora do ar), conferidos também aqui
 import registro_processos  # cada processo dos robôs, 3 dias, para o checkup do dia
 import rotinas  # em que canal sai cada rotina de texto
 import conferencia_espiao  # o nome que a IA do Espião deu confere com o produto?
@@ -17383,6 +17384,21 @@ async def monitor_saude():
     except Exception as e:
         logger.error(f"❌ [Saúde] Falha no monitor: {e}")
 
+@registro_processos.anotar("bot_mestre", "graves: robôs fora do ar")
+async def conferir_graves_do_servidor():
+    """
+    De hora em hora, os graves que só o alertas.py vê (robô fora do ar e o robô da Shopee
+    Vídeo sem rodar), avisados no privado do Rafael como no diagnóstico: o GitHub pula boa
+    parte das rodadas agendadas dele, e o aviso chegava horas depois. Sem resposta do
+    systemctl, confere só o robô da Shopee Vídeo (os robôs fora do ar ficam para o diagnóstico).
+    """
+    caidos = await asyncio.to_thread(alertas.servicos_fora)
+    so = alertas.GRAVES_DO_SERVIDOR if caidos is not None else ("robo_sv",)
+    if caidos is None:
+        logger.warning("🩺 [Graves] O systemctl não respondeu: os robôs fora do ar ficam para o diagnóstico.")
+    await asyncio.to_thread(alertas.verificar, caidos or [], None, None, so)
+
+
 def contar_links_sem_conversao(horas=24):
     """Links que saíram sem a marcação de afiliado (o api_shopee registra no erros_logs)."""
     corte = (datetime.now(fuso_horario) - timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
@@ -17534,6 +17550,11 @@ async def main():
     # hora marcada é pulado (24/10: 19 de 24).
     scheduler.add_job(monitor_saude, 'cron', minute=7, timezone=FUSO_STR, id='monitor_saude_loop',
                       replace_existing=True, misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
+    # Os graves que o diagnóstico do GitHub conferia sozinho (robô fora do ar e o robô da
+    # Shopee Vídeo sem rodar), também aqui: o GitHub pula boa parte das rodadas dele.
+    scheduler.add_job(conferir_graves_do_servidor, 'cron', minute=37, timezone=FUSO_STR,
+                      id='graves_do_servidor_loop', replace_existing=True,
+                      misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
 
     # Perguntas do Claude sem resposta: confere a cada 5 min e lembra de hora em hora,
     # contando do último aviso (um restart não adianta nem atrasa o lembrete).
