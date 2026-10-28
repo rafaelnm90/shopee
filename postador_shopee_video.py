@@ -26,6 +26,9 @@ Passos, separados por ponto e vírgula:
     escrever:TEXTO   escreve no campo que está com o cursor
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte;
                      video:link-de-video, um cujo link abre um vídeo, o Ver Produtos)
+    foto             põe na galeria a foto do anúncio do produto do vídeo do teste (a da API de
+                     afiliado), a mais nova da galeria, para a busca pela foto (a câmera da
+                     busca de Criadores & Afiliados); foto:apagar tira
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     curtir           na página que o link abriu, toca no nome do produto (abre a página
                      completa) e curte; já curtido, segue sem tocar no coração
@@ -171,6 +174,10 @@ PARECIDO_NO_TOPO = 80
 # Elemento de outro app até este tamanho (px) é coisa flutuante, como a bolinha da Motorola.
 LADO_MAXIMO_FLUTUANTE = 400
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
+# A foto do anúncio na galeria, para a busca pela foto que o Rafael mostrou em vídeo
+# (28/10/2026): a extensão sai dos bytes, porque a galeria do Android reconhece a foto por ela.
+NOME_DA_FOTO = "busca_pela_foto"
+EXTENSOES_DA_FOTO = (("jpg", b"\xff\xd8\xff"), ("png", b"\x89PNG"))
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
 MAXIMO_LINHAS = 150
@@ -1352,6 +1359,45 @@ def por_na_galeria(d, arquivo, nome=NOME_NA_GALERIA):
     return nome in getattr(lista, "output", "")
 
 
+def extensao_da_foto(dados):
+    """jpg, png ou webp pela assinatura dos bytes; None para o que não é foto."""
+    for extensao, assinatura in EXTENSOES_DA_FOTO:
+        if dados.startswith(assinatura):
+            return extensao
+    return "webp" if dados[:4] == b"RIFF" and dados[8:12] == b"WEBP" else None
+
+
+def por_foto_na_galeria(d, dados, nome=NOME_DA_FOTO):
+    """
+    Copia a foto para a câmera do Android e avisa a galeria: a mais nova é a que a busca
+    pela foto mostra primeiro em "Pesquisar na galeria". True se ela apareceu na galeria.
+    """
+    extensao = extensao_da_foto(dados or b"")
+    if not extensao:
+        return False
+    destino = f"{GALERIA}/{nome}.{extensao}"
+    with tempfile.NamedTemporaryFile(suffix="." + extensao, delete=False) as arquivo:
+        arquivo.write(dados)
+    try:
+        d.shell(["mkdir", "-p", GALERIA])
+        d.push(arquivo.name, destino)
+    finally:
+        os.remove(arquivo.name)
+    d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + destino])
+    time.sleep(3)
+    lista = d.shell(["content", "query", "--uri", "content://media/external/images/media",
+                     "--projection", "_display_name"])
+    return f"{nome}.{extensao}" in getattr(lista, "output", "")
+
+
+def tirar_foto_da_galeria(d, nome=NOME_DA_FOTO):
+    """Tira da câmera do Android a foto da busca, em qualquer extensão, e avisa a galeria."""
+    for extensao in ("jpg", "png", "webp"):
+        caminho = f"{GALERIA}/{nome}.{extensao}"
+        d.shell(["rm", "-f", caminho])
+        d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + caminho])
+
+
 def texto_copiado(d):
     """O que está copiado no celular; "" se nada ou se o Android não deixou ler."""
     try:
@@ -1453,8 +1499,8 @@ def link_copiado(d):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar",
-                  "print", "copiado", "legenda", "colar", "tela"}
+                  "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
+                  "postar", "print", "copiado", "legenda", "colar", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -1515,6 +1561,18 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         escrever(d, argumento)
         return True, "escrito"
+    if nome == "foto" and argumento == "apagar":
+        tirar_foto_da_galeria(d)
+        return True, "foto da busca tirada da galeria"
+    if nome == "foto":
+        video = video_do_teste()
+        if not video:
+            return False, "nenhum vídeo da fonte do painel com arquivo e link"
+        foto = anuncio_do_produto(video).get("foto")
+        if not foto:
+            return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
+        return ((True, "foto do anúncio na galeria") if por_foto_na_galeria(d, foto)
+                else (False, "a foto do anúncio não apareceu na galeria"))
     if nome in ("link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar"):
         escolher = nome == "video" and argumento in ("novo", "link-de-video")
         video = video_do_teste(novo=escolher, de_video=escolher and argumento == "link-de-video")

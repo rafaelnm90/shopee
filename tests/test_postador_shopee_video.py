@@ -577,6 +577,44 @@ def test_video_vai_para_a_galeria():
 def test_sem_video_na_fonte_o_link_e_o_video_falham(capsys):
     assert not ps.explorar("video", Aparelho())
     assert "nenhum vídeo da fonte do painel" in capsys.readouterr().out
+    assert not ps.explorar("foto", Aparelho())
+
+
+JPG = b"\xff\xd8\xff\xe0" + b"0" * 32
+
+
+@pytest.mark.parametrize("dados, extensao", [
+    (JPG, "jpg"), (b"\x89PNG\r\n\x1a\n" + b"0" * 8, "png"), (b"RIFF\x10\x00\x00\x00WEBPVP8 ", "webp"),
+    (b"<html>erro</html>", None), (b"", None)])
+def test_extensao_da_foto_sai_dos_bytes(dados, extensao):
+    assert ps.extensao_da_foto(dados) == extensao
+
+
+def test_foto_do_anuncio_vai_para_a_galeria_e_foto_apagar_tira(monkeypatch, capsys):
+    _autorais()
+    monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {"foto": JPG, "nome": "Produto", "preco": 9.9})
+    aparelho = Aparelho(galeria=f"Row: 0 _display_name={ps.NOME_DA_FOTO}.jpg")
+    assert ps.explorar("foto", aparelho)
+    [(temporario, destino)] = aparelho.enviados
+    assert destino == f"{ps.GALERIA}/{ps.NOME_DA_FOTO}.jpg" and not os.path.exists(temporario)
+    assert ["content", "query", "--uri", "content://media/external/images/media",
+            "--projection", "_display_name"] in aparelho.comandos
+    assert "foto do anúncio na galeria" in capsys.readouterr().out
+    # Sem a foto na galeria depois do aviso, o passo falha.
+    assert not ps.explorar("foto", Aparelho(galeria=""))
+    aparelho = Aparelho()
+    assert ps.explorar("foto:apagar", aparelho)
+    assert ["rm", "-f", f"{ps.GALERIA}/{ps.NOME_DA_FOTO}.jpg"] in aparelho.comandos
+    assert aparelho.toques == [] and aparelho.enviados == []
+
+
+@pytest.mark.parametrize("anuncio", [{}, {"foto": None}, {"foto": b"<html>erro</html>"}])
+def test_sem_a_foto_do_anuncio_nada_vai_para_a_galeria(anuncio, monkeypatch, capsys):
+    _autorais()
+    monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: anuncio)
+    aparelho = Aparelho()
+    assert not ps.explorar("foto", aparelho)
+    assert aparelho.enviados == []
 
 
 TELA_CURTIDAS = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
