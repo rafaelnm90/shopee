@@ -7,6 +7,7 @@ from datetime import datetime
 import pytest
 
 import assistente_shopee_video as asv
+import edicao_video
 from conftest import consultar, inserir, rodar
 from fuso import fuso_horario
 
@@ -405,8 +406,11 @@ def test_video_que_da_erro_e_pulado_para_nao_travar_a_fila(monkeypatch):
 LEGENDA_VIDEO = LEGENDA.replace("https://s.shopee.com.br/abc", "https://s.shopee.com.br/video")
 
 
-def _com_edicao(monkeypatch, conteudos, ias):
-    """Edição ligada, com o ffmpeg e a foto de mentira; o link de vídeo não traz produto (sem foto)."""
+def _com_edicao(monkeypatch, conteudos, ias, editados=None):
+    """
+    Edição ligada, com a edição e a foto de mentira; o link de vídeo não traz produto (sem
+    foto). editados recebe (foto, produto, preço, avisos) de cada edição.
+    """
     import db
     import edicao_video
     import postador_shopee_video as ps
@@ -421,12 +425,15 @@ def _com_edicao(monkeypatch, conteudos, ias):
             return [], link
         return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g"}], link
 
-    def editar(video, foto, destino, avisos=False):
+    editados = [] if editados is None else editados
+
+    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+        editados.append((foto, produto, preco, avisos))
         if not foto:
-            return "a foto do anúncio não veio"
+            return "a foto do anúncio não veio", edicao_video.SO_COM_O_EDITOR_1, ""
         with open(destino, "wb") as arquivo:
-            arquivo.write(b"editado com " + foto)
-        return ""
+            arquivo.write(b"capa com os avisos" if avisos else b"editado com " + foto)
+        return "", edicao_video.COM_LEGENDAS + (edicao_video.COM_OS_AVISOS if avisos else ""), ""
 
     class BotQueLe(Bot):
         async def send_video(self, chat_id, video, **kw):
@@ -437,19 +444,42 @@ def _com_edicao(monkeypatch, conteudos, ias):
     monkeypatch.setattr(asv, "gerar_textos", gerar)
     monkeypatch.setattr(asv, "produtos_do_link", produtos)
     monkeypatch.setattr(ps, "baixar_foto", lambda endereco: b"foto")
-    monkeypatch.setattr(edicao_video, "editar", editar)
+    monkeypatch.setattr(edicao_video, "editar_para_postar", editar_para_postar)
     return BotQueLe()
 
 
 def test_com_a_edicao_ligada_o_assistente_manda_o_video_editado(monkeypatch):
-    # Pedido do Rafael (25/10, P40): na Shopee Vídeo, só vídeo editado, também no assistente.
-    conteudos, ias = [], []
-    bot = _com_edicao(monkeypatch, conteudos, ias)
+    # Pedidos do Rafael (25/10, P40): na Shopee Vídeo, só vídeo editado, também no assistente;
+    # (28/10, P50) com o Editor 2, como nos rascunhos do robô: as legendas com o nome e o preço.
+    conteudos, ias, editados = [], [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias, editados)
     _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"))
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
     assert conteudos == [b"editado com foto"] and "Postagem pronta" in bot.mensagens[0][1]
+    assert editados == [(b"foto", "Garrafa", 19.9, False)]
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'edição do vídeo: assistente'") \
+        == (edicao_video.COM_LEGENDAS, 1)
     # A IA assiste ao vídeo original, sem a foto e a seta por cima.
     assert set(ias) == {"archive/novo.mp4"}
+
+
+def test_sem_o_editor_2_o_assistente_manda_com_o_editor_1_e_o_registro_anota(monkeypatch):
+    # Escolha do Rafael (28/10, P51): se o Editor 2 não sai, o vídeo vai com o Editor 1, sem
+    # legendas; o registro anota (como falha, para o checkup ver).
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+
+    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editor 1")
+        return "", edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: o ffmpeg falhou"
+    monkeypatch.setattr(edicao_video, "editar_para_postar", editar_para_postar)
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert conteudos == [b"editor 1"]
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos "
+                     "WHERE processo = 'edição do vídeo: assistente'") == (
+        edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: o ffmpeg falhou", 0)
 
 
 def test_o_que_nao_sai_editado_fica_de_lado_e_vai_o_proximo_sem_gastar_a_ia(monkeypatch):
@@ -562,17 +592,8 @@ def test_mensagem_da_bebida_alcoolica_pede_para_deixar_a_capa_e_os_avisos():
 
 
 def test_bebida_alcoolica_vai_editada_com_os_avisos_na_capa(monkeypatch):
-    conteudos, ias = [], []
-    bot = _com_edicao(monkeypatch, conteudos, ias)
-    import edicao_video
-    editados = []
-
-    def editar(video, foto, destino, avisos=False):
-        editados.append(avisos)
-        with open(destino, "wb") as arquivo:
-            arquivo.write(b"capa com os avisos" if avisos else b"editado")
-        return ""
-    monkeypatch.setattr(edicao_video, "editar", editar)
+    conteudos, ias, editados = [], [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias, editados)
 
     async def gerar(arquivo, nome="", leves=False):
         ias.append(arquivo)
@@ -580,9 +601,9 @@ def test_bebida_alcoolica_vai_editada_com_os_avisos_na_capa(monkeypatch):
     monkeypatch.setattr(asv, "gerar_textos", gerar)
     _fila(("cerveja", LEGENDA, "archive/cerveja.mp4", "2026-10-02 10:00"))
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
-    assert editados == [False, True] and conteudos == [b"capa com os avisos"]
+    assert [e[-1] for e in editados] == [False, True] and conteudos == [b"capa com os avisos"]
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = 'edição do vídeo: assistente' "
-                     "ORDER BY rowid DESC LIMIT 1") == ("editado com os avisos",)
+                     "ORDER BY rowid DESC LIMIT 1") == (edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS,)
 
 
 def test_bebida_alcoolica_sem_a_edicao_fica_de_lado_e_vai_o_proximo(monkeypatch):

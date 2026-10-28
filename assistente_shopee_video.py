@@ -13,10 +13,12 @@ Para cada vídeo:
   API de afiliado; link de vídeo da Shopee Vídeo não diz os produtos, e o Rafael os
   vê no próprio vídeo.
 
-Com a edição dos vídeos ligada no painel do robô (edicao_video), o vídeo vai já editado
-(a foto do anúncio no começo, a miniatura e a seta), e o que não dá para editar (link de
-vídeo, sem uma foto só, ou sem a foto na API) fica de lado: o assistente tenta o próximo
-na mesma hora, até VIDEOS_POR_ENVIO. Pedido do Rafael (25/10, P40): só vídeo editado.
+Com a edição dos vídeos ligada no painel do robô (edicao_video), o vídeo vai já editado,
+com o Editor 2, como nos rascunhos do robô (a foto do anúncio no começo, a miniatura, a
+seta, as partes paradas tiradas e as legendas; se ele não sai, com o Editor 1, sem
+legendas), e o que não dá para editar (link de vídeo, sem uma foto só, ou sem a foto na
+API) fica de lado: o assistente tenta o próximo na mesma hora, até VIDEOS_POR_ENVIO.
+Pedidos do Rafael (25/10, P40): só vídeo editado; (28/10, P50): o Editor 2 aqui também.
 
 Quando mandar: cada dia sorteia quantos vídeos (a faixa do painel) e espalha os
 horários pela janela do painel, com um sorteio fixo por dia. A cada volta do agendador,
@@ -604,9 +606,10 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
 
 def _editar(video, produtos, destino, avisos=False):
     """
-    O vídeo editado em destino, com a foto do anúncio do produto do link: "" quando deu
-    certo, ou o motivo fixo; com avisos=True, a capa dos avisos da bebida alcoólica no lugar
-    da foto. O edicao_video importa este módulo: o import fica aqui dentro.
+    O vídeo editado em destino, com o Editor 2 (ou o Editor 1, se ele não sai) e a foto do
+    anúncio do produto do link; com avisos=True, a capa dos avisos da bebida alcoólica no
+    lugar da foto. Anota no registro como saiu e devolve "" quando deu certo, ou o motivo
+    fixo. O edicao_video importa este módulo: o import fica aqui dentro.
     """
     import edicao_video
     import postador_shopee_video as ps
@@ -615,7 +618,14 @@ def _editar(video, produtos, destino, avisos=False):
     except Exception as e:
         logger.warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
         foto = None
-    return edicao_video.editar(video["arquivo"], foto, destino, avisos=avisos)
+    produto = produtos[0] if produtos else {}
+    motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], foto, destino, produto.get("nome", ""),
+                                                            produto.get("preco"), avisos)
+    # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
+    so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
+    registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo else como,
+                                 motivo or detalhe, ok=not motivo and not so_com_o_editor_1)
+    return motivo
 
 
 def _edicao_ligada(fonte):
@@ -632,8 +642,6 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     if pasta and _edicao_ligada(fonte):
         arquivo = os.path.join(pasta, os.path.basename(video["arquivo"]))
         motivo = await asyncio.to_thread(_editar, video, produtos, arquivo)
-        registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo
-                                     else "editado", motivo, ok=not motivo)
         if motivo:
             registrar(video["id"], "sem_edicao", motivo, agora)
             return SEM_EDICAO
@@ -657,8 +665,6 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         motivo = SEM_AVISOS
         if pasta and _edicao_ligada(fonte):
             motivo = await asyncio.to_thread(_editar, video, produtos, arquivo, True)
-            registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo
-                                         else "editado com os avisos", motivo, ok=not motivo)
         if motivo:
             registrar(video["id"], "sem_edicao", motivo, agora)
             return SEM_AVISOS

@@ -290,11 +290,14 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "todos os vídeos que o robô usa" in texto and "Viral" in texto and "Grupo Público" in texto
     assert "desligada" in texto and "O que cada botão faz" in texto
     # Pedido do Rafael (27/10): dois botões só, o Editor 1 sem legendas e o Editor 2 com legendas,
-    # cada um com o vídeo completo e as versões; o Editor 2 só no exemplo, até ele escolher.
+    # cada um com o vídeo completo e as versões. Escolha dele (28/10, P50 e P51): vai ao ar o
+    # completo do Editor 2, nos rascunhos e no modo assistente; sem ele, o Editor 1.
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
         "Editor 1 sem Legendas 👀", "Editor 2 com Legendas ✨", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
-    assert "Editor 1 sem legendas</b> (o que vale nos rascunhos)" in texto
-    assert "Editor 2 com legendas</b> (em teste, só no exemplo)" in texto
+    assert "Editor 2 com legendas</b> (o que vai ao ar)" in texto
+    assert "o vídeo completo do Editor 2, nos rascunhos do robô e no modo assistente" in texto
+    assert "ele vai com o Editor 1, sem legendas" in texto and "nada delas vai ao ar" in texto
+    assert "(Editor 2, só o vídeo completo)" in texto and "em teste" not in texto
     assert "O exemplo de cada editor</b>: primeiro o vídeo completo, como o editor entrega" in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
     assert "a 1ª versão tem uns 3/4 do vídeo completo e a 2ª é a mais curta (pelo menos 8 s" in texto

@@ -697,32 +697,40 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     assert json.loads(robo.pegar(rascunho["id"])["conferencia"]) == ["mesmo vestido", "mesmo vestido"]
 
 
+def _editar_para_postar(chamadas, respostas=None):
+    """O editar_para_postar de mentira: guarda (vídeo, foto, produto, preço, avisos) e grava o editado."""
+    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+        chamadas.append((video, foto, produto, preco, avisos))
+        motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
+        if not motivo:
+            with open(destino, "wb") as arquivo:
+                arquivo.write(b"com os avisos" if avisos else b"editado")
+        return motivo, como + (robo.edicao_video.COM_OS_AVISOS if avisos else ""), detalhe
+    return editar_para_postar
+
+
 def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avisos):
-    # Escolha do Rafael (P37): nos vídeos dele (Autorais), com a edição ligada no painel, o
-    # rascunho leva a foto do produto no começo e a miniatura no topo.
+    # Escolhas do Rafael (P37; 28/10, P51): nos vídeos dele (Autorais), com a edição ligada no
+    # painel, o rascunho vai com o Editor 2: a foto do produto no começo, a miniatura, a seta e
+    # as legendas, com o nome e o preço do produto da API.
     _fonte(monkeypatch)
     editados = []
-
-    def editar(video, foto, destino, avisos=False):
-        editados.append((video, foto))
-        with open(destino, "wb") as arquivo:
-            arquivo.write(b"editado")
-        return ""
 
     async def analisar(arquivo, prompt, imagens=None):
         return '{"confere": true, "motivo": "vestido"}'
 
     # A mesma foto do anúncio vai à conferência da IA (com a foto) e à edição.
-    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto do anuncio")
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
     monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
-    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar(editados))
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     rascunho = robo.esperando_aprovacao()[0]
     assert open(rascunho["arquivo"], "rb").read() == b"editado"
-    assert editados == [(os.path.abspath("archive/vestido.mp4"), b"foto do anuncio")]
-    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
-                     robo.PROCESSO_DA_EDICAO) == ("editado",)
+    assert editados == [(os.path.abspath("archive/vestido.mp4"), b"foto do anuncio", VESTIDO, 59.9, False)]
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS, 1)
 
 
 def test_rascunho_sem_edicao_nao_sai_com_a_edicao_ligada(monkeypatch, avisos):
@@ -746,18 +754,11 @@ def test_sem_edicao_desligada_ou_quando_falha(monkeypatch, tmp_path):
     original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
     with open(original, "wb") as arquivo:
         arquivo.write(b"original")
-    respostas, chamadas = ["o ffmpeg falhou", ""], []
-
-    def editar(video, foto, destino, avisos=False):
-        chamadas.append(video)
-        motivo = respostas.pop(0)
-        if not motivo:
-            with open(destino, "wb") as arquivo:
-                arquivo.write(b"editado")
-        return motivo
-
-    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto")
-    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    respostas = [("o ffmpeg falhou", robo.edicao_video.SO_COM_O_EDITOR_1, ""),
+                 ("", robo.edicao_video.COM_LEGENDAS, "")]
+    chamadas = []
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"foto", "nome": VESTIDO, "preco": 59.9})
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar(chamadas, respostas))
     video = {"arquivo": original, "link": LINK}
     # Desligada: nenhum vídeo é editado.
     robo.copiar_para_o_rascunho(video, "autorais", copia)
@@ -769,12 +770,30 @@ def test_sem_edicao_desligada_ou_quando_falha(monkeypatch, tmp_path):
     with pytest.raises(robo.Parada) as parada:
         robo.copiar_para_o_rascunho(video, "viral", copia)
     assert parada.value.motivo.startswith(robo.MOTIVO_SEM_EDICAO) and not parada.value.do_video
-    assert chamadas == [original] and not os.path.exists(copia)
+    assert [c[0] for c in chamadas] == [original] and not os.path.exists(copia)
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_EDICAO) == ("vídeo de lado", "o ffmpeg falhou", 0)
     # Todos os vídeos do Rafael são autorais: o do Viral também vai editado.
     robo.copiar_para_o_rascunho(video, "viral", copia)
     assert open(copia, "rb").read() == b"editado"
+
+
+def test_sem_o_editor_2_o_rascunho_vai_com_o_editor_1_e_o_registro_anota(monkeypatch, tmp_path):
+    # Escolha do Rafael (28/10, P51): se o Editor 2 não sai, o vídeo vai com o Editor 1, sem
+    # legendas, e o rascunho não se perde; o registro anota (como falha, para o checkup ver).
+    original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
+    with open(original, "wb") as arquivo:
+        arquivo.write(b"original")
+    chamadas = []
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"foto", "nome": VESTIDO, "preco": 59.9})
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar(chamadas, [
+        ("", robo.edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: o ffmpeg falhou")]))
+    ativar(edicao_ligada=True)
+    robo.copiar_para_o_rascunho({"arquivo": original, "link": LINK}, "viral", copia)
+    assert open(copia, "rb").read() == b"editado"
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.SO_COM_O_EDITOR_1,
+                                                  "o Editor 2 não saiu: o ffmpeg falhou", 0)
 
 
 
@@ -784,15 +803,8 @@ def test_bebida_alcoolica_vai_com_a_capa_dos_avisos_e_sem_edicao_fica_de_lado(mo
     with open(original, "wb") as arquivo:
         arquivo.write(b"original")
     chamadas = []
-
-    def editar(video, foto, destino, avisos=False):
-        chamadas.append(avisos)
-        with open(destino, "wb") as arquivo:
-            arquivo.write(b"com os avisos" if avisos else b"editado")
-        return ""
-
-    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto")
-    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"foto", "nome": "Vinho", "preco": 39.9})
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar(chamadas))
     video = {"arquivo": original, "link": LINK}
     # Sem a edição não há capa com os avisos: o vídeo fica de lado e não volta.
     with pytest.raises(robo.Parada) as parada:
@@ -801,9 +813,9 @@ def test_bebida_alcoolica_vai_com_a_capa_dos_avisos_e_sem_edicao_fica_de_lado(mo
     assert not chamadas and not os.path.exists(copia)
     ativar(edicao_ligada=True)
     robo.copiar_para_o_rascunho(video, "viral", copia, alcool=True)
-    assert chamadas == [True] and open(copia, "rb").read() == b"com os avisos"
+    assert [c[-1] for c in chamadas] == [True] and open(copia, "rb").read() == b"com os avisos"
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
-                     robo.PROCESSO_DA_EDICAO) == ("editado com os avisos",)
+                     robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS + robo.edicao_video.COM_OS_AVISOS,)
 
 def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, tmp_path):
     # Escolha do Rafael (25/10, P39): no vídeo de Ver Produtos (vários produtos), a foto da
@@ -813,28 +825,32 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar(video, foto, destino, avisos=False):
-        fotos.append(foto)
+    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+        fotos.append((foto, produto, preco))
         if not foto:
-            return "a foto do anúncio não veio"
+            return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editado")
-        return ""
+        return "", robo.edicao_video.COM_LEGENDAS, ""
 
     async def buscar(termo, limite=10, sort_type=2):
         buscas.append((termo, sort_type))
-        return [{"productName": "Capinha Transparente Celular", "imageUrl": "https://cf.shopee.com.br/outra"},
+        return [{"productName": "Capinha Transparente Celular", "imageUrl": "https://cf.shopee.com.br/outra",
+                 "priceMin": "9.90"},
                 {"productName": "Vestido Infantil Estampado Gatinho Verão Menina",
-                 "imageUrl": "https://cf.shopee.com.br/vestido"}]
+                 "imageUrl": "https://cf.shopee.com.br/vestido", "priceMin": "45.50"}]
 
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
     monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"foto de " + endereco.encode())
-    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: pytest.fail("o link é de vídeo, não de produto"))
-    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: pytest.fail("o link é de vídeo, não de produto"))
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", editar_para_postar)
     ativar(edicao_ligada=True)
     video = {"arquivo": original, "link": LINK, "de_video": True}
     robo.copiar_para_o_rascunho(video, "viral", copia, ["Vestido Infantil Estampado Gatinho Verão Menina", "Laço"])
-    assert fotos == [b"foto de https://cf.shopee.com.br/vestido"] and open(copia, "rb").read() == b"editado"
+    # A foto e o preço (das legendas do Editor 2) são os do anúncio achado; o nome, o do app.
+    assert fotos == [(b"foto de https://cf.shopee.com.br/vestido", "Vestido Infantil Estampado Gatinho Verão Menina",
+                      45.5)]
+    assert open(copia, "rb").read() == b"editado"
     # Busca pelo nome, por relevância (1), com as primeiras palavras.
     assert buscas == [("Vestido Infantil Estampado Gatinho Verão Menina", 1)]
     # Nenhuma oferta com o nome parecido o bastante: sem a foto não há edição, e o vídeo fica
@@ -842,7 +858,7 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
     os.remove(copia)
     with pytest.raises(robo.Parada) as parada:
         robo.copiar_para_o_rascunho(video, "viral", copia, ["Tênis Esportivo Corrida Masculino"])
-    assert fotos[-1] is None and not os.path.exists(copia) and parada.value.do_video
+    assert fotos[-1][0] is None and not os.path.exists(copia) and parada.value.do_video
     assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
                      robo.PROCESSO_DA_EDICAO) == ("vídeo de lado", "a foto do anúncio não veio")
 
