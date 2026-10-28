@@ -169,6 +169,47 @@ def ler_journal(servico):
     return [linha for linha in r.stdout.splitlines() if linha.strip()]
 
 
+# O que o systemd anotou de cada robô, com a hora: diz se uma parada foi o robô caindo
+# sozinho (o systemd o reinicia) ou o robô que demorou a parar num reinício (deploy) e foi
+# morto. Só as palavras fixas do systemd, nunca o texto do robô.
+REINICIO_AUTOMATICO = "reinício automático"
+MORTO_AO_PARAR = "não parou no tempo e foi morto"
+EVENTOS_DO_SYSTEMD = (
+    (re.compile(r"Scheduled restart job"), REINICIO_AUTOMATICO),
+    (re.compile(r"State 'stop-sigterm' timed out"), MORTO_AO_PARAR),
+    (re.compile(r"Main process exited, code=(\w+), status=(\w+)/(\w+)"), "o processo saiu ({0}, {2})"),
+    (re.compile(r"Failed with result '([\w-]+)'"), "terminou com falha ({0})"),
+)
+# A saída normal de uma parada pedida (deploy, painel) não conta.
+SAIDAS_NORMAIS = {"SUCCESS", "TERM"}
+
+
+def eventos_do_systemd(linhas):
+    """[(HH:MM, evento)] das linhas do journal em short-iso que o systemd escreveu sobre o robô."""
+    eventos = []
+    for linha in linhas:
+        if " systemd[1]: " not in linha:
+            continue
+        mensagem = linha.split(" systemd[1]: ", 1)[1]
+        for padrao, texto in EVENTOS_DO_SYSTEMD:
+            achado = padrao.search(mensagem)
+            if not achado:
+                continue
+            if texto.startswith("o processo saiu") and achado.group(3) in SAIDAS_NORMAIS:
+                break
+            eventos.append((linha[11:16], texto.format(*achado.groups())))
+            break
+    return eventos
+
+
+def ler_eventos_do_systemd(servico):
+    """Os eventos do systemd do serviço nas últimas 24 h, na hora de Brasília."""
+    r = subprocess.run(["sudo", "-n", "journalctl", "-u", f"{servico}.service", "--since", "24 hours ago",
+                        "-o", "short-iso", "-q"], capture_output=True, text=True, timeout=180,
+                       env={**os.environ, "TZ": "America/Sao_Paulo"})
+    return eventos_do_systemd(r.stdout.splitlines())
+
+
 def _lugar_do_quadro(caminho, linha, funcao):
     """O quadro do rastro como arquivo:linha (função); de biblioteca, o caminho dentro dela."""
     if "site-packages/" in caminho:
@@ -226,7 +267,9 @@ def resumo_do_log(linhas, modelos):
     depois = linhas[inicios[-1] + 1:] if inicios else linhas
     return {
         "inicios": len(inicios),
-        "quedas": sum(1 for l in linhas if "Scheduled restart job" in l or "Failed with result" in l),
+        # Queda é o reinício que o systemd fez sozinho; o "Failed with result" também sai quando
+        # o deploy mata o robô que demorou a parar (eventos_do_systemd mostra qual foi).
+        "quedas": sum(1 for l in linhas if "Scheduled restart job" in l),
         "rastros": sum(1 for l in linhas if l.startswith("Traceback (most recent call last)")),
         "rastros_por_lugar": rastros_do_log(linhas),
         "rastros_depois": sum(1 for l in depois if l.startswith("Traceback (most recent call last)")),
@@ -1009,6 +1052,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
     for servico, r in logs.items():
         if r["quedas"]:
             pontos.append(f"{servico}: caiu e o systemd reiniciou {r['quedas']} vez(es)")
+        mortos = sum(1 for _hora, evento in r.get("eventos", ()) if evento == MORTO_AO_PARAR)
+        if mortos:
+            pontos.append(f"{servico}: não parou no tempo ao ser parado e o systemd o matou {mortos} vez(es)")
         # Rastro só de antes do último início (o deploy trouxe o código novo) não cobra:
         # a seção do log mostra quantos vieram depois.
         depois = r.get("rastros_depois", r["rastros"])
@@ -1155,9 +1201,16 @@ def main():
         if servico == "downloader_bot":
             linhas_baixador = linhas
         r = logs[servico] = resumo_do_log(linhas, modelos)
+        if servico not in LOGS_POR_NOME:
+            try:
+                r["eventos"] = ler_eventos_do_systemd(servico)
+            except Exception as e:
+                print(f"   systemd: sem os eventos ({type(e).__name__})")
         print(f"{servico}: {len(linhas)} linha(s) | inícios {r['inicios']} | quedas {r['quedas']} | "
               f"rastros {r['rastros']} ({r['rastros_depois']} depois do último início) | avisos {r['avisos']} | "
               f"erros {r['erros']}")
+        if r.get("eventos"):
+            print("   systemd: " + " | ".join(f"{hora} {evento}" for hora, evento in r["eventos"]))
         for onde, texto, nivel, qtd in r["problemas"][:LUGARES_POR_ROBO]:
             print(f"   {qtd:5}x {nivel:8} {onde:34} {texto}")
         depois_por_lugar = {(tipo, lugar): qtd for tipo, lugar, qtd in r["rastros_depois_por_lugar"]}
