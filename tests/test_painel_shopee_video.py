@@ -300,6 +300,7 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "(Editor 2, só o vídeo original, sem cortes)" in texto and "em teste" not in texto
     # Pedido do Rafael (vídeo de 28/10): o 1º vídeo é o original, sem cortes; as versões são modificadas.
     assert "vídeo original, sem cortar nada nem mudar a velocidade" in texto
+    assert "ou se o vídeo já tem texto próprio na tela, ele vai sem os nossos textos" in texto
     assert ("O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições do "
             "editor, como vai ao ar; depois até 2 versões modificadas dele") in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
@@ -1023,6 +1024,10 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     resumo.update(lugar="nenhum")
     legenda = sv.legenda_das_versoes("Copo", resumo, 1, 2)
     assert "Sem texto na tela: a IA não achou lugar" in legenda and "Textos na tela" not in legenda
+    # Escolha do Rafael (P52): o vídeo que já tem texto próprio na tela vai sem as nossas legendas.
+    resumo.update(texto_no_video=True)
+    assert "📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela." in sv.legenda_das_versoes(
+        "Copo", resumo, 1, 2)
     # Os botões de antes do Editor 2 e do 4 valem como o Editor 2.
     assert sv.BOTOES_ANTIGOS_EDITOR_2 == ["Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 4 🎬"]
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))

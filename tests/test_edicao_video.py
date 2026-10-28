@@ -496,6 +496,12 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_o_preco_da_api(monkeyp
     assert dados["ids"] == ["viral:1"] and dados["ids_2"] == ["viral:1"]
     edicao_video.exemplo_editor_2("exemplo.mp4")
     assert pedidos[-1][1] == videos["v2"]
+    # Escolha do Rafael (P52): o vídeo que já tem texto próprio na tela vai sem as nossas legendas.
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+        "nome": "Presilha", "vantagem": "Firme", "versoes": versoes, "falas": [], "lugar": "alto",
+        "texto_no_video": True})
+    _, _, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
+    assert pedidos[-1][-1] == edicao_video.SEM_LUGAR and resumo["texto_no_video"]
 
 
 def test_onde_alguem_fala_o_ritmo_nao_corta_nao_acelera_nem_poe_camera_lenta():
@@ -811,8 +817,13 @@ def test_o_que_vai_ao_ar_e_o_completo_do_editor_2_com_as_legendas(monkeypatch, t
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "nenhum"})
     assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
         "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_LUGAR_LIVRE)
-    # Sem a resposta da IA, só o preço na tela.
+    # Escolha do Rafael (P52): o vídeo que já tem texto próprio na tela vai sem as nossas legendas.
     montados.clear()
+    _textos_da_tela(monkeypatch, {"nome": "Presilha", "vantagem": "Firme", "lugar": "alto", "texto_no_video": True})
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Presilha", 20.93) == (
+        "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.TEXTO_JA_NO_VIDEO)
+    assert montados == []
+    # Sem a resposta da IA, só o preço na tela.
     _textos_da_tela(monkeypatch, {})
     assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
         "", edicao_video.COM_LEGENDAS, edicao_video.SEM_OS_TEXTOS_DA_IA)
@@ -874,12 +885,16 @@ def test_textos_da_tela_pede_so_o_do_video_completo(monkeypatch):
 
     async def analisar(video, prompt, imagens=None):
         pedidos.append(prompt)
-        return '{"nome": "Copo Térmico", "vantagem": "Mantém gelado 🧊", "falas": [], "lugar": "meio"}'
+        return ('{"nome": "Copo Térmico", "vantagem": "Mantém gelado 🧊", "lugar": "meio", '
+                '"texto_no_video": true}')
 
     monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
-    assert edicao_video.textos_da_tela("v.mp4", "Copo Marca X") == {
-        "nome": "Copo Térmico", "vantagem": "Mantém gelado", "falas": [], "lugar": "meio"}
-    assert "Copo Marca X" in pedidos[0] and "versoes" not in pedidos[0]
+    textos = edicao_video.textos_da_tela("v.mp4", "Copo Marca X")
+    assert textos == {"nome": "Copo Térmico", "vantagem": "Mantém gelado", "lugar": "meio", "texto_no_video": True}
+    assert "Copo Marca X" in pedidos[0] and "versoes" not in pedidos[0] and "texto_no_video" in pedidos[0]
+    # O vídeo com texto próprio na tela fica sem lugar para as nossas legendas (P52).
+    assert edicao_video.lugar_dos_textos(textos) == edicao_video.SEM_LUGAR
+    assert edicao_video.lugar_dos_textos({"lugar": "meio", "texto_no_video": False}) == "meio"
 
 
 def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):

@@ -747,7 +747,7 @@ def texto_edicao(config):
         "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto e uma vantagem que o vídeo "
         "mostra (escritos pela IA, sem marca) e o preço (\"A partir de\", pela API), em letra média, no alto, logo "
         "abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, "
-        "o vídeo vai sem os textos.\n\n"
+        "ou se o vídeo já tem texto próprio na tela, ele vai sem os nossos textos.\n\n"
         "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
@@ -977,6 +977,8 @@ def _linha_dos_textos(textos):
 def _linha_do_lugar(resumo, com_textos):
     """[a linha do lugar dos textos na legenda do exemplo], ou [] sem nada a dizer."""
     if not com_textos:
+        if resumo.get("texto_no_video"):
+            return ["📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela."]
         return (["📍 Sem texto na tela: a IA não achou lugar que não cubra o rosto ou o produto."]
                 if resumo.get("lugar") == edicao_video.SEM_LUGAR else [])
     lugar = {"alto": "no alto, ao lado da miniatura", "meio": "logo abaixo da miniatura",

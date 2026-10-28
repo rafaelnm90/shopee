@@ -211,7 +211,14 @@ _LUGAR_NO_PROMPT = (
     "uns 33% da largura, entre uns 31% e 44% da altura) ou \"direita\" (o mesmo, na borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem o produto ou um rosto.\n"
 )
-_FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT
+# Vídeo que já tem texto próprio na tela vai sem as nossas legendas, que cobririam o dele
+# (escolha do Rafael, P52: DECISOES.md, Shopee Vídeo).
+_TEXTO_NO_VIDEO_NO_PROMPT = (
+    "Diga também se o próprio vídeo já tem texto escrito na tela, como legenda, título ou frase por cima da "
+    "imagem, na maior parte do tempo (não contam marca d'água, nome do perfil nem o que está escrito no "
+    "produto ou na embalagem): \"texto_no_video\", true ou false.\n"
+)
+_FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
@@ -219,8 +226,9 @@ PROMPT_DOS_TEXTOS = (
     + _NOME_NO_PROMPT
     + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
     f"até {MAXIMO_DA_VANTAGEM} caracteres.\n"
-    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"lugar\": \"alto\"}}"
+    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"lugar\": \"alto\", "
+    "\"texto_no_video\": false}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -433,21 +441,31 @@ def _resposta_da_ia(video, prompt):
 
 
 def _nome_lugar_e_falas(dados):
-    """O nome, o lugar e as falas da resposta da IA, só os que vieram certos."""
+    """O nome, o lugar, as falas e se o vídeo já tem texto, da resposta da IA, só os que vieram certos."""
     textos = {}
     nome = _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
     if nome:
         textos["nome"] = nome
     if dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
         textos["lugar"] = dados["lugar"]
+    if isinstance(dados.get("texto_no_video"), bool):
+        textos["texto_no_video"] = dados["texto_no_video"]
     falas = _falas(dados.get("falas"))
     if falas is not None:
         textos["falas"] = falas
     return textos
 
 
+def lugar_dos_textos(textos):
+    """O lugar das nossas legendas pela resposta da IA: nenhum quando o vídeo já tem texto na tela (P52)."""
+    return SEM_LUGAR if textos.get("texto_no_video") else textos.get("lugar")
+
+
 def textos_da_tela(video, nome):
-    """{"nome", "vantagem", "lugar"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta."""
+    """
+    {"nome", "vantagem", "lugar", "texto_no_video"} que a IA escreveu vendo o vídeo, só o que
+    veio certo; {} sem resposta.
+    """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
     textos = _nome_lugar_e_falas(dados)
     vantagem = _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
@@ -577,6 +595,7 @@ SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
+TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome e a vantagem"
 
 
@@ -599,13 +618,15 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
     textos = textos_da_tela(video, produto) if produto else {}
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), preco,
-                                    textos.get("lugar"), avisos)
+                                    lugar_dos_textos(textos), avisos)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
     if not motivo_2:
         detalhe = ""
-        if resumo.get("lugar") == SEM_LUGAR:
+        if textos.get("texto_no_video"):
+            detalhe = TEXTO_JA_NO_VIDEO
+        elif resumo.get("lugar") == SEM_LUGAR:
             detalhe = SEM_LUGAR_LIVRE
         elif not (textos.get("nome") or textos.get("vantagem")):
             detalhe = SEM_OS_TEXTOS_DA_IA
@@ -738,7 +759,8 @@ PROMPT_DAS_VERSOES = (
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
     + _REGRAS_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"versoes\": [{{\"vantagem\": \"...\", "
-    "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\"}}"
+    "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
+    "\"texto_no_video\": false}}"
 )
 
 
@@ -950,6 +972,7 @@ def _exemplo_das_versoes(destino, lista, editar_versoes):
         textos = textos_das_versoes(arquivo, produto["nome"]) if produto.get("nome") else {}
         motivo, resumo = editar_versoes(arquivo, foto, textos, produto)
         resumo["lugar_da_ia"] = "lugar" in textos
+        resumo["texto_no_video"] = bool(textos.get("texto_no_video"))
         resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem"))
         resumo["versoes_da_ia"] = len(textos.get("versoes", []))
         return motivo, resumo
@@ -971,4 +994,4 @@ def exemplo_editor_2(destino):
     """O exemplo do Editor 2 (com legendas), como o do Editor 1, com os textos na tela e o preço da API."""
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
-        produto.get("preco"), textos.get("falas"), textos.get("lugar")))
+        produto.get("preco"), textos.get("falas"), lugar_dos_textos(textos)))
