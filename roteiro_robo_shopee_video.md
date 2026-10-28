@@ -190,7 +190,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      com sucesso!") e o voltar volta aos resultados.
   - **Como o Rafael escolhe:** na ordem Comissão (%) vêm os de comissão alta, mas muito caros;
     por isso ele prefere **Vendas Populares** e, ali, pega os que têm **COMISSÃO EXTRA**, que
-    vendem mais. A ordem que o robô usa entre os resultados foi perguntada a ele em 28/10.
+    vendem mais. No robô (escolhas dele em 28/10, P67 e P68): só o mesmo item (mesma marca,
+    modelo e cor, conferido pela IA); ordena por Vendas Populares e, entre os primeiros (uns
+    20), fica com os que pagam mais reais por venda, até 20% mais caros que o do post (P58).
   - **Falta mapear no Motorola:** os ids e textos da câmera da barra, da galeria, dos recortes,
     das ordens e dos resultados; se o "Taxa de comissão" cortado vem inteiro na leitura da
     tela; e o "Ver Mais (N)" do Ver Produtos (P66), quando a fonte trouxer um vídeo com ele.
