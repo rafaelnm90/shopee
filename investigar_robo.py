@@ -5,9 +5,9 @@ vídeo ("o link não diz o produto do vídeo"). Para os vídeos que o robô pulo
 próximos da Fonte dos Vídeos do painel, segue o link como o robô segue e mostra só a
 forma: por que tipos de página ele passou, se chegou a um produto ou a um vídeo (Ver
 Produtos), se a API de afiliado devolve a oferta do produto e, nos próximos, se a busca
-acha o mesmo produto pagando mais comissão (P33, sem a IA). No fim, as contagens. Antes,
-cada tentativa das últimas 24 h que não deu certo, com a hora, o passo e a forma do
-motivo (o texto fixo do código, com "…" no que muda de um vídeo para outro).
+acha o mesmo produto pagando mais por venda (P33 e P58, sem a IA). No fim, as contagens.
+Antes, cada tentativa das últimas 24 h que não deu certo, com a hora, o passo e a forma
+do motivo (o texto fixo do código, com "…" no que muda de um vídeo para outro).
 
 Usado pelo workflow investigar_robo.yml (só à mão). O log do Actions é público: nunca
 imprime links, nomes de produto ou textos; só tipos de página, contagens e o motivo do
@@ -53,23 +53,27 @@ async def classificar(link):
 async def comissao(link):
     """
     O que a troca pelo mesmo produto que paga mais (P33) acharia, sem a IA e sem o celular:
-    quantos vieram na busca por maior comissão, quantos de nome parecido pagam mais que o do
-    link e quantos pontos a mais paga o melhor. Só números.
+    quantos vieram na busca por maior comissão, quantos de nome e preço parecidos pagam mais
+    por venda que o do link (P58) e quanto a mais por venda paga o melhor, em %. Só números:
+    o valor em reais fica fora do log, que é público.
     """
     import robo_shopee_video as robo
     produtos, _ = await assistente.produtos_do_link(link)
     if not produtos:
         return "comissão: a API não diz o produto", False
     original = produtos[0]
+    if not original["preco"]:
+        return "comissão: a API não diz o preço do produto", False
     ofertas = await api_shopee.buscar_ofertas_shopee(robo.termo_da_busca(original["nome"]),
                                                      limite=robo.OFERTAS_NA_BUSCA, sort_type=5)
     sem_taxa = sum(1 for oferta in ofertas if not oferta.get("commissionRate"))
     candidatos = robo.candidatos_de_mais_comissao(original, ofertas)
     texto = f"comissão: {len(ofertas)} na busca ({sem_taxa} sem a taxa)"
     if not candidatos:
-        return f"{texto}, nenhum parecido pagando mais", False
-    return (f"{texto}, {len(candidatos)} parecido(s) pagando mais (o melhor: "
-            f"+{candidatos[0]['comissao'] - original['comissao']:.1f} ponto(s))"), True
+        return f"{texto}, nenhum parecido pagando mais por venda", False
+    antes = robo.valor_por_venda(original["preco"], original["comissao"])
+    ganho = f"+{(candidatos[0]['valor'] / antes - 1) * 100:.0f}% por venda" if antes else "o do link não paga comissão"
+    return f"{texto}, {len(candidatos)} parecido(s) pagando mais por venda (o melhor: {ganho})", True
 
 
 def links_das_fontes():
@@ -204,7 +208,8 @@ async def investigar(quantos):
         extra = ""
         if resultado == "produto com oferta na API de afiliado":
             extra, achou = await comissao(link)
-            contagem["próximo: há o mesmo produto pagando mais" if achou else "próximo: nenhum pagando mais"] += 1
+            contagem["próximo: há o mesmo produto pagando mais por venda" if achou
+                     else "próximo: nenhum pagando mais por venda"] += 1
             extra = f" | {extra}"
         print(f"   {i}. caminho: {' → '.join(tipos)} | {resultado}{extra}")
 
