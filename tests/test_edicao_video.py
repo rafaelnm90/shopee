@@ -737,19 +737,31 @@ VERSOES_DA_IA = [{"vantagem": "Fechamento com zíper", "inicio": 9.0, "fim": 10.
                  {"vantagem": "Várias cores", "inicio": 4.5, "fim": 6.0, "chamada": "Escolha a sua"}]
 
 
-def test_editor_1_entrega_o_completo_e_as_versoes_sem_textos_nem_acelerar(monkeypatch, tmp_path):
+def test_editor_1_entrega_o_original_e_as_versoes_remontadas_sem_textos(monkeypatch, tmp_path):
     # Pedidos do Rafael (27/10): o Editor 1 sem legendas entrega o vídeo completo e as versões,
-    # sem textos e nada acelerado; cada versão segue do seu momento e tem um tamanho (P49).
+    # cada uma seguindo do seu momento e com um tamanho (P49). (Vídeo de 28/10, 00:12) o mesmo
+    # padrão do Editor 2: o original sem cortes e as versões remontadas, só sem legendas.
     montados, editados = _versoes_de_mentira(monkeypatch)
     motivo, resumo = edicao_video.editar_1_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), VERSOES_DA_IA, falas=[])
+    # O original vai inteiro direto ao Editor 1; as versões são remontadas antes.
     assert motivo == "" and editados == [("v.mp4", "exemplo_1.mp4"), ("remontado_2.mp4", "exemplo_2.mp4"),
                                          ("remontado_3.mp4", "exemplo_3.mp4")]
-    assert montados == [([(9.0, 12.0, 1.0), (0.0, 6.0, 1.0)], 0), ([(4.5, 12.0, 1.0), (0.0, 0.5, 1.0)], 0)]
+    # As mesmas versões do Editor 2 (o trecho calmo acelerado), sem nenhum texto por cima.
+    montados_1 = list(montados)
+    montados.clear()
+    edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha", "Leve",
+                                    VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
+    assert [m[0] for m in montados_1] == [m[0] for m in montados[1:]]
+    assert [m[0][0] for m in montados_1] == [(9.0, 12.0, 1.0), (4.5, 8.0, edicao_video.ACELERADO)]
+    assert [m[1] for m in montados_1] == [0, 0]
     assert all(not v["textos"] for v in resumo["versoes"]) and resumo["inteiro"] == 12.0
-    assert [(v["gancho"], v["curta"], v["remontado"]) for v in resumo["versoes"]] == [
-        (None, False, 12.0), ((9.0, 10.5), True, 9.0), ((4.5, 6.0), True, 8.0)]
+    assert resumo["remontagem"]["acelerados"] == 1
+    assert [(v["gancho"], v["curta"]) for v in resumo["versoes"]] == [
+        (None, False), ((9.0, 10.5), True), ((4.5, 6.0), True)]
+    assert [v["remontado"] for v in resumo["versoes"]] == [
+        12.0, pytest.approx(9.0), pytest.approx(edicao_video.MINIMO_DO_REMONTADO)]
     assert [v["vantagem"] for v in resumo["versoes"]] == ["", "Fechamento com zíper", "Várias cores"]
-    # Sem momento que sirva, só o completo: o próprio vídeo com o Editor 1, sem remontar.
+    # Sem momento que sirva, só o original: o próprio vídeo com o Editor 1, sem remontar.
     montados.clear()
     editados.clear()
     _, resumo = edicao_video.editar_1_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), [], falas=[])

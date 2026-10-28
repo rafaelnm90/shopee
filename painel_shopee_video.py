@@ -757,18 +757,19 @@ def texto_edicao(config):
         "do editor, como vai ao ar; depois até 2 versões modificadas dele. Cada versão abre com um momento "
         "diferente, que a IA escolhe vendo o vídeo, e segue dali (o que vinha antes vai para o fim); a 1ª tem "
         "até uns 3/4 do vídeo original e a 2ª é a mais curta (pelo menos "
-        f"{edicao_video.MINIMO_DO_REMONTADO} s; sai o fim, nunca o meio de uma fala). No Editor 2, as versões "
-        "também ficam sem as partes paradas, com os trechos calmos mais rápidos e uma câmera lenta curta (onde "
-        "alguém fala, nada muda), e cada uma mostra na tela a vantagem do seu momento e termina com uma chamada "
-        "diferente para o produto. Só sai versão com um momento a pelo menos "
+        f"{edicao_video.MINIMO_DO_REMONTADO} s; sai o fim, nunca o meio de uma fala). Nos dois editores, as "
+        "versões também ficam sem as partes paradas, com os trechos calmos mais rápidos e uma câmera lenta curta "
+        "(onde alguém fala, nada muda); no Editor 2, cada uma mostra na tela a vantagem do seu momento e termina "
+        "com uma chamada diferente para o produto, e no Editor 1 vai sem textos. Só sai versão com um momento a pelo menos "
         f"{edicao_video.ENTRE_VERSOES:.0f} s do começo "
         "do vídeo e dos das outras: vídeo curto, ou com fala do começo ao fim, rende menos versões. As versões "
         "ficam só no exemplo: nada delas vai ao ar.\n\n"
         f"Agora: {rotulo_edicao(config)} (Editor 2, só o vídeo original, sem cortes)\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EDITOR_1}</b>: manda no seu privado, já editados e sem postar, o vídeo original e as "
-        "versões modificadas do próximo vídeo que o robô pegaria, sem legendas; cada toque mostra um vídeo novo.\n"
-        f"✨ <b>{BOTAO_EDITOR_2}</b>: o mesmo, com o Editor 2 e as legendas, e o que cada versão mudou.\n"
+        "versões modificadas do próximo vídeo que o robô pegaria, sem legendas, e o que cada versão mudou; cada "
+        "toque mostra um vídeo novo.\n"
+        f"✨ <b>{BOTAO_EDITOR_2}</b>: o mesmo, com o Editor 2 e as legendas.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
         "próximos rascunhos e nos vídeos do modo assistente. Com a edição ligada, só vai vídeo editado: o vídeo "
         "que não sair editado fica de lado e o robô pega o próximo."
@@ -917,7 +918,7 @@ EXEMPLO_INTERROMPIDO_RECENTE = timedelta(minutes=30)
 # O nome, o botão e uns minutos a mais que o exemplo de cada editor leva (até 3 vídeos).
 NOME_DO_EDITOR = {1: "Editor 1 (sem legendas)", 2: "Editor 2 (com legendas)"}
 BOTAO_DO_EDITOR = {1: BOTAO_EDITOR_1, 2: BOTAO_EDITOR_2}
-MINUTOS_DO_EXEMPLO = {1: 5, 2: 8}
+MINUTOS_DO_EXEMPLO = {1: 8, 2: 8}
 # A anotação de um exemplo de antes da junção dos editores (27/10) pode dizer 3 ou 4.
 EDITOR_DE_ANTES = {3: 1, 4: 2}
 
@@ -1004,7 +1005,7 @@ def _tamanho_da_versao(versoes, indice, inteiro):
 
 
 def _linhas_da_remontagem(remontagem):
-    """O que a remontagem das versões do Editor 2 muda no vídeo original (números), para a legenda."""
+    """O que a remontagem das versões muda no vídeo original (números), para a legenda."""
     linhas = []
     cortado = remontagem.get("cortado", 0)
     linhas.append(f"✂️ Partes paradas tiradas: {_segundos(cortado)}" if cortado >= 0.5
@@ -1042,7 +1043,7 @@ def legenda_das_versoes(nome, resumo, indice, editor):
         linhas.append(_linha_do_original(editor))
     linhas.append(f"⏱️ {_segundos(versao.get('remontado', 0))} (mais os {edicao_video.SEGUNDOS_DA_FOTO} s da foto)"
                   + _tamanho_da_versao(versoes, indice, resumo.get("inteiro")))
-    if gancho and editor == 2:
+    if gancho:
         linhas += _linhas_da_remontagem(resumo.get("remontagem") or {})
     if versao.get("textos"):
         linhas.append(_linha_dos_textos(versao["textos"]))
