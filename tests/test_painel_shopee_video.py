@@ -322,7 +322,8 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     # cada um com o vídeo completo e as versões. Escolha dele (28/10, P50 e P51): vai ao ar o
     # completo do Editor 2, nos rascunhos e no modo assistente; sem ele, o Editor 1.
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
-        "Editor 1 sem Legendas 👀", "Editor 2 com Legendas ✨", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
+        "Editor 1 sem Legendas 👀", "Editor 2 com Legendas ✨", "Ligar Edição ✅", "Capa com Chamada 🏷️",
+        "Voltar ao Robô 🔙"]
     assert "Editor 2 com legendas</b> (o que vai ao ar)" in texto
     assert "o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente" in texto
     assert "ele vai com o Editor 1, sem legendas" in texto and "nada delas vai ao ar" in texto
@@ -340,6 +341,63 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
     rodar(sv.ligar_edicao_handler(Msg("Desligar Edição ⏸️"), est))
     assert not sv.edicao_video.vale_para("autorais")
+
+
+def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(bm, Msg, Est):
+    # Escolha do Rafael (29/10, P76): a capa com chamada começa desligada; ele vê o exemplo e liga
+    # em Edição dos Vídeos ✂️ → Capa com Chamada 🏷️. Pedido dele: sem atrapalhar os números.
+    sv, est = _painel(bm), Est()
+    assert "Capa com chamada: ⏸️ <b>desligada</b>" in sv.texto_robo(sv.ler_config())
+    msg = Msg(sv.BOTAO_CAPA)
+    rodar(sv.capa_handler(msg, est))
+    texto = msg.saidas[-1]
+    assert "Os números ficam livres" in texto and 'selo "Fixado"' in texto and "O que cada botão faz" in texto
+    assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto
+    assert _textos(sv.teclado_capa(sv.ler_config())) == [
+        "Ver Exemplo da Capa 👀", "Ligar Capa com Chamada ✅", "Voltar à Edição 🔙", "Voltar ao Robô 🔙"]
+    rodar(sv.ligar_capa_handler(Msg(sv.BOTAO_LIGAR_CAPA), est))
+    config = sv.ler_config()
+    assert sv.edicao_video.capa_ligada() and config["capa_com_chamada_desde"]
+    assert "Desligar Capa com Chamada ⏸️" in _textos(sv.teclado_capa(config))
+    assert "Capa com chamada: ✅ <b>ligada</b> desde " in sv.texto_robo(config)
+    rodar(sv.ligar_capa_handler(Msg(sv.BOTAO_DESLIGAR_CAPA), est))
+    assert not sv.edicao_video.capa_ligada()
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
+                     "edição do vídeo: capa com chamada") == ("desligada",)
+    # Com vídeos medidos na grade, a tela mostra o que a medição já tem (o painel é só do Rafael).
+    for postado, chamada, vistas in (("2026-10-20 10:00:00", "", [["2026-10-21 10:00:00", 120]]),
+                                     ("2026-10-27 10:00:00", "1", [["2026-10-28 09:00:00", 190]])):
+        sv.robo.atualizar(sv.robo.criar("v", None), estado="postado", postado_em=postado, chamada=chamada,
+                          marca="0f" * 8, vistas=vistas)
+    medicao = sv.robo.visualizacoes.comparar(sv.robo.listar("postado"))
+    texto = sv.texto_capa(sv.ler_config(), medicao)
+    assert "Até agora: 1 vídeo(s) sem a chamada e 1 com a chamada medidos na grade." in texto
+    assert ("Com 1 dia(s) de postado: sem a chamada, mediana de 120 visualizações; com a chamada, mediana de 190 "
+            "visualizações.") in texto
+    # A volta leva à Edição dos Vídeos.
+    msg = Msg(sv.BOTAO_VOLTAR_EDICAO)
+    rodar(sv.edicao_handler(msg, est))
+    assert msg.saidas[-1].startswith("✂️ <b>Edição dos Vídeos</b>")
+
+
+def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypatch):
+    sv, est = _painel(bm), Est()
+    monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
+        "Copo Térmico", "", {"capa": b"capa", "grade": b"grade", "chamada": "Gelado por 12 horas"}))
+    msg = MsgComMidia(Msg, sv.BOTAO_EXEMPLO_DA_CAPA)
+    rodar(sv.exemplo_capa_handler(msg, est))
+    tipo, caminhos, legenda = msg.midias[-1]
+    assert tipo == "album" and [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png"]
+    assert "Copo Térmico" in legenda and "“Gelado por 12 horas”" in legenda and "não foi postado" in legenda
+    assert "O número de visualizações fica na faixa preta de baixo" in legenda
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     "edição do vídeo: exemplo da capa") == ("mandado",)
+    # Sem o exemplo, o motivo.
+    monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
+        None, "a IA não escreveu a vantagem do produto deste vídeo", None))
+    msg = MsgComMidia(Msg, sv.BOTAO_EXEMPLO_DA_CAPA)
+    rodar(sv.exemplo_capa_handler(msg, est))
+    assert "não saiu: a IA não escreveu a vantagem do produto deste vídeo" in msg.saidas[-1] and not msg.midias
 
 
 def test_produtos_a_mais_ligam_e_desligam_pelo_painel(bm, Msg, Est):

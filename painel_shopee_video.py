@@ -537,6 +537,12 @@ BOTOES_ANTIGOS_EDITOR_1 = ["Ver Exemplo Editor 1 👀", "Ver Exemplo da Edição
 BOTOES_ANTIGOS_EDITOR_2 = ["Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 4 🎬"]
 BOTAO_LIGAR_EDICAO = "Ligar Edição ✅"
 BOTAO_DESLIGAR_EDICAO = "Desligar Edição ⏸️"
+# A capa com chamada (P76), dentro da Edição dos Vídeos.
+BOTAO_CAPA = "Capa com Chamada 🏷️"
+BOTAO_EXEMPLO_DA_CAPA = "Ver Exemplo da Capa 👀"
+BOTAO_LIGAR_CAPA = "Ligar Capa com Chamada ✅"
+BOTAO_DESLIGAR_CAPA = "Desligar Capa com Chamada ⏸️"
+BOTAO_VOLTAR_EDICAO = "Voltar à Edição 🔙"
 BOTAO_PRODUTOS_A_MAIS = "Produtos a Mais 🛍️"
 # O processo dos produtos a mais no registro: o mesmo do robo_shopee_video (o teste confere).
 PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
@@ -600,8 +606,17 @@ def teclado_edicao(config):
     liga = BOTAO_DESLIGAR_EDICAO if config.get("edicao_ligada") else BOTAO_LIGAR_EDICAO
     return montar_teclado([
         [KeyboardButton(text=BOTAO_EDITOR_1), KeyboardButton(text=BOTAO_EDITOR_2)],
-        [KeyboardButton(text=liga)],
+        [KeyboardButton(text=liga), KeyboardButton(text=BOTAO_CAPA)],
         [KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
+    ])
+
+
+def teclado_capa(config):
+    liga = BOTAO_DESLIGAR_CAPA if config.get(edicao_video.CHAVE_DA_CAPA) else BOTAO_LIGAR_CAPA
+    return montar_teclado([
+        [KeyboardButton(text=BOTAO_EXEMPLO_DA_CAPA)],
+        [KeyboardButton(text=liga)],
+        [KeyboardButton(text=BOTAO_VOLTAR_EDICAO), KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
     ])
 
 
@@ -720,6 +735,7 @@ def texto_robo(config, agora=None, celular=None):
         f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
         f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
         f"✂️ Edição dos vídeos: {rotulo_edicao(config)}\n"
+        f"🏷️ Capa com chamada: {rotulo_capa(config)}\n"
         f"🛍️ Produtos a mais: {rotulo_produtos_a_mais(config)}\n"
         f"🧭 Treino: {_linha_treino()}\n\n"
         "<b>O que cada botão faz</b>\n"
@@ -816,7 +832,61 @@ def texto_edicao(config):
         f"✨ <b>{BOTAO_EDITOR_2}</b>: o mesmo, com o Editor 2 e as legendas.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
         "próximos rascunhos e nos vídeos do modo assistente. Com a edição ligada, só vai vídeo editado: o vídeo "
-        "que não sair editado fica de lado e o robô pega o próximo."
+        "que não sair editado fica de lado e o robô pega o próximo.\n"
+        f"🏷️ <b>{BOTAO_CAPA}</b>: a vantagem do vídeo escrita em letras grandes na capa que aparece na grade do "
+        "seu perfil, sem cobrir os números; ver o exemplo, ligar ou desligar."
+    )
+
+
+def rotulo_capa(config):
+    if not config.get(edicao_video.CHAVE_DA_CAPA):
+        return "⏸️ <b>desligada</b>"
+    desde = config.get("capa_com_chamada_desde") or ""
+    return "✅ <b>ligada</b>" + (f" desde {desde[8:10]}/{desde[5:7]}" if desde else "")
+
+
+def _mediana_das_visualizacoes(mediana):
+    return "ainda sem leitura" if mediana is None else f"mediana de {mediana:.0f} visualizações"
+
+
+def _linha_da_medicao(medicao):
+    """O que a medição da capa já tem (P76), com os números: o painel é só do Rafael."""
+    com, sem = medicao["com"], medicao["sem"]
+    linhas = [f"Até agora: {sem['lidos']} vídeo(s) sem a chamada e {com['lidos']} com a chamada medidos na grade."]
+    for dias in robo.visualizacoes.IDADES_DA_COMPARACAO:
+        mediana_sem, mediana_com = sem["idades"][dias][1], com["idades"][dias][1]
+        if mediana_sem is not None or mediana_com is not None:
+            linhas.append(f"Com {dias} dia(s) de postado: sem a chamada, {_mediana_das_visualizacoes(mediana_sem)}; "
+                          f"com a chamada, {_mediana_das_visualizacoes(mediana_com)}.")
+    return " ".join(linhas)
+
+
+def texto_capa(config, medicao):
+    """A tela da Capa com Chamada. Escolha do Rafael (29/10, P76): DECISOES.md, Shopee Vídeo."""
+    return (
+        "🏷️ <b>Capa com Chamada</b>\n"
+        "A capa é o que aparece na grade do seu perfil: o primeiro quadro do vídeo (a foto do anúncio dos "
+        f"primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos). Com a capa com chamada, o robô escreve acima da "
+        "foto, em letras grandes, a vantagem que o vídeo mostra (a frase que a IA escreve vendo o vídeo, a mesma "
+        "das legendas do Editor 2), sem marca, sem preço e sem desconto: as diretrizes da Shopee punem promessa que "
+        "o vídeo não mostra e desconto falso, e o preço muda.\n\n"
+        "<b>Os números ficam livres</b>: a chamada fica abaixo da sacolinha da Shopee e do selo \"Fixado\" dos "
+        "vídeos fixados, e a foto, um pouco menor, acaba antes do número de visualizações, embaixo à esquerda. "
+        "Tudo cabe no pedaço da capa que a grade mostra.\n\n"
+        "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Na bebida "
+        "alcoólica, a capa continua a dos três avisos; sem a vantagem da IA, o vídeo vai com a capa de sempre.\n\n"
+        f"Agora: {rotulo_capa(config)} (edição dos vídeos: {rotulo_edicao(config)})\n\n"
+        "<b>Medição</b>: uma vez por dia, o robô anota na grade do perfil as visualizações de cada vídeo que ele "
+        "postou. 7 dias depois de você ligar, o Claude compara os vídeos com a chamada com os de antes e traz os "
+        "números para você decidir; quanto mais vídeos sem a chamada medidos antes de ligar, mais justa a "
+        f"comparação. {_linha_da_medicao(medicao)}\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"👀 <b>{BOTAO_EXEMPLO_DA_CAPA}</b>: manda no seu privado, sem postar, a capa com chamada do próximo vídeo "
+        "que o robô pegaria: a capa inteira e o pedaço que aparece na grade do perfil. Cada toque mostra um vídeo "
+        "novo.\n"
+        f"✅ <b>{BOTAO_LIGAR_CAPA}</b> / ⏸️ <b>{BOTAO_DESLIGAR_CAPA}</b>: liga ou desliga a capa com chamada nos "
+        "próximos vídeos editados (os rascunhos já salvos ficam como estão).\n"
+        f"🔙 <b>{BOTAO_VOLTAR_EDICAO}</b>: volta à tela da Edição dos Vídeos."
     )
 
 
@@ -995,7 +1065,7 @@ async def mostrar_edicao(message, state):
     await message.answer(texto_edicao(config), parse_mode="HTML", reply_markup=teclado_edicao(config))
 
 
-@router.message(F.text == BOTAO_EDICAO, StateFilter("*"))
+@router.message(F.text.in_([BOTAO_EDICAO, BOTAO_VOLTAR_EDICAO]), StateFilter("*"))
 async def edicao_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     await mostrar_edicao(message, state)
@@ -1009,6 +1079,76 @@ async def ligar_edicao_handler(message: types.Message, state: FSMContext):
     registro_processos.registrar("shopee_video", "edição do vídeo: painel", "ligada" if ligar else "desligada", ok=True)
     logger.info(f"✂️ [Shopee Vídeo] Edição dos vídeos {'ligada' if ligar else 'desligada'} pelo painel.")
     await mostrar_edicao(message, state)
+
+
+async def mostrar_capa(message, state):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    await message.answer(texto_capa(config, robo.medicao_da_capa()), parse_mode="HTML",
+                         reply_markup=teclado_capa(config))
+
+
+@router.message(F.text == BOTAO_CAPA, StateFilter("*"))
+async def capa_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_capa(message, state)
+
+
+@router.message(F.text.in_([BOTAO_LIGAR_CAPA, BOTAO_DESLIGAR_CAPA]), StateFilter("*"))
+async def ligar_capa_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    ligar = message.text == BOTAO_LIGAR_CAPA
+    mudancas = {edicao_video.CHAVE_DA_CAPA: ligar}
+    if ligar:
+        # O começo da comparação de 7 dias (P76): o checkup e o Claude contam daqui.
+        mudancas["capa_com_chamada_desde"] = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+    alterar_config(**mudancas)
+    registro_processos.registrar("shopee_video", "edição do vídeo: capa com chamada",
+                                 "ligada" if ligar else "desligada", ok=True)
+    logger.info(f"🏷️ [Shopee Vídeo] Capa com chamada {'ligada' if ligar else 'desligada'} pelo painel.")
+    await mostrar_capa(message, state)
+
+
+def legenda_do_exemplo_da_capa(nome, chamada):
+    return (f"🏷️ <b>Exemplo da capa com chamada</b> (não foi postado): {html_escape(nome)}.\n"
+            "1ª foto: a capa inteira, como abre o vídeo. 2ª foto: o pedaço que a grade do seu perfil mostra.\n"
+            f"✍️ Chamada (a vantagem que a IA viu no vídeo): “{html_escape(chamada)}”\n"
+            "🔢 O número de visualizações fica na faixa preta de baixo, à esquerda, e a sacolinha da Shopee e o "
+            "selo Fixado, na faixa de cima: nenhum deles cobre a chamada nem a foto.\n"
+            f"Toque de novo em {BOTAO_EXEMPLO_DA_CAPA} para ver outro vídeo.")
+
+
+@router.message(F.text == BOTAO_EXEMPLO_DA_CAPA, StateFilter("*"))
+async def exemplo_capa_handler(message: types.Message, state: FSMContext):
+    """O exemplo da capa com chamada no privado, um exemplo da edição de cada vez."""
+    if not _admin(message): return
+    if _exemplo_da_edicao.locked():
+        await message.answer("⏳ Um exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
+        return
+    async with _exemplo_da_edicao:
+        await message.answer("⏳ Montando o exemplo da capa com chamada com o próximo vídeo que o robô pegaria (a IA "
+                             "vê o vídeo para escrever a vantagem). Leva até uns 2 minutos.")
+        try:
+            nome, motivo, exemplo = await asyncio.to_thread(edicao_video.exemplo_capa)
+        except Exception as e:
+            nome, motivo, exemplo = None, f"erro ({type(e).__name__})", None
+        registro_processos.registrar("shopee_video", "edição do vídeo: exemplo da capa",
+                                     "mandado" if nome else "não saiu", motivo, ok=bool(nome))
+        if not nome:
+            await message.answer(f"⚠️ O exemplo da capa com chamada não saiu: {html_escape(motivo)}.",
+                                 parse_mode="HTML")
+            return
+        with tempfile.TemporaryDirectory() as pasta:
+            caminhos = []
+            for parte in ("capa", "grade"):
+                caminhos.append(os.path.join(pasta, f"{parte}.png"))
+                with open(caminhos[-1], "wb") as arquivo:
+                    arquivo.write(exemplo[parte])
+            await message.answer_media_group([
+                InputMediaPhoto(media=FSInputFile(caminhos[0]), parse_mode="HTML",
+                                caption=legenda_do_exemplo_da_capa(nome, exemplo["chamada"])),
+                InputMediaPhoto(media=FSInputFile(caminhos[1]))])
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
 
 
 async def mostrar_produtos_a_mais(message, state):
