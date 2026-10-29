@@ -208,14 +208,17 @@ async def verificar_robo():
     if robo_ocupado():
         return
     if config["robo_pausado"]:
-        # Os horários de rascunho que passam pausado são pulados, como no assistente.
-        robo.consumir_horarios(config)
+        # Pausado pelo Rafael, os horários de rascunho que passam são pulados, como no
+        # assistente. Pausado sozinho, sem o celular, eles ficam: na volta contam como um só.
+        # Escolha do Rafael (P16): DECISOES.md, Shopee Vídeo.
+        if config.get("robo_pausa_motivo") != robo.MOTIVO_DA_DESCONEXAO:
+            robo.consumir_horarios(config, pular=True)
         return
     if robo.suspensa(config):
         # Na suspensão os horários de rascunho também são pulados, mas a rodada segue: o robô
         # só não prepara, não posta e não treina; a limpeza dos favoritos, apagar o recusado,
         # as respostas, o feed e a Saúde do Vídeo continuam. Pedido do Rafael: DECISOES.md.
-        robo.consumir_horarios(config)
+        robo.consumir_horarios(config, pular=True)
     if robo.no_horario(config):
         await rodar_robo("--rodada")
 

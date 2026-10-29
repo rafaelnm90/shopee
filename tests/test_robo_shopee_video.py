@@ -318,6 +318,8 @@ def test_pausado_nao_toca_e_pula_os_horarios(monkeypatch, avisos):
     monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("pausado nem olha o celular"))
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 21:59")) == "pausado"
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["feitos"] == 1
+    # Pulado sem tentativa: o checkup não o cobra.
+    assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["sem_tentar"] == 1
 
 
 def test_pausa_por_desconexao_guarda_os_horarios_e_na_volta_contam_como_um(monkeypatch, avisos):
@@ -332,6 +334,8 @@ def test_pausa_por_desconexao_guarda_os_horarios_e_na_volta_contam_como_um(monke
     robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=False, robo_pausa_motivo=""))
     assert robo.consumir_horarios(robo.ler_config(), momento("2026-10-22 21:59")) is True
     assert robo.consumir_horarios(robo.ler_config(), momento("2026-10-22 21:59")) is False
+    # Os 2 viraram uma tentativa só: o outro fica como sem tentativa, e o checkup não o cobra.
+    assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["sem_tentar"] == 1
 
 
 def test_fora_do_horario_nao_toca(monkeypatch, avisos):

@@ -361,18 +361,22 @@ def horarios_vencidos(estado, agora=None):
     return sum(1 for h in estado["horarios"] if h <= hora)
 
 
-def consumir_horarios(config, agora=None):
+def consumir_horarios(config, agora=None, pular=False):
     """
     Marca como feitos os horários que já passaram e diz se havia algum novo. Vários de uma
     vez (robô pausado ou fora do ar) contam como um só: retomar não solta tudo de uma vez.
     O horário novo ganha as tentativas a mais, começa no primeiro vídeo e tira a repetição
-    do anterior.
+    do anterior. pular=True (a pausa do Rafael, a suspensão): passam sem rascunho. Os que
+    passam sem tentativa, pulados ou juntados num só, somam em "sem_tentar", que o checkup
+    desconta do que cobra.
     """
     estado = estado_do_dia(config, agora)
     passados = horarios_vencidos(estado, agora)
     if passados <= estado["feitos"]:
         return False
-    estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, videos=1, repetir=False)
+    novos = passados - estado["feitos"]
+    estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, videos=1, repetir=False,
+                  sem_tentar=estado.get("sem_tentar", 0) + (novos if pular else novos - 1))
     db.salvar_config(CHAVE_DIA, estado)
     return True
 
@@ -3410,13 +3414,13 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             # desconexão: ficam, e na volta do celular contam como um só, como com o robô fora
             # do ar. Escolha do Rafael (24/10, P16): DECISOES.md, Shopee Vídeo.
             if config.get("robo_pausa_motivo") != MOTIVO_DA_DESCONEXAO:
-                consumir_horarios(config, agora)
+                consumir_horarios(config, agora, pular=True)
             return "pausado"
         if suspensa(config, agora):
             # Os horários de rascunho que passam na suspensão são pulados, como pausado: o
             # preparo e a postagem esperam o fim (o_que_fazer), e o resto segue. O treino da
             # segunda fica para logo depois do fim.
-            consumir_horarios(config, agora)
+            consumir_horarios(config, agora, pular=True)
             adiar_treino_da_suspensao(agora)
         if not no_horario(config, agora):
             return "fora do Horário do Robô"
