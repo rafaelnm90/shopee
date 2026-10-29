@@ -2187,6 +2187,28 @@ def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypa
     assert robo.links_do_ver_produtos([cortina_a]) == [""]
 
 
+def test_o_0_do_selo_colado_no_nome_nao_atrapalha_a_busca_na_api(monkeypatch):
+    # Caso das 18:04 de 29/10 (e o das 00:32): no Ver Produtos, o selo da loja chegou como um "0"
+    # colado no nome ("0Tênis ..."); a busca ia com "0Tênis" e a foto do 1º produto não vinha, e
+    # o vídeo ficava de lado na edição.
+    nome = "Tênis Feminino Slip On Casual Conforto Esportivo Amortecedor"
+    termos = []
+
+    async def buscar(termo, limite=10, sort_type=2):
+        termos.append(termo)
+        if termo.startswith("0"):
+            return []
+        return [{"itemId": 9, "productName": nome, "productLink": "https://shopee.com.br/product/1/9",
+                 "imageUrl": "https://cf.shopee.com.br/foto"}]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: "/tmp/foto.jpg" if endereco else None)
+    assert robo.termo_da_busca("0" + nome) == "Tênis Feminino Slip On Casual Conforto"
+    assert robo.oferta_pelo_nome("0" + nome)["itemId"] == 9
+    assert robo.anuncio_do_ver_produtos("0" + nome) == {"foto": "/tmp/foto.jpg", "nome": "0" + nome}
+    assert not any(t.startswith("0") for t in termos)
+
+
 def test_link_de_video_deixa_de_fora_o_produto_que_a_ia_recusa(monkeypatch, avisos):
     _fonte_de_video(monkeypatch, confirma=(PRODUTO_B,))
     app = AppDoVerProdutos()
@@ -3743,7 +3765,7 @@ def test_busca_pela_foto_le_os_cartoes_em_vendas_populares_e_tira_a_foto_da_gale
     cartoes, motivo = robo.buscar_pela_foto(app, b"\xff\xd8\xfffoto")
     assert motivo == "" and [c["nome"] for c in cartoes] == ["Garrafa A", "Garrafa B", "Garrafa C", "Garrafa D",
                                                               "Garrafa E", "Garrafa F"]
-    assert cartoes[0] == {"nome": "Garrafa A", "preco": 49.9, "comissao": 10.0, "extra": False}
+    assert cartoes[0] == {"nome": "Garrafa A", "selo": False, "preco": 49.9, "comissao": 10.0, "extra": False}
     # Nunca o botão de tirar foto: a foto mais nova da galeria, e a ordem Vendas Populares (P68).
     assert (541, 1570) not in app.toques and "Vendas Populares" in app.toques
     assert app.toques.count("rolar") == 2 and "@AN_component_IcCloseShape_Img" in app.toques

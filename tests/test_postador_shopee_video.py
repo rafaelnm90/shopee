@@ -1588,9 +1588,27 @@ def test_cartoes_da_busca_pela_foto_na_ordem_da_grade():
                       _cartao(0, 2469, "Óculos Escuro Redondo Preto", "1.299,90", "3,5"),
                       _cartao(1, 2465, "Corrente cortada embaixo", "10,00", "5,0", inteiro=False))
     assert ps.cartoes_da_busca(xml) == [
-        {"nome": "Óculos de Sol Feminino Redondo UV400 Preto", "preco": 29.9, "comissao": 12.0, "extra": True},
-        {"nome": "Óculos de Sol Redondo Proteção UV400 Preto", "preco": 39.9, "comissao": 8.5, "extra": False},
-        {"nome": "Óculos Escuro Redondo Preto", "preco": 1299.9, "comissao": 3.5, "extra": False}]
+        {"nome": "Óculos de Sol Feminino Redondo UV400 Preto", "selo": False, "preco": 29.9, "comissao": 12.0,
+         "extra": True},
+        {"nome": "Óculos de Sol Redondo Proteção UV400 Preto", "selo": False, "preco": 39.9, "comissao": 8.5,
+         "extra": False},
+        {"nome": "Óculos Escuro Redondo Preto", "selo": False, "preco": 1299.9, "comissao": 3.5, "extra": False}]
+
+
+def test_o_0_do_selo_da_loja_colado_no_nome_sai():
+    # Ver Produtos (29/10/2026, caso das 18:04): o selo da loja (Full, Oficial, Indicado) chega
+    # como um "0" colado na 1ª palavra ("0Tênis ..."); nenhum anúncio da API tem esse "0".
+    assert ps.sem_o_selo_colado("0Tênis Feminino Slip On") == "Tênis Feminino Slip On"
+    assert ps.tem_o_selo_colado("0Tênis Feminino") and not ps.tem_o_selo_colado("Tênis Feminino")
+    for real in ("3 em 1 Escova Secadora", "10 Pares de Meias", "2x Sabonete Líquido", "0800 Fone", "Tênis 0km"):
+        assert ps.sem_o_selo_colado(real) == real and not ps.tem_o_selo_colado(real)
+    assert ps.nome_na_pagina("0" + VESTIDO, VESTIDO) and ps.mesmo_produto("0" + VESTIDO, VESTIDO)
+    pagina = (f'<hierarchy><node text="0{VESTIDO}" resource-id="com.shopee.br:id/labelProductPageProductName" '
+              'class="android.widget.TextView" bounds="[40,1850][1040,1900]" /></hierarchy>')
+    assert ps.nome_na_pagina_do_produto(pagina) == VESTIDO
+    xml = _resultados(_cartao(0, 1533, "0Óculos de Sol Feminino Redondo UV400 Preto", "29,90", "12,0"))
+    assert ps.cartoes_da_busca(xml) == [{"nome": "Óculos de Sol Feminino Redondo UV400 Preto", "selo": True,
+                                         "preco": 29.9, "comissao": 12.0, "extra": False}]
 
 
 def test_cartoes_da_busca_param_nas_recomendacoes_e_sem_resultados_e_avisado():
