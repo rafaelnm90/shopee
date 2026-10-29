@@ -26,6 +26,7 @@ Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao 
 modo assistente (assistente_shopee_video, no vídeo que vai ao privado do Rafael) e pelo
 painel da Shopee Vídeo (os exemplos).
 """
+import math
 import os
 
 import assistente_shopee_video as assistente
@@ -423,11 +424,21 @@ _TEXTO_NO_VIDEO_NO_PROMPT = (
 # A nossa miniatura só entra quando o canto de cima à direita, onde ela fica, está livre do
 # que o criador pôs por cima do vídeo: foto, quadro, texto ou figura (no vídeo da cortina de
 # 29/10, ela cobriu a ponta da colagem das cores do criador). Marca d'água, logo e nome do
-# perfil não contam. Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
+# perfil não contam. Ela fica lá o vídeo inteiro: o que passa por ela em qualquer momento
+# conta. Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
+# A IA também diz onde fica cada coisa que o criador pôs no alto da tela, e a conta de cruzar
+# com a miniatura é feita aqui (com_a_miniatura): no print de 29/10, a legenda do criador,
+# centralizada logo abaixo da barra de busca, passava por baixo da ponta da miniatura, e a IA
+# tinha dito que o canto estava livre.
 _CANTO_NO_PROMPT = (
     "Diga também se o canto de cima à direita do vídeo (de uns 65% a 95% da largura e até uns 20% da altura) "
-    "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, na maior "
-    "parte do tempo (não contam marca d'água, logo nem nome do perfil): \"canto_ocupado\", true ou false.\n"
+    "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, em "
+    "qualquer momento (não contam marca d'água, logo nem nome do perfil): \"canto_ocupado\", true ou false.\n"
+    "Diga também onde ficam, em qualquer momento do vídeo, as legendas, títulos, frases, fotos, quadros e "
+    "figuras que o próprio vídeo pôs por cima da imagem no alto da tela, até uns 30% da altura (sem marca "
+    "d'água, logo nem nome do perfil): \"por_cima_no_alto\", a lista com a parte da tela que cada um ocupa, em "
+    "porcentagem da largura e da altura do vídeo, contando da borda esquerda e da borda de cima, como "
+    "[{{\"esquerda\": 30, \"direita\": 70, \"topo\": 14, \"base\": 19}}]; [] se não há nenhum.\n"
 )
 _FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
@@ -440,7 +451,7 @@ PROMPT_DOS_TEXTOS = (
     + _CHAMADA_NO_PROMPT
     + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
-    "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false}}"
+    "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": []}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -666,6 +677,9 @@ def _nome_lugar_e_falas(dados):
     for chave in ("texto_no_video", "canto_ocupado"):
         if isinstance(dados.get(chave), bool):
             textos[chave] = dados[chave]
+    por_cima = _por_cima_no_alto(dados.get("por_cima_no_alto"))
+    if por_cima:
+        textos["por_cima"] = por_cima
     falas = _falas(dados.get("falas"))
     if falas is not None:
         textos["falas"] = falas
@@ -677,9 +691,49 @@ def lugar_dos_textos(textos):
     return SEM_LUGAR if textos.get("texto_no_video") else textos.get("lugar")
 
 
+def _por_cima_no_alto(lista):
+    """
+    [(esquerda, direita, topo, base)], em % do vídeo, do que a IA diz que o criador pôs no
+    alto da tela; só os que vieram com os quatro números. Resposta em fração (0,3) vira %.
+    """
+    caixas = []
+    for item in lista if isinstance(lista, list) else []:
+        try:
+            valores = [float(item[chave]) for chave in ("esquerda", "direita", "topo", "base")]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(valor) for valor in valores):
+            continue
+        if max(valores) <= 1 and any(valor != int(valor) for valor in valores):
+            valores = [round(valor * 100, 1) for valor in valores]
+        valores = [min(max(valor, 0.0), 100.0) for valor in valores]
+        caixas.append(tuple(sorted(valores[:2]) + sorted(valores[2:])))
+    return caixas
+
+
+# A IA acerta o lugar das coisas na tela só mais ou menos: o que ela diz que o criador pôs no
+# alto conta como em cima da miniatura também quando passa a esta folga dela (px do vídeo de
+# 720x1280). A miniatura é tomada como quadrada, como a foto do anúncio quase sempre é.
+FOLGA_DA_MINIATURA = 30
+
+
+def _cruza_a_miniatura(caixa):
+    """A caixa (em % do vídeo) passa pela miniatura, com a folga?"""
+    esquerda, direita, topo, base = caixa
+    largura, altura = TELA
+    meia = LARGURA_DA_MINIATURA / 2 + FOLGA_DA_MINIATURA
+    x, y = CENTRO_DA_MINIATURA
+    return (esquerda * largura / 100 < x + meia and direita * largura / 100 > x - meia
+            and topo * altura / 100 < y + meia and base * altura / 100 > y - meia)
+
+
 def com_a_miniatura(textos):
-    """A nossa miniatura vai no vídeo? Não quando a IA viu coisa do criador no canto dela (P81); sem a resposta, vai."""
-    return not textos.get("canto_ocupado")
+    """
+    A nossa miniatura vai no vídeo? Não quando a IA viu coisa do criador no canto dela, nem
+    quando alguma das que ela diz que o criador pôs no alto passa por ela (P81); sem a
+    resposta, vai.
+    """
+    return not textos.get("canto_ocupado") and not any(map(_cruza_a_miniatura, textos.get("por_cima", ())))
 
 
 def _vantagem_e_chamada(dados, textos):
@@ -693,8 +747,8 @@ def _vantagem_e_chamada(dados, textos):
 
 def textos_da_tela(video, nome):
     """
-    {"nome", "vantagem", "chamada", "lugar", "texto_no_video"} que a IA escreveu vendo o
-    vídeo, só o que veio certo; {} sem resposta.
+    {"nome", "vantagem", "chamada", "lugar", "texto_no_video", "canto_ocupado", "por_cima"} que
+    a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta.
     """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
     return _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados))
@@ -995,7 +1049,7 @@ PROMPT_DAS_VERSOES = (
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
-    "\"texto_no_video\": false, \"canto_ocupado\": false}}"
+    "\"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": []}}"
 )
 
 

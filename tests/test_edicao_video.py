@@ -1311,6 +1311,44 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     assert miniaturas == [False]
 
 
+
+def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, tmp_path):
+    # Print do Rafael (29/10): num rascunho, a legenda do criador, centralizada logo abaixo da
+    # barra de busca, passava por baixo da ponta da nossa miniatura, e a IA tinha dito que o
+    # canto estava livre (P81). Ela diz também onde fica cada coisa que o criador pôs no alto
+    # da tela, e a miniatura sai quando alguma passa por ela, com a folga.
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        assert "\"por_cima_no_alto\"" in prompt and "em qualquer momento" in prompt
+    legenda = {"esquerda": 29, "direita": 69, "topo": 15, "base": 18}
+    textos = edicao_video._nome_lugar_e_falas({"canto_ocupado": False, "por_cima_no_alto": [legenda]})
+    assert textos == {"canto_ocupado": False, "por_cima": [(29.0, 69.0, 15.0, 18.0)]}
+    assert edicao_video.com_a_miniatura(textos) is False
+    # A IA errando um pouco para fora da miniatura (até 65% da largura) ainda conta, pela folga.
+    assert edicao_video.com_a_miniatura({"por_cima": [(30.0, 65.0, 15.0, 18.0)]}) is False
+    # Longe dela (no alto à esquerda, ou logo abaixo), a miniatura fica.
+    for longe in ((5.0, 50.0, 5.0, 12.0), (20.0, 80.0, 21.0, 25.0)):
+        assert edicao_video.com_a_miniatura({"canto_ocupado": False, "por_cima": [longe]})
+    # Resposta em fração, com os lados trocados, ou sem os quatro números.
+    assert edicao_video._por_cima_no_alto([{"esquerda": 0.69, "direita": 0.29, "topo": 0.18, "base": 0.15},
+                                           {"esquerda": "x"}, "texto", {"esquerda": 1, "direita": 2},
+                                           {"esquerda": float("nan"), "direita": 2, "topo": 1, "base": 2}]) == [
+        (29.0, 69.0, 15.0, 18.0)]
+    assert edicao_video._por_cima_no_alto(None) == [] and "por_cima" not in edicao_video._nome_lugar_e_falas(
+        {"por_cima_no_alto": []})
+    # No que vai ao ar, o vídeo vai sem ela, e o registro diz.
+    _versoes_de_mentira(monkeypatch)
+    miniaturas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+        miniaturas.append(miniatura)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    _textos_da_tela(monkeypatch, {"nome": "Clipe de Unha", "vantagem": "Tira o gel sem esforço", "lugar": "alto",
+                                  "texto_no_video": True, "canto_ocupado": False,
+                                  "por_cima": [(29.0, 69.0, 15.0, 18.0)]})
+    como = edicao_video.editar_para_postar("v.mp4", b"foto", str(tmp_path / "r.mp4"), "Clipe de Unha")[1]
+    assert como.endswith(edicao_video.SEM_A_MINIATURA) and miniaturas == [False]
+
 def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
     # Escolha do Rafael (29/10, P82): a IA contava como texto próprio do vídeo (P52) os quadros
     # que o criador pôs por cima com a foto do produto (as cores, a quantidade), e as nossas
