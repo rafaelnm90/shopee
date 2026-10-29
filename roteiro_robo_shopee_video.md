@@ -160,7 +160,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     o `investigar_robo.yml` mostra: o link não abriu o player (`rn_vod_player_view_with_surface`),
     o player tem o cartão de um produto (com o botão de comprar) sem o Ver Produtos, ou nem
     isso. O cartão de um produto só ainda não foi mapeado no celular.
-- **Busca pela foto (o Rafael mostrou em vídeo em 28/10/2026; falta mapear no Motorola):** é
+- **Busca pela foto (o Rafael mostrou em vídeo em 28/10/2026; mapeada no Motorola na mesma noite):** é
   como ele acha o mesmo produto em outras lojas, para os espaços livres até 6 (P59, P66) e a
   troca de loja (P57). O caminho, como ele faz no celular dele:
   1. a foto: ele abre o produto do post, passa para a 2ª foto do anúncio (a 1ª costuma ser
@@ -193,9 +193,40 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     vendem mais. No robô (escolhas dele em 28/10, P67 e P68): só o mesmo item (mesma marca,
     modelo e cor, conferido pela IA); ordena por Vendas Populares e, entre os primeiros (uns
     20), fica com os que pagam mais reais por venda, até 20% mais caros que o do post (P58).
-  - **Falta mapear no Motorola:** os ids e textos da câmera da barra, da galeria, dos recortes,
-    das ordens e dos resultados; se o "Taxa de comissão" cortado vem inteiro na leitura da
-    tela; e o "Ver Mais (N)" do Ver Produtos (P66), quando a fonte trouxer um vídeo com ele.
+  - **No Motorola (28/10/2026, 5 explorações, sem Verificação, nada curtido):** tudo é a mesma
+    `ReactActivity_`, com ids `AN_…`:
+    - área de afiliado: a câmera da barra é `AN_ImageSearchIconEntry_IcCameraOutline_Img`
+      (~896,189), ao lado do chat `AN_ChatEntry_IcChatMulti_Img` (~1014,189);
+    - câmera: "Clique no botão para buscar", o botão de tirar foto (~541,1570; nunca tocar:
+      tiraria foto com a câmera do Motorola), "Pesquisar na galeria" e "Ver tudo" (~982,1842),
+      e a faixa da galeria com a foto mais nova em 1º (~158,2037). O X (~63,169) fecha a câmera
+      e volta à área de afiliado; dali, o voltar volta à aba Eu;
+    - resultados: título "Resultados da busca por imagem" e o X
+      `AN_component_IcCloseShape_Img` (~1018,274), que volta à câmera. Os recortes são
+      `AN_CandidateImg_Uri_Img` (a foto do anúncio deu um só), seguidos da câmera
+      (~236,415) para outra foto. As ordens: "Comissão (%)" (~137,578), "Vendas Populares"
+      (~420,578; a escolhida ganha `AN_FilterItem_SelectionTick_Img`), "Preço" (~651,578,
+      com `AN_FilterItem_Image_Img`) e uma quarta que começa com "Comissão da" (~938,578);
+    - cada resultado (2 colunas): a foto, o selo da loja `AN_component_Source_Img`, o selo de
+      Comissão Extra como imagem (`AN_Labels_Content_Img`, sem texto), o nome em texto, "R$"
+      e o preço em textos separados, as estrelas (`imagefullFilledStar_undefined`), "N
+      vendas" e **"Taxa de comissão N,N%" em texto inteiro** (o corte é só na tela), com o
+      compartilhar `AN_CommRate_ShareIconWithBg_Img` ao lado (nunca tocar). O `rolar:baixo`
+      rola os resultados; aparece `AN_ScrollToTopIcon_ToTopIcon_Img`;
+    - o toque no resultado (no nome ou no preço) abre a página de afiliado do produto: fotos
+      `AN_ProductImages_Image_Img`, a faixa de preço "R$#-R$#", o selo de Comissão Extra
+      (imagem) e a porcentagem "N,N%" em texto, o nome com a seta
+      `AN_component_RightArrow_Img_2` (abre a página completa), "N Afiliados promoveram", a
+      nota, "Aprenda Com Outros Criadores" e a loja `AN_ShopHeader_Image_Img`. No alto, o
+      voltar `AN_FullScreenTitleBar_CircleBack_Img_1` e o compartilhar
+      `AN_FullScreenTitleBar_CircleShare_Img` (nunca tocar); embaixo, o chat
+      `AN_ChatButton_IcChatSingleOrange_Img` (nunca), o **Favoritar**
+      `AN_LikeButton_IcLikeSolidIconLike_Img` (~405,2309) e o Compartilhe para Ganhar
+      (~810,2325; o explorar recusa). O voltar volta aos resultados, na mesma ordem e rolagem.
+  - **Falta:** ver se o Favoritar da página de afiliado põe o produto em Minhas Curtidas (a
+    lista do Adicionar Produto) como o coração da página completa, ou se o robô curte pela
+    página completa, como o Rafael faz; e o "Ver Mais (N)" do Ver Produtos (P66), quando a
+    fonte trouxer um vídeo com ele.
 
 ## Onde paramos
 
