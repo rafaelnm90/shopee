@@ -654,7 +654,7 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     # o meio cobriria o conjunto. A IA ganha os lados e, sem lugar livre, o vídeo vai sem texto.
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
-    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino, avisos=False, musica=None: "")
+    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino, avisos=False, musica=None, capa=None: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -787,7 +787,7 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         montados.append((list(trechos), len(letreiros)))
         return ""
 
-    def editar(video, foto, destino, avisos=False, musica=None):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -941,7 +941,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     _textos_da_tela(monkeypatch, {"nome": "Vinho Tinto", "vantagem": "Encorpado", "falas": [], "lugar": "alto"})
     avisos = []
 
-    def editar(video, foto, destino, com_avisos=False, musica=None):
+    def editar(video, foto, destino, com_avisos=False, musica=None, capa=None):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1081,3 +1081,114 @@ def test_edicao_de_verdade_do_video_sem_som_sai_com_a_musica(tmp_path):
     assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), musica=musica) == ""
     assert not edicao_video.videos.mudo(str(destino))
     assert abs(edicao_video.videos.duracao(str(destino)) - 5.0) < 0.3
+
+
+# --- A capa com chamada (escolha do Rafael, 29/10, P76) ---
+
+def _capa(chamada):
+    import io
+
+    from PIL import Image
+    return Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), chamada))).convert("RGB")
+
+
+def _claros(imagem, caixa, passo=4):
+    x1, y1, x2, y2 = caixa
+    return sum(1 for x in range(x1, x2, passo) for y in range(y1, y2, passo) if min(imagem.getpixel((x, y))) > 200)
+
+
+def test_capa_com_chamada_nao_atrapalha_o_numero_nem_a_sacolinha():
+    # Pedido do Rafael: a chamada não pode atrapalhar os números da grade do perfil. Ela fica
+    # abaixo da sacolinha e do selo Fixado, e a foto acaba antes do número.
+    capa = _capa("Acaba com a bagunça da cozinha")
+    assert capa.size == edicao_video.TELA
+    assert _claros(capa, edicao_video.AREA_DA_CHAMADA) > 50               # as letras brancas
+    assert _claros(capa, edicao_video.NUMERO_DA_GRADE) == 0               # onde a grade põe o número
+    assert _claros(capa, edicao_video.SACOLINHA_DA_GRADE) == 0            # a sacolinha da Shopee
+    assert _claros(capa, edicao_video.FIXADO_DA_GRADE) == 0               # o selo dos vídeos fixados
+    # A foto no meio, um pouco menor, dentro do que a grade mostra; preto em volta.
+    topo, base = edicao_video.AREA_DA_FOTO_COM_CHAMADA
+    cor = capa.getpixel((360, (topo + base) // 2))
+    assert max(abs(a - b) for a, b in zip(cor, (200, 120, 40))) < 8
+    assert max(capa.getpixel((360, base + 5))) < 20 and max(capa.getpixel((360, topo - 5))) < 20
+    cima, baixo = edicao_video.VISIVEL_NA_GRADE
+    assert cima <= edicao_video.AREA_DA_CHAMADA[1] and base <= edicao_video.NUMERO_DA_GRADE[1] < baixo
+    # Nada da chamada fora da faixa dela.
+    x1, y1, x2, y2 = edicao_video.AREA_DA_CHAMADA
+    assert _claros(capa, (0, 0, 720, y1)) == 0 and _claros(capa, (x2, 0, 720, topo)) == 0
+
+
+def test_chamada_comprida_cabe_em_duas_linhas_e_sem_chamada_nao_ha_capa():
+    # A vantagem da IA tem até MAXIMO_DA_VANTAGEM caracteres: sempre cabe, numa letra menor.
+    longa = "Organiza todos os temperos em segundos"[:edicao_video.MAXIMO_DA_VANTAGEM]
+    assert _claros(_capa(longa), edicao_video.AREA_DA_CHAMADA) > _claros(_capa("Leve"), edicao_video.AREA_DA_CHAMADA)
+    assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
+    assert edicao_video.capa_com_chamada(b"nao e imagem", "Leve") is None
+    # A chamada curta vai numa linha só, na maior letra; a que não cabe, em duas equilibradas,
+    # sem a 1ª terminar numa palavra de ligação.
+    import os
+
+    import matplotlib
+    from PIL import Image, ImageDraw
+    desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    fonte, linhas = edicao_video._quebra_da_chamada("Leve", desenho, fonte_ttf)
+    assert (fonte.size, linhas) == (edicao_video.LETRAS_DA_CHAMADA[0], ["Leve"])
+    assert edicao_video._quebra_da_chamada("Acaba com a bagunça da cozinha", desenho, fonte_ttf)[1] == [
+        "Acaba com a bagunça", "da cozinha"]
+    # O exemplo do painel mostra também o pedaço que a grade do perfil mostra.
+    import io
+    recorte = Image.open(io.BytesIO(edicao_video.recorte_da_grade(edicao_video.capa_com_chamada(_foto_jpg(), "Leve"))))
+    cima, baixo = edicao_video.VISIVEL_NA_GRADE
+    assert recorte.size == (720, baixo - cima)
+
+
+def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkeypatch, tmp_path):
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
+    capas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None):
+        capas.append(capa)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    destino = str(tmp_path / "r.mp4")
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    # Desligada (o padrão), a capa é a de antes.
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)[1] == edicao_video.COM_LEGENDAS
+    assert capas == [None]
+    # Ligada no painel, a vantagem da IA vai na capa, e o registro diz.
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)[1] == (
+        edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
+    assert capas[-1][:8] == b"\x89PNG\r\n\x1a\n"
+    # A bebida alcoólica fica com a capa dos avisos (P43).
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Vinho", 39.9, avisos=True)[1] == (
+        edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS)
+    assert capas[-1] is None
+    # Sem a vantagem da IA, a capa de antes também.
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa"})
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)
+    assert capas[-1] is None
+    # A capa que não sai (a letra que não abre, por exemplo) não segura o vídeo: vai a capa de antes.
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
+
+    def quebrada(foto, chamada):
+        raise OSError("sem a letra")
+    monkeypatch.setattr(edicao_video, "capa_com_chamada", quebrada)
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)[1] == edicao_video.COM_LEGENDAS
+    assert capas[-1] is None
+
+
+def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
+    _fontes_de_mentira(monkeypatch, {"autorais": [("autorais:1", "/tmp/a.mp4", "https://s.shopee.com.br/a", "")]})
+    monkeypatch.setattr(edicao_video.os.path, "exists", lambda caminho: True)
+    monkeypatch.setattr(edicao_video.ps, "foto_do_produto", lambda video: _foto_jpg())
+    monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Copo Térmico", "preco": 30.0})
+    _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas"})
+    nome, motivo, exemplo = edicao_video.exemplo_capa()
+    assert (nome, motivo, exemplo["chamada"]) == ("Copo Térmico", "", "Gelado por 12 horas")
+    assert exemplo["capa"][:4] == b"\x89PNG" and exemplo["grade"][:4] == b"\x89PNG"
+    # Sem a vantagem da IA, o exemplo diz por quê.
+    _textos_da_tela(monkeypatch, {"nome": "Copo Térmico"})
+    assert edicao_video.exemplo_capa()[:2] == (None, "a IA não escreveu a vantagem do produto deste vídeo")

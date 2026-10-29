@@ -162,13 +162,133 @@ def capa_com_avisos(foto):
     return saida.getvalue()
 
 
-def editar(video, foto, destino, avisos=False, musica=None):
+# A capa com chamada: a foto do anúncio no fundo preto, um pouco menor, e acima dela a
+# vantagem que o vídeo mostra, em letras grandes (a frase que a IA escreve para as legendas
+# do Editor 2: sem marca, sem preço e sem promoção, regras 9, 13 e 14). Tudo dentro do que a
+# grade do perfil mostra da capa (o corte do meio, medido no print do Rafael de 29/10: de y
+# 196 a 1116 da tela de 720x1280) e longe do que a grade põe por cima: o número de
+# visualizações, embaixo à esquerda (NUMERO_DA_GRADE), a sacolinha da Shopee, em cima à
+# direita (SACOLINHA_DA_GRADE), e o selo "Fixado" dos vídeos fixados no perfil, em cima à
+# esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10): pedido do Rafael, não atrapalhar os
+# números. Começa desligada (chave capa_com_chamada de shopee_video): ele vê o exemplo no
+# privado e liga no painel. A bebida alcoólica fica com a capa dos avisos. Escolha do Rafael
+# (29/10, P76): DECISOES.md, Shopee Vídeo.
+CHAVE_DA_CAPA = "capa_com_chamada"
+VISIVEL_NA_GRADE = (196, 1116)                  # de cima a baixo, em y
+NUMERO_DA_GRADE = (52, 1005, 228, 1055)         # x1, y1, x2, y2
+SACOLINHA_DA_GRADE = (587, 210, 667, 278)
+FIXADO_DA_GRADE = (36, 200, 252, 305)
+AREA_DA_CHAMADA = (52, 312, 668, 452)           # abaixo do selo e da sacolinha, acima da foto
+AREA_DA_FOTO_COM_CHAMADA = (466, 995)           # de cima a baixo, em y: acaba antes do número
+LETRAS_DA_CHAMADA = (64, 36)                    # a maior e a menor
+LINHAS_DA_CHAMADA = 2
+
+
+def capa_ligada():
+    return bool((db.ler_config("shopee_video", {}) or {}).get(CHAVE_DA_CAPA))
+
+
+# A linha que termina numa palavra de ligação ("Acaba com a / bagunça") vale como uma letra
+# PENALIDADE_DA_QUEBRA px menor: a quebra boa ganha, se a letra não ficar muito menor.
+PENALIDADE_DA_QUEBRA = 8
+
+
+def _quebra_da_chamada(texto, desenho, fonte_ttf):
+    """
+    (fonte, linhas) da chamada: a maior letra em que ela cabe em até LINHAS_DA_CHAMADA linhas
+    na AREA_DA_CHAMADA, com as duas linhas equilibradas e, se der, sem a 1ª terminar numa
+    palavra de ligação. None quando não cabe nem na menor letra.
+    """
+    from PIL import ImageFont
+    x1, y1, x2, y2 = AREA_DA_CHAMADA
+    palavras = texto.split(" ")
+    melhor = None
+    maior, menor = LETRAS_DA_CHAMADA
+    for tamanho in range(maior, menor - 1, -2):
+        fonte = ImageFont.truetype(fonte_ttf, tamanho)
+        opcoes = [[texto]]
+        if LINHAS_DA_CHAMADA >= 2:
+            opcoes += [[" ".join(palavras[:k]), " ".join(palavras[k:])] for k in range(1, len(palavras))]
+        cabem = [linhas for linhas in opcoes if round(tamanho * 1.2) * len(linhas) <= y2 - y1
+                 and all(desenho.textlength(l, font=fonte) <= x2 - x1 for l in linhas)]
+        for linhas in cabem:
+            ligacao = len(linhas) > 1 and linhas[0].split(" ")[-1].lower().strip(",.-:") in PALAVRAS_DE_LIGACAO
+            # Uma linha só é a melhor; em duas, as de tamanho parecido.
+            nota = (tamanho - (PENALIDADE_DA_QUEBRA if ligacao else 0), len(linhas) == 1,
+                    -max(desenho.textlength(l, font=fonte) for l in linhas))
+            if melhor is None or nota > melhor[0]:
+                melhor = (nota, fonte, linhas)
+    return (melhor[1], melhor[2]) if melhor else None
+
+
+def capa_com_chamada(foto, chamada):
+    """
+    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) no fundo preto e a
+    chamada em cima, em até LINHAS_DA_CHAMADA linhas, na maior letra que cabe. None sem a
+    chamada, com a foto que não abre ou com a chamada que não cabe nem na menor letra.
+    """
+    import io
+
+    import matplotlib
+    from PIL import Image, ImageDraw
+    chamada = " ".join((chamada or "").split())
+    if not chamada:
+        return None
+    try:
+        imagem = Image.open(io.BytesIO(foto)).convert("RGB")
+    except Exception:
+        return None
+    largura, _altura = TELA
+    capa = Image.new("RGB", TELA, "black")
+    topo, base = AREA_DA_FOTO_COM_CHAMADA
+    escala = min(largura / imagem.width, (base - topo) / imagem.height)
+    imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
+    capa.paste(imagem, ((largura - imagem.width) // 2, topo + (base - topo - imagem.height) // 2))
+
+    desenho = ImageDraw.Draw(capa)
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf)
+    if not quebra:
+        return None
+    fonte, linhas = quebra
+    x1, y1, x2, y2 = AREA_DA_CHAMADA
+    altura_da_linha = round(fonte.size * 1.2)
+    # Alinhada à esquerda, na mesma coluna do número de visualizações, e no meio da faixa.
+    cima = y1 + (y2 - y1 - altura_da_linha * len(linhas)) / 2
+    for i, linha in enumerate(linhas):
+        desenho.text((x1, cima + altura_da_linha * (i + 0.5)), linha, font=fonte, fill="white", anchor="lm")
+    saida = io.BytesIO()
+    capa.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def _capa_da_vez(foto, vantagem):
+    """A capa com chamada do vídeo que vai ao ar, ou None (a capa de sempre) quando ela não sai: o vídeo não para por ela."""
+    try:
+        return capa_com_chamada(foto, vantagem)
+    except Exception:
+        return None
+
+
+def recorte_da_grade(capa):
+    """O pedaço da capa (PNG, bytes) que a grade do perfil mostra (VISIVEL_NA_GRADE), em PNG: o exemplo do painel."""
+    import io
+
+    from PIL import Image
+    with Image.open(io.BytesIO(capa)) as imagem:
+        cima, baixo = VISIVEL_NA_GRADE
+        saida = io.BytesIO()
+        imagem.crop((0, cima, imagem.width, baixo)).save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def editar(video, foto, destino, avisos=False, musica=None, capa=None):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
-    Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto.
-    Com a musica (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55).
+    Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
+    sem eles, a capa (bytes de uma imagem, como a capa com chamada), quando vem. Com a musica
+    (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55).
     """
-    capa = None
     if avisos and foto:
         capa = capa_com_avisos(foto)
         if not capa:
@@ -601,39 +721,40 @@ def _letreiros(textos, lugar, duracao):
     return letreiros, [texto for texto, *_ in horarios]
 
 
-def editar_2(video, foto, destino, nome="", vantagem="", preco=None, lugar=None, avisos=False, musica=None):
+def editar_2(video, foto, destino, nome="", vantagem="", preco=None, lugar=None, avisos=False, musica=None,
+             capa=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
-    alcoólica no lugar da foto). Nada é cortado nem acelerado: isso fica para as versões
-    modificadas do exemplo (pedido do Rafael de 28/10/2026: DECISOES.md, Shopee Vídeo). lugar:
-    onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA; SEM_LUGAR = sem os textos; sem ela,
-    LUGAR_PADRAO). Com a musica (caminho), ela é o som do vídeo inteiro. Devolve (motivo,
-    resumo {original, lugar, textos}): motivo "" quando deu certo.
+    alcoólica no lugar da foto; sem eles, a capa, quando vem). Nada é cortado nem acelerado:
+    isso fica para as versões modificadas do exemplo (pedido do Rafael de 28/10/2026:
+    DECISOES.md, Shopee Vídeo). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA;
+    SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
+    vídeo inteiro. Devolve (motivo, resumo {original, lugar, textos}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, _lugar(lugar), avisos,
-                                 musica)
+                                 musica, capa)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, lugar, avisos=False,
-                          musica=None):
+                          musica=None, capa=None):
     """O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo)."""
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (texto_do_preco(preco), FUNDO_DO_PRECO)], lugar, original)
     resumo = {"original": original, "lugar": lugar, "textos": textos}
     if not letreiros:
-        return editar(video, foto, destino, avisos, musica), resumo
+        return editar(video, foto, destino, avisos, musica, capa), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
         motivo = videos.com_cortes_e_ritmo(video, [(0.0, original, 1.0)], corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino, avisos, musica), resumo
+        return editar(corpo, foto, destino, avisos, musica, capa), resumo
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -641,6 +762,7 @@ COM_LEGENDAS = "editado com legendas (Editor 2)"
 SEM_LEGENDAS_NA_TELA = "editado com o Editor 2, sem legendas na tela"
 SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
+COM_A_CHAMADA = ", com a chamada na capa"
 COM_MUSICA = ", com música de fundo"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
@@ -659,17 +781,20 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
     Devolve (motivo, como, detalhe): motivo "" quando o vídeo saiu editado; como, o jeito
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
-    som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA.
+    som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA. Com a capa com
+    chamada ligada (P76), a vantagem da IA vai na capa, e o jeito leva COM_A_CHAMADA.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
         return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), ""
     musica = _caminho(musicas_de_fundo(video)[0])
-    avisado = (COM_OS_AVISOS if avisos else "") + (COM_MUSICA if musica else "")
     textos = textos_da_tela(video, produto) if produto else {}
+    # Sem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a dos avisos.
+    capa = _capa_da_vez(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
+    avisado = (COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), preco,
-                                    lugar_dos_textos(textos), avisos, musica)
+                                    lugar_dos_textos(textos), avisos, musica, capa)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -682,7 +807,7 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
         elif not (textos.get("nome") or textos.get("vantagem")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica), SO_COM_O_EDITOR_1 + avisado,
+    return (editar(video, foto, destino, avisos, musica, capa), SO_COM_O_EDITOR_1 + avisado,
             f"o Editor 2 não saiu: {motivo_2}")
 
 
@@ -1055,3 +1180,23 @@ def exemplo_editor_2(destino):
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
         produto.get("preco"), textos.get("falas"), lugar_dos_textos(textos)))
+
+
+def exemplo_capa():
+    """
+    O exemplo da capa com chamada (P76), com o próximo vídeo que o robô pegaria: a vantagem que
+    a IA escreve vendo o vídeo, na capa. Tem a lista própria dos já mostrados. Devolve (nome do
+    produto, "", {"capa", "grade", "chamada"}) quando deu certo (as duas imagens em PNG: a capa
+    inteira e o pedaço que a grade do perfil mostra), ou (None, motivo, None).
+    """
+    def editar_um(arquivo, link, foto):
+        produto = _produto_do_link(link)
+        textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
+        if not textos.get("vantagem"):
+            return "a IA não escreveu a vantagem do produto deste vídeo", None
+        capa = capa_com_chamada(foto, textos["vantagem"])
+        if not capa:
+            return "a capa com a chamada não saiu", None
+        return "", {"capa": capa, "grade": recorte_da_grade(capa), "chamada": textos["vantagem"]}
+
+    return _exemplo("ids_capa", editar_um)
