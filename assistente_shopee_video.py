@@ -626,7 +626,7 @@ def _editar(video, produtos, destino, avisos=False):
         foto = None
     produto = produtos[0] if produtos else {}
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], foto, destino, produto.get("nome", ""),
-                                                            produto.get("preco"), avisos)
+                                                            avisos=avisos)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo else como,

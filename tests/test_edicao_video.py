@@ -389,28 +389,42 @@ def test_ritmo_nao_corta_parado_curto_nem_deixa_o_video_curto_demais():
 
 
 def test_textos_um_de_cada_vez_e_o_que_nao_cabe_sai():
-    horarios = edicao_video.horarios_dos_textos(["nome", "vantagem", "preço"], 12)
-    assert [t for t, *_ in horarios] == ["nome", "vantagem", "preço"]
+    horarios = edicao_video.horarios_dos_textos(["nome", "vantagem", "chamada"], 12)
+    assert [t for t, *_ in horarios] == ["nome", "vantagem", "chamada"]
     assert all(fim - inicio <= edicao_video.SEGUNDOS_DE_CADA_TEXTO for _, inicio, fim in horarios)
     assert all(horarios[i][2] < horarios[i + 1][1] for i in range(2)) and horarios[-1][2] <= 12
     # Vídeo curto: cada texto precisa de 1,5 s; o do fim sai primeiro.
-    assert [t for t, *_ in edicao_video.horarios_dos_textos(["nome", "vantagem", "preço"], 4)] == ["nome", "vantagem"]
+    assert [t for t, *_ in edicao_video.horarios_dos_textos(["nome", "vantagem", "chamada"], 4)] == ["nome", "vantagem"]
     assert edicao_video.horarios_dos_textos(["nome"], 1) == []
 
 
-def test_preco_a_partir_de_numa_linha_so_com_o_numero():
-    # "A partir de": o anúncio pode ter variações de preço (regra 14, informação errada).
-    assert edicao_video.texto_do_preco(39.9) == "A\u00a0partir\u00a0de R$\u00a039,90"
-    assert edicao_video.texto_do_preco(0) == edicao_video.texto_do_preco(None) == ""
+def test_chamada_para_o_produto_no_lugar_do_preco(monkeypatch):
+    # Escolha do Rafael (29/10, P80): o preço ficava parado no vídeo e não batia com o do cartão
+    # do app (o do Pix, mais baixo). No lugar dele, uma chamada para o produto anexado embaixo,
+    # que a IA escreve para cada vídeo, no laranja da Shopee; o preço e o desconto ficam só no
+    # cartão, sempre atualizados.
+    import api_gemini
+    pedidos = []
+
+    async def analisar(video, prompt, imagens=None):
+        pedidos.append(prompt)
+        return ('{"nome": "Copo Térmico", "vantagem": "Mantém gelado", '
+                '"chamada": "Toque no produto aqui embaixo 👇 #oferta", "lugar": "alto"}')
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    textos = edicao_video.textos_da_tela("v.mp4", "Copo Térmico Inox 500 ml")
+    assert textos["chamada"] == "Toque no produto aqui embaixo" and len(textos["chamada"]) <= edicao_video.MAXIMO_DA_CHAMADA
+    assert "\"chamada\"" in pedidos[0] and "aqui embaixo" in pedidos[0] and "fora da Shopee" in pedidos[0]
+    assert "sem preço, desconto" in pedidos[0] and not hasattr(edicao_video, "texto_do_preco")
     import io
 
     from PIL import Image
-    with Image.open(io.BytesIO(edicao_video.letreiro(edicao_video.texto_do_preco(1299.9), edicao_video.FUNDO_DO_PRECO,
+    with Image.open(io.BytesIO(edicao_video.letreiro(textos["chamada"], edicao_video.FUNDO_DA_CHAMADA,
                                                      edicao_video.LUGARES_DOS_TEXTOS["alto"][2]))) as imagem:
-        # Na caixa do alto, duas linhas ("A partir de" e o preço), dentro da tela e com o fundo
-        # transparente.
-        assert imagem.mode == "RGBA" and imagem.width <= 720 and 100 < imagem.height < 200
-        assert imagem.getpixel((0, 0))[3] == 0 and imagem.getpixel((imagem.width // 2, 8))[3] > 150
+        # Dentro da caixa do alto, com o fundo transparente em volta e o laranja da Shopee.
+        assert imagem.mode == "RGBA" and imagem.width <= 720 and imagem.getpixel((0, 0))[3] == 0
+        vermelho, verde, _azul, opaco = imagem.getpixel((imagem.width // 2, 8))
+        assert opaco > 150 and vermelho > 180 and verde < 120
 
 
 def test_textos_da_ia_vem_limpos_e_curtos(monkeypatch):
@@ -449,13 +463,13 @@ def test_editor_2_de_verdade_e_o_video_original_sem_cortes_com_os_textos(tmp_pat
                     "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]", "-map", "3:a",
                     "-shortest", str(video)], check=True)
     destino = tmp_path / "editado.mp4"
-    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "", 39.9,
-                                           lugar="meio")
+    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "",
+                                           "Toque no produto aqui embaixo", lugar="meio")
     assert motivo == ""
     # Nada sai: o vídeo inteiro, mais a foto no começo.
     assert abs(edicao_video.videos.duracao(str(destino)) - (15 + edicao_video.SEGUNDOS_DA_FOTO)) < 0.3
     assert edicao_video.videos.tem_audio(str(destino))
-    assert resumo["textos"] == ["Copo Térmico", "A\u00a0partir\u00a0de R$\u00a039,90"]
+    assert resumo["textos"] == ["Copo Térmico", "Toque no produto aqui embaixo"]
     from PIL import Image
 
     def ponto(segundo, onde):
@@ -470,12 +484,12 @@ def test_editor_2_de_verdade_e_o_video_original_sem_cortes_com_os_textos(tmp_pat
     meio_da_tela = (360, 700)
     assert all(abs(a - b) < 30 for a, b in zip(ponto(2.5, meio_da_tela), (0xd0, 0xc0, 0xa0)))
     assert all(abs(a - b) < 30 for a, b in zip(ponto(16.5, meio_da_tela), (0xa0, 0xc0, 0xd0)))
-    # O nome logo depois da foto (caixa escura) e o preço na 2ª metade (caixa laranja).
+    # O nome logo depois da foto (caixa escura) e a chamada na 2ª metade (caixa laranja, P80).
     assert max(ponto(3.0, caixa)) < 80
     vermelho, verde, azul = ponto(11.0, caixa)
     assert vermelho > 180 and verde < 120 and azul < 100
     # Sem o lugar da IA, o texto vai no padrão: no alto, à esquerda, ao lado da miniatura (P46).
-    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None)
+    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", "")
     x, topo, *_ = edicao_video.LUGARES_DOS_TEXTOS[edicao_video.LUGAR_PADRAO]
     assert motivo == "" and resumo["lugar"] == "alto" and max(ponto(2.8, (x + 12, topo + 6))) < 80
 
@@ -490,7 +504,7 @@ def test_remontar_sem_som_nao_mexe_no_som(monkeypatch, tmp_path):
     assert edicao_video.videos.com_cortes_e_ritmo("v.mp4", [], str(tmp_path / "r.mp4")) != ""
 
 
-def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, tmp_path):
+def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkeypatch, tmp_path):
     # Pedido do Rafael (27/10): dois editores, o 1 sem legendas e o 2 com legendas, cada um com o
     # vídeo completo e as versões; cada um com a lista própria dos vídeos já mostrados.
     videos = {nome: str(tmp_path / f"{nome}.mp4") for nome in ("v1", "v2")}
@@ -502,16 +516,17 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_o_preco_da_api(monkeyp
     monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Copo Marca X", "preco": 39.9})
     versoes = [{"vantagem": "Tampa firme", "inicio": 4.0, "fim": 6.0, "chamada": "Veja aqui"}]
     monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
-        "nome": "Copo Térmico", "vantagem": "Gelado o dia todo", "versoes": versoes, "falas": [], "lugar": "meio"})
+        "nome": "Copo Térmico", "vantagem": "Gelado o dia todo", "chamada": "Toque no copo aqui embaixo",
+        "versoes": versoes, "falas": [], "lugar": "meio"})
     pedidos = []
 
     def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
         pedidos.append((1, video, list(versoes_da_ia), falas))
         return "", {"versoes": []}
 
-    def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None,
+    def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                            lugar=None):
-        pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), preco, lugar))
+        pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar))
         return "", {"versoes": []}
 
     monkeypatch.setattr(edicao_video, "editar_1_e_versoes", editar_1_e_versoes)
@@ -522,7 +537,8 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_o_preco_da_api(monkeyp
     # O Editor 1 já mostrou o v1; o Editor 2 tem a lista dele e começa pelo v1 também.
     assert (nome, motivo) == ("Copo Térmico", "") and resumo["textos_da_ia"]
     assert pedidos == [(1, videos["v1"], versoes, []),
-                       (2, videos["v1"], "Copo Térmico", "Gelado o dia todo", versoes, 39.9, "meio")]
+                       (2, videos["v1"], "Copo Térmico", "Gelado o dia todo", versoes, "Toque no copo aqui embaixo",
+                        "meio")]
     dados = db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})
     assert dados["ids"] == ["viral:1"] and dados["ids_2"] == ["viral:1"]
     edicao_video.exemplo_editor_2("exemplo.mp4")
@@ -606,7 +622,7 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
 
     from PIL import Image
     for texto in ("Confortável e cheio de estilo", "Cintura alta e ótima modelagem", "Aparador Buffet Retrô",
-                  "Mantém a bebida gelada por 24 horas", edicao_video.texto_do_preco(1299.9)):
+                  "Mantém a bebida gelada por 24 horas", "Toque no produto aqui embaixo"):
         for lugar, (x, topo, largura, linhas) in edicao_video.LUGARES_DOS_TEXTOS.items():
             with Image.open(io.BytesIO(edicao_video.letreiro(texto, largura_maxima=largura,
                                                              linhas_maximas=linhas))) as imagem:
@@ -618,9 +634,6 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
                     # botões do app à direita.
                     topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - 70
                     assert imagem.width <= 0.34 * 720 and topo + imagem.height < topo_da_seta, (texto, lugar)
-                    if texto.startswith("A\u00a0partir"):
-                        # O preço em 2 linhas: "A partir de" e o valor, sem quebrar por dentro.
-                        assert imagem.height < 3 * round(28 * 1.25) + 2 * 18
 
 
 def test_seta_e_textos_dentro_do_que_o_app_mostra():
@@ -640,7 +653,7 @@ def test_seta_e_textos_dentro_do_que_o_app_mostra():
     assert cy - altura // 2 + max(c[3] for c in caixas if c) < edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
     assert cx - largura // 2 + min(c[0] for c in caixas if c) >= esquerda
     for texto in ("Óculos de Sol Hexagonal", "Mantém a bebida gelada por 24 horas", "Design elegante e moderno",
-                  edicao_video.texto_do_preco(1299.9)):
+                  "Toque no produto aqui embaixo"):
         for lugar, (x, topo, largura_maxima, linhas) in edicao_video.LUGARES_DOS_TEXTOS.items():
             with Image.open(io.BytesIO(edicao_video.letreiro(texto, largura_maxima=largura_maxima,
                                                              linhas_maximas=linhas))) as imagem:
@@ -664,15 +677,17 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     destino = str(tmp_path / "r.mp4")
 
     motivo, resumo = edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "Modelo elegante",
-                                           50.99, lugar="nenhum")
+                                           "Confira no produto abaixo", lugar="nenhum")
     # Sem texto, o vídeo vai direto ao Editor 1, sem passar pelo ffmpeg dos textos.
     assert motivo == "" and montados == [] and resumo["textos"] == [] and resumo["lugar"] == "nenhum"
 
-    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, lugar="esquerda")
+    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", "Confira no produto abaixo",
+                          lugar="esquerda")
     margem = edicao_video.LUGARES_DOS_TEXTOS["esquerda"][0]
     assert [(x, topo) for _, _, _, x, topo in montados[-1]] == [(margem, 400), (margem, 400)]
 
-    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, lugar="direita")
+    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", "Confira no produto abaixo",
+                          lugar="direita")
     for imagem, _, _, x, topo in montados[-1]:
         # Encostado na direita: a caixa termina à mesma distância da borda que a da esquerda.
         assert topo == 400 and x + int.from_bytes(imagem[16:20], "big") == 720 - margem
@@ -814,7 +829,7 @@ def test_editor_1_entrega_o_original_e_as_versoes_remontadas_sem_textos(monkeypa
     montados_1 = list(montados)
     montados.clear()
     edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha", "Leve",
-                                    VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
+                                    VERSOES_DA_IA, "Garanta a sua aqui embaixo", falas=[], lugar="alto")
     assert [m[0] for m in montados_1] == [m[0] for m in montados[1:]]
     assert [m[0][0] for m in montados_1] == [(9.0, 12.0, 1.0), (4.5, 8.0, edicao_video.ACELERADO)]
     assert [m[1] for m in montados_1] == [0, 0]
@@ -839,13 +854,14 @@ def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatc
     # edições; as versões é que são modificadas.
     montados, editados = _versoes_de_mentira(monkeypatch)
     motivo, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
-                                           "Leve e resistente", VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
+                                           "Leve e resistente", VERSOES_DA_IA, "Garanta a sua aqui embaixo", falas=[],
+                                           lugar="alto")
     assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4", "exemplo_3.mp4"]
     # O 1º é o vídeo inteiro, numa parte só e na velocidade dele, com os 3 textos.
     assert montados[0] == ([(0.0, 12.0, 1.0)], 3)
     # As versões são remontadas (o trecho calmo acelerado) e abrem no seu momento.
     assert [m[0][0] for m in montados[1:]] == [(9.0, 12.0, 1.0), (4.5, 8.0, edicao_video.ACELERADO)]
-    assert [m[1] for m in montados[1:]] == [4, 4]
+    assert [m[1] for m in montados[1:]] == [3, 3]
     # Até uns 3/4 e 1/2 do vídeo original (12 s), nunca menos de 8 s.
     assert [edicao_video._segundos_remontados(m[0]) for m in montados[1:]] == [
         pytest.approx(9.0), pytest.approx(edicao_video.MINIMO_DO_REMONTADO)]
@@ -853,16 +869,17 @@ def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatc
     assert resumo["inteiro"] == 12.0 and completo["remontado"] == 12.0
     # O que a remontagem muda nas versões, para a legenda delas.
     assert resumo["remontagem"]["acelerados"] == 1 and resumo["remontagem"]["cortado"] == 0
-    preco = edicao_video.texto_do_preco(25.8)
-    assert completo["gancho"] is None and completo["textos"] == ["Bolsa de Palha", "Leve e resistente", preco]
-    # Nas versões, a vantagem do gancho abre e a chamada fecha.
-    assert segunda["textos"] == ["Fechamento com zíper", "Bolsa de Palha", preco, "Toque no produto"]
+    # O preço não entra mais (P80): o original fecha com a chamada da IA para o produto.
+    assert completo["gancho"] is None and completo["textos"] == [
+        "Bolsa de Palha", "Leve e resistente", "Garanta a sua aqui embaixo"]
+    # Nas versões, a vantagem do gancho abre e a chamada da versão fecha.
+    assert segunda["textos"] == ["Fechamento com zíper", "Bolsa de Palha", "Toque no produto"]
     assert terceira["textos"][0] == "Várias cores" and terceira["textos"][-1] == "Escolha a sua"
     assert segunda["gancho"] == (9.0, 10.5) and segunda["curta"] and not completo["curta"]
     # Sem lugar livre (P47), todos vão sem os textos.
     montados.clear()
     _, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
-                                      VERSOES_DA_IA, 25.8, falas=[], lugar="nenhum")
+                                      VERSOES_DA_IA, "Garanta a sua aqui embaixo", falas=[], lugar="nenhum")
     # O original vai direto ao Editor 1 (sem texto, nada a pôr por cima); as versões, sem texto.
     assert [m[1] for m in montados] == [0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
 
@@ -879,31 +896,31 @@ def test_o_que_vai_ao_ar_e_o_completo_do_editor_2_com_as_legendas(monkeypatch, t
     # assistente vão com o vídeo original do Editor 2 (a foto, a miniatura, a seta e as
     # legendas, sem cortes); as versões modificadas ficam só no exemplo.
     montados, editados = _versoes_de_mentira(monkeypatch)
-    pedidos = _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "falas": [],
-                                            "lugar": "alto"})
+    pedidos = _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente",
+                                            "chamada": "Garanta a sua aqui embaixo", "falas": [], "lugar": "alto"})
     destino = str(tmp_path / "rascunho.mp4")
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa Palha Marca X", 25.8) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa Palha Marca X") == (
         "", edicao_video.COM_LEGENDAS, "")
-    # Um vídeo só: a remontagem inteira com o nome, a vantagem e o preço, e o Editor 1 por cima.
+    # Um vídeo só: a remontagem inteira com o nome, a vantagem e a chamada, e o Editor 1 por cima.
     assert pedidos == ["Bolsa Palha Marca X"]
     # O vídeo original inteiro, sem cortes nem mudança de velocidade (pedido do Rafael, 28/10).
     assert montados == [([(0.0, 12.0, 1.0)], 3)]
     assert editados == [("com_textos.mp4", "rascunho.mp4")]
     # Sem lugar livre do produto e do rosto (P47), o Editor 2 vai sem os textos, e o registro diz por quê.
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "nenhum"})
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa") == (
         "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_LUGAR_LIVRE)
     # Escolha do Rafael (P52): o vídeo que já tem texto próprio na tela vai sem as nossas legendas.
     montados.clear()
     _textos_da_tela(monkeypatch, {"nome": "Presilha", "vantagem": "Firme", "lugar": "alto", "texto_no_video": True})
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Presilha", 20.93) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Presilha") == (
         "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.TEXTO_JA_NO_VIDEO)
     assert montados == []
-    # Sem a resposta da IA, só o preço na tela.
+    # Sem a resposta da IA, o vídeo vai sem os textos (o preço não entra mais, P80).
     _textos_da_tela(monkeypatch, {})
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
-        "", edicao_video.COM_LEGENDAS, edicao_video.SEM_OS_TEXTOS_DA_IA)
-    assert montados[0][1] == 1
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa") == (
+        "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_OS_TEXTOS_DA_IA)
+    assert montados == []
 
 
 def test_sem_o_editor_2_o_que_vai_ao_ar_e_o_editor_1(monkeypatch, tmp_path):
@@ -914,7 +931,7 @@ def test_sem_o_editor_2_o_que_vai_ao_ar_e_o_editor_1(monkeypatch, tmp_path):
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
                         lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
     destino = str(tmp_path / "rascunho.mp4")
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa") == (
         "", edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: o ffmpeg falhou")
     assert editados == [("v.mp4", "rascunho.mp4")]
 
@@ -923,7 +940,7 @@ def test_sem_o_editor_2_o_que_vai_ao_ar_e_o_editor_1(monkeypatch, tmp_path):
         raise RuntimeError("quebrou")
     monkeypatch.setattr(edicao_video, "editar_2", quebra)
     editados.clear()
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa") == (
         "", edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: erro (RuntimeError)")
     assert editados == [("v.mp4", "rascunho.mp4")]
 
@@ -931,7 +948,7 @@ def test_sem_o_editor_2_o_que_vai_ao_ar_e_o_editor_1(monkeypatch, tmp_path):
 def test_sem_a_foto_nada_vai_ao_ar_e_a_ia_nem_e_chamada(monkeypatch, tmp_path):
     _programas(monkeypatch)
     pedidos = _textos_da_tela(monkeypatch, {"nome": "Bolsa"})
-    motivo, _, _ = edicao_video.editar_para_postar("v.mp4", None, str(tmp_path / "r.mp4"), "Bolsa", 25.8)
+    motivo, _, _ = edicao_video.editar_para_postar("v.mp4", None, str(tmp_path / "r.mp4"), "Bolsa")
     assert motivo == "a foto do anúncio não veio" and pedidos == [] and not os.path.exists(tmp_path / "r.mp4")
 
 
@@ -946,11 +963,11 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
     destino = str(tmp_path / "r.mp4")
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vinho", 39.9, avisos=True)[1] == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vinho", avisos=True)[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS)
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
                         lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vinho", 39.9, avisos=True)[1] == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vinho", avisos=True)[1] == (
         edicao_video.SO_COM_O_EDITOR_1 + edicao_video.COM_OS_AVISOS)
     assert avisos == [True, True]
 
@@ -1028,12 +1045,12 @@ def test_o_que_vai_ao_ar_sem_som_leva_a_musica_e_o_registro_diz(monkeypatch, tmp
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "alto"})
     monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
     destino = str(tmp_path / "rascunho.mp4")
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa") == (
         "", edicao_video.COM_LEGENDAS + edicao_video.COM_MUSICA, "")
     assert musicas == ["musica_animada.m4a"]
     # Com som, nada muda.
     monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", 25.8)[1] == edicao_video.COM_LEGENDAS
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")[1] == edicao_video.COM_LEGENDAS
     assert musicas[-1] is None
 
 
@@ -1048,7 +1065,7 @@ def test_exemplo_sem_som_tem_uma_musica_em_cada_video(monkeypatch, tmp_path):
     assert [v["musica"] for v in resumo["versoes"]] == ["animada", "calma", "divertida"]
     musicas.clear()
     _, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
-                                                VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
+                                                VERSOES_DA_IA, "Garanta a sua aqui embaixo", falas=[], lugar="alto")
     assert musicas == ["musica_calma.m4a", "musica_divertida.m4a", "musica_animada.m4a"]
     assert [v["musica"] for v in resumo["versoes"]] == ["calma", "divertida", "animada"]
 
@@ -1155,20 +1172,20 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     destino = str(tmp_path / "r.mp4")
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     # Desligada (o padrão), a capa é a de antes.
-    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)[1] == edicao_video.COM_LEGENDAS
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == edicao_video.COM_LEGENDAS
     assert capas == [None]
     # Ligada no painel, a vantagem da IA vai na capa, e o registro diz.
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
-    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)[1] == (
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
     assert capas[-1][:8] == b"\x89PNG\r\n\x1a\n"
     # A bebida alcoólica fica com a capa dos avisos (P43).
-    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Vinho", 39.9, avisos=True)[1] == (
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Vinho", avisos=True)[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS)
     assert capas[-1] is None
     # Sem a vantagem da IA, a capa de antes também.
     _textos_da_tela(monkeypatch, {"nome": "Bolsa"})
-    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")
     assert capas[-1] is None
     # A capa que não sai (a letra que não abre, por exemplo) não segura o vídeo: vai a capa de antes.
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
@@ -1176,7 +1193,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     def quebrada(foto, chamada):
         raise OSError("sem a letra")
     monkeypatch.setattr(edicao_video, "capa_com_chamada", quebrada)
-    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)[1] == edicao_video.COM_LEGENDAS
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == edicao_video.COM_LEGENDAS
     assert capas[-1] is None
 
 
@@ -1197,7 +1214,7 @@ def test_capa_com_chamada_alterna_um_video_sim_outro_nao(monkeypatch, tmp_path):
     com_vantagem = {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"}
     for textos in (com_vantagem, com_vantagem, {"nome": "Bolsa"}, com_vantagem, com_vantagem):
         _textos_da_tela(monkeypatch, textos)
-        edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)
+        edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")
     assert capas == [True, False, False, True, False]
     assert db.ler_config("shopee_video", {})[edicao_video.CHAVE_DA_VEZ] == 4
 
