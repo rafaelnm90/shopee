@@ -30,6 +30,7 @@ hora em hora para a retomada do Claude (a cada 3 h): paradas, erros e pulados na
 últimas 3 h e 12 h, os aprovados que passaram da hora de ir ao ar e os postados que
 esperam a fila do Canal Afiliados.
 """
+import json
 import os
 import re
 import sqlite3
@@ -48,6 +49,7 @@ import perguntas_rafael
 import registro_processos
 import rotas_espelhador
 import rotinas
+import vendas
 from fuso import fuso_horario
 
 # Erro que já tem seção própria no diagnostico.yml (Links sem conversão).
@@ -801,6 +803,82 @@ def robo_da_shopee_video(agora=None):
             "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora)}
 
 
+# A medição dos produtos a mais da Shopee Vídeo (P73) conta desde o dia em que eles entraram
+# no robô (29/10/2026, PR #285).
+INICIO_DOS_PRODUTOS_A_MAIS = "2026-10-29"
+# As tentativas do robô por dia (a mesma chave do robo_shopee_video.CHAVE_TENTATIVAS_POR_DIA).
+CHAVE_TENTATIVAS_POR_DIA_SV = "shopee_video_tentativas_por_dia"
+
+
+def produtos_a_mais_da_shopee_video(agora=None):
+    """
+    A medição dos produtos a mais da Shopee Vídeo (P73), desde INICIO_DOS_PRODUTOS_A_MAIS: os
+    rascunhos de link de produto salvos e postados com eles, quantos produtos a mais, as vendas
+    do produto do vídeo e dos a mais (a parte dos a mais na comissão em %, nunca o valor), as
+    punições de Produto Irrelevante e se estão ligados. Só números.
+    """
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT estado, postado_em, itens FROM shopee_video_rascunhos WHERE criado_em >= ? "
+                "AND itens IS NOT NULL", (INICIO_DOS_PRODUTOS_A_MAIS,)).fetchall()
+    except sqlite3.OperationalError:
+        linhas = []
+    salvos = com_a_mais = a_mais = 0
+    postados = []
+    for estado, postado_em, itens in linhas:
+        try:
+            itens = json.loads(itens or "[]")
+        except ValueError:
+            continue
+        if estado in ("pulado", "preparando") or not itens:
+            continue
+        salvos += 1
+        quantos = sum(1 for item in itens if item.get("a_mais"))
+        com_a_mais += bool(quantos)
+        a_mais += quantos
+        if estado == "postado" and postado_em:
+            postados.append((postado_em[:10], itens))
+    contas = vendas.vendas_dos_produtos_a_mais(db.ler_config("banco_pedidos", {}) or {}, postados,
+                                               INICIO_DOS_PRODUTOS_A_MAIS)
+    total = contas["do_video"][1] + contas["a_mais"][1]
+    punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE criada >= ? "
+                       "AND LOWER(tipo) LIKE '%irrelevante%'", INICIO_DOS_PRODUTOS_A_MAIS)
+    # Os rascunhos que não saíram e as verificações, pela contagem por dia (o histórico guarda 3 dias).
+    tentativas = Counter()
+    for dia, contagem in (db.ler_config(CHAVE_TENTATIVAS_POR_DIA_SV, {}) or {}).items():
+        if dia >= INICIO_DOS_PRODUTOS_A_MAIS:
+            tentativas.update(contagem)
+    return {"ligados": config.get("robo_produtos_a_mais", True),
+            "parados": bool(config.get("robo_produtos_a_mais_parados")),
+            "salvos": salvos, "com_a_mais": com_a_mais, "a_mais": a_mais, "postados": len(postados),
+            "postados_com_a_mais": sum(1 for _dia, itens in postados if any(i.get("a_mais") for i in itens)),
+            "vendas_do_video": contas["do_video"][0], "vendas_a_mais": contas["a_mais"][0],
+            "parte_a_mais": round(contas["a_mais"][1] * 100 / total) if total else None,
+            "punicoes": punicoes or 0,
+            "tentativas": {resultado: tentativas[f"rascunho: {resultado}"] for resultado in ("salvo", "pulado",
+                                                                                            "parou", "erro")},
+            "verificacoes": sum(n for chave, n in tentativas.items() if chave.endswith(": verificação"))}
+
+
+def _linha_dos_produtos_a_mais(medicao):
+    """A linha da medição dos produtos a mais (P73) no checkup."""
+    if medicao["ligados"]:
+        situacao = "ligados"
+    else:
+        situacao = "parados por punição de produto" if medicao["parados"] else "desligados no painel"
+    parte = f" ({medicao['parte_a_mais']}% da comissão)" if medicao["parte_a_mais"] is not None else ""
+    return (f"Produtos a mais (P73, desde {INICIO_DOS_PRODUTOS_A_MAIS[8:]}/{INICIO_DOS_PRODUTOS_A_MAIS[5:7]}): "
+            f"{situacao} | rascunhos de link de produto salvos {medicao['salvos']} (com produtos a mais "
+            f"{medicao['com_a_mais']}; produtos a mais {medicao['a_mais']}) | postados {medicao['postados']} (com "
+            f"produtos a mais {medicao['postados_com_a_mais']}) | vendas: {medicao['vendas_do_video']} do produto do "
+            f"vídeo, {medicao['vendas_a_mais']} dos produtos a mais{parte} | punições de Produto Irrelevante: "
+            f"{medicao['punicoes']} | tentativas de rascunho: "
+            + ", ".join(f"{resultado} {n}" for resultado, n in medicao["tentativas"].items())
+            + f" | verificações: {medicao['verificacoes']}")
+
+
 def aprovados_postados(agora=None):
     """
     Os aprovados que foram ao ar nas últimas 24 h: [(aprovado HH:MM, previsto HH:MM,
@@ -1423,6 +1501,7 @@ def main():
         print(f"   aprovado {aprovado} → previsto {previsto} → postado {postado} (atraso {atraso} min)")
     print(f"Canal Afiliados: postados esperando a fila do canal há mais de {ESPERA_DO_CANAL} min: "
           f"{robo_sv['canal_parados']}")
+    print(_linha_dos_produtos_a_mais(produtos_a_mais_da_shopee_video(agora)))
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))

@@ -15356,7 +15356,9 @@ async def relatorio_semanal_de_vendas():
     e os produtos que mais renderam, no privado. Pedido do Rafael (P13).
     Decisão do Rafael: DECISOES.md, Financeiro
     """
-    texto = vendas.texto_semanal(ler_banco_pedidos(), datetime.now(fuso_horario))
+    # Os produtos dos vídeos do robô da Shopee Vídeo: a medição dos produtos a mais (P73).
+    texto = vendas.texto_semanal(ler_banco_pedidos(), datetime.now(fuso_horario),
+                                 painel_shopee_video.robo.itens_postados())
     await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
 
 

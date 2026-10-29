@@ -54,7 +54,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
         "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Fila de Rascunhos 🗂️", "Preparar 1 Agora ⚡",
         "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
-        "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Horário das Interações 💬",
+        "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Horário das Interações 💬", "Produtos a Mais 🛍️",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
@@ -337,6 +337,31 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
     rodar(sv.ligar_edicao_handler(Msg("Desligar Edição ⏸️"), est))
     assert not sv.edicao_video.vale_para("autorais")
+
+
+def test_produtos_a_mais_ligam_e_desligam_pelo_painel(bm, Msg, Est):
+    # Escolha do Rafael (29/10, P73): os produtos a mais ficam ligados para a medição de 7 dias;
+    # a punição de produto os para sozinha, e eles voltam pelo painel.
+    sv, est = _painel(bm), Est()
+    assert sv.BOTAO_PRODUTOS_A_MAIS in _textos(sv.teclado_robo(sv.ler_config()))
+    assert sv.BOTAO_PRODUTOS_A_MAIS in sv.robo.CAMINHO_DOS_PRODUTOS_A_MAIS
+    assert sv.PROCESSO_DOS_ESPACOS == sv.robo.PROCESSO_DOS_ESPACOS
+    assert "Produtos a mais: ✅ <b>ligados</b>" in sv.texto_robo(sv.ler_config())
+    msg = Msg(sv.BOTAO_PRODUTOS_A_MAIS)
+    rodar(sv.produtos_a_mais_handler(msg, est))
+    assert "Medição" in msg.saidas[-1] and "Produto Irrelevante" in msg.saidas[-1]
+    assert "O que cada botão faz" in msg.saidas[-1]
+    assert _textos(sv.teclado_produtos_a_mais(sv.ler_config())) == ["Desligar Produtos a Mais ⏸️", "Voltar ao Robô 🔙"]
+    rodar(sv.ligar_produtos_a_mais_handler(Msg("Desligar Produtos a Mais ⏸️"), est))
+    assert sv.robo.ler_config()["robo_produtos_a_mais"] is False
+    assert "Produtos a mais: ⏸️ <b>desligados</b>" in sv.texto_robo(sv.ler_config())
+    # Parados pela punição: a tela diz por quê, e o Ligar tira o motivo.
+    sv.alterar_config(robo_produtos_a_mais_parados="punição de Produto Irrelevante (30/10/2026 10:00:00)")
+    assert "parados sozinhos: punição de Produto Irrelevante" in sv.texto_produtos_a_mais(sv.ler_config())
+    rodar(sv.ligar_produtos_a_mais_handler(Msg("Ligar Produtos a Mais ✅"), est))
+    config = sv.robo.ler_config()
+    assert config["robo_produtos_a_mais"] is True and not config.get("robo_produtos_a_mais_parados")
+    assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ?", sv.robo.PROCESSO_DOS_ESPACOS) == (2,)
 
 
 def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10:00:00"):

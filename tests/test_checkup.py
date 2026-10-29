@@ -39,6 +39,7 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.HORA_DAS_RESPOSTAS_SEM_JANELA_SV == robo.HORA_DAS_RESPOSTAS_SEM_JANELA
     assert checkup.HORARIO_DO_ROBO_SV == robo.ps.HORARIO_DAS_RODADAS
     assert checkup.CHAVE_SEGUIDORES_SV == robo.CHAVE_SEGUIDORES
+    assert checkup.CHAVE_TENTATIVAS_POR_DIA_SV == robo.CHAVE_TENTATIVAS_POR_DIA
 
 
 def test_erro_ligado_ao_lugar_do_codigo_sem_o_texto():
@@ -827,3 +828,43 @@ def test_log_da_rodada_do_robo_e_lido_pelo_nome_no_journal(monkeypatch):
     checkup.ler_journal("robo_shopee_video")
     checkup.ler_journal("bot_mestre_bot")
     assert pedidos[0][3:5] == ["-t", "robo_shopee_video"] and pedidos[1][3:5] == ["-u", "bot_mestre_bot.service"]
+
+
+def test_medicao_dos_produtos_a_mais_so_com_numeros():
+    # Escolha do Rafael (29/10, P73): em 7 dias, os números dos produtos a mais. O checkup mostra
+    # os rascunhos, os postados, as vendas do produto do vídeo e dos a mais (a parte na comissão em
+    # %, nunca o valor) e as punições de Produto Irrelevante.
+    import apelacoes_shopee_video as ap
+    import robo_shopee_video as robo
+    vazio = checkup.produtos_a_mais_da_shopee_video(AGORA)
+    assert (vazio["ligados"], vazio["salvos"], vazio["vendas_a_mais"], vazio["parte_a_mais"]) == (True, 0, 0, None)
+    depois = AGORA + timedelta(days=7)
+    com = [{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}, {"item": "3", "a_mais": True}]
+    robo.atualizar(robo.criar("v1", AGORA + timedelta(days=6)), estado="postado", postado_em="2026-10-30 10:00:00",
+                   itens=com)
+    robo.atualizar(robo.criar("v2", AGORA + timedelta(days=6)), estado="rascunho",
+                   itens=[{"item": "4", "a_mais": False}])
+    robo.atualizar(robo.criar("v3", AGORA + timedelta(days=6)), estado="pulado", itens=com)
+    db.salvar_config("banco_pedidos", {
+        "a": {"data": "2026-10-30", "status": "COMPLETED", "etiqueta": "",
+              "itens": [{"id": "2", "nome": "Garrafa Loja Dois", "qtd": 1, "comissao": 3.0}]},
+        "b": {"data": "2026-10-31", "status": "PENDING", "etiqueta": "",
+              "itens": [{"id": "1", "nome": "Garrafa", "qtd": 1, "comissao": 1.0}]}})
+    ap.guardar("Produto Irrelevante", "30/10/2026 12:00:00", "Não Recorrido", agora=depois)
+    # As tentativas contam pela contagem por dia: o histórico guarda só 3 dias.
+    robo.registrar_tentativa("rascunho", "salvo", agora=depois - timedelta(days=1))
+    robo.registrar_tentativa("rascunho", "parou", "não achei o botão Rascunhos", agora=depois - timedelta(days=1))
+    robo.registrar_tentativa("rascunho", "verificação", "verificação", agora=depois - timedelta(hours=5))
+    robo.registrar_tentativa("rascunho", "salvo", agora=depois)
+    robo.registrar_tentativa("rascunho", "pulado", "antes da medição", agora=AGORA - timedelta(days=1))
+    db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(
+        robo_produtos_a_mais=False, robo_produtos_a_mais_parados="punição de Produto Irrelevante"))
+    m = checkup.produtos_a_mais_da_shopee_video(depois)
+    assert (m["salvos"], m["com_a_mais"], m["a_mais"], m["postados"], m["postados_com_a_mais"]) == (2, 1, 2, 1, 1)
+    assert (m["vendas_do_video"], m["vendas_a_mais"], m["parte_a_mais"], m["punicoes"]) == (1, 1, 75, 1)
+    linha = checkup._linha_dos_produtos_a_mais(m)
+    assert linha.startswith("Produtos a mais (P73, desde 29/10): parados por punição de produto")
+    assert "vendas: 1 do produto do vídeo, 1 dos produtos a mais (75% da comissão)" in linha
+    assert m["tentativas"] == {"salvo": 2, "pulado": 0, "parou": 1, "erro": 0} and m["verificacoes"] == 1
+    assert linha.endswith("| tentativas de rascunho: salvo 2, pulado 0, parou 1, erro 0 | verificações: 1")
+    assert "Garrafa" not in linha and "R$" not in linha and "Rascunhos" not in linha
