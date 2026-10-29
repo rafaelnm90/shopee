@@ -1012,9 +1012,9 @@ def interacoes_da_shopee_video(agora=None):
     """
     As respostas aos comentários dos vídeos e o feed, pelo registro de processos: cada
     resultado das respostas nas últimas 24 h, os comentários com mais de uma resposta do
-    perfil, se as respostas rodaram hoje, os comentários no feed hoje (a meta é 3) e o
-    mesmo vídeo do feed comentado mais de uma vez em 3 dias. Pedido do Rafael: DECISOES.md,
-    Shopee Vídeo.
+    perfil, se as respostas rodaram hoje, os comentários no feed hoje (a meta é 3), com a hora
+    de cada um (espalhados e no Horário das Interações), e o mesmo vídeo do feed comentado
+    mais de uma vez em 3 dias. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
     """
     agora = _agora(agora)
     desde, hoje = _momento(agora - timedelta(hours=24)), agora.strftime("%Y-%m-%d 00:00:00")
@@ -1031,6 +1031,7 @@ def interacoes_da_shopee_video(agora=None):
                           if resultado == "já respondido" and not str(detalhe).startswith("1 ")),
         "rodou_hoje": bool(registro_processos.sequencia("shopee_video", "notificações (respostas)", hoje)),
         "feed_hoje": sum(1 for momento, *_ in feed if momento >= hoje),
+        "feed_horas": [momento[11:16] for momento, *_ in feed if momento >= hoje],
         "feed_repetidos": sum(1 for n in Counter(o for *_x, o in feed if o).values() if n > 1),
         "curtidas": dict(Counter(resultado for _m, _p, resultado, _d, _o in curtidas)),
         "lives": len(registro_processos.sequencia("shopee_video", "feed: vídeo olhado", desde, resultado="live pulada")),
@@ -1325,8 +1326,9 @@ def main():
     print(f"Respostas aos comentários (24 h): {respostas or 'nenhuma'} | com mais de uma resposta do perfil: "
           f"{interacoes['duplicadas']} | Notificações lidas hoje: {'sim' if interacoes['rodou_hoje'] else 'não'}")
     curtidas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["curtidas"].items()))
-    print(f"Feed: comentados hoje {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} | mesmo vídeo mais de "
-          f"uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
+    horas = f" ({', '.join(interacoes['feed_horas'])})" if interacoes.get("feed_horas") else ""
+    print(f"Feed: comentados hoje {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA}{horas} | mesmo vídeo "
+          f"mais de uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
           f"lives puladas (24 h): {interacoes['lives']}")
 
     print("\n== Sobreposições (uma tarefa no horário de outra, 24 h)")
