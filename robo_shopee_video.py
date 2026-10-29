@@ -73,6 +73,7 @@ import interacoes_shopee_video as interacoes
 import pedidos_do_canal
 import postador_shopee_video as ps
 import registro_processos
+import visualizacoes_shopee_video as visualizacoes
 from api_shopee import eh_video, link_para_converter
 from fuso import fuso_horario
 from legendas import nome_da_legenda
@@ -602,7 +603,7 @@ def suspensao_na_tela(xml, agora=None):
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
-           "rotulo_ia", "mais_produtos", "itens", "capas")
+           "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -610,7 +611,10 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # um produto a mais, [{item, a_mais}]: a medição das vendas da P73.
 # capas: os arquivos das fotos de capa dos produtos do post, na ordem, no rascunho com produtos
 # a mais: o Rafael as vê em álbum antes de aprovar (P75).
-COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas")
+# chamada: "1" quando o vídeo vai com a capa com chamada (P76); marca: a marca da capa dele na
+# grade do Perfil, guardada no post; vistas: as visualizações lidas na grade, [[momento, número]]
+# (a medição da P76, visualizacoes_shopee_video).
+COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas")
 
 
 def _criar_tabela(con):
@@ -635,6 +639,7 @@ def _linha_para_dict(linha):
     rascunho["mais_produtos"] = json.loads(rascunho["mais_produtos"] or "[]")
     rascunho["itens"] = json.loads(rascunho["itens"] or "[]")
     rascunho["capas"] = json.loads(rascunho["capas"] or "[]")
+    rascunho["vistas"] = json.loads(rascunho["vistas"] or "[]")
     return rascunho
 
 
@@ -657,7 +662,7 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    for coluna in ("produtos", "mais_produtos", "itens", "capas"):
+    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2827,10 +2832,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
-    copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False))
+    como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False))
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
-              mais_produtos=_mais_produtos(produtos[1:] if produtos else []))
+              mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
+              chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "")
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
@@ -2901,7 +2907,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
     só vai vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo;
     sem a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou deixa tentar de novo
     depois. Bebida alcoólica (alcool=True) abre com a capa dos avisos da Shopee no lugar da
-    foto, e sem a edição ela não tem como levar os avisos: fica de lado.
+    foto, e sem a edição ela não tem como levar os avisos: fica de lado. Devolve como o vídeo
+    saiu (o jeito de edicao_video.editar_para_postar; "" sem a edição).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -2909,7 +2916,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
         if alcool:
             raise Parada(MOTIVO_SEM_AVISOS, do_video=True)
         shutil.copyfile(video["arquivo"], copia)
-        return
+        return ""
     if video.get("de_video"):
         anuncio = anuncio_do_ver_produtos(nomes[0]) if nomes else {}
     else:
@@ -2922,6 +2929,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
                                  motivo or detalhe, ok=not motivo and not so_com_o_editor_1)
     if motivo:
         raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))
+    return como
 
 
 def oferta_pelo_nome(nome):
@@ -3157,7 +3165,7 @@ def publicar(d, rascunho, agora=None):
     _conferir(ps.postar(d, video_do_rascunho(rascunho)), do_video=False)
     pausa(15)
     atualizar(rascunho["id"], estado="postado", postado_em=_momento(agora))
-    link = link_do_post(d)
+    link = link_do_post(d, ident=rascunho["id"])
     if link:
         atualizar(rascunho["id"], link_post=link)
     avisar("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou.\n\n"
@@ -3184,13 +3192,14 @@ def botao_de_compartilhar(xml):
     return None
 
 
-def link_do_post(d):
+def link_do_post(d, ident=None):
     """
     O link do post que acabou de sair: Perfil em Shopee Vídeo → o vídeo mais novo → o
     ícone de compartilhar → Copiar link (mapeado no Motorola em 22/10/2026). Qualquer
     passo que não aparece: sem link (o post saiu do mesmo jeito, e a mensagem diz onde
     achar). Nada aqui desfaz a postagem: até a Verificação só abre a tela do celular no
-    privado.
+    privado. Com o ident do rascunho, antes de abrir o vídeo guarda a marca da capa dele na
+    grade (a medição da capa com chamada, P76).
     """
     try:
         ir_ao_perfil(d)
@@ -3200,6 +3209,8 @@ def link_do_post(d):
                    if not any(tem_texto_no_quadro(d, q, texto) for texto in ("Rascunhos", "Fixado"))]
         if not quadros:
             return ""
+        if ident:
+            marcar_o_post(d, ident, quadros[0]["caixa"])
         d.click(*ps._centro(quadros[0]))
         pausa(8)
         compartilhar = botao_de_compartilhar(tela(d))
@@ -3224,6 +3235,122 @@ def link_do_post(d):
 def tem_texto_no_quadro(d, quadro, texto):
     return any(ps._dentro(ps._centro(el), quadro["caixa"]) and texto.casefold() in el["texto"].casefold()
                for el in ps.elementos(d.dump_hierarchy()))
+
+
+# --- As visualizações dos vídeos na grade do Perfil (a medição da capa com chamada) ---
+# Escolha do Rafael (29/10, P76): depois de 7 dias com a capa com chamada, o Claude compara as
+# visualizações dos vídeos com a chamada com as dos de antes. A grade do Perfil em Shopee Vídeo
+# mostra o número embaixo de cada vídeo ("123", "1,2 mil"), mas não diz qual vídeo é qual: no
+# post, o robô guarda a marca da capa do vídeo novo (visualizacoes_shopee_video), e uma vez por
+# dia, depois da Saúde do Vídeo, acha na grade cada vídeo dele dos últimos
+# DIAS_DAS_VISUALIZACOES dias pela marca e anota o número. DECISOES.md, Shopee Vídeo.
+DIAS_DAS_VISUALIZACOES = 8
+# Os vídeos comparados no painel e no checkup: os postados nestes últimos dias.
+DIAS_DA_COMPARACAO = 21
+LEITURAS_POR_VIDEO = 12
+ROLADAS_DA_GRADE = 6
+# A capa do vídeo novo pode demorar a carregar na grade: até tantas tentativas, com a pausa entre elas.
+TENTATIVAS_DA_MARCA, PAUSA_DA_MARCA = 3, 4
+# Quadro cortado pela beirada da tela (mais baixo que isto do mais alto) fica para a próxima rolada.
+QUADRO_INTEIRO = 0.9
+PROCESSO_DAS_VISUALIZACOES = "visualizações na grade do perfil"
+
+
+def marcar_o_post(d, ident, caixa):
+    """
+    Guarda no rascunho a marca da capa do vídeo que acabou de ir ao ar (o quadro da grade em
+    caixa). Sem a marca (a capa não carregou, o print falhou), o vídeo fica fora da medição, e o
+    checkup conta. Nada aqui segura o post nem o link.
+    """
+    try:
+        for tentativa in range(TENTATIVAS_DA_MARCA):
+            if tentativa:
+                pausa(PAUSA_DA_MARCA)
+            marca = visualizacoes.marca_da_capa(d.screenshot(), caixa)
+            if marca:
+                atualizar(ident, marca=marca)
+                return marca
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A marca da capa do post não saiu: {type(e).__name__}")
+    return None
+
+
+def quadros_da_grade(xml):
+    """
+    Os vídeos da grade do Perfil que estão inteiros na tela, na ordem dela, sem o quadro
+    "Rascunhos: N": [{"caixa", "fixado", "vistas"}], vistas o número embaixo do quadro (None
+    quando ele não aparece).
+    """
+    textos = [el for el in (ps.elementos(xml) if xml else []) if el["texto"].strip()]
+    quadros = []
+    for quadro in quadros_da_lista(xml):
+        dentro = [el for el in textos if ps._dentro(ps._centro(el), quadro["caixa"])]
+        if any(ps._normal(el["texto"]).startswith("rascunhos") for el in dentro):
+            continue
+        numeros = [interacoes.contagem(el["texto"]) for el in dentro if ps._normal(el["texto"]) != "fixado"]
+        numeros = [n for n in numeros if n is not None]
+        quadros.append({"caixa": quadro["caixa"], "fixado": any(ps._normal(el["texto"]) == "fixado" for el in dentro),
+                        "vistas": numeros[-1] if numeros else None})
+    altura = max((q["caixa"][3] - q["caixa"][1] for q in quadros), default=0)
+    return [q for q in quadros if q["caixa"][3] - q["caixa"][1] >= altura * QUADRO_INTEIRO]
+
+
+def anotar_visualizacoes(d, agora=None):
+    """
+    No Perfil, acha na grade, pela marca, cada vídeo que o robô postou nos últimos
+    DIAS_DAS_VISUALIZACOES dias e anota as visualizações dele no rascunho (vistas). Rola a
+    grade até ROLADAS_DA_GRADE vezes, até achar todos ou chegar ao fim. Devolve (achados,
+    procurados).
+    """
+    limite = _momento(agora_br(agora) - timedelta(days=DIAS_DAS_VISUALIZACOES))
+    procurados = sorted((r for r in listar("postado") if r.get("marca") and (r["postado_em"] or "") >= limite),
+                        key=lambda r: (r["postado_em"], r["id"]), reverse=True)
+    if not procurados:
+        return 0, 0
+    ir_ao_perfil(d)
+    achados, vistos, anterior = {}, set(), None
+    for rolada in range(ROLADAS_DA_GRADE + 1):
+        if rolada:
+            ps.rolar(d)
+            pausa(4)
+        imagem = d.screenshot()
+        quadros = [(visualizacoes.marca_da_capa(imagem, q["caixa"]), q["vistas"]) for q in quadros_da_grade(tela(d))]
+        # O quadro que já apareceu antes da rolada não conta de novo.
+        novos = [q for q in quadros if q not in vistos]
+        vistos.update(quadros)
+        faltam = [(r["id"], r["marca"]) for r in procurados if r["id"] not in achados]
+        achados.update(visualizacoes.casar(novos, faltam))
+        if len(achados) == len(procurados) or quadros == anterior:
+            break
+        anterior = quadros
+    momento = _momento(agora)
+    for rascunho in procurados:
+        if rascunho["id"] in achados:
+            leituras = (rascunho.get("vistas") or []) + [[momento, achados[rascunho["id"]]]]
+            atualizar(rascunho["id"], vistas=leituras[-LEITURAS_POR_VIDEO:])
+    registro_processos.registrar(REGISTRO, PROCESSO_DAS_VISUALIZACOES, "lidas",
+                                 f"{len(achados)} de {len(procurados)} vídeo(s)", ok=bool(achados))
+    return len(achados), len(procurados)
+
+
+def _anotar_visualizacoes_junto(d, agora=None):
+    """As visualizações lidas depois da Saúde do Vídeo: erro aqui não derruba a rodada."""
+    try:
+        achados, procurados = anotar_visualizacoes(d, agora)
+        if procurados:
+            logger.info(f"📈 [Robô Shopee Vídeo] Visualizações: achei {achados} de {procurados} vídeo(s) na grade.")
+    except (Parada, Verificacao) as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não li as visualizações: {ps.mascarar(getattr(e, 'motivo', ''))}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DAS_VISUALIZACOES, "parou", ok=False)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao ler as visualizações: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DAS_VISUALIZACOES, f"erro ({type(e).__name__})", ok=False)
+
+
+def medicao_da_capa(agora=None):
+    """A comparação da capa com chamada (P76) com os vídeos postados nos últimos DIAS_DA_COMPARACAO dias."""
+    limite = _momento(agora_br(agora) - timedelta(days=DIAS_DA_COMPARACAO))
+    return visualizacoes.comparar([r for r in listar("postado") if (r["postado_em"] or "") >= limite])
 
 
 # --- Canal Afiliados: o vídeo postado vai à fila do canal ---
@@ -4107,6 +4234,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
                        f"{novas} nova(s) para recorrer" + (" (o texto de cada uma chega aqui em seguida)." if novas
                                                              else ".")
                        + "\n\nTudo em Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺.")
+            # De passagem, as visualizações dos vídeos na grade do Perfil (P76).
+            _anotar_visualizacoes_junto(d, agora)
             return resultado
         if acao == "descurtir":
             # A lista só fica limpa se este descurtir chegar ao fim (P27).

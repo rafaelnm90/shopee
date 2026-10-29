@@ -50,6 +50,7 @@ import registro_processos
 import rotas_espelhador
 import rotinas
 import vendas
+import visualizacoes_shopee_video
 from fuso import fuso_horario
 
 # Erro que já tem seção própria no diagnostico.yml (Links sem conversão).
@@ -356,7 +357,7 @@ SEM_META = {
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
-    ("shopee_video", "edição do vídeo: "),
+    ("shopee_video", "edição do vídeo: "), ("shopee_video", "visualizações na grade"),
     ("shopee_video", "responder comentário"), ("shopee_video", "espaços livres: "),
 }
 
@@ -877,6 +878,53 @@ def _linha_dos_produtos_a_mais(medicao):
             f"{medicao['punicoes']} | tentativas de rascunho: "
             + ", ".join(f"{resultado} {n}" for resultado, n in medicao["tentativas"].items())
             + f" | verificações: {medicao['verificacoes']}")
+
+
+# A medição da capa com chamada (P76): os vídeos postados nestes últimos dias (os mesmos do
+# painel, robo_shopee_video.DIAS_DA_COMPARACAO).
+DIAS_DA_COMPARACAO_DA_CAPA = 21
+
+
+def capa_com_chamada_da_shopee_video(agora=None):
+    """
+    A medição da capa com chamada da Shopee Vídeo (P76): se está ligada (e desde quando), os
+    postados com e sem a chamada, os sem a marca da capa e a comparação das visualizações em
+    cada idade (visualizacoes_shopee_video.comparar). O checkup só mostra contagens e %.
+    """
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    limite = (_agora(agora) - timedelta(days=DIAS_DA_COMPARACAO_DA_CAPA)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT postado_em, chamada, marca, vistas FROM shopee_video_rascunhos WHERE estado = 'postado' "
+                "AND postado_em >= ?", (limite,)).fetchall()
+    except sqlite3.OperationalError:
+        linhas = []
+    videos = []
+    for postado_em, chamada, marca, vistas in linhas:
+        try:
+            vistas = json.loads(vistas or "[]")
+        except ValueError:
+            vistas = []
+        videos.append({"postado_em": postado_em, "chamada": chamada, "marca": marca, "vistas": vistas})
+    return {"ligada": bool(config.get("capa_com_chamada")), "desde": config.get("capa_com_chamada_desde") or "",
+            **visualizacoes_shopee_video.comparar(videos)}
+
+
+def _linha_da_capa_com_chamada(medicao):
+    """A linha da medição da capa com chamada (P76) no checkup: só contagens e a diferença em %."""
+    desde = medicao["desde"]
+    situacao = (f"ligada desde {desde[8:10]}/{desde[5:7]}" if medicao["ligada"] and desde
+                else "ligada" if medicao["ligada"] else "desligada")
+    com, sem = medicao["com"], medicao["sem"]
+    partes = [f"Capa com chamada (P76): {situacao}",
+              f"postados com a marca da capa: com a chamada {com['videos']}, sem {sem['videos']} "
+              f"(lidos {com['lidos']} e {sem['lidos']}); sem a marca {medicao['sem_marca']}"]
+    for dias in visualizacoes_shopee_video.IDADES_DA_COMPARACAO:
+        diferenca = visualizacoes_shopee_video.diferenca_em_porcento(medicao, dias)
+        comparado = f"a chamada {diferenca:+d}%" if diferenca is not None else "sem comparação ainda"
+        partes.append(f"com {dias} dia(s): {comparado} ({com['idades'][dias][0]} com, {sem['idades'][dias][0]} sem)")
+    return " | ".join(partes)
 
 
 def aprovados_postados(agora=None):
@@ -1502,6 +1550,7 @@ def main():
     print(f"Canal Afiliados: postados esperando a fila do canal há mais de {ESPERA_DO_CANAL} min: "
           f"{robo_sv['canal_parados']}")
     print(_linha_dos_produtos_a_mais(produtos_a_mais_da_shopee_video(agora)))
+    print(_linha_da_capa_com_chamada(capa_com_chamada_da_shopee_video(agora)))
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
