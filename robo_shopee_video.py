@@ -829,9 +829,7 @@ def motivo_da_espera(config, agora=None):
     if not no_horario(config, agora):
         return "fora do Horário do Robô"
     if na_hora_das_interacoes(config, agora) and not interacoes_do_dia_feitas(agora):
-        inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
-        faltam = max(0, interacoes.COMENTARIOS_NO_FEED_POR_DIA
-                     - interacoes.quantos_desde("video_feed", interacoes.COMENTADOS_NO_FEED, inicio))
+        faltam = comentarios_do_feed_que_faltam(agora)
         partes = ([f"{faltam} comentário(s) no feed"] if faltam else []) + (
             ["as respostas aos comentários"] if respostas_pendentes(agora) else [])
         return f"no Horário das Interações, esperando acabarem {' e '.join(partes) or 'as interações'} do dia"
@@ -979,7 +977,7 @@ def o_que_fazer(config, agora=None):
     hora só isso), ("treino", None), ("apagar", id), ("postar", id), ("saude",
     None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
     ("rascunho", None), ("responder", None) (os comentários dos vídeos, uma vez por dia),
-    ("feed", None) (um vídeo do feed, até 3 por dia) ou None. Gasta o horário do plano, ou
+    ("feed", None) (até 3 vídeos do feed por dia, comentarios_nesta_rodada) ou None. Gasta o horário do plano, ou
     uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
     """
     if na_hora_do_descurtir(agora):
@@ -2870,6 +2868,13 @@ ABA_PARA_VOCE = "Para você"
 VIDEOS_OLHADOS_NO_FEED = 12
 # Os 3 comentários do dia no feed saem espalhados, não um atrás do outro.
 INTERVALO_DO_FEED = timedelta(hours=2)
+# O painel chama uma rodada a cada 15 min (painel_shopee_video).
+INTERVALO_DAS_RODADAS = timedelta(minutes=15)
+# Quanto leva um comentário no feed (passar as lives, assistir, a IA, curtir, comentar e
+# conferir): no Horário das Interações, ele só começa se der para acabar dentro do horário.
+DURACAO_DO_FEED = timedelta(minutes=5)
+# Entre dois comentários na mesma rodada, em segundos (sorteados): o robô fica um pouco no feed.
+PAUSA_ENTRE_COMENTARIOS = (60, 120)
 REGISTRO = "shopee_video"
 
 
@@ -2883,23 +2888,62 @@ def respostas_pendentes(agora=None):
     return bool(estado.get("respostas_continuar")) or not (estado.get("respostas_em") or "").startswith(hoje)
 
 
+def comentarios_do_feed_que_faltam(agora=None):
+    """Quantos dos 3 comentários do feed de hoje (P10) ainda faltam."""
+    inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
+    return max(0, interacoes.COMENTARIOS_NO_FEED_POR_DIA
+               - interacoes.quantos_desde("video_feed", interacoes.COMENTADOS_NO_FEED, inicio))
+
+
+def rodadas_que_restam(config, agora=None):
+    """
+    Quantas rodadas, contando esta, ainda começam a tempo de comentar no feed antes do fim do
+    Horário das Interações (DURACAO_DO_FEED antes dele); None sem o horário ou fora dele.
+    """
+    janela = janela_das_interacoes(config)
+    if not janela or not na_hora_das_interacoes(config, agora):
+        return None
+    momento = agora_br(agora)
+    ultimo_comeco = (momento.replace(hour=0, minute=0, second=0, microsecond=0)
+                     + timedelta(hours=janela[1]) - DURACAO_DO_FEED)
+    if momento > ultimo_comeco:
+        return 0
+    return int((ultimo_comeco - momento) / INTERVALO_DAS_RODADAS) + 1
+
+
 def feed_pendente(agora=None):
     """
     Falta comentar no feed hoje (3 por dia, P10), e o último foi há INTERVALO_DO_FEED ou mais?
-    Num Horário das Interações curto, o intervalo encolhe para os 3 caberem nele.
+    Num Horário das Interações curto, o intervalo encolhe para os 3 caberem nele (P22 a P24)
+    e some quando as rodadas que ainda cabem nele não passam dos comentários que faltam;
+    sem tempo de acabar dentro dele, o feed não começa.
     """
-    inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
-    if interacoes.quantos_desde("video_feed", interacoes.COMENTADOS_NO_FEED, inicio) >= \
-            interacoes.COMENTARIOS_NO_FEED_POR_DIA:
+    faltam = comentarios_do_feed_que_faltam(agora)
+    if not faltam:
         return False
-    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config()))
+    config = ler_config()
+    restam = rodadas_que_restam(config, agora)
+    if restam is not None and restam <= faltam:
+        return restam > 0
+    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(config))
+
+
+def comentarios_nesta_rodada(config, agora=None):
+    """
+    Quantos vídeos do feed esta rodada comenta: um, ou mais quando as rodadas que ainda cabem
+    no Horário das Interações não bastam para os que faltam hoje (numa janela de 1 hora, a
+    rodada das respostas e o começo das rodadas, que muda a cada reinício do bot, podem não
+    deixar 3 livres). Escolha do Rafael (P22 a P24): os 3 cabem no horário. DECISOES.md, Shopee Vídeo.
+    """
+    restam = rodadas_que_restam(config, agora)
+    if not restam:
+        return 1
+    return max(1, comentarios_do_feed_que_faltam(agora) - (restam - 1))
 
 
 def interacoes_do_dia_feitas(agora=None):
     """As respostas e os comentários do feed de hoje já saíram todos? Aí o postar volta, mesmo na janela."""
-    inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
-    return not respostas_pendentes(agora) and interacoes.quantos_desde(
-        "video_feed", interacoes.COMENTADOS_NO_FEED, inicio) >= interacoes.COMENTARIOS_NO_FEED_POR_DIA
+    return not respostas_pendentes(agora) and not comentarios_do_feed_que_faltam(agora)
 
 
 def intervalo_do_feed(config):
@@ -3256,7 +3300,8 @@ def interagir_no_feed(d, agora=None):
     """
     Live e Vídeo → Para você: passa as lives, olha uns vídeos e, num vídeo de outro criador
     que ainda não comentou, curte e comenta (texto da IA, diferente dos anteriores). Um
-    vídeo por rodada; os 3 do dia saem espalhados (feed_pendente). Pedido do Rafael (P10).
+    vídeo de cada vez; os 3 do dia saem espalhados (feed_pendente e comentarios_nesta_rodada).
+    Pedido do Rafael (P10).
     """
     ir_ao_inicio(d)
     tocar(d, ABA_DO_FEED, 8)
@@ -3456,8 +3501,15 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             gravar_estado(respostas_em=_momento(agora), respostas_continuar=False)
             return responder_comentarios(d, agora)
         if acao == "feed":
-            gravar_estado(feed_em=_momento(agora))
-            return interagir_no_feed(d, agora)
+            resultados = []
+            for vez in range(comentarios_nesta_rodada(config, agora)):
+                if vez:
+                    pausa(random.uniform(*PAUSA_ENTRE_COMENTARIOS))
+                    if not comentarios_do_feed_que_faltam(agora) or not rodadas_que_restam(config, agora):
+                        break
+                gravar_estado(feed_em=_momento(agora))
+                resultados.append(interagir_no_feed(d, agora))
+            return "; ".join(resultados)
         if acao == "apagar":
             resultado = apagar_do_app(d, pegar(ident))
             registrar_tentativa("apagar", "apagado", produto=produto, agora=agora)

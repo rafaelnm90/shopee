@@ -439,6 +439,38 @@ def test_respostas_uma_vez_por_dia_e_o_feed_3_por_dia_espalhados():
     assert not robo.feed_pendente(momento("2026-10-24 20:00"))
 
 
+def _janela_das_20_as_21():
+    config = {**robo.PADRAO, "robo_interacoes_inicio": 20, "robo_interacoes_fim": 21}
+    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
+    return config
+
+
+def test_feed_na_janela_de_1_hora_faz_os_3_do_dia():
+    # 28/10, Horário das Interações das 20h às 21h: saíram 2 de 3. A rodada das 20h foi das
+    # respostas, e o espaço de 20 min entre os comentários pulava a das 20:30.
+    _janela_das_20_as_21()
+    for hora in ("20:15", "20:30", "20:45"):
+        agora = momento(f"2026-10-28 {hora}")
+        assert robo.feed_pendente(agora), hora
+        robo.gravar_estado(feed_em=robo._momento(agora))
+        it.guardar(f"video {hora}", "video_feed", "comentado", agora)
+    assert not robo.feed_pendente(momento("2026-10-28 20:50"))
+
+
+def test_feed_no_fim_da_janela_nao_comeca_sem_tempo_e_junta_os_que_nao_cabem():
+    # O começo das rodadas muda a cada reinício do bot: com rodadas às 20:14, 20:29, 20:44 e
+    # 20:59, a das 20:59 não acaba antes das 21h, e a das 20:14 é das respostas.
+    config = _janela_das_20_as_21()
+    assert robo.rodadas_que_restam(config, momento("2026-10-28 20:00")) == 4
+    assert robo.comentarios_nesta_rodada(config, momento("2026-10-28 20:00")) == 1
+    assert robo.rodadas_que_restam(config, momento("2026-10-28 20:29")) == 2
+    assert robo.comentarios_nesta_rodada(config, momento("2026-10-28 20:29")) == 2
+    assert not robo.feed_pendente(momento("2026-10-28 20:59"))
+    # Fora do horário ou sem ele escolhido, um por rodada, a cada INTERVALO_DO_FEED.
+    assert robo.rodadas_que_restam(config, momento("2026-10-28 21:10")) is None
+    assert robo.comentarios_nesta_rodada({**robo.PADRAO}, momento("2026-10-28 20:29")) == 1
+
+
 class CelularDoFeed:
     """O feed Para você: uma live, um vídeo do próprio Rafael e vídeos de outros criadores."""
 
@@ -459,7 +491,9 @@ class CelularDoFeed:
             if video == "live":
                 return _player(live=True)
             return _player(*video, coracao="unlike icon" if self.indice in self.curtidos else "like icon")
-        feitos = [_comentario("Eu", texto, 1250 + 250 * k) for k, texto in enumerate(self.comentarios.get(self.indice, []))]
+        # O comentário do robô sai com o nome do perfil (o do vídeo do próprio Rafael), não "Eu".
+        feitos = [_comentario("Loja Rafa", texto, 1250 + 250 * k)
+                  for k, texto in enumerate(self.comentarios.get(self.indice, []))]
         return _painel(*feitos, campo="" if self.atual == "escrevendo" else None)
 
     def click(self, x, y):
@@ -519,6 +553,18 @@ def test_feed_pula_a_live_e_o_video_do_rafael_curte_e_comenta_um_de_outro_criado
     app.atual, app.indice = "inicio", 0
     robo.interagir_no_feed(app, momento("2026-10-24 12:00"))
     assert app.comentarios == {2: ["Que achado! 0"], 3: ["Que achado! 1"]}
+
+
+def test_rodada_do_feed_sem_rodadas_bastantes_comenta_mais_de_um_video(avisos, ia_do_feed):
+    # Às 20:29 faltam os 3 do dia e só esta rodada e a das 20:44 cabem no horário: 2 agora.
+    _janela_das_20_as_21()
+    robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
+    app = CelularDoFeed()
+    agora = momento("2026-10-28 20:29")
+    resultado = robo._agir(app, "feed", None, False, robo.ler_config(), agora)
+    assert resultado == "feed: 1 vídeo curtido e comentado; feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {2: ["Que achado! 0"], 3: ["Que achado! 1"]}
+    assert robo.comentarios_do_feed_que_faltam(agora) == 1
 
 
 def test_feed_com_o_coracao_que_nao_curte_para_sem_comentar(monkeypatch, avisos, ia_do_feed):
