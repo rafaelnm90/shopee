@@ -2398,19 +2398,27 @@ def item_do_link(link):
     return achado.group(1) if achado else ""
 
 
-def oferta_do_cartao(cartao):
+def oferta_do_cartao(cartao, perdas=None):
     """
     A oferta da API do cartão da busca pela foto: a busca pelo nome, por relevância, e vale a
     de mesmo nome (igual ou cortado) e mesmo preço (até DIFERENCA_DE_PRECO% de diferença). {}
     quando não acha: sem a oferta não há o link para curtir e para o canal, nem a foto da IA.
+    perdas (dict), quando vem, conta por que não achou: "nome" (nenhuma oferta da busca com o
+    mesmo nome) ou "preço" (a de mesmo nome tem outro preço), só números para o checkup.
     """
     ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(cartao["nome"]), limite=OFERTAS_NA_BUSCA,
                                                            sort_type=1))
+    mesmo_nome = False
     for oferta in ofertas:
+        if not ps.nome_na_pagina(oferta.get("productName") or "", cartao["nome"]):
+            continue
+        mesmo_nome = True
         preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
-        if (preco and abs(preco - cartao["preco"]) <= cartao["preco"] * DIFERENCA_DE_PRECO / 100
-                and ps.nome_na_pagina(oferta.get("productName") or "", cartao["nome"])):
+        if preco and abs(preco - cartao["preco"]) <= cartao["preco"] * DIFERENCA_DE_PRECO / 100:
             return oferta
+    if perdas is not None:
+        motivo = "preço" if mesmo_nome else "nome"
+        perdas[motivo] = perdas.get(motivo, 0) + 1
     return {}
 
 
@@ -2527,14 +2535,16 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
         if not cartoes:
             anotar(f"nenhum - {motivo}")
             return []
-        achados = []
+        achados, perdas = [], {}
         for cartao in cartoes:
-            oferta = oferta_do_cartao(cartao)
+            oferta = oferta_do_cartao(cartao, perdas)
             if oferta:
                 achados.append((cartao, oferta))
         candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]),
                                         achados)[:CANDIDATOS_DOS_ESPACOS]
-        contagem = f"{len(cartoes)} na busca, {len(achados)} na API, {len(candidatos)} no preço"
+        # Por que os outros cartões não foram achados na API: o nome ou o preço.
+        fora = f" (sem o nome {perdas.get('nome', 0)}, outro preço {perdas.get('preço', 0)})" if perdas else ""
+        contagem = f"{len(cartoes)} na busca, {len(achados)} na API{fora}, {len(candidatos)} no preço"
         fotos = []
         for candidato in candidatos:
             try:
