@@ -3327,6 +3327,12 @@ def test_oferta_do_cartao_e_a_de_mesmo_nome_e_mesmo_preco(monkeypatch):
     cartao = {"nome": "Garrafa Térmica Inox 1 Litro Preta", "preco": 49.9, "comissao": 10.0, "extra": False}
     assert robo.oferta_do_cartao(cartao)["itemId"] == 3 and pedidos[0][1] == 1
     assert robo.oferta_do_cartao(dict(cartao, preco=20.0)) == {}
+    # Por que não achou, só números para o checkup: o mesmo nome com outro preço, ou nenhum
+    # com o mesmo nome.
+    perdas = {}
+    assert robo.oferta_do_cartao(dict(cartao, preco=20.0), perdas) == {} and perdas == {"preço": 1}
+    assert robo.oferta_do_cartao(dict(cartao, nome="Panela De Pressão Elétrica"), perdas) == {}
+    assert perdas == {"preço": 1, "nome": 1}
 
 
 @pytest.fixture
@@ -3353,7 +3359,14 @@ def busca_pela_foto(monkeypatch):
 
     monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"\xff\xd8foto"})
     monkeypatch.setattr(robo, "buscar_pela_foto", buscar)
-    monkeypatch.setattr(robo, "oferta_do_cartao", lambda cartao: ofertas.get(cartao["nome"], {}))
+    def oferta(cartao, perdas=None):
+        achada = estado["ofertas"].get(cartao["nome"], {})
+        if not achada and perdas is not None:
+            perdas["nome"] = perdas.get("nome", 0) + 1
+        return achada
+
+    estado["ofertas"] = ofertas
+    monkeypatch.setattr(robo, "oferta_do_cartao", oferta)
     monkeypatch.setattr(robo, "item_do_link", lambda link: "7")
     monkeypatch.setattr(robo.ps, "baixar_foto",
                         lambda endereco: b"\xff\xd8capa" if endereco == "https://cf.shopee.com.br/capa" else b"\xff\xd8anuncio")
@@ -3382,6 +3395,16 @@ def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_qu
     assert mais[0]["foto"] == b"\xff\xd8anuncio"
     assert vistos == ["Produtos a mais (2 de 3): a mesma garrafa"]
     assert _registro_dos_espacos() == ["achados"]
+
+
+def test_espacos_livres_contam_os_cartoes_que_nao_acharam_na_api(busca_pela_foto):
+    # Só números no registro: por que os cartões da busca não foram achados na API.
+    del busca_pela_foto["ofertas"]["Garrafa 2"]
+    busca_pela_foto["iguais"] = [0]
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+    robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [], robo.time.monotonic() + 600)
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
+    assert "3 na busca, 2 na API (sem o nome 1, outro preço 0), 2 no preço" in registro[-1][3]
 
 
 def test_espacos_livres_sem_resultado_sem_tempo_ou_com_a_busca_parada_seguem_sem_nenhum(busca_pela_foto, monkeypatch):
