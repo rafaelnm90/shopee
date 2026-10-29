@@ -802,13 +802,15 @@ def texto_edicao(config):
         f"<b>Editor 1 sem legendas</b>: o robô edita o vídeo como você faz no LumaFusion: a foto do anúncio do "
         f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
         "no canto de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à "
-        "esquerda, no lugar em que você põe no LumaFusion.\n\n"
+        "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
+        "(a foto do produto, um quadro ou um texto), a nossa miniatura fica de fora.\n\n"
         "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
         "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto, uma vantagem que o vídeo "
         "mostra e, no fim, uma chamada para o produto anexado embaixo, no laranja da Shopee (escritos pela IA, "
         "sem marca e sem preço: o preço e o desconto aparecem no cartão do produto, sempre atualizados), em letra "
-        "média, no alto, logo abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto nem o "
-        "rosto; sem lugar livre, ou se o vídeo já tem texto próprio na tela, ele vai sem os nossos textos.\n\n"
+        "média, no alto, logo abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto, o "
+        "rosto nem os quadros que o criador pôs por cima; sem lugar livre, ou se o vídeo já tem legenda própria "
+        "(os quadros do criador com a foto do produto não contam), ele vai sem os nossos textos.\n\n"
         "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
@@ -1270,6 +1272,10 @@ def legenda_das_versoes(nome, resumo, indice, editor):
         linhas.append(f"🎵 Música de fundo: {versao['musica']} (o vídeo original não tem som)")
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
         linhas.append("⚠️ A IA não escreveu o nome, a vantagem e a chamada desta vez.")
+    if not gancho and resumo.get("miniatura") is False:
+        # Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
+        linhas.append("🖼️ Sem a nossa miniatura (neste vídeo e nas versões): o criador já pôs coisa no canto de "
+                      "cima à direita.")
     if indice < total - 1:
         return "\n".join(linhas)
     if total < edicao_video.VERSOES_POR_VIDEO:
@@ -1628,15 +1634,39 @@ def linhas_dos_links(rascunho):
     return "".join(f"🔗 {html_escape(link)}\n" for link in links if link) or "🔗 \n"
 
 
+SEM_O_LINK_DO_PRODUTO = "🔗 (a API não achou o link deste: ele está no Ver Produtos do vídeo original, abaixo)"
+
+
+def linhas_dos_produtos(rascunho):
+    """
+    Cada produto anexado com o link dele logo embaixo, na ordem do post, para o Rafael conferir
+    um a um que o link é o do produto (pedido dele, 29/10, P83: DECISOES.md, Shopee Vídeo). No
+    link de produto, o do link (ou o da troca) e os dos produtos a mais (P59); no Ver Produtos,
+    o que a API achou pelo nome de cada um e, no fim, o link do vídeo original, que abre a lista
+    do criador. O rascunho de antes, sem um link por produto, mostra os nomes e o link dele.
+    """
+    nomes = list(rascunho.get("produtos") or [])
+    do_ver_produtos = rascunho.get("links_dos_produtos") or []
+    fim = ""
+    if do_ver_produtos and len(do_ver_produtos) == len(nomes):
+        links = do_ver_produtos
+        fim = f"🎬 Vídeo original, com o Ver Produtos do criador:\n🔗 {html_escape(rascunho.get('link') or '')}\n"
+    else:
+        links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
+        if len(links) != len(nomes):
+            return ("\n".join(f"• {html_escape(nome)}" for nome in nomes) or "• ?") + "\n" + linhas_dos_links(rascunho)
+    return "".join(f"• {html_escape(nome)}\n" + (f"🔗 {html_escape(link)}" if link else SEM_O_LINK_DO_PRODUTO) + "\n"
+                   for nome, link in zip(nomes, links)) + fim
+
+
 def texto_rascunho(rascunho, posicao, total):
-    produtos = "\n".join(f"• {html_escape(nome)}" for nome in rascunho["produtos"]) or "• ?"
     aviso = (f"⚠️ Da última vez não deu certo: {html_escape(rascunho['motivo'])}\n\n"
              if rascunho.get("motivo") else "")
     return (f"📝 <b>Rascunho {posicao} de {total}</b> (salvo em {_data_curta(rascunho['criado_em'])})\n\n"
             "📝 <b>Título</b> (o que está na legenda):\n"
             f"<code>{html_escape(rascunho['titulo'] or '')}</code>\n\n"
-            f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n{produtos}\n"
-            f"{linhas_dos_links(rascunho)}\n"
+            f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n"
+            f"{linhas_dos_produtos(rascunho)}\n"
             f"{linhas_da_origem(rascunho.get('fonte'))}"
             f"{linhas_da_conferencia(rascunho.get('conferencia'))}{linha_do_rotulo_de_ia(rascunho.get('rotulo_ia'))}"
             f"{aviso}"

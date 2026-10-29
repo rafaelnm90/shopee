@@ -330,7 +330,11 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "(Editor 2, só o vídeo original, sem cortes)" in texto and "em teste" not in texto
     # Pedido do Rafael (vídeo de 28/10): o 1º vídeo é o original, sem cortes; as versões são modificadas.
     assert "vídeo original, sem cortar nada nem mudar a velocidade" in texto
-    assert "ou se o vídeo já tem texto próprio na tela, ele vai sem os nossos textos" in texto
+    # Escolhas do Rafael (29/10, P81 e P82): a nossa miniatura fica de fora quando o criador já pôs
+    # coisa no canto dela, e os quadros dele com a foto do produto não tiram as nossas legendas.
+    assert "ou se o vídeo já tem legenda própria (os quadros do criador com a foto do produto não contam)" in texto
+    assert "nem os quadros que o criador pôs por cima" in texto
+    assert "a nossa miniatura fica de fora" in texto
     assert ("O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições do "
             "editor, como vai ao ar; depois até 2 versões modificadas dele") in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
@@ -717,10 +721,27 @@ def test_rascunho_mostra_o_link_de_cada_produto_a_mais(bm):
                 "link": "https://s.shopee.com.br/a", "motivo": "", "fonte": "viral", "conferencia": None,
                 "mais_produtos": [{"nome": "Garrafa B", "link": "https://s.shopee.com.br/b", "endereco": ""}]}
     texto = sv.texto_rascunho(rascunho, 1, 1)
-    assert "Produtos anexados" in texto and texto.index("🔗 https://s.shopee.com.br/a") < texto.index(
-        "🔗 https://s.shopee.com.br/b")
+    # Cada produto com o link dele logo embaixo, para o Rafael conferir um a um (P83).
+    assert ("Produtos anexados:</b>\n• Garrafa A\n🔗 https://s.shopee.com.br/a\n• Garrafa B\n"
+            "🔗 https://s.shopee.com.br/b\n") in texto
     # O rascunho de antes, sem os produtos a mais, continua com o link dele.
     assert "🔗 https://s.shopee.com.br/a" in sv.texto_rascunho(dict(rascunho, mais_produtos=None), 1, 1)
+
+
+def test_rascunho_de_ver_produtos_mostra_o_link_de_cada_produto(bm):
+    # Pedido do Rafael (29/10, P83): no rascunho de Ver Produtos ele via os nomes e só o link do
+    # vídeo original, e não dava para validar cada produto. Agora cada um vem com o link dele (o
+    # que a API não achou diz isso), e o link do vídeo original fica no fim.
+    sv = _painel(bm)
+    rascunho = {"criado_em": "2026-10-29 15:15:00", "titulo": "Cortina", "produtos": ["Cortina A", "Cortina B"],
+                "link": "https://s.shopee.com.br/video", "motivo": "", "fonte": "viral", "conferencia": None,
+                "links_dos_produtos": ["https://s.shopee.com.br/a", ""]}
+    texto = sv.texto_rascunho(rascunho, 1, 1)
+    assert ("• Cortina A\n🔗 https://s.shopee.com.br/a\n• Cortina B\n" + sv.SEM_O_LINK_DO_PRODUTO + "\n") in texto
+    assert "🎬 Vídeo original, com o Ver Produtos do criador:\n🔗 https://s.shopee.com.br/video" in texto
+    # O rascunho de antes, sem o link de cada produto, mostra os nomes e o link do vídeo.
+    antigo = sv.texto_rascunho(dict(rascunho, links_dos_produtos=[]), 1, 1)
+    assert "• Cortina A\n• Cortina B\n🔗 https://s.shopee.com.br/video" in antigo and "🎬" not in antigo
 
 
 def test_preparar_1_agora_roda_o_robo_na_hora(bm, Msg, Est, monkeypatch):

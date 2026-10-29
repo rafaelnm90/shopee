@@ -2111,10 +2111,19 @@ def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B)):
         confere = any(nome in prompt for nome in confirma)
         return '{"confere": %s, "motivo": "a IA viu no vídeo"}' % ("true" if confere else "false")
 
+    async def buscar(termo, limite=10, sort_type=2):
+        # A API acha o 1º produto pelo nome; o 2º, não (o rascunho diz que falta o link dele).
+        return [{"itemId": 11, "productName": PRODUTO_A, "productLink": "https://shopee.com.br/product/1/11"}]
+
+    async def encurtar(link, etiqueta, avisar_falha=True):
+        return "https://s.shopee.com.br/curto-" + link.rsplit("/", 1)[-1]
+
     monkeypatch.setattr(robo, "link_para_converter", converter)
     monkeypatch.setattr(robo.ps, "link_para_converter", converter)
     monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
     monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", encurtar)
     robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
 
 
@@ -2132,6 +2141,50 @@ def test_link_de_video_curte_e_anexa_todos_os_produtos_que_a_ia_confirma(monkeyp
     assert rascunho["produtos"] == [PRODUTO_A, PRODUTO_B]
     assert len(robo.json.loads(rascunho["conferencia"])) == 4          # 2 conferências por produto
     assert "os do Ver Produtos" in avisos[0]
+    # Pedido do Rafael (29/10, P83): o link de cada produto anexado, para ele conferir no
+    # rascunho; o que a API não acha pelo nome fica sem.
+    assert rascunho["links_dos_produtos"] == ["https://s.shopee.com.br/curto-11", ""]
+
+
+
+def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypatch):
+    # Pedido do Rafael (29/10, P83): no rascunho de Ver Produtos, um link para cada produto, para
+    # ele conferir que bate com o produto. No vídeo dele, eram duas cortinas de nome quase igual,
+    # de lojas diferentes: o anúncio que a API acha fica com o produto de nome igual ao dele, e o
+    # outro fica sem link, em vez de ganhar o link errado.
+    cortina_a = "Cortina Jacquard 2,00m x 1,35m Sala Quarto Cozinha Semi Blackout Premium"
+    cortina_b = "Cortina Jacquard 2,00m x 1,35m Sala E Quarto Cozinha Semi Blackout"
+    etiquetas = []
+
+    async def buscar(termo, limite=10, sort_type=2):
+        assert sort_type == 1
+        return [{"itemId": 7, "productName": cortina_a, "productLink": "https://shopee.com.br/product/1/7"}]
+
+    async def encurtar(link, etiqueta, avisar_falha=True):
+        etiquetas.append((etiqueta, avisar_falha))
+        return "https://s.shopee.com.br/curto-" + link.rsplit("/", 1)[-1]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", encurtar)
+    assert robo.links_do_ver_produtos([cortina_b, cortina_a, "Abajur de Mesa Articulado"]) == [
+        "", "https://s.shopee.com.br/curto-7", ""]
+    assert etiquetas == [(robo.api_shopee.ETIQUETA_SHOPEE_VIDEO, False)]
+    # Com os dois anúncios na busca, cada produto fica com o seu.
+    outra = {"itemId": 8, "productName": cortina_b, "productLink": "https://shopee.com.br/product/1/8"}
+
+    async def buscar_os_dois(termo, limite=10, sort_type=2):
+        return [{"itemId": 7, "productName": cortina_a, "productLink": "https://shopee.com.br/product/1/7"}, outra]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar_os_dois)
+    assert robo.links_do_ver_produtos([cortina_b, cortina_a]) == [
+        "https://s.shopee.com.br/curto-8", "https://s.shopee.com.br/curto-7"]
+
+    # A API fora: o rascunho sai, sem os links (o Rafael confere pelo vídeo original).
+    async def fora(termo, limite=10, sort_type=2):
+        raise RuntimeError("fora do ar")
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", fora)
+    assert robo.links_do_ver_produtos([cortina_a]) == [""]
 
 
 def test_link_de_video_deixa_de_fora_o_produto_que_a_ia_recusa(monkeypatch, avisos):
