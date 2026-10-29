@@ -304,6 +304,9 @@ class MsgComMidia:
     async def answer_photo(self, foto, **kwargs):
         self.midias.append(("foto", foto.path, kwargs.get("caption", "")))
 
+    async def answer_media_group(self, fotos, **kwargs):
+        self.midias.append(("album", [foto.media.path for foto in fotos], fotos[0].caption or ""))
+
 
 def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     # Escolha do Rafael (P37): a edição só vale nos vídeos dele (Autorais) e começa desligada,
@@ -375,6 +378,29 @@ def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10
     robo.atualizar(ident, estado="rascunho", criado_em=criado, titulo=titulo, link="https://s.shopee.com.br/x",
                    produtos=["Vestido Infantil"], comentario="Amei!", arquivo=arquivo, print=print_tela)
     return ident
+
+
+def test_rascunho_com_produtos_a_mais_chega_com_o_album_das_capas(bm, Msg, Est):
+    # Escolha do Rafael (29/10, P75): a tela final mostra só os 2 primeiros produtos; o álbum
+    # das fotos de capa de todos, na ordem do post, vem entre o print e o texto do rascunho.
+    sv, est = _painel(bm), Est()
+    ident = _rascunho(sv)
+    capas = []
+    for n in (1, 2, 3):
+        caminho = os.path.join(sv.robo.PASTA_RASCUNHOS, f"{ident}_capa_{n}.jpg")
+        with open(caminho, "wb") as f:
+            f.write(b"\xff\xd8\xff")
+        capas.append(caminho)
+    sv.robo.atualizar(ident, capas=capas + [os.path.join(sv.robo.PASTA_RASCUNHOS, "sumiu.jpg")])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "foto", "album"]
+    assert msg.midias[2][1] == capas and "as fotos de capa dos 3 produtos, na ordem do post" in msg.midias[2][2]
+    # Com um produto só, o print já mostra tudo: sem álbum.
+    sv.robo.atualizar(ident, capas=capas[:1])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "foto"]
 
 
 def test_rascunhos_um_por_um_com_video_print_titulo_e_link(bm, Msg, Est):
