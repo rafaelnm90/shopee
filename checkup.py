@@ -73,6 +73,9 @@ INTERVALO_CURTO_ROTINA = 10
 # Rotina adiada há menos que isto ainda tem o novo disparo marcado (a intercalação adia
 # de 20 a 45 min): sai depois do checkup, então não é cobrada como "a menos".
 MINUTOS_DA_ADIADA = 60
+# A rotina é sorteada na janela dela no painel e não espera o vídeo além do fim (P84, P85);
+# depois do fim, só o espaçamento entre rotinas a empurra, até isto (min).
+FOLGA_DA_JANELA = 30
 INTERVALO_CURTO_DIVULGACAO = 15
 JANELA_DO_PICO, PICO_PARA_COBRAR = 5, 10
 # Quantos lugares do código mostrar por robô no log.
@@ -446,8 +449,9 @@ def rotinas_do_dia(agora=None):
     As rotinas de texto de hoje por canal, pelo histórico que o bot guarda
     (config_rotina.historico_diario: cada rotina e os horários em que saiu): quantas
     saíram, o menor intervalo, os intervalos curtos, as vezes em que o mesmo assunto
-    saiu em seguida, quantas de cada assunto e as que saíram a mais ou a menos que o
-    configurado (a menos só depois do fim da janela daquela rotina e sem pausa). A que
+    saiu em seguida, quantas de cada assunto, as que saíram fora da janela do painel e as
+    que saíram a mais ou a menos que o configurado (a menos só depois do fim da janela
+    daquela rotina e sem pausa). A que
     falta mas foi adiada há pouco (MINUTOS_DA_ADIADA) ainda vai tentar: fica em "adiadas",
     sem cobrar; a de ontem que ficou adiada e não saiu vem em "ontem_sem_sair".
     """
@@ -474,6 +478,8 @@ def rotinas_do_dia(agora=None):
         pares = [(a, b, any(tipo == b[1] and -1 <= minuto - b[0] <= MINUTOS_DA_ANOTACAO for tipo, minuto in sem_outro))
                  for a, b in zip(lista, lista[1:]) if a[1] == b[1]]
         por_assunto = Counter(tipo for _m, tipo in lista)
+        fora_da_janela = [f"{_hhmm(minuto)} {tipo} (janela {config[tipo]['inicio']}h às {config[tipo]['fim']}h)"
+                          for minuto, tipo in lista if _fora_da_janela(config.get(tipo), minuto)]
         fora, adiadas, linhas = [], [], {}
         for tipo, regra in config.items():
             if (not isinstance(regra, dict) or "frequencia" not in regra or not rotinas.conhecida(tipo)
@@ -501,8 +507,16 @@ def rotinas_do_dia(agora=None):
             "pares_seguidos": [f"{_hhmm(a[0])} {a[1]} → {_hhmm(b[0])} {b[1]}"
                                + (" (sem outro assunto marcado)" if deixado else "") for a, b, deixado in pares],
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
+            "fora_da_janela": fora_da_janela,
         }
     return resultado
+
+
+def _fora_da_janela(regra, minuto):
+    """A rotina saiu (minuto do dia) antes da janela dela no painel ou mais de FOLGA_DA_JANELA min depois?"""
+    if not isinstance(regra, dict) or "inicio" not in regra or "fim" not in regra:
+        return False
+    return minuto < int(regra["inicio"]) * 60 or minuto > int(regra["fim"]) * 60 + FOLGA_DA_JANELA
 
 
 def adiadas_de_ontem(canal, agora=None):
@@ -1378,6 +1392,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             pontos.append(f"Rotinas do {canal}: {tipo} saiu {feitas} vez(es), configurado {esperado} ({sentido})")
         for tipo, _hora in r.get("ontem_sem_sair", []):
             pontos.append(f"Rotinas do {canal}: ontem, {tipo} ficou adiada e não saiu")
+        if r.get("fora_da_janela"):
+            pontos.append(f"Rotinas do {canal}: {len(r['fora_da_janela'])} vez(es) fora da janela do painel")
     if divulgacao and divulgacao["curtos"]:
         pontos.append(f"Divulgação: {divulgacao['curtos']} envio(s) ao mesmo grupo com menos de "
                       f"{INTERVALO_CURTO_DIVULGACAO} min (menor: {divulgacao['menor']:.0f} min)")
@@ -1491,6 +1507,8 @@ def main():
             print(f"   {tipo} ({feitas} de {esperado}): adiada às {hora}, ainda vai tentar de novo")
         for tipo, hora in r["ontem_sem_sair"]:
             print(f"   ontem: {tipo} ficou adiada às {hora} e não saiu")
+        for linha in r["fora_da_janela"]:
+            print(f"   fora da janela do painel: {linha}")
     divulgacao = divulgacao_do_dia(agora)
     menor = "—" if divulgacao["menor"] is None else f"{divulgacao['menor']:.0f} min"
     print(f"Divulgação (24 h): envios {divulgacao['envios']} | grupos {divulgacao['grupos']} | "

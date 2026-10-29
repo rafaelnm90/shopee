@@ -466,6 +466,28 @@ def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
     assert "Rotinas do canal principal: 1 vez(es) o mesmo assunto em seguida" in pontos
 
 
+def test_rotina_fora_da_janela_do_painel_e_cobrada():
+    # P84 e P85 (29/10): cada rotina sai na janela dela e não espera o vídeo além do fim; o
+    # espaçamento ainda pode empurrar a que saiu no fim da janela, até FOLGA_DA_JANELA min.
+    db.salvar_config("config_rotina", {
+        "incentivo": {"inicio": 10, "fim": 20, "frequencia": 3},
+        "link_grupo_viral": {"inicio": 9, "fim": 21, "frequencia": 2},
+        "historico_diario": {"data": "2026-10-23", "contagem": {
+            "incentivo": ["09:45", "15:00", "20:20"],           # antes da janela; dentro; na folga
+            "link_grupo_viral": ["12:00", "21:40"],             # dentro; 40 min depois do fim
+            "promo_publico_viral": ["23:30"],                    # sem janela no banco: não conta
+        }},
+    })
+    r = checkup.rotinas_do_dia(AGORA)
+    assert r["canal principal"]["fora_da_janela"] == ["09:45 incentivo (janela 10h às 20h)"]
+    assert r["Viral"]["fora_da_janela"] == ["21:40 link_grupo_viral (janela 9h às 21h)"]
+    assert r["Grupo Público"]["fora_da_janela"] == []
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA, {}, r, None)
+    assert "Rotinas do canal principal: 1 vez(es) fora da janela do painel" in pontos
+    assert "Rotinas do Viral: 1 vez(es) fora da janela do painel" in pontos
+
+
 def test_rotina_em_seguida_sem_outro_assunto_marcado_nao_e_cobrada():
     # 28/10, Viral: promo_publico_viral às 18:57, 20:47 e 21:33. Sem outro assunto marcado no
     # dia, a regra deixa sair (23/10); o bot anota, e o checkup só cobra o que a regra segura.
