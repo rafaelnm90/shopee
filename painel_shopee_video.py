@@ -1412,6 +1412,15 @@ def linha_do_rotulo_de_ia(rotulo_ia):
     return "🤖 <b>Rótulo de IA:</b> desligado (a IA não viu sinal claro de vídeo feito por IA).\n\n"
 
 
+def linhas_dos_links(rascunho):
+    """
+    O link de cada produto anexado, na ordem do post: o do link (ou o da troca) e os dos
+    produtos a mais, o mesmo item de outras lojas (P59).
+    """
+    links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
+    return "".join(f"🔗 {html_escape(link)}\n" for link in links if link) or "🔗 \n"
+
+
 def texto_rascunho(rascunho, posicao, total):
     produtos = "\n".join(f"• {html_escape(nome)}" for nome in rascunho["produtos"]) or "• ?"
     aviso = (f"⚠️ Da última vez não deu certo: {html_escape(rascunho['motivo'])}\n\n"
@@ -1420,7 +1429,7 @@ def texto_rascunho(rascunho, posicao, total):
             "📝 <b>Título</b> (o que está na legenda):\n"
             f"<code>{html_escape(rascunho['titulo'] or '')}</code>\n\n"
             f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n{produtos}\n"
-            f"🔗 {html_escape(rascunho['link'] or '')}\n\n"
+            f"{linhas_dos_links(rascunho)}\n"
             f"{linhas_da_origem(rascunho.get('fonte'))}"
             f"{linhas_da_conferencia(rascunho.get('conferencia'))}{linha_do_rotulo_de_ia(rascunho.get('rotulo_ia'))}"
             f"{aviso}"

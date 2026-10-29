@@ -1547,3 +1547,196 @@ def test_toque_no_coracao_que_nao_pega_ganha_mais_um(monkeypatch):
     aparelho = CoracaoLento(toques_ate_curtir=9)
     assert ps.curtir_na_pagina(aparelho, TELA_PRODUTO) == (False, "toquei no coração, mas o produto não ficou curtido")
     assert len(aparelho.toques) == 2
+
+
+# --- Busca pela foto: os cartões dos resultados, nas posições do Motorola (29/10/2026) ---
+
+def _no_da_busca(texto="", ident="", centro=(0, 0), meia=(30, 20), classe="TextView", clicavel=False):
+    x, y = centro
+    w, h = meia
+    ident = f' resource-id="com.shopee.br:id/{ident}"' if ident else ""
+    return (f'<node text="{texto}"{ident} class="android.widget.{classe}" clickable="{str(clicavel).lower()}" '
+            f'bounds="[{x - w},{y - h}][{x + w},{y + h}]" />')
+
+
+def _cartao(coluna, y_da_taxa, nome, preco, taxa, extra=False, inteiro=True):
+    """Um cartão como no Motorola: o nome uns 243 px acima da taxa, o preço uns 114 e o selo uns 173."""
+    x = 276 if coluna == 0 else 799
+    nos = [_no_da_busca(nome, centro=(x, y_da_taxa - 243), meia=(220, 35)),
+           _no_da_busca(ident="AN_component_Source_Img", centro=(x - 180, y_da_taxa - 260), classe="ImageView"),
+           _no_da_busca("R$", centro=(x - 217, y_da_taxa - 106), meia=(14, 14)),
+           _no_da_busca(preco, centro=(x - 153, y_da_taxa - 114), meia=(50, 22)),
+           _no_da_busca("1mil+ vendas", centro=(x + 3, y_da_taxa - 61), meia=(90, 16))]
+    if extra:
+        nos.append(_no_da_busca(ident="AN_Labels_Content_Img", centro=(x - 116, y_da_taxa - 173), classe="ImageView"))
+    if inteiro:
+        nos.append(_no_da_busca(f"Taxa de comissão {taxa}%", centro=(x - 47, y_da_taxa), meia=(180, 18)))
+    return "".join(nos)
+
+
+def _resultados(*partes):
+    return ('<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+            + _no_da_busca("Resultados da busca por imagem", centro=(540, 273), meia=(300, 25))
+            + _no_da_busca(ident="AN_component_IcCloseShape_Img", centro=(1018, 274), classe="ImageView",
+                           clicavel=True)
+            + "".join(partes) + "</node></hierarchy>")
+
+
+def test_cartoes_da_busca_pela_foto_na_ordem_da_grade():
+    xml = _resultados(_cartao(1, 1530, "Óculos de Sol Redondo Proteção UV400 Preto", "39,90", "8,5"),
+                      _cartao(0, 1533, "Óculos de Sol Feminino Redondo UV400 Preto", "29,90", "12,0", extra=True),
+                      _cartao(0, 2469, "Óculos Escuro Redondo Preto", "1.299,90", "3,5"),
+                      _cartao(1, 2465, "Corrente cortada embaixo", "10,00", "5,0", inteiro=False))
+    assert ps.cartoes_da_busca(xml) == [
+        {"nome": "Óculos de Sol Feminino Redondo UV400 Preto", "preco": 29.9, "comissao": 12.0, "extra": True},
+        {"nome": "Óculos de Sol Redondo Proteção UV400 Preto", "preco": 39.9, "comissao": 8.5, "extra": False},
+        {"nome": "Óculos Escuro Redondo Preto", "preco": 1299.9, "comissao": 3.5, "extra": False}]
+
+
+def test_cartoes_da_busca_param_nas_recomendacoes_e_sem_resultados_e_avisado():
+    # Sem resultado, o app diz "Nenhum produto encontrado" e mostra "Você também pode gostar":
+    # recomendações da Shopee, que não são a busca (Motorola, 29/10/2026).
+    xml = _resultados(_no_da_busca("Nenhum produto encontrado", centro=(540, 926), meia=(200, 20)),
+                      _no_da_busca("Você também pode gostar", centro=(540, 1279), meia=(200, 20)),
+                      _cartao(0, 2220, "Garrafa Térmica Inox 1 Litro", "49,90", "10,0"))
+    assert ps.sem_resultados_da_busca(xml) and ps.fim_dos_resultados(xml)
+    assert ps.cartoes_da_busca(xml) == []
+    resultados = _resultados(_cartao(0, 1533, "Óculos de Sol Feminino Redondo UV400 Preto", "29,90", "12,0"))
+    assert not ps.sem_resultados_da_busca(resultados) and not ps.fim_dos_resultados(resultados)
+
+
+def test_primeira_foto_da_galeria_da_busca_nunca_o_botao_de_tirar_foto():
+    xml = ('<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+           + _no_da_busca("Clique no botão para buscar", centro=(540, 1401), meia=(250, 20))
+           + _no_da_busca(centro=(541, 1570), meia=(90, 90), classe="ViewGroup", clicavel=True)
+           + _no_da_busca("Pesquisar na galeria", centro=(468, 1842), meia=(200, 22))
+           + _no_da_busca(centro=(982, 1842), meia=(60, 22), classe="ViewGroup", clicavel=True)
+           + _no_da_busca(centro=(430, 2037), meia=(120, 120), classe="ImageView", clicavel=True)
+           + _no_da_busca(centro=(158, 2037), meia=(120, 120), classe="ImageView", clicavel=True)
+           + "</node></hierarchy>")
+    assert ps.primeira_foto_da_galeria(xml) == (158, 2037)
+    assert ps.primeira_foto_da_galeria(xml.replace("Pesquisar na galeria", "Outra tela")) is None
+
+
+def test_ia_dos_produtos_a_mais_ve_as_fotos_de_uma_vez_e_fica_so_o_confirmado_nas_duas(monkeypatch):
+    pedidos, respostas = [], ['{"iguais": [1, 3], "motivo": "a mesma garrafa"}',
+                              '{"iguais": ["3", 2], "motivo": "a 3 é igual"}']
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append((arquivo, prompt, imagens))
+        return respostas[len(pedidos) - 1]
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    anuncios = [("Garrafa A", b"\xff\xd8a"), ("Garrafa B", b"\x89PNGb"), ("Garrafa C", b"\xff\xd8c")]
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa Térmica", anuncios) == ([2], "a 3 é igual")
+    arquivo, prompt, imagens = pedidos[0]
+    assert arquivo == "v.mp4" and '"Garrafa Térmica"' in prompt and len(pedidos) == 2
+    assert [(tipo, rotulo) for _foto, tipo, rotulo in imagens] == [
+        ("image/jpeg", "Anúncio 1: Garrafa A"), ("image/png", "Anúncio 2: Garrafa B"), ("image/jpeg", "Anúncio 3: Garrafa C")]
+    # Sem confirmado na 1ª vez, a 2ª nem é pedida; sem resposta, nenhum.
+    pedidos.clear()
+    respostas[:] = ['{"iguais": [], "motivo": "nenhum é igual"}']
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios) == ([], "nenhum é igual") and len(pedidos) == 1
+    pedidos.clear()
+    respostas[:] = ["não sei"]
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios)[0] == []
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", []) == ([], "sem o vídeo ou sem anúncio para conferir")
+
+
+def test_video_apagar_tira_o_video_do_teste_da_galeria():
+    aparelho = Aparelho()
+    assert ps.explorar("video:apagar", aparelho)
+    assert ["rm", "-f", f"{ps.GALERIA}/{ps.NOME_NA_GALERIA}"] in aparelho.comandos
+    assert aparelho.toques == [] and aparelho.enviados == []
+
+
+class Fileira(Aparelho):
+    """
+    A tela final com a fileira de produtos que rola para o lado: cabem o 1º e o começo do 2º
+    (Motorola, 29/10). Cada arrasto anda passo produtos (com embalo, mais de um).
+    """
+
+    def __init__(self, produtos, passo=1):
+        super().__init__()
+        self.produtos, self.inicio, self.rolagens, self.passo = list(produtos), 0, [], passo
+
+    def dump_hierarchy(self):
+        itens = "".join(
+            f'<node text="{nome}" resource-id="com.shopee.br:id/tv_product_title" class="android.widget.TextView" '
+            f'bounds="[{130 + 800 * i},820][{700 + 800 * i},875]" />'
+            for i, nome in enumerate(self.produtos[self.inicio:self.inicio + 2]))
+        return TELA_FINAL.replace("PRODUTOS", '<node class="androidx.recyclerview.widget.RecyclerView" '
+                                  'resource-id="com.shopee.br:id/rv_product" bounds="[0,800][1080,1030]">'
+                                  + itens + "</node>")
+
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        self.rolagens.append(("fim" if x2 < x1 else "começo", duracao))
+        fim = max(len(self.produtos) - 2, 0)
+        self.inicio = min(self.inicio + self.passo, fim) if x2 < x1 else max(self.inicio - 1, 0)
+
+
+GATINHO = [VESTIDO] + [f"Vestido Infantil Estampado Gatinho Loja {loja}"
+                       for loja in ("Dois", "Três", "Quatro", "Cinco", "Seis")]
+FIBRA = "Fibra Proteína Cabelo Cacheado Luxo"
+
+
+def test_tela_final_com_mais_produtos_que_a_tela_rola_a_fileira_e_confere_cada_um(monkeypatch):
+    # Os produtos a mais (P59): com 4 anexados, a tela mostra só os 2 primeiros; o robô rola a
+    # fileira devagar até o fim, confere cada um na ordem do anexar e volta ao começo.
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    nomes = GATINHO[:4]
+    aparelho = Fileira(nomes)
+    ok, motivo = ps.conferir_tela_final(aparelho, {"produtos": nomes})
+    assert ok and "os 4 produtos anexados" in motivo
+    indo = [duracao for lado, duracao in aparelho.rolagens if lado == "fim"]
+    assert aparelho.inicio == 0 and aparelho.rolagens[-1][0] == "começo"
+    assert indo and all(duracao == ps.SEGUNDOS_DO_ARRASTO for duracao in indo)
+    # Um produto que não é o do vídeo no fim da fileira: não confere, e o aviso vai ao privado.
+    avisos = _avisos(monkeypatch)
+    errado = Fileira(nomes[:3] + [FIBRA])
+    ok, motivo = ps.conferir_tela_final(errado, {"produtos": nomes})
+    assert not ok and "4 produto(s) anexado(s)" in motivo and len(avisos) == 1
+    # Com 2 produtos, os dois cabem na tela: nada rola.
+    dois = Fileira(nomes[:2])
+    assert ps.conferir_tela_final(dois, {"produtos": nomes[:2]})[0] and dois.rolagens == []
+
+
+def test_tela_final_confere_tambem_os_produtos_do_meio_da_fileira(monkeypatch):
+    # Com 6 anexados, o 3º e o 4º não aparecem nem no começo nem no fim da fileira: um produto
+    # errado ali também não passa.
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    avisos = _avisos(monkeypatch)
+    assert ps.conferir_tela_final(Fileira(GATINHO), {"produtos": GATINHO})[0]
+    meio_errado = Fileira(GATINHO[:2] + [FIBRA] + GATINHO[3:])
+    ok, motivo = ps.conferir_tela_final(meio_errado, {"produtos": GATINHO})
+    assert not ok and "6 produto(s) anexado(s)" in motivo and len(avisos) == 1
+
+
+@pytest.mark.parametrize("passo, confere", [(2, True), (3, False)])
+def test_tela_final_nao_confere_produto_que_passou_sem_aparecer(passo, confere, monkeypatch):
+    # O arrasto com embalo anda mais de um produto: andando 2, todos aparecem em alguma olhada;
+    # andando 3, o 3º passa sem aparecer, e a tela final não confere.
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    _avisos(monkeypatch)
+    assert ps.conferir_tela_final(Fileira(GATINHO, passo=passo), {"produtos": GATINHO})[0] is confere
+
+
+@pytest.mark.parametrize("vistas, nomes, confere", [
+    ([["A", "B"], ["B", "C"], ["C", "D"]], ["A", "B", "C", "D"], True),
+    ([["A", "B"], ["C", "D"]], ["A", "B", "C", "D"], True),
+    ([["A", "B"], [], ["B", "C"]], ["A", "B", "C"], True),
+    ([["A", "B"], ["D", "E"]], ["A", "B", "C", "D", "E"], False),
+    ([["B", "A"], ["A", "C"]], ["A", "B", "C"], False),
+    ([["A", "B"], ["B", "C"]], ["A", "B", "C", "D"], False),
+    ([], ["A"], False),
+])
+def test_fileira_confere_pelas_olhadas(vistas, nomes, confere):
+    nomes_longos = {letra: f"Produto {letra} Modelo {letra}{letra} Cor {letra}" for letra in "ABCDE"}
+    longas = [[nomes_longos[letra] for letra in vista] for vista in vistas]
+    assert ps._fileira_confere(longas, [nomes_longos[letra] for letra in nomes]) is confere
+
+
+def test_juntar_vistas_nao_conta_duas_vezes():
+    assert ps._juntar_vistas([["A", "B"], ["B", "C"], ["C", "D"], ["C", "D"]]) == ["A", "B", "C", "D"]
+    assert ps._juntar_vistas([["A", "B"], ["C"]]) == ["A", "B", "C"]
+    assert ps._juntar_vistas([]) == []

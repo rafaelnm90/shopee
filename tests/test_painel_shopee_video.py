@@ -598,6 +598,19 @@ def test_rascunho_mostra_a_origem_e_o_que_a_ia_conferiu(bm):
     assert "Origem" not in texto and "A IA conferiu" not in texto and "Lustre Escandinavo" in texto
 
 
+def test_rascunho_mostra_o_link_de_cada_produto_a_mais(bm):
+    # Os espaços livres (P59): o mesmo item de outras lojas, com o link de cada um, na ordem do post.
+    sv = _painel(bm)
+    rascunho = {"criado_em": "2026-10-29 10:00:00", "titulo": "Garrafa", "produtos": ["Garrafa A", "Garrafa B"],
+                "link": "https://s.shopee.com.br/a", "motivo": "", "fonte": "viral", "conferencia": None,
+                "mais_produtos": [{"nome": "Garrafa B", "link": "https://s.shopee.com.br/b", "endereco": ""}]}
+    texto = sv.texto_rascunho(rascunho, 1, 1)
+    assert "Produtos anexados" in texto and texto.index("🔗 https://s.shopee.com.br/a") < texto.index(
+        "🔗 https://s.shopee.com.br/b")
+    # O rascunho de antes, sem os produtos a mais, continua com o link dele.
+    assert "🔗 https://s.shopee.com.br/a" in sv.texto_rascunho(dict(rascunho, mais_produtos=None), 1, 1)
+
+
 def test_preparar_1_agora_roda_o_robo_na_hora(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
     chamadas = []
