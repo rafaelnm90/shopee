@@ -1468,8 +1468,11 @@ def video_removido(xml):
 
 
 def _texto_de_nome(texto):
-    """Texto que pode ser o nome do produto num cartão (não preço, desconto, nota nem botão)."""
-    normal = _normal(texto)
+    """
+    Texto que pode ser o nome do produto num cartão (não preço, desconto, nota nem botão).
+    O "0" do selo da loja colado na 1ª palavra não faz do nome um número.
+    """
+    normal = _normal(sem_o_selo_colado(texto))
     return bool(normal) and not (normal.startswith("r$") or normal[0].isdigit() or normal[0] in "-+#"
                                  or texto_proibido(normal) or normal == "apenas vídeo")
 
