@@ -104,12 +104,13 @@ def test_mesmo_assunto_em_seguida_sai_depois_da_proxima_de_outro_assunto(bm, rel
     assert any(l[1] == "rotina Viral" and l[2] == "adiada (mesmo assunto em seguida)" for l in linhas)
 
 
-@pytest.mark.parametrize("contagem, forcar, com_outra", [
-    ({"link_grupo_viral": ["10:00"]}, False, False),                                  # nenhuma outra marcada
-    ({"link_grupo_viral": ["09:00"], "promo_publico_viral": ["10:00"]}, False, True),  # a anterior é de outro assunto
-    ({"link_grupo_viral": ["10:00"]}, True, True),                                    # disparo manual
+@pytest.mark.parametrize("contagem, forcar, com_outra, anotada", [
+    ({"link_grupo_viral": ["10:00"]}, False, False, True),                                  # nenhuma outra marcada
+    ({"link_grupo_viral": ["09:00"], "promo_publico_viral": ["10:00"]}, False, True, False),  # a anterior é de outro assunto
+    ({"link_grupo_viral": ["10:00"]}, True, True, False),                                   # disparo manual
 ])
-def test_sem_assunto_seguido_ou_sem_outra_marcada_sai_na_hora(bm, relogio, monkeypatch, contagem, forcar, com_outra):
+def test_sem_assunto_seguido_ou_sem_outra_marcada_sai_na_hora(bm, relogio, monkeypatch, contagem, forcar, com_outra,
+                                                             anotada):
     relogio("11:00")
     agora = datetime.now(bm.fuso_horario)
     _viral_ate_a_ia(bm, monkeypatch)
@@ -127,6 +128,9 @@ def test_sem_assunto_seguido_ou_sem_outra_marcada_sai_na_hora(bm, relogio, monke
             bm.scheduler.shutdown(wait=False)
     with pytest.raises(Parou):
         rodar(cenario())
+    # A que sai em seguida porque não havia outra marcada fica anotada: o checkup não a cobra.
+    linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[1] == "rotina Viral" and l[2] == bm.rotinas.EM_SEGUIDA_SEM_OUTRO for l in linhas) == anotada
 
 
 def test_ligar_o_bot_mantem_os_horarios_das_rotinas_de_hoje(bm, relogio):

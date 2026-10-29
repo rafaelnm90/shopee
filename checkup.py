@@ -465,6 +465,11 @@ def rotinas_do_dia(agora=None):
     for canal, lista in saidas.items():
         lista.sort()
         intervalos = [b[0] - a[0] for a, b in zip(lista, lista[1:])]
+        # O mesmo assunto em seguida que a regra deixa (sem outro assunto marcado no dia) não
+        # conta; o bot anota a hora de cada um.
+        sem_outro = em_seguida_sem_outro(canal, agora)
+        pares = [(a, b, any(tipo == b[1] and -1 <= minuto - b[0] <= MINUTOS_DA_ANOTACAO for tipo, minuto in sem_outro))
+                 for a, b in zip(lista, lista[1:]) if a[1] == b[1]]
         por_assunto = Counter(tipo for _m, tipo in lista)
         fora, adiadas, linhas = [], [], {}
         for tipo, regra in config.items():
@@ -488,9 +493,10 @@ def rotinas_do_dia(agora=None):
             "adiadas": adiadas, "ontem_sem_sair": adiadas_de_ontem(canal, agora),
             "enviadas": len(lista), "menor": min(intervalos) if intervalos else None,
             "curtos": sum(1 for i in intervalos if i < INTERVALO_CURTO_ROTINA),
-            "seguidos": sum(1 for a, b in zip(lista, lista[1:]) if a[1] == b[1]),
+            "seguidos": sum(1 for _a, _b, deixado in pares if not deixado),
+            "seguidos_sem_outro": sum(1 for _a, _b, deixado in pares if deixado),
             "pares_seguidos": [f"{_hhmm(a[0])} {a[1]} → {_hhmm(b[0])} {b[1]}"
-                               for a, b in zip(lista, lista[1:]) if a[1] == b[1]],
+                               + (" (sem outro assunto marcado)" if deixado else "") for a, b, deixado in pares],
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
         }
     return resultado
@@ -514,6 +520,22 @@ def adiadas_de_ontem(canal, agora=None):
             logo_depois.add(detalhe)
     return sorted((tipo, hora) for tipo, (hora, resultado) in ultima.items()
                   if resultado.startswith("adiada") and tipo not in logo_depois)
+
+
+# A anotação da rotina que sai em seguida vem logo depois da hora que o histórico guarda (antes
+# do texto da IA): até estes minutos.
+MINUTOS_DA_ANOTACAO = 3
+
+
+def em_seguida_sem_outro(canal, agora=None):
+    """
+    As rotinas de hoje no canal que saíram logo depois de outra do mesmo assunto porque não
+    havia outro assunto marcado (o bot anota; a regra deixa): [(tipo, minuto do dia)].
+    """
+    desde = _agora(agora).strftime("%Y-%m-%d 00:00:00")
+    return [(detalhe, _minutos(momento[11:16]))
+            for momento, _p, resultado, detalhe, _o in registro_processos.sequencia("bot_mestre", f"rotina {canal}", desde)
+            if resultado == rotinas.EM_SEGUIDA_SEM_OUTRO]
 
 
 def linha_do_tempo_da_rotina(canal, tipo, agora=None):
@@ -1254,7 +1276,9 @@ def main():
     for canal, r in rotinas_hoje.items():
         menor = "—" if r["menor"] is None else f"{r['menor']} min"
         print(f"{canal}{' (pausado)' if r['pausado'] else ''}: enviadas {r['enviadas']} | menor intervalo {menor} | "
-              f"abaixo de {INTERVALO_CURTO_ROTINA} min {r['curtos']} | mesmo assunto em seguida {r['seguidos']}")
+              f"abaixo de {INTERVALO_CURTO_ROTINA} min {r['curtos']} | mesmo assunto em seguida {r['seguidos']}"
+              + (f" (mais {r['seguidos_sem_outro']} sem outro assunto marcado, como a regra deixa)"
+                 if r.get("seguidos_sem_outro") else ""))
         if r["por_assunto"]:
             print("   " + " | ".join(f"{tipo}: {qtd}" for tipo, qtd in sorted(r["por_assunto"].items())))
         for par in r.get("pares_seguidos", []):

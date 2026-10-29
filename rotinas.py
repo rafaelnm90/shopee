@@ -12,6 +12,10 @@ ROTINAS_VIRAIS = ("promo_principal", "link_grupo_viral", "divulgar_gem_viral", "
 ROTINAS_PUBLICO = ("link_grupo_publico", "promo_principal_publico", "promo_viral_publico",
                    "promo_achadinhos_publico")
 CANAIS = ("canal principal", "Viral", "Grupo Público")
+# O resultado que o bot anota quando a rotina sai logo depois de outra do mesmo assunto porque
+# não havia outro assunto marcado no dia no canal (a regra deixa); o checkup não a cobra.
+# Escolha do Rafael (23/10): DECISOES.md, Trabalho com o Claude.
+EM_SEGUIDA_SEM_OUTRO = "em seguida (sem outro assunto marcado)"
 
 
 def canal_da_rotina(tipo):

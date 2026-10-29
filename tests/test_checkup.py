@@ -459,6 +459,21 @@ def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
     assert "Rotinas do canal principal: 1 vez(es) o mesmo assunto em seguida" in pontos
 
 
+def test_rotina_em_seguida_sem_outro_assunto_marcado_nao_e_cobrada():
+    # 28/10, Viral: promo_publico_viral às 18:57, 20:47 e 21:33. Sem outro assunto marcado no
+    # dia, a regra deixa sair (23/10); o bot anota, e o checkup só cobra o que a regra segura.
+    import registro_processos
+    import rotinas
+    db.salvar_config("config_rotina", {"historico_diario": {"data": "2026-10-23", "contagem": {
+        "promo_publico_viral": ["18:57", "20:47", "21:33"]}}})
+    registro_processos.registrar("bot_mestre", "rotina Viral", rotinas.EM_SEGUIDA_SEM_OUTRO, "promo_publico_viral",
+                                 ok=None, agora=AGORA.replace(hour=21, minute=34))
+    viral = checkup.rotinas_do_dia(AGORA)["Viral"]
+    assert (viral["seguidos"], viral["seguidos_sem_outro"]) == (1, 1)
+    assert viral["pares_seguidos"] == ["18:57 promo_publico_viral → 20:47 promo_publico_viral",
+                                       "20:47 promo_publico_viral → 21:33 promo_publico_viral "
+                                       "(sem outro assunto marcado)"]
+
 
 def test_rotina_antiga_do_banco_nao_conta_e_a_que_falta_mostra_a_linha_do_tempo():
     # Checkup de 23/10: uma chave antiga do banco (sem texto no código, nunca enviada)
