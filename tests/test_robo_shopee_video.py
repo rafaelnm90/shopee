@@ -3014,9 +3014,9 @@ def _anexar_espiao(monkeypatch):
     chamadas = []
     original = robo.ps.adicionar_produto
 
-    def espiao(d, video, anexados=None, no_topo=1, rolar_a_lista=True):
+    def espiao(d, video, anexados=None, no_topo=1, rolar_a_lista=True, **outros):
         chamadas.append(rolar_a_lista)
-        return original(d, video, anexados, no_topo, rolar_a_lista)
+        return original(d, video, anexados, no_topo, rolar_a_lista, **outros)
 
     monkeypatch.setattr(robo.ps, "adicionar_produto", espiao)
     return chamadas
@@ -3191,3 +3191,311 @@ def test_erro_ao_guardar_o_pedido_avisa_sem_derrubar_o_post(monkeypatch, avisos,
     assert robo.pedidos_do_canal.pendentes() == []
     assert len(avisos) == 1 and "o pedido não foi guardado" in avisos[0]
     assert _resultado_no_registro() == ("erro (FileNotFoundError)", 0)
+
+
+# --- Os espaços livres com o mesmo item de outras lojas (P59) ---
+
+def _registro_dos_espacos():
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
+    return [r[2] for r in registro]
+
+
+def _oferta_da_foto(item, preco, comissao, link=True):
+    return {"itemId": item, "productName": f"Garrafa Térmica Inox Loja {item}", "priceMin": str(preco),
+            "commissionRate": str(comissao / 100), "imageUrl": f"https://img.exemplo/{item}.jpg",
+            "productLink": f"https://shopee.com.br/product/9/{item}" if link else ""}
+
+
+def test_candidatos_da_foto_ate_20_por_cento_mais_caros_do_que_paga_mais_para_o_que_paga_menos():
+    # Escolhas do Rafael (P58, P59, P68): o mesmo item de outras lojas, até 20% mais caro que o
+    # do link (R$ 50: até R$ 60), nunca o que já está no rascunho nem o mesmo anúncio duas vezes,
+    # do que paga mais por venda para o que paga menos.
+    achados = [({}, _oferta_da_foto(1, 55, 10)),          # R$ 5,50 por venda
+               ({}, _oferta_da_foto(2, 45, 20)),          # R$ 9,00: o que paga mais
+               ({}, _oferta_da_foto(3, 61, 30)),          # mais caro que o teto
+               ({}, _oferta_da_foto(7, 50, 10)),          # o produto do rascunho
+               ({}, _oferta_da_foto(2, 45, 20)),          # o mesmo anúncio de novo
+               ({}, _oferta_da_foto(4, 40, 5, link=False)),
+               ({}, _oferta_da_foto(5, 60, 12))]          # exatamente no teto: R$ 7,20
+    candidatos = robo.candidatos_da_foto({"preco": 50.0, "comissao": 10.0}, "7", achados)
+    assert [c["item"] for c in candidatos] == ["2", "5", "1"]
+    assert candidatos[0]["valor"] == pytest.approx(9.0) and candidatos[0]["endereco"].endswith("/9/2")
+    assert robo.candidatos_da_foto({"preco": 0}, "7", achados) == []
+
+
+def test_oferta_do_cartao_e_a_de_mesmo_nome_e_mesmo_preco(monkeypatch):
+    pedidos = []
+
+    async def buscar(termo, limite=20, sort_type=1):
+        pedidos.append((termo, sort_type))
+        return [{"productName": "Garrafa Térmica Inox 1 Litro Preta", "priceMin": "79.90", "itemId": 1},
+                {"productName": "Outra Coisa Qualquer De Cozinha", "priceMin": "49.90", "itemId": 2},
+                {"productName": "Garrafa Térmica Inox 1 Litro Preta", "priceMin": "49.50", "itemId": 3}]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    cartao = {"nome": "Garrafa Térmica Inox 1 Litro Preta", "preco": 49.9, "comissao": 10.0, "extra": False}
+    assert robo.oferta_do_cartao(cartao)["itemId"] == 3 and pedidos[0][1] == 1
+    assert robo.oferta_do_cartao(dict(cartao, preco=20.0)) == {}
+
+
+@pytest.fixture
+def busca_pela_foto(monkeypatch):
+    """A busca pela foto e a API de mentira: 3 cartões, todos achados na API, e a IA confirma o 1º e o 3º."""
+    estado = {"cartoes": [{"nome": f"Garrafa {i}", "preco": 50.0, "comissao": 10.0, "extra": False} for i in (1, 2, 3)],
+              "motivo": "", "iguais": [0, 2], "fotos_da_ia": []}
+    ofertas = {"Garrafa 1": _oferta_da_foto(1, 52, 12), "Garrafa 2": _oferta_da_foto(2, 50, 11),
+               "Garrafa 3": _oferta_da_foto(3, 55, 8)}
+
+    def buscar(d, foto):
+        if isinstance(estado["cartoes"], Exception):
+            raise estado["cartoes"]
+        return estado["cartoes"], estado["motivo"]
+
+    def iguais(video, nome, anuncios):
+        estado["fotos_da_ia"] = [n for n, _ in anuncios]
+        return estado["iguais"], "a mesma garrafa"
+
+    async def converter(endereco, etiqueta, avisar_falha=True):
+        return "https://s.shopee.com.br/curto" + endereco.rsplit("/", 1)[-1]
+
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"\xff\xd8foto"})
+    monkeypatch.setattr(robo, "buscar_pela_foto", buscar)
+    monkeypatch.setattr(robo, "oferta_do_cartao", lambda cartao: ofertas.get(cartao["nome"], {}))
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "7")
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"\xff\xd8anuncio")
+    monkeypatch.setattr(robo.ps, "ia_confere_iguais", iguais)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    return estado
+
+
+PRINCIPAL = {"nome": "Garrafa Térmica Inox 1 Litro", "link": "https://s.shopee.com.br/principal", "do_video": True,
+             "preco": 50.0, "comissao": 10.0, "valor": 5.0}
+
+
+def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_que_paga_menos(busca_pela_foto):
+    vistos = []
+    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, {"preco": 50.0}, vistos,
+                               robo.time.monotonic() + 600)
+    # A IA vê os 3 de uma vez, do que paga mais (R$ 6,24) para o que paga menos (R$ 4,40).
+    assert busca_pela_foto["fotos_da_ia"] == ["Garrafa Térmica Inox Loja 1", "Garrafa Térmica Inox Loja 2",
+                                              "Garrafa Térmica Inox Loja 3"]
+    assert [p["link"] for p in mais] == ["https://s.shopee.com.br/curto1", "https://s.shopee.com.br/curto3"]
+    assert mais[0]["endereco"] == "https://shopee.com.br/product/9/1" and not mais[0].get("do_video")
+    assert vistos == ["Produtos a mais (2 de 3): a mesma garrafa"]
+    assert _registro_dos_espacos() == ["achados"]
+
+
+def test_espacos_livres_sem_resultado_sem_tempo_ou_com_a_busca_parada_seguem_sem_nenhum(busca_pela_foto):
+    video = {"link": LINK, "arquivo": "v.mp4"}
+    agora = robo.time.monotonic()
+    assert robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora - 1) == []
+    busca_pela_foto.update(cartoes=[], motivo="a busca pela foto não achou o produto")
+    assert robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora + 600) == []
+    busca_pela_foto["cartoes"] = robo.Parada("os resultados da busca pela foto não abriram")
+    assert robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora + 600) == []
+    assert _registro_dos_espacos() == ["nenhum - sem tempo na rodada", "nenhum - a busca pela foto não achou o produto",
+                                       "parou"]
+    # A Verificação da Shopee para tudo, como em qualquer passo.
+    busca_pela_foto["cartoes"] = robo.Verificacao()
+    with pytest.raises(robo.Verificacao):
+        robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora + 600)
+
+
+def test_curte_do_que_paga_menos_para_o_que_paga_mais_e_o_a_mais_que_nao_curte_fica_de_fora(monkeypatch):
+    abertos = []
+    monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: None)
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    monkeypatch.setattr(robo.ps, "limpar_aviso_rapido", lambda d: None)
+    monkeypatch.setattr(robo.ps, "abrir_link", lambda d, link: abertos.append(link))
+    monkeypatch.setattr(robo, "_esperar_a_pagina_do_produto",
+                        lambda d, a_mais=False: abertos[-1] != "https://s.shopee.com.br/ferias")
+    monkeypatch.setattr(robo.ps, "curtir", lambda d, video: (video["link"] != "https://s.shopee.com.br/sem-coracao",
+                                                             "produto curtido"))
+    mais = [dict(PRINCIPAL, nome="Loja 1", link="https://s.shopee.com.br/1", do_video=False, valor=9.0),
+            dict(PRINCIPAL, nome="Férias", link="https://s.shopee.com.br/ferias", do_video=False, valor=7.0),
+            dict(PRINCIPAL, nome="Sem coração", link="https://s.shopee.com.br/sem-coracao", do_video=False, valor=6.0),
+            dict(PRINCIPAL, nome="Loja 4", link="https://s.shopee.com.br/4", do_video=False, valor=2.0)]
+    produtos = sorted([PRINCIPAL] + mais, key=lambda p: -p["valor"])
+    curtidos = []
+    feitos = robo._curtir_os_produtos(None, {"link": LINK}, produtos, curtidos)
+    # O último curtido fica no alto de Minhas Curtidas: curte do que paga menos para o que paga mais.
+    assert abertos == ["https://s.shopee.com.br/4", PRINCIPAL["link"], "https://s.shopee.com.br/sem-coracao",
+                       "https://s.shopee.com.br/ferias", "https://s.shopee.com.br/1"]
+    assert [p["nome"] for p in feitos] == ["Loja 1", PRINCIPAL["nome"], "Loja 4"]
+    assert [link for link, _ in curtidos] == ["https://s.shopee.com.br/4", PRINCIPAL["link"], "https://s.shopee.com.br/1"]
+    # O produto do vídeo que não curte para o rascunho, como sempre.
+    monkeypatch.setattr(robo.ps, "curtir", lambda d, video: (False, "toquei no coração, mas o produto não ficou curtido"))
+    with pytest.raises(robo.Parada):
+        robo._curtir_os_produtos(None, {"link": LINK}, [PRINCIPAL], [])
+
+
+def test_anexa_na_ordem_e_o_a_mais_que_nao_anexa_fica_de_fora(monkeypatch):
+    caminhos, voltas, chamadas = [], [], []
+    monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append(caminho[0][0]))
+    monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
+    monkeypatch.setattr(robo, "voltar_a_tela_final", lambda d: voltas.append(True))
+
+    def adicionar(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ultima_chance=True, avisar=True):
+        chamadas.append((video["produto"], no_topo, ultima_chance, avisar))
+        if video["produto"] in ("B", "Z"):
+            return False, "não achei"
+        anexados.append(video["produto"])
+        return True, "anexado"
+
+    monkeypatch.setattr(robo.ps, "adicionar_produto", adicionar)
+    anexados, no_post = robo.anexar_os_produtos(None, {"link": LINK}, ["A", "B", "C"], a_mais={1, 2})
+    assert anexados == ["A", "C"] and no_post == [0, 2] and len(voltas) == 1
+    assert caminhos == ["@ll_add_product_symbol", "@tv_add_more", "@tv_add_more"]
+    # O a mais vai sem a última chance e sem o aviso; o curtido que não anexou continua no alto da lista.
+    assert chamadas == [("A", 3, True, True), ("B", 2, False, False), ("C", 2, False, False)]
+    assert _registro_dos_espacos() == ["produto a mais de fora"]
+    # O produto do vídeo que não anexa para o rascunho.
+    with pytest.raises(robo.Parada):
+        robo.anexar_os_produtos(None, {"link": LINK}, ["Z", "A"], a_mais={1})
+
+
+def test_passado_o_prazo_os_a_mais_que_faltam_anexar_ficam_de_fora(monkeypatch):
+    # Os a mais são anexados do que paga mais para o que paga menos: passado o prazo, ficam de
+    # fora os que faltam, sem tocar no celular; o do vídeo é anexado sempre.
+    caminhos, chamadas = [], []
+    monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append(caminho[0][0]))
+    monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
+    # Cada anexar leva 250 s no relógio do teste.
+    relogio = [0.0]
+    monkeypatch.setattr(robo.time, "monotonic", lambda: relogio[0])
+
+    def adicionar(d, video, anexados=None, **outros):
+        chamadas.append(video["produto"])
+        anexados.append(video["produto"])
+        relogio[0] += 250
+        return True, "anexado"
+
+    monkeypatch.setattr(robo.ps, "adicionar_produto", adicionar)
+    anexados, no_post = robo.anexar_os_produtos(None, {"link": LINK}, ["X", "A", "B", "C"], a_mais={0, 2, 3},
+                                                prazo=300.0)
+    assert anexados == ["X", "A"] and no_post == [0, 1] and chamadas == ["X", "A"]
+    assert caminhos == ["@ll_add_product_symbol", "@tv_add_more"]
+    assert _registro_dos_espacos() == ["produto a mais de fora", "produto a mais de fora"]
+
+
+def test_descurtir_no_fim_desfaz_cada_produto_curtido_pelo_link_dele(monkeypatch):
+    abertos = []
+    monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: None)
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    monkeypatch.setattr(robo.ps, "limpar_aviso_rapido", lambda d: None)
+    monkeypatch.setattr(robo.ps, "abrir_link", lambda d, link: abertos.append(link))
+    monkeypatch.setattr(robo.ps, "descurtir", lambda d, video: (video["link"] != "https://s.shopee.com.br/2", "ok"))
+    robo.gravar_estado(favoritos_limpos=True)
+    curtidos = [("https://s.shopee.com.br/1", "A"), (None, "B"), ("https://s.shopee.com.br/3", "C")]
+    robo.descurtir_no_fim(None, {"link": "https://s.shopee.com.br/2"}, curtidos)
+    assert abertos == ["https://s.shopee.com.br/1", "https://s.shopee.com.br/2", "https://s.shopee.com.br/3"]
+    # Um não descurtiu: a lista não está limpa até o descurtir das 4h (P27).
+    assert not robo.lista_limpa()
+    robo.gravar_estado(favoritos_limpos=True)
+    robo.descurtir_no_fim(None, {"link": "https://s.shopee.com.br/9"}, curtidos)
+    assert robo.lista_limpa()
+
+
+def test_links_do_canal_levam_os_produtos_a_mais_na_ordem_do_post(monkeypatch):
+    async def destino(link):
+        return "https://shopee.com.br/product/1/" + link.rsplit("/", 1)[-1]
+
+    async def converter(endereco, etiqueta, avisar_falha=True):
+        return f"canal:{endereco.rsplit('/', 1)[-1]}"
+
+    monkeypatch.setattr(robo, "link_para_converter", destino)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    rascunho = {"link": "https://s.shopee.com.br/a", "produtos": ["A", "B", "C"],
+                "mais_produtos": [{"nome": "B", "link": "https://s.shopee.com.br/b",
+                                   "endereco": "https://shopee.com.br/product/9/b9"},
+                                  {"nome": "C", "link": "https://s.shopee.com.br/c", "endereco": ""}]}
+    assert robo.links_para_o_canal(rascunho) == ["canal:a", "canal:b9", "canal:c"]
+
+
+def test_rascunho_guarda_os_produtos_a_mais():
+    ident = robo.criar("v1")
+    robo.atualizar(ident, produtos=["A", "B"], mais_produtos=[{"nome": "B", "link": "l", "endereco": "e"}])
+    rascunho = robo.pegar(ident)
+    assert rascunho["produtos"] == ["A", "B"] and rascunho["mais_produtos"] == [{"nome": "B", "link": "l", "endereco": "e"}]
+    assert robo.pegar(robo.criar("v2"))["mais_produtos"] == []
+
+
+def _cartao_da_busca(coluna, y, nome, preco, taxa):
+    """Um cartão dos resultados da busca pela foto, nas posições do Motorola (29/10/2026)."""
+    x = 276 if coluna == 0 else 799
+    return [_no(nome, caixa=(x - 220, y - 278, x + 220, y - 208), clicavel=False),
+            _no("R$", caixa=(x - 231, y - 120, x - 203, y - 92), clicavel=False),
+            _no(preco, caixa=(x - 203, y - 136, x - 103, y - 92), clicavel=False),
+            _no(f"Taxa de comissão {taxa}%", caixa=(x - 227, y - 18, x + 133, y + 18), clicavel=False)]
+
+
+class AppDaBuscaPelaFoto(AppDeMentira):
+    """A busca pela foto de mentira: Eu → Criadores & Afiliados → câmera → galeria → resultados, em páginas."""
+
+    def __init__(self, sem_resultado=False):
+        super().__init__()
+        self.sem_resultado, self.pagina, self.ordenado = sem_resultado, 0, False
+        linha = lambda y, *nomes: [n for i, nome in enumerate(nomes) for n in _cartao_da_busca(i, y, nome, "49,90", "10,0")]
+        self.paginas = [linha(1533, "Garrafa A", "Garrafa B"),
+                        linha(1326, "Garrafa C", "Garrafa D") + linha(2262, "Garrafa E", "Garrafa F")]
+
+    def _nos(self):
+        topo = [_no("Resultados da busca por imagem", caixa=(240, 250, 840, 300), clicavel=False),
+                _no(ident="AN_component_IcCloseShape_Img", caixa=(990, 246, 1046, 302))]
+        if self.atual == "afiliado":
+            return [_no(ident="AN_ImageSearchIconEntry_IcCameraOutline_Img", caixa=(870, 163, 922, 215)),
+                    _no("Conversão", caixa=(40, 600, 300, 660))]
+        if self.atual == "camera":
+            return [_no(caixa=(451, 1480, 631, 1660)), _no("Pesquisar na galeria", caixa=(268, 1820, 668, 1864),
+                                                          clicavel=False),
+                    '<node text="" class="android.widget.ImageView" clickable="true" bounds="[38,1917][278,2157]" />']
+        if self.atual == "resultados":
+            if self.sem_resultado:
+                return topo + [_no("Nenhum produto encontrado", caixa=(340, 906, 740, 946), clicavel=False),
+                               _no("Você também pode gostar", caixa=(340, 1259, 740, 1299), clicavel=False)]
+            return topo + [_no("Vendas Populares", caixa=(300, 555, 540, 600))] + (
+                self.paginas[min(self.pagina, len(self.paginas) - 1)] if self.ordenado else [])
+        return {"inicio": [ABA_EU], "eu": [ABA_EU, _no("Criadores & Afiliados", caixa=(560, 1640, 1060, 1700))]}[self.atual]
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        nomes = [el["texto"] or "@" + el["id"] for el in ps.elementos(self.dump_hierarchy()) if ps._dentro((x, y), el["caixa"])]
+        self.toques.append(nomes[0] if nomes else (x, y))
+        destinos = {("inicio", "Eu"): "eu", ("eu", "Criadores & Afiliados"): "afiliado",
+                    ("afiliado", "@AN_ImageSearchIconEntry_IcCameraOutline_Img"): "camera",
+                    ("resultados", "@AN_component_IcCloseShape_Img"): "camera"}
+        if self.atual == "camera" and (x, y) == (158, 2037):
+            self.atual = "resultados"
+        elif self.atual == "resultados" and "Vendas Populares" in nomes:
+            self.ordenado = True
+        for nome in nomes:
+            if (self.atual, nome) in destinos:
+                self.atual = destinos[(self.atual, nome)]
+                return
+
+    def swipe(self, *pontos):
+        self.toques.append("rolar")
+        self.pagina += 1
+
+
+def test_busca_pela_foto_le_os_cartoes_em_vendas_populares_e_tira_a_foto_da_galeria(monkeypatch):
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
+    app = AppDaBuscaPelaFoto()
+    cartoes, motivo = robo.buscar_pela_foto(app, b"\xff\xd8\xfffoto")
+    assert motivo == "" and [c["nome"] for c in cartoes] == ["Garrafa A", "Garrafa B", "Garrafa C", "Garrafa D",
+                                                              "Garrafa E", "Garrafa F"]
+    assert cartoes[0] == {"nome": "Garrafa A", "preco": 49.9, "comissao": 10.0, "extra": False}
+    # Nunca o botão de tirar foto: a foto mais nova da galeria, e a ordem Vendas Populares (P68).
+    assert (541, 1570) not in app.toques and "Vendas Populares" in app.toques
+    assert app.toques.count("rolar") == 2 and "@AN_component_IcCloseShape_Img" in app.toques
+    assert ["rm", "-f", f"{robo.ps.GALERIA}/{robo.ps.NOME_DA_FOTO}.jpg"] in app.comandos
+
+
+def test_busca_pela_foto_sem_resultado_nao_le_as_recomendacoes(monkeypatch):
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
+    app = AppDaBuscaPelaFoto(sem_resultado=True)
+    assert robo.buscar_pela_foto(app, b"\xff\xd8\xfffoto") == ([], "a busca pela foto não achou o produto")
+    assert "Vendas Populares" not in app.toques and "rolar" not in app.toques
+    assert ["rm", "-f", f"{robo.ps.GALERIA}/{robo.ps.NOME_DA_FOTO}.jpg"] in app.comandos

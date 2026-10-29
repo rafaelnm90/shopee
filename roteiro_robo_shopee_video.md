@@ -165,7 +165,8 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   troca de loja (P57). O caminho, como ele faz no celular dele:
   1. a foto: ele abre o produto do post, passa para a 2ª foto do anúncio (a 1ª costuma ser
      vídeo) e tira print. O robô usa a foto do anúncio que a API de afiliado dá: o passo
-     `foto` do explorar a põe na galeria, como a mais nova, e o `foto:apagar` tira;
+     `foto` do explorar a põe na galeria, como a mais nova, e o `foto:apagar` tira (o
+     `video:apagar` tira o vídeo do teste que o passo `video` pôs);
   2. Eu → Criadores & Afiliados → a barra **"Pesquisar produtos e lojas"**, no alto da área
      de afiliado (aba Oferta), tem uma **câmera** à direita, antes do ícone de chat;
   3. a câmera abre com "Clique no botão para buscar" (o botão de tirar foto, que o robô não
@@ -223,10 +224,32 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
       `AN_ChatButton_IcChatSingleOrange_Img` (nunca), o **Favoritar**
       `AN_LikeButton_IcLikeSolidIconLike_Img` (~405,2309) e o Compartilhe para Ganhar
       (~810,2325; o explorar recusa). O voltar volta aos resultados, na mesma ordem e rolagem.
-  - **Falta:** ver se o Favoritar da página de afiliado põe o produto em Minhas Curtidas (a
-    lista do Adicionar Produto) como o coração da página completa, ou se o robô curte pela
-    página completa, como o Rafael faz; e o "Ver Mais (N)" do Ver Produtos (P66), quando a
-    fonte trouxer um vídeo com ele.
+  - **No Motorola (29/10/2026, 4 explorações, sem Verificação, nada salvo):**
+    - na ordem **Vendas Populares** (o toque em "Vendas Populares" marca a ordem), os
+      cartões vêm logo abaixo das ordens; cada `rolar:baixo` sobe uns 1.150 px (um pouco mais
+      que uma linha da grade, que tem uns 936 px), e o alto (o título e o X) fica parado. O
+      robô lê só o cartão inteiro (o nome, o preço e a taxa de comissão na tela);
+    - uma foto que o app não reconhece dá **"Nenhum produto encontrado"**, com "Tirar uma nova
+      foto", "Pesquisar por texto" e **"Você também pode gostar"** (recomendações, não a
+      busca), sem os recortes; na ordem Vendas Populares, essa tela mostra cartões sem o
+      aviso, que são as recomendações: o robô não ordena nem lê nada e segue sem os produtos a
+      mais;
+    - o **Adicionar Produto** (Minhas Curtidas → Mais Recente) mostra uns 6 produtos por tela,
+      cada um com o Adicionar à direita (~924); o já anexado fica como "Adicionado", e o
+      próximo "Adicionar" é o do produto seguinte;
+    - a **tela final com 6 produtos** mostra só o 1º inteiro e o começo do 2º: a fileira
+      `rv_product` rola para o lado, e a ordem é a do anexar. Sem legenda escrita, o voltar da
+      tela final vai para a edição do vídeo (`SSZMultipleEditActivity`) sem aviso.
+  - **O robô (P59, 29/10/2026), nos vídeos de link de produto:** a foto do anúncio do produto
+    do rascunho na galeria → Eu → Criadores & Afiliados → a câmera → a foto mais nova →
+    Vendas Populares → os primeiros 20 cartões → o X e o voltar até a aba Eu; a foto sai da
+    galeria. Cada cartão é achado na API pelo nome e pelo preço, a IA confere com o vídeo os
+    do preço parecido, e os confirmados são curtidos pela **página completa** (o link curto de
+    cada um, como o do link: o Favoritar da página de afiliado não é usado) e anexados do que
+    paga mais para o que paga menos. A tela final é conferida produto a produto, rolando a
+    fileira devagar (uns 40% da largura por vez, sem embalo) até o fim e voltando ao começo.
+  - **Falta:** o "Ver Mais (N)" do Ver Produtos (P66), quando a fonte trouxer um vídeo com
+    ele, e os espaços livres dos vídeos de vários produtos (P57).
 
 ## Onde paramos
 

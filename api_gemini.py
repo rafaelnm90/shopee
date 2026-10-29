@@ -203,7 +203,9 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
     """
     Sobe o vídeo para o Gemini, espera o processamento e pede a análise com
     `prompt`, tentando os modelos da cascata em ordem. imagens: [(bytes, tipo)] que
-    vão junto com o vídeo (a foto do anúncio, para a IA comparar com o vídeo).
+    vão junto com o vídeo (a foto do anúncio, para a IA comparar com o vídeo); com um
+    rótulo, [(bytes, tipo, texto)], o texto vai logo antes da imagem, para a IA saber de
+    qual anúncio é cada foto.
 
     O vídeo é sempre apagado do Google no final, com sucesso ou não, para não
     gastar a cota de armazenamento. O upload tem 3 tentativas. Roda numa thread
@@ -238,7 +240,9 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
                 
             logger.info("✅ [IA] Vídeo pronto! Gerando a copy...")
             from google.genai import types
-            partes_das_imagens = [types.Part.from_bytes(data=dados, mime_type=tipo) for dados, tipo in imagens or []]
+            partes_das_imagens = []
+            for dados, tipo, *rotulo in imagens or []:
+                partes_das_imagens += [*rotulo, types.Part.from_bytes(data=dados, mime_type=tipo)]
 
             falhas = []   # motivo de cada modelo, para a mensagem de erro final
             recusas = 0   # modelos que responderam vazio pelo conteúdo do pedido

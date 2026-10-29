@@ -25,7 +25,8 @@ Passos, separados por ponto e vírgula:
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte;
-                     video:link-de-video, um cujo link abre um vídeo, o Ver Produtos)
+                     video:link-de-video, um cujo link abre um vídeo, o Ver Produtos);
+                     video:apagar tira da galeria o vídeo do teste
     foto             põe na galeria a foto do anúncio do produto do vídeo do teste (a da API de
                      afiliado), a mais nova da galeria, para a busca pela foto (a câmera da
                      busca de Criadores & Afiliados); foto:apagar tira
@@ -147,6 +148,18 @@ Assista ao vídeo inteiro, compare com a imagem e diga se o vídeo mostra o mesm
 item, da mesma cor e estampa. Outro produto do mesmo tipo, outro modelo, o mesmo produto em outra \
 cor, só um acessório dele, ou um vídeo em que o produto da imagem não aparece, não confere.
 Responda só com um JSON: {"confere": true ou false, "motivo": "uma frase curta"}"""
+# Os produtos a mais (P59): as fotos dos anúncios achados pela busca pela foto, de uma vez,
+# com o vídeo. A mesma régua da foto do anúncio: o mesmo item, da mesma cor e estampa (P19),
+# da mesma marca e modelo (P67). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+PROMPT_ITENS_IGUAIS = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
+O produto do vídeo é "{nome}". Junto com o vídeo vão as fotos de anúncios de outras lojas, cada uma logo \
+depois do número e do nome do anúncio.
+A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
+Assista ao vídeo inteiro, compare com cada foto e diga quais anúncios são o mesmo produto do vídeo: o mesmo \
+item, da mesma marca e modelo, da mesma cor e estampa. Outro produto do mesmo tipo, de outra marca, com outro \
+formato ou modelo, o mesmo produto em outra cor ou estampa, outra quantidade no kit, só um acessório dele, ou \
+um anúncio cujo produto não aparece no vídeo, não é o mesmo produto. Na dúvida, não é.
+Responda só com um JSON: {{"iguais": [os números dos anúncios que são o mesmo produto], "motivo": "uma frase curta"}}"""
 # O aviso da página do produto de loja de férias (loja_de_ferias).
 AVISO_DE_FERIAS = "está de férias"
 # A foto do anúncio tem até isto de tamanho (bytes); maior que isso, a conferência segue só pelo nome.
@@ -665,7 +678,7 @@ def nome_do_produto(video):
     return produtos[0]["nome"] if produtos else ""
 
 
-def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True):
+def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ultima_chance=True, avisar=True):
     """
     Anexa o produto do vídeo pela lista de Minhas Curtidas → Mais Recente, onde os curtidos
     agora ficam em cima (curtiu 2, são os 2 primeiros: no_topo). Escolha do Rafael (P18),
@@ -681,6 +694,8 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True):
     "Editar nome do produto" pelo nome que a lista mostra. anexados (lista) recebe esse nome,
     que a tela final e o postar conferem. Sem achar: não segue e avisa no privado; o nome
     não vai para o log. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    O produto a mais (P59) vai sem a última chance (ultima_chance=False: o 1º da lista pode
+    ser outro produto a mais) e sem o aviso (avisar=False): o que não anexa só fica de fora.
     """
     nome = nome_do_produto(video)
     if not nome:
@@ -736,13 +751,16 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True):
                                  + topo_txt
                                  + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else "")
                                  + ("" if rolar_a_lista else "; lista limpa"), ok=None)
+    if not ultima_chance:
+        return False, "o produto a mais não está na lista: nada adicionado"
     ok, motivo = _pelo_primeiro_com_a_ia(d, video, rolagens, anexados)
     if ok:
         return ok, motivo
     registro_processos.registrar("shopee_video", "anexar o produto", "não anexado",
                                  "nem pelo nome nem pela foto do 1º da lista", ok=False)
-    avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, "
-                               f"e a foto do 1º da lista não confere com o vídeo: {nome}")
+    if avisar:
+        avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, "
+                                   f"e a foto do 1º da lista não confere com o vídeo: {nome}")
     return False, f"o produto do vídeo não está na lista, nem pela foto do 1º ({motivo}): nada adicionado (aviso no privado)"
 
 
@@ -814,6 +832,43 @@ def ia_confere_item(video, imagem):
         if dados.get("confere") is not True:
             return False, f"a foto do 1º da lista não é o produto do vídeo ({vez}ª vez)"
     return True, f"a foto do 1º da lista confere com o vídeo {VEZES_DA_IA} vezes"
+
+
+def tipo_da_foto(dados):
+    """O tipo da foto (image/jpeg, image/png, image/webp) pela assinatura dos bytes; jpeg na dúvida."""
+    return {"png": "image/png", "webp": "image/webp"}.get(extensao_da_foto(dados or b""), "image/jpeg")
+
+
+def ia_confere_iguais(video, nome, anuncios):
+    """
+    Quais anúncios de outras lojas são o mesmo item do vídeo (os produtos a mais, P59):
+    anuncios = [(nome, foto em bytes)]. A IA vê o vídeo com todas as fotos de uma vez, cada
+    uma depois do número e do nome dela, VEZES_DA_IA vezes; fica só o confirmado em todas.
+    Devolve (as posições confirmadas, em ordem, o que a IA disse da última vez), ou ([], o
+    motivo fixo) quando ela não responde.
+    """
+    if not (video or {}).get("arquivo") or not anuncios:
+        return [], "sem o vídeo ou sem anúncio para conferir"
+    imagens = [(foto, tipo_da_foto(foto), f"Anúncio {i}: {nome_do_anuncio}")
+               for i, (nome_do_anuncio, foto) in enumerate(anuncios, 1)]
+    confirmados, motivo = set(range(1, len(anuncios) + 1)), ""
+    for vez in range(1, VEZES_DA_IA + 1):
+        resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], PROMPT_ITENS_IGUAIS.format(nome=nome),
+                                                                 imagens=imagens))
+        dados = _json_da_ia(resposta)
+        if not isinstance(dados, dict) or not isinstance(dados.get("iguais"), list):
+            return [], f"a IA não respondeu à conferência dos produtos a mais ({vez}ª vez)"
+        iguais = set()
+        for numero in dados["iguais"]:
+            try:
+                iguais.add(int(numero))
+            except (TypeError, ValueError):
+                continue
+        confirmados &= iguais
+        motivo = str(dados.get("motivo") or "").strip()
+        if not confirmados:
+            break
+    return sorted(numero - 1 for numero in confirmados), motivo
 
 
 def _json_da_ia(resposta):
@@ -1200,15 +1255,107 @@ def ajustar_rotulo_de_ia(d, ligado):
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
 
 
+# A tela final mostra os produtos anexados lado a lado, na ordem do anexar, numa fileira que
+# rola para o lado (rv_product): no Motorola (29/10/2026, com 6 anexados), cabem o 1º inteiro
+# e o começo do 2º (um produto a cada uns 590 px), e os outros só aparecem rolando a fileira.
+# Para conferir todos, o dedo arrasta devagar, uns 40% da largura por vez: sem embalo, nenhum
+# produto passa entre uma olhada e a seguinte.
+FILEIRA_DOS_PRODUTOS = "rv_product"
+ROLAGENS_DA_FILEIRA = 12
+ARRASTO_DA_FILEIRA = (70, 30)
+SEGUNDOS_DO_ARRASTO = 1.0
+
+
+def produtos_na_fileira(xml):
+    """Os nomes dos produtos que a tela final mostra agora, da esquerda para a direita, com a posição de cada um."""
+    return [(el["caixa"][0], el["texto"]) for el in sorted(
+        (el for el in elementos(xml) if el["id"] == "tv_product_title"), key=lambda el: el["caixa"][0])]
+
+
+def vistas_da_fileira(d):
+    """
+    O que a fileira dos produtos da tela final mostra, do começo ao fim: [[os nomes da 1ª
+    olhada, da esquerda para a direita], [os da 2ª], ...]. Rola devagar até a fileira parar e
+    volta ao começo, para o print mostrar o 1º produto.
+    """
+    xml = d.dump_hierarchy()
+    fileira = next((el for el in elementos(xml) if el["id"] == FILEIRA_DOS_PRODUTOS), None)
+    vista = produtos_na_fileira(xml)
+    vistas = [[nome for _, nome in vista]]
+    if not fileira:
+        return vistas
+    x1, y1, x2, y2 = fileira["caixa"]
+    meio = (y1 + y2) // 2
+    de, ate = (x1 + (x2 - x1) * pct // 100 for pct in ARRASTO_DA_FILEIRA)
+    for _ in range(ROLAGENS_DA_FILEIRA):
+        d.swipe(de, meio, ate, meio, SEGUNDOS_DO_ARRASTO)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO / 2)
+        agora = produtos_na_fileira(d.dump_hierarchy())
+        if agora == vista:
+            break
+        vista = agora
+        vistas.append([nome for _, nome in agora])
+    # A volta não lê nada: vai depressa até a fileira parar no começo.
+    for _ in range(ROLAGENS_DA_FILEIRA):
+        d.swipe(x1 + (x2 - x1) * 15 // 100, meio, x1 + (x2 - x1) * 85 // 100, meio, 0.3)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO / 2)
+        agora = produtos_na_fileira(d.dump_hierarchy())
+        if agora == vista:
+            break
+        vista = agora
+    return vistas
+
+
+def _mesmos_em_ordem(textos, nomes):
+    """Cada texto da tela é o nome na mesma posição (o app pode cortar ou pôr um selo antes)?"""
+    return len(textos) == len(nomes) and all(nome_na_pagina(texto, nome) for texto, nome in zip(textos, nomes))
+
+
+def _fileira_confere(vistas, nomes):
+    """
+    As olhadas da fileira, na ordem da rolagem, mostram os nomes um a um, na ordem do anexar,
+    do 1º ao último, sem outro produto no meio e sem pular nenhum? Cada olhada começa no mesmo
+    produto da anterior ou depois dele, e no máximo no seguinte ao último que a anterior
+    mostrou. posicoes guarda onde cada olhada pode começar (mais de uma quando dois nomes se
+    parecem, como o mesmo item de lojas diferentes).
+    """
+    vistas = [vista for vista in vistas if vista]
+    if not vistas or not _mesmos_em_ordem(vistas[0], nomes[:len(vistas[0])]):
+        return False
+    posicoes = {0}
+    for antes, vista in zip(vistas, vistas[1:]):
+        posicoes = {q for q in range(len(nomes) - len(vista) + 1)
+                    if any(p <= q <= p + len(antes) for p in posicoes)
+                    and _mesmos_em_ordem(vista, nomes[q:q + len(vista)])}
+    return any(q + len(vistas[-1]) == len(nomes) for q in posicoes)
+
+
+def _juntar_vistas(vistas):
+    """As olhadas da fileira numa lista só, sem contar duas vezes o que aparece em duas seguidas."""
+    juntos = []
+    for vista in vistas:
+        repetidos = max(k for k in range(min(len(juntos), len(vista)) + 1) if juntos[len(juntos) - k:] == vista[:k])
+        juntos += vista[repetidos:]
+    return juntos
+
+
 def conferir_tela_final(d, video):
     """
     Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): os produtos anexados
-    têm de ser os do vídeo, um para um (o do link, ou os do Ver Produtos que a IA
-    confirmou). Diferente, a mais, a menos ou nenhum: não segue e avisa.
+    têm de ser os do vídeo, um para um (o do link, os do Ver Produtos que a IA confirmou e os
+    produtos a mais da P59). Diferente, a mais, a menos ou nenhum: não segue e avisa. Com mais
+    produtos do que a tela mostra, rola a fileira devagar até o fim, confere cada um na ordem
+    do anexar e volta ao começo.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     nomes = nomes_dos_produtos(video)
-    anexados = [el["texto"] for el in elementos(d.dump_hierarchy()) if el["id"] == "tv_product_title"]
+    anexados = [nome for _, nome in produtos_na_fileira(d.dump_hierarchy())]
+    if anexados and len(anexados) < len(nomes):
+        vistas = vistas_da_fileira(d)
+        if _fileira_confere(vistas, nomes):
+            return True, (f"tela final confere: os {len(nomes)} produtos anexados são os do vídeo, na ordem do "
+                          "anexar (rolando a fileira)")
+        anexados = _juntar_vistas(vistas)
     sobrando = list(anexados)
     for nome in nomes:
         par = next((anexado for anexado in sobrando if nome_na_pagina(anexado, nome)), None)
@@ -1401,6 +1548,98 @@ def tirar_foto_da_galeria(d, nome=NOME_DA_FOTO):
         d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + caminho])
 
 
+# --- Busca pela foto (mapeada no Motorola em 28 e 29/10/2026; o caminho está no roteiro) ---
+# Na câmera da busca, a faixa da galeria fica embaixo de "Pesquisar na galeria", com a foto
+# mais nova em 1º; o botão de tirar foto fica acima dela e nunca é tocado.
+PESQUISAR_NA_GALERIA = "Pesquisar na galeria"
+# Cada resultado é um cartão, em 2 colunas: o nome, "R$" e o preço em textos separados, as
+# estrelas, "N vendas" e "Taxa de comissão N,N%" em texto inteiro; o selo de Comissão Extra
+# é uma imagem. Todo cartão tem a taxa: o nome fica uns 240 px acima dela e o preço uns 115
+# (de y, no Motorola). Os de "Você também pode gostar" são recomendações, não resultados.
+TAXA_DO_CARTAO = re.compile(r"taxa de comiss[aã]o\s*(\d+(?:[.,]\d+)?)\s*%", re.I)
+PRECO_DO_CARTAO = re.compile(r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?")
+SELO_DE_COMISSAO_EXTRA = "AN_Labels_Content_Img"
+MEIO_DA_TELA = 540
+NOME_ACIMA_DA_TAXA = (330, 160)
+PRECO_ACIMA_DA_TAXA = (160, 80)
+SELO_ACIMA_DA_TAXA = (210, 130)
+MESMA_LINHA = 60
+FIM_DOS_RESULTADOS = "você também pode gostar"
+SEM_RESULTADOS = re.compile(r"^nenhum\b.*\bencontrad[oa]s?$")
+
+
+def _numero_da_tela(texto):
+    """O número como o app escreve, com o ponto no milhar e a vírgula nos centavos ("1.299,90", "12,5"); None quando não é número."""
+    try:
+        return float(texto.replace(".", "").replace(",", "."))
+    except ValueError:
+        return None
+
+
+def primeira_foto_da_galeria(xml):
+    """O centro da foto mais nova da faixa da galeria da busca pela foto; None sem ela."""
+    lista = elementos(xml)
+    titulo = next((el for el in lista if _normal(el["texto"]) == _normal(PESQUISAR_NA_GALERIA)), None)
+    if not titulo:
+        return None
+    fotos = [el for el in lista if el["clicavel"] and el["classe"] == "ImageView"
+             and el["caixa"][1] >= titulo["caixa"][3]]
+    return _centro(min(fotos, key=lambda el: el["caixa"][0])) if fotos else None
+
+
+def sem_resultados_da_busca(xml):
+    """A busca pela foto disse que não achou nada ("Nenhum produto encontrado")?"""
+    return any(SEM_RESULTADOS.match(_normal(el["texto"])) for el in elementos(xml))
+
+
+def fim_dos_resultados(xml):
+    """As recomendações ("Você também pode gostar") começaram na tela: os resultados acabaram."""
+    return any(_normal(el["texto"]) == FIM_DOS_RESULTADOS for el in elementos(xml))
+
+
+def cartoes_da_busca(xml):
+    """
+    Os resultados da busca pela foto inteiros na tela, de cima para baixo e, na mesma linha,
+    da esquerda para a direita: [{"nome", "preco", "comissao", "extra"}] (comissão em %,
+    extra = o selo de Comissão Extra). O cartão cortado na borda (sem o nome, o preço ou a
+    taxa) fica de fora: a rolagem seguinte o traz inteiro. Os de "Você também pode gostar",
+    que vêm depois dos resultados, também ficam de fora.
+    """
+    lista = elementos(xml)
+    fim = min((el["caixa"][1] for el in lista if _normal(el["texto"]) == FIM_DOS_RESULTADOS), default=None)
+    cartoes = []
+    for taxa in lista:
+        achado = TAXA_DO_CARTAO.search(taxa["texto"])
+        if not achado:
+            continue
+        x, y = _centro(taxa)
+        if fim is not None and y > fim:
+            continue
+
+        def acima(faixa):
+            longe, perto = faixa
+            return [el for el in lista if (_centro(el)[0] < MEIO_DA_TELA) == (x < MEIO_DA_TELA)
+                    and y - longe <= _centro(el)[1] <= y - perto]
+
+        nomes = [el["texto"].strip() for el in acima(NOME_ACIMA_DA_TAXA)
+                 if el["texto"].strip() and el["texto"].strip() != "R$"
+                 and not PRECO_DO_CARTAO.fullmatch(el["texto"].strip())]
+        precos = [_numero_da_tela(el["texto"].strip()) for el in acima(PRECO_ACIMA_DA_TAXA)
+                  if PRECO_DO_CARTAO.fullmatch(el["texto"].strip())]
+        if not nomes or not precos or not precos[0]:
+            continue
+        cartoes.append((y, x, {"nome": nomes[0], "preco": precos[0], "comissao": _numero_da_tela(achado.group(1)),
+                               "extra": any(el["id"] == SELO_DE_COMISSAO_EXTRA for el in acima(SELO_ACIMA_DA_TAXA))}))
+    # A mesma linha da grade: as taxas dos dois cartões ficam a poucos px uma da outra.
+    linhas = []
+    for y, x, cartao in sorted(cartoes, key=lambda c: c[0]):
+        if linhas and y - linhas[-1][0] < MESMA_LINHA:
+            linhas[-1][1].append((x, cartao))
+        else:
+            linhas.append((y, [(x, cartao)]))
+    return [cartao for _, linha in linhas for _, cartao in sorted(linha, key=lambda par: par[0])]
+
+
 def texto_copiado(d):
     """O que está copiado no celular; "" se nada ou se o Android não deixou ler."""
     try:
@@ -1567,6 +1806,11 @@ def fazer_passo(d, nome, argumento):
     if nome == "foto" and argumento == "apagar":
         tirar_foto_da_galeria(d)
         return True, "foto da busca tirada da galeria"
+    if nome == "video" and argumento == "apagar":
+        caminho = f"{GALERIA}/{NOME_NA_GALERIA}"
+        d.shell(["rm", "-f", caminho])
+        d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + caminho])
+        return True, "vídeo do teste tirado da galeria"
     if nome == "foto":
         video = video_do_teste()
         if not video:

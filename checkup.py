@@ -355,7 +355,7 @@ SEM_META = {
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
     ("shopee_video", "edição do vídeo: "),
-    ("shopee_video", "responder comentário"),
+    ("shopee_video", "responder comentário"), ("shopee_video", "espaços livres: "),
 }
 
 

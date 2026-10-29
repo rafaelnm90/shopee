@@ -124,10 +124,11 @@ def video_no_gemini(monkeypatch):
     monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["a", "b", "c"])
     monkeypatch.setattr(ia, "_fora_ate", {})
     monkeypatch.setattr(ia, "ULTIMO_ERRO_IA", None)
-    estado = SimpleNamespace(respostas={})
+    estado = SimpleNamespace(respostas={}, conteudos=[])
     arquivo = SimpleNamespace(name="files/1", state=SimpleNamespace(name="ACTIVE"))
 
     def generate_content(model, contents):
+        estado.conteudos.append(contents)
         resposta = estado.respostas.get(model, "ok")
         if resposta.startswith(("429", "404", "500")):
             raise RuntimeError(resposta)
@@ -194,3 +195,15 @@ def test_recusa_guarda_o_que_o_google_disse_para_o_aviso(video_no_gemini):
                                 "categorias": [("HARM_CATEGORY_SEXUALLY_EXPLICIT", "MEDIUM")]}
     video_no_gemini.respostas = {"a": "texto"}
     assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "texto" and ia.ULTIMA_RECUSA is None
+
+
+def test_video_com_fotos_rotuladas_manda_cada_rotulo_antes_da_foto(video_no_gemini):
+    # Os produtos a mais (P59): a IA confere de uma vez várias fotos de anúncio com o vídeo,
+    # e cada foto vai logo depois do número e do nome dela.
+    imagens = [(b"\xff\xd8um", "image/jpeg", "Anúncio 1: Garrafa"), (b"\xff\xd8dois", "image/jpeg"),
+               (b"\xff\xd8tres", "image/jpeg", "Anúncio 3: Caneca")]
+    assert rodar(ia.analisar_video_gemini("v.mp4", "compare", imagens=imagens)) == "ok"
+    video, rotulo_1, foto_1, foto_2, rotulo_3, foto_3, pedido = video_no_gemini.conteudos[-1]
+    assert video.name == "files/1" and pedido == "compare"
+    assert (rotulo_1, rotulo_3) == ("Anúncio 1: Garrafa", "Anúncio 3: Caneca")
+    assert [foto.inline_data.data for foto in (foto_1, foto_2, foto_3)] == [b"\xff\xd8um", b"\xff\xd8dois", b"\xff\xd8tres"]

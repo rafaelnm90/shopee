@@ -3,10 +3,11 @@
 Robô automático da Shopee Vídeo: no celular guardado do Rafael (celular_robo.py), prepara
 rascunhos sozinho e posta os que o Rafael aprova no bot (Shopee Vídeo 🎬 → Rascunhos do
 Robô 📝, no painel_shopee_video.py). Usa os passos e as conferências do explorar
-(postador_shopee_video.py): a IA confere o produto do link com o vídeo, o produto é achado
-no topo de Minhas Curtidas (pelo nome parecido ou, por último, pela foto conferida pela IA)
-e a tela final é conferida antes de salvar e de postar. No fim de cada rascunho, salvo ou
-não, descurte os produtos que curtiu para ele.
+(postador_shopee_video.py): a IA confere o produto do link com o vídeo; no link de produto,
+a busca pela foto do app acha o mesmo item em outras lojas para os espaços livres, até 6
+produtos (P59); cada produto é achado no topo de Minhas Curtidas (pelo nome parecido ou,
+por último, pela foto conferida pela IA) e a tela final é conferida antes de salvar e de
+postar. No fim de cada rascunho, salvo ou não, descurte os produtos que curtiu para ele.
 
 O painel (bot_mestre) chama uma rodada a cada 15 min, num processo à parte: o robô passa
 minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bot.
@@ -25,7 +26,7 @@ Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
    intervalo sorteado entre eles, sempre dentro do Horário do Robô;
 4. prepara um rascunho novo quando um horário do plano do dia passou: cada dia sorteia
    quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô;
-5. responde os comentários novos dos vídeos do Rafael, uma vez por dia (Notificações →
+5. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia (P70; Notificações →
    Lives, Vídeos e ...; o texto é da IA e cada resposta é conferida embaixo do comentário);
 6. curte e comenta um vídeo de outro criador no feed Live e Vídeo → Para você, até 3 por
    dia, espalhados (interacoes_shopee_video.py).
@@ -599,10 +600,11 @@ def suspensao_na_tela(xml, agora=None):
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
-           "rotulo_ia")
+           "rotulo_ia", "mais_produtos")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
-COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia")
+# mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
+COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos")
 
 
 def _criar_tabela(con):
@@ -610,7 +612,7 @@ def _criar_tabela(con):
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, id_video TEXT, criado_em TEXT, estado TEXT, "
                 "arquivo TEXT, print TEXT, link TEXT, produtos TEXT, titulo TEXT, comentario TEXT, "
                 "aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT, "
-                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT)")
+                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT, mais_produtos TEXT)")
     existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")}
     for coluna in COLUNAS_NOVAS:
         if coluna not in existentes:
@@ -624,6 +626,7 @@ def _momento(agora=None):
 def _linha_para_dict(linha):
     rascunho = dict(zip(COLUNAS, linha))
     rascunho["produtos"] = json.loads(rascunho["produtos"] or "[]")
+    rascunho["mais_produtos"] = json.loads(rascunho["mais_produtos"] or "[]")
     return rascunho
 
 
@@ -646,8 +649,9 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    if "produtos" in campos:
-        campos["produtos"] = json.dumps(campos["produtos"], ensure_ascii=False)
+    for coluna in ("produtos", "mais_produtos"):
+        if coluna in campos:
+            campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
         _criar_tabela(con)
         con.execute(f"UPDATE shopee_video_rascunhos SET {', '.join(f'{c} = ?' for c in campos)} WHERE id = ?",
@@ -691,6 +695,8 @@ PASSOS = (
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
+    ("busca pela foto", "busca pela foto"),
+    ("câmera da busca", "busca pela foto"),
     ("Criadores & Afiliados", "descurtir em Meus Favoritos"),
     ("de férias", "loja de férias"),
     ("notificação do comentário", "achar a notificação"),
@@ -723,6 +729,7 @@ PASSOS = (
     ("legenda", "escrever o título"),
     ("título", "escrever o título"),
     ("toquei em Rascunhos", "salvar em Rascunhos"),
+    ("produto a mais", "anexar o produto"),
     ("Adicionar", "anexar o produto"),
     ("não está na lista", "anexar o produto"),
     ("tela final", "conferir a tela final"),
@@ -1766,12 +1773,13 @@ def preparar_rascunho(d, config, agora=None):
 def descurtir_no_fim(d, video, curtidos):
     """
     O fim de cada rascunho, salvo ou não: descurte os produtos que o robô curtiu nele
-    (curtidos: (posição no Ver Produtos, nome), com a posição None no link de produto), pelo
-    mesmo caminho do curtir. A curtida só serve para o produto subir em Minhas Curtidas; o
-    rascunho salvo guarda o produto anexado, e o postar confere a tela final antes de tocar
-    em Postar. O que não descurtir aqui fica para o descurtir das 4h. A Verificação da
-    Shopee segue parando tudo; a conta suspensa não passa por aqui (o robô não toca no
-    celular nela). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    (curtidos: (posição no Ver Produtos, nome), ou (link, nome) no link de produto, com os
+    produtos a mais da P59; o link None é o do vídeo), pelo mesmo caminho do curtir. A
+    curtida só serve para o produto subir em Minhas Curtidas; o rascunho salvo guarda o
+    produto anexado, e o postar confere a tela final antes de tocar em Postar. O que não
+    descurtir aqui fica para o descurtir das 4h. A Verificação da Shopee segue parando
+    tudo; a conta suspensa não passa por aqui (o robô não toca no celular nela).
+    Pedido do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not curtidos:
         return
@@ -1779,32 +1787,36 @@ def descurtir_no_fim(d, video, curtidos):
     try:
         if video.get("de_video"):
             _abrir_ver_produtos(d, video)
-            todos = True
+            descurtidos = 0
             for indice, nome in curtidos:
                 xml = tela(d)
                 pontos = ps.produtos_vinculados(xml)
                 if indice >= len(pontos) or ps.proibido_no_ponto(xml, *pontos[indice]):
                     registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "produto fora da lista",
                                                  ok=False)
-                    todos = False
                     continue
                 d.click(*pontos[indice])
                 pausa(8)
                 xml = tela(d)
                 if ps.nome_na_pagina_do_produto(xml) == nome:
-                    todos = ps.descurtir_na_pagina(d, xml)[0] and todos
+                    descurtidos += ps.descurtir_na_pagina(d, xml)[0]
                 else:
                     registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho",
                                                  "outro produto na posição", ok=False)
-                    todos = False
                 d.press("back")
                 pausa(4)
+            todos = descurtidos == len(curtidos)
         else:
-            ir_ao_inicio(d)
-            ps.limpar_aviso_rapido(d)
-            ps.abrir_link(d, video["link"])
-            pausa(8)
-            todos = ps.descurtir(d, video)[0]
+            # Um por um, pelo link de cada um; a lista só fica limpa se todos descurtirem.
+            descurtidos = 0
+            for link, _nome in curtidos:
+                link = link or video["link"]
+                ir_ao_inicio(d)
+                ps.limpar_aviso_rapido(d)
+                ps.abrir_link(d, link)
+                pausa(8)
+                descurtidos += ps.descurtir(d, dict(video, link=link))[0]
+            todos = descurtidos == len(curtidos)
     except Verificacao:
         gravar_estado(favoritos_limpos=False)
         raise
@@ -2252,6 +2264,304 @@ def _trocar_pela_maior_comissao(video):
     return None
 
 
+# --- Os espaços livres com o mesmo item de outras lojas (P59) ---
+# A busca pela foto do app, como o Rafael ensinou em vídeo (28/10/2026; o caminho está no
+# roteiro): Eu → Criadores & Afiliados → a câmera da barra de busca → a foto do anúncio na
+# galeria → os resultados, na ordem Vendas Populares. O robô lê os primeiros
+# RESULTADOS_DA_FOTO cartões, acha cada um na API de afiliado pelo nome e pelo preço (o link,
+# a foto e a comissão), fica com os até MAIS_CARO_NA_TROCA% mais caros que o produto do link,
+# do que paga mais por venda para o que paga menos, e a IA confere com o vídeo, de uma vez,
+# quais são o mesmo item. Os confirmados, até ESPACOS_DO_VIDEO no total com o do vídeo, entram
+# no rascunho como ele: curtidos, anexados e descurtidos no fim. 6 é o ideal, não obrigatório.
+# Escolhas do Rafael (28/10, P59, P67 e P68): DECISOES.md, Shopee Vídeo.
+PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
+ESPACOS_DO_VIDEO = 6
+RESULTADOS_DA_FOTO = 20
+ROLAGENS_DA_FOTO = 8
+CANDIDATOS_DOS_ESPACOS = 8
+# O preço do cartão e o da API podem diferir uns centavos (arredondamento, cupom do app).
+DIFERENCA_DE_PRECO = 5
+# Passado isto desde o começo do rascunho, os espaços livres ficam de fora: o resto do
+# preparo (título, edição, anexar e conferir) tem de caber na rodada (MAXIMO_DA_RODADA).
+# Depois de MINUTOS_PARA_ANEXAR_OS_A_MAIS, o produto a mais que falta anexar também fica de
+# fora (os que pagam menos, que são os últimos a anexar).
+MINUTOS_PARA_OS_ESPACOS = 10
+MINUTOS_PARA_ANEXAR_OS_A_MAIS = 20
+CAMERA_DA_BUSCA = "@AN_ImageSearchIconEntry_IcCameraOutline_Img"
+FECHAR_OS_RESULTADOS = "@AN_component_IcCloseShape_Img"
+ORDEM_DA_BUSCA = "Vendas Populares"
+
+
+def item_do_link(link):
+    """O número do item (itemId) do produto do link; "" quando o link não leva a um produto."""
+    try:
+        destino = asyncio.run(link_para_converter(link))
+    except Exception:
+        return ""
+    achado = re.search(r"/product/\d+/(\d+)", api_shopee.produto_do_link(destino) or "")
+    return achado.group(1) if achado else ""
+
+
+def oferta_do_cartao(cartao):
+    """
+    A oferta da API do cartão da busca pela foto: a busca pelo nome, por relevância, e vale a
+    de mesmo nome (igual ou cortado) e mesmo preço (até DIFERENCA_DE_PRECO% de diferença). {}
+    quando não acha: sem a oferta não há o link para curtir e para o canal, nem a foto da IA.
+    """
+    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(cartao["nome"]), limite=OFERTAS_NA_BUSCA,
+                                                           sort_type=1))
+    for oferta in ofertas:
+        preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
+        if (preco and abs(preco - cartao["preco"]) <= cartao["preco"] * DIFERENCA_DE_PRECO / 100
+                and ps.nome_na_pagina(oferta.get("productName") or "", cartao["nome"])):
+            return oferta
+    return {}
+
+
+def candidatos_da_foto(original, item_do_rascunho, achados):
+    """
+    Dos cartões da busca pela foto já achados na API ([(cartão, oferta)], na ordem de Vendas
+    Populares), os que podem ir nos espaços livres, do que paga mais por venda para o que paga
+    menos (no empate, o mais vendido): até MAIS_CARO_NA_TROCA% mais caros que o produto do link
+    (P58), nunca o produto que já está no rascunho nem o mesmo item duas vezes.
+    [{nome, endereco, imagem, preco, comissao, valor, item}]. Sem o preço do produto do link, nenhum.
+    """
+    if not original.get("preco"):
+        return []
+    teto = round(original["preco"] * (1 + MAIS_CARO_NA_TROCA / 100), 2)
+    vistos = {str(item_do_rascunho)} if item_do_rascunho else set()
+    candidatos = []
+    for ordem, (_cartao, oferta) in enumerate(achados):
+        item = str(oferta.get("itemId") or "")
+        endereco = oferta.get("productLink") or ""
+        preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
+        comissao = assistente._numero(oferta.get("commissionRate")) * 100
+        if not item or item in vistos or not endereco or not preco or preco > teto:
+            continue
+        vistos.add(item)
+        candidatos.append({"nome": (oferta.get("productName") or "").strip(), "endereco": endereco,
+                           "imagem": oferta.get("imageUrl") or "", "preco": preco, "comissao": comissao,
+                           "valor": valor_por_venda(preco, comissao), "item": item, "ordem": ordem})
+    return sorted(candidatos, key=lambda c: (-c["valor"], c["ordem"]))
+
+
+def buscar_pela_foto(d, foto):
+    """
+    Os primeiros RESULTADOS_DA_FOTO cartões da busca pela foto do app, na ordem Vendas
+    Populares (P68): (cartões, motivo); sem cartão, o motivo em texto fixo. A foto do anúncio
+    entra na galeria como a mais nova e sai no fim, deu certo ou não. Nunca toca no botão de
+    tirar foto (a câmera do Motorola).
+    """
+    if not ps.por_foto_na_galeria(d, foto):
+        return [], "a foto do anúncio não apareceu na galeria"
+    try:
+        return _buscar_pela_foto(d)
+    finally:
+        ps.tirar_foto_da_galeria(d)
+
+
+def _buscar_pela_foto(d):
+    ir_ao_inicio(d)
+    tocar(d, "Eu", 5)
+    if not esperar_na_tela(d, CRIADORES_E_AFILIADOS, 9):
+        ps.rolar(d)
+        pausa(2)
+        if not tem(tela(d), CRIADORES_E_AFILIADOS):
+            raise Parada("a busca pela foto não achou Criadores & Afiliados na aba Eu")
+    tocar(d, CRIADORES_E_AFILIADOS, 6)
+    if not esperar_na_tela(d, CAMERA_DA_BUSCA, 12):
+        raise Parada("a área de Criadores & Afiliados não abriu com a câmera da busca")
+    tocar(d, CAMERA_DA_BUSCA, 5)
+    xml = esperar_na_tela(d, ps.PESQUISAR_NA_GALERIA, 9)
+    ponto = ps.primeira_foto_da_galeria(xml) if xml else None
+    if not ponto:
+        raise Parada("a câmera da busca não mostrou a foto da galeria")
+    d.click(*ponto)
+    pausa(8)
+    xml = esperar_na_tela(d, FECHAR_OS_RESULTADOS, 15)
+    if not xml:
+        raise Parada("os resultados da busca pela foto não abriram")
+    cartoes = []
+    if ps.sem_resultados_da_busca(xml):
+        motivo = "a busca pela foto não achou o produto"
+    else:
+        tocar(d, ORDEM_DA_BUSCA, 8)
+        vistos = set()
+        for rolagem in range(ROLAGENS_DA_FOTO + 1):
+            xml = tela(d)
+            novos = [c for c in ps.cartoes_da_busca(xml) if (c["nome"], c["preco"], c["comissao"]) not in vistos]
+            vistos.update((c["nome"], c["preco"], c["comissao"]) for c in novos)
+            cartoes.extend(novos)
+            if len(cartoes) >= RESULTADOS_DA_FOTO or ps.fim_dos_resultados(xml) or (rolagem and not novos):
+                break
+            ps.rolar(d)
+            pausa(3)
+        motivo = "" if cartoes else "a busca pela foto não mostrou nenhum cartão inteiro"
+    # O X dos resultados volta à câmera; o voltar sai dela e da área de afiliado.
+    tocar(d, FECHAR_OS_RESULTADOS, 3)
+    ir_ao_inicio(d)
+    return cartoes[:RESULTADOS_DA_FOTO], motivo
+
+
+def espacos_livres(d, video, principal, original, vistos, prazo):
+    """
+    Os produtos a mais do rascunho de link de produto (P59): até ESPACOS_DO_VIDEO - 1 do mesmo
+    item, de outras lojas, conferidos pela IA com o vídeo, do que paga mais por venda para o
+    que paga menos: [{nome, link, endereco, preco, comissao, valor, item}], com o link curto
+    que o celular abre. Nenhum quando passou o prazo (time.monotonic), a busca não acha ou a
+    IA não confirma. Um erro aqui nunca derruba o rascunho; a Verificação, sim.
+    """
+    def anotar(resultado, detalhe="", ok=None):
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, resultado, detalhe, ok=ok)
+
+    if time.monotonic() > prazo:
+        anotar("nenhum - sem tempo na rodada")
+        return []
+    foto = ps.anuncio_do_produto(video).get("foto")
+    if not foto:
+        anotar("nenhum - sem a foto do anúncio")
+        return []
+    try:
+        cartoes, motivo = buscar_pela_foto(d, foto)
+        if not cartoes:
+            anotar(f"nenhum - {motivo}")
+            return []
+        achados = []
+        for cartao in cartoes:
+            oferta = oferta_do_cartao(cartao)
+            if oferta:
+                achados.append((cartao, oferta))
+        candidatos = candidatos_da_foto(original, item_do_link(video["link"]), achados)[:CANDIDATOS_DOS_ESPACOS]
+        contagem = f"{len(cartoes)} na busca, {len(achados)} na API, {len(candidatos)} no preço"
+        fotos = []
+        for candidato in candidatos:
+            try:
+                foto_do_candidato = ps.baixar_foto(candidato["imagem"])
+            except Exception:
+                # A foto que não baixa só tira esse anúncio da conferência da IA.
+                foto_do_candidato = None
+            if foto_do_candidato:
+                fotos.append((candidato, foto_do_candidato))
+        if not fotos:
+            anotar("nenhum - nenhum do mesmo preço na API", contagem)
+            return []
+        if time.monotonic() > prazo:
+            anotar("nenhum - sem tempo na rodada", contagem)
+            return []
+        posicoes, motivo_da_ia = ps.ia_confere_iguais(video, principal["nome"],
+                                                      [(c["nome"], f) for c, f in fotos])
+        confirmados = [fotos[i][0] for i in posicoes][:ESPACOS_DO_VIDEO - 1]
+        if motivo_da_ia:
+            vistos.append(f"Produtos a mais ({len(confirmados)} de {len(fotos)}): {motivo_da_ia}")
+        mais = []
+        for candidato in confirmados:
+            link = asyncio.run(api_shopee.converter_link_shopee(candidato["endereco"], api_shopee.ETIQUETA_SHOPEE_VIDEO,
+                                                                avisar_falha=False))
+            # Sem o link curto, o celular não abre o produto (fica no esqueleto da página).
+            if link and link != candidato["endereco"]:
+                mais.append({**candidato, "link": link})
+        contagem += f", {len(fotos)} na IA, {len(posicoes)} confirmados"
+        if mais:
+            anotar("achados", f"{len(mais)} a mais; {contagem}", ok=True)
+        else:
+            anotar("nenhum - a IA não confirmou nenhum" if not posicoes else "nenhum - sem o link curto", contagem)
+        return mais
+    except (Verificacao, Suspensa):
+        raise
+    except Parada as e:
+        anotar("parou", passo_do_motivo(e.motivo), ok=False)
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A busca pela foto parou: {ps.mascarar(e.motivo)}")
+        return []
+    except Exception as e:
+        anotar("erro", type(e).__name__, ok=False)
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A busca dos produtos a mais deu erro: {type(e).__name__}")
+        return []
+
+
+def _curtir_os_produtos(d, video, produtos, curtidos):
+    """
+    Curte cada produto do rascunho de link de produto pela página dele, do que paga menos para
+    o que paga mais: o curtido por último fica no alto de Minhas Curtidas, e o anexar pega do
+    alto para baixo, na ordem de quem paga mais (P59). O produto do vídeo que não curte para o
+    rascunho, como sempre; o produto a mais que não curte (loja de férias, coração que não
+    pega) só fica de fora. Devolve os curtidos, do que paga mais para o que paga menos;
+    curtidos recebe (link, nome) de cada um, para o descurtir do fim.
+    """
+    feitos = []
+    for produto in reversed(produtos):
+        a_mais = not produto.get("do_video")
+        este = dict(video, link=produto["link"])
+        ir_ao_inicio(d)
+        ps.limpar_aviso_rapido(d)
+        ps.abrir_link(d, produto["link"])
+        if not _esperar_a_pagina_do_produto(d, a_mais=a_mais):
+            continue
+        resultado = ps.curtir(d, este)
+        if a_mais and not resultado[0]:
+            registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora", "não curtiu",
+                                         ok=None)
+            continue
+        _conferir_curtida(resultado)
+        curtidos.append((produto["link"], produto["nome"]))
+        feitos.append(produto)
+        pausa(3)
+    return feitos[::-1]
+
+
+def _mais_produtos(produtos):
+    """Os produtos a mais como o rascunho os guarda: [{nome, link, endereco}] (endereço vazio no do vídeo)."""
+    return [{"nome": p["nome"], "link": p["link"], "endereco": p.get("endereco") or ""} for p in produtos]
+
+
+def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
+    """
+    Anexa os produtos curtidos, na ordem de nomes (o 1º pelo Adicionar produto, os outros
+    pelo Adicionar Mais). O produto a mais (a posição está em a_mais, P59) que não anexa, ou
+    que chega depois do prazo (time.monotonic), só fica de fora; o do vídeo que não anexa
+    para o rascunho. Devolve (os nomes como a lista os mostrou, as posições anexadas). Os
+    curtidos ficam no alto da lista: cada um é procurado entre os que ainda não foram
+    anexados. Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado
+    rolando a lista inteira (P27).
+    """
+    anexados, no_post = [], []
+    for i, nome in enumerate(nomes):
+        if i in a_mais and prazo is not None and time.monotonic() > prazo:
+            registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora",
+                                         "sem tempo na rodada", ok=None)
+            continue
+        seguir(d, CAMINHO_PRODUTO if not anexados else CAMINHO_MAIS_UM_PRODUTO)
+        ok, motivo = ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=len(nomes) - len(anexados),
+                                          rolar_a_lista=not limpa, ultima_chance=i not in a_mais,
+                                          avisar=i not in a_mais)
+        if not ok and i in a_mais:
+            registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora", "não anexou",
+                                         ok=None)
+            voltar_a_tela_final(d)
+            continue
+        _conferir((ok, motivo))
+        no_post.append(i)
+        tocar(d, "Feito", 6)
+    return anexados, no_post
+
+
+def voltar_a_tela_final(d, vezes=3):
+    """
+    Depois do produto a mais que não anexou, volta da lista de Minhas Curtidas (ou da janela de
+    editar o nome) para a tela final; o aviso de sair dela, se abrir, fica no Cancelar.
+    """
+    for _ in range(vezes):
+        xml = tela(d)
+        if tem(xml, "@et_caption"):
+            return
+        if aviso_de_sair(xml):
+            tocar(d, "Cancelar", 3)
+            continue
+        d.press("back")
+        pausa(3)
+    if not tem(tela(d), "@et_caption"):
+        raise Parada("o produto a mais não anexou, e o voltar não voltou à tela final")
+
+
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     """
     O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim);
@@ -2260,6 +2570,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     curtidos = [] if curtidos is None else curtidos
     celular = [] if celular is None else celular
     vistos = []
+    inicio = time.monotonic()
+    prazo = inicio + MINUTOS_PARA_OS_ESPACOS * 60
+    # principal: o produto do link (ou o da troca); produtos: os do rascunho de link de
+    # produto na ordem do post, com o link de cada um. No Ver Produtos, os dois ficam None.
+    principal = produtos = None
     if video.get("de_video"):
         celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
@@ -2269,6 +2584,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         nome = ps.nome_do_produto(video)
         if not nome:
             raise Parada("o link não diz o produto do vídeo", do_video=True)
+        # O preço do produto do link do post: a régua dos 20% dos produtos a mais (P58).
+        do_post, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
+        original = do_post[0] if do_post else {}
         # O mesmo produto de outra loja que paga mais por venda, já conferido pela IA com o
         # vídeo, toma o lugar do produto do link (o video muda aqui: curtir, anexar e descurtir
         # usam o novo). Escolhas do Rafael (25/10, P33; 28/10, P58): DECISOES.md, Shopee Vídeo.
@@ -2285,6 +2603,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                + f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
         if not troca:
             _conferir(ps.ia_confere_produto(video, vistos))
+        principal = {"nome": nome, "link": video["link"], "do_video": True,
+                     "preco": troca["preco"] if troca else original.get("preco", 0),
+                     "comissao": troca["comissao"] if troca else original.get("comissao", 0)}
+        principal["valor"] = valor_por_venda(principal["preco"], principal["comissao"])
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))
@@ -2298,23 +2620,24 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # Escolha do Rafael (24/10, P8): DECISOES.md, Shopee Vídeo.
     rotulo_ia = (textos.get("sinal_ia") or "a IA viu que o vídeo é gerado por IA") if textos.get("feito_por_ia") else ""
 
+    if principal:
+        # Os espaços livres com o mesmo item de outras lojas (P59), depois das conferências sem
+        # o celular e antes da edição: todos são curtidos, e o 1º, o que paga mais por venda, dá
+        # a foto e o preço da edição e o link do rascunho (P57). Escolhas do Rafael:
+        # DECISOES.md, Shopee Vídeo.
+        celular.append(True)
+        mais = espacos_livres(d, video, principal, original, vistos, prazo)
+        produtos = _curtir_os_produtos(d, video, sorted([principal] + mais, key=lambda p: -p["valor"]), curtidos)
+        video["link"] = produtos[0]["link"]
+        nomes = [p["nome"] for p in produtos]
+        atualizar(ident, conferencia=json.dumps(vistos, ensure_ascii=False))
+
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
     copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False))
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
-              comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia)
-
-    celular.append(True)
-    if not video.get("de_video"):
-        # Curtir o produto pela página dele, como o Rafael faz antes de postar (os do Ver
-        # Produtos já foram curtidos lá).
-        ir_ao_inicio(d)
-        ps.limpar_aviso_rapido(d)
-        ps.abrir_link(d, video["link"])
-        _esperar_a_pagina_do_produto(d)
-        _conferir_curtida(ps.curtir(d, video))
-        curtidos.append((None, ps.nome_do_produto(video)))
-        pausa(3)
+              comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
+              mais_produtos=_mais_produtos(produtos[1:] if produtos else []))
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
@@ -2343,15 +2666,15 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # ser outro que o da API. Escolha do Rafael (P18): DECISOES.md, Shopee Vídeo.
     # Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado rolando a
     # lista inteira; o topo continua conferido. Escolha do Rafael (P27): DECISOES.md, Shopee Vídeo.
-    limpa = lista_limpa()
-    anexados = []
-    for i, nome in enumerate(nomes):
-        seguir(d, CAMINHO_PRODUTO if i == 0 else CAMINHO_MAIS_UM_PRODUTO)
-        _conferir(ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=len(nomes) - i,
-                                       rolar_a_lista=not limpa))
-        tocar(d, "Feito", 6)
+    a_mais = {i for i, produto in enumerate(produtos or []) if not produto.get("do_video")}
+    anexados, no_post = anexar_os_produtos(d, video, nomes, a_mais, lista_limpa(),
+                                           inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60)
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
-    atualizar(ident, produtos=anexados)
+    if produtos:
+        ordem = [produtos[i] for i in no_post]
+        atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]))
+    else:
+        atualizar(ident, produtos=anexados)
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rotulo_ia)))
 
@@ -2362,8 +2685,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         raise Parada("toquei em Rascunhos, mas o app continuou na tela final")
     atualizar(ident, estado="rascunho", print=print_tela)
     esperando = len(esperando_aprovacao())
-    avisar(f"📝 Robô da Shopee Vídeo: rascunho novo salvo no celular. {esperando} esperando a sua aprovação "
-           "em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
+    a_mais_no_post = sum(1 for i in no_post if i in a_mais)
+    avisar("📝 Robô da Shopee Vídeo: rascunho novo salvo no celular"
+           + (f", com {len(anexados)} produtos (o do vídeo e {a_mais_no_post} iguais de outras lojas)"
+              if a_mais_no_post else "")
+           + f". {esperando} esperando a sua aprovação em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
 
 
 PROCESSO_DA_EDICAO = "edição do vídeo: rascunho do robô"
@@ -2439,18 +2765,23 @@ def anuncio_do_ver_produtos(nome):
         return {}
 
 
-def _esperar_a_pagina_do_produto(d, voltas=4):
+def _esperar_a_pagina_do_produto(d, voltas=4, a_mais=False):
     """
     Espera a página do produto abrir (uns 12 s), olhando a cada volta o aviso de loja de
     férias, que some em segundos. Produto de loja de férias não entra no Adicionar Produto
     do vídeo, mesmo curtido (24/10/2026, o teclado curtido às 14:25 não estava na lista):
-    o vídeo fica de lado na hora, antes da galeria e do título.
+    o vídeo fica de lado na hora, antes da galeria e do título. O produto a mais (a_mais=True,
+    P59) só fica de fora: devolve False. Página sem o aviso: True.
     """
     for _ in range(voltas):
         pausa(2)
         if ps.loja_de_ferias(d, tela(d)):
-            registro_processos.registrar(REGISTRO, "produto de loja de férias", "vídeo pulado", ok=None)
+            registro_processos.registrar(REGISTRO, "produto de loja de férias",
+                                         "produto a mais de fora" if a_mais else "vídeo pulado", ok=None)
+            if a_mais:
+                return False
             raise Parada(MOTIVO_DE_FERIAS, do_video=True)
+    return True
 
 
 def _produtos_do_video(d, video, vistos, curtidos=None):
@@ -2731,16 +3062,18 @@ def levar_ao_canal(rascunho, link_post):
 def links_para_o_canal(rascunho):
     """
     Os links de afiliado dos produtos do rascunho, com a etiqueta do Canal Afiliados. No
-    link de produto, o do produto anexado (o do link ou o da troca, P33); no vídeo de Ver
-    Produtos, cada produto anexado, achado na API pelo nome (como a foto da edição, P39),
-    e o que não se acha fica de fora. A API que falha deixa o link original, e o Rafael
-    fica sabendo, como em todo robô que troca link (06/10: DECISOES.md, Canal Viral).
+    link de produto, o do produto anexado (o do link ou o da troca, P33) e os dos produtos a
+    mais (P59), na ordem do post; no vídeo de Ver Produtos, cada produto anexado, achado na
+    API pelo nome (como a foto da edição, P39), e o que não se acha fica de fora. A API que
+    falha deixa o link original, e o Rafael fica sabendo, como em todo robô que troca link
+    (06/10: DECISOES.md, Canal Viral).
     """
     destino = asyncio.run(link_para_converter(rascunho["link"]))
     if eh_video(destino):
         enderecos = [oferta_pelo_nome(nome).get("productLink") for nome in rascunho["produtos"] or []]
     else:
-        enderecos = [destino]
+        enderecos = [destino] + [produto.get("endereco") or asyncio.run(link_para_converter(produto["link"]))
+                                 for produto in rascunho.get("mais_produtos") or []]
     links = []
     for endereco in filter(None, enderecos):
         link = asyncio.run(api_shopee.converter_link_shopee(endereco, api_shopee.ETIQUETA_CANAL_AFILIADOS)) or endereco
