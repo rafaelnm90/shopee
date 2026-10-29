@@ -758,6 +758,9 @@ def robo_da_shopee_video(agora=None):
     hoje = agora.strftime("%Y-%m-%d")
     horarios = plano.get("horarios", []) if plano.get("data") == hoje else []
     vencidos = sum(1 for h in horarios if h <= agora.strftime("%H:%M"))
+    # Os que passaram sem tentativa: pulados na pausa do Rafael ou na suspensão, ou juntados
+    # num só na volta do celular (P16). O checkup não os cobra.
+    sem_tentar = int(plano.get("sem_tentar") or 0) if plano.get("data") == hoje else 0
     # Pela tabela dos rascunhos, que guarda todos; o histórico das tentativas pode ter
     # começado depois.
     salvos = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? "
@@ -771,7 +774,7 @@ def robo_da_shopee_video(agora=None):
     # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
     punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
-            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
+            "sem_tentar": sem_tentar, "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
             "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora)}
 
@@ -1084,8 +1087,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             pontos.append(f"{nome}: {f['atrasados']} item(ns) atrasado(s) na fila")
         if (f["postados"] == 0 and (f["media"] or 0) >= MEDIA_PARA_COBRAR and agora.hour >= HORA_PARA_COBRAR):
             pontos.append(f"{nome}: nenhum post hoje (média de {f['media']:.1f} por dia)")
-    if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv["salvos"] < robo_sv["vencidos"]:
-        pontos.append(f"Robô da Shopee Vídeo: {robo_sv['vencidos']} horário(s) vencido(s) hoje e "
+    tentados = robo_sv["vencidos"] - robo_sv.get("sem_tentar", 0)
+    if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv["salvos"] < tentados:
+        pontos.append(f"Robô da Shopee Vídeo: {tentados} horário(s) com tentativa hoje e "
                       f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         pontos.append(f"Robô da Shopee Vídeo: {acao} → {resultado} em \"{passo or '?'}\" {qtd}x")
@@ -1307,7 +1311,8 @@ def main():
     if robo_sv.get("punicoes"):
         situacao += f" | punições esperando recurso: {robo_sv['punicoes']}"
     print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
-          f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']} | "
+          f"vencidos {robo_sv['vencidos']} (sem tentativa: {robo_sv['sem_tentar']}) | "
+          f"rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")
     # O caso completo de cada falha fica cifrado para o Claude (casos_robo.yml exportar) e
     # sai depois de analisado (casos_robo.yml apagar).

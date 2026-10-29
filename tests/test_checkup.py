@@ -248,6 +248,25 @@ def test_robo_da_shopee_video_horarios_vencidos_e_tentativas_ruins():
     assert "Fone X" not in str(r)
 
 
+def test_horarios_sem_tentativa_nao_sao_cobrados():
+    # 28/10: a suspensão pulou os horários da manhã e a pausa sem o celular juntou os da tarde
+    # num só; o checkup cobrava "8 horários vencidos e 1 rascunho salvo".
+    import robo_shopee_video as robo
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
+    db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-23", "horarios": ["09:43", "12:40", "15:10", "21:30"],
+                                      "feitos": 4, "sem_tentar": 3})
+    robo.atualizar(robo.criar("v1", AGORA - timedelta(hours=1)), estado="rascunho")
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert (r["vencidos"], r["sem_tentar"], r["salvos"]) == (4, 3, 1)
+    assert not any("com tentativa hoje" in p for p in checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA))
+    # Com uma tentativa a mais sem rascunho, cobra.
+    db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-23", "horarios": ["09:43", "12:40", "15:10", "21:30"],
+                                      "feitos": 4, "sem_tentar": 2})
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert "Robô da Shopee Vídeo: 2 horário(s) com tentativa hoje e 1 rascunho(s) salvo(s) (0 vídeo(s) pulado(s))" in \
+        checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
+
+
 def test_robo_agora_mostra_as_falhas_recentes_e_o_aprovado_que_passou_da_hora():
     # Pedido do Rafael (25/10): o Claude reconhece sozinho, na retomada de cada 3 h, as falhas
     # do robô e o aprovado que não saiu, sem esperar o checkup da noite nem o Rafael pedir.
@@ -386,7 +405,7 @@ def test_pontos_de_atencao():
             "downloader_bot.py:9 (f), 2x)") in texto
     assert "Viral: 2 item(ns) atrasado(s)" in texto and "Viral: nenhum post hoje" in texto
     assert "Autorais: nenhum post" not in texto      # média baixa não cobra
-    assert "2 horário(s) vencido(s)" in texto and "navegar no app" in texto
+    assert "2 horário(s) com tentativa hoje" in texto and "navegar no app" in texto
     assert "Baixador: 4 falha(s)" in texto and "Backup: nenhum" in texto
     assert checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 3, "salvos": 0, "ruins": []},
                                      {}, ("x", 5.0, 1), AGORA) == []
@@ -438,6 +457,7 @@ def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
                                        {}, ("x", 1.0, 1), AGORA, {}, r, None)
     assert "Rotinas do canal principal: 1 intervalo(s) abaixo de 10 min (menor: 5 min)" in pontos
     assert "Rotinas do canal principal: 1 vez(es) o mesmo assunto em seguida" in pontos
+
 
 
 def test_rotina_antiga_do_banco_nao_conta_e_a_que_falta_mostra_a_linha_do_tempo():
@@ -587,7 +607,7 @@ def test_conta_suspensa_nao_cobra_horario_vencido_e_mostra_ate_quando():
     r = checkup.robo_da_shopee_video(AGORA)
     assert r["suspenso"] == "26/10 19:04" and r["vencidos"] == 2 and r["salvos"] == 0
     pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
-    assert not any("horário(s) vencido(s)" in p for p in pontos)
+    assert not any("horário(s) com tentativa hoje" in p for p in pontos)
     # As punições que esperam o recurso aparecem só como número.
     import apelacoes_shopee_video as ap
     ap.guardar("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido", titulo="Botijão secreto")
