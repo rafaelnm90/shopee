@@ -2779,7 +2779,12 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                   "produto de outra loja, conferido pela IA com o vídeo)\n" if troca else "")
                + f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
         if not troca:
-            _conferir(ps.ia_confere_produto(video, vistos))
+            ok, motivo = ps.ia_confere_produto(video, vistos)
+            if not ok:
+                # O produto e o que a IA viu ficam no rascunho pulado: o caso do checkup do
+                # Claude (casos_robo) os lê dele.
+                atualizar(ident, fonte=fonte, produtos=[nome], conferencia=json.dumps(vistos, ensure_ascii=False))
+                raise Parada(motivo, do_video=True)
         principal = {"nome": nome, "link": video["link"], "do_video": True,
                      "preco": troca["preco"] if troca else original.get("preco", 0),
                      "comissao": troca["comissao"] if troca else original.get("comissao", 0)}

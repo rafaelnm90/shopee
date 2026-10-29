@@ -796,6 +796,26 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
                      robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS, 1)
 
 
+def test_produto_recusado_pela_ia_deixa_no_caso_o_produto_e_o_que_ela_viu(monkeypatch, avisos):
+    # O caso do checkup do Claude tem de dizer qual era o produto do link e o que a IA viu
+    # no vídeo, para saber se ela acertou ao pular.
+    import json
+    _fonte(monkeypatch)
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": false, "motivo": "o vídeo mostra uma luminária, não um vestido"}'
+
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    resultado = robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert "a IA viu outro produto no vídeo" in resultado and not robo.esperando_aprovacao()
+    casos = robo.casos_robo.casos()
+    with open(os.path.join(robo.casos_robo.PASTA, casos[-1], "caso.json"), encoding="utf-8") as f:
+        caso = json.load(f)
+    assert caso["resultado"] == "pulado" and caso["rascunho"]["produtos"] == [VESTIDO]
+    assert json.loads(caso["rascunho"]["conferencia"]) == ["o vídeo mostra uma luminária, não um vestido"]
+
+
 def test_rascunho_sem_edicao_nao_sai_com_a_edicao_ligada(monkeypatch, avisos):
     # Pedido do Rafael (25/10): na Shopee Vídeo, só vídeo editado. Sem a foto do anúncio, o
     # rascunho não sai e o vídeo fica de lado, sem tocar no celular.

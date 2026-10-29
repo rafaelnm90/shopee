@@ -1017,6 +1017,9 @@ def ia_confere_produto(video, vistos=None, avisar=True, capa=None):
             if avisar:
                 avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
                                            f"{str(dados.get('motivo') or '').strip()}")
+            if vistos is not None:
+                # O que a IA viu quando recusou: o rascunho pulado guarda, para o caso do checkup.
+                vistos.append(str(dados.get("motivo") or "").strip())
             return False, f"a IA viu outro produto no vídeo ({vez}ª vez): parado (aviso no privado)"
         if vistos is not None:
             vistos.append(str(dados.get("motivo") or "").strip())
