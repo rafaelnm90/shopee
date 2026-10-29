@@ -2256,11 +2256,14 @@ async def _disparar_mensagem(tipo, forcar=False):
             return
 
     # Mesmo assunto em seguida: a última rotina de hoje neste canal foi deste assunto e há
-    # outra, de outro assunto, marcada para hoje; esta sai logo depois dela.
+    # outra, de outro assunto, marcada para hoje; esta sai logo depois dela. Sem outra
+    # marcada, sai na hora, e fica anotado (o checkup não a cobra).
     # Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
+    em_seguida = False
     if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
         if assunto_anterior_no_canal(dados_rotina, canal_rotina, hoje_str) == tipo:
             depois_de = proxima_de_outro_assunto(tipo, canal_rotina, agora_tz)
+            em_seguida = not depois_de
             if depois_de:
                 novo_horario = depois_de + timedelta(minutes=random.randint(10, 25))
                 job_id = f"job_rotina_{tipo}_seguido_{int(agora_tz.timestamp())}"
@@ -2336,6 +2339,8 @@ async def _disparar_mensagem(tipo, forcar=False):
     historico_tipo.append(hora_exata_disparo)
     dados_rotina["historico_diario"]["contagem"][tipo] = historico_tipo
     salvar_config_rotina(dados_rotina)
+    if em_seguida:
+        registro_processos.registrar("bot_mestre", processo_rotina, rotinas.EM_SEGUIDA_SEM_OUTRO, tipo, ok=None)
 
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
