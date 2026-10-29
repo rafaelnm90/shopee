@@ -180,11 +180,11 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - Exceção a um padrão no código: comentário curto no lugar apontando para a entrada (ex.: `# Decisão do Rafael: DECISOES.md, Canal Viral`).
 - Dúvida sobre a intenção de uma regra (ex.: "era para apagar depois de processar?") → pergunte antes de mudar. Ofereça opções, com a recomendada primeiro.
 - Opções oferecidas ao Rafael ficam abertas até ele escolher, mesmo que ele demore:
-  - oferecer pelo seletor de opções (`AskUserQuestion`), não só em texto;
-  - se o seletor sumir sem resposta (ex.: uma chamada agendada chegou antes), mostrar as mesmas opções de novo na próxima resposta;
+  - oferecer na conversa, em texto, com as opções numeradas e a recomendada primeiro, e no privado do bot (como em "Toda pergunta ao Rafael", abaixo);
+  - enquanto não houver resposta, lembrar os códigos das abertas no fim das respostas seguintes, e mostrar as opções de novo quando ele pedir;
   - nunca escolher por ele por causa da demora. Até ele responder, fica valendo o que já estava.
 - Nunca presumir como um robô deve se comportar:
-  - toda escolha que mudaria o que um robô faz, mesmo pequena (ex.: o texto pedido à IA, o formato de um post), vira pergunta ao Rafael no fim do trabalho, pelo seletor de opções;
+  - toda escolha que mudaria o que um robô faz, mesmo pequena (ex.: o texto pedido à IA, o formato de um post), vira pergunta ao Rafael no fim do trabalho, como em "Toda pergunta ao Rafael";
   - a parte que depende da resposta não vai ao ar antes dela (o PR espera); o resto segue;
   - pergunta sem resposta entra na lista do "Lembrete diário: tudo o que o Rafael tem pendente" (`update_trigger`) e sai quando ele responder.
 - Investigação que depende de esperar o servidor (contagem, log, diagnóstico novo, correção que só se confirma com o uso):
@@ -202,7 +202,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - chamada que cai sem crédito não roda; a próxima, com crédito, retoma.
 - Checkup diário (rotina "Checkup diário", 22:43, nesta conversa):
   - ler o último `checkup.yml` (disparar um se o das 22:20 não rodou), o `diagnostico.yml` e os deploys do dia;
-  - cada ponto de atenção: achar a causa com dados verificáveis e corrigir sozinho (PR, CI, merge, deploy), como na conferência agendada. Comportamento de robô continua indo ao Rafael pelo seletor;
+  - cada ponto de atenção: achar a causa com dados verificáveis e corrigir sozinho (PR, CI, merge, deploy), como na conferência agendada. Comportamento de robô continua indo ao Rafael como pergunta;
   - falha do robô da Shopee Vídeo (pulado, parou, erro): ler o caso completo (`casos_robo.yml` exportar, abrir no scratchpad), achar a causa e corrigir; resolvido, `casos_robo.yml` apagar (pedido do Rafael: nada acumula);
   - o que não deu para conferir pelos números (falta contagem, estado ou lugar do código): mudar o `checkup.py`, o robô ou o diagnóstico para a próxima rodada mostrar, sempre só números, estados e trechos fixos do código;
   - no fim, uma tabela curta ao Rafael: o que foi conferido, o que deu errado, o que foi corrigido e o que ficou com ele. Dia sem nada: uma linha só.
@@ -212,11 +212,12 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - pôr os modelos novos de texto que a chave enxerga e respondem, o melhor primeiro (modelo de vídeo, imagem ou voz não entra: `FORA_DOS_ROBOS`);
   - subir do PR ao deploy sem perguntar e avisar numa tabela curta, com as fontes; semana sem mudança: uma linha só.
 - Toda pergunta ao Rafael tem de ser respondida: nunca passa despercebida nem expira.
-  - A pergunta aparece primeiro aqui, pelo seletor; o privado do bot é só a cópia de segurança, para quando o seletor some antes da resposta (pedido do Rafael, 28/10). A cópia e o seletor saem na mesma resposta, sem esperar o código P; nunca terminar a resposta só com a cópia.
-  - Toda pergunta do seletor vai também, na hora, para o privado do bot: um JSON no scratchpad (`pergunta`, `opcoes` com `rotulo` e `descricao`, a recomendada primeiro, e `link` = link da sessão), `python3 perguntas_rafael.py cifrar ARQUIVO`, e o `avisar.yml` com `acao=pergunta` e `dados` = o texto cifrado. Ler no log o código (P…).
+  - A pergunta aparece primeiro aqui, em texto, com as opções numeradas (a recomendada primeiro) e o código P; o privado do bot é a cópia de segurança (pedido do Rafael, 28/10). Nunca terminar a resposta só com a cópia.
+  - O seletor (`AskUserQuestion`) não é usado: em 29/10 ele voltou duas vezes com a recomendada antes de o Rafael responder, e as cópias sumiram do privado quando foram marcadas como respondidas.
+  - Toda pergunta vai também, na hora, para o privado do bot: um JSON no scratchpad (`pergunta`, `opcoes` com `rotulo` e `descricao`, a recomendada primeiro, e `link` = link da sessão), `python3 perguntas_rafael.py cifrar ARQUIVO`, e o `avisar.yml` com `acao=pergunta` e `dados` = o texto cifrado. Ler no log o código (P…).
   - O bot lembra de hora em hora, a qualquer hora (de dia e de noite), sozinho no servidor, mesmo sem crédito do Claude.
-  - O Rafael responde pelo seletor ou colando aqui o texto do aviso (começa com "[P…] Vc me enviou anteriormente a pergunta"). Respondida: `avisar.yml` com `acao=respondida` e `dados` = o código, e ela sai da lista do lembrete diário.
-  - Seletor que some sem resposta: mostrar a mesma pergunta de novo na resposta seguinte. Pergunta aberta fica na lista do lembrete diário.
+  - O Rafael responde aqui, por escrito (ex.: "P93 1"), ou colando o texto do aviso (começa com "[P…] Vc me enviou anteriormente a pergunta"). Só a resposta dele de verdade (escrita aqui, colada do aviso ou dita num vídeo dele) marca a pergunta como respondida; a do seletor, sozinha, nunca (pedido do Rafael, 29/10: "Todas as perguntas não podem ser marcadas respondidas sem q eu as efetivamente responda-os"). Respondida: `avisar.yml` com `acao=respondida` e `dados` = o código, e ela sai da lista do lembrete diário.
+  - Pergunta aberta fica no privado do bot e na lista do lembrete diário até a resposta dele.
 - Comentários em português explicam o porquê e a regra de negócio.
   - Sem histórico ("antes era…", "corrigido em…"): isso fica no git.
   - Sem emoji nos comentários. Nos textos que o bot mostra, pode.
