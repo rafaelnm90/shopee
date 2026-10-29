@@ -907,8 +907,9 @@ def capa_com_chamada_da_shopee_video(agora=None):
         except ValueError:
             vistas = []
         videos.append({"postado_em": postado_em, "chamada": chamada, "marca": marca, "vistas": vistas})
-    return {"ligada": bool(config.get("capa_com_chamada")), "desde": config.get("capa_com_chamada_desde") or "",
-            **visualizacoes_shopee_video.comparar(videos)}
+    desde = config.get("capa_com_chamada_desde") or ""
+    return {"ligada": bool(config.get("capa_com_chamada")), "desde": desde,
+            **visualizacoes_shopee_video.comparar(videos, desde)}
 
 
 def _linha_da_capa_com_chamada(medicao):

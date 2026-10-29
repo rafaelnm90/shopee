@@ -1180,6 +1180,28 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     assert capas[-1] is None
 
 
+def test_capa_com_chamada_alterna_um_video_sim_outro_nao(monkeypatch, tmp_path):
+    # Escolha do Rafael (29/10, P77): ligada, a chamada vai num vídeo e no seguinte não, para a
+    # comparação de 7 dias ter os dois grupos nos mesmos dias. O vídeo que devia levar a chamada
+    # e ficou sem a vantagem da IA deixa a vez para o próximo.
+    _versoes_de_mentira(monkeypatch)
+    capas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None):
+        capas.append(capa is not None)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    destino = str(tmp_path / "r.mp4")
+    com_vantagem = {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"}
+    for textos in (com_vantagem, com_vantagem, {"nome": "Bolsa"}, com_vantagem, com_vantagem):
+        _textos_da_tela(monkeypatch, textos)
+        edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", 25.8)
+    assert capas == [True, False, False, True, False]
+    assert db.ler_config("shopee_video", {})[edicao_video.CHAVE_DA_VEZ] == 4
+
+
 def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     _fontes_de_mentira(monkeypatch, {"autorais": [("autorais:1", "/tmp/a.mp4", "https://s.shopee.com.br/a", "")]})
     monkeypatch.setattr(edicao_video.os.path, "exists", lambda caminho: True)

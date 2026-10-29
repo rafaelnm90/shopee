@@ -188,6 +188,27 @@ def capa_ligada():
     return bool((db.ler_config("shopee_video", {}) or {}).get(CHAVE_DA_CAPA))
 
 
+# Ligada, a chamada vai num vídeo e no seguinte não: os dois grupos saem nos mesmos dias, para o
+# mesmo público, e a diferença nas visualizações é da capa (a conta cresce toda semana, e uma
+# comparação com os vídeos de antes favoreceria a chamada). A vez fica na chave shopee_video.
+# Escolha do Rafael (29/10, P77): DECISOES.md, Shopee Vídeo.
+CHAVE_DA_VEZ = "capa_com_chamada_vez"
+
+
+def _capa_alternada(foto, vantagem):
+    """
+    A capa do vídeo com a capa com chamada ligada: a com chamada na vez dela, None na vez sem
+    (a capa de sempre). A vez só passa quando o vídeo sai do jeito da vez: o que devia levar a
+    chamada e ficou sem ela (sem a vantagem da IA, a capa que não saiu) deixa a vez para o
+    próximo.
+    """
+    vez = int((db.ler_config("shopee_video", {}) or {}).get(CHAVE_DA_VEZ) or 0)
+    capa = _capa_da_vez(foto, vantagem) if vez % 2 == 0 else None
+    if capa or vez % 2:
+        db.atualizar_config("shopee_video", lambda dados: dados.update({CHAVE_DA_VEZ: vez + 1}))
+    return capa
+
+
 # A linha que termina numa palavra de ligação ("Acaba com a / bagunça") vale como uma letra
 # PENALIDADE_DA_QUEBRA px menor: a quebra boa ganha, se a letra não ficar muito menor.
 PENALIDADE_DA_QUEBRA = 8
@@ -782,7 +803,8 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
     som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA. Com a capa com
-    chamada ligada (P76), a vantagem da IA vai na capa, e o jeito leva COM_A_CHAMADA.
+    chamada ligada (P76), a vantagem da IA vai na capa, um vídeo sim e o seguinte não (P77), e o
+    jeito leva COM_A_CHAMADA.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -790,7 +812,7 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
     musica = _caminho(musicas_de_fundo(video)[0])
     textos = textos_da_tela(video, produto) if produto else {}
     # Sem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a dos avisos.
-    capa = _capa_da_vez(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
+    capa = _capa_alternada(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
     avisado = (COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), preco,
