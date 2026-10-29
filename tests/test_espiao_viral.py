@@ -1,4 +1,5 @@
 """Espião e canal Viral: retentativa da IA, trava de silêncio, intercalação e alerta."""
+import os
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -66,6 +67,34 @@ def test_retentativa_da_ia_marca_o_clone_certo(bm, espiao):
         rodar(bm.processar_fila_espiao())
     assert item_da_fila(bm, "B")["processado"] is True
     assert espiao.enviados[-1] == "https://s.shopee.com.br/b?afiliado"
+
+
+def test_clone_que_falha_por_rede_volta_para_a_fila(bm, espiao, monkeypatch):
+    # 28/10, deploy das 20:12: o aiogram fecha a conexão do bot ao desligar, o envio do clone
+    # caiu com TelegramNetworkError, e o clone ficou como processado sem ter saído.
+    from aiogram.exceptions import TelegramNetworkError
+    agora = datetime.now(bm.fuso_horario)
+    vencido = (agora - timedelta(minutes=5)).strftime(FMT)
+    open("temp/d.mp4", "wb").write(b"v")
+    bm.salvar_fila_clonagem({"fila": [
+        {"id": "D", "processado": False, "horario_disparo": vencido, "caminho_video": "temp/d.mp4",
+         "link_original": "https://s.shopee.com.br/d", "legenda_ia": "Produto\n#Casa", "data_captura": vencido}]})
+
+    async def sem_rede(**k):
+        raise TelegramNetworkError(method=None, message="ClientConnectionError: Connector is closed.")
+
+    monkeypatch.setattr(bm.bot, "send_video", sem_rede)
+    rodar(bm.processar_fila_espiao())
+    item = item_da_fila(bm, "D")
+    assert not item["processado"] and item["falhas_de_rede"] == 1 and item["horario_disparo"] > vencido
+    assert os.path.exists("temp/d.mp4")
+    # Na terceira falha de rede, fica de lado como as outras falhas.
+    for _ in range(2):
+        dados = bm.ler_fila_clonagem()
+        dados["fila"][0]["horario_disparo"] = vencido
+        bm.salvar_fila_clonagem(dados)
+        rodar(bm.processar_fila_espiao())
+    assert item_da_fila(bm, "D")["processado"] is True
 
 
 @pytest.mark.parametrize("rotina, segura", [

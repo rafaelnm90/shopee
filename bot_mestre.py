@@ -42,7 +42,7 @@ from aiogram import BaseMiddleware
 from typing import Callable, Dict, Any, Awaitable
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
@@ -15037,6 +15037,12 @@ def ler_fila_clonagem():
 def salvar_fila_clonagem(dados):
     db.salvar_config("fila_clonagem", dados)
 
+# O clone que não sai por falha de rede volta para a fila; na terceira, fica de lado como as
+# outras falhas.
+MAX_FALHAS_DE_REDE_DO_CLONE = 3
+ESPERA_DA_REDE_DO_CLONE_MIN = 10
+
+
 async def processar_fila_espiao(forcar=False):
     """
     Motor do Espião, de minuto em minuto: trata os atrasados, distribui os horários
@@ -15302,6 +15308,19 @@ async def processar_fila_espiao(forcar=False):
             try: os.remove(caminho_video)
             except: pass
         except Exception as e:
+            falhas_de_rede = item_pendente.get("falhas_de_rede", 0) + 1
+            if isinstance(e, TelegramNetworkError) and falhas_de_rede < MAX_FALHAS_DE_REDE_DO_CLONE:
+                # A rede falhou (o deploy, por exemplo, fecha a conexão do bot no meio do envio):
+                # o clone não saiu e volta para a fila daqui a pouco, em vez de se perder.
+                item_pendente["falhas_de_rede"] = falhas_de_rede
+                item_pendente["horario_disparo"] = (agora + timedelta(minutes=ESPERA_DA_REDE_DO_CLONE_MIN)
+                                                    ).strftime("%Y-%m-%d %H:%M:%S")
+                salvar_fila_clonagem(fila_data)
+                logger.warning(f"🌐 [Espião] Clone {item_id} não saiu por falha de rede "
+                               f"({falhas_de_rede}/{MAX_FALHAS_DE_REDE_DO_CLONE}): volta em "
+                               f"{ESPERA_DA_REDE_DO_CLONE_MIN} min.")
+                registro_processos.registrar("bot_mestre", "postagem Viral", "adiada (rede)", type(e).__name__, ok=None)
+                continue
             logger.error(f"❌ Falha ao postar clone: {e}")
             registro_processos.registrar("bot_mestre", "postagem Viral", "falhou", type(e).__name__, ok=False)
             try: os.rename(caminho_video, caminho_video + ".pendente")
