@@ -619,6 +619,7 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     r = checkup.interacoes_da_shopee_video(AGORA)
     assert r["respostas"] == {"respondido": 1, "resposta no lugar errado": 1, "já respondido": 1, "sem resposta": 1}
     assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 4 and r["feed_repetidos"] == 1
+    assert r["feed_horas"] == ["17:20", "18:20", "19:20", "20:20"]
     robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
     for trecho in ("não ficaram embaixo do comentário certo", "ficaram sem resposta depois de 3 tentativas",
