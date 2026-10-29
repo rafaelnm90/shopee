@@ -118,8 +118,9 @@ def vale_para(fonte):
 
 # A capa da bebida alcoólica: a tela de 720x1280 que abre o vídeo (o app usa o primeiro
 # quadro como capa) com a foto do anúncio em cima e, logo embaixo, os três avisos da Shopee
-# em letras brancas sobre faixa preta. Fica no meio da tela, longe das bordas que a grade da
-# Shopee corta na miniatura. Escolha do Rafael (26/10, P43): DECISOES.md, Shopee Vídeo.
+# em letras brancas, no fundo preto da foto do começo (onde o número de visualizações da
+# grade se lê, P72). Fica no meio da tela, longe das bordas que a grade da Shopee corta na
+# miniatura. Escolhas do Rafael (26/10, P43; 29/10, P72): DECISOES.md, Shopee Vídeo.
 TELA = (720, 1280)
 AREA_DA_FOTO = (60, 740)        # de cima a baixo, em y
 AREA_DOS_AVISOS = (790, 1090)
@@ -138,7 +139,7 @@ def capa_com_avisos(foto):
     except Exception:
         return None
     largura, altura = TELA
-    capa = Image.new("RGB", TELA, "white")
+    capa = Image.new("RGB", TELA, "black")
     topo, base = AREA_DA_FOTO
     escala = min(largura / imagem.width, (base - topo) / imagem.height)
     imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
@@ -153,7 +154,6 @@ def capa_com_avisos(foto):
         if max(desenho.textlength(aviso, font=fonte) for aviso in assistente.AVISOS_DE_ALCOOL) \
                 <= largura - 2 * MARGEM_DOS_AVISOS:
             break
-    desenho.rectangle((0, cima, largura, baixo), fill="black")
     passo = (baixo - cima) / len(assistente.AVISOS_DE_ALCOOL)
     for i, aviso in enumerate(assistente.AVISOS_DE_ALCOOL):
         desenho.text((largura / 2, cima + passo * (i + 0.5)), aviso, font=fonte, fill="white", anchor="mm")

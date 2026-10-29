@@ -159,7 +159,7 @@ SAIDA_DA_MUSICA = 1.5
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0):
     """
-    O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, ou a `capa` no
+    O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
     avisos), depois o vídeo em 720x1280 com a foto em miniatura (`miniatura` px de largura)
     com o centro em `centro` (x, y) até o fim. Com `seta` (uma animação APNG com fundo transparente), a seta
@@ -171,7 +171,10 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     entrando e saindo devagar; o som do vídeo não entra.
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
-    filtro = (f"[0:v]{tela.replace('color=black', 'color=white')}[foto];"
+    # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
+    # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
+    # Escolha do Rafael (29/10, P72): DECISOES.md, Shopee Vídeo.
+    filtro = (f"[0:v]{tela}[foto];"
               f"[1:v]{tela}[corpo];"
               f"[2:v]scale={miniatura}:-2[mini];"
               f"[corpo][mini]overlay=x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1[comfoto];")
