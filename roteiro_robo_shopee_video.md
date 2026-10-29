@@ -456,6 +456,11 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      (pela caixa de baixo; sem ela, um por um, rolando), toca em Like e repete até a lista
      acabar. Falta ver no celular se a caixa de baixo marca tudo de uma vez: o robô confere
      pelo "Selecionado N/50".
+     O produto que saiu da loja fica na lista com o selo **Inválido** embaixo da foto (e a
+     linha dos filtros tem um filtro Inválido, que não é selo); marcado, o Like não o tira, e
+     ele continua marcado ("Selecionado 1/1", Motorola, 04:48 de 29/10/2026). Cada produto tem
+     também o ícone de mais (`AN_component_OfferCard_Control_Icon_Img_more_N`), ainda não
+     mapeado. Sobrando só inválidos, a rotina das 4h dá a lista por acabada.
    - Meus Favoritos de comprador (aba **Eu** → **Meus Favoritos**, Motorola, 24/10/2026): outra
      lista, com Editar, Todos, Status e Categoria e o Remover dos Favoritos; o app guarda a
      edição aberta. Não é a do Minhas Curtidas: o robô não mexe nela.

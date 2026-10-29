@@ -2874,11 +2874,15 @@ class AppDosFavoritos(AppDeMentira):
     marcar tudo, o "Selecionado N/50", o Like (tira os marcados) e o Compartilhar. O Meus
     Favoritos de comprador da aba Eu é outra lista: o robô não pode ir para lá.
     marcar_tudo=False: a caixa de baixo não marca nada, e o robô marca um por um, rolando.
+    invalidos: as posições dos produtos que saíram da loja, com o selo Inválido na foto, que o
+    Like não tira e que continuam marcados depois dele (Motorola, 29/10/2026). Na linha dos
+    filtros há também o filtro Inválido.
     """
 
-    def __init__(self, favoritos=6, marcar_tudo=True):
+    def __init__(self, favoritos=6, marcar_tudo=True, invalidos=()):
         super().__init__()
         self.favoritos = [f"Produto {i}" for i in range(favoritos)]
+        self.invalidos = {f"Produto {i}" for i in invalidos}
         self.marcados, self.marcar_tudo, self.topo = [], marcar_tudo, 0
 
     def _visiveis(self):
@@ -2894,11 +2898,14 @@ class AppDosFavoritos(AppDeMentira):
         if self.atual == "favoritos":
             nos = [_no(f"Meus favoritos({min(len(self.favoritos), 1000)})", caixa=(120, 160, 560, 220)),
                    _no("Melhor Oferta", caixa=(480, 300, 650, 350)),
+                   _no("Inválido", caixa=(700, 300, 820, 350), clicavel=False),
                    _no("Substituir Tudo", caixa=(740, 440, 910, 500))]
             for i, nome in enumerate(self._visiveis()):
                 y = 600 + 340 * i
                 nos += [_no(caixa=(50, y + 80, 120, y + 150), ident=CAIXA),
                         _no(nome, caixa=(420, y, 1040, y + 60), clicavel=False)]
+                if nome in self.invalidos:
+                    nos.append(_no("Inválido", caixa=(140, y + 200, 300, y + 240), clicavel=False))
             nos += [_no(caixa=(30, 2290, 96, 2356), ident=CAIXA),
                     _no(f"Selecionado {len(self.marcados)}/50", caixa=(120, 2300, 380, 2350), clicavel=False),
                     _no("Like", caixa=(600, 2290, 750, 2356)), _no("Compartilhar", caixa=(800, 2290, 1010, 2356))]
@@ -2915,8 +2922,8 @@ class AppDosFavoritos(AppDeMentira):
         elif self.atual == "afiliado" and "Meus favoritos" in tocados:
             self.atual, self.topo = "favoritos", 0
         elif self.atual == "favoritos" and "Like" in tocados:
-            self.favoritos = [f for f in self.favoritos if f not in self.marcados]
-            self.marcados, self.topo = [], 0
+            self.favoritos = [f for f in self.favoritos if f not in self.marcados or f in self.invalidos]
+            self.marcados, self.topo = [f for f in self.marcados if f in self.invalidos], 0
         elif self.atual == "favoritos" and 30 <= x <= 96 and 2290 <= y <= 2356:
             if self.marcar_tudo:
                 self.marcados = self.favoritos[:50]
@@ -3011,6 +3018,49 @@ def test_pausado_nao_descurte(monkeypatch, avisos):
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:05")) == "pausado"
 
 
+def test_produto_invalido_que_o_like_nao_tira_fica_e_a_lista_acaba(monkeypatch, avisos):
+    # 29/10/2026: o produto que saiu da loja (selo Inválido) continuou depois do Like, e a
+    # limpeza parava todo dia, sem dar a lista por limpa (P27).
+    from conftest import consultar
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=6, invalidos=[5])
+    resultado = robo.rodada(d=app, agora=momento("2026-10-29 04:05"))
+    assert resultado == ("5 produto(s) descurtido(s) em Meus favoritos; 1 inválido(s) ficam "
+                         "(o Like não tira produto que saiu da loja)")
+    assert app.favoritos == ["Produto 5"] and robo.lista_limpa()
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'descurtir tudo (4h)'") == (
+        "descurtido", "5 produto(s); 1 inválido(s) ficam", 1)
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-29 04:20")) == "nada a fazer agora"
+
+
+def test_so_invalidos_na_lista_a_limpeza_acaba_sem_tocar_no_like(monkeypatch, avisos):
+    # O caso das 04:48 de 29/10: só o inválido na lista; marcar e tocar em Like não adianta.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=1, invalidos=[0])
+    resultado = robo.rodada(d=app, agora=momento("2026-10-29 04:05"))
+    assert resultado.startswith("0 produto(s) descurtido(s) em Meus favoritos; 1 inválido(s) ficam")
+    assert "Like" not in app.toques and app.favoritos == ["Produto 0"] and robo.lista_limpa()
+
+
+def test_invalidos_no_alto_e_outros_embaixo_continua_descurtindo(monkeypatch, avisos):
+    # Só inválidos na tela, mas a lista continua embaixo: o robô rola, acha os outros e tira.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=8, invalidos=range(5))
+    resultado = robo.rodada(d=app, agora=momento("2026-10-29 04:05"))
+    assert resultado.startswith("3 produto(s) descurtido(s) em Meus favoritos; 5 inválido(s) ficam")
+    assert app.favoritos == [f"Produto {i}" for i in range(5)] and robo.lista_limpa()
+
+
+def test_selo_invalido_do_filtro_nao_conta_como_produto():
+    # A linha dos filtros tem o filtro Inválido; só o selo na foto do produto conta.
+    filtro = _no("Melhor Oferta", caixa=(480, 300, 650, 350)), _no("Inválido", caixa=(700, 300, 820, 350))
+    produto = _no(caixa=(50, 680, 120, 750), ident=CAIXA), _no("Produto", caixa=(420, 600, 1040, 660))
+    selo = _no("Inválido", caixa=(140, 800, 300, 840))
+    assert robo.produtos_invalidos(_xml(*filtro, *produto)) == 0 and not robo.so_invalidos(_xml(*filtro, *produto))
+    assert robo.produtos_invalidos(_xml(*filtro, *produto, selo)) == 1 and robo.so_invalidos(_xml(*filtro, *produto, selo))
+    assert not robo.so_invalidos(_xml(*filtro))
+
+
 def test_like_que_nao_tira_para_e_diz_onde(monkeypatch, avisos):
     # Uma pergunta do app que o robô não conhece: os produtos continuam marcados e na lista.
     class LikeQueNaoPega(AppDosFavoritos):
@@ -3023,7 +3073,8 @@ def test_like_que_nao_tira_para_e_diz_onde(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22)
     app = LikeQueNaoPega(favoritos=3)
     resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
-    assert "continuaram em Meus favoritos" in resultado and len(app.favoritos) == 3
+    assert "continuaram em Meus favoritos (3 marcado(s); 0 inválido(s) na tela)" in resultado
+    assert len(app.favoritos) == 3 and not robo.lista_limpa()
     assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
 
 
