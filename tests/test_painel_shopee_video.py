@@ -360,6 +360,9 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     assert sv.edicao_video.capa_ligada() and config["capa_com_chamada_desde"]
     assert "Desligar Capa com Chamada ⏸️" in _textos(sv.teclado_capa(config))
     assert "Capa com chamada: ✅ <b>ligada</b> desde " in sv.texto_robo(config)
+    # Escolha do Rafael (P77): ligada, alterna um vídeo com a chamada e o seguinte sem.
+    assert "(um vídeo com a chamada, o seguinte sem)" in sv.texto_robo(config)
+    assert "um vídeo com a chamada e o seguinte sem" in sv.texto_capa(config, sv.robo.medicao_da_capa())
     rodar(sv.ligar_capa_handler(Msg(sv.BOTAO_DESLIGAR_CAPA), est))
     assert not sv.edicao_video.capa_ligada()
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",

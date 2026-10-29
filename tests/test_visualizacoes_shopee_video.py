@@ -62,3 +62,6 @@ def test_comparar_usa_a_leitura_mais_perto_de_cada_idade():
     assert vsv.diferenca_em_porcento(medicao, 1) == 36 and vsv.diferenca_em_porcento(medicao, 3) == 33
     vazio = vsv.comparar([])
     assert vazio["sem_marca"] == 0 and vsv.diferenca_em_porcento(vazio, 1) is None
+    # Ligada a capa (P77), só os vídeos postados depois entram: os dois grupos dos mesmos dias.
+    depois = vsv.comparar(videos, desde="2026-10-27 00:00:00")
+    assert (depois["sem"]["videos"], depois["com"]["videos"], depois["sem_marca"]) == (0, 2, 1)

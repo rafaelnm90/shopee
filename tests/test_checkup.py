@@ -879,7 +879,9 @@ def test_medicao_da_capa_com_chamada_so_com_contagens_e_porcento():
     assert not vazio["ligada"] and checkup._linha_da_capa_com_chamada(vazio).startswith(
         "Capa com chamada (P76): desligada | postados com a marca da capa: com a chamada 0, sem 0")
     for postado, chamada, marca, vistas in (
-            ("2026-10-25 10:00:00", "", "a", [["2026-10-26 10:00:00", 1234]]),
+            # Antes de ligar: fora da comparação, que usa só os vídeos dos mesmos dias (P77).
+            ("2026-10-25 10:00:00", "", "a", [["2026-10-26 10:00:00", 9999]]),
+            ("2026-10-26 09:00:00", "", "a", [["2026-10-27 09:30:00", 1234]]),
             ("2026-10-26 10:00:00", "1", "b", [["2026-10-27 09:00:00", 1851]]),
             ("2026-10-26 12:00:00", "1", "", [])):
         robo.atualizar(robo.criar("v", AGORA - timedelta(days=3)), estado="postado", postado_em=postado,
@@ -891,4 +893,4 @@ def test_medicao_da_capa_com_chamada_so_com_contagens_e_porcento():
     assert linha == ("Capa com chamada (P76): ligada desde 26/10 | postados com a marca da capa: com a chamada 1, "
                      "sem 1 (lidos 1 e 1); sem a marca 1 | com 1 dia(s): a chamada +50% (1 com, 1 sem) | "
                      "com 3 dia(s): sem comparação ainda (0 com, 0 sem)")
-    assert "1234" not in linha and "1851" not in linha
+    assert "1234" not in linha and "1851" not in linha and "9999" not in linha

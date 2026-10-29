@@ -3348,9 +3348,13 @@ def _anotar_visualizacoes_junto(d, agora=None):
 
 
 def medicao_da_capa(agora=None):
-    """A comparação da capa com chamada (P76) com os vídeos postados nos últimos DIAS_DA_COMPARACAO dias."""
+    """
+    A comparação da capa com chamada (P76) com os vídeos postados nos últimos
+    DIAS_DA_COMPARACAO dias; depois que o Rafael liga a capa, só os de depois (P77).
+    """
     limite = _momento(agora_br(agora) - timedelta(days=DIAS_DA_COMPARACAO))
-    return visualizacoes.comparar([r for r in listar("postado") if (r["postado_em"] or "") >= limite])
+    return visualizacoes.comparar([r for r in listar("postado") if (r["postado_em"] or "") >= limite],
+                                  ler_config().get("capa_com_chamada_desde"))
 
 
 # --- Canal Afiliados: o vídeo postado vai à fila do canal ---

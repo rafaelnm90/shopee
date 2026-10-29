@@ -842,7 +842,8 @@ def rotulo_capa(config):
     if not config.get(edicao_video.CHAVE_DA_CAPA):
         return "⏸️ <b>desligada</b>"
     desde = config.get("capa_com_chamada_desde") or ""
-    return "✅ <b>ligada</b>" + (f" desde {desde[8:10]}/{desde[5:7]}" if desde else "")
+    return ("✅ <b>ligada</b>" + (f" desde {desde[8:10]}/{desde[5:7]}" if desde else "")
+            + " (um vídeo com a chamada, o seguinte sem)")
 
 
 def _mediana_das_visualizacoes(mediana):
@@ -873,13 +874,14 @@ def texto_capa(config, medicao):
         "<b>Os números ficam livres</b>: a chamada fica abaixo da sacolinha da Shopee e do selo \"Fixado\" dos "
         "vídeos fixados, e a foto, um pouco menor, acaba antes do número de visualizações, embaixo à esquerda. "
         "Tudo cabe no pedaço da capa que a grade mostra.\n\n"
-        "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Na bebida "
-        "alcoólica, a capa continua a dos três avisos; sem a vantagem da IA, o vídeo vai com a capa de sempre.\n\n"
+        "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Ligada, ela "
+        "alterna: um vídeo com a chamada e o seguinte sem, para os dois grupos saírem nos mesmos dias, para o mesmo "
+        "público. Na bebida alcoólica, a capa continua a dos três avisos; o vídeo que devia levar a chamada e ficou "
+        "sem a vantagem da IA vai com a capa de sempre, e o próximo leva a chamada.\n\n"
         f"Agora: {rotulo_capa(config)} (edição dos vídeos: {rotulo_edicao(config)})\n\n"
         "<b>Medição</b>: uma vez por dia, o robô anota na grade do perfil as visualizações de cada vídeo que ele "
-        "postou. 7 dias depois de você ligar, o Claude compara os vídeos com a chamada com os de antes e traz os "
-        "números para você decidir; quanto mais vídeos sem a chamada medidos antes de ligar, mais justa a "
-        f"comparação. {_linha_da_medicao(medicao)}\n\n"
+        "postou. 7 dias depois de você ligar, o Claude compara os vídeos com a chamada com os sem, dos mesmos dias, "
+        f"e traz os números para você decidir se fica em todos. {_linha_da_medicao(medicao)}\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EXEMPLO_DA_CAPA}</b>: manda no seu privado, sem postar, a capa com chamada do próximo vídeo "
         "que o robô pegaria: a capa inteira e o pedaço que aparece na grade do perfil. Cada toque mostra um vídeo "

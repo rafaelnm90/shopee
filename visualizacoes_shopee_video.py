@@ -94,14 +94,17 @@ def vistas_com_a_idade(postado_em, leituras, dias):
     return melhor[1] if melhor else None
 
 
-def comparar(videos):
+def comparar(videos, desde=None):
     """
     A comparação da capa com chamada. videos: os postados pelo robô, [{"postado_em",
-    "chamada", "marca", "vistas"}]. Devolve {"com": grupo, "sem": grupo, "sem_marca": n}:
-    cada grupo é {"videos", "lidos", "idades": {dias: (quantos, mediana ou None)}}, e
-    sem_marca conta os postados sem a marca da capa desde o primeiro que a teve (os de antes
-    da medição nunca a tiveram).
+    "chamada", "marca", "vistas"}]; desde: o momento em que o Rafael ligou a capa (com ela
+    ligada, os vídeos alternam, P77, e só os de depois entram, os dois grupos dos mesmos dias).
+    Devolve {"com": grupo, "sem": grupo, "sem_marca": n}: cada grupo é {"videos", "lidos",
+    "idades": {dias: (quantos, mediana ou None)}}, e sem_marca conta os postados sem a marca da
+    capa desde o primeiro que a teve (os de antes da medição nunca a tiveram).
     """
+    if desde:
+        videos = [v for v in videos if (v.get("postado_em") or "") >= desde]
     com_marca = [v for v in videos if v.get("marca")]
     inicio = min((v["postado_em"] or "" for v in com_marca), default=None)
     grupos = {"com": [], "sem": []}
