@@ -205,12 +205,15 @@ def test_na_janela_das_interacoes_so_responde_e_comenta_no_feed(monkeypatch):
     # 13h: na janela, nem o aprovado vencido sai nem o plano gasta horário.
     assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("responder", None)
     assert robo.estado_do_dia(config, momento("2026-10-25 13:00"))["feitos"] == 0
-    # 16h: fora dela, o robô posta e prepara, e não responde nem comenta.
+    # 16h: fora dela, o robô posta e prepara, e não comenta no feed; as respostas, nas horas
+    # delas, saem dentro ou fora (P70).
     assert robo.o_que_fazer(config, momento("2026-10-25 16:00")) == ("postar", aprovado)
     robo.atualizar(aprovado, estado="postado")
     assert robo.o_que_fazer(config, momento("2026-10-25 16:00")) == ("rascunho", None)
     monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: False)
     monkeypatch.setattr(robo, "repetir_o_que_falhou", lambda config, agora=None: False)
+    assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) == ("responder", None)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
     assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) is None
 
 
@@ -2302,7 +2305,14 @@ class AppDaSaude(AppDeMentira):
         if self.atual in TELAS_DA_SAUDE:
             return TELAS_DA_SAUDE[self.atual]
         nos = super()._nos()
-        return nos + [_no("Centro do criador", caixa=(620, 980, 980, 1040))] if self.atual == "perfil" else nos
+        if self.atual != "perfil":
+            return nos
+        # O Perfil como o Motorola mostrou (explorar de 29/10/2026): o número acima de Seguidores.
+        return nos + [_no("12", caixa=(430, 310, 520, 360), clicavel=False),
+                      _no("Seguindo", caixa=(410, 365, 540, 405), clicavel=False),
+                      _no("1,2K", caixa=(650, 310, 750, 360), clicavel=False),
+                      _no("Seguidores", caixa=(630, 365, 770, 405), clicavel=False),
+                      _no("Centro do criador", caixa=(620, 980, 980, 1040))]
 
     def click(self, x, y):
         import postador_shopee_video as ps
@@ -2386,6 +2396,31 @@ def test_saude_uma_vez_por_dia_e_tambem_com_a_conta_suspensa(monkeypatch, avisos
     # Já leu hoje: com a conta suspensa e nada mais a fazer, não toca mais no celular.
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:15")) == "nada a fazer agora"
     assert robo.saude_do_dia_pendente(momento("2026-10-25 08:00"))
+
+
+def test_saude_anota_os_seguidores_do_perfil(monkeypatch, avisos, ia_da_apelacao):
+    # Escolha do Rafael (P70): os seguidores, um número por dia, para o checkup ver se sobem.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)
+    ativar(robo_inicio=0, robo_fim=24)
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-24 10:00")))
+    assert robo.rodada(d=AppDaSaude(), agora=momento("2026-10-24 10:00")).startswith("saúde lida")
+    assert robo.db.ler_config(robo.CHAVE_SEGUIDORES)["dias"] == {"2026-10-24": 1200}
+
+
+def test_seguidores_na_tela_e_os_dias_guardados():
+    perfil = _xml(_no("12", caixa=(430, 310, 520, 360)), _no("Seguindo", caixa=(410, 365, 540, 405)),
+                  _no("1,2 mil", caixa=(650, 310, 750, 360)), _no("Seguidores", caixa=(630, 365, 770, 405)))
+    assert robo.seguidores_na_tela(perfil) == 1200
+    assert robo.seguidores_na_tela(_xml(_no("Seguindo", caixa=(410, 365, 540, 405)))) is None
+    sem_numero = _xml(_no("Seguidores", caixa=(630, 365, 770, 405)))
+    assert robo.anotar_seguidores(sem_numero, momento("2026-10-24 10:00")) is None
+    assert robo.db.ler_config(robo.CHAVE_SEGUIDORES, {}) == {}
+    for dia in range(1, 31):
+        robo.anotar_seguidores(perfil, momento(f"2026-10-{dia:02d} 10:00"))
+    for dia in range(1, 10):
+        robo.anotar_seguidores(perfil, momento(f"2026-11-{dia:02d} 10:00"))
+    dias = robo.db.ler_config(robo.CHAVE_SEGUIDORES)["dias"]
+    assert len(dias) == robo.DIAS_DOS_SEGUIDORES and min(dias) == "2026-10-05" and max(dias) == "2026-11-09"
 
 
 def test_saude_que_nao_abre_nao_toma_as_rodadas_do_dia(monkeypatch, avisos):

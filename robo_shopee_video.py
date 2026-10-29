@@ -48,6 +48,7 @@ Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
 import html
+import io
 import json
 import logging
 import os
@@ -980,7 +981,7 @@ def o_que_fazer(config, agora=None):
     A tarefa desta rodada: ("descurtir", None) (tudo em Meus Favoritos, às 4h, e nessa
     hora só isso), ("treino", None), ("apagar", id), ("postar", id), ("saude",
     None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
-    ("rascunho", None), ("responder", None) (os comentários dos vídeos, uma vez por dia),
+    ("rascunho", None), ("responder", None) (os comentários dos vídeos, nas horas_das_respostas),
     ("feed", None) (até 3 vídeos do feed por dia, comentarios_nesta_rodada) ou None. Gasta o horário do plano, ou
     uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
     """
@@ -996,10 +997,10 @@ def o_que_fazer(config, agora=None):
     recusados = listar("recusado")
     if recusados:
         return "apagar", recusados[0]["id"]
-    # Responder e o feed só no Horário das Interações (sem ele escolhido, no Horário do Robô,
-    # como antes); preparar e postar fora dele, ou nele depois que as interações do dia
-    # acabam. Escolhas do Rafael (P22 a P24 e P26). (A rodada já confere o horário: aqui
-    # só a separação entre os dois.)
+    # O feed só no Horário das Interações (sem ele escolhido, no Horário do Robô, como antes);
+    # preparar e postar fora dele, ou nele depois que as interações do dia acabam. As
+    # respostas, nas horas_das_respostas, dentro ou fora dele. Escolhas do Rafael (P22 a
+    # P24, P26 e P70). (A rodada já confere o horário: aqui só a separação entre os dois.)
     na_janela = na_hora_das_interacoes(config, agora)
     postar = (not na_janela or interacoes_do_dia_feitas(agora)) and not sem_postar
     interagir = na_janela or not janela_das_interacoes(config)
@@ -1017,7 +1018,7 @@ def o_que_fazer(config, agora=None):
         return "saude", None
     if postar and (consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
         return "rascunho", None
-    if interagir and respostas_pendentes(agora):
+    if respostas_pendentes(agora):
         return "responder", None
     if interagir and feed_pendente(agora):
         return "feed", None
@@ -1309,7 +1310,7 @@ def ler_suspensao(d, agora=None, postar_fechado=False):
     if not ate or suspensao_retirada(ate):
         return None
     try:
-        abrir_saude(d)
+        abrir_saude(d, agora)
         na_saude = suspensao_na_tela(tela(d), agora)
     except Parada as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Não confirmei a suspensão na Saúde do Vídeo: {ps.mascarar(e.motivo)}")
@@ -1470,13 +1471,52 @@ def _texto_da_apelacao(tipo, detalhe, rascunho):
                                              fonte))
 
 
-def abrir_saude(d):
+# Os seguidores do perfil em Shopee Vídeo, um número por dia (os últimos DIAS_DOS_SEGUIDORES),
+# lidos no Perfil quando o robô passa por ele para a Saúde do Vídeo: o checkup mostra se
+# sobem. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
+CHAVE_SEGUIDORES = "shopee_video_seguidores"
+DIAS_DOS_SEGUIDORES = 35
+
+
+def seguidores_na_tela(xml):
+    """O número logo acima de "Seguidores" no Perfil em Shopee Vídeo ("1,2K" → 1200), ou None."""
+    elementos = ps.elementos(xml) if xml else []
+    rotulo = next((el for el in elementos if ps._normal(el["texto"]) == "seguidores"), None)
+    if not rotulo:
+        return None
+    x, y = ps._centro(rotulo)
+    for el in elementos:
+        ex, ey = ps._centro(el)
+        if el is not rotulo and el["texto"].strip() and abs(ex - x) <= 80 and y - 100 <= ey < y:
+            return interacoes.contagem(el["texto"])
+    return None
+
+
+def anotar_seguidores(xml, agora=None):
+    """Guarda os seguidores de hoje (a leitura mais nova do dia); devolve o número ou None."""
+    numero = seguidores_na_tela(xml)
+    if numero is None:
+        return None
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+
+    def anotar(guardado):
+        dias = guardado.setdefault("dias", {})
+        dias[hoje] = numero
+        for dia in sorted(dias)[:-DIAS_DOS_SEGUIDORES]:
+            del dias[dia]
+
+    db.atualizar_config(CHAVE_SEGUIDORES, anotar)
+    return numero
+
+
+def abrir_saude(d, agora=None):
     """
     Perfil em Shopee Vídeo → Centro do criador → o quadro Saúde do Vídeo. O nome do quadro
     não aceita toque: o robô toca no que aceita na mesma linha (o "Melhoria Necessária",
-    "Bom"...) ou, sem ele, na frase logo abaixo.
+    "Bom"...) ou, sem ele, na frase logo abaixo. De passagem pelo Perfil, anota os seguidores.
     """
     ir_ao_perfil(d)
+    anotar_seguidores(tela(d), agora)
     botao, espera, esperado = CAMINHO_CENTRO_DO_CRIADOR[0]
     tocar(d, botao, espera)
     xml = esperar_na_tela(d, esperado, ESPERA_DA_SAUDE)
@@ -1506,7 +1546,7 @@ def ler_saude(d, agora=None):
     # A tentativa conta para a leitura do dia mesmo se der errado: a Saúde que não abre não
     # pode tomar todas as rodadas do dia no lugar dos rascunhos.
     gravar_estado(saude_tentada_em=_momento(agora))
-    abrir_saude(d)
+    abrir_saude(d, agora)
     xml = tela(d)
     pontos = pontos_de_penalidade(xml)
     ate = suspensao_na_tela(xml, agora)
@@ -2861,6 +2901,11 @@ def _sair_sem_salvar(d):
 
 # Quantas vezes o robô rola as Notificações procurando a linha do topo da vez anterior.
 ROLADAS_NAS_RESPOSTAS = 6
+# As respostas aos comentários dos vídeos do Rafael saem 3 vezes por dia: nestas horas e no
+# começo do Horário das Interações (sem ele escolhido, às 20h). O feed continua só na
+# janela. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
+HORAS_DAS_RESPOSTAS = (12, 17)
+HORA_DAS_RESPOSTAS_SEM_JANELA = 20
 # Respostas numa rodada (cada uma leva perto de 1 min); o resto fica para a rodada seguinte.
 RESPOSTAS_POR_RODADA = 8
 # O painel de comentários abre uns 8 s depois do vídeo (Motorola, 24/10/2026).
@@ -2882,14 +2927,27 @@ PAUSA_ENTRE_COMENTARIOS = (60, 120)
 REGISTRO = "shopee_video"
 
 
+def horas_das_respostas(config):
+    """As horas de cada leitura das Notificações: HORAS_DAS_RESPOSTAS e o começo do Horário das Interações."""
+    janela = janela_das_interacoes(config)
+    return sorted(set(HORAS_DAS_RESPOSTAS) | {janela[0] if janela else HORA_DAS_RESPOSTAS_SEM_JANELA})
+
+
 def respostas_pendentes(agora=None):
     """
-    Hora de responder os comentários? Uma vez por dia, e de novo na rodada seguinte
-    quando a anterior parou no limite de RESPOSTAS_POR_RODADA.
+    Hora de responder os comentários? Uma vez em cada uma das horas_das_respostas (a última
+    leitura foi antes do começo da vez de agora), e de novo na rodada seguinte quando a
+    anterior parou no limite de RESPOSTAS_POR_RODADA.
     """
     estado = ler_estado()
-    hoje = agora_br(agora).strftime("%Y-%m-%d")
-    return bool(estado.get("respostas_continuar")) or not (estado.get("respostas_em") or "").startswith(hoje)
+    if estado.get("respostas_continuar"):
+        return True
+    momento = agora_br(agora)
+    vezes = [hora for hora in horas_das_respostas(ler_config()) if hora <= momento.hour]
+    if not vezes:
+        return False
+    comeco = momento.replace(hour=max(vezes), minute=0, second=0, microsecond=0)
+    return (estado.get("respostas_em") or "") < _momento(comeco)
 
 
 def comentarios_do_feed_que_faltam(agora=None):
@@ -3314,7 +3372,7 @@ def interagir_no_feed(d, agora=None):
     pular = random.randint(0, 2)
     anteriores = ler_estado().get("feed_textos") or []
     try:
-        for _ in range(VIDEOS_OLHADOS_NO_FEED):
+        for olhada in range(VIDEOS_OLHADOS_NO_FEED):
             # Cada tela olhada fica no registro com o que o robô viu nela (um texto fixo):
             # o checkup mostra onde ele se perde quando nenhum vídeo serve.
             video, motivo = interacoes.ler_o_feed(tela(d))
@@ -3325,6 +3383,8 @@ def interagir_no_feed(d, agora=None):
                 visto = "já comentado antes"
             elif _proprio(video):
                 visto = "vídeo do próprio perfil"
+            elif _muitos_comentarios(video, olhada):
+                visto = "muitos comentários"
             else:
                 pausa(random.uniform(6, 14))  # assiste um pouco antes
                 if not pular:
@@ -3347,8 +3407,33 @@ def interagir_no_feed(d, agora=None):
         _sair_sem_salvar(d)
 
 
+def _muitos_comentarios(video, olhada):
+    """
+    O vídeo tem mais de POUCOS_COMENTARIOS (o comentário do robô sumiria no meio)? Só na 1ª
+    metade das telas: sem nenhum com poucos, depois vale qualquer um, para os 3 do dia
+    saírem. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
+    """
+    return ((video.get("comentarios") or 0) > interacoes.POUCOS_COMENTARIOS
+            and olhada < VIDEOS_OLHADOS_NO_FEED // 2)
+
+
+# A tela do vídeo vai à IA com metade do tamanho: basta para ver o produto e gasta menos.
+TAMANHO_DA_TELA_PARA_A_IA = (540, 1200)
+
+
+def _tela_do_video(d):
+    """A tela do vídeo do feed em JPEG, para a IA comentar o que aparece nele (P70); None se o print falhar."""
+    try:
+        imagem, saida = d.screenshot().convert("RGB"), io.BytesIO()
+        imagem.thumbnail(TAMANHO_DA_TELA_PARA_A_IA)
+        imagem.save(saida, format="JPEG", quality=80)
+        return saida.getvalue()
+    except Exception:
+        return None
+
+
 def _interagir_com(d, video, marca, anteriores, agora=None):
-    texto = asyncio.run(interacoes.gerar_comentario(video["legenda"], anteriores))
+    texto = asyncio.run(interacoes.gerar_comentario(video["legenda"], anteriores, _tela_do_video(d)))
     if texto is None:
         raise Parada("a IA não escreveu o comentário do feed")
     if not texto:

@@ -725,9 +725,9 @@ def texto_robo(config, agora=None, celular=None):
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
-        f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele responde os comentários dos seus vídeos e "
-        "comenta e curte os de outros criadores. Nessa janela, ele só volta a preparar e postar quando acaba "
-        "os comentários e as respostas do dia.\n"
+        f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele comenta e curte os vídeos de outros criadores "
+        "e responde os comentários dos seus (as respostas saem também às 12h e às 17h). Nessa janela, ele só "
+        "volta a preparar e postar quando acaba os comentários e as respostas do dia.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
@@ -1294,17 +1294,17 @@ async def pedir_janela_robo(message: types.Message, state: FSMContext):
 async def pedir_janela_interacoes(message: types.Message, state: FSMContext):
     """
     O Horário das Interações: nele o robô só responde os comentários e comenta e curte no
-    feed; fora dele, só prepara e posta. Escolha do Rafael (24/10, P22 a P24): DECISOES.md,
-    Shopee Vídeo.
+    feed; fora dele, prepara e posta, e responde às 12h e às 17h. Escolhas do Rafael (24/10,
+    P22 a P24, e 29/10, P70): DECISOES.md, Shopee Vídeo.
     """
     if not _admin(message): return
     config = ler_config()
     janela = robo.janela_das_interacoes(config) or (None, None)
     exemplo = exemplos.janela("shopee_video_interacoes", *janela, "12-15")
     await message.answer(
-        "Em que horário o robô responde os comentários dos seus vídeos e comenta e curte os vídeos de outros "
-        "criadores? Nessa janela, ele só volta a preparar e postar quando acaba os comentários e as respostas do "
-        "dia; fora dela, só prepara e posta.\n\n"
+        "Em que horário o robô comenta e curte os vídeos de outros criadores e responde os comentários dos "
+        "seus? Nessa janela, ele só volta a preparar e postar quando acaba os comentários e as respostas do "
+        "dia; fora dela, prepara e posta, e responde também às 12h e às 17h.\n\n"
         f"Envie <code>início-fim</code> (ex.: <code>{exemplo}</code>) ou toque em {BOTAO_SEM_HORARIO_PROPRIO} para "
         "ele voltar a interagir dentro do Horário do Robô.\n"
         f"<i>Hoje está {rotulo_interacoes(config)}. Com 3 h ou mais cabem, com folga, os 3 comentários do dia "

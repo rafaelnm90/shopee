@@ -16,10 +16,11 @@ def gemini(monkeypatch):
     """Cascata de 3 modelos com respostas falsas: erro (texto) ou o texto devolvido."""
     monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["a", "b", "c"])
     monkeypatch.setattr(ia, "_fora_ate", {})
-    estado = SimpleNamespace(respostas={}, chamadas=[])
+    estado = SimpleNamespace(respostas={}, chamadas=[], conteudos=[])
 
     def generate_content(model, contents):
         estado.chamadas.append(model)
+        estado.conteudos.append(contents)
         resposta = estado.respostas.get(model, "ok")
         if resposta.startswith(("429", "404", "500")):
             raise RuntimeError(resposta)
@@ -34,6 +35,16 @@ def test_modelo_sem_cota_fica_de_fora_nas_proximas(gemini):
     assert rodar(ia.gerar_texto_gemini("p")) == "texto do c"
     assert rodar(ia.gerar_texto_gemini("p")) == "texto do c"
     assert gemini.chamadas == ["a", "b", "c", "c"]
+
+
+def test_texto_com_imagem_manda_a_imagem_antes_do_pedido(gemini):
+    # A IA do feed comenta vendo a tela do vídeo (P70): a imagem vai junto com o pedido.
+    assert rodar(ia.gerar_texto_gemini("comente", imagens=[(b"\xff\xd8jpeg", "image/jpeg")])) == "ok"
+    imagem, pedido = gemini.conteudos[-1]
+    assert pedido == "comente" and imagem.inline_data.mime_type == "image/jpeg"
+    assert imagem.inline_data.data == b"\xff\xd8jpeg"
+    rodar(ia.gerar_texto_gemini("só texto"))
+    assert gemini.conteudos[-1] == "só texto"
 
 
 def test_erro_comum_nao_tira_da_cascata(gemini):

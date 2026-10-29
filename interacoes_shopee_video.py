@@ -29,6 +29,9 @@ DIAS_DAS_MARCAS = 90
 TENTATIVAS_DO_COMENTARIO = 3
 # Escolha do Rafael (P10): 3 comentários por dia no feed, cada um diferente.
 COMENTARIOS_NO_FEED_POR_DIA = 3
+# No feed, o robô prefere os vídeos com até tantos comentários: o dele fica no alto e é
+# visto. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
+POUCOS_COMENTARIOS = 20
 TAMANHO_DA_RESPOSTA = 150
 TAMANHO_DO_COMENTARIO = 80
 # Os estados de um comentário em que ele não volta mais.
@@ -361,7 +364,33 @@ def ler_o_feed(xml):
     legenda = next((t for t in (texto_em(c) for c in caixas if ps._normal(c["descricao"]) != "video caption user")
                     if t and t != autor), "")
     return {"autor": autor, "legenda": legenda, "coracao": ps._centro(coracao),
-            "coracao_desc": coracao["descricao"], "balao": ps._centro(balao)}, ""
+            "coracao_desc": coracao["descricao"], "balao": ps._centro(balao),
+            "comentarios": numero_embaixo(elementos, balao)}, ""
+
+
+def numero_embaixo(elementos, botao):
+    """O número escrito logo embaixo de um botão da coluna da direita (no balão, os comentários), ou None."""
+    x1, _y1, x2, y2 = botao["caixa"]
+    for el in elementos:
+        x, y = ps._centro(el)
+        if el["texto"].strip() and x1 - 30 <= x <= x2 + 30 and y2 - 5 <= y <= y2 + 60:
+            return contagem(el["texto"])
+    return None
+
+
+def contagem(texto):
+    """O número do app: "3" → 3, "1.234" → 1234, "1,2 mil" → 1200, "2K" → 2000; None se não é um número."""
+    numero, multiplo = ps._normal(texto).replace(" ", "").rstrip("+"), 1
+    for sufixo, valor in (("mil", 1000), ("mi", 1000000), ("k", 1000), ("m", 1000000)):
+        if numero.endswith(sufixo):
+            numero, multiplo = numero[:-len(sufixo)].replace(",", "."), valor
+            break
+    else:
+        numero = numero.replace(".", "").replace(",", "")
+    try:
+        return int(float(numero) * multiplo)
+    except ValueError:
+        return None
 
 
 def campo_de_comentar(xml):
@@ -395,6 +424,11 @@ Comentários que você já fez (não repita nem escreva parecido): {anteriores}
 Escreva UM comentário curto, em português do Brasil, com no máximo {limite} caracteres: natural, positivo e sobre o que a legenda mostra (o produto, o resultado, a ideia), como uma pessoa de verdade escreveria. Sem link, sem nome de marca, sem convite para o seu perfil, sem pedir nada, sem hashtags, no máximo 1 emoji e sem aspas.
 Se a legenda tiver conteúdo adulto, político, ofensivo, de aposta ou de golpe, escreva só: PULAR"""
 
+# Com a tela do vídeo anexa, o comentário fala do que aparece nele. Escolha do Rafael (P70).
+SOBRE_A_IMAGEM = """
+
+A imagem anexa é a tela do vídeo agora: comente o que aparece nela (o produto, o resultado, a ideia), junto com a legenda, sem falar dos botões nem dos textos do aplicativo. Se a imagem mostrar conteúdo adulto, político, ofensivo, de aposta ou de golpe, escreva só: PULAR"""
+
 
 def texto_simples(texto, limite):
     """
@@ -409,11 +443,15 @@ def texto_simples(texto, limite):
     return texto
 
 
-async def _pedir(prompt, limite, tentativas=2):
-    """O texto da IA; "" quando ela diz PULAR; None quando ela não respondeu."""
+async def _pedir(prompt, limite, tentativas=2, imagens=None):
+    """
+    O texto da IA (com as imagens [(bytes, tipo)], se vierem); "" quando ela diz PULAR; None
+    quando ela não respondeu.
+    """
     import api_gemini
     for _ in range(tentativas):
-        resposta = await api_gemini.gerar_texto_gemini(prompt)
+        resposta = await (api_gemini.gerar_texto_gemini(prompt, imagens=imagens) if imagens
+                          else api_gemini.gerar_texto_gemini(prompt))
         if not resposta:
             continue
         if resposta.strip().strip(".!").upper() == "PULAR":
@@ -431,8 +469,11 @@ async def gerar_resposta(comentario, produto="", legenda="", anteriores=()):
     return await _pedir(prompt, TAMANHO_DA_RESPOSTA)
 
 
-async def gerar_comentario(legenda="", anteriores=()):
-    """O comentário num vídeo do feed (P10: curto e diferente a cada vez)."""
+async def gerar_comentario(legenda="", anteriores=(), imagem=None):
+    """
+    O comentário num vídeo do feed (P10: curto e diferente a cada vez). Com a imagem (JPEG da
+    tela do vídeo), sobre o que aparece nele (P70).
+    """
     prompt = PROMPT_COMENTARIO.format(legenda=legenda or "—", anteriores="; ".join(anteriores) or "nenhum",
-                                      limite=TAMANHO_DO_COMENTARIO)
-    return await _pedir(prompt, TAMANHO_DO_COMENTARIO)
+                                      limite=TAMANHO_DO_COMENTARIO) + (SOBRE_A_IMAGEM if imagem else "")
+    return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")] if imagem else None)
