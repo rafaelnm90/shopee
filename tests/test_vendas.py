@@ -148,3 +148,36 @@ def test_relatorio_recusado_volta_ao_de_antes_sem_parar_o_financeiro(bm, monkeyp
     monkeypatch.setattr(bm, "_relatorio_completo", True)
     nos = rodar(bm.buscar_dados_financeiros_shopee(3))
     assert consultas == [True, False] and len(nos) == 1
+
+
+def _pedido(data, *itens, status="COMPLETED"):
+    return {"data": data, "status": status, "etiqueta": "", "comissao_total": 0,
+            "itens": [{"id": item, "nome": "Produto", "qtd": 1, "comissao": comissao} for item, comissao in itens]}
+
+
+def test_vendas_dos_produtos_a_mais_contam_do_dia_do_post_em_diante():
+    # A medição da P73: as vendas do produto do vídeo e dos produtos a mais (o mesmo item de
+    # outras lojas), cada um só a partir do dia do post dele, sem os cancelados.
+    postados = [("2026-10-30", [{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}]),
+                ("2026-10-31", [{"item": "3", "a_mais": False}, {"item": "2", "a_mais": True}])]
+    pedidos = {"a": _pedido("2026-10-29", ("2", 5.0)),            # antes do post: não conta
+               "b": _pedido("2026-10-30", ("1", 2.0)),
+               "c": _pedido("2026-10-31", ("2", 3.0), ("9", 7.0)),  # o 9 não é de vídeo do robô
+               "d": _pedido("2026-11-01", ("2", 4.0), status="CANCELLED"),
+               "e": _pedido("2026-11-01", ("3", 1.5))}
+    contas = vendas.vendas_dos_produtos_a_mais(pedidos, postados, "2026-10-29")
+    assert contas == {"do_video": [2, 3.5], "a_mais": [1, 3.0]}
+    assert vendas.vendas_dos_produtos_a_mais(pedidos, postados, "2026-10-29", "2026-10-30") == \
+        {"do_video": [1, 2.0], "a_mais": [0, 0.0]}
+
+
+def test_relatorio_da_semana_mostra_os_produtos_a_mais_so_quando_ha():
+    pedidos = {"b": dict(_pedido("2026-10-30", ("1", 2.0)), comissao_total=2.0, etiqueta="canalafiliados"),
+               "c": dict(_pedido("2026-10-31", ("2", 3.0)), comissao_total=3.0)}
+    com = [("2026-10-30", [{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}])]
+    texto = vendas.texto_semanal(pedidos, AGORA, com)
+    assert "Produtos a mais da Shopee Vídeo" in texto
+    assert "Dos produtos a mais: 1 venda(s), R$ 3,00" in texto and "Do produto do vídeo: 1 venda(s), R$ 2,00" in texto
+    sem = [("2026-10-30", [{"item": "1", "a_mais": False}])]
+    assert "Produtos a mais" not in vendas.texto_semanal(pedidos, AGORA, sem)
+    assert "Produtos a mais" not in vendas.texto_semanal(pedidos, AGORA)

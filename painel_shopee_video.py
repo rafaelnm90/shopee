@@ -537,6 +537,11 @@ BOTOES_ANTIGOS_EDITOR_1 = ["Ver Exemplo Editor 1 👀", "Ver Exemplo da Edição
 BOTOES_ANTIGOS_EDITOR_2 = ["Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 4 🎬"]
 BOTAO_LIGAR_EDICAO = "Ligar Edição ✅"
 BOTAO_DESLIGAR_EDICAO = "Desligar Edição ⏸️"
+BOTAO_PRODUTOS_A_MAIS = "Produtos a Mais 🛍️"
+# O processo dos produtos a mais no registro: o mesmo do robo_shopee_video (o teste confere).
+PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
+BOTAO_LIGAR_A_MAIS = "Ligar Produtos a Mais ✅"
+BOTAO_DESLIGAR_A_MAIS = "Desligar Produtos a Mais ⏸️"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -573,7 +578,7 @@ def teclado_robo(config):
         [KeyboardButton(text=BOTAO_FILA), KeyboardButton(text=BOTAO_PREPARAR)],
         [KeyboardButton(text=BOTAO_HISTORICO), KeyboardButton(text=BOTAO_EDICAO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
-        [KeyboardButton(text=BOTAO_HORARIO_INTERACOES)],
+        [KeyboardButton(text=BOTAO_HORARIO_INTERACOES), KeyboardButton(text=BOTAO_PRODUTOS_A_MAIS)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
@@ -598,6 +603,11 @@ def teclado_edicao(config):
         [KeyboardButton(text=liga)],
         [KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
     ])
+
+
+def teclado_produtos_a_mais(config):
+    liga = BOTAO_DESLIGAR_A_MAIS if config.get("robo_produtos_a_mais", True) else BOTAO_LIGAR_A_MAIS
+    return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
 def teclado_assistente(config):
@@ -710,6 +720,7 @@ def texto_robo(config, agora=None, celular=None):
         f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
         f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
         f"✂️ Edição dos vídeos: {rotulo_edicao(config)}\n"
+        f"🛍️ Produtos a mais: {rotulo_produtos_a_mais(config)}\n"
         f"🧭 Treino: {_linha_treino()}\n\n"
         "<b>O que cada botão faz</b>\n"
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
@@ -728,9 +739,37 @@ def texto_robo(config, agora=None, celular=None):
         f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele comenta e curte os vídeos de outros criadores "
         "e responde os comentários dos seus (as respostas saem também às 12h e às 17h). Nessa janela, ele só "
         "volta a preparar e postar quando acaba os comentários e as respostas do dia.\n"
+        f"🛍️ <b>{BOTAO_PRODUTOS_A_MAIS}</b>: nos vídeos de link de produto, o mesmo item de outras lojas nos "
+        "espaços livres (até 6 produtos); ligar ou desligar.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
+    )
+
+
+def rotulo_produtos_a_mais(config):
+    if config.get("robo_produtos_a_mais", True):
+        return "✅ <b>ligados</b> (até 6 por vídeo)"
+    parados = config.get("robo_produtos_a_mais_parados")
+    return "⏸️ <b>desligados</b>" + (f" (parados sozinhos: {html_escape(parados)})" if parados else "")
+
+
+def texto_produtos_a_mais(config):
+    """A tela dos Produtos a Mais. Escolhas do Rafael (28/10, P59; 29/10, P73): DECISOES.md, Shopee Vídeo."""
+    return (
+        "🛍️ <b>Produtos a Mais</b>\n"
+        "Nos vídeos de link de produto, o robô procura o mesmo item em outras lojas pela busca pela foto do "
+        "app (Vendas Populares, os primeiros 20), fica com os até 20% mais caros que o produto do post, e a "
+        "IA confere com o vídeo quais são o mesmo item. Vão até 6 produtos no total, do que paga mais por venda "
+        "para o que paga menos. Sem itens iguais, o rascunho vai só com o produto do link.\n\n"
+        f"Agora: {rotulo_produtos_a_mais(config)}\n\n"
+        "<b>Medição</b>: até 05/11 o Claude conta as vendas que vieram dos produtos a mais, as punições, as "
+        "verificações e os rascunhos que não saíram, e traz os números para você decidir. Se a Shopee der uma "
+        "punição de Produto Irrelevante, os produtos a mais param sozinhos e você recebe o aviso no privado.\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"✅ <b>{BOTAO_LIGAR_A_MAIS}</b> / ⏸️ <b>{BOTAO_DESLIGAR_A_MAIS}</b>: liga ou desliga os produtos a mais "
+        "nos próximos rascunhos (os já salvos ficam como estão).\n"
+        f"🔙 <b>{BOTAO_VOLTAR_ROBO}</b>: volta à tela do Robô Automático."
     )
 
 
@@ -968,6 +1007,29 @@ async def ligar_edicao_handler(message: types.Message, state: FSMContext):
     registro_processos.registrar("shopee_video", "edição do vídeo: painel", "ligada" if ligar else "desligada", ok=True)
     logger.info(f"✂️ [Shopee Vídeo] Edição dos vídeos {'ligada' if ligar else 'desligada'} pelo painel.")
     await mostrar_edicao(message, state)
+
+
+async def mostrar_produtos_a_mais(message, state):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    await message.answer(texto_produtos_a_mais(config), parse_mode="HTML", reply_markup=teclado_produtos_a_mais(config))
+
+
+@router.message(F.text == BOTAO_PRODUTOS_A_MAIS, StateFilter("*"))
+async def produtos_a_mais_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_produtos_a_mais(message, state)
+
+
+@router.message(F.text.in_([BOTAO_LIGAR_A_MAIS, BOTAO_DESLIGAR_A_MAIS]), StateFilter("*"))
+async def ligar_produtos_a_mais_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    ligar = message.text == BOTAO_LIGAR_A_MAIS
+    alterar_config(robo_produtos_a_mais=ligar, robo_produtos_a_mais_parados=None)
+    registro_processos.registrar("shopee_video", PROCESSO_DOS_ESPACOS,
+                                 "ligados no painel" if ligar else "desligados no painel", ok=True)
+    logger.info(f"🛍️ [Shopee Vídeo] Produtos a mais {'ligados' if ligar else 'desligados'} pelo painel.")
+    await mostrar_produtos_a_mais(message, state)
 
 
 def _segundos(valor):

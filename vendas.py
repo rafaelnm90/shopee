@@ -104,22 +104,56 @@ def resumo(pedidos, desde, ate=None):
     return {"canais": canais, "produtos": ranking, "sem_dados": sem_dados}
 
 
+def vendas_dos_produtos_a_mais(pedidos, postados, desde, ate=None):
+    """
+    A medição dos produtos a mais da Shopee Vídeo (P73): dos vídeos de link de produto que o
+    robô postou (postados: [(dia do post AAAA-MM-DD, [{item, a_mais}])], o itens_postados do
+    robo_shopee_video), as vendas de desde a ate do produto do vídeo e dos produtos a mais
+    (o mesmo item de outras lojas, P59), cada produto contado só a partir do dia do post dele.
+    Sem os cancelados. {"do_video": [vendas, comissão], "a_mais": [vendas, comissão]}.
+    Escolha do Rafael (29/10, P73): DECISOES.md, Shopee Vídeo.
+    """
+    # O item que entrou em mais de um post vale do primeiro post em diante, com o papel dele ali.
+    inicio = {}
+    for dia, itens in postados:
+        for item in itens or []:
+            numero = str(item.get("item") or "")
+            if numero and (numero not in inicio or dia < inicio[numero][0]):
+                inicio[numero] = (dia, bool(item.get("a_mais")))
+    contas = {"do_video": [0, 0.0], "a_mais": [0, 0.0]}
+    for p in pedidos.values():
+        data = p.get("data") or ""
+        if data < desde or (ate and data > ate) or not _vale(p):
+            continue
+        for item in p.get("itens") or []:
+            achado = inicio.get(str(item.get("id") or ""))
+            if achado and data >= achado[0]:
+                conta = contas["a_mais" if achado[1] else "do_video"]
+                conta[0] += int(item.get("qtd") or 1)
+                conta[1] += float(item.get("comissao") or 0)
+    return contas
+
+
 def _reais(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def texto_semanal(pedidos, agora):
-    """O relatório da semana (os 7 dias antes de hoje) no privado do Rafael, em HTML."""
+def texto_semanal(pedidos, agora, postados=()):
+    """
+    O relatório da semana (os 7 dias antes de hoje) no privado do Rafael, em HTML. postados:
+    os produtos dos vídeos do robô da Shopee Vídeo (vendas_dos_produtos_a_mais).
+    """
     import html
     ate = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
     desde = (agora - timedelta(days=7)).strftime("%Y-%m-%d")
     r = resumo(pedidos, desde, ate)
+    a_mais = _linhas_dos_produtos_a_mais(pedidos, postados, desde, ate)
     titulo = (f"💰 <b>Vendas da semana por canal</b> ({datetime.strptime(desde, '%Y-%m-%d'):%d/%m} a "
               f"{datetime.strptime(ate, '%Y-%m-%d'):%d/%m})")
     if not r["canais"]:
         aviso = ("Ainda sem vendas com etiqueta nesta semana: as etiquetas começaram em 24/10, e os pedidos "
                  "aparecem aqui conforme a Shopee manda o relatório.")
-        return f"{titulo}\n\n{aviso}"
+        return f"{titulo}\n\n{aviso}" + "".join(f"\n{linha}" for linha in a_mais)
     linhas = [titulo, ""]
     total = sum(c["comissao"] for c in r["canais"].values())
     for nome, c in sorted(r["canais"].items(), key=lambda x: -x[1]["comissao"]):
@@ -131,6 +165,18 @@ def texto_semanal(pedidos, agora):
         linhas += ["", "🏆 <b>Produtos que mais renderam</b>"]
         for nome, n, valor in r["produtos"][:PRODUTOS_NO_RELATORIO]:
             linhas.append(f"• {html.escape(nome[:70])}: {n} pedido(s), {_reais(valor)}")
+    linhas += a_mais
     if r["sem_dados"]:
         linhas += ["", f"(+{r['sem_dados']} pedido(s) de antes das etiquetas, fora da conta por canal.)"]
     return "\n".join(linhas)
+
+
+def _linhas_dos_produtos_a_mais(pedidos, postados, desde, ate):
+    """As linhas da medição dos produtos a mais no relatório da semana; nenhuma sem vídeo com eles."""
+    if not any(item.get("a_mais") for _dia, itens in postados for item in itens or []):
+        return []
+    contas = vendas_dos_produtos_a_mais(pedidos, postados, desde, ate)
+    (n_video, v_video), (n_mais, v_mais) = contas["do_video"], contas["a_mais"]
+    return ["", "🛍️ <b>Produtos a mais da Shopee Vídeo</b> (o mesmo item de outras lojas, nos vídeos do robô)",
+            f"• Dos produtos a mais: {n_mais} venda(s), {_reais(v_mais)}",
+            f"• Do produto do vídeo: {n_video} venda(s), {_reais(v_video)}"]

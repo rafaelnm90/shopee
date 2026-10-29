@@ -731,11 +731,14 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
                         lambda video: {"nome": VESTIDO, "link": "https://s.shopee.com.br/mais", "comissao": 15.0,
                                        "preco": 59.9, "valor": 8.99, "antes": 10.0, "valor_antes": 5.99,
                                        "vistos": ["mesmo vestido", "mesmo vestido"]})
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "77" if "mais" in link else "")
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     app = AppDeMentira()
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["link"] == "https://s.shopee.com.br/mais" and rascunho["produtos"] == [VESTIDO]
+    # O número do produto do post fica guardado para a medição das vendas (P73).
+    assert rascunho["itens"] == [{"item": "77", "a_mais": False}]
     assert "Comissão: 15.0%, R$ 8,99 por venda (o produto do link pagava 10.0%, R$ 5,99" in avisos[0]
     # A IA já conferiu o produto novo com o vídeo na troca: a conferência não se repete.
     assert not any(p.startswith("Você confere um vídeo") for p in analises)
@@ -3410,6 +3413,46 @@ def test_links_do_canal_levam_os_produtos_a_mais_na_ordem_do_post(monkeypatch):
                                    "endereco": "https://shopee.com.br/product/9/b9"},
                                   {"nome": "C", "link": "https://s.shopee.com.br/c", "endereco": ""}]}
     assert robo.links_para_o_canal(rascunho) == ["canal:a", "canal:b9", "canal:c"]
+
+
+def test_itens_do_post_e_os_postados_para_a_medicao():
+    # A medição da P73: o número (itemId) de cada produto do post e se é um produto a mais.
+    produtos = [dict(PRINCIPAL, item="1"), dict(PRINCIPAL, nome="Loja 2", do_video=False, item=2)]
+    assert robo._itens(produtos) == [{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}]
+    ident = robo.criar("v1")
+    robo.atualizar(ident, estado="postado", postado_em="2026-10-30 10:00:00", itens=robo._itens(produtos))
+    robo.atualizar(robo.criar("v2"), estado="postado", postado_em="2026-10-30 11:00:00")
+    robo.atualizar(robo.criar("v3"), estado="rascunho", itens=robo._itens(produtos))
+    assert robo.itens_postados() == [("2026-10-30", [{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}])]
+    assert robo.pegar(robo.criar("v4"))["itens"] == []
+
+
+def test_punicao_de_produto_irrelevante_para_os_produtos_a_mais(monkeypatch, avisos, ia_da_apelacao):
+    # Escolha do Rafael (29/10, P73): a punição nova por produto que não é o do vídeo desliga os
+    # produtos a mais sozinha, com aviso no privado; ligar de novo, só no painel.
+    ident = _postado_pelo_robo()
+    robo.atualizar(ident, itens=[{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}])
+    assert robo.ler_config()["robo_produtos_a_mais"] is True
+    robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 10:00"))
+    config = robo.ler_config()
+    assert config["robo_produtos_a_mais"] is False
+    assert config["robo_produtos_a_mais_parados"] == "punição de Produto Irrelevante (23/10/2026 19:04:25)"
+    parados = [a for a in avisos if "desliguei os produtos a mais" in a]
+    assert len(parados) == 1 and "O vídeo punido tinha 1 produto(s) a mais." in parados[0]
+    assert robo.CAMINHO_DOS_PRODUTOS_A_MAIS in parados[0]
+    # Já desligados, outra punição não avisa de novo; e os espaços livres ficam de fora sem o celular.
+    robo.parar_os_produtos_a_mais({"tipo": "Produto Irrelevante", "data": "25/10/2026 10:00:00"})
+    assert len([a for a in avisos if "desliguei os produtos a mais" in a]) == 1
+    assert robo.espacos_livres(None, {"link": LINK}, PRINCIPAL, {"preco": 50.0}, [], robo.time.monotonic() + 600) == []
+    assert _registro_dos_espacos() == ["desligados - punição de produto", "nenhum - desligados"]
+
+
+def test_punicao_de_outro_tipo_nao_mexe_nos_produtos_a_mais(avisos):
+    robo.parar_os_produtos_a_mais({"tipo": "Produto Irrelevante", "data": "23/10/2026 19:04:25"})
+    assert "O vídeo punido" not in avisos[-1] and "Não achei o rascunho do robô desse vídeo." in avisos[-1]
+    robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(robo_produtos_a_mais=True))
+    assert robo.PUNICAO_DE_PRODUTO not in "Violação de Propriedade Intelectual".casefold()
+    assert robo.PUNICAO_DE_PRODUTO in "Produto Irrelevante".casefold()
 
 
 def test_rascunho_guarda_os_produtos_a_mais():

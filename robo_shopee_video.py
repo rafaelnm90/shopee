@@ -84,9 +84,11 @@ CHAVE_CONFIG = "shopee_video"  # a mesma chave do painel_shopee_video
 # Começa pausado: o Rafael retoma no painel. Rascunhos por dia em faixa (sorteada a cada
 # dia), o Horário do Robô e o Horário das Interações (None até o Rafael escolher), em
 # horas de Brasília.
+# robo_produtos_a_mais: os espaços livres com o mesmo item de outras lojas (P59), ligados
+# até o Rafael desligar no painel ou uma punição por produto parar (P73).
 PADRAO = {"robo_pausado": True, "robo_limite_min": 1, "robo_limite_max": 2,
           "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1],
-          "robo_interacoes_inicio": None, "robo_interacoes_fim": None}
+          "robo_interacoes_inicio": None, "robo_interacoes_fim": None, "robo_produtos_a_mais": True}
 MAXIMO_POR_DIA = 20
 CHAVE_DIA = "shopee_video_robo_dia"
 # Rascunho do plano que não deu certo volta nas rodadas seguintes: até estas vezes a mais
@@ -600,11 +602,13 @@ def suspensao_na_tela(xml, agora=None):
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
-           "rotulo_ia", "mais_produtos")
+           "rotulo_ia", "mais_produtos", "itens")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
-COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos")
+# itens: o número (itemId) de cada produto anexado no link de produto, na ordem do post, e se é
+# um produto a mais, [{item, a_mais}]: a medição das vendas da P73.
+COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens")
 
 
 def _criar_tabela(con):
@@ -612,7 +616,7 @@ def _criar_tabela(con):
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, id_video TEXT, criado_em TEXT, estado TEXT, "
                 "arquivo TEXT, print TEXT, link TEXT, produtos TEXT, titulo TEXT, comentario TEXT, "
                 "aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT, "
-                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT, mais_produtos TEXT)")
+                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT, mais_produtos TEXT, itens TEXT)")
     existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")}
     for coluna in COLUNAS_NOVAS:
         if coluna not in existentes:
@@ -627,6 +631,7 @@ def _linha_para_dict(linha):
     rascunho = dict(zip(COLUNAS, linha))
     rascunho["produtos"] = json.loads(rascunho["produtos"] or "[]")
     rascunho["mais_produtos"] = json.loads(rascunho["mais_produtos"] or "[]")
+    rascunho["itens"] = json.loads(rascunho["itens"] or "[]")
     return rascunho
 
 
@@ -649,7 +654,7 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    for coluna in ("produtos", "mais_produtos"):
+    for coluna in ("produtos", "mais_produtos", "itens"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -687,6 +692,10 @@ def ids_usados():
 # Shopee Vídeo. Fica 3 dias no banco, como todo registro de processo (DECISOES.md,
 # Trabalho com o Claude).
 DIAS_DO_HISTORICO = 3
+# As tentativas de cada dia por ação e resultado, por DIAS_DA_CONTAGEM dias (o histórico guarda
+# só 3): a medição dos produtos a mais (P73) olha 7 dias.
+CHAVE_TENTATIVAS_POR_DIA = "shopee_video_tentativas_por_dia"
+DIAS_DA_CONTAGEM = 30
 LINHAS_DO_HISTORICO = 12
 # O passo em que parou, achado no motivo (as frases fixas do robô e do postador). A
 # ordem importa: o primeiro trecho que aparece no motivo decide.
@@ -782,6 +791,21 @@ def registrar_tentativa(acao, resultado, motivo="", produto="", agora=None):
             con.execute("DELETE FROM shopee_video_tentativas WHERE momento < ?", (corte,))
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Tentativa não entrou no histórico: {type(e).__name__}")
+    _contar_no_dia(acao, resultado, agora)
+
+
+def _contar_no_dia(acao, resultado, agora=None):
+    """Mais uma tentativa com essa ação e esse resultado no dia (só a contagem, sem o motivo)."""
+    dia = agora_br(agora).strftime("%Y-%m-%d")
+    corte = (agora_br(agora) - timedelta(days=DIAS_DA_CONTAGEM)).strftime("%Y-%m-%d")
+
+    def contar(dados):
+        for velho in [d for d in dados if d < corte]:
+            dados.pop(velho)
+        do_dia = dados.setdefault(dia, {})
+        do_dia[f"{acao}: {resultado}"] = do_dia.get(f"{acao}: {resultado}", 0) + 1
+
+    db.atualizar_config(CHAVE_TENTATIVAS_POR_DIA, contar)
 
 
 def tentativas_desde(desde):
@@ -1599,6 +1623,8 @@ def ler_saude(d, agora=None):
                               (rascunho or {}).get("fonte") or "", texto, observacao,
                               pode_apelar=detalhe["pode_apelar"], agora=agora)
             novas += 1
+            if PUNICAO_DE_PRODUTO in punicao["tipo"].casefold():
+                parar_os_produtos_a_mais(punicao, rascunho)
         if not andou:
             completa = True
             break
@@ -2414,6 +2440,9 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
     def anotar(resultado, detalhe="", ok=None):
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, resultado, detalhe, ok=ok)
 
+    if not ler_config().get("robo_produtos_a_mais", True):
+        anotar("nenhum - desligados")
+        return []
     if time.monotonic() > prazo:
         anotar("nenhum - sem tempo na rodada")
         return []
@@ -2431,7 +2460,8 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
             oferta = oferta_do_cartao(cartao)
             if oferta:
                 achados.append((cartao, oferta))
-        candidatos = candidatos_da_foto(original, item_do_link(video["link"]), achados)[:CANDIDATOS_DOS_ESPACOS]
+        candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]),
+                                        achados)[:CANDIDATOS_DOS_ESPACOS]
         contagem = f"{len(cartoes)} na busca, {len(achados)} na API, {len(candidatos)} no preço"
         fotos = []
         for candidato in candidatos:
@@ -2508,9 +2538,59 @@ def _curtir_os_produtos(d, video, produtos, curtidos):
     return feitos[::-1]
 
 
+# A punição por produto que não é o do vídeo: o app escreve "Produto Irrelevante" (a regra 2
+# das diretrizes, conteúdo irrelevante).
+PUNICAO_DE_PRODUTO = "irrelevante"
+CAMINHO_DOS_PRODUTOS_A_MAIS = "Shopee Vídeo 🎬 → Robô Automático 🤖 → Produtos a Mais 🛍️"
+
+
+def parar_os_produtos_a_mais(punicao, rascunho=None):
+    """
+    Punição nova por produto que não é o do vídeo: os produtos a mais (P59) param sozinhos,
+    até o Rafael ligar de novo no painel, e o aviso no privado diz se o vídeo punido tinha
+    produtos a mais. Os rascunhos seguem só com o produto do link.
+    Escolha do Rafael (29/10, P73): DECISOES.md, Shopee Vídeo.
+    """
+    if not ler_config().get("robo_produtos_a_mais", True):
+        return
+    parados = f"punição de {punicao['tipo']} ({punicao['data']})"
+    db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.update(robo_produtos_a_mais=False,
+                                                                 robo_produtos_a_mais_parados=parados))
+    a_mais = sum(1 for item in (rascunho or {}).get("itens") or [] if item.get("a_mais"))
+    if not rascunho:
+        contexto = "Não achei o rascunho do robô desse vídeo."
+    elif a_mais:
+        contexto = f"O vídeo punido tinha {a_mais} produto(s) a mais."
+    else:
+        contexto = "O vídeo punido não tinha produtos a mais."
+    registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "desligados - punição de produto",
+                                 "com produtos a mais" if a_mais else ("sem produtos a mais" if rascunho
+                                                                        else "vídeo sem rascunho do robô"),
+                                 ok=None)
+    avisar(f"⚠️ Robô da Shopee Vídeo: a Shopee deu uma punição de {punicao['tipo']} ({punicao['data']}). Como "
+           "você escolheu, desliguei os produtos a mais (o mesmo item de outras lojas): os próximos rascunhos vão "
+           f"só com o produto do link. {contexto}\n\nPara ligar de novo: {CAMINHO_DOS_PRODUTOS_A_MAIS}.")
+
+
 def _mais_produtos(produtos):
     """Os produtos a mais como o rascunho os guarda: [{nome, link, endereco}] (endereço vazio no do vídeo)."""
     return [{"nome": p["nome"], "link": p["link"], "endereco": p.get("endereco") or ""} for p in produtos]
+
+
+def _itens(produtos):
+    """
+    O número (itemId) de cada produto do post, na ordem, e se é um produto a mais: com ele, a
+    medição da P73 acha nas vendas o que veio do produto do vídeo e o que veio dos a mais.
+    """
+    return [{"item": str(p.get("item") or ""), "a_mais": not p.get("do_video")} for p in produtos]
+
+
+def itens_postados():
+    """
+    Os produtos de cada vídeo de link de produto que o robô postou: [(dia do post AAAA-MM-DD,
+    [{item, a_mais}])], para a medição das vendas dos produtos a mais (P73).
+    """
+    return [((r["postado_em"] or "")[:10], r["itens"]) for r in listar("postado") if r["itens"] and r["postado_em"]]
 
 
 def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
@@ -2607,6 +2687,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                      "preco": troca["preco"] if troca else original.get("preco", 0),
                      "comissao": troca["comissao"] if troca else original.get("comissao", 0)}
         principal["valor"] = valor_por_venda(principal["preco"], principal["comissao"])
+        principal["item"] = item_do_link(video["link"])
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))
@@ -2672,7 +2753,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
         ordem = [produtos[i] for i in no_post]
-        atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]))
+        atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
+                  itens=_itens(ordem))
     else:
         atualizar(ident, produtos=anexados)
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
