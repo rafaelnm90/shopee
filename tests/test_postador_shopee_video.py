@@ -1611,6 +1611,19 @@ def test_o_0_do_selo_da_loja_colado_no_nome_sai():
                                          "preco": 29.9, "comissao": 12.0, "extra": False}]
 
 
+
+def test_o_ver_produtos_acha_os_produtos_com_o_selo_colado_no_nome():
+    # Ver Produtos (29/10/2026, casos das 18:17 e 18:29): com o "0" do selo da loja colado, o
+    # nome começava com um número e não contava como nome; a lista ficava vazia e o vídeo era
+    # pulado ("o Ver Produtos não mostrou os produtos do criador").
+    com_selo = VER_PRODUTOS.replace('text="Garrafa Térmica', 'text="0Garrafa Térmica').replace(
+        'text="Copo Térmico', 'text="0Copo Térmico')
+    assert ps.produtos_vinculados(com_selo) == [(685, 1095), (685, 1415)]
+    # Preço, desconto, nota e contagens continuam fora.
+    for numero in ("4,8", "0,5 kg", "10 mil vendidos", "0 avaliações", "-20%", "R$5 de desconto"):
+        assert not ps._texto_de_nome(numero)
+    assert ps._texto_de_nome("0Garrafa Térmica Inox") and ps._texto_de_nome("Garrafa Térmica Inox")
+
 def test_cartoes_da_busca_param_nas_recomendacoes_e_sem_resultados_e_avisado():
     # Sem resultado, o app diz "Nenhum produto encontrado" e mostra "Você também pode gostar":
     # recomendações da Shopee, que não são a busca (Motorola, 29/10/2026).

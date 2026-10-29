@@ -150,8 +150,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     **`labelProductPageProductName`**; o voltar volta à lista. O selo da loja (Full, Oficial,
     Indicado) antes do nome é uma imagem dentro do texto e chega como um **"0" colado na 1ª
     palavra** ("0Tênis ...", 29/10/2026, na lista do Ver Produtos); o robô tira esse "0" ao ler
-    e comparar nomes (`sem_o_selo_colado`), e a busca pela foto conta os cartões que vieram
-    assim ("N com o selo colado"). **Vídeo com um produto só**
+    e comparar nomes (`sem_o_selo_colado`), também ao achar os nomes dos cartões da lista (sem
+    isso, o nome parecia um número e a lista ficava vazia), e a busca pela foto conta os
+    cartões que vieram assim ("N com o selo colado"). **Vídeo com um produto só**
     (24/10/2026): o player não mostra o "Ver Produtos (N)"; no lugar dele, embaixo do cartão,
     fica a **barra dos produtos** (descrição terminada em "video product icon") com o desconto
     e o nome. O toque na barra abre a mesma lista, com "Ver Produtos (1)", o cartão do produto
