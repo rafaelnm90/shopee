@@ -67,6 +67,14 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro and "[a]" in ffmpeg
     # Só o vídeo editado fica na pasta do rascunho.
     assert os.listdir(pasta) == ["rascunho.mp4"]
+    # Escolha do Rafael (29/10, P81): sem a nossa miniatura, o vídeo passa direto, e as outras
+    # entradas (a seta e o silêncio) continuam com os mesmos números.
+    assert edicao_video.editar("video.mp4", b"foto", destino, miniatura=False) == ""
+    ffmpeg = comandos[-1]
+    filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
+    assert "[corpo]null[comfoto]" in filtro and "[mini]" not in filtro and "scale=180:-2" not in filtro
+    assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
+    assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
 
 def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
@@ -520,13 +528,13 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         "versoes": versoes, "falas": [], "lugar": "meio"})
     pedidos = []
 
-    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
-        pedidos.append((1, video, list(versoes_da_ia), falas))
+    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True):
+        pedidos.append((1, video, list(versoes_da_ia), falas, miniatura))
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None):
-        pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar))
+                           lugar=None, miniatura=True):
+        pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
     monkeypatch.setattr(edicao_video, "editar_1_e_versoes", editar_1_e_versoes)
@@ -536,9 +544,9 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
     nome, motivo, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
     # O Editor 1 já mostrou o v1; o Editor 2 tem a lista dele e começa pelo v1 também.
     assert (nome, motivo) == ("Copo Térmico", "") and resumo["textos_da_ia"]
-    assert pedidos == [(1, videos["v1"], versoes, []),
+    assert pedidos == [(1, videos["v1"], versoes, [], True),
                        (2, videos["v1"], "Copo Térmico", "Gelado o dia todo", versoes, "Toque no copo aqui embaixo",
-                        "meio")]
+                        "meio", True)]
     dados = db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})
     assert dados["ids"] == ["viral:1"] and dados["ids_2"] == ["viral:1"]
     edicao_video.exemplo_editor_2("exemplo.mp4")
@@ -548,7 +556,17 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         "nome": "Presilha", "vantagem": "Firme", "versoes": versoes, "falas": [], "lugar": "alto",
         "texto_no_video": True})
     _, _, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
-    assert pedidos[-1][-1] == edicao_video.SEM_LUGAR and resumo["texto_no_video"]
+    assert pedidos[-1][-2] == edicao_video.SEM_LUGAR and resumo["texto_no_video"]
+    # Escolha do Rafael (29/10, P81): o criador pôs coisa no canto da nossa miniatura, e os dois
+    # exemplos vão sem ela, como o vídeo que vai ao ar; as nossas legendas continuam (P82).
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+        "nome": "Cortina", "vantagem": "Tecido com relevo", "versoes": versoes, "falas": [], "lugar": "alto",
+        "canto_ocupado": True})
+    _, _, resumo = edicao_video.exemplo_editor_1("exemplo.mp4")
+    assert pedidos[-1][0] == 1 and pedidos[-1][-1] is False and resumo["miniatura"] is False
+    _, _, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
+    assert pedidos[-1][0] == 2 and pedidos[-1][-1] is False and pedidos[-1][-2] == "alto"
+    assert resumo["miniatura"] is False
 
 
 def test_onde_alguem_fala_o_ritmo_nao_corta_nao_acelera_nem_poe_camera_lenta():
@@ -667,7 +685,8 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     # o meio cobriria o conjunto. A IA ganha os lados e, sem lugar livre, o vídeo vai sem texto.
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
-    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino, avisos=False, musica=None, capa=None: "")
+    monkeypatch.setattr(edicao_video, "editar",
+                        lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -802,7 +821,7 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         montados.append((list(trechos), len(letreiros)))
         return ""
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -958,7 +977,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     _textos_da_tela(monkeypatch, {"nome": "Vinho Tinto", "vantagem": "Encorpado", "falas": [], "lugar": "alto"})
     avisos = []
 
-    def editar(video, foto, destino, com_avisos=False, musica=None, capa=None):
+    def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1165,7 +1184,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
     capas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
         capas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1204,7 +1223,7 @@ def test_capa_com_chamada_alterna_um_video_sim_outro_nao(monkeypatch, tmp_path):
     _versoes_de_mentira(monkeypatch)
     capas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
         capas.append(capa is not None)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1231,3 +1250,77 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     # Sem a vantagem da IA, o exemplo diz por quê.
     _textos_da_tela(monkeypatch, {"nome": "Copo Térmico"})
     assert edicao_video.exemplo_capa()[:2] == (None, "a IA não escreveu a vantagem do produto deste vídeo")
+
+
+def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):
+    # Escolha do Rafael (29/10, P81): com o ffmpeg de verdade, sem a nossa miniatura o canto de
+    # cima à direita fica com o próprio vídeo; com ela, com a foto do produto.
+    if not shutil.which("ffmpeg"):
+        assert edicao_video.editar(str(tmp_path / "nao_existe.mp4"), b"foto", str(tmp_path / "r.mp4"),
+                                   miniatura=False) != ""
+        return
+    video, foto = tmp_path / "v.mp4", tmp_path / "foto.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=4",
+                    str(video)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
+                    "-frames:v", "1", str(foto)], check=True)
+    from PIL import Image
+    for miniatura, azul in ((True, True), (False, False)):
+        destino = tmp_path / f"editado_{miniatura}.mp4"
+        assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), miniatura=miniatura) == ""
+        quadro = tmp_path / f"quadro_{miniatura}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", "3", "-i", str(destino), "-frames:v", "1", str(quadro)],
+                       check=True)
+        with Image.open(quadro) as imagem:
+            r, g, b = imagem.convert("RGB").getpixel(edicao_video.CENTRO_DA_MINIATURA)
+        assert (b > r + 60) == azul
+
+
+def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatch, tmp_path):
+    # Escolha do Rafael (29/10, P81): no vídeo da cortina, o criador já tinha posto a colagem das
+    # cores no alto, e a nossa miniatura cobriu a ponta dela. Quando a IA vê foto, quadro, texto
+    # ou figura do criador no canto de cima à direita, a nossa miniatura fica de fora (a foto do
+    # começo, a seta e as legendas continuam), e o registro diz.
+    _versoes_de_mentira(monkeypatch)
+    miniaturas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+        miniaturas.append(miniatura)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    destino = str(tmp_path / "r.mp4")
+    ocupado = {"nome": "Cortina", "vantagem": "Tecido com relevo", "lugar": "alto", "canto_ocupado": True}
+    _textos_da_tela(monkeypatch, ocupado)
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cortina") == (
+        "", edicao_video.COM_LEGENDAS + edicao_video.SEM_A_MINIATURA, "")
+    assert miniaturas == [False]
+    # Canto livre, ou sem a resposta da IA: a miniatura vai, como sempre.
+    for textos in (dict(ocupado, canto_ocupado=False), {}):
+        miniaturas.clear()
+        _textos_da_tela(monkeypatch, textos)
+        assert edicao_video.SEM_A_MINIATURA not in edicao_video.editar_para_postar("v.mp4", b"foto", destino,
+                                                                                  "Cortina")[1]
+        assert miniaturas == [True]
+    # Sem o Editor 2, o Editor 1 também vai sem ela.
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
+                        lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
+    _textos_da_tela(monkeypatch, ocupado)
+    miniaturas.clear()
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cortina")[1] == (
+        edicao_video.SO_COM_O_EDITOR_1 + edicao_video.SEM_A_MINIATURA)
+    assert miniaturas == [False]
+
+
+def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
+    # Escolha do Rafael (29/10, P82): a IA contava como texto próprio do vídeo (P52) os quadros
+    # que o criador pôs por cima com a foto do produto (as cores, a quantidade), e as nossas
+    # legendas saíam (4 de 9 rascunhos editados em 29/10). O texto dentro deles não conta mais,
+    # e as legendas entram onde não os cobrem; a IA também diz se o canto da miniatura está livre.
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        assert "nem o texto dentro das fotos e quadros do produto que o vídeo pôs por cima" in prompt
+        assert "sem cobrir o produto, o rosto de alguém nem as fotos, quadros ou textos" in prompt
+        assert "\"canto_ocupado\"" in prompt and "não contam marca d'água, logo nem nome do perfil" in prompt
+    assert edicao_video._nome_lugar_e_falas({"canto_ocupado": True, "texto_no_video": "sim"}) == {
+        "canto_ocupado": True}
+    assert edicao_video.com_a_miniatura({"canto_ocupado": True}) is False
+    assert edicao_video.com_a_miniatura({"canto_ocupado": False}) and edicao_video.com_a_miniatura({})

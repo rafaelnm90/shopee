@@ -303,20 +303,21 @@ def recorte_da_grade(capa):
     return saida.getvalue()
 
 
-def editar(video, foto, destino, avisos=False, musica=None, capa=None):
+def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
     sem eles, a capa (bytes de uma imagem, como a capa com chamada), quando vem. Com a musica
-    (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55).
+    (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55). Com miniatura=False, o
+    vídeo vai sem a nossa miniatura (o canto dela tem coisa do criador, P81).
     """
     if avisos and foto:
         capa = capa_com_avisos(foto)
         if not capa:
             return "a capa com os avisos da bebida alcoólica não saiu"
-    return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, LARGURA_DA_MINIATURA,
-                                       CENTRO_DA_MINIATURA, SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA,
-                                       capa, musica)
+    return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO,
+                                       LARGURA_DA_MINIATURA if miniatura else 0, CENTRO_DA_MINIATURA, SETA,
+                                       CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica)
 
 
 # --- Editor 2 ---
@@ -398,21 +399,37 @@ _FALAS_NO_PROMPT = (
     "Diga também onde alguém fala no vídeo (voz de gente, não música): \"falas\", a lista dos trechos em "
     "segundos desde o começo do vídeo, como [[início, fim], ...]; [] se ninguém fala.\n"
 )
+# O lugar também não cobre as fotos, quadros e textos que o criador pôs por cima do vídeo,
+# agora que eles não tiram as nossas legendas (escolha do Rafael, 29/10, P82: DECISOES.md,
+# Shopee Vídeo).
 _LUGAR_NO_PROMPT = (
-    "Diga onde os textos podem ficar sem cobrir o produto nem o rosto de alguém, na maior parte do vídeo: "
+    "Diga onde os textos podem ficar sem cobrir o produto, o rosto de alguém nem as fotos, quadros ou textos "
+    "que o próprio vídeo pôs por cima da imagem, na maior parte do vídeo: "
     "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 12% e 22% da altura e até uns 65% da largura), "
     "\"meio\" (centralizado, entre uns 22% e 33% da altura), \"esquerda\" (perto da borda esquerda, até "
     "uns 40% da largura, entre uns 31% e 45% da altura) ou \"direita\" (o mesmo, perto da borda direita); "
-    f"\"{SEM_LUGAR}\" se todos esses cobrem o produto ou um rosto.\n"
+    f"\"{SEM_LUGAR}\" se todos esses cobrem alguma dessas coisas.\n"
 )
 # Vídeo que já tem texto próprio na tela vai sem as nossas legendas, que cobririam o dele
-# (escolha do Rafael, P52: DECISOES.md, Shopee Vídeo).
+# (escolha do Rafael, P52). O texto dentro das fotos e quadros do produto que o criador pôs
+# por cima (as cores, a quantidade) não conta: é a miniatura dele, como a nossa (escolha do
+# Rafael, 29/10, P82). DECISOES.md, Shopee Vídeo.
 _TEXTO_NO_VIDEO_NO_PROMPT = (
     "Diga também se o próprio vídeo já tem texto escrito na tela, como legenda, título ou frase por cima da "
-    "imagem, na maior parte do tempo (não contam marca d'água, nome do perfil nem o que está escrito no "
-    "produto ou na embalagem): \"texto_no_video\", true ou false.\n"
+    "imagem, na maior parte do tempo (não contam marca d'água, nome do perfil, o que está escrito no "
+    "produto ou na embalagem, nem o texto dentro das fotos e quadros do produto que o vídeo pôs por cima, "
+    "como as cores ou a quantidade): \"texto_no_video\", true ou false.\n"
 )
-_FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
+# A nossa miniatura só entra quando o canto de cima à direita, onde ela fica, está livre do
+# que o criador pôs por cima do vídeo: foto, quadro, texto ou figura (no vídeo da cortina de
+# 29/10, ela cobriu a ponta da colagem das cores do criador). Marca d'água, logo e nome do
+# perfil não contam. Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
+_CANTO_NO_PROMPT = (
+    "Diga também se o canto de cima à direita do vídeo (de uns 65% a 95% da largura e até uns 20% da altura) "
+    "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, na maior "
+    "parte do tempo (não contam marca d'água, logo nem nome do perfil): \"canto_ocupado\", true ou false.\n"
+)
+_FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
@@ -421,9 +438,9 @@ PROMPT_DOS_TEXTOS = (
     + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CHAMADA_NO_PROMPT
-    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
-    "\"lugar\": \"alto\", \"texto_no_video\": false}}"
+    "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -636,15 +653,19 @@ def _resposta_da_ia(video, prompt):
 
 
 def _nome_lugar_e_falas(dados):
-    """O nome, o lugar, as falas e se o vídeo já tem texto, da resposta da IA, só os que vieram certos."""
+    """
+    O nome, o lugar, as falas, se o vídeo já tem texto e se o canto da nossa miniatura tem
+    coisa do criador, da resposta da IA, só os que vieram certos.
+    """
     textos = {}
     nome = _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
     if nome:
         textos["nome"] = nome
     if dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
         textos["lugar"] = dados["lugar"]
-    if isinstance(dados.get("texto_no_video"), bool):
-        textos["texto_no_video"] = dados["texto_no_video"]
+    for chave in ("texto_no_video", "canto_ocupado"):
+        if isinstance(dados.get(chave), bool):
+            textos[chave] = dados[chave]
     falas = _falas(dados.get("falas"))
     if falas is not None:
         textos["falas"] = falas
@@ -654,6 +675,11 @@ def _nome_lugar_e_falas(dados):
 def lugar_dos_textos(textos):
     """O lugar das nossas legendas pela resposta da IA: nenhum quando o vídeo já tem texto na tela (P52)."""
     return SEM_LUGAR if textos.get("texto_no_video") else textos.get("lugar")
+
+
+def com_a_miniatura(textos):
+    """A nossa miniatura vai no vídeo? Não quando a IA viu coisa do criador no canto dela (P81); sem a resposta, vai."""
+    return not textos.get("canto_ocupado")
 
 
 def _vantagem_e_chamada(dados, textos):
@@ -745,7 +771,7 @@ def _letreiros(textos, lugar, duracao):
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-             capa=None):
+             capa=None, miniatura=True):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -759,25 +785,25 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
-                                 musica, capa)
+                                 musica, capa, miniatura)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
-                          musica=None, capa=None):
+                          musica=None, capa=None, miniatura=True):
     """O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo)."""
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (chamada, FUNDO_DA_CHAMADA)], lugar, original)
-    resumo = {"original": original, "lugar": lugar, "textos": textos}
+    resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura}
     if not letreiros:
-        return editar(video, foto, destino, avisos, musica, capa), resumo
+        return editar(video, foto, destino, avisos, musica, capa, miniatura), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
         motivo = videos.com_cortes_e_ritmo(video, [(0.0, original, 1.0)], corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino, avisos, musica, capa), resumo
+        return editar(corpo, foto, destino, avisos, musica, capa, miniatura), resumo
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -787,6 +813,7 @@ SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
 COM_A_CHAMADA = ", com a chamada na capa"
 COM_MUSICA = ", com música de fundo"
+SEM_A_MINIATURA = ", sem a nossa miniatura"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
 TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
@@ -816,10 +843,14 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False):
     textos = textos_da_tela(video, produto) if produto else {}
     # Sem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a dos avisos.
     capa = _capa_alternada(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
-    avisado = (COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
+    # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81).
+    miniatura = com_a_miniatura(textos)
+    avisado = ((COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
+               + ("" if miniatura else SEM_A_MINIATURA))
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                                    textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, capa)
+                                    textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, capa,
+                                    miniatura)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -832,7 +863,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False):
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica, capa), SO_COM_O_EDITOR_1 + avisado,
+    return (editar(video, foto, destino, avisos, musica, capa, miniatura), SO_COM_O_EDITOR_1 + avisado,
             f"o Editor 2 não saiu: {motivo_2}")
 
 
@@ -964,7 +995,7 @@ PROMPT_DAS_VERSOES = (
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
-    "\"texto_no_video\": false}}"
+    "\"texto_no_video\": false, \"canto_ocupado\": false}}"
 )
 
 
@@ -1086,13 +1117,14 @@ def _resumo_da_versao(arquivo, plano, da_ia, textos=(), musica=None):
             "musica": musica[0] if musica else ""}
 
 
-def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, textos_da_versao, musicas):
+def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, textos_da_versao, musicas,
+                         miniatura=True):
     """
     As versões modificadas (planos de planejar_versoes) em arquivo_da_versao(destino, 2, 3...):
     cada uma remontada com os trechos dela, com os letreiros de textos_da_versao(plano, da_ia)
-    → (letreiros, textos), e o Editor 1 por cima, com a sua música (musicas, uma por versão,
-    None no vídeo com som); cada uma entra em resumo["versoes"]. Devolve (motivo, resumo):
-    motivo "" quando todas saíram.
+    → (letreiros, textos), e o Editor 1 por cima (com a miniatura ou sem ela, como o original),
+    com a sua música (musicas, uma por versão, None no vídeo com som); cada uma entra em
+    resumo["versoes"]. Devolve (motivo, resumo): motivo "" quando todas saíram.
     """
     import tempfile
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
@@ -1104,13 +1136,13 @@ def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, te
             corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
             motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, letreiros, ESPERA_MAXIMA)
             if not motivo:
-                motivo = editar(corpo, foto, arquivo, musica=_caminho(musica))
+                motivo = editar(corpo, foto, arquivo, musica=_caminho(musica), miniatura=miniatura)
             if motivo:
                 return motivo, resumo
     return "", resumo
 
 
-def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
+def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True):
     """
     O Editor 1 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 1; os seguintes são as versões modificadas, remontadas como as do
@@ -1127,17 +1159,17 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
     musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
     resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
-              "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
+              "remontagem": _resumo_da_remontagem(trechos, original, com_fala), "miniatura": miniatura,
               "versoes": [_resumo_do_completo(completo, original, musica=musicas[0])]}
-    motivo = editar(video, foto, completo, musica=_caminho(musicas[0]))
+    motivo = editar(video, foto, completo, musica=_caminho(musicas[0]), miniatura=miniatura)
     if motivo:
         return motivo, resumo
     return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: ((), []),
-                                musicas[1:])
+                                musicas[1:], miniatura)
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                       lugar=None):
+                       lugar=None, miniatura=True):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
@@ -1156,8 +1188,8 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
-                                                musica=_caminho(musicas[0]))
-    resumo = {"original": original, "inteiro": original, "lugar": lugar,
+                                                musica=_caminho(musicas[0]), miniatura=miniatura)
+    resumo = {"original": original, "inteiro": original, "lugar": lugar, "miniatura": miniatura,
               "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
               "versoes": [_resumo_do_completo(completo, original, do_completo["textos"], vantagem, musicas[0])]}
@@ -1166,7 +1198,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: _letreiros(
         [(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
          (da_ia.get("chamada", ""), FUNDO_DA_CHAMADA)],
-        lugar, _segundos_remontados(plano["trechos"])), musicas[1:])
+        lugar, _segundos_remontados(plano["trechos"])), musicas[1:], miniatura)
 
 
 def _exemplo_das_versoes(destino, lista, editar_versoes):
@@ -1181,6 +1213,7 @@ def _exemplo_das_versoes(destino, lista, editar_versoes):
         motivo, resumo = editar_versoes(arquivo, foto, textos, produto)
         resumo["lugar_da_ia"] = "lugar" in textos
         resumo["texto_no_video"] = bool(textos.get("texto_no_video"))
+        resumo["miniatura"] = com_a_miniatura(textos)
         resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem") or textos.get("chamada"))
         resumo["versoes_da_ia"] = len(textos.get("versoes", []))
         return motivo, resumo
@@ -1195,7 +1228,7 @@ def exemplo_editor_1(destino):
     produto, "", resumo) quando deu certo, ou (None, motivo, resumo ou None).
     """
     return _exemplo_das_versoes(destino, "ids", lambda arquivo, foto, textos, produto: editar_1_e_versoes(
-        arquivo, foto, destino, textos.get("versoes", []), textos.get("falas")))
+        arquivo, foto, destino, textos.get("versoes", []), textos.get("falas"), com_a_miniatura(textos)))
 
 
 def exemplo_editor_2(destino):
@@ -1205,7 +1238,7 @@ def exemplo_editor_2(destino):
     """
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
-        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos)))
+        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), com_a_miniatura(textos)))
 
 
 def exemplo_capa():

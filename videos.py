@@ -162,7 +162,8 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
     avisos), depois o vídeo em 720x1280 com a foto em miniatura (`miniatura` px de largura)
-    com o centro em `centro` (x, y) até o fim. Com `seta` (uma animação APNG com fundo transparente), a seta
+    com o centro em `centro` (x, y) até o fim; com `miniatura` 0, sem ela (o canto tem coisa
+    do criador do vídeo, P81). Com `seta` (uma animação APNG com fundo transparente), a seta
     com o centro em `centro_seta`, do começo do vídeo, logo depois da foto, até o fim;
     `pulso_da_seta` = (primeiro quadro, quantos quadros) é o trecho do fim da animação que
     se repete até o fim do vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
@@ -174,10 +175,13 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
     # Escolha do Rafael (29/10, P72): DECISOES.md, Shopee Vídeo.
-    filtro = (f"[0:v]{tela}[foto];"
-              f"[1:v]{tela}[corpo];"
-              f"[2:v]scale={miniatura}:-2[mini];"
-              f"[corpo][mini]overlay=x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1[comfoto];")
+    filtro = f"[0:v]{tela}[foto];[1:v]{tela}[corpo];"
+    if miniatura:
+        filtro += (f"[2:v]scale={miniatura}:-2[mini];"
+                   f"[corpo][mini]overlay=x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1[comfoto];")
+    else:
+        # A entrada da foto em laço continua na lista (os números das outras não mudam), sem uso.
+        filtro += "[corpo]null[comfoto];"
     entradas = ["-loop", "1", "-t", str(segundos), "-i", capa or foto, "-i", video, "-loop", "1", "-i", foto]
     if seta:
         inicio, quadros = pulso_da_seta

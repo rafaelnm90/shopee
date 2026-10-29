@@ -603,7 +603,7 @@ def suspensao_na_tela(xml, agora=None):
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
-           "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas")
+           "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -614,7 +614,10 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # chamada: "1" quando o vídeo vai com a capa com chamada (P76); marca: a marca da capa dele na
 # grade do Perfil, guardada no post; vistas: as visualizações lidas na grade, [[momento, número]]
 # (a medição da P76, visualizacoes_shopee_video).
-COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas")
+# links_dos_produtos: no Ver Produtos, o link de cada produto anexado, na ordem do post ("" no que
+# a API não achou), para o Rafael conferir no rascunho, produto por produto (P83).
+COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
+                 "links_dos_produtos")
 
 
 def _criar_tabela(con):
@@ -640,6 +643,7 @@ def _linha_para_dict(linha):
     rascunho["itens"] = json.loads(rascunho["itens"] or "[]")
     rascunho["capas"] = json.loads(rascunho["capas"] or "[]")
     rascunho["vistas"] = json.loads(rascunho["vistas"] or "[]")
+    rascunho["links_dos_produtos"] = json.loads(rascunho["links_dos_produtos"] or "[]")
     return rascunho
 
 
@@ -662,7 +666,7 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas"):
+    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2874,7 +2878,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
                   itens=_itens(ordem), capas=guardar_capas(ident, video, ordem) if len(ordem) > 1 else [])
     else:
-        atualizar(ident, produtos=anexados)
+        atualizar(ident, produtos=anexados, links_dos_produtos=links_do_ver_produtos(anexados))
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rotulo_ia)))
 
@@ -2932,20 +2936,61 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
     return como
 
 
+def _oferta_parecida(nome):
+    """
+    (quanto o nome parece, se é o mesmo nome, a oferta) da busca pelo nome na API, por
+    relevância: a de nome igual (ou cortado, ps.nome_na_pagina), senão a de nome mais
+    parecido; no empate, a mais relevante. (0, False, {}) sem nenhuma.
+    """
+    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(nome), limite=OFERTAS_NA_BUSCA,
+                                                           sort_type=1))
+    notas = [(ps.nome_na_pagina(oferta.get("productName") or "", nome),
+              ps.parecido_entre([oferta.get("productName") or ""], nome)[0], -i) for i, oferta in enumerate(ofertas)]
+    exato, parecido, melhor = max(notas, default=(False, 0, None))
+    return (parecido, exato, ofertas[-melhor]) if melhor is not None else (0, False, {})
+
+
 def oferta_pelo_nome(nome):
     """
     A oferta da API de afiliado de um produto anexado num vídeo de Ver Produtos (o link é do
     vídeo, não do produto): a busca pelo nome, por relevância, e vale a de nome mais
     parecido, com pelo menos PARECIDO_DA_FOTO% das palavras. {} quando não acha.
     """
-    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(nome), limite=OFERTAS_NA_BUSCA,
-                                                           sort_type=1))
-    parecidos = [(ps.parecido_entre([oferta.get("productName") or ""], nome)[0], i)
-                 for i, oferta in enumerate(ofertas)]
-    parecido, melhor = max(parecidos, default=(0, None))
-    if melhor is None or parecido < PARECIDO_DA_FOTO:
-        return {}
-    return ofertas[melhor]
+    parecido, _exato, oferta = _oferta_parecida(nome)
+    return oferta if oferta and parecido >= PARECIDO_DA_FOTO else {}
+
+
+def links_do_ver_produtos(nomes):
+    """
+    O link de cada produto anexado num vídeo de Ver Produtos, na ordem do post, para o Rafael
+    conferir no rascunho, produto por produto: a oferta achada na API pelo nome (a mesma busca
+    dos links do Canal Afiliados), em link curto com a etiqueta da Shopee Vídeo, como o dos
+    produtos a mais; "" no que a API não acha. Dois produtos de nome quase igual que caem no
+    mesmo anúncio: o link fica com o de nome igual ao do anúncio (senão, o mais parecido) e o
+    outro fica sem, para nunca mostrar o link de um produto no lugar do de outro. Pedido do
+    Rafael (29/10, P83): DECISOES.md, Shopee Vídeo.
+    """
+    achados = []
+    for nome in nomes:
+        try:
+            parecido, exato, oferta = _oferta_parecida(nome)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] O link do produto do Ver Produtos não veio: {type(e).__name__}")
+            parecido, exato, oferta = 0, False, {}
+        achados.append((parecido, exato, oferta if parecido >= PARECIDO_DA_FOTO else {}))
+    links, usados = [""] * len(nomes), set()
+    for i in sorted(range(len(achados)), key=lambda i: (not achados[i][1], -achados[i][0])):
+        oferta = achados[i][2]
+        item, endereco = str(oferta.get("itemId") or ""), oferta.get("productLink") or ""
+        if not endereco or (item and item in usados):
+            continue
+        usados.add(item)
+        try:
+            links[i] = asyncio.run(api_shopee.converter_link_shopee(endereco, api_shopee.ETIQUETA_SHOPEE_VIDEO,
+                                                                   avisar_falha=False)) or endereco
+        except Exception:
+            links[i] = endereco
+    return links
 
 
 def anuncio_do_ver_produtos(nome):
