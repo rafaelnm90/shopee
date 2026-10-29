@@ -1628,19 +1628,62 @@ def test_ia_dos_produtos_a_mais_ve_as_fotos_de_uma_vez_e_fica_so_o_confirmado_na
 
     monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
     anuncios = [("Garrafa A", b"\xff\xd8a"), ("Garrafa B", b"\x89PNGb"), ("Garrafa C", b"\xff\xd8c")]
-    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa Térmica", anuncios) == ([2], "a 3 é igual")
+    capa = b"\xff\xd8capa"
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa Térmica", anuncios, capa=capa) == ([2], "a 3 é igual")
     arquivo, prompt, imagens = pedidos[0]
     assert arquivo == "v.mp4" and '"Garrafa Térmica"' in prompt and len(pedidos) == 2
+    # A capa do anúncio do post vai primeiro, e cada anúncio só vale com a mesma foto de capa (P74).
+    assert ps.REGRA_DA_CAPA in prompt and imagens[0][0] == capa
     assert [(tipo, rotulo) for _foto, tipo, rotulo in imagens] == [
-        ("image/jpeg", "Anúncio 1: Garrafa A"), ("image/png", "Anúncio 2: Garrafa B"), ("image/jpeg", "Anúncio 3: Garrafa C")]
+        ("image/jpeg", ps.ROTULO_DA_CAPA), ("image/jpeg", "Anúncio 1: Garrafa A"), ("image/png", "Anúncio 2: Garrafa B"),
+        ("image/jpeg", "Anúncio 3: Garrafa C")]
     # Sem confirmado na 1ª vez, a 2ª nem é pedida; sem resposta, nenhum.
     pedidos.clear()
     respostas[:] = ['{"iguais": [], "motivo": "nenhum é igual"}']
-    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios) == ([], "nenhum é igual") and len(pedidos) == 1
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios, capa=capa) == ([], "nenhum é igual")
+    assert len(pedidos) == 1
     pedidos.clear()
     respostas[:] = ["não sei"]
-    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios)[0] == []
-    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", []) == ([], "sem o vídeo ou sem anúncio para conferir")
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios, capa=capa)[0] == []
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", [], capa=capa) == (
+        [], "sem o vídeo ou sem anúncio para conferir")
+    # Sem a capa do post, nenhum: não há com o que comparar a foto de capa.
+    pedidos.clear()
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios) == ([], "sem a foto de capa do anúncio do post")
+    assert pedidos == []
+
+
+def test_troca_de_loja_so_confere_com_o_mesmo_produto_e_a_mesma_foto_de_capa(monkeypatch):
+    # Escolha do Rafael (29/10, P74): o anúncio de outra loja só entra no lugar do produto do link
+    # com a mesma foto de capa do anúncio do post (selo ou moldura da loja por cima pode).
+    import registro_processos as rp
+    pedidos, respostas = [], ['{"confere": true, "mesma_capa": true, "motivo": "a mesma folha"}',
+                              '{"confere": true, "mesma_capa": true, "motivo": "a mesma foto"}']
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append((prompt, imagens))
+        return respostas[len(pedidos) - 1]
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Folhas Prontas Depilsam")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\x89PNGoutra")
+    capa, vistos = b"\xff\xd8capa", []
+    ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, vistos, avisar=False, capa=capa)
+    assert ok and "foto de capa" in motivo and vistos == ["a mesma folha", "a mesma foto"]
+    prompt, imagens = pedidos[0]
+    assert ps.REGRA_DA_CAPA in prompt and '"Folhas Prontas Depilsam"' in prompt
+    assert [(foto, rotulo) for foto, _tipo, rotulo in imagens] == [
+        (capa, ps.ROTULO_DA_CAPA), (b"\x89PNGoutra", "Anúncio de outra loja: Folhas Prontas Depilsam")]
+    assert ("conferência da IA (produto × vídeo)", "confere", "com a foto do anúncio e a capa do post") in [
+        (l[1], l[2], l[3]) for l in rp.contagem("2000-01-01 00:00:00")]
+    # O mesmo produto com outra foto de capa não confere; nem sem a foto do anúncio de outra loja.
+    pedidos.clear()
+    respostas[:] = ['{"confere": true, "mesma_capa": false, "motivo": "outra foto, de outro ângulo"}']
+    ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=capa)
+    assert not ok and "outra foto de capa" in motivo and len(pedidos) == 1
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: None)
+    ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=capa)
+    assert not ok and motivo == "sem a foto do anúncio para comparar com a capa do post" and len(pedidos) == 1
 
 
 def test_video_apagar_tira_o_video_do_teste_da_galeria():

@@ -602,13 +602,15 @@ def suspensao_na_tela(xml, agora=None):
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
-           "rotulo_ia", "mais_produtos", "itens")
+           "rotulo_ia", "mais_produtos", "itens", "capas")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
 # itens: o número (itemId) de cada produto anexado no link de produto, na ordem do post, e se é
 # um produto a mais, [{item, a_mais}]: a medição das vendas da P73.
-COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens")
+# capas: os arquivos das fotos de capa dos produtos do post, na ordem, no rascunho com produtos
+# a mais: o Rafael as vê em álbum antes de aprovar (P75).
+COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas")
 
 
 def _criar_tabela(con):
@@ -616,7 +618,7 @@ def _criar_tabela(con):
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, id_video TEXT, criado_em TEXT, estado TEXT, "
                 "arquivo TEXT, print TEXT, link TEXT, produtos TEXT, titulo TEXT, comentario TEXT, "
                 "aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT, "
-                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT, mais_produtos TEXT, itens TEXT)")
+                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT, mais_produtos TEXT, itens TEXT, capas TEXT)")
     existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")}
     for coluna in COLUNAS_NOVAS:
         if coluna not in existentes:
@@ -632,6 +634,7 @@ def _linha_para_dict(linha):
     rascunho["produtos"] = json.loads(rascunho["produtos"] or "[]")
     rascunho["mais_produtos"] = json.loads(rascunho["mais_produtos"] or "[]")
     rascunho["itens"] = json.loads(rascunho["itens"] or "[]")
+    rascunho["capas"] = json.loads(rascunho["capas"] or "[]")
     return rascunho
 
 
@@ -654,7 +657,7 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    for coluna in ("produtos", "mais_produtos", "itens"):
+    for coluna in ("produtos", "mais_produtos", "itens", "capas"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2268,6 +2271,11 @@ def _trocar_pela_maior_comissao(video):
     if not original["preco"]:
         anotar("mantido - a API não disse o preço do produto do link")
         return None
+    # Só o anúncio com a mesma foto de capa do anúncio do post entra no lugar dele (P74).
+    capa = foto_do_anuncio(original.get("imagem"))
+    if not capa:
+        anotar("mantido - sem a foto de capa do post")
+        return None
     ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(original["nome"]), limite=OFERTAS_NA_BUSCA,
                                                            sort_type=5))
     candidatos = candidatos_de_mais_comissao(original, ofertas)
@@ -2281,7 +2289,7 @@ def _trocar_pela_maior_comissao(video):
             # Sem o link curto, o celular não abre o produto (fica no esqueleto da página).
             continue
         vistos = []
-        ok, _ = ps.ia_confere_produto(dict(video, link=link), vistos, avisar=False)
+        ok, _ = ps.ia_confere_produto(dict(video, link=link), vistos, avisar=False, capa=capa)
         if ok:
             anotar("trocado", ok=True)
             return {**candidato, "link": link, "antes": original["comissao"],
@@ -2316,6 +2324,14 @@ MINUTOS_PARA_ANEXAR_OS_A_MAIS = 20
 CAMERA_DA_BUSCA = "@AN_ImageSearchIconEntry_IcCameraOutline_Img"
 FECHAR_OS_RESULTADOS = "@AN_component_IcCloseShape_Img"
 ORDEM_DA_BUSCA = "Vendas Populares"
+
+
+def foto_do_anuncio(endereco):
+    """A foto de um anúncio (bytes) pelo endereço que a API de afiliado deu; None quando não baixa."""
+    try:
+        return ps.baixar_foto(endereco)
+    except Exception:
+        return None
 
 
 def item_do_link(link):
@@ -2446,12 +2462,14 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
     if time.monotonic() > prazo:
         anotar("nenhum - sem tempo na rodada")
         return []
-    foto = ps.anuncio_do_produto(video).get("foto")
-    if not foto:
-        anotar("nenhum - sem a foto do anúncio")
+    # A capa do anúncio do post: a busca pela foto parte dela, e cada produto a mais tem de ter
+    # a mesma foto de capa (P74).
+    capa = foto_do_anuncio(original.get("imagem"))
+    if not capa:
+        anotar("nenhum - sem a foto de capa do post")
         return []
     try:
-        cartoes, motivo = buscar_pela_foto(d, foto)
+        cartoes, motivo = buscar_pela_foto(d, capa)
         if not cartoes:
             anotar(f"nenhum - {motivo}")
             return []
@@ -2479,8 +2497,9 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
             anotar("nenhum - sem tempo na rodada", contagem)
             return []
         posicoes, motivo_da_ia = ps.ia_confere_iguais(video, principal["nome"],
-                                                      [(c["nome"], f) for c, f in fotos])
-        confirmados = [fotos[i][0] for i in posicoes][:ESPACOS_DO_VIDEO - 1]
+                                                      [(c["nome"], f) for c, f in fotos], capa=capa)
+        # A foto de cada um vai junto: o álbum das capas do rascunho (P75).
+        confirmados = [dict(fotos[i][0], foto=fotos[i][1]) for i in posicoes][:ESPACOS_DO_VIDEO - 1]
         if motivo_da_ia:
             vistos.append(f"Produtos a mais ({len(confirmados)} de {len(fotos)}): {motivo_da_ia}")
         mais = []
@@ -2583,6 +2602,30 @@ def _itens(produtos):
     medição da P73 acha nas vendas o que veio do produto do vídeo e o que veio dos a mais.
     """
     return [{"item": str(p.get("item") or ""), "a_mais": not p.get("do_video")} for p in produtos]
+
+
+def guardar_capas(ident, video, produtos):
+    """
+    As fotos de capa dos produtos do post, na ordem, em arquivos ao lado do vídeo do rascunho
+    ({ident}_capa_{n}): o Rafael as vê em álbum em Rascunhos do Robô antes de aprovar, e saem
+    com o vídeo depois de usadas. A do produto a mais veio da conferência; a do produto do link
+    (ou da troca), da API. A que não vem fica de fora. Devolve os caminhos.
+    Escolha do Rafael (29/10, P75): DECISOES.md, Shopee Vídeo.
+    """
+    caminhos = []
+    for n, produto in enumerate(produtos, 1):
+        # O álbum é para o Rafael revisar: a foto que falha não derruba o rascunho já anexado.
+        try:
+            foto = produto.get("foto") or ps.anuncio_do_produto(dict(video, link=produto["link"])).get("foto")
+            if not foto:
+                continue
+            caminho = os.path.join(PASTA_RASCUNHOS, f"{ident}_capa_{n}.{ps.extensao_da_foto(foto) or 'jpg'}")
+            with open(caminho, "wb") as arquivo:
+                arquivo.write(foto)
+            caminhos.append(caminho)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto de capa de um produto não foi guardada: {type(e).__name__}")
+    return caminhos
 
 
 def itens_postados():
@@ -2754,7 +2797,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     if produtos:
         ordem = [produtos[i] for i in no_post]
         atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
-                  itens=_itens(ordem))
+                  itens=_itens(ordem), capas=guardar_capas(ident, video, ordem) if len(ordem) > 1 else [])
     else:
         atualizar(ident, produtos=anexados)
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
@@ -2960,7 +3003,8 @@ def nome_na_galeria(ident):
     return f"robo_shopee_video_{ident}.mp4"
 
 
-ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)\.(?:mp4|png)$")
+# O vídeo, o print e as fotos de capa (P75) de cada rascunho: {id}.mp4, {id}.png e {id}_capa_{n}.jpg.
+ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_capa_\d+\.(?:jpg|png|webp)|\.(?:mp4|png))$")
 
 
 # --- Os rascunhos no app ---

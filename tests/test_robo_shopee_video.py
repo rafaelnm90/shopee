@@ -615,10 +615,10 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9):
     A API (produto do link a 5%, pelo preço dado, e as ofertas da busca), o link curto e a
     IA de mentira; devolve o que foi pedido.
     """
-    pedidos = {"busca": [], "ia": []}
+    pedidos = {"busca": [], "ia": [], "capa": []}
 
     async def produtos_do_link(link):
-        return [{"nome": FOLHAS, "preco": preco, "comissao": 5.0}], link
+        return [{"nome": FOLHAS, "preco": preco, "comissao": 5.0, "imagem": "https://cf.shopee.com.br/capa"}], link
 
     async def buscar(termo, limite=10, sort_type=2):
         pedidos["busca"].append((termo, limite, sort_type))
@@ -627,8 +627,9 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9):
     async def converter(link, etiqueta, avisar_falha=True):
         return link if "falha" in link else "https://s.shopee.com.br/" + link.rsplit("/", 1)[-1]
 
-    def ia(video, vistos, avisar=True):
+    def ia(video, vistos, avisar=True, capa=None):
         pedidos["ia"].append(video["link"])
+        pedidos["capa"].append(capa)
         if video["link"] in confirma:
             vistos.append("é o mesmo pacote")
             return True, "confere"
@@ -638,6 +639,7 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9):
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
     monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
     monkeypatch.setattr(robo.ps, "ia_confere_produto", ia)
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"\xff\xd8capa" if endereco else None)
     return pedidos
 
 
@@ -660,8 +662,21 @@ def test_troca_pelo_mesmo_produto_que_paga_mais_conferido_pela_ia(monkeypatch):
     assert pedidos["ia"] == ["https://s.shopee.com.br/3", "https://s.shopee.com.br/4"]
     assert troca["link"] == "https://s.shopee.com.br/4" and troca["comissao"] == 8.0 and troca["antes"] == 5.0
     assert troca["vistos"] == ["é o mesmo pacote"]
+    # A IA confere cada um com a foto de capa do anúncio do post (P74).
+    assert pedidos["capa"] == [b"\xff\xd8capa", b"\xff\xd8capa"]
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
     assert [r[2] for r in registro] == ["trocado"]
+
+
+def test_troca_sem_a_foto_de_capa_do_post_fica_o_do_link(monkeypatch):
+    # Escolha do Rafael (29/10, P74): só entra o anúncio com a mesma foto de capa; sem a capa
+    # do post para comparar, não há troca, nem busca, nem IA.
+    pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Kit", 0.2, 1)], confirma=("https://s.shopee.com.br/1",))
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: None)
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
+    assert pedidos["busca"] == [] and pedidos["ia"] == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mantido - sem a foto de capa do post"]
 
 
 def test_troca_compara_os_reais_por_venda_com_preco_parecido(monkeypatch):
@@ -690,7 +705,7 @@ def test_sem_o_preco_do_link_fica_o_do_link(monkeypatch):
     # Sem o preço do produto do link não há com o que comparar: nem busca, nem IA.
     pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Kit", 0.2, 1)], preco=0.0)
     assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
-    assert pedidos == {"busca": [], "ia": []}
+    assert pedidos == {"busca": [], "ia": [], "capa": []}
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
     assert [r[2] for r in registro] == ["mantido - a API não disse o preço do produto do link"]
 
@@ -3250,12 +3265,14 @@ def busca_pela_foto(monkeypatch):
                "Garrafa 3": _oferta_da_foto(3, 55, 8)}
 
     def buscar(d, foto):
+        estado["foto_da_busca"] = foto
         if isinstance(estado["cartoes"], Exception):
             raise estado["cartoes"]
         return estado["cartoes"], estado["motivo"]
 
-    def iguais(video, nome, anuncios):
+    def iguais(video, nome, anuncios, capa=None):
         estado["fotos_da_ia"] = [n for n, _ in anuncios]
+        estado["capa"] = capa
         return estado["iguais"], "a mesma garrafa"
 
     async def converter(endereco, etiqueta, avisar_falha=True):
@@ -3265,7 +3282,8 @@ def busca_pela_foto(monkeypatch):
     monkeypatch.setattr(robo, "buscar_pela_foto", buscar)
     monkeypatch.setattr(robo, "oferta_do_cartao", lambda cartao: ofertas.get(cartao["nome"], {}))
     monkeypatch.setattr(robo, "item_do_link", lambda link: "7")
-    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"\xff\xd8anuncio")
+    monkeypatch.setattr(robo.ps, "baixar_foto",
+                        lambda endereco: b"\xff\xd8capa" if endereco == "https://cf.shopee.com.br/capa" else b"\xff\xd8anuncio")
     monkeypatch.setattr(robo.ps, "ia_confere_iguais", iguais)
     monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
     return estado
@@ -3277,18 +3295,23 @@ PRINCIPAL = {"nome": "Garrafa Térmica Inox 1 Litro", "link": "https://s.shopee.
 
 def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_que_paga_menos(busca_pela_foto):
     vistos = []
-    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, {"preco": 50.0}, vistos,
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, vistos,
                                robo.time.monotonic() + 600)
     # A IA vê os 3 de uma vez, do que paga mais (R$ 6,24) para o que paga menos (R$ 4,40).
     assert busca_pela_foto["fotos_da_ia"] == ["Garrafa Térmica Inox Loja 1", "Garrafa Térmica Inox Loja 2",
                                               "Garrafa Térmica Inox Loja 3"]
     assert [p["link"] for p in mais] == ["https://s.shopee.com.br/curto1", "https://s.shopee.com.br/curto3"]
     assert mais[0]["endereco"] == "https://shopee.com.br/product/9/1" and not mais[0].get("do_video")
+    # A busca parte da foto de capa do anúncio do post, e a IA confere cada um com ela (P74);
+    # a foto de cada um vai junto, para o álbum das capas do rascunho (P75).
+    assert busca_pela_foto["foto_da_busca"] == b"\xff\xd8capa" and busca_pela_foto["capa"] == b"\xff\xd8capa"
+    assert mais[0]["foto"] == b"\xff\xd8anuncio"
     assert vistos == ["Produtos a mais (2 de 3): a mesma garrafa"]
     assert _registro_dos_espacos() == ["achados"]
 
 
-def test_espacos_livres_sem_resultado_sem_tempo_ou_com_a_busca_parada_seguem_sem_nenhum(busca_pela_foto):
+def test_espacos_livres_sem_resultado_sem_tempo_ou_com_a_busca_parada_seguem_sem_nenhum(busca_pela_foto, monkeypatch):
     video = {"link": LINK, "arquivo": "v.mp4"}
     agora = robo.time.monotonic()
     assert robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora - 1) == []
@@ -3302,6 +3325,11 @@ def test_espacos_livres_sem_resultado_sem_tempo_ou_com_a_busca_parada_seguem_sem
     busca_pela_foto["cartoes"] = robo.Verificacao()
     with pytest.raises(robo.Verificacao):
         robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora + 600)
+    # Sem a foto de capa do post, nem a busca: não há com o que comparar (P74).
+    busca_pela_foto.pop("foto_da_busca", None)
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: None)
+    assert robo.espacos_livres(None, video, PRINCIPAL, {"preco": 50.0}, [], agora + 600) == []
+    assert "foto_da_busca" not in busca_pela_foto and _registro_dos_espacos()[-1] == "nenhum - sem a foto de capa do post"
 
 
 def test_curte_do_que_paga_menos_para_o_que_paga_mais_e_o_a_mais_que_nao_curte_fica_de_fora(monkeypatch):
@@ -3453,6 +3481,26 @@ def test_punicao_de_outro_tipo_nao_mexe_nos_produtos_a_mais(avisos):
     robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(robo_produtos_a_mais=True))
     assert robo.PUNICAO_DE_PRODUTO not in "Violação de Propriedade Intelectual".casefold()
     assert robo.PUNICAO_DE_PRODUTO in "Produto Irrelevante".casefold()
+
+
+def test_rascunho_guarda_as_fotos_de_capa_para_o_album(monkeypatch, tmp_path):
+    # Escolha do Rafael (29/10, P75): as fotos de capa de cada produto, na ordem do post, ao lado
+    # do vídeo do rascunho; a do produto a mais veio da conferência, a do principal vem da API.
+    monkeypatch.setattr(robo, "PASTA_RASCUNHOS", str(tmp_path))
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"\x89PNG\r\n\x1a\nprincipal"} if "principal" in video["link"] else {})
+    produtos = [dict(PRINCIPAL), dict(PRINCIPAL, nome="Loja 2", link="https://s.shopee.com.br/2", do_video=False,
+                                      foto=b"\xff\xd8\xffloja2"),
+                dict(PRINCIPAL, nome="Loja 3", link="https://s.shopee.com.br/3", do_video=False)]
+    capas = robo.guardar_capas(7, {"link": LINK}, produtos)
+    assert [os.path.basename(c) for c in capas] == ["7_capa_1.png", "7_capa_2.jpg"]
+    assert open(capas[1], "rb").read() == b"\xff\xd8\xffloja2"
+    # As capas saem com o vídeo e o print do rascunho usado.
+    assert all(robo.ARQUIVO_NO_SERVIDOR.match(nome) for nome in ("7.mp4", "7.png", "7_capa_1.png", "7_capa_2.jpg"))
+    assert not robo.ARQUIVO_NO_SERVIDOR.match("treino.png") and not robo.ARQUIVO_NO_SERVIDOR.match("7_capa.jpg")
+    ident = robo.criar("v9")
+    robo.atualizar(ident, capas=capas)
+    assert robo.pegar(ident)["capas"] == capas and robo.pegar(robo.criar("v10"))["capas"] == []
 
 
 def test_rascunho_guarda_os_produtos_a_mais():

@@ -42,7 +42,7 @@ from aiogram import Router, Bot, types, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import FSInputFile, KeyboardButton
+from aiogram.types import FSInputFile, InputMediaPhoto, KeyboardButton
 from teclados import (montar_teclado, teclado_com_cancelar, teclado_cancelar,
                       teclado_aprovar_cancelar, teclado_janela_dia_todo)
 
@@ -760,8 +760,10 @@ def texto_produtos_a_mais(config):
         "🛍️ <b>Produtos a Mais</b>\n"
         "Nos vídeos de link de produto, o robô procura o mesmo item em outras lojas pela busca pela foto do "
         "app (Vendas Populares, os primeiros 20), fica com os até 20% mais caros que o produto do post, e a "
-        "IA confere com o vídeo quais são o mesmo item. Vão até 6 produtos no total, do que paga mais por venda "
-        "para o que paga menos. Sem itens iguais, o rascunho vai só com o produto do link.\n\n"
+        "IA confere com o vídeo quais são o mesmo item, com a mesma foto de capa do anúncio do post (selo ou "
+        "moldura da loja por cima pode). Vão até 6 produtos no total, do que paga mais por venda para o que paga "
+        "menos. Sem itens iguais, o rascunho vai só com o produto do link. No rascunho, você vê as fotos de capa "
+        "de todos antes de aprovar.\n\n"
         f"Agora: {rotulo_produtos_a_mais(config)}\n\n"
         "<b>Medição</b>: até 05/11 o Claude conta as vendas que vieram dos produtos a mais, as punições, as "
         "verificações e os rascunhos que não saíram, e traz os números para você decidir. Se a Shopee der uma "
@@ -1499,6 +1501,10 @@ def texto_rascunho(rascunho, posicao, total):
             f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta.")
 
 
+# O Telegram manda até 10 fotos num álbum; o post tem até 6 produtos.
+LIMITE_DO_ALBUM = 10
+
+
 async def mostrar_rascunho(message, state, depois_de=None):
     """
     Um rascunho por vez, com o vídeo, o print da tela final, o título e o link do produto:
@@ -1523,6 +1529,16 @@ async def mostrar_rascunho(message, state, depois_de=None):
     if rascunho["print"] and os.path.exists(rascunho["print"]):
         await message.answer_photo(FSInputFile(rascunho["print"]),
                                    caption=f"📱 Rascunho {posicao}: a tela final no celular, como vai ao ar.")
+    # Com produtos a mais, a tela final mostra só os 2 primeiros: as fotos de capa de todos, na
+    # ordem do post, para o Rafael conferir o mesmo item, modelo e foto. Escolha dele (29/10,
+    # P75): DECISOES.md, Shopee Vídeo.
+    capas = [capa for capa in rascunho.get("capas") or [] if os.path.exists(capa)]
+    if len(capas) > 1:
+        await message.answer_media_group([
+            InputMediaPhoto(media=FSInputFile(capa), caption=(
+                f"🛍️ Rascunho {posicao}: as fotos de capa dos {len(capas)} produtos, na ordem do post. Confira "
+                "que são o mesmo item, o mesmo modelo e a mesma foto.") if n == 0 else None)
+            for n, capa in enumerate(capas[:LIMITE_DO_ALBUM])])
     await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
                          disable_web_page_preview=True, reply_markup=teclado_rascunho())
 
