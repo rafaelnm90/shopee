@@ -35,6 +35,10 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.FOLGA_DA_SUSPENSAO_SV == robo.FOLGA_DA_SUSPENSAO
     assert robo.PADRAO["robo_pausado"] is True
     assert checkup.COMENTARIOS_NO_FEED_POR_DIA == robo.interacoes.COMENTARIOS_NO_FEED_POR_DIA
+    assert checkup.HORAS_DAS_RESPOSTAS_SV == robo.HORAS_DAS_RESPOSTAS
+    assert checkup.HORA_DAS_RESPOSTAS_SEM_JANELA_SV == robo.HORA_DAS_RESPOSTAS_SEM_JANELA
+    assert checkup.HORARIO_DO_ROBO_SV == robo.ps.HORARIO_DAS_RODADAS
+    assert checkup.CHAVE_SEGUIDORES_SV == robo.CHAVE_SEGUIDORES
 
 
 def test_erro_ligado_ao_lugar_do_codigo_sem_o_texto():
@@ -358,6 +362,8 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     robo.registrar_tentativa("feed", "comentado", agora=em("15:00"))                # fora da janela
     robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # antes dos 3 do feed
     robo.registrar_tentativa("rascunho", "salvo", agora=em("13:00"))                # fora da janela: certo
+    robo.registrar_tentativa("responder", "respondido", agora=em("17:05"))          # as respostas: em qualquer hora (P70)
+    registro_processos.registrar("shopee_video", "notificações (respostas)", "topo achado", agora=em("17:00"))
     registro_processos.registrar("shopee_video", "descurtir tudo (4h)", "descurtido", agora=em("04:12"))
     registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", agora=em("04:05"))
     registro_processos.registrar("shopee_video", "rodada fora do bot", "unidade própria", agora=em("04:00"))
@@ -655,10 +661,12 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     assert r["respostas"] == {"respondido": 1, "resposta no lugar errado": 1, "já respondido": 1, "sem resposta": 1}
     assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 4 and r["feed_repetidos"] == 1
     assert r["feed_horas"] == ["17:20", "18:20", "19:20", "20:20"]
+    assert (r["leituras_hoje"], r["leituras_esperadas"]) == (1, 3)           # só a das 12h (P70)
     robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
     for trecho in ("não ficaram embaixo do comentário certo", "ficaram sem resposta depois de 3 tentativas",
                    "com mais de uma resposta do perfil", "4 comentários hoje (o combinado é 3)",
+                   "as Notificações foram lidas 1 de 3 vezes hoje",
                    "comentado(s) mais de uma vez em 3 dias"):
         assert trecho in texto
     # A meta do dia: sem as Notificações lidas e com menos de 3 no feed, à noite, cobra.
@@ -667,6 +675,50 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     assert "as Notificações não foram lidas hoje" in texto and "1 de 3 comentários hoje" in texto
     pausado = dict(robo_sv, ativo=False)
     assert checkup.pontos_de_atencao([], {}, {}, pausado, {}, ("x", 1.0, 1), AGORA, interacoes=vazio) == []
+
+
+def test_leituras_das_notificacoes_contam_as_vezes_do_dia():
+    # Escolha do Rafael (P70): as Notificações às 12h, às 17h e no começo do Horário das Interações.
+    import registro_processos
+    import robo_shopee_video as robo
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_interacoes_inicio": 20, "robo_interacoes_fim": 21})
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    def leu(hora):
+        registro_processos.registrar("shopee_video", "notificações (respostas)", "topo achado", ok=True, agora=em(hora))
+
+    assert checkup.leituras_das_notificacoes(em("12:30")) == (0, 0)           # a vez das 12h ainda pode sair
+    leu("12:10")
+    leu("12:25")                                                                # a continuação, na mesma vez
+    assert checkup.leituras_das_notificacoes(em("12:30")) == (1, 1)
+    assert checkup.leituras_das_notificacoes(em("18:00")) == (1, 2)           # a das 17h faltou
+    leu("18:40")                                                                # atrasada, ainda na vez das 17h
+    assert checkup.leituras_das_notificacoes(em("22:20")) == (2, 3)
+    leu("20:05")
+    assert checkup.leituras_das_notificacoes(em("22:20")) == (3, 3)
+    # A vez que cai toda fora do horário em que o robô roda não é cobrada.
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_inicio": 8, "robo_fim": 12})
+    assert checkup.leituras_das_notificacoes(em("10:00").replace(day=AGORA.day + 1)) == (0, 0)
+    assert checkup.leituras_das_notificacoes(em("23:00").replace(day=AGORA.day + 1)) == (0, 0)
+
+
+def test_seguidores_mostram_so_a_variacao():
+    # Escolha do Rafael (P70): o checkup mostra se os seguidores sobem; o número fica no banco.
+    dia = AGORA.strftime("%Y-%m-%d")
+    assert checkup.seguidores_da_shopee_video(AGORA) == {"lido_hoje": False, "dia": None, "semana": None}
+    db.salvar_config(checkup.CHAVE_SEGUIDORES_SV, {"dias": {"2026-10-14": 90, "2026-10-15": 100,
+                                                            "2026-10-22": 110, dia: 112}})
+    assert checkup.seguidores_da_shopee_video(AGORA) == {"lido_hoje": True, "dia": 2, "semana": 12}
+    robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
+    interacoes = {"respostas": {}, "duplicadas": 0, "rodou_hoje": True, "feed_hoje": 3, "feed_repetidos": 0,
+                  "seguidores": {"lido_hoje": False, "dia": None, "semana": None}}
+    pontos = checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=interacoes)
+    assert any(p.startswith("Seguidores da Shopee Vídeo: não lidos hoje") for p in pontos)
+    assert checkup._variacao(2) == "+2" and checkup._variacao(-1) == "-1" and checkup._variacao(None) == (
+        "sem leitura de antes")
 
 
 # Funções que dão o nome do processo, com o começo fixo que devolvem.

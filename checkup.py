@@ -909,22 +909,27 @@ def robo_agora(agora=None):
 # O que o robô da Shopee Vídeo faz no celular, pelo nome no registro e pela ação da
 # tentativa: o que fica de fora é do bot (rodada, assistente, avisos), não do celular.
 PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)",)
-PROCESSOS_DE_INTERACAO = ("feed:", "notificações (respostas)", "responder comentário")
+# As respostas aos comentários dos vídeos do Rafael saem também fora do Horário das
+# Interações (às 12h e às 17h, P70); só o feed fica nele.
+PROCESSOS_DE_INTERACAO = ("feed:",)
+PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário")
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
                         "preparo interrompido")
-ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed", "responder"), ("rascunho", "postar", "apagar")
+ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed",), ("rascunho", "postar", "apagar")
 
 
 def _tipo_da_atividade(processo=None, acao=None):
-    """'descurtir', 'interação', 'preparo' (preparar, postar, apagar) ou None (outra coisa)."""
+    """'descurtir', 'interação' (o feed), 'respostas', 'preparo' (preparar, postar, apagar) ou None (outra coisa)."""
     if acao:
         return ("descurtir" if acao == "descurtir" else "interação" if acao in ACOES_DE_INTERACAO
-                else "preparo" if acao in ACOES_DE_PREPARO else None)
+                else "respostas" if acao == "responder" else "preparo" if acao in ACOES_DE_PREPARO else None)
     if processo.startswith(PROCESSOS_DO_DESCURTIR):
         return "descurtir"
     if processo.startswith(PROCESSOS_DE_INTERACAO):
         return "interação"
+    if processo.startswith(PROCESSOS_DAS_RESPOSTAS):
+        return "respostas"
     if processo.startswith(PROCESSOS_DE_PREPARO):
         return "preparo"
     return None
@@ -1031,15 +1036,75 @@ def rotinas_coladas(agora=None):
 
 # O mesmo de interacoes_shopee_video (o tests/test_checkup.py confere): 3 por dia (P10).
 COMENTARIOS_NO_FEED_POR_DIA = 3
+# Os mesmos do robo_shopee_video (o tests/test_checkup.py confere): as respostas saem às 12h,
+# às 17h e no começo do Horário das Interações, às 20h sem ele (P70), e o robô roda no
+# Horário do Robô (o padrão) e no das Interações.
+HORAS_DAS_RESPOSTAS_SV, HORA_DAS_RESPOSTAS_SEM_JANELA_SV = (12, 17), 20
+HORARIO_DO_ROBO_SV = (8, 22)
+
+
+def leituras_das_notificacoes(agora=None):
+    """
+    (feitas, esperadas) hoje: as vezes em que o robô devia ler as Notificações e responder
+    (horas_das_respostas do robô, P70) e quantas tiveram leitura. Cada vez vai até a
+    seguinte; a da hora de agora só é cobrada depois que a hora passa, e a que cai toda fora
+    do horário em que o robô roda não é cobrada.
+    """
+    agora = _agora(agora)
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    inicio, fim = config.get("robo_interacoes_inicio"), config.get("robo_interacoes_fim")
+    janela = (int(inicio), int(fim)) if inicio is not None and fim is not None else None
+    robo = (int(config.get("robo_inicio", HORARIO_DO_ROBO_SV[0])), int(config.get("robo_fim", HORARIO_DO_ROBO_SV[1])))
+    horas = sorted(set(HORAS_DAS_RESPOSTAS_SV) | {janela[0] if janela else HORA_DAS_RESPOSTAS_SEM_JANELA_SV})
+    leituras = registro_processos.sequencia("shopee_video", "notificações (respostas)",
+                                            agora.strftime("%Y-%m-%d 00:00:00"))
+    lidas = {int(momento[11:13]) for momento, *_ in leituras if momento <= _momento(agora)}
+    feitas = esperadas = 0
+    for hora, seguinte in zip(horas, horas[1:] + [24]):
+        feita = any(hora <= lida < seguinte for lida in lidas)
+        roda = any(robo[0] <= h < robo[1] or (janela and janela[0] <= h < janela[1])
+                   for h in range(hora, min(seguinte, agora.hour)))
+        feitas += feita
+        esperadas += feita or roda
+    return feitas, esperadas
+
+
+# Os seguidores que o robô anota (a mesma chave do robo_shopee_video.CHAVE_SEGUIDORES; o
+# tests/test_checkup.py confere). Escolha do Rafael (P70).
+CHAVE_SEGUIDORES_SV = "shopee_video_seguidores"
+
+
+def seguidores_da_shopee_video(agora=None):
+    """
+    Se os seguidores do perfil em Shopee Vídeo foram lidos hoje e quanto mudaram em 1 e em 7
+    dias (a leitura de hoje menos a do dia mais novo até lá; None sem leitura). Só a variação:
+    o número fica no banco.
+    """
+    agora = _agora(agora)
+    dias = (db.ler_config(CHAVE_SEGUIDORES_SV, {}) or {}).get("dias") or {}
+    hoje = agora.strftime("%Y-%m-%d")
+
+    def variacao(n):
+        limite = (agora - timedelta(days=n)).strftime("%Y-%m-%d")
+        antes = [dia for dia in sorted(dias) if dia <= limite]
+        return dias[hoje] - dias[antes[-1]] if hoje in dias and antes else None
+
+    return {"lido_hoje": hoje in dias, "dia": variacao(1), "semana": variacao(7)}
+
+
+def _variacao(numero):
+    """+3, -1, 0 ou "sem leitura de antes"."""
+    return "sem leitura de antes" if numero is None else f"{numero:+d}"
 
 
 def interacoes_da_shopee_video(agora=None):
     """
     As respostas aos comentários dos vídeos e o feed, pelo registro de processos: cada
     resultado das respostas nas últimas 24 h, os comentários com mais de uma resposta do
-    perfil, se as respostas rodaram hoje, os comentários no feed hoje (a meta é 3), com a hora
-    de cada um (espalhados e no Horário das Interações), e o mesmo vídeo do feed comentado
-    mais de uma vez em 3 dias. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    perfil, as vezes em que as Notificações foram lidas hoje (P70), os comentários no feed
+    hoje (a meta é 3), com a hora de cada um (espalhados e no Horário das Interações), o
+    mesmo vídeo do feed comentado mais de uma vez em 3 dias e os seguidores (P70). Pedido do
+    Rafael: DECISOES.md, Shopee Vídeo.
     """
     agora = _agora(agora)
     desde, hoje = _momento(agora - timedelta(hours=24)), agora.strftime("%Y-%m-%d 00:00:00")
@@ -1055,11 +1120,14 @@ def interacoes_da_shopee_video(agora=None):
         "duplicadas": sum(1 for _m, _p, resultado, detalhe, _o in respostas
                           if resultado == "já respondido" and not str(detalhe).startswith("1 ")),
         "rodou_hoje": bool(registro_processos.sequencia("shopee_video", "notificações (respostas)", hoje)),
+        # As vezes de hoje com leitura das Notificações e as que já deviam ter saído (P70).
+        **dict(zip(("leituras_hoje", "leituras_esperadas"), leituras_das_notificacoes(agora))),
         "feed_hoje": sum(1 for momento, *_ in feed if momento >= hoje),
         "feed_horas": [momento[11:16] for momento, *_ in feed if momento >= hoje],
         "feed_repetidos": sum(1 for n in Counter(o for *_x, o in feed if o).values() if n > 1),
         "curtidas": dict(Counter(resultado for _m, _p, resultado, _d, _o in curtidas)),
         "lives": len(registro_processos.sequencia("shopee_video", "feed: vídeo olhado", desde, resultado="live pulada")),
+        "seguidores": seguidores_da_shopee_video(agora),
     }
 
 
@@ -1146,6 +1214,12 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
         if robo_sv["ativo"] and not robo_sv.get("suspenso") and agora.hour >= HORA_PARA_COBRAR:
             if not interacoes["rodou_hoje"]:
                 pontos.append("Respostas da Shopee Vídeo: as Notificações não foram lidas hoje")
+            elif interacoes.get("leituras_hoje", 1) < interacoes.get("leituras_esperadas", 1):
+                pontos.append(f"Respostas da Shopee Vídeo: as Notificações foram lidas "
+                              f"{interacoes['leituras_hoje']} de {interacoes['leituras_esperadas']} vezes hoje")
+            if not (interacoes.get("seguidores") or {"lido_hoje": True})["lido_hoje"]:
+                pontos.append("Seguidores da Shopee Vídeo: não lidos hoje (o robô lê no Perfil, com a Saúde "
+                              "do Vídeo)")
             if interacoes["feed_hoje"] < COMENTARIOS_NO_FEED_POR_DIA:
                 pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} "
                               "comentários hoje")
@@ -1353,12 +1427,16 @@ def main():
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
     print(f"Respostas aos comentários (24 h): {respostas or 'nenhuma'} | com mais de uma resposta do perfil: "
-          f"{interacoes['duplicadas']} | Notificações lidas hoje: {'sim' if interacoes['rodou_hoje'] else 'não'}")
+          f"{interacoes['duplicadas']} | Notificações lidas hoje: {interacoes['leituras_hoje']} de "
+          f"{interacoes['leituras_esperadas']} vezes")
     curtidas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["curtidas"].items()))
     horas = f" ({', '.join(interacoes['feed_horas'])})" if interacoes.get("feed_horas") else ""
     print(f"Feed: comentados hoje {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA}{horas} | mesmo vídeo "
           f"mais de uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
           f"lives puladas (24 h): {interacoes['lives']}")
+    seguidores = interacoes["seguidores"]
+    print(f"Seguidores (Shopee Vídeo): lidos hoje: {'sim' if seguidores['lido_hoje'] else 'não'} | em 1 dia: "
+          f"{_variacao(seguidores['dia'])} | em 7 dias: {_variacao(seguidores['semana'])}")
 
     print("\n== Sobreposições (uma tarefa no horário de outra, 24 h)")
     sobre = sobreposicoes(agora)

@@ -148,12 +148,37 @@ def test_ia_que_diz_pular_e_ia_fora(monkeypatch):
     assert asyncio.run(it.gerar_comentario("Mini saia")) is None
 
 
+def test_comentario_do_feed_com_a_tela_do_video_vai_a_ia_com_a_imagem(monkeypatch):
+    # Escolha do Rafael (P70): a IA comenta o que aparece no vídeo, não só a legenda.
+    import api_gemini
+    pedidos = []
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append((prompt, imagens))
+        return "Que cor linda!"
+
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
+    assert asyncio.run(it.gerar_comentario("Mini saia", imagem=b"\xff\xd8jpeg")) == "Que cor linda!"
+    prompt, imagens = pedidos[-1]
+    assert imagens == [(b"\xff\xd8jpeg", "image/jpeg")] and "imagem anexa" in prompt
+    assert asyncio.run(it.gerar_comentario("Mini saia")) == "Que cor linda!"
+    prompt, imagens = pedidos[-1]
+    assert imagens is None and "imagem anexa" not in prompt
+
+
+def test_numero_do_app_vira_contagem():
+    assert it.contagem("3") == 3 and it.contagem("1.234") == 1234
+    assert it.contagem("1,2 mil") == 1200 and it.contagem("2K") == 2000 and it.contagem("1,5mi") == 1500000
+    assert it.contagem("Comentar") is None and it.contagem("") is None
+
+
 # As abas do alto do player (Live e Vídeo), como no Motorola.
 ABAS = [_el("Vídeos", caixa=(350, 140, 460, 195), clicavel=True), _el("Lives", caixa=(510, 140, 600, 195), clicavel=True),
         _el("Para você", caixa=(660, 140, 810, 195), clicavel=True)]
 
 
-def _player(autor="Loja da Bia", legenda="Mini saia que veste bem", coracao="like icon", live=False):
+def _player(autor="Loja da Bia", legenda="Mini saia que veste bem", coracao="like icon", live=False,
+            comentarios=None):
     if live:
         return _xml(_el(ident="live_room_in_video_feed_18", classe="FrameLayout", caixa=(0, 0, 1080, 2260)),
                     _el("Diga alguma coisa", ident="tv_send_message", caixa=(200, 2150, 600, 2210), clicavel=True),
@@ -168,6 +193,7 @@ def _player(autor="Loja da Bia", legenda="Mini saia que veste bem", coracao="lik
                 _el(desc=coracao, classe="ViewGroup", caixa=(960, 1600, 1040, 1680), clicavel=True),
                 _el("12", caixa=(980, 1675, 1020, 1700)),
                 _el(desc="comment video icon", classe="ViewGroup", caixa=(960, 1770, 1040, 1840), clicavel=True),
+                *([_el(str(comentarios), caixa=(985, 1852, 1020, 1878))] if comentarios is not None else []),
                 _el(desc="video share icon", classe="ViewGroup", caixa=(960, 1950, 1040, 2010), clicavel=True),
                 *BARRA)
 
@@ -211,6 +237,7 @@ def _player_do_motorola(compartilhar=True, autor="Loja da Bia"):
 def test_feed_le_o_video_como_o_motorola_mostra_e_diz_por_que_pula():
     video, motivo = it.ler_o_feed(_player_do_motorola())
     assert motivo == "" and video["autor"] == "Loja da Bia" and video["legenda"].startswith("Mini saia")
+    assert video["comentarios"] == 3                                      # o número embaixo do balão
     assert video["coracao"] == (1002, 1645) and video["balao"] == (1002, 1806)
     assert it.ler_o_feed(_player(live=True)) == (None, "live")
     assert it.ler_o_feed(_xml(*ABAS, *BARRA)) == (None, "tela sem o player de vídeo")
@@ -423,13 +450,28 @@ def test_comentario_que_a_ia_pula_avisa_e_nao_volta(monkeypatch, avisos):
     assert not app.enviadas and avisos and it.terminado(it.marca(NOTIFICACAO))
 
 
-def test_respostas_uma_vez_por_dia_e_o_feed_3_por_dia_espalhados():
+def test_respostas_tres_vezes_por_dia_e_o_feed_3_por_dia_espalhados():
+    # Escolha do Rafael (P70): as Notificações às 12h, às 17h e no começo do Horário das
+    # Interações (às 20h sem ele), dentro ou fora dele.
+    assert not robo.respostas_pendentes(momento("2026-10-24 11:59"))
+    assert robo.respostas_pendentes(momento("2026-10-24 12:05"))
+    robo.gravar_estado(respostas_em="2026-10-24 12:05:00")
+    assert not robo.respostas_pendentes(momento("2026-10-24 16:59"))
+    robo.gravar_estado(respostas_continuar=True)                          # parou no limite: segue
+    assert robo.respostas_pendentes(momento("2026-10-24 12:20"))
+    robo.gravar_estado(respostas_continuar=False)
+    assert robo.respostas_pendentes(momento("2026-10-24 17:00"))
+    robo.gravar_estado(respostas_em="2026-10-24 17:10:00")
+    assert not robo.respostas_pendentes(momento("2026-10-24 19:59"))
+    assert robo.respostas_pendentes(momento("2026-10-24 20:00"))
+    robo.gravar_estado(respostas_em="2026-10-24 20:05:00")
+    assert not robo.respostas_pendentes(momento("2026-10-24 23:59"))
+    assert robo.respostas_pendentes(momento("2026-10-25 12:00"))
+    # Com o Horário das Interações às 15h, a 3ª vez é às 15h.
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_interacoes_inicio": 15, "robo_interacoes_fim": 16})
+    assert robo.horas_das_respostas(robo.ler_config()) == [12, 15, 17]
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO})
     agora = momento("2026-10-24 10:00")
-    assert robo.respostas_pendentes(agora)
-    robo.gravar_estado(respostas_em="2026-10-24 09:00:00")
-    assert not robo.respostas_pendentes(agora)
-    robo.gravar_estado(respostas_continuar=True)
-    assert robo.respostas_pendentes(agora)
     assert robo.feed_pendente(agora)
     robo.gravar_estado(feed_em="2026-10-24 09:00:00")
     assert not robo.feed_pendente(agora)
@@ -490,7 +532,8 @@ class CelularDoFeed:
         if self.atual == "player":
             if video == "live":
                 return _player(live=True)
-            return _player(*video, coracao="unlike icon" if self.indice in self.curtidos else "like icon")
+            return _player(*video[:2], coracao="unlike icon" if self.indice in self.curtidos else "like icon",
+                           comentarios=video[2] if len(video) > 2 else None)
         # O comentário do robô sai com o nome do perfil (o do vídeo do próprio Rafael), não "Eu".
         feitos = [_comentario("Loja Rafa", texto, 1250 + 250 * k)
                   for k, texto in enumerate(self.comentarios.get(self.indice, []))]
@@ -536,11 +579,48 @@ class CelularDoFeed:
 
 @pytest.fixture
 def ia_do_feed(monkeypatch):
-    async def comentario(legenda="", anteriores=()):
+    imagens = []
+
+    async def comentario(legenda="", anteriores=(), imagem=None):
+        imagens.append(imagem)
         return f"Que achado! {len(anteriores)}"
 
     monkeypatch.setattr(it, "gerar_comentario", comentario)
     monkeypatch.setattr(robo.random, "randint", lambda a, b: a)
+    return imagens
+
+
+def test_feed_prefere_o_video_com_poucos_comentarios(avisos, ia_do_feed):
+    # Escolha do Rafael (P70): o comentário do robô fica no alto e é visto.
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda", 500), ("Ana Achados", "Copo térmico que gela", 4)])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {1: ["Que achado! 0"]}
+    vistos = [r for _m, _p, r, _d, _o in robo.registro_processos.sequencia("shopee_video", "feed: vídeo olhado", "")]
+    assert vistos[0] == "muitos comentários"
+
+
+def test_feed_sem_video_de_poucos_comentarios_comenta_um_qualquer_na_2a_metade(monkeypatch, avisos, ia_do_feed):
+    monkeypatch.setattr(robo, "VIDEOS_OLHADOS_NO_FEED", 2)
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda", 500), ("Ana Achados", "Copo térmico", 300)])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {1: ["Que achado! 0"]}
+
+
+def test_feed_manda_a_tela_do_video_para_a_ia(avisos, ia_do_feed):
+    from PIL import Image
+
+    class ComTela(CelularDoFeed):
+        def screenshot(self):
+            return Image.new("RGB", (1080, 2400), (200, 50, 50))
+
+    app = ComTela(videos=[("Loja da Bia", "Mini saia linda")])
+    robo.interagir_no_feed(app, momento("2026-10-24 10:00"))
+    assert ia_do_feed[-1][:2] == b"\xff\xd8"                              # JPEG
+    import io
+    assert Image.open(io.BytesIO(ia_do_feed[-1])).size == robo.TAMANHO_DA_TELA_PARA_A_IA   # metade do tamanho
+    # Sem o print, o comentário sai só pela legenda.
+    robo.interagir_no_feed(CelularDoFeed(videos=[("Ana Achados", "Copo térmico")]), momento("2026-10-24 11:00"))
+    assert ia_do_feed[-1] is None
 
 
 def test_feed_pula_a_live_e_o_video_do_rafael_curte_e_comenta_um_de_outro_criador(avisos, ia_do_feed):

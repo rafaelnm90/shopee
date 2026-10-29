@@ -166,12 +166,17 @@ def _motivo_resposta_vazia(response):
     except Exception as e:
         return f"motivo ilegível ({e})"
 
-async def gerar_texto_gemini(prompt):
+async def gerar_texto_gemini(prompt, imagens=None):
     """
-    Gera texto com o primeiro modelo da cascata que responder.
+    Gera texto com o primeiro modelo da cascata que responder. imagens: [(bytes, tipo)] que
+    vão junto com o pedido (a tela de um vídeo, para a IA falar do que aparece nele).
 
     Devolve o texto ou None se todos falharem (não grava ULTIMO_ERRO_IA).
     """
+    conteudo = prompt
+    if imagens:
+        from google.genai import types
+        conteudo = [*(types.Part.from_bytes(data=dados, mime_type=tipo) for dados, tipo in imagens), prompt]
     for modelo_nome in _modelos_da_vez():
         try:
             logger.debug(f"⏳ [IA] Consultando motor: {modelo_nome}...")
@@ -179,7 +184,7 @@ async def gerar_texto_gemini(prompt):
             response = await asyncio.to_thread(
                 client_genai.models.generate_content,
                 model=modelo_nome,
-                contents=prompt
+                contents=conteudo
             )
             
             if response and response.text:
