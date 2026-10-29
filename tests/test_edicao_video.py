@@ -58,7 +58,8 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     # A seta entra só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e o pulso do fim
     # do arquivo (quadros 72 a 101) se repete até o fim.
     assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro
-    assert "[comfoto][seta]overlay=x=142-w/2:y=846-h/2:shortest=1,format=yuv420p[editado]" in filtro
+    cx, cy = edicao_video.CENTRO_DA_SETA
+    assert f"[comfoto][seta]overlay=x={cx}-w/2:y={cy}-h/2:shortest=1,format=yuv420p[editado]" in filtro
     assert "[foto][editado]concat=n=2:v=1:a=0[v]" in filtro
     entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
     assert entradas[3] == edicao_video.SETA
@@ -375,9 +376,10 @@ def test_preco_a_partir_de_numa_linha_so_com_o_numero():
     import io
 
     from PIL import Image
-    with Image.open(io.BytesIO(edicao_video.letreiro(edicao_video.texto_do_preco(1299.9),
-                                                     edicao_video.FUNDO_DO_PRECO))) as imagem:
-        # Duas linhas ("A partir de" e o preço), dentro da tela e com o fundo transparente.
+    with Image.open(io.BytesIO(edicao_video.letreiro(edicao_video.texto_do_preco(1299.9), edicao_video.FUNDO_DO_PRECO,
+                                                     edicao_video.LUGARES_DOS_TEXTOS["alto"][2]))) as imagem:
+        # Na caixa do alto, duas linhas ("A partir de" e o preço), dentro da tela e com o fundo
+        # transparente.
         assert imagem.mode == "RGBA" and imagem.width <= 720 and 100 < imagem.height < 200
         assert imagem.getpixel((0, 0))[3] == 0 and imagem.getpixel((imagem.width // 2, 8))[3] > 150
 
@@ -583,12 +585,39 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
                 if lugar == "alto":
                     assert x + imagem.width < 486 - 10 and topo + imagem.height < 280
                 if lugar in ("esquerda", "direita"):
-                    # Nos lados (P47): estreita, longe do meio da tela, acima da seta (que
-                    # começa em y 776) e dos botões do app à direita.
-                    assert imagem.width <= 0.34 * 720 and topo + imagem.height < 740, (texto, lugar)
+                    # Nos lados (P47): estreita, longe do meio da tela, acima da seta e dos
+                    # botões do app à direita.
+                    topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - 70
+                    assert imagem.width <= 0.34 * 720 and topo + imagem.height < topo_da_seta, (texto, lugar)
                     if texto.startswith("A\u00a0partir"):
                         # O preço em 2 linhas: "A partir de" e o valor, sem quebrar por dentro.
                         assert imagem.height < 3 * round(28 * 1.25) + 2 * 18
+
+
+def test_seta_e_textos_dentro_do_que_o_app_mostra():
+    # Escolha do Rafael (P71, vídeo de 28/10 às 23:20): no celular dele o app corta as bordas do
+    # vídeo, a barra de busca cobria o alto da caixa do texto e o cartão do produto tampava a
+    # ponta da seta. A seta fica inteira acima do cartão, mesmo no maior pulso, e os textos dentro
+    # do que o app mostra, abaixo da busca.
+    import io
+
+    from PIL import Image, ImageSequence
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    with Image.open(edicao_video.SETA) as seta:
+        caixas = [q.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()
+                  for q in ImageSequence.Iterator(seta)]
+        largura, altura = seta.size
+    cx, cy = edicao_video.CENTRO_DA_SETA
+    assert cy - altura // 2 + max(c[3] for c in caixas if c) < edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
+    assert cx - largura // 2 + min(c[0] for c in caixas if c) >= esquerda
+    for texto in ("Óculos de Sol Hexagonal", "Mantém a bebida gelada por 24 horas", "Design elegante e moderno",
+                  edicao_video.texto_do_preco(1299.9)):
+        for lugar, (x, topo, largura_maxima, linhas) in edicao_video.LUGARES_DOS_TEXTOS.items():
+            with Image.open(io.BytesIO(edicao_video.letreiro(texto, largura_maxima=largura_maxima,
+                                                             linhas_maximas=linhas))) as imagem:
+                inicio = (720 - imagem.width) // 2 if x is None else (720 + x - imagem.width if x < 0 else x)
+                assert esquerda + 10 <= inicio and inicio + imagem.width <= direita - 10, (texto, lugar)
+                assert topo >= edicao_video.FIM_DA_BARRA_DE_BUSCA + 5, lugar
 
 
 def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
@@ -611,12 +640,13 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     assert motivo == "" and montados == [] and resumo["textos"] == [] and resumo["lugar"] == "nenhum"
 
     edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, lugar="esquerda")
-    assert [(x, topo) for _, _, _, x, topo in montados[-1]] == [(16, 400), (16, 400)]
+    margem = edicao_video.LUGARES_DOS_TEXTOS["esquerda"][0]
+    assert [(x, topo) for _, _, _, x, topo in montados[-1]] == [(margem, 400), (margem, 400)]
 
     edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, lugar="direita")
     for imagem, _, _, x, topo in montados[-1]:
-        # Encostado na direita: a caixa termina a 16 px da borda.
-        assert topo == 400 and x + int.from_bytes(imagem[16:20], "big") == 720 - 16
+        # Encostado na direita: a caixa termina à mesma distância da borda que a da esquerda.
+        assert topo == 400 and x + int.from_bytes(imagem[16:20], "big") == 720 - margem
 
 
 def test_texto_da_ia_comprido_nao_termina_em_palavra_de_ligacao():

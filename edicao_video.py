@@ -43,13 +43,22 @@ SEGUNDOS_DA_FOTO = 2
 LARGURA_DA_MINIATURA = 180
 CENTRO_DA_MINIATURA = (576, 128)
 # A seta é a do Rafael (o arquivo Seta_da_Shopee que ele usa no LumaFusion), com o fundo
-# preto tirado: só o pedaço com a seta, já no tamanho dele (62,9%, posição X -23 e Y 16), com
-# o centro perto do canto de baixo à esquerda, apontando para onde a Shopee mostra o produto.
-# Ela começa logo depois da foto, já se desenhando quando o vídeo começa, e pulsa: o arquivo
-# guarda a entrada e um pulso (quadros 72 a 101, 1,2 s), que se repete até o fim do vídeo.
-# Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
+# preto tirado: só o pedaço com a seta, já no tamanho dele (62,9%, posição X -23), perto do
+# canto de baixo à esquerda, inteira logo acima do cartão do produto que o app mostra e
+# apontando para ele (escolha do Rafael, P71: na posição do LumaFusion, o cartão tampava a
+# ponta). Ela começa logo depois da foto, já se desenhando quando o vídeo começa, e pulsa: o
+# arquivo guarda a entrada e um pulso (quadros 72 a 101, 1,2 s), que se repete até o fim do
+# vídeo. Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
 SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "seta_da_shopee.apng")
-CENTRO_DA_SETA = (142, 846)
+CENTRO_DA_SETA = (142, 796)
+# O que o app da Shopee mostra do vídeo de 720x1280 num celular de tela 20:9, medido no
+# celular do Rafael (vídeo de 28/10, P71): ele enche a tela e corta uns 47 px de cada lado
+# (fica visível de x 47 a 673), a barra de busca do alto vai até y 140 e o cartão do produto
+# embaixo começa em y 870. A seta e os textos ficam dentro disso (o tests/test_edicao_video.py
+# confere).
+VISIVEL_NO_APP = (47, 673)
+FIM_DA_BARRA_DE_BUSCA = 140
+COMECO_DO_CARTAO_DO_PRODUTO = 870
 PULSO_DA_SETA = (72, 30)
 # Uns minutos bastam para um vídeo curto; depois disso a edição desiste (e o vídeo fica para depois).
 ESPERA_MAXIMA = 300
@@ -204,23 +213,25 @@ MINIMO_DO_REMONTADO = 8
 # bem (a regra 13 da Shopee pune texto pequeno ou sobreposto), mas sem tampar o produto: a
 # caixa ocupa uns 7% da tela, e em cada vídeo a IA escolhe o lugar em que ela não cobre o
 # produto nem o rosto de alguém (escolha do Rafael, P46: a letra grande, logo abaixo da
-# miniatura, cobria o alto do móvel e o decote do vestido). Os lugares, em (x, topo, largura
-# máxima das linhas, quantas linhas; a caixa tem mais 56 px de margem) no vídeo de 720x1280;
-# x None = centralizado, x negativo = encostado na direita, a -x px da borda:
+# miniatura, cobria o alto do móvel e o decote do vestido). Todos longe das bordas que o app
+# corta (VISIVEL_NO_APP) e abaixo da barra de busca, com a letra um pouco menor (escolha do
+# Rafael, P71: a caixa do alto encostava na borda e ficava embaixo da busca). Os lugares, em
+# (x, topo, largura máxima das linhas, quantas linhas; a caixa tem mais 56 px de margem) no
+# vídeo de 720x1280; x None = centralizado, x negativo = encostado na direita, a -x px da borda:
 # - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 486 a 666);
 # - "meio": logo abaixo da miniatura (que vai até uns 250 px), centralizado;
 # - "esquerda" e "direita": nos lados, numa caixa estreita de até 3 linhas, no meio da
-#   altura: acima da seta (que começa em y 776) e da coluna de botões do app à direita.
+#   altura: acima da seta (que começa em y 726) e da coluna de botões do app à direita.
 # Nenhum lugar livre do rosto e do produto (SEM_LUGAR), o vídeo vai sem os textos (escolha
 # do Rafael, P47: no vídeo do conjunto, o alto cobriu o rosto da modelo e o meio cobriria o
 # conjunto).
-LUGARES_DOS_TEXTOS = {"alto": (24, 110, 390, 2), "meio": (None, 280, 480, 2),
-                      "esquerda": (16, 400, 170, 3), "direita": (-16, 400, 170, 3)}
+LUGARES_DOS_TEXTOS = {"alto": (68, 150, 340, 2), "meio": (None, 280, 480, 2),
+                      "esquerda": (64, 400, 170, 3), "direita": (-64, 400, 170, 3)}
 LUGAR_PADRAO = "alto"
 SEM_LUGAR = "nenhum"
 TOPO_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][1]
 LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
-LETRA_DOS_TEXTOS = (40, 28)         # a maior e a menor
+LETRA_DOS_TEXTOS = (36, 28)         # a maior e a menor
 SEGUNDOS_DE_CADA_TEXTO = 3.0
 FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
 FUNDO_DO_PRECO = (238, 77, 45, 230)  # o laranja da Shopee
@@ -240,9 +251,9 @@ _FALAS_NO_PROMPT = (
 )
 _LUGAR_NO_PROMPT = (
     "Diga onde os textos podem ficar sem cobrir o produto nem o rosto de alguém, na maior parte do vídeo: "
-    "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 8% e 19% da altura e até uns 65% da largura), "
-    "\"meio\" (centralizado, entre uns 22% e 33% da altura), \"esquerda\" (encostado na borda esquerda, até "
-    "uns 33% da largura, entre uns 31% e 44% da altura) ou \"direita\" (o mesmo, na borda direita); "
+    "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 12% e 22% da altura e até uns 65% da largura), "
+    "\"meio\" (centralizado, entre uns 22% e 33% da altura), \"esquerda\" (perto da borda esquerda, até "
+    "uns 40% da largura, entre uns 31% e 45% da altura) ou \"direita\" (o mesmo, perto da borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem o produto ou um rosto.\n"
 )
 # Vídeo que já tem texto próprio na tela vai sem as nossas legendas, que cobririam o dele
