@@ -409,7 +409,7 @@ LEGENDA_VIDEO = LEGENDA.replace("https://s.shopee.com.br/abc", "https://s.shopee
 def _com_edicao(monkeypatch, conteudos, ias, editados=None):
     """
     Edição ligada, com a edição e a foto de mentira; o link de vídeo não traz produto (sem
-    foto). editados recebe (foto, produto, preço, avisos) de cada edição.
+    foto). editados recebe (foto, produto, avisos) de cada edição.
     """
     import db
     import edicao_video
@@ -427,8 +427,8 @@ def _com_edicao(monkeypatch, conteudos, ias, editados=None):
 
     editados = [] if editados is None else editados
 
-    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
-        editados.append((foto, produto, preco, avisos))
+    def editar_para_postar(video, foto, destino, produto="", avisos=False):
+        editados.append((foto, produto, avisos))
         if not foto:
             return "a foto do anúncio não veio", edicao_video.SO_COM_O_EDITOR_1, ""
         with open(destino, "wb") as arquivo:
@@ -450,13 +450,14 @@ def _com_edicao(monkeypatch, conteudos, ias, editados=None):
 
 def test_com_a_edicao_ligada_o_assistente_manda_o_video_editado(monkeypatch):
     # Pedidos do Rafael (25/10, P40): na Shopee Vídeo, só vídeo editado, também no assistente;
-    # (28/10, P50) com o Editor 2, como nos rascunhos do robô: as legendas com o nome e o preço.
+    # (28/10, P50) com o Editor 2, como nos rascunhos do robô: as legendas com o nome, a vantagem
+    # e a chamada para o produto (sem o preço, P80).
     conteudos, ias, editados = [], [], []
     bot = _com_edicao(monkeypatch, conteudos, ias, editados)
     _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"))
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
     assert conteudos == [b"editado com foto"] and "Postagem pronta" in bot.mensagens[0][1]
-    assert editados == [(b"foto", "Garrafa", 19.9, False)]
+    assert editados == [(b"foto", "Garrafa", False)]
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'edição do vídeo: assistente'") \
         == (edicao_video.COM_LEGENDAS, 1)
     # A IA assiste ao vídeo original, sem a foto e a seta por cima.
@@ -482,7 +483,7 @@ def test_sem_o_editor_2_o_assistente_manda_com_o_editor_1_e_o_registro_anota(mon
     conteudos, ias = [], []
     bot = _com_edicao(monkeypatch, conteudos, ias)
 
-    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False):
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editor 1")
         return "", edicao_video.SO_COM_O_EDITOR_1, "o Editor 2 não saiu: o ffmpeg falhou"

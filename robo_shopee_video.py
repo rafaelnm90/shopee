@@ -2821,7 +2821,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     if principal:
         # Os espaços livres com o mesmo item de outras lojas (P59), depois das conferências sem
         # o celular e antes da edição: todos são curtidos, e o 1º, o que paga mais por venda, dá
-        # a foto e o preço da edição e o link do rascunho (P57). Escolhas do Rafael:
+        # a foto da edição e o link do rascunho (P57). Escolhas do Rafael:
         # DECISOES.md, Shopee Vídeo.
         celular.append(True)
         mais = espacos_livres(d, video, principal, original, vistos, prazo)
@@ -2901,9 +2901,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
-    do Rafael são autorais) e as legendas (nome, vantagem e o preço da API); se o Editor 2 não
-    sai, com o Editor 1, sem legendas (edicao_video.editar_para_postar). No vídeo de Ver
-    Produtos, a foto e o preço são os do 1º produto anexado (nomes[0]). Com a edição ligada,
+    do Rafael são autorais) e as legendas (nome, vantagem e uma chamada para o produto, P80); se
+    o Editor 2 não sai, com o Editor 1, sem legendas (edicao_video.editar_para_postar). No vídeo
+    de Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Com a edição ligada,
     só vai vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo;
     sem a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou deixa tentar de novo
     depois. Bebida alcoólica (alcool=True) abre com a capa dos avisos da Shopee no lugar da
@@ -2922,7 +2922,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
     else:
         anuncio = ps.anuncio_do_produto(video)
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
-                                                            anuncio.get("nome", ""), anuncio.get("preco"), alcool)
+                                                            anuncio.get("nome", ""), avisos=alcool)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -2950,7 +2950,7 @@ def oferta_pelo_nome(nome):
 
 def anuncio_do_ver_produtos(nome):
     """
-    {"foto", "nome", "preco"} do anúncio do 1º produto anexado num vídeo de Ver Produtos,
+    {"foto", "nome"} do anúncio do 1º produto anexado num vídeo de Ver Produtos,
     achado pelo nome (oferta_pelo_nome). {} quando não acha, e foto None quando ela não
     baixa: o vídeo fica de lado (só vídeo editado vai). A IA já conferiu esse produto com o
     vídeo, e o nome fica o do app (o que ela conferiu).
@@ -2960,8 +2960,7 @@ def anuncio_do_ver_produtos(nome):
         oferta = oferta_pelo_nome(nome)
         if not oferta:
             return {}
-        return {"foto": ps.baixar_foto(oferta.get("imageUrl") or ""), "nome": nome,
-                "preco": assistente._numero(oferta.get("priceMin"))}
+        return {"foto": ps.baixar_foto(oferta.get("imageUrl") or ""), "nome": nome}
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto do produto do Ver Produtos não veio: {type(e).__name__}")
         return {}

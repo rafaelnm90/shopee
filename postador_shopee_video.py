@@ -952,8 +952,8 @@ def foto_do_produto(video):
 
 def anuncio_do_produto(video):
     """
-    {"foto" (bytes ou None), "nome", "preco"} do anúncio do produto do link, pela API de
-    afiliado; {} quando o link é de vídeo (Ver Produtos) ou a API não diz o produto.
+    {"foto" (bytes ou None), "nome"} do anúncio do produto do link, pela API de afiliado; {}
+    quando o link é de vídeo (Ver Produtos) ou a API não diz o produto.
     """
     if (video or {}).get("produto") or not (video or {}).get("link"):
         return {}
@@ -969,7 +969,7 @@ def anuncio_do_produto(video):
     except Exception as e:
         logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
         foto = None
-    return {"foto": foto, "nome": produtos[0]["nome"], "preco": produtos[0]["preco"]}
+    return {"foto": foto, "nome": produtos[0]["nome"]}
 
 
 def baixar_foto(endereco):

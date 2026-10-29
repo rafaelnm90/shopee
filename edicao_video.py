@@ -12,8 +12,8 @@ chave edicao_ligada de shopee_video). Escolhas do Rafael (25/10/2026, P37 e depo
 P38): DECISOES.md, Shopee Vídeo.
 
 O Editor 2 (editar_2, "com legendas") é esta edição com os textos da tela (nome, vantagem e
-preço) no vídeo original, sem cortar nada nem mudar a velocidade. É o que vai ao ar
-(editar_para_postar): o Rafael escolheu o Editor 2 nos rascunhos do robô e no modo
+uma chamada para o produto) no vídeo original, sem cortar nada nem mudar a velocidade. É o que
+vai ao ar (editar_para_postar): o Rafael escolheu o Editor 2 nos rascunhos do robô e no modo
 assistente, e o vídeo em que ele não sai vai com o Editor 1 (28/10/2026, P50 e P51). O
 exemplo de cada editor (exemplo_editor_1 e exemplo_editor_2) entrega primeiro esse vídeo
 original e depois até 2 versões modificadas, diferentes de verdade, cada uma abrindo com um
@@ -321,9 +321,9 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None):
 
 # --- Editor 2 ---
 # O Editor 1 (sem legendas) é a edição de cima. O Editor 2 (com legendas) é o Editor 1 com os
-# textos da tela (nome, vantagem e preço) por cima do vídeo original, sem cortar nada nem mudar
-# a velocidade, e é o que vai ao ar (editar_para_postar; escolhas do Rafael de 28/10/2026:
-# DECISOES.md, Shopee Vídeo). A remontagem daqui (as partes paradas saem, os trechos calmos
+# textos da tela (nome, vantagem e uma chamada para o produto) por cima do vídeo original, sem
+# cortar nada nem mudar a velocidade, e é o que vai ao ar (editar_para_postar; escolhas do
+# Rafael de 28/10/2026: DECISOES.md, Shopee Vídeo). A remontagem daqui (as partes paradas saem, os trechos calmos
 # ficam mais rápidos, o de mais ação ganha uma câmera lenta curta) vale só nas versões
 # modificadas do exemplo (editar_2_e_versoes).
 
@@ -375,15 +375,23 @@ LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
 LETRA_DOS_TEXTOS = (36, 28)         # a maior e a menor
 SEGUNDOS_DE_CADA_TEXTO = 3.0
 FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
-FUNDO_DO_PRECO = (238, 77, 45, 230)  # o laranja da Shopee
+FUNDO_DA_CHAMADA = (238, 77, 45, 230)  # o laranja da Shopee
 MAXIMO_DO_NOME = 28
 MAXIMO_DA_VANTAGEM = 36
+MAXIMO_DA_CHAMADA = 32
 
-# A IA escreve o nome e a vantagem vendo o vídeo, com as regras da Shopee Vídeo que mais
-# pegam texto na tela (regras 7, 13 e 14 das diretrizes): sem marca, sem prometer o que o
-# vídeo não mostra, sem preço ou promoção (o preço vem da API, com "a partir de").
+# A IA escreve o nome, a vantagem e a chamada vendo o vídeo, com as regras da Shopee Vídeo
+# que mais pegam texto na tela (regras 7, 13 e 14 das diretrizes): sem marca, sem prometer o
+# que o vídeo não mostra, sem preço ou promoção. O preço e o desconto ficam só no cartão do
+# produto, que o app mostra sempre atualizado (com o desconto do Pix): no vídeo eles ficariam
+# parados no dia do post e podiam não bater com o cartão. No lugar deles, a chamada para o
+# produto anexado embaixo, onde a seta aponta. Escolha do Rafael (29/10, P80): DECISOES.md,
+# Shopee Vídeo.
 _NOME_NO_PROMPT = ("- \"nome\": o nome genérico do produto, como o comprador procura (ex.: \"Copo Térmico\"), "
                    f"até {MAXIMO_DO_NOME} caracteres;\n")
+_CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
+                      f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
+                      "Shopee;\n")
 _REGRAS_NO_PROMPT = ("Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; "
                      "sem preço, desconto, promoção, emoji ou hashtag.\n")
 _FALAS_NO_PROMPT = (
@@ -408,13 +416,14 @@ _FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
-    "Escreva dois textos curtos para aparecer na tela do vídeo, em português do Brasil:\n"
+    "Escreva três textos curtos para aparecer na tela do vídeo, em português do Brasil:\n"
     + _NOME_NO_PROMPT
     + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
-    f"até {MAXIMO_DA_VANTAGEM} caracteres.\n"
+    f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
+    + _CHAMADA_NO_PROMPT
     + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"lugar\": \"alto\", "
-    "\"texto_no_video\": false}}"
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
+    "\"lugar\": \"alto\", \"texto_no_video\": false}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -561,7 +570,7 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=
     for tamanho in range(maior, menor - 1, -2):
         fonte = ImageFont.truetype(fonte_ttf, tamanho)
         linhas, linha = [], ""
-        # Só o espaço comum separa as linhas: o espaço fixo ("R$ 39,90") não quebra.
+        # Só o espaço comum separa as linhas: o espaço fixo não quebra.
         for palavra in [p for p in texto.split(" ") if p]:
             tentativa = f"{linha} {palavra}".strip()
             if not linha or rascunho.textlength(tentativa, font=fonte) <= limite:
@@ -647,17 +656,22 @@ def lugar_dos_textos(textos):
     return SEM_LUGAR if textos.get("texto_no_video") else textos.get("lugar")
 
 
+def _vantagem_e_chamada(dados, textos):
+    """Põe em textos a vantagem e a chamada da resposta da IA, só as que vieram certas."""
+    for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA)):
+        limpo = _so_letras(str(dados.get(chave) or ""), maximo)
+        if limpo:
+            textos[chave] = limpo
+    return textos
+
+
 def textos_da_tela(video, nome):
     """
-    {"nome", "vantagem", "lugar", "texto_no_video"} que a IA escreveu vendo o vídeo, só o que
-    veio certo; {} sem resposta.
+    {"nome", "vantagem", "chamada", "lugar", "texto_no_video"} que a IA escreveu vendo o
+    vídeo, só o que veio certo; {} sem resposta.
     """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
-    textos = _nome_lugar_e_falas(dados)
-    vantagem = _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
-    if vantagem:
-        textos["vantagem"] = vantagem
-    return textos
+    return _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados))
 
 
 def _falas(bruto):
@@ -673,18 +687,6 @@ def _falas(bruto):
         if fim > inicio >= 0:
             falas.append((inicio, fim))
     return falas
-
-
-# Dentro do "A partir de" e entre o "R$" e o número, para não se quebrarem em linhas
-# diferentes (na caixa estreita dos lados, o preço fica em 2 linhas: "A partir de" e o valor).
-ESPACO_FIXO = "\u00a0"
-
-
-def texto_do_preco(preco):
-    """O preço da tela, do jeito que fica certo mesmo com variações de preço no anúncio."""
-    if not preco or preco <= 0:
-        return ""
-    return " ".join(parte.replace(" ", ESPACO_FIXO) for parte in ("A partir de", assistente._reais(preco)))
 
 
 def horarios_dos_textos(textos, duracao):
@@ -742,7 +744,7 @@ def _letreiros(textos, lugar, duracao):
     return letreiros, [texto for texto, *_ in horarios]
 
 
-def editar_2(video, foto, destino, nome="", vantagem="", preco=None, lugar=None, avisos=False, musica=None,
+def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
              capa=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
@@ -756,16 +758,16 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None, lugar=None,
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
-    return _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, _lugar(lugar), avisos,
+    return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
                                  musica, capa)
 
 
-def _editor_2_no_original(video, foto, destino, original, nome, vantagem, preco, lugar, avisos=False,
+def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
                           musica=None, capa=None):
     """O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo)."""
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
-                                    (texto_do_preco(preco), FUNDO_DO_PRECO)], lugar, original)
+                                    (chamada, FUNDO_DA_CHAMADA)], lugar, original)
     resumo = {"original": original, "lugar": lugar, "textos": textos}
     if not letreiros:
         return editar(video, foto, destino, avisos, musica, capa), resumo
@@ -788,17 +790,18 @@ COM_MUSICA = ", com música de fundo"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
 TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
-SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome e a vantagem"
+SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
+def editar_para_postar(video, foto, destino, produto="", avisos=False):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
-    vídeo original, sem cortes, com o Editor 2: os textos que a IA escreve vendo o vídeo
-    (produto: o nome do produto para ela; sem ele, só o preço na tela) e o preço "A partir de"
-    da API. As versões modificadas ficam só no exemplo. Se o Editor 2 não sai, o vídeo vai com o Editor 1 (foto,
-    miniatura e seta, sem legendas). Escolhas do Rafael (28/10/2026, P50 e P51): DECISOES.md,
-    Shopee Vídeo. Com avisos=True (bebida alcoólica), a capa dos avisos abre o vídeo nos dois.
+    vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
+    que a IA escreve vendo o vídeo (produto: o nome do produto para ela; sem ele, o vídeo vai
+    sem os textos), sem o preço (P80). As versões modificadas ficam só no exemplo. Se o Editor
+    2 não sai, o vídeo vai com o Editor 1 (foto, miniatura e seta, sem legendas). Escolhas do
+    Rafael (28/10/2026, P50 e P51): DECISOES.md, Shopee Vídeo. Com avisos=True (bebida
+    alcoólica), a capa dos avisos abre o vídeo nos dois.
     Devolve (motivo, como, detalhe): motivo "" quando o vídeo saiu editado; como, o jeito
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
@@ -815,8 +818,8 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
     capa = _capa_alternada(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
     avisado = (COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
     try:
-        motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), preco,
-                                    lugar_dos_textos(textos), avisos, musica, capa)
+        motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
+                                    textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, capa)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -826,7 +829,7 @@ def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=Fals
             detalhe = TEXTO_JA_NO_VIDEO
         elif resumo.get("lugar") == SEM_LUGAR:
             detalhe = SEM_LUGAR_LIVRE
-        elif not (textos.get("nome") or textos.get("vantagem")):
+        elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
     return (editar(video, foto, destino, avisos, musica, capa), SO_COM_O_EDITOR_1 + avisado,
@@ -940,7 +943,6 @@ ENTRE_VERSOES = 3.0
 # Pedaço que sobra menor que isto, ao dividir um trecho no começo do gancho ou no corte do fim,
 # sai (emenda curta demais só soluça).
 PEDACO_MINIMO = 0.2
-MAXIMO_DA_CHAMADA = 32
 
 PROMPT_DAS_VERSOES = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
@@ -949,7 +951,8 @@ PROMPT_DAS_VERSOES = (
     + _NOME_NO_PROMPT
     + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra, para o vídeo completo, diferente das "
     f"vantagens das versões, até {MAXIMO_DA_VANTAGEM} caracteres;\n"
-    "- \"versoes\": até 3, cada uma com \"vantagem\" (uma vantagem do produto que o vídeo mostra naquele "
+    + _CHAMADA_NO_PROMPT.replace("o fim do vídeo,", "o fim do vídeo completo, diferente das chamadas das versões,")
+    + "- \"versoes\": até 3, cada uma com \"vantagem\" (uma vantagem do produto que o vídeo mostra naquele "
     f"momento, até {MAXIMO_DA_VANTAGEM} caracteres), \"inicio\" e \"fim\" (os segundos do vídeo em que ela "
     "aparece melhor, de 1 a 4 segundos, sem ninguém falando, com pelo menos "
     f"{ENTRE_VERSOES:.0f} segundos entre o começo do vídeo e o começo de um momento, e entre o começo de um "
@@ -958,7 +961,8 @@ PROMPT_DAS_VERSOES = (
     "versão, sem mandar para fora da Shopee). Só ponha uma versão com um momento e uma vantagem que as outras "
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
     + _REGRAS_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"versoes\": [{{\"vantagem\": \"...\", "
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
+    "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
     "\"texto_no_video\": false}}"
 )
@@ -966,15 +970,12 @@ PROMPT_DAS_VERSOES = (
 
 def textos_das_versoes(video, nome):
     """
-    {"nome", "vantagem" (a do vídeo completo), "lugar", "falas", "versoes": [{"vantagem",
-    "chamada", "inicio", "fim"}]} que a IA escreveu vendo o vídeo, só o que veio certo; {}
-    quando ela não respondeu.
+    {"nome", "vantagem" e "chamada" (as do vídeo completo), "lugar", "falas", "versoes":
+    [{"vantagem", "chamada", "inicio", "fim"}]} que a IA escreveu vendo o vídeo, só o que veio
+    certo; {} quando ela não respondeu.
     """
     dados = _resposta_da_ia(video, PROMPT_DAS_VERSOES.format(nome=nome))
-    textos = _nome_lugar_e_falas(dados)
-    vantagem = _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
-    if vantagem:
-        textos["vantagem"] = vantagem
+    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados))
     versoes = []
     for bruta in dados.get("versoes") if isinstance(dados.get("versoes"), list) else []:
         if not isinstance(bruta, dict):
@@ -1135,13 +1136,13 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
                                 musicas[1:])
 
 
-def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None,
+def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                        lugar=None):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
-    cortes, com o Editor 2 (o nome, a vantagem e o preço), como vai ao ar; os seguintes são as
+    cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
     versões modificadas (planejar_versoes), cada uma remontada (sem as partes paradas, com o
-    ritmo), com os seus textos (a vantagem do gancho, o nome, o preço e a chamada, nessa ordem)
+    ritmo), com os seus textos (a vantagem do gancho, o nome e a chamada da versão, nessa ordem)
     e com o Editor 1 por cima. versoes_da_ia = [{"vantagem", "chamada", "inicio", "fim"}].
     Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas versões
     fica em resumo["remontagem"].
@@ -1154,7 +1155,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
     musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
-    motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, preco, lugar,
+    motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
                                                 musica=_caminho(musicas[0]))
     resumo = {"original": original, "inteiro": original, "lugar": lugar,
               "com_fala": _segundos_com_fala(com_fala, original),
@@ -1164,7 +1165,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
         return motivo, resumo
     return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: _letreiros(
         [(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
-         (texto_do_preco(preco), FUNDO_DO_PRECO), (da_ia.get("chamada", ""), FUNDO_DOS_TEXTOS)],
+         (da_ia.get("chamada", ""), FUNDO_DA_CHAMADA)],
         lugar, _segundos_remontados(plano["trechos"])), musicas[1:])
 
 
@@ -1180,7 +1181,7 @@ def _exemplo_das_versoes(destino, lista, editar_versoes):
         motivo, resumo = editar_versoes(arquivo, foto, textos, produto)
         resumo["lugar_da_ia"] = "lugar" in textos
         resumo["texto_no_video"] = bool(textos.get("texto_no_video"))
-        resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem"))
+        resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem") or textos.get("chamada"))
         resumo["versoes_da_ia"] = len(textos.get("versoes", []))
         return motivo, resumo
 
@@ -1198,10 +1199,13 @@ def exemplo_editor_1(destino):
 
 
 def exemplo_editor_2(destino):
-    """O exemplo do Editor 2 (com legendas), como o do Editor 1, com os textos na tela e o preço da API."""
+    """
+    O exemplo do Editor 2 (com legendas), como o do Editor 1, com os textos na tela (o nome, a
+    vantagem e a chamada).
+    """
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
-        produto.get("preco"), textos.get("falas"), lugar_dos_textos(textos)))
+        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos)))
 
 
 def exemplo_capa():

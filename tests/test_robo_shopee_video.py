@@ -761,9 +761,9 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
 
 
 def _editar_para_postar(chamadas, respostas=None):
-    """O editar_para_postar de mentira: guarda (vídeo, foto, produto, preço, avisos) e grava o editado."""
-    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
-        chamadas.append((video, foto, produto, preco, avisos))
+    """O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado."""
+    def editar_para_postar(video, foto, destino, produto="", avisos=False):
+        chamadas.append((video, foto, produto, avisos))
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
         if not motivo:
             with open(destino, "wb") as arquivo:
@@ -775,7 +775,7 @@ def _editar_para_postar(chamadas, respostas=None):
 def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avisos):
     # Escolhas do Rafael (P37; 28/10, P51): nos vídeos dele (Autorais), com a edição ligada no
     # painel, o rascunho vai com o Editor 2: a foto do produto no começo, a miniatura, a seta e
-    # as legendas, com o nome e o preço do produto da API.
+    # as legendas: o nome do produto da API, a vantagem e a chamada da IA (sem o preço, P80).
     _fonte(monkeypatch)
     editados = []
 
@@ -791,7 +791,7 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     rascunho = robo.esperando_aprovacao()[0]
     assert open(rascunho["arquivo"], "rb").read() == b"editado"
-    assert editados == [(os.path.abspath("archive/vestido.mp4"), b"foto do anuncio", VESTIDO, 59.9, False)]
+    assert editados == [(os.path.abspath("archive/vestido.mp4"), b"foto do anuncio", VESTIDO, False)]
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS, 1)
     # Sem a capa com chamada, o rascunho fica no grupo de antes na medição (P76).
@@ -927,8 +927,8 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", preco=None, avisos=False):
-        fotos.append((foto, produto, preco))
+    def editar_para_postar(video, foto, destino, produto="", avisos=False):
+        fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
         with open(destino, "wb") as arquivo:
@@ -949,9 +949,8 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
     ativar(edicao_ligada=True)
     video = {"arquivo": original, "link": LINK, "de_video": True}
     robo.copiar_para_o_rascunho(video, "viral", copia, ["Vestido Infantil Estampado Gatinho Verão Menina", "Laço"])
-    # A foto e o preço (das legendas do Editor 2) são os do anúncio achado; o nome, o do app.
-    assert fotos == [(b"foto de https://cf.shopee.com.br/vestido", "Vestido Infantil Estampado Gatinho Verão Menina",
-                      45.5)]
+    # A foto é a do anúncio achado; o nome (das legendas do Editor 2), o do app.
+    assert fotos == [(b"foto de https://cf.shopee.com.br/vestido", "Vestido Infantil Estampado Gatinho Verão Menina")]
     assert open(copia, "rb").read() == b"editado"
     # Busca pelo nome, por relevância (1), com as primeiras palavras.
     assert buscas == [("Vestido Infantil Estampado Gatinho Verão Menina", 1)]

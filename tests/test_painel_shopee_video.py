@@ -1138,7 +1138,7 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     def exemplo_editor_2(destino):
         resumo["versoes"] = _exemplo_com_versoes(sv, destino, [
             {"remontado": 24.0, "curta": False, "gancho": None, "vantagem": "Mantém gelado",
-             "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$ 39,90"]},
+             "textos": ["Copo Térmico", "Mantém gelado", "Garanta o seu aqui embaixo"]},
             {"remontado": 18.0, "curta": True, "gancho": (9.0, 10.5), "vantagem": "Tampa firme",
              "textos": ["Tampa firme", "Copo Térmico", "Chamada 2"]}])
         return "Copo Térmico <inox>", "", resumo
@@ -1172,13 +1172,13 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     assert not any(os.path.exists(m[1]) for m in msg.midias)
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
         "edição do vídeo: exemplo do editor 2", "mandado")
-    # Sem os textos da IA, o original sai com o preço e avisa; na versão, a fala mantida aparece (P45).
+    # Sem os textos da IA, o original sai sem eles e avisa; na versão, a fala mantida aparece (P45).
     remontagem.update(cortado=0, com_fala=7.5)
     resumo.update(textos_da_ia=False)
     msg = MsgComMidia(Msg, "Ver Exemplo Editor 4 🎬")
     rodar(sv.exemplo_editor_2_handler(msg, est))
     primeira, segunda = msg.midias[0][2], msg.midias[1][2]
-    assert "A IA não escreveu o nome e a vantagem" in primeira
+    assert "A IA não escreveu o nome, a vantagem e a chamada" in primeira
     assert "Nenhuma parte parada para tirar" in segunda
     assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in segunda
     # Escolha do Rafael (P47): os lados também valem e, sem lugar livre, o vídeo vai sem texto.

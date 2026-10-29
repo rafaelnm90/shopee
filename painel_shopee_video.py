@@ -804,15 +804,16 @@ def texto_edicao(config):
         "no canto de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion.\n\n"
         "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
-        "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto e uma vantagem que o vídeo "
-        "mostra (escritos pela IA, sem marca) e o preço (\"A partir de\", pela API), em letra média, no alto, logo "
-        "abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, "
-        "ou se o vídeo já tem texto próprio na tela, ele vai sem os nossos textos.\n\n"
+        "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto, uma vantagem que o vídeo "
+        "mostra e, no fim, uma chamada para o produto anexado embaixo, no laranja da Shopee (escritos pela IA, "
+        "sem marca e sem preço: o preço e o desconto aparecem no cartão do produto, sempre atualizados), em letra "
+        "média, no alto, logo abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto nem o "
+        "rosto; sem lugar livre, ou se o vídeo já tem texto próprio na tela, ele vai sem os nossos textos.\n\n"
         "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
-        "são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto e o preço são os do 1º produto que o "
-        "robô anexou.\n\n"
+        "são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto é a do 1º produto que o robô "
+        "anexou.\n\n"
         "<b>O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições "
         "do editor, como vai ao ar; depois até 2 versões modificadas dele. Cada versão abre com um momento "
         "diferente, que a IA escolhe vendo o vídeo, e segue dali (o que vinha antes vai para o fim); a 1ª tem "
@@ -1268,7 +1269,7 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     if versao.get("musica"):
         linhas.append(f"🎵 Música de fundo: {versao['musica']} (o vídeo original não tem som)")
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
-        linhas.append("⚠️ A IA não escreveu o nome e a vantagem desta vez.")
+        linhas.append("⚠️ A IA não escreveu o nome, a vantagem e a chamada desta vez.")
     if indice < total - 1:
         return "\n".join(linhas)
     if total < edicao_video.VERSOES_POR_VIDEO:
