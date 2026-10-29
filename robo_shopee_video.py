@@ -2263,8 +2263,11 @@ PROCESSO_DA_COMISSAO = "comissão: o mesmo produto que paga mais"
 
 
 def termo_da_busca(nome):
-    """As primeiras PALAVRAS_DA_BUSCA palavras do nome, sem o que vem entre colchetes ou parênteses e sem símbolos."""
-    limpo = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", nome or "")
+    """
+    As primeiras PALAVRAS_DA_BUSCA palavras do nome, sem o "0" do selo da loja colado, sem o
+    que vem entre colchetes ou parênteses e sem símbolos.
+    """
+    limpo = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", ps.sem_o_selo_colado(nome))
     palavras = [p for p in re.sub(r"[^\w\s-]", " ", limpo).split() if p.strip("-_")]
     return " ".join(palavras[:PALAVRAS_DA_BUSCA])
 
@@ -2551,9 +2554,12 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
                 achados.append((cartao, oferta))
         candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]),
                                         achados)[:CANDIDATOS_DOS_ESPACOS]
-        # Por que os outros cartões não foram achados na API: o nome ou o preço.
+        # Por que os outros cartões não foram achados na API: o nome ou o preço. E quantos nomes
+        # vieram com o "0" do selo da loja colado, que sai antes da busca.
         fora = f" (sem o nome {perdas.get('nome', 0)}, outro preço {perdas.get('preço', 0)})" if perdas else ""
-        contagem = f"{len(cartoes)} na busca, {len(achados)} na API{fora}, {len(candidatos)} no preço"
+        selos = sum(1 for cartao in cartoes if cartao.get("selo"))
+        contagem = (f"{len(cartoes)} na busca, {len(achados)} na API{fora}, {len(candidatos)} no preço"
+                    + (f", {selos} com o selo colado" if selos else ""))
         fotos = []
         for candidato in candidatos:
             try:

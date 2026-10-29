@@ -147,7 +147,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     Comprar com cupom), **"Ver Mais (N)"** e **"Você Também Pode Gostar"** (recomendações da
     Shopee, que não são do vídeo). O toque no nome abre a página do produto
     (`HalfPdpActivity`), com o coração (`buttonItemLike`/`buttonItemLiked`) e o nome no id
-    **`labelProductPageProductName`**; o voltar volta à lista. **Vídeo com um produto só**
+    **`labelProductPageProductName`**; o voltar volta à lista. O selo da loja (Full, Oficial,
+    Indicado) antes do nome é uma imagem dentro do texto e chega como um **"0" colado na 1ª
+    palavra** ("0Tênis ...", 29/10/2026, na lista do Ver Produtos); o robô tira esse "0" ao ler
+    e comparar nomes (`sem_o_selo_colado`), e a busca pela foto conta os cartões que vieram
+    assim ("N com o selo colado"). **Vídeo com um produto só**
     (24/10/2026): o player não mostra o "Ver Produtos (N)"; no lugar dele, embaixo do cartão,
     fica a **barra dos produtos** (descrição terminada em "video product icon") com o desconto
     e o nome. O toque na barra abre a mesma lista, com "Ver Produtos (1)", o cartão do produto

@@ -517,14 +517,30 @@ def _dentro(ponto, caixa):
     return x1 <= ponto[0] <= x2 and y1 <= ponto[1] <= y2
 
 
+# O selo da loja (Full, Oficial, Indicado) antes do nome é uma imagem dentro do texto; na
+# lista do Ver Produtos (29/10/2026) ela chega como um "0" colado na 1ª palavra ("0Tênis ..."),
+# que nenhum anúncio da API tem: a busca pelo nome não achava o anúncio.
+SELO_COLADO = re.compile(r"^\s*0+(?=[^\W\d_])")
+
+
+def sem_o_selo_colado(texto):
+    """O nome sem o "0" do selo da loja colado na 1ª palavra (o resto fica como está)."""
+    return SELO_COLADO.sub("", texto or "")
+
+
+def tem_o_selo_colado(texto):
+    """O nome da tela veio com o "0" do selo da loja colado na 1ª palavra?"""
+    return bool(SELO_COLADO.match(texto or ""))
+
+
 def _nome_normal(texto):
     """
-    O nome de produto para comparar: sem caixa, com a mesma codificação dos acentos (NFKC)
-    e com os sinais (colchete, traço, barra, reticências, emoji) como espaço. Um sinal a
-    mais ou a menos não faz outro produto, e a palavra colada num sinal ("【oferta】kit")
-    precisa contar como as palavras dela.
+    O nome de produto para comparar: sem o "0" do selo da loja colado, sem caixa, com a
+    mesma codificação dos acentos (NFKC) e com os sinais (colchete, traço, barra,
+    reticências, emoji) como espaço. Um sinal a mais ou a menos não faz outro produto, e a
+    palavra colada num sinal ("【oferta】kit") precisa contar como as palavras dela.
     """
-    texto = unicodedata.normalize("NFKC", texto or "").casefold()
+    texto = unicodedata.normalize("NFKC", sem_o_selo_colado(texto)).casefold()
     return " ".join("".join(c if c.isalnum() else " " for c in texto).split())
 
 
@@ -1496,8 +1512,9 @@ def barra_dos_produtos(xml):
 
 
 def nome_na_pagina_do_produto(xml):
-    """O nome do produto na página dele (labelProductPageProductName); "" sem ele."""
-    return next((el["texto"].strip() for el in elementos(xml) if el["id"] == "labelProductPageProductName"), "")
+    """O nome do produto na página dele (labelProductPageProductName), sem o "0" do selo colado; "" sem ele."""
+    return next((sem_o_selo_colado(el["texto"]).strip() for el in elementos(xml)
+                 if el["id"] == "labelProductPageProductName"), "")
 
 
 def toca_em_rascunhos(xml, x, y):
@@ -1655,8 +1672,9 @@ def fim_dos_resultados(xml):
 def cartoes_da_busca(xml):
     """
     Os resultados da busca pela foto inteiros na tela, de cima para baixo e, na mesma linha,
-    da esquerda para a direita: [{"nome", "preco", "comissao", "extra"}] (comissão em %,
-    extra = o selo de Comissão Extra). O cartão cortado na borda (sem o nome, o preço ou a
+    da esquerda para a direita: [{"nome", "selo", "preco", "comissao", "extra"}] (o nome sem
+    o "0" do selo da loja colado, selo = ele veio com esse "0", comissão em %, extra = o selo
+    de Comissão Extra). O cartão cortado na borda (sem o nome, o preço ou a
     taxa) fica de fora: a rolagem seguinte o traz inteiro. Os de "Você também pode gostar",
     que vêm depois dos resultados, também ficam de fora.
     """
@@ -1683,7 +1701,9 @@ def cartoes_da_busca(xml):
                   if PRECO_DO_CARTAO.fullmatch(el["texto"].strip())]
         if not nomes or not precos or not precos[0]:
             continue
-        cartoes.append((y, x, {"nome": nomes[0], "preco": precos[0], "comissao": _numero_da_tela(achado.group(1)),
+        # selo: o nome veio com o "0" do selo da loja colado (só a contagem vai ao registro).
+        cartoes.append((y, x, {"nome": sem_o_selo_colado(nomes[0]).strip(), "selo": tem_o_selo_colado(nomes[0]),
+                               "preco": precos[0], "comissao": _numero_da_tela(achado.group(1)),
                                "extra": any(el["id"] == SELO_DE_COMISSAO_EXTRA for el in acima(SELO_ACIMA_DA_TAXA))}))
     # A mesma linha da grade: as taxas dos dois cartões ficam a poucos px uma da outra.
     linhas = []
