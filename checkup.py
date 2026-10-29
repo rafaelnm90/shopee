@@ -342,7 +342,7 @@ SEM_META = {
     ("baixador", "Shopee pela Apify"), ("baixador", "conferência semanal da Shopee Vídeo"),
     ("baixador", "mensagem sem link"), ("baixador", "pedido "),
     ("bot_mestre", "canal afiliados: "), ("bot_mestre", "garimpo de ofertas"),
-    ("bot_mestre", "lembrete de pergunta do Claude"),
+    ("bot_mestre", "lembrete de pergunta do Claude"), ("bot_mestre", "pausa automática"),
     ("bot_mestre", "relatório semanal de vendas"),
     ("bot_mestre", "postagem "), ("bot_mestre", "rotina "),
     ("divulgacao", "envio ("), ("divulgacao", "verificação semanal do Grupo Público"),
