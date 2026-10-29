@@ -2008,6 +2008,10 @@ MEUS_FAVORITOS = "Meus favoritos"
 ABA_DE_AFILIADO = "Conversão"
 # O filtro do alto da lista: com ele na tela, Meus favoritos abriu.
 FILTRO_DOS_FAVORITOS = "Melhor Oferta"
+# O produto que saiu da loja fica na lista com o selo "Inválido" na foto, e o Like não o tira
+# (29/10/2026, Motorola): sobrando só ele, a lista acabou. Na linha dos filtros há também um
+# filtro com o mesmo nome, que não é selo de produto.
+SELO_INVALIDO = "Inválido"
 CAIXA_DE_MARCAR = "AN_Checkbox_CheckedIconUnCheckIcon_Img"
 BOTAO_LIKE = "Like"
 NUNCA_NOS_FAVORITOS = ("compartilhar", "substituir")
@@ -2049,6 +2053,36 @@ def caixas_de_marcar(xml):
         elif ps._centro(el) not in produtos:
             produtos.append(ps._centro(el))
     return barra, produtos
+
+
+def produtos_invalidos(xml):
+    """Quantos produtos da tela têm o selo Inválido (o filtro Inválido, na linha do Melhor Oferta, não conta)."""
+    lista = ps.elementos(xml)
+    filtro = next((el["caixa"] for el in lista if ps._normal(el["texto"]) == ps._normal(FILTRO_DOS_FAVORITOS)), None)
+    return sum(1 for el in lista if ps._normal(el["texto"]) == ps._normal(SELO_INVALIDO)
+               and not (filtro and filtro[1] <= ps._centro(el)[1] <= filtro[3]))
+
+
+def so_invalidos(xml):
+    """Todos os produtos da tela (pelo menos um) têm o selo Inválido."""
+    produtos = caixas_de_marcar(xml)[1]
+    return bool(produtos) and produtos_invalidos(xml) >= len(produtos)
+
+
+def _so_restam_invalidos(d, xml):
+    """
+    Quantos produtos inválidos sobraram, quando só eles sobraram em Meus favoritos: os da tela
+    são todos inválidos e, rolando uma vez, não aparece outro. 0 quando há outros produtos.
+    """
+    if not so_invalidos(xml):
+        return 0
+    quantos = produtos_invalidos(xml)
+    ps.rolar(d)
+    pausa(2)
+    depois = tela(d)
+    if caixas_de_marcar(depois)[1] and not so_invalidos(depois):
+        return 0
+    return max(quantos, produtos_invalidos(depois))
 
 
 def _ponto_exato(xml, alvo):
@@ -2140,7 +2174,8 @@ def descurtir_tudo(d, agora=None):
     A rotina das 4h: tira de Meus favoritos (a lista de afiliado, a do Minhas Curtidas) tudo o
     que está curtido: Eu → Criadores & Afiliados → Meus favoritos → marcar → Like, até a lista
     acabar. Sobrou depois de VOLTAS_DO_DESCURTIR voltas: a rodada seguinte, na mesma hora,
-    continua. Só números no registro, nunca o nome dos produtos.
+    continua. O produto inválido (que saiu da loja), que o Like não tira, fica: sobrando só ele,
+    a lista acabou. Só números no registro, nunca o nome dos produtos.
     Escolhas do Rafael (P25 e o caminho que ele ensinou): DECISOES.md, Shopee Vídeo.
     """
     ir_ao_inicio(d)
@@ -2162,9 +2197,14 @@ def descurtir_tudo(d, agora=None):
         gravar_estado(favoritos_limpos=True)
         ir_ao_inicio(d)
         return "nada curtido em Meus favoritos"
-    removidos, acabou = 0, False
+    removidos, acabou, invalidos = 0, False, 0
     for _volta in range(VOLTAS_DO_DESCURTIR):
-        if not caixas_de_marcar(tela(d))[1]:
+        xml = tela(d)
+        if not caixas_de_marcar(xml)[1]:
+            acabou = True
+            break
+        invalidos = _so_restam_invalidos(d, xml)
+        if invalidos:
             acabou = True
             break
         marcados = _marcar(d)
@@ -2178,20 +2218,32 @@ def descurtir_tudo(d, agora=None):
         pausa(3)
         _confirmar_remocao(d)
         pausa(2)
-        if _marcados(tela(d)) >= marcados:
-            # Os mesmos continuam marcados: o Like não tirou (uma pergunta do app que o robô
-            # não conhece, por exemplo).
-            raise Parada("toquei em Like, mas os produtos marcados continuaram em Meus favoritos")
-        removidos += marcados
+        xml = tela(d)
+        restantes = _marcados(xml)
+        if restantes >= marcados:
+            # Os mesmos continuam marcados: o Like não tirou. Sendo só os inválidos, a lista
+            # acabou; com outros, é uma pergunta do app que o robô não conhece, por exemplo.
+            invalidos = _so_restam_invalidos(d, xml)
+            if invalidos:
+                acabou = True
+                break
+            raise Parada(f"toquei em Like, mas os produtos marcados continuaram em Meus favoritos "
+                         f"({marcados} marcado(s); {produtos_invalidos(xml)} inválido(s) na tela)")
+        # O inválido marcado junto continua marcado depois do Like: não conta como tirado.
+        removidos += marcados - restantes
     else:
-        acabou = not caixas_de_marcar(tela(d))[1]
+        xml = tela(d)
+        invalidos = _so_restam_invalidos(d, xml) if caixas_de_marcar(xml)[1] else 0
+        acabou = not caixas_de_marcar(xml)[1] or bool(invalidos)
     gravar_estado(descurtir_continuar=not acabou, favoritos_limpos=acabou)
     ir_ao_inicio(d)
+    ficam = f"; {invalidos} inválido(s) ficam" if invalidos else ""
     registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "descurtido" if acabou else "continua depois",
-                                 f"{removidos} produto(s)", ok=True if acabou else None)
+                                 f"{removidos} produto(s){ficam}", ok=True if acabou else None)
     if not acabou:
         return f"{removidos} produto(s) descurtido(s) em Meus favoritos; o resto fica para a próxima rodada"
-    return f"{removidos} produto(s) descurtido(s) em Meus favoritos"
+    return (f"{removidos} produto(s) descurtido(s) em Meus favoritos"
+            + (f"; {invalidos} inválido(s) ficam (o Like não tira produto que saiu da loja)" if invalidos else ""))
 
 
 # --- O mesmo produto com mais comissão (P33) ---
