@@ -172,6 +172,31 @@ def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatc
     assert "o Motorola desconectou" in sv.texto_robo(sv.ler_config())
 
 
+def test_pausa_sem_o_celular_guarda_os_horarios_e_a_do_rafael_pula(bm, monkeypatch):
+    # 28/10: o celular caiu às 15:05 e, na volta, nenhum rascunho saiu pelos horários da tarde:
+    # o painel pulava os horários em qualquer pausa. Escolha do Rafael (P16): na pausa sozinha,
+    # sem o celular, eles ficam e na volta contam como um só.
+    from datetime import datetime
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado", robo_inicio=0, robo_fim=24)
+    hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    sv.robo.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": ["00:00"], "feitos": 0})
+    rodar(sv.verificar_robo())
+    assert sv.robo.estado_do_dia(sv.robo.ler_config())["feitos"] == 0 and rodadas == []
+    # Pausado pelo Rafael, o horário passa sem rascunho (e sem cobrança no checkup).
+    sv.alterar_config(robo_pausa_motivo="")
+    rodar(sv.verificar_robo())
+    estado = sv.robo.estado_do_dia(sv.robo.ler_config())
+    assert (estado["feitos"], estado["sem_tentar"]) == (1, 1) and rodadas == []
+
+
 def test_reconectar_acha_a_porta_sozinho_antes_de_pedir(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
     monkeypatch.setattr(sv.celular_robo, "ler", lambda: {"pareado_em": "2026-10-17 10:00:00", "ip": "100.1.2.3"})
