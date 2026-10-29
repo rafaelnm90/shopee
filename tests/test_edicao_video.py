@@ -137,6 +137,35 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
 
 
 
+def test_foto_do_comeco_e_capa_dos_avisos_no_fundo_preto(tmp_path):
+    # Escolha do Rafael (29/10, P72): o app usa o primeiro quadro como capa na grade do perfil,
+    # e o número de visualizações, em letras brancas, some num fundo branco.
+    import io
+
+    from PIL import Image
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_avisos(_foto_jpg()))).convert("RGB")
+    # O alto e o pé da capa, fora da foto e dos avisos: onde a grade põe o número.
+    assert max(capa.getpixel((360, 20))) < 20 and max(capa.getpixel((360, 1250))) < 20
+    if not shutil.which("ffmpeg"):
+        return
+    video, foto = tmp_path / "v.mp4", tmp_path / "foto.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=3",
+                    str(video)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
+                    "-frames:v", "1", str(foto)], check=True)
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), foto.read_bytes(), str(destino)) == ""
+    quadro = tmp_path / "quadro.ppm"
+    subprocess.run(["ffmpeg", "-v", "error", "-ss", "0.5", "-i", str(destino), "-frames:v", "1", str(quadro)],
+                   check=True)
+    with Image.open(quadro) as imagem:
+        tela = imagem.convert("RGB")
+    # A foto quadrada fica no meio da tela; acima e abaixo dela, o fundo preto.
+    assert max(tela.getpixel((360, 60))) < 30 and max(tela.getpixel((360, 1220))) < 30
+    vermelho, _, azul = tela.getpixel((360, 640))
+    assert azul > 120 and vermelho < 90
+
+
 def _foto_jpg():
     import io
 
