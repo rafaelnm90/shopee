@@ -1170,6 +1170,8 @@ def test_passo_do_motivo():
     assert robo.passo_do_motivo("não achei Centro do criador na tela") == "achar a Saúde no Centro do criador"
     assert robo.passo_do_motivo("a Saúde do Vídeo não abriu") == "abrir a Saúde do Vídeo"
     assert robo.passo_do_motivo("toquei no Rótulo de IA, mas ele não ficou ligado") == "rótulo de IA"
+    assert robo.passo_do_motivo(f"{robo.MOTIVO_SEM_EDICAO} (a foto do anúncio não veio)") == "edição do vídeo"
+    assert robo.passo_do_motivo(robo.MOTIVO_SEM_AVISOS) == "edição do vídeo"
     assert robo.passo_do_motivo("algo novo") == "outro" and robo.passo_do_motivo("") == ""
 
 

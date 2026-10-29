@@ -706,6 +706,8 @@ PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
+    ("edição do vídeo não saiu", "edição do vídeo"),
+    ("bebida alcoólica só vai", "edição do vídeo"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
     ("busca pela foto", "busca pela foto"),
     ("câmera da busca", "busca pela foto"),
