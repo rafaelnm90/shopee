@@ -64,6 +64,7 @@ import db
 import painel_espelhos
 import painel_notas
 import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
+import robo_shopee_video  # a suspensão da conta de Shopee Vídeo, que pausa o Canal Afiliados sozinho
 import painel_acessos  # Acessos do Servidor: Tailscale e Oracle (Opções do Servidor)
 import painel_admins  # Administradores dos grupos e canais (Opções do Servidor)
 import painel_ia  # IA: o link da conversa com o Claude (Opções do Servidor)
@@ -1394,11 +1395,243 @@ async def verificar_pausa_diaria():
     
     logger.info("✅ Aviso diário enviado e salvo na memória com sucesso.")
 
+def _pausar_servicos(spam, rotina):
+    """Pausa o SPAM em Grupos e as rotinas do canal principal pedidos, só os que estão ligados; devolve os pausados."""
+    pausados = []
+    if spam:
+        dados_div = ler_alvos_divulgacao()
+        if not dados_div.get("pausado", False):
+            dados_div["pausado"] = True
+            salvar_alvos_divulgacao(dados_div)
+            pausados.append("spam")
+    if rotina:
+        dados_rotina = ler_config_rotina()
+        if not dados_rotina.get("pausado", False):
+            dados_rotina["pausado"] = True
+            salvar_config_rotina(dados_rotina)
+            pausados.append("rotina")
+    return pausados
+
+
+def _reativar_servicos(servicos):
+    """Religa o SPAM em Grupos e as rotinas do canal principal que a pausa tinha parado."""
+    if "spam" in servicos:
+        dados_div = ler_alvos_divulgacao()
+        dados_div["pausado"] = False
+        salvar_alvos_divulgacao(dados_div)
+        logger.info("✅ SPAM reativado.")
+    if "rotina" in servicos:
+        dados_rotina = ler_config_rotina()
+        dados_rotina["pausado"] = False
+        salvar_config_rotina(dados_rotina)
+        logger.info("✅ Mensagens de rotina reativadas.")
+
+
+# O motivo do aviso da pausa, sorteado; o aviso das 9h repete o mesmo.
+MOTIVOS_DA_PAUSA = [
+    "manutenção preventiva nos servidores para garantir estabilidade",
+    "curadoria minuciosa e validação de um novo lote gigante de vídeos premium de alta conversão",
+    "atualização rigorosa no nosso sistema de proteção contra punições e bloqueios nas redes",
+    "reestruturação interna e organização do acervo para entregar materiais ainda melhores"
+]
+
+
+async def ligar_pausa_programada(data_retorno_str, spam, rotina, extras=None):
+    """
+    Liga a pausa programada do canal principal: pausa o SPAM em Grupos e as rotinas pedidos
+    (os que estão ligados), posta no grupo o aviso com o dia da volta e desfaz os vídeos
+    agendados de hoje. extras vai junto na pausa guardada (a automática marca a origem).
+    Devolve os serviços pausados.
+    """
+    servicos_pausados = _pausar_servicos(spam, rotina)
+    motivo_escolhido = random.choice(MOTIVOS_DA_PAUSA)
+    logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
+    data_curta = data_retorno_str.split(" ")[0][:5]
+    prompt = (
+        f"Você é um assistente de afiliados. Crie um aviso imediato MUITO CURTO E DIRETO "
+        f"informando que as postagens estão pausadas a partir de agora para {motivo_escolhido}. "
+        f"Avise que o retorno será no dia {data_curta}. "
+        f"REGRA ABSOLUTA: Use no máximo 2 a 3 linhas e não ultrapasse 150 caracteres. "
+        f"Seja direto, não peça desculpas longas e não dê explicações chatas. "
+        f"Use emojis e entregue APENAS o texto da mensagem final."
+    )
+    texto_aviso = await gerar_mensagem_gemini(prompt)
+    msg_imediata = await bot.send_message(GRUPO_ID, texto_aviso)
+    salvar_pausa_programada({
+        "ativa": True,
+        "data_retorno": data_retorno_str,
+        "servicos_pausados": servicos_pausados,
+        "id_aviso_imediato": msg_imediata.message_id,
+        "motivo": motivo_escolhido,
+        **(extras or {}),
+    })
+    agendar_fila_postagens()  # com a pausa ativa, só desfaz os agendamentos de hoje
+    logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
+    return servicos_pausados
+
+
+async def encerrar_pausa_programada(quando="hoje"):
+    """
+    Fim da pausa (na data de retorno, pelo botão ou, na automática, quando a suspensão acaba
+    antes): troca o aviso do grupo pela mensagem de volta, que sai na faxina da madrugada,
+    reativa o SPAM e a rotina que a pausa parou, empurra as datas da fila e refaz a grade.
+    quando ("hoje" ou "agora") entra na mensagem de volta. Devolve os serviços reativados.
+    """
+    dados_pausa = ler_pausa_programada()
+    id_aviso = dados_pausa.pop("id_aviso_imediato", None)
+    if id_aviso:
+        await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
+    prompt_retorno = (
+        "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
+        "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
+        f"vídeos com ofertas voltarão a ser postados normalmente a partir de {quando}. "
+        "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
+    )
+    texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
+    msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
+    registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
+    logger.info("✅ Mensagem de retorno postada no grupo e enviada para a lixeira.")
+    servicos = dados_pausa.get("servicos_pausados", [])
+    _reativar_servicos(servicos)
+    dados_pausa["ativa"] = False
+    dados_pausa["servicos_pausados"] = []
+    for chave in CHAVES_DA_PAUSA_AUTOMATICA:
+        dados_pausa.pop(chave, None)
+    salvar_pausa_programada(dados_pausa)
+    retomar_grade_pos_pausa()
+    logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
+    return servicos
+
+
+# A pausa que o bot liga sozinho quando a Shopee suspende a conta de Shopee Vídeo (o robô lê
+# o fim nas Notificações e o guarda em robo_suspenso_ate): o Pausar Postagens do Canal
+# Afiliados, com a volta quando o robô da Shopee Vídeo também volta (o fim e a folga dele) e
+# o Pausar Ambos. Ela acompanha a suspensão: tirada antes, o canal volta na hora; com data
+# nova, a volta muda; a pausa feita à mão com volta mais tarde continua valendo.
+# Decisão do Rafael (P86, P87): DECISOES.md, Pausa programada.
+ORIGEM_DA_SUSPENSAO = "suspensão da Shopee Vídeo"
+PROCESSO_DA_PAUSA_AUTOMATICA = "pausa automática (suspensão da Shopee Vídeo)"
+# O que a pausa automática guarda a mais: a origem, o fim da suspensão que ela segue, a volta
+# da pausa feita à mão que ela estendeu e os serviços que ela mesma parou nessa pausa.
+CHAVES_DA_PAUSA_AUTOMATICA = ("origem", "suspensao_ate", "retorno_manual", "servicos_da_suspensao")
+FORMATO_DA_VOLTA = "%d/%m/%Y %H:%M"
+
+
+def _data_da_volta(texto):
+    """A data de retorno guardada ("DD/MM/AAAA HH:MM"), em datetime de Brasília; None se não lê."""
+    try:
+        return datetime.strptime(texto or "", FORMATO_DA_VOLTA).replace(tzinfo=fuso_horario)
+    except ValueError:
+        return None
+
+
+def _o_que_para(servicos):
+    """O que a pausa para, em texto: os vídeos e, se vierem, o SPAM e as rotinas."""
+    nomes = ["os vídeos"] + [nome for chave, nome in (("spam", "o SPAM em Grupos"), ("rotina", "as Mensagens de Rotina"))
+                             if chave in servicos]
+    return nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1]
+
+
+async def _avisar_pausa_automatica(resultado, texto):
+    """Anota a pausa automática no registro e avisa o Rafael no privado."""
+    registro_processos.registrar("bot_mestre", PROCESSO_DA_PAUSA_AUTOMATICA, resultado, ok=True)
+    try:
+        await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"❌ [Pausa automática] O aviso no privado não foi: {e}")
+
+
+async def acompanhar_suspensao_da_shopee_video():
+    """
+    De minuto em minuto, com o fim da pausa: a pausa automática do Canal Afiliados segue a
+    suspensão da conta de Shopee Vídeo. Liga quando ela aparece, muda a volta quando a data
+    muda e acaba (ou devolve a pausa feita à mão) quando ela acaba antes. A volta na data
+    marcada fica com o verificar_retorno_pausa_minuto, como na pausa feita à mão.
+    """
+    config = robo_shopee_video.ler_config()
+    ate = robo_shopee_video.suspenso_ate(config)
+    pausa = ler_pausa_programada()
+    automatica = bool(pausa.get("ativa")) and pausa.get("origem") == ORIGEM_DA_SUSPENSAO
+    agora = datetime.now(fuso_horario)
+
+    if ate and robo_shopee_video.suspensa(config, agora):
+        volta = ate + robo_shopee_video.FOLGA_DA_SUSPENSAO
+        marca = ate.strftime("%Y-%m-%d %H:%M:%S")
+        if not pausa.get("ativa"):
+            servicos = await ligar_pausa_programada(volta.strftime(FORMATO_DA_VOLTA), spam=True, rotina=True,
+                                                    extras={"origem": ORIGEM_DA_SUSPENSAO, "suspensao_ate": marca})
+            await _avisar_pausa_automatica("ligada", (
+                f"🛑 <b>Canal Afiliados pausado sozinho</b>\n\nA Shopee suspendeu a sua conta de Shopee Vídeo até "
+                f"{robo_shopee_video.quando_acaba(ate)}. Preenchi o Pausar Postagens 🔴: param {_o_que_para(servicos)} "
+                f"até {volta:%d/%m às %H:%M}, quando o robô da Shopee Vídeo também volta. O aviso já foi para o grupo "
+                "e é trocado todo dia às 9h; na volta, tudo volta sozinho. Se a Shopee tirar a suspensão antes, o canal "
+                "volta na hora."))
+            return
+        if automatica:
+            if pausa.get("suspensao_ate") == marca:
+                return
+            manual = _data_da_volta(pausa.get("retorno_manual"))
+            nova = max(volta, manual) if manual else volta
+            pausa.update(data_retorno=nova.strftime(FORMATO_DA_VOLTA), suspensao_ate=marca)
+            salvar_pausa_programada(pausa)
+            await verificar_pausa_diaria()  # o aviso do grupo, de novo, com o dia novo
+            await _avisar_pausa_automatica("data nova", (
+                f"🔁 A suspensão da Shopee Vídeo mudou para {robo_shopee_video.quando_acaba(ate)}: a pausa do Canal "
+                f"Afiliados agora vai até {nova:%d/%m às %H:%M}, e o aviso do grupo foi trocado."))
+            return
+        # Pausa feita à mão que acaba antes da suspensão: vai até o fim dela, com o Pausar Ambos.
+        manual = _data_da_volta(pausa.get("data_retorno"))
+        if not manual or manual >= volta:
+            return
+        adicionados = _pausar_servicos(spam=True, rotina=True)
+        pausa.update(origem=ORIGEM_DA_SUSPENSAO, suspensao_ate=marca, retorno_manual=pausa["data_retorno"],
+                     servicos_da_suspensao=adicionados, data_retorno=volta.strftime(FORMATO_DA_VOLTA),
+                     servicos_pausados=list(dict.fromkeys(pausa.get("servicos_pausados", []) + adicionados)))
+        salvar_pausa_programada(pausa)
+        await verificar_pausa_diaria()
+        await _avisar_pausa_automatica("estendida (pausa feita à mão)", (
+            f"🛑 A Shopee suspendeu a sua conta de Shopee Vídeo até {robo_shopee_video.quando_acaba(ate)}: a pausa "
+            f"que você fez no Canal Afiliados, que acabava em {manual:%d/%m às %H:%M}, agora vai até "
+            f"{volta:%d/%m às %H:%M}, e o aviso do grupo foi trocado. Se a suspensão acabar antes, ela volta a "
+            f"acabar em {manual:%d/%m às %H:%M}."))
+        return
+
+    # Sem suspensão agora: a automática que ainda tinha volta pela frente acabou antes.
+    if not automatica:
+        return
+    volta_marcada = _data_da_volta(pausa.get("data_retorno"))
+    if volta_marcada and volta_marcada <= agora:
+        return
+    manual = _data_da_volta(pausa.get("retorno_manual"))
+    if manual and manual > agora:
+        da_suspensao = pausa.get("servicos_da_suspensao", [])
+        _reativar_servicos(da_suspensao)
+        pausa["servicos_pausados"] = [s for s in pausa.get("servicos_pausados", []) if s not in da_suspensao]
+        pausa["data_retorno"] = pausa["retorno_manual"]
+        for chave in CHAVES_DA_PAUSA_AUTOMATICA:
+            pausa.pop(chave, None)
+        salvar_pausa_programada(pausa)
+        await verificar_pausa_diaria()
+        await _avisar_pausa_automatica("devolvida à pausa feita à mão", (
+            f"✅ A suspensão da Shopee Vídeo acabou: a pausa que você fez no Canal Afiliados continua até "
+            f"{manual:%d/%m às %H:%M}, e o aviso do grupo foi trocado."))
+        return
+    servicos = await encerrar_pausa_programada("agora")
+    await _avisar_pausa_automatica("encerrada (a suspensão acabou antes)", (
+        f"✅ A suspensão da Shopee Vídeo acabou antes do prazo: o Canal Afiliados voltou agora, com a mensagem de "
+        f"volta no grupo, e voltaram {_o_que_para(servicos)}."))
+
+
 async def verificar_retorno_pausa_minuto():
     """
-    De minuto em minuto: chegou a data de retorno, apaga o aviso, posta a volta no
-    grupo, reativa o SPAM e a rotina pausados, empurra as datas da fila e reagenda.
+    De minuto em minuto: primeiro a pausa automática segue a suspensão da Shopee Vídeo;
+    chegou a data de retorno, apaga o aviso, posta a volta no grupo, reativa o SPAM e a
+    rotina pausados, empurra as datas da fila e reagenda.
     """
+    try:
+        await acompanhar_suspensao_da_shopee_video()
+    except Exception as e:
+        logger.error(f"❌ [Pausa automática] A conferência da suspensão da Shopee Vídeo falhou: {e}")
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
         return
@@ -1421,41 +1654,7 @@ async def verificar_retorno_pausa_minuto():
     
     if hoje >= data_retorno:
         logger.info("⏰ Data e hora de retorno atingidas! Reativando serviços pausados...")
-        
-        id_aviso = dados_pausa.pop("id_aviso_imediato", None)
-        if id_aviso:
-            await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
-            
-        prompt_retorno = (
-            "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
-            "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
-            "vídeos com ofertas voltarão a ser postados normalmente a partir de hoje. "
-            "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
-        )
-        texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
-        msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
-        registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
-        
-        logger.info("✅ Mensagem triunfal de retorno postada no grupo e enviada para a lixeira.")
-            
-        servicos = dados_pausa.get("servicos_pausados", [])
-        
-        if "spam" in servicos:
-            dados_div = ler_alvos_divulgacao()
-            dados_div["pausado"] = False
-            salvar_alvos_divulgacao(dados_div)
-            logger.info("✅ SPAM reativado.")
-        if "rotina" in servicos:
-            dados_rotina = ler_config_rotina()
-            dados_rotina["pausado"] = False
-            salvar_config_rotina(dados_rotina)
-            logger.info("✅ Mensagens de rotina reativadas.")
-        
-        dados_pausa["ativa"] = False
-        dados_pausa["servicos_pausados"] = []
-        salvar_pausa_programada(dados_pausa)
-        retomar_grade_pos_pausa()
-        logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
+        await encerrar_pausa_programada("hoje")
 
 async def gerar_mensagem_gemini(prompt):
     """Texto da IA para as mensagens do grupo; se a IA falhar, uma frase padrão."""
@@ -12894,57 +13093,10 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
     data = await state.get_data()
     data_retorno_str = data["data_retorno_str"]
     selecao = data.get("servicos_selecionados", "")
-    
-    servicos_pausados = []
-    if selecao in ["Pausar Ambos", "Apenas SPAM", "Pausar SPAM"]:
-        dados_div = ler_alvos_divulgacao()
-        dados_div["pausado"] = True
-        salvar_alvos_divulgacao(dados_div)
-        servicos_pausados.append("spam")
-        
-    if selecao in ["Pausar Ambos", "Apenas Rotina", "Pausar Rotina"]:
-        dados_rotina = ler_config_rotina()
-        dados_rotina["pausado"] = True
-        salvar_config_rotina(dados_rotina)
-        servicos_pausados.append("rotina")
-        
-    # Motivo sorteado: o aviso diário reaproveita o mesmo
-    motivos_pausa = [
-        "manutenção preventiva nos servidores para garantir estabilidade",
-        "curadoria minuciosa e validação de um novo lote gigante de vídeos premium de alta conversão",
-        "atualização rigorosa no nosso sistema de proteção contra punições e bloqueios nas redes",
-        "reestruturação interna e organização do acervo para entregar materiais ainda melhores"
-    ]
-    import random
-    motivo_escolhido = random.choice(motivos_pausa)
-    logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
-
-    data_curta = data_retorno_str.split(" ")[0][:5]
-
-    prompt = (
-        f"Você é um assistente de afiliados. Crie um aviso imediato MUITO CURTO E DIRETO "
-        f"informando que as postagens estão pausadas a partir de agora para {motivo_escolhido}. "
-        f"Avise que o retorno será no dia {data_curta}. "
-        f"REGRA ABSOLUTA: Use no máximo 2 a 3 linhas e não ultrapasse 150 caracteres. "
-        f"Seja direto, não peça desculpas longas e não dê explicações chatas. "
-        f"Use emojis e entregue APENAS o texto da mensagem final."
-    )
     msg_status = await message.answer("⏳ Configurando a pausa e gerando o aviso no grupo...", reply_markup=teclado_cancelar)
-    texto_aviso = await gerar_mensagem_gemini(prompt)
-    msg_imediata = await bot.send_message(GRUPO_ID, texto_aviso)
+    await ligar_pausa_programada(data_retorno_str, spam=selecao in ["Pausar Ambos", "Apenas SPAM", "Pausar SPAM"],
+                                 rotina=selecao in ["Pausar Ambos", "Apenas Rotina", "Pausar Rotina"])
     await msg_status.delete()
-    
-    dados_pausa = {
-        "ativa": True,
-        "data_retorno": data_retorno_str,
-        "servicos_pausados": servicos_pausados,
-        "id_aviso_imediato": msg_imediata.message_id, 
-        "motivo": motivo_escolhido 
-    }
-    salvar_pausa_programada(dados_pausa)
-    agendar_fila_postagens()  # com a pausa ativa, só desfaz os agendamentos de hoje
-    
-    logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
     await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO aviso já foi enviado ao grupo. A partir de amanhã, o robô atualizará esse aviso todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
     await state.clear()
 
@@ -12967,46 +13119,9 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
         await message.answer("Por favor, clique em Aprovar Encerramento ✅ ou Cancelar ❌.")
         return
 
-    dados_pausa = ler_pausa_programada()
-    servicos = dados_pausa.get("servicos_pausados", [])
-    
-    id_aviso = dados_pausa.get("id_aviso_imediato")
-    if id_aviso:
-        await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
-        logger.info("🧹 Aviso de pausa antigo excluído do grupo.")
-        
     msg_status = await message.answer("⏳ Gerando mensagem de retorno com a IA...", reply_markup=teclado_cancelar)
-    
-    prompt_retorno = (
-        "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
-        "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
-        "vídeos com ofertas voltarão a ser postados normalmente a partir de agora. "
-        "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
-    )
-    texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
-    
-    # A mensagem de retorno vai para a lixeira (apagada na faxina da madrugada)
-    msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
-    registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
-    
+    await encerrar_pausa_programada("agora")
     await msg_status.delete()
-    
-    if "spam" in servicos:
-        dados_div = ler_alvos_divulgacao()
-        dados_div["pausado"] = False
-        salvar_alvos_divulgacao(dados_div)
-        logger.info("✅ SPAM reativado após encerramento forçado.")
-    if "rotina" in servicos:
-        dados_rotina = ler_config_rotina()
-        dados_rotina["pausado"] = False
-        salvar_config_rotina(dados_rotina)
-        logger.info("✅ Mensagens de rotina reativadas após encerramento forçado.")
-            
-    dados_pausa["ativa"] = False
-    dados_pausa["servicos_pausados"] = []
-    dados_pausa.pop("id_aviso_imediato", None)
-    salvar_pausa_programada(dados_pausa)
-    retomar_grade_pos_pausa()
     
     await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()

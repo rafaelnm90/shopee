@@ -113,6 +113,157 @@ def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatc
     assert bom_dia.date() == agora.date()
 
 
+@pytest.fixture
+def grupo(bm, monkeypatch):
+    """O que o bot manda (chat, texto) e apaga; a IA responde "volta" na mensagem de volta e "aviso" no resto."""
+    estado = SimpleNamespace(mandados=[], apagados=[])
+
+    async def send_message(chat_id, texto, **k):
+        estado.mandados.append((chat_id, texto))
+        return SimpleNamespace(message_id=100 + len(estado.mandados))
+
+    async def apagar(msg_id, chat_id):
+        estado.apagados.append(msg_id)
+
+    async def gerar(prompt):
+        return "volta" if "voltou à ativa" in prompt else "aviso"
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm, "apagar_mensagem_automatica", apagar)
+    monkeypatch.setattr(bm, "gerar_mensagem_gemini", gerar)
+    return estado
+
+
+def _suspensa_ate(bm, quando):
+    """O robô da Shopee Vídeo leu a suspensão até quando (None: ela saiu)."""
+    config = bm.db.ler_config("shopee_video", {}) or {}
+    if quando is None:
+        config.pop("robo_suspenso_ate", None)
+    else:
+        config["robo_suspenso_ate"] = quando.strftime("%Y-%m-%d %H:%M:%S")
+    bm.db.salvar_config("shopee_video", config)
+
+
+def _minuto(bm):
+    """Uma volta do job de minuto em minuto (o fim da pausa e a suspensão)."""
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            await bm.verificar_retorno_pausa_minuto()
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    rodar(cenario())
+
+
+def _pausados(bm):
+    return bm.ler_alvos_divulgacao().get("pausado", False), bm.ler_config_rotina().get("pausado", False)
+
+
+def test_suspensao_da_shopee_video_pausa_o_canal_e_a_pausa_acompanha(bm, grupo, relogio):
+    # Pedido do Rafael (vídeo de 29/10, 18:22; P86 e P87): suspensa a conta de Shopee Vídeo, o
+    # Pausar Postagens do Canal Afiliados se preenche sozinho, com o Pausar Ambos e a volta
+    # quando o robô volta; a pausa acompanha a suspensão.
+    relogio("15:00")
+    agora = datetime.now(bm.fuso_horario).replace(second=0, microsecond=0)
+    ate = agora + timedelta(days=2)
+    _suspensa_ate(bm, ate)
+    _minuto(bm)
+    pausa = bm.ler_pausa_programada()
+    volta = ate + bm.robo_shopee_video.FOLGA_DA_SUSPENSAO
+    assert pausa["ativa"] and pausa["data_retorno"] == volta.strftime("%d/%m/%Y %H:%M")
+    assert pausa["origem"] == bm.ORIGEM_DA_SUSPENSAO and pausa["servicos_pausados"] == ["spam", "rotina"]
+    assert _pausados(bm) == (True, True)
+    assert (bm.GRUPO_ID, "aviso") in grupo.mandados
+    assert any(chat == bm.ADMIN_ID and "pausado sozinho" in texto for chat, texto in grupo.mandados)
+    aviso = pausa["id_aviso_imediato"]
+    # Outra volta do minuto com a mesma suspensão: nada de novo.
+    antes = len(grupo.mandados)
+    _minuto(bm)
+    assert len(grupo.mandados) == antes
+
+    # Data nova: a volta muda e o aviso do grupo é trocado.
+    ate = agora + timedelta(days=3)
+    _suspensa_ate(bm, ate)
+    _minuto(bm)
+    pausa = bm.ler_pausa_programada()
+    assert pausa["data_retorno"] == (ate + bm.robo_shopee_video.FOLGA_DA_SUSPENSAO).strftime("%d/%m/%Y %H:%M")
+    assert aviso in grupo.apagados and pausa["id_aviso_imediato"] != aviso
+    assert any(chat == bm.ADMIN_ID and "mudou" in texto for chat, texto in grupo.mandados)
+
+    # A Shopee tirou a suspensão antes: o canal volta na hora.
+    _suspensa_ate(bm, None)
+    _minuto(bm)
+    pausa = bm.ler_pausa_programada()
+    assert not pausa["ativa"] and "origem" not in pausa
+    assert (bm.GRUPO_ID, "volta") in grupo.mandados and _pausados(bm) == (False, False)
+    assert any(chat == bm.ADMIN_ID and "acabou antes do prazo" in texto for chat, texto in grupo.mandados)
+    resultados = [r[2] for r in bm.registro_processos.contagem("2000-01-01 00:00:00")
+                  if r[1] == bm.PROCESSO_DA_PAUSA_AUTOMATICA]
+    assert sorted(resultados) == sorted(["ligada", "data nova", "encerrada (a suspensão acabou antes)"])
+
+
+def test_pausa_automatica_nao_religa_o_que_o_rafael_pausou(bm, grupo, relogio):
+    relogio("15:00")
+    rotina = bm.ler_config_rotina()
+    rotina["pausado"] = True            # pausada à mão antes da suspensão
+    bm.salvar_config_rotina(rotina)
+    _suspensa_ate(bm, datetime.now(bm.fuso_horario) + timedelta(days=1))
+    _minuto(bm)
+    assert bm.ler_pausa_programada()["servicos_pausados"] == ["spam"]
+    _suspensa_ate(bm, None)
+    _minuto(bm)
+    assert _pausados(bm) == (False, True)
+
+
+def test_suspensao_que_ja_acabou_nao_pausa_de_novo(bm, grupo, relogio):
+    # O robô tira a marca até 15 min depois da volta; nesse meio tempo o canal não pausa de novo.
+    relogio("15:00")
+    _suspensa_ate(bm, datetime.now(bm.fuso_horario) - timedelta(minutes=20))
+    _minuto(bm)
+    assert not bm.ler_pausa_programada().get("ativa") and grupo.mandados == []
+
+
+def test_pausa_feita_a_mao_continua_valendo(bm, grupo, relogio):
+    relogio("15:00")
+    agora = datetime.now(bm.fuso_horario).replace(second=0, microsecond=0)
+    rotina = bm.ler_config_rotina()
+    rotina["pausado"] = True
+    bm.salvar_config_rotina(rotina)
+    manual = {"ativa": True, "servicos_pausados": ["rotina"], "id_aviso_imediato": 7, "motivo": "x",
+              "data_retorno": (agora + timedelta(days=5)).strftime("%d/%m/%Y %H:%M")}
+    bm.salvar_pausa_programada(dict(manual))
+    # Volta mais tarde que a suspensão: fica como o Rafael deixou.
+    _suspensa_ate(bm, agora + timedelta(days=2))
+    _minuto(bm)
+    assert bm.ler_pausa_programada() == manual and grupo.mandados == []
+
+    # Volta antes do fim da suspensão: vai até ele, com o Pausar Ambos.
+    manual["data_retorno"] = (agora + timedelta(days=1)).strftime("%d/%m/%Y %H:%M")
+    bm.salvar_pausa_programada(dict(manual))
+    _minuto(bm)
+    pausa = bm.ler_pausa_programada()
+    volta = agora + timedelta(days=2) + bm.robo_shopee_video.FOLGA_DA_SUSPENSAO
+    assert pausa["data_retorno"] == volta.strftime("%d/%m/%Y %H:%M") and pausa["retorno_manual"] == manual["data_retorno"]
+    assert pausa["servicos_pausados"] == ["rotina", "spam"] and _pausados(bm) == (True, True)
+    assert 7 in grupo.apagados
+
+    # A suspensão acabou antes: volta a pausa feita à mão, com a data e os serviços dela.
+    _suspensa_ate(bm, None)
+    _minuto(bm)
+    pausa = bm.ler_pausa_programada()
+    assert pausa["ativa"] and pausa["data_retorno"] == manual["data_retorno"] and "origem" not in pausa
+    assert pausa["servicos_pausados"] == ["rotina"] and _pausados(bm) == (False, True)
+    assert (bm.GRUPO_ID, "volta") not in grupo.mandados
+
+
+def test_pausar_postagens_do_formulario_e_o_mesmo_de_antes(bm, grupo, Msg, Est):
+    rodar(bm.confirmar_pausa_programada_final(Msg("Confirmar Pausa ✅"), Est(
+        {"data_retorno_str": "30/12/2099 15:00", "servicos_selecionados": "Apenas Rotina"})))
+    pausa = bm.ler_pausa_programada()
+    assert pausa["ativa"] and pausa["servicos_pausados"] == ["rotina"] and "origem" not in pausa
+    assert pausa["motivo"] in bm.MOTIVOS_DA_PAUSA and (bm.GRUPO_ID, "aviso") in grupo.mandados
+    assert _pausados(bm) == (False, True)
+
+
 def test_publicar_agora_pelo_file_id_nao_repete(bm, telegram, Msg, Est, monkeypatch):
     video(bm, "so_fileid")
 
