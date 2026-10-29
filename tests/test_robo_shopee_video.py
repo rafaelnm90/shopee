@@ -794,6 +794,25 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
     assert editados == [(os.path.abspath("archive/vestido.mp4"), b"foto do anuncio", VESTIDO, 59.9, False)]
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS, 1)
+    # Sem a capa com chamada, o rascunho fica no grupo de antes na medição (P76).
+    assert not rascunho["chamada"]
+
+
+def test_rascunho_com_a_capa_com_chamada_fica_marcado_para_a_medicao(monkeypatch, avisos):
+    # Escolha do Rafael (29/10, P76): a medição compara os vídeos com a chamada com os de antes.
+    _fonte(monkeypatch)
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], [
+        ("", robo.edicao_video.COM_LEGENDAS + robo.edicao_video.COM_A_CHAMADA, "")]))
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["chamada"] == "1"
 
 
 def test_produto_recusado_pela_ia_deixa_no_caso_o_produto_e_o_que_ela_viu(monkeypatch, avisos):
@@ -3201,7 +3220,7 @@ def _resultado_no_registro():
 def test_postado_vai_ao_canal_com_o_link_do_post(monkeypatch, avisos, caminho_do_rascunho):
     ident = _aprovado(monkeypatch)
     levados = []
-    monkeypatch.setattr(robo, "link_do_post", lambda d: LINK_DO_POST)
+    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: LINK_DO_POST)
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: levados.append((rascunho["id"], link_post)))
     app = AppComQuadros()
     app.legenda, app.com_produto = TITULO, True
@@ -3686,3 +3705,120 @@ def test_busca_pela_foto_sem_resultado_nao_le_as_recomendacoes(monkeypatch):
     assert robo.buscar_pela_foto(app, b"\xff\xd8\xfffoto") == ([], "a busca pela foto não achou o produto")
     assert "Vendas Populares" not in app.toques and "rolar" not in app.toques
     assert ["rm", "-f", f"{robo.ps.GALERIA}/{robo.ps.NOME_DA_FOTO}.jpg"] in app.comandos
+
+
+# --- As visualizações na grade do Perfil: a medição da capa com chamada (P76) ---
+
+LARGURA_DO_QUADRO, ALTURA_DO_QUADRO = 358, 470
+
+
+def _capa_de_mentira(semente):
+    """Uma capa que dá uma marca só dela (ruído com a semente)."""
+    from PIL import Image
+    gerador = random.Random(semente)
+    pequena = Image.new("L", (12, 12))
+    pequena.putdata([gerador.randrange(256) for _ in range(144)])
+    return pequena.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)).convert("RGB")
+
+
+def _tela_da_grade(quadros):
+    """
+    (xml, print) do Perfil: quadros [(x1, y1, semente ou None, textos)] com o tamanho do
+    Motorola; semente None é o quadro sem a capa carregada (uma cor só).
+    """
+    from PIL import Image
+    imagem = Image.new("RGB", (1080, 2400), "black")
+    nos = []
+    for x1, y1, semente, textos in quadros:
+        y2 = min(y1 + ALTURA_DO_QUADRO, 2400)
+        if semente is not None:
+            imagem.paste(_capa_de_mentira(semente).crop((0, 0, LARGURA_DO_QUADRO, y2 - y1)), (x1, y1))
+        filhos = "".join(_no(t, caixa=(x1 + 20, y2 - 60 - 50 * i, x1 + 200, y2 - 20 - 50 * i), clicavel=False)
+                         for i, t in enumerate(textos))
+        nos.append(_no(caixa=(x1, y1, x1 + LARGURA_DO_QUADRO, y2), filhos=filhos, desc="profile video 1"))
+    return _xml(*nos), imagem
+
+
+class AppDaGrade:
+    """O Perfil em Shopee Vídeo de mentira: cada rolada mostra a próxima tela da grade."""
+
+    def __init__(self, telas):
+        self.telas, self.vez, self.roladas = telas, 0, 0
+
+    def dump_hierarchy(self):
+        return self.telas[self.vez][0]
+
+    def screenshot(self, caminho=None):
+        return self.telas[self.vez][1]
+
+    def window_size(self):
+        return 1080, 2400
+
+    def swipe(self, *pontos):
+        self.roladas += 1
+        self.vez = min(self.vez + 1, len(self.telas) - 1)
+
+
+def _marca(semente):
+    imagem = _capa_de_mentira(semente)
+    return robo.visualizacoes.marca_da_capa(imagem, (0, 0, LARGURA_DO_QUADRO, ALTURA_DO_QUADRO))
+
+
+def test_quadros_da_grade_tiram_o_de_rascunhos_e_o_cortado_e_leem_o_numero():
+    xml, _ = _tela_da_grade([(0, 1210, 1, ["Rascunhos: 1"]), (361, 1210, 2, ["3,4 mil", "Fixado"]),
+                             (722, 1210, 3, ["57"]), (0, 2156, 4, ["9"])])
+    quadros = robo.quadros_da_grade(xml)
+    assert [(q["caixa"][0], q["fixado"], q["vistas"]) for q in quadros] == [(361, True, 3400), (722, False, 57)]
+
+
+def test_post_guarda_a_marca_da_capa_e_espera_a_capa_carregar(monkeypatch):
+    ident = _rascunho("postado", postado_em="2026-10-29 10:00:00")
+    _, sem_capa = _tela_da_grade([(722, 1210, None, ["0"])])
+    _, com_capa = _tela_da_grade([(722, 1210, 7, ["0"])])
+    prints = [sem_capa, com_capa]
+    celular = type("Celular", (), {"screenshot": lambda self, caminho=None: prints.pop(0)})()
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    assert robo.marcar_o_post(celular, ident, caixa) == _marca(7) == robo.pegar(ident)["marca"]
+    # Sem o print, o post segue sem a marca (e o checkup conta).
+    outro = _rascunho("postado", postado_em="2026-10-29 11:00:00")
+    assert robo.marcar_o_post(object(), outro, caixa) is None and not robo.pegar(outro)["marca"]
+
+
+def test_visualizacoes_achadas_pela_marca_na_grade_rolando_ate_o_fim(monkeypatch):
+    # Escolha do Rafael (29/10, P76): os vídeos do robô são achados na grade pela marca da
+    # capa, e o número de cada um fica no rascunho; o que não é do robô fica de fora.
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: None)
+    agora = momento("2026-10-30 09:00")
+    r1 = _rascunho("postado", postado_em="2026-10-23 10:00:00", marca=_marca(16))
+    r2 = _rascunho("postado", postado_em="2026-10-27 10:00:00", marca=_marca(13))
+    # Dois posts com a mesma foto de capa: casam na ordem da grade (o mais novo vem antes).
+    r2b = _rascunho("postado", postado_em="2026-10-28 10:00:00", marca=_marca(13))
+    r3 = _rascunho("postado", postado_em="2026-10-29 20:00:00", marca=_marca(11), chamada="1")
+    velho = _rascunho("postado", postado_em="2026-10-20 10:00:00", marca=_marca(15))
+    sem_marca = _rascunho("postado", postado_em="2026-10-29 21:00:00")
+    linha_2 = [(0, 1683, 12, ["1,2 mil"]), (361, 1683, 13, ["980"]), (722, 1683, 14, ["15"])]
+    tela_1 = _tela_da_grade([(0, 1210, 1, ["Rascunhos: 1"]), (361, 1210, 10, ["3,4 mil", "Fixado"]),
+                             (722, 1210, 11, ["57"])] + linha_2 + [(0, 2156, 15, ["9"])])
+    linha_2_em_cima = [(x, 1210, semente, textos) for x, _y, semente, textos in linha_2]
+    tela_2 = _tela_da_grade(linha_2_em_cima + [(0, 1683, 15, ["9"]), (361, 1683, 16, ["400"]),
+                                               (722, 1683, 13, ["321"])])
+    app = AppDaGrade([tela_1, tela_2])
+    assert robo.anotar_visualizacoes(app, agora) == (4, 4)
+    momento_da_leitura = "2026-10-30 09:00:00"
+    assert robo.pegar(r3)["vistas"] == [[momento_da_leitura, 57]]
+    assert robo.pegar(r2b)["vistas"] == [[momento_da_leitura, 980]]
+    assert robo.pegar(r2)["vistas"] == [[momento_da_leitura, 321]]
+    assert robo.pegar(r1)["vistas"] == [[momento_da_leitura, 400]]
+    assert robo.pegar(velho)["vistas"] == [] and robo.pegar(sem_marca)["vistas"] == []
+    assert app.roladas == 1
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DAS_VISUALIZACOES) == ("lidas", "4 de 4 vídeo(s)", 1)
+    # A medição separa os com a chamada dos de antes (o de 10 dias ainda entra na comparação).
+    medicao = robo.medicao_da_capa(agora)
+    assert (medicao["com"]["videos"], medicao["sem"]["videos"], medicao["sem_marca"]) == (1, 4, 1)
+
+
+def test_sem_video_com_marca_nao_abre_o_perfil(monkeypatch):
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: pytest.fail("não precisava abrir o Perfil"))
+    _rascunho("postado", postado_em="2026-10-29 10:00:00")
+    assert robo.anotar_visualizacoes(object(), momento("2026-10-30 09:00")) == (0, 0)

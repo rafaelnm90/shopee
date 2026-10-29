@@ -100,6 +100,14 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     com algum rascunho salvo**; depois vêm os vídeos **Fixados** (rótulo "Fixado" no
     canto) e só então o mais novo. A grade carrega pela rede depois do Postar vídeo: o
     robô espera até 18 s o quadro aparecer (24/10/2026, a postagem parou sem esperar);
+  - **grade do Perfil, os números (mapeada no Motorola em 29/10/2026):** 3 quadros por
+    linha, de ~359x476 (centros em x 179, 540 e 901; a 1ª linha em y ~1443, a 2ª em ~1921;
+    a 3ª fica cortada pela beirada). Cada vídeo é um quadro com a descrição "... video N";
+    dentro dele, o número de visualizações embaixo (um texto, ~92% da altura do quadro: "123"
+    ou, nos maiores, com letra, como "1,2 mil") e, nos fixados, o texto "Fixado" em cima à
+    esquerda (~9% da altura). A grade não diz qual vídeo é qual: o robô reconhece os dele
+    pela marca da capa (`visualizacoes_shopee_video`), guardada no post, e lê os números uma
+    vez por dia, rolando a grade (medição da capa com chamada, P76);
   - **lista de rascunhos:** o texto de aviso no alto, os quadros (o 1º em ~179,658, com a
     data embaixo) e Selecionar (~933,173). Em Selecionar, o alto vira Cancelar e embaixo
     aparece **"Excluir (N)"** (~539,2312); o toque no quadro o marca. Excluir abre
