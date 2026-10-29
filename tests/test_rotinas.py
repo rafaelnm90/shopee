@@ -223,6 +223,143 @@ def test_rotina_do_principal_depois_do_boa_noite_fica_no_registro(bm, relogio, m
     assert any(l[2] == "fora do expediente (depois do Boa Noite)" and l[3] == "incentivo" for l in linhas)
 
 
+def _texto_por_ultimo_e_video_na_fila(bm, monkeypatch):
+    """O último post do canal foi texto e há vídeo do dia na fila: a intercalação segura a rotina."""
+    monkeypatch.setattr(bm, "contar_videos_pendentes", lambda chat: 2)
+    monkeypatch.setattr(bm, "obter_ultimo_post", lambda chat: "texto")
+
+    async def gerar(prompt):
+        raise Parou()
+    monkeypatch.setattr(bm, "gerar_mensagem_gemini", gerar)
+
+
+def _disparos(bm, tipo, horas, boa_noite=None):
+    """
+    Dispara a rotina em cada hora de horas (o relógio anda entre um e outro, como o bot que
+    tenta de novo) e devolve, de cada uma, o horário do novo disparo ou "saiu".
+    """
+    import time_machine
+    from conftest import _instante
+
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            if boa_noite:
+                bm.scheduler.add_job(bm.disparar_mensagem, 'cron', hour=boa_noite[0], minute=boa_noite[1],
+                                     timezone=bm.FUSO_STR, args=["boa_noite"], id="job_rotina_boa_noite_0")
+            resultados = []
+            for hora in horas:
+                with time_machine.travel(_instante(hora), tick=True):
+                    try:
+                        await bm.disparar_mensagem(tipo)
+                    except Parou:
+                        resultados.append("saiu")
+                        continue
+                    adiados = [j for j in bm.scheduler.get_jobs() if "_intercalado_" in j.id]
+                    resultados.append(adiados[0].next_run_time.astimezone(bm.fuso_horario).strftime("%H:%M:%S"))
+                    for job in adiados:
+                        job.remove()
+            return resultados
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    return rodar(cenario())
+
+
+def test_rotina_espera_o_video_no_maximo_1_hora_e_depois_sai(bm, relogio, monkeypatch):
+    # 29/10, Canal Afiliados: com 1 ou 2 vídeos por dia, a rotina esperava um vídeo o dia todo
+    # e se perdia depois do Boa Noite (2 de 9 até as 16:31). Escolha do Rafael (P84): espera no
+    # máximo 1 h. Cada disparo aqui é uma chamada nova, como depois de um reinício do bot: a
+    # espera fica no banco e não começa de novo.
+    relogio("14:00")
+    hoje = datetime.now(bm.fuso_horario).strftime("%Y-%m-%d")
+    _config(bm, hoje)
+    _texto_por_ultimo_e_video_na_fila(bm, monkeypatch)
+    primeiro, segundo, terceiro = _disparos(bm, "incentivo", ["14:00", "14:50", "15:01"])
+    assert "14:20:00" <= primeiro <= "14:45:59"
+    assert segundo == "15:00:00"                     # o novo disparo não passa de 1 h de espera
+    assert terceiro == "saiu"
+    assert bm.ler_config_rotina()["historico_diario"]["contagem"]["incentivo"] == ["15:01"]
+    linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[2] == "sem esperar mais o vídeo (1 h)" and l[3] == "incentivo" for l in linhas)
+    # Saiu: a próxima do mesmo assunto espera do zero.
+    assert "incentivo" not in bm.db.ler_config(bm.CHAVE_ESPERA_PELO_VIDEO)["desde"]
+
+
+@pytest.mark.parametrize("tipo, horas, boa_noite, adiado, motivo", [
+    ("incentivo", ["19:50", "20:00:30"], None, "20:00:00", "fim da janela"),            # janela 8h às 20h
+    ("divulgar_gem", ["20:30", "20:41"], (21, 10), "20:40:00", "antes do Boa Noite"),   # janela 8h às 22h
+    ("link_grupo_viral", ["20:45", "21:00:30"], (21, 10), "21:00:00", "fim da janela"),  # o Viral não tem Boa Noite
+])
+def test_a_espera_pelo_video_nao_passa_do_fim_da_janela_nem_do_boa_noite(bm, relogio, monkeypatch, tipo, horas,
+                                                                       boa_noite, adiado, motivo):
+    relogio(horas[0])
+    hoje = datetime.now(bm.fuso_horario).strftime("%Y-%m-%d")
+    _config(bm, hoje)
+    _texto_por_ultimo_e_video_na_fila(bm, monkeypatch)
+    assert _disparos(bm, tipo, horas, boa_noite) == [adiado, "saiu"]
+    linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[2] == f"sem esperar mais o vídeo ({motivo})" and l[3] == tipo for l in linhas)
+
+
+# As janelas que o Rafael usa no Canal Afiliados (vídeo de 29/10, 16:44).
+JANELAS_DO_CANAL = {"bom_dia": (7, 8, 1), "incentivo": (10, 20, 2), "link_grupo": (9, 21, 1), "divulgar_gem": (8, 22, 1),
+                    "promo_viral": (10, 20, 1), "promo_publico": (10, 20, 1), "promo_achadinhos": (10, 20, 1),
+                    "boa_noite": (21, 23, 1)}
+
+
+def _janelas_do_canal(bm, **extras):
+    r = bm.ler_config_rotina()
+    r.update({tipo: {"inicio": i, "fim": f, "frequencia": q} for tipo, (i, f, q) in JANELAS_DO_CANAL.items()})
+    r.update({"pausado": False, "historico_diario": {"data": "", "contagem": {}}}, **extras)
+    bm.salvar_config_rotina(r)
+
+
+def _horarios_do_principal(bm):
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            bm.agendar_tarefas_diarias("principal")
+            return {j.id: j.next_run_time.astimezone(bm.fuso_horario) for j in bm.scheduler.get_jobs()
+                    if j.id.startswith("job_rotina_")}
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    return rodar(cenario())
+
+
+def test_rotinas_do_canal_afiliados_saem_na_janela_do_painel(bm, relogio):
+    # 29/10: no Canal Afiliados a janela do painel não entrava no sorteio, e uma rotina de 10h
+    # às 20h podia sair às 9:45. Escolha do Rafael (P85): cada uma sai na janela dela.
+    import random
+    from datetime import timedelta
+    relogio("00:30")
+    _janelas_do_canal(bm)
+    for semente in range(30):
+        random.seed(semente)
+        horarios = _horarios_do_principal(bm)
+        rotinas_do_dia = {ident: quando for ident, quando in horarios.items()
+                          if not ident.startswith(("job_rotina_bom_dia", "job_rotina_boa_noite"))}
+        assert len(rotinas_do_dia) == 7, semente
+        for ident, quando in rotinas_do_dia.items():
+            inicio, fim, _q = JANELAS_DO_CANAL[ident[len("job_rotina_"):].rsplit("_", 1)[0]]
+            assert inicio * 60 <= quando.hour * 60 + quando.minute <= fim * 60, (semente, ident, quando)
+        todas = sorted(horarios.values())
+        assert all(b - a >= timedelta(minutes=10) for a, b in zip(todas, todas[1:])), semente
+
+
+def test_rotina_com_a_janela_de_hoje_ja_passada_sai_logo_antes_do_boa_noite(bm, relogio):
+    # O bot fora do ar ou o painel editado depois do fim da janela: a rotina sai logo, antes do
+    # Boa Noite, para não se perder.
+    relogio("20:30")
+    hoje = datetime.now(bm.fuso_horario).strftime("%Y-%m-%d")
+    _janelas_do_canal(bm, ultimo_bom_dia=hoje, hora_ultimo_bom_dia="07:30")
+    horarios = _horarios_do_principal(bm)
+    boa_noite = horarios["job_rotina_boa_noite_0"]
+    incentivos = [quando for ident, quando in horarios.items() if ident.startswith("job_rotina_incentivo_")]
+    assert len(incentivos) == 2
+    agora = datetime.now(bm.fuso_horario)
+    assert all(agora < quando < boa_noite for quando in incentivos)
+
+
 def _jobs_depois_de(bm, tipo, **kwargs):
     async def cenario():
         bm.scheduler.start()

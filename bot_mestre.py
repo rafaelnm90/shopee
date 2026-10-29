@@ -2126,6 +2126,72 @@ def minutos_desde_a_ultima_no_canal(dados_rotina, canal, agora):
     return (agora.hour * 60 + agora.minute) - (hora * 60 + minuto)
 
 
+# A intercalação segura a rotina, depois de um texto, à espera de um vídeo. No Canal
+# Afiliados, com 1 ou 2 vídeos por dia, ela esperaria o dia todo e se perderia depois do Boa
+# Noite: espera no máximo isto (min) e nunca passa do fim da janela dela no painel; no canal
+# principal, também sai até MINUTOS_ANTES_DO_BOA_NOITE antes do Boa Noite, com folga para o
+# espaçamento. Decisão do Rafael (P84): DECISOES.md, Trabalho com o Claude.
+ESPERA_MAXIMA_PELO_VIDEO = 60
+MINUTOS_ANTES_DO_BOA_NOITE = 30
+# Desde quando cada rotina espera um vídeo ({"data", "desde": {tipo: "AAAA-MM-DD HH:MM:SS"}}),
+# no banco: o reinício do bot (um deploy) apaga os jobs da memória, e a espera não começa de novo.
+CHAVE_ESPERA_PELO_VIDEO = "rotinas_esperando_video"
+
+
+def janela_de_hoje(config, agora):
+    """O começo e o fim de hoje da janela de uma rotina no painel ({"inicio": h, "fim": h})."""
+    inicio = agora.replace(hour=int(config.get("inicio", 0)), minute=0, second=0, microsecond=0)
+    fim = int(config.get("fim", 24))
+    if fim >= 24:
+        return inicio, agora.replace(hour=23, minute=59, second=59, microsecond=0)
+    return inicio, agora.replace(hour=fim, minute=0, second=0, microsecond=0)
+
+
+def boa_noite_de_hoje(agora):
+    """Quando sai o Boa Noite de hoje (o job marcado); None se não sai mais hoje."""
+    job = scheduler.get_job('job_rotina_boa_noite_0')
+    quando = getattr(job, 'next_run_time', None) if job else None
+    if quando and quando.astimezone(fuso_horario).date() == agora.date():
+        return quando.astimezone(fuso_horario)
+    return None
+
+
+def espera_pelo_video_desde(tipo, agora):
+    """Desde quando a rotina espera um vídeo hoje: a 1ª vez que a intercalação a segurou (já anotada)."""
+    hoje = agora.strftime("%Y-%m-%d")
+
+    def alterar(espera):
+        if espera.get("data") != hoje:
+            espera.clear()
+            espera.update({"data": hoje, "desde": {}})
+        return espera["desde"].setdefault(tipo, agora.strftime("%Y-%m-%d %H:%M:%S"))
+    desde = db.atualizar_config(CHAVE_ESPERA_PELO_VIDEO, alterar, {})
+    if not desde:
+        return agora
+    return datetime.strptime(desde, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+
+
+def fim_da_espera_pelo_video(tipo):
+    """A rotina saiu ou se perdeu: a próxima do mesmo assunto começa a esperar do zero."""
+    if tipo in (db.ler_config(CHAVE_ESPERA_PELO_VIDEO, {}) or {}).get("desde", {}):
+        db.atualizar_config(CHAVE_ESPERA_PELO_VIDEO, lambda espera: espera.get("desde", {}).pop(tipo, None), {})
+
+
+def limite_da_espera_pelo_video(tipo, dados_rotina, canal, agora):
+    """
+    Até quando a rotina espera um vídeo: ESPERA_MAXIMA_PELO_VIDEO desde a 1ª espera, sem passar
+    do fim da janela dela nem, no canal principal, de MINUTOS_ANTES_DO_BOA_NOITE antes do Boa
+    Noite. (limite, o que limitou, em texto fixo para o registro.)
+    """
+    limites = [(espera_pelo_video_desde(tipo, agora) + timedelta(minutes=ESPERA_MAXIMA_PELO_VIDEO), "1 h")]
+    if isinstance(dados_rotina.get(tipo), dict):
+        limites.append((janela_de_hoje(dados_rotina[tipo], agora)[1], "fim da janela"))
+    boa_noite = boa_noite_de_hoje(agora) if canal == "canal principal" else None
+    if boa_noite:
+        limites.append((boa_noite - timedelta(minutes=MINUTOS_ANTES_DO_BOA_NOITE), "antes do Boa Noite"))
+    return min(limites, key=lambda limite: limite[0])
+
+
 def proxima_de_outro_assunto(tipo, canal, agora):
     """
     Quando sai hoje a próxima rotina do mesmo canal com outro assunto; None sem nenhuma.
@@ -2210,14 +2276,17 @@ async def _disparar_mensagem(tipo, forcar=False):
     if is_viral and dados_rotina.get("pausado_viral", False):
         logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
         registro_processos.registrar("bot_mestre", processo_rotina, "pausada", tipo)
+        fim_da_espera_pelo_video(tipo)
         return
     if is_publico and dados_rotina.get("pausado_publico", False):
         logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do PÚBLICO estão pausadas.")
         registro_processos.registrar("bot_mestre", processo_rotina, "pausada", tipo)
+        fim_da_espera_pelo_video(tipo)
         return
     if not is_viral and not is_publico and dados_rotina.get("pausado", False):
         logger.warning(f"🛑 Disparo abortado ({tipo}): Rotinas do PRINCIPAL estão pausadas.")
         registro_processos.registrar("bot_mestre", processo_rotina, "pausada", tipo)
+        fim_da_espera_pelo_video(tipo)
         return
 
 
@@ -2244,16 +2313,23 @@ async def _disparar_mensagem(tipo, forcar=False):
                 except Exception:
                     pass
 
-    # Intercalação: não posta dois textos seguidos se ainda há vídeo do dia na fila.
+    # Intercalação: não posta dois textos seguidos se ainda há vídeo do dia na fila. A rotina
+    # espera o vídeo até limite_da_espera_pelo_video; passado ele, sai mesmo depois de outro
+    # texto. Decisão do Rafael (P84): DECISOES.md, Trabalho com o Claude.
     if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
         estoque_videos = contar_videos_pendentes(chat_destino)
         if obter_ultimo_post(chat_destino) == "texto" and estoque_videos > 0:
-            novo_horario = agora_tz + timedelta(minutes=random.randint(20, 45))
-            job_id = f"job_rotina_{tipo}_intercalado_{int(agora_tz.timestamp())}"
-            scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
-            logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
-            registro_processos.registrar("bot_mestre", processo_rotina, "adiada (intercalação)", tipo)
-            return
+            limite, motivo_do_limite = limite_da_espera_pelo_video(tipo, dados_rotina, canal_rotina, agora_tz)
+            if agora_tz < limite:
+                novo_horario = min(agora_tz + timedelta(minutes=random.randint(20, 45)), limite)
+                job_id = f"job_rotina_{tipo}_intercalado_{int(agora_tz.timestamp())}"
+                scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+                logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
+                registro_processos.registrar("bot_mestre", processo_rotina, "adiada (intercalação)", tipo)
+                return
+            logger.info(f"🚦 [Intercalação] '{tipo}' sai sem esperar mais o vídeo ({motivo_do_limite}).")
+            registro_processos.registrar("bot_mestre", processo_rotina, f"sem esperar mais o vídeo ({motivo_do_limite})",
+                                         tipo)
 
     # Mesmo assunto em seguida: a última rotina de hoje neste canal foi deste assunto e há
     # outra, de outro assunto, marcada para hoje; esta sai logo depois dela. Sem outra
@@ -2299,6 +2375,7 @@ async def _disparar_mensagem(tipo, forcar=False):
                 logger.warning(f"🛑 Disparo abortado ({tipo}): Expediente principal fechado.")
                 registro_processos.registrar("bot_mestre", processo_rotina, "fora do expediente (antes do Bom Dia)",
                                              tipo, ok=False)
+                fim_da_espera_pelo_video(tipo)
                 return
                 
             if not is_viral and not is_publico:
@@ -2318,6 +2395,7 @@ async def _disparar_mensagem(tipo, forcar=False):
             if not is_viral and not is_publico and dados_rotina.get("ultimo_boa_noite") == hoje_str:
                 registro_processos.registrar("bot_mestre", processo_rotina, "fora do expediente (depois do Boa Noite)",
                                              tipo, ok=False)
+                fim_da_espera_pelo_video(tipo)
                 return
 
     hora_exata_disparo = agora_tz.strftime("%H:%M")
@@ -2339,6 +2417,7 @@ async def _disparar_mensagem(tipo, forcar=False):
     historico_tipo.append(hora_exata_disparo)
     dados_rotina["historico_diario"]["contagem"][tipo] = historico_tipo
     salvar_config_rotina(dados_rotina)
+    fim_da_espera_pelo_video(tipo)
     if em_seguida:
         registro_processos.registrar("bot_mestre", processo_rotina, rotinas.EM_SEGUIDA_SEM_OUTRO, tipo, ok=None)
 
@@ -2713,18 +2792,23 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
     
     eventos_fixos.sort()
     
-    def encontrar_maior_lacuna_e_inserir(duracao_minima=15):
+    def encontrar_maior_lacuna_e_inserir(duracao_minima=15, janela=None):
+        """
+        O meio da maior lacuna entre os eventos do dia, já marcado como evento; None se a maior
+        não tem duracao_minima (min). Com janela (o começo e o fim de hoje), só conta a parte de
+        cada lacuna dentro dela.
+        """
         maior_gap = timedelta(0)
         ponto_insercao = None
-        idx_insercao = -1
-        for i in range(len(eventos_fixos) - 1):
-            gap = eventos_fixos[i+1] - eventos_fixos[i]
-            if gap > maior_gap:
-                maior_gap = gap
-                ponto_insercao = eventos_fixos[i] + (gap / 2)
-                idx_insercao = i + 1
-        if maior_gap.total_seconds() / 60 >= duracao_minima:
-            eventos_fixos.insert(idx_insercao, ponto_insercao)
+        for comeco, fim in zip(eventos_fixos, eventos_fixos[1:]):
+            if janela:
+                comeco, fim = max(comeco, janela[0]), min(fim, janela[1])
+            if fim - comeco > maior_gap:
+                maior_gap = fim - comeco
+                ponto_insercao = comeco + (maior_gap / 2)
+        if ponto_insercao and maior_gap.total_seconds() / 60 >= duracao_minima:
+            eventos_fixos.append(ponto_insercao)
+            eventos_fixos.sort()
             return ponto_insercao
         return None
 
@@ -2767,15 +2851,25 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
         ultimo_tipo_agendado = None
         for tipo, indice in tarefas_para_distribuir:
             duracao_min_gap = 60 if tipo == ultimo_tipo_agendado else 20
-            horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=duracao_min_gap)
+            # Cada rotina sai dentro da janela dela no painel, como no Viral e no Grupo Público.
+            # Decisão do Rafael (P85): DECISOES.md, Trabalho com o Claude.
+            janela = janela_de_hoje(dados_rotina[tipo], agora)
+            horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=duracao_min_gap, janela=janela)
             if horario_ideal:
                 job_id = f"job_rotina_{tipo}_{indice}"
                 scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_ideal, manter_horarios),
                                   args=[tipo], id=job_id, replace_existing=True)
                 ultimo_tipo_agendado = tipo
             else:
+                # Sem lacuna livre na janela: um horário dela que ainda vem, entre o Bom Dia e o
+                # Boa Noite. Com a janela de hoje já passada (o bot fora do ar, o painel editado
+                # tarde), sai logo, para não se perder.
+                comeco = max(agora + timedelta(minutes=2), fronteira_inicial, janela[0])
+                fim = min(fronteira_final, janela[1])
                 minutos_offset = random.randint(30, 90) if tipo == ultimo_tipo_agendado else random.randint(15, 60)
                 horario_fallback = agora + timedelta(minutes=minutos_offset)
+                if comeco < fim:
+                    horario_fallback = comeco + (fim - comeco) * random.random()
                 if horario_fallback <= fronteira_inicial: horario_fallback = fronteira_inicial + timedelta(minutes=random.randint(15, 45))
                 if horario_fallback >= fronteira_final:
                     horario_fallback = fronteira_final - timedelta(minutes=random.randint(5, 30))
