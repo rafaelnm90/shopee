@@ -1906,3 +1906,88 @@ def test_juntar_vistas_nao_conta_duas_vezes():
     assert ps._juntar_vistas([["A", "B"], ["B", "C"], ["C", "D"], ["C", "D"]]) == ["A", "B", "C", "D"]
     assert ps._juntar_vistas([["A", "B"], ["C"]]) == ["A", "B", "C"]
     assert ps._juntar_vistas([]) == []
+
+
+class AparelhoQueArrasta(Aparelho):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.arrastos = []
+
+    def drag(self, x1, y1, x2, y2, segundos):
+        self.arrastos.append((x1, y1, x2, y2))
+
+
+def test_arrastar_move_devagar_e_nunca_solta_num_botao_proibido():
+    # Para mover o texto na tela da capa (P109). O dedo sai da tela no fim do arrasto: nem o
+    # começo nem o fim podem cair no Postar.
+    assert ps.separar_passos("arrastar:540,1300,540,1700") == [("arrastar", "540,1300,540,1700")]
+    aparelho = AparelhoQueArrasta()
+    assert ps.fazer_passo(aparelho, "arrastar", "100,300,150,600") == (True, "arrastado de (100,300) a (150,600)")
+    assert aparelho.arrastos == [(100, 300, 150, 600)]
+    assert ps.fazer_passo(aparelho, "arrastar", "100,300,300,1230") == (False, ps.RECUSA)
+    assert ps.fazer_passo(aparelho, "arrastar", "300,1230,100,300") == (False, ps.RECUSA)
+    assert ps.fazer_passo(aparelho, "arrastar", "100,300") == (False, "arrastar pede X1,Y1,X2,Y2")
+    assert aparelho.arrastos == [(100, 300, 150, 600)]
+
+
+def test_caso_guarda_a_tela_para_o_claude_e_nada_no_log(monkeypatch):
+    guardados = []
+
+    def guardar(d, acao, resultado, motivo, passo=""):
+        guardados.append((acao, resultado, motivo, passo))
+        return "pasta"
+
+    monkeypatch.setattr(ps.casos_robo, "guardar", guardar)
+    assert ps.separar_passos("caso; caso:capa com texto") == [("caso", ""), ("caso", "capa com texto")]
+    assert ps.fazer_passo(Aparelho(), "caso", "capa com texto") == (
+        True, "tela guardada para o Claude (casos_robo.yml exportar)")
+    assert ps.fazer_passo(Aparelho(), "caso", "") == (True, "tela guardada para o Claude (casos_robo.yml exportar)")
+    assert guardados == [("explorar", "tela", "capa com texto", "explorar"),
+                         ("explorar", "tela", "tela do explorar", "explorar")]
+    monkeypatch.setattr(ps.casos_robo, "guardar", lambda *a, **k: None)
+    assert ps.fazer_passo(Aparelho(), "caso", "") == (False, "a tela não foi guardada")
+
+
+def test_video_editado_vai_para_a_galeria_no_lugar_do_video_do_teste(monkeypatch, tmp_path):
+    # O 1º quadro do vídeo vira a capa no Selecionar Capa: o editado começa com a foto do
+    # anúncio, como os posts do robô (P109).
+    import edicao_video
+    original = tmp_path / "original.mp4"
+    original.write_bytes(b"video")
+    monkeypatch.setattr(ps, "video_do_teste", lambda novo=False, de_video=False: {
+        "arquivo": str(original), "link": "https://s.shopee.com.br/produto"})
+    monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {"foto": b"\xff\xd8\xfffoto", "nome": "Produto"})
+    editados, na_galeria = [], []
+
+    def editar(video, foto, destino):
+        editados.append((video, foto))
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return ""
+
+    def por_na_galeria(d, arquivo, nome=ps.NOME_NA_GALERIA):
+        with open(arquivo, "rb") as aberto:
+            na_galeria.append((aberto.read(), nome))
+        return True
+
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    monkeypatch.setattr(ps, "por_na_galeria", por_na_galeria)
+    assert ps.fazer_passo(Aparelho(), "video", "editado") == (True, "vídeo editado na galeria")
+    assert editados == [(str(original), b"\xff\xd8\xfffoto")]
+    # O mesmo nome do vídeo do teste: o video:apagar tira também o editado.
+    assert na_galeria == [(b"editado", ps.NOME_NA_GALERIA)]
+    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino: "a foto do anúncio não abre")
+    assert ps.fazer_passo(Aparelho(), "video", "editado") == (False, "a edição não saiu: a foto do anúncio não abre")
+    monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {})
+    ok, texto = ps.fazer_passo(Aparelho(), "video", "editado")
+    assert not ok and texto.startswith("sem a foto do anúncio")
+    assert na_galeria == [(b"editado", ps.NOME_NA_GALERIA)]
+
+
+def test_print_da_capa_diz_que_e_o_exemplo_para_aprovar(monkeypatch):
+    legendas = []
+    monkeypatch.setattr(ps, "mandar_print", lambda d, legenda=ps.LEGENDA_PRINT: legendas.append(legenda) or True)
+    for argumento in ("", "postar", "capa"):
+        assert ps.fazer_passo(Aparelho(), "print", argumento) == (True, "print mandado no privado")
+    assert legendas == [ps.LEGENDA_PRINT, ps.LEGENDA_PRINT_POSTAR, ps.LEGENDA_PRINT_CAPA]
+    assert "aprova" in ps.LEGENDA_PRINT_CAPA and "não vai ao ar" in ps.LEGENDA_PRINT_CAPA
