@@ -1731,8 +1731,9 @@ def test_ia_dos_produtos_a_mais_ve_as_fotos_de_uma_vez_e_fica_so_o_confirmado_na
     assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa Térmica", anuncios, capa=capa) == ([2], "a 3 é igual")
     arquivo, prompt, imagens = pedidos[0]
     assert arquivo == "v.mp4" and '"Garrafa Térmica"' in prompt and len(pedidos) == 2
-    # A capa do anúncio do post vai primeiro, e cada anúncio só vale com a mesma foto de capa (P74).
-    assert ps.REGRA_DA_CAPA in prompt and imagens[0][0] == capa
+    # A capa do anúncio do post vai primeiro, como o produto do post; a foto de cada anúncio pode
+    # ser outra (P102).
+    assert ps.A_CAPA_PODE_SER_OUTRA in prompt and imagens[0][0] == capa
     assert [(tipo, rotulo) for _foto, tipo, rotulo in imagens] == [
         ("image/jpeg", ps.ROTULO_DA_CAPA), ("image/jpeg", "Anúncio 1: Garrafa A"), ("image/png", "Anúncio 2: Garrafa B"),
         ("image/jpeg", "Anúncio 3: Garrafa C")]
@@ -1752,30 +1753,34 @@ def test_ia_dos_produtos_a_mais_ve_as_fotos_de_uma_vez_e_fica_so_o_confirmado_na
     assert pedidos == []
 
 
-def test_ia_dos_produtos_a_mais_diz_quantos_ficaram_de_fora_pela_capa_e_por_outro_produto(monkeypatch):
-    # 30/10: 8 na IA e 2 confirmados, sem saber se os outros eram outro produto ou o mesmo com
-    # outra foto de capa (P74). A IA diz os de outra capa; a escolha não muda.
-    respostas = ['{"iguais": [1, 2], "outra_capa": [2, 3], "motivo": "x"}',
-                 '{"iguais": [1], "outra_capa": [2, 3, "?"], "motivo": "y"}']
+def test_ia_dos_produtos_a_mais_aceita_o_mesmo_produto_com_outra_foto_de_capa(monkeypatch):
+    # Escolha do Rafael (30/10, P102): basta ser o mesmo produto; a foto de capa pode ser outra
+    # (cada loja usa a sua). A IA não separa mais os de outra capa, e o registro conta só os que
+    # ficaram de fora por serem outro produto.
+    pedidos, respostas = [], ['{"iguais": [1, 2, 4], "motivo": "o mesmo cubo"}',
+                              '{"iguais": [1, 2], "outra_capa": [2], "motivo": "y"}']
 
     async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(prompt)
         return respostas.pop(0)
 
     monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
-    anuncios = [(f"Garrafa {letra}", b"\xff\xd8" + letra.encode()) for letra in "ABCD"]
+    anuncios = [(f"Cubo {letra}", b"\xff\xd8" + letra.encode()) for letra in "ABCD"]
     recusas = {}
-    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios, capa=b"\xff\xd8capa",
-                                recusas=recusas) == ([0], "y")
-    assert recusas == {"outra capa": 2, "outro produto": 1}
-    assert '"outra_capa"' in ps.PROMPT_ITENS_IGUAIS
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Cubo", anuncios, capa=b"\xff\xd8capa",
+                                recusas=recusas) == ([0, 1], "y")
+    assert recusas == {"outro produto": 2}
+    assert "outra_capa" not in pedidos[0] and "mesma foto de capa" not in pedidos[0]
+    assert ps.A_CAPA_PODE_SER_OUTRA in pedidos[0]
 
 
-def test_troca_de_loja_so_confere_com_o_mesmo_produto_e_a_mesma_foto_de_capa(monkeypatch):
-    # Escolha do Rafael (29/10, P74): o anúncio de outra loja só entra no lugar do produto do link
-    # com a mesma foto de capa do anúncio do post (selo ou moldura da loja por cima pode).
+def test_troca_de_loja_confere_o_mesmo_produto_mesmo_com_outra_foto_de_capa(monkeypatch):
+    # Escolha do Rafael (30/10, P102): o anúncio de outra loja entra no lugar do produto do link
+    # sendo o mesmo produto, mesmo com outra foto de capa; a capa do post vai junto como o
+    # produto do post.
     import registro_processos as rp
-    pedidos, respostas = [], ['{"confere": true, "mesma_capa": true, "motivo": "a mesma folha"}',
-                              '{"confere": true, "mesma_capa": true, "motivo": "a mesma foto"}']
+    pedidos, respostas = [], ['{"confere": true, "motivo": "a mesma folha, outra foto"}',
+                              '{"confere": true, "motivo": "o mesmo produto"}']
 
     async def analisar(arquivo, prompt, imagens=None):
         pedidos.append((prompt, imagens))
@@ -1786,18 +1791,19 @@ def test_troca_de_loja_so_confere_com_o_mesmo_produto_e_a_mesma_foto_de_capa(mon
     monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\x89PNGoutra")
     capa, vistos = b"\xff\xd8capa", []
     ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, vistos, avisar=False, capa=capa)
-    assert ok and "foto de capa" in motivo and vistos == ["a mesma folha", "a mesma foto"]
+    assert ok and "capa do post" in motivo and vistos == ["a mesma folha, outra foto", "o mesmo produto"]
     prompt, imagens = pedidos[0]
-    assert ps.REGRA_DA_CAPA in prompt and '"Folhas Prontas Depilsam"' in prompt
+    assert ps.A_CAPA_PODE_SER_OUTRA in prompt and '"Folhas Prontas Depilsam"' in prompt
+    assert "mesma_capa" not in prompt
     assert [(foto, rotulo) for foto, _tipo, rotulo in imagens] == [
         (capa, ps.ROTULO_DA_CAPA), (b"\x89PNGoutra", "Anúncio de outra loja: Folhas Prontas Depilsam")]
     assert ("conferência da IA (produto × vídeo)", "confere", "com a foto do anúncio e a capa do post") in [
         (l[1], l[2], l[3]) for l in rp.contagem("2000-01-01 00:00:00")]
-    # O mesmo produto com outra foto de capa não confere; nem sem a foto do anúncio de outra loja.
+    # Outro produto não confere; nem sem a foto do anúncio de outra loja.
     pedidos.clear()
-    respostas[:] = ['{"confere": true, "mesma_capa": false, "motivo": "outra foto, de outro ângulo"}']
+    respostas[:] = ['{"confere": false, "motivo": "outro modelo"}']
     ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=capa)
-    assert not ok and "outra foto de capa" in motivo and len(pedidos) == 1
+    assert not ok and "outro produto" in motivo and len(pedidos) == 1
     monkeypatch.setattr(ps, "foto_do_produto", lambda video: None)
     ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=capa)
     assert not ok and motivo == "sem a foto do anúncio para comparar com a capa do post" and len(pedidos) == 1

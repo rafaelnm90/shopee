@@ -605,7 +605,7 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar")
+           "falhas_ao_postar", "outras_capas")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -619,8 +619,10 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # links_dos_produtos: no Ver Produtos, o link de cada produto anexado, na ordem do post ("" no que
 # a API não achou), para o Rafael conferir no rascunho, produto por produto (P83).
 # falhas_ao_postar: quantas vezes o aprovado não saiu na hora de postar (P99); zera ao aprovar.
+# outras_capas: as posições (1, 2, ...) dos produtos do post cuja foto de capa não é a do anúncio
+# do post: o álbum e o texto do rascunho as marcam (P102).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
-                 "links_dos_produtos", "falhas_ao_postar")
+                 "links_dos_produtos", "falhas_ao_postar", "outras_capas")
 
 
 def _criar_tabela(con):
@@ -647,6 +649,7 @@ def _linha_para_dict(linha):
     rascunho["capas"] = json.loads(rascunho["capas"] or "[]")
     rascunho["vistas"] = json.loads(rascunho["vistas"] or "[]")
     rascunho["links_dos_produtos"] = json.loads(rascunho["links_dos_produtos"] or "[]")
+    rascunho["outras_capas"] = json.loads(rascunho["outras_capas"] or "[]")
     return rascunho
 
 
@@ -669,7 +672,7 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos"):
+    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2368,7 +2371,8 @@ def _trocar_pela_maior_comissao(video):
     if not original["preco"]:
         anotar("mantido - a API não disse o preço do produto do link")
         return None
-    # Só o anúncio com a mesma foto de capa do anúncio do post entra no lugar dele (P74).
+    # A capa do anúncio do post vai à IA como o produto do post; a do anúncio de outra loja
+    # pode ser outra (P102), e o álbum do rascunho marca a diferente.
     capa = foto_do_anuncio(original.get("imagem"))
     if not capa:
         anotar("mantido - sem a foto de capa do post")
@@ -2409,8 +2413,8 @@ PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
 # Em que minuto do rascunho a busca começou e quanto levou cada parte, com o mesmo resultado
 # da linha da contagem: a régua de MINUTOS_PARA_OS_ESPACOS.
 PROCESSO_DO_TEMPO_DOS_ESPACOS = "espaços livres: tempo de cada parte"
-# Por que a IA deixou os outros anúncios de fora: o mesmo produto com outra foto de capa (P74)
-# ou outro produto. Pedido do Rafael (30/10): o que dificulta achar a causa vira registro.
+# Quantos anúncios a IA deixou de fora por serem outro produto (a outra foto de capa não tira,
+# P102). Pedido do Rafael (30/10): o que dificulta achar a causa vira registro.
 PROCESSO_DAS_RECUSAS_DA_IA = "espaços livres: por que a IA deixou de fora"
 # Por que o cartão não foi achado pelo nome na API, numa linha à parte: a busca sem nenhuma
 # oferta, uma oferta de nome parecido (o anúncio com o nome um pouco diferente do cartão) ou só
@@ -2662,8 +2666,8 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
     if time.monotonic() > prazo:
         anotar("nenhum - sem tempo na rodada")
         return []
-    # A capa do anúncio do post: a busca pela foto parte dela, e cada produto a mais tem de ter
-    # a mesma foto de capa (P74).
+    # A capa do anúncio do post: a busca pela foto parte dela, e ela vai à IA como o produto do
+    # post. A foto do produto a mais pode ser outra (P102); o álbum do rascunho marca a diferente.
     capa = foto_do_anuncio(original.get("imagem"))
     if not capa:
         anotar("nenhum - sem a foto de capa do post")
@@ -2729,12 +2733,9 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
                 mais.append({**candidato, "link": link})
         contagem += f", {len(fotos)} na IA, {len(posicoes)} confirmados"
         if recusas and len(posicoes) < len(fotos):
-            # Por que a IA deixou os outros de fora, numa linha à parte (a contagem já enche o
-            # detalhe): o mesmo produto com outra capa (P74) ou outro produto. O checkup mostra
-            # qual regra mais segura os produtos a mais.
+            # Quantos a IA deixou de fora, numa linha à parte (a contagem já enche o detalhe).
             registro_processos.registrar(REGISTRO, PROCESSO_DAS_RECUSAS_DA_IA, "de fora pela IA",
-                                         f"outra capa {recusas.get('outra capa', 0)}, outro produto "
-                                         f"{recusas.get('outro produto', 0)} (de {len(fotos)} na IA)")
+                                         f"outro produto {recusas.get('outro produto', 0)} (de {len(fotos)} na IA)")
         if mais:
             anotar("achados", f"{len(mais)} a mais; {contagem}", ok=True)
         else:
@@ -2841,7 +2842,7 @@ def guardar_capas(ident, video, produtos):
     for n, produto in enumerate(produtos, 1):
         # O álbum é para o Rafael revisar: a foto que falha não derruba o rascunho já anexado.
         try:
-            foto = produto.get("foto") or ps.anuncio_do_produto(dict(video, link=produto["link"])).get("foto")
+            foto = foto_do_produto_do_post(video, produto)
             if not foto:
                 continue
             caminho = os.path.join(PASTA_RASCUNHOS, f"{ident}_capa_{n}.{ps.extensao_da_foto(foto) or 'jpg'}")
@@ -2851,6 +2852,63 @@ def guardar_capas(ident, video, produtos):
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto de capa de um produto não foi guardada: {type(e).__name__}")
     return caminhos
+
+
+def foto_do_produto_do_post(video, produto):
+    """
+    A foto de capa (bytes) de um produto do post: a do produto a mais veio da conferência; a do
+    produto do link (ou da troca) vem da API e fica guardada no produto, para o álbum e a marca da
+    outra foto não a baixarem de novo. None quando não vem.
+    """
+    if not produto.get("foto"):
+        try:
+            produto["foto"] = ps.anuncio_do_produto(dict(video, link=produto["link"])).get("foto")
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto de capa de um produto não veio: {type(e).__name__}")
+            return None
+    return produto.get("foto")
+
+
+# A parte da foto que entra na marca da comparação, em fração da largura e da altura: sem a
+# borda, onde a loja põe selo, moldura ou texto.
+MIOLO_DA_FOTO = (0.1, 0.9)
+
+
+def mesma_foto(foto, outra):
+    """
+    Se as duas fotos (bytes) são a mesma imagem, pela marca do miolo (o dHash da medição da capa,
+    visualizacoes_shopee_video): o selo, a moldura ou o texto que a loja põe na borda não contam.
+    None quando alguma não abre ou não tem desenho para a marca.
+    """
+    from PIL import Image
+    marcas = []
+    for dados in (foto, outra):
+        try:
+            imagem = Image.open(io.BytesIO(dados or b"")).convert("RGB")
+        except Exception:
+            return None
+        largura, altura = imagem.size
+        de, ate = MIOLO_DA_FOTO
+        marca = visualizacoes.marca_da_capa(imagem, (int(largura * de), int(altura * de),
+                                                     int(largura * ate), int(altura * ate)))
+        if not marca:
+            return None
+        marcas.append(marca)
+    return visualizacoes.diferenca(*marcas) <= visualizacoes.MARCA_PARECIDA
+
+
+def com_outra_foto_de_capa(video, produtos, capa):
+    """
+    As posições (1, 2, ...) dos produtos do post cuja foto de capa não é a do anúncio do post
+    (capa, em bytes): o álbum e o texto do rascunho as marcam, para o Rafael conferir antes de
+    aprovar. A comparação é da imagem (mesma_foto), não da IA, que confunde o mesmo produto com
+    a mesma foto. Sem a capa do post, nenhuma; a foto que não abre não é marcada.
+    Escolha do Rafael (30/10, P102): DECISOES.md, Shopee Vídeo.
+    """
+    if not capa:
+        return []
+    return [n for n, produto in enumerate(produtos, 1)
+            if mesma_foto(foto_do_produto_do_post(video, produto), capa) is False]
 
 
 def itens_postados():
@@ -3027,8 +3085,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
         ordem = [produtos[i] for i in no_post]
+        capas = guardar_capas(ident, video, ordem) if len(ordem) > 1 else []
+        # Os de outra foto de capa que a do anúncio do post vêm marcados (P102).
+        outras = com_outra_foto_de_capa(video, ordem, foto_do_anuncio(original.get("imagem"))) if capas else []
         atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
-                  itens=_itens(ordem), capas=guardar_capas(ident, video, ordem) if len(ordem) > 1 else [])
+                  itens=_itens(ordem), capas=capas, outras_capas=outras)
     else:
         atualizar(ident, produtos=anexados, links_dos_produtos=links_do_ver_produtos(anexados))
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
