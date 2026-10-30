@@ -211,6 +211,8 @@ LADO_MAXIMO_FLUTUANTE = 400
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 # A foto do anúncio na galeria, para a busca pela foto que o Rafael mostrou em vídeo
 # (28/10/2026): a extensão sai dos bytes, porque a galeria do Android reconhece a foto por ela.
+# O nome começa assim e leva a hora: com o mesmo nome toda vez, a galeria e o app ficavam com
+# a imagem da busca anterior e buscavam por ela (29/10: óculos de sol na de um liquidificador).
 NOME_DA_FOTO = "busca_pela_foto"
 EXTENSOES_DA_FOTO = (("jpg", b"\xff\xd8\xff"), ("png", b"\x89PNG"))
 SEGUNDOS_DEPOIS_DO_PASSO = 3
@@ -1592,15 +1594,23 @@ def extensao_da_foto(dados):
     return "webp" if dados[:4] == b"RIFF" and dados[8:12] == b"WEBP" else None
 
 
-def por_foto_na_galeria(d, dados, nome=NOME_DA_FOTO):
+def nome_novo_da_foto():
+    """Um nome que a galeria nunca viu para a foto da busca: NOME_DA_FOTO e a hora."""
+    return f"{NOME_DA_FOTO}_{time.time_ns()}"
+
+
+def por_foto_na_galeria(d, dados, nome=None):
     """
     Copia a foto para a câmera do Android e avisa a galeria: a mais nova é a que a busca
-    pela foto mostra primeiro em "Pesquisar na galeria". True se ela apareceu na galeria.
+    pela foto mostra primeiro em "Pesquisar na galeria". O nome é novo a cada vez
+    (nome_novo_da_foto, quando não vem). O nome do arquivo na galeria, para tirar depois;
+    "" se ela não apareceu na galeria.
     """
     extensao = extensao_da_foto(dados or b"")
     if not extensao:
-        return False
-    destino = f"{GALERIA}/{nome}.{extensao}"
+        return ""
+    arquivo_na_galeria = f"{nome or nome_novo_da_foto()}.{extensao}"
+    destino = f"{GALERIA}/{arquivo_na_galeria}"
     with tempfile.NamedTemporaryFile(suffix="." + extensao, delete=False) as arquivo:
         arquivo.write(dados)
     try:
@@ -1612,15 +1622,20 @@ def por_foto_na_galeria(d, dados, nome=NOME_DA_FOTO):
     time.sleep(3)
     lista = d.shell(["content", "query", "--uri", "content://media/external/images/media",
                      "--projection", "_display_name"])
-    return f"{nome}.{extensao}" in getattr(lista, "output", "")
+    return arquivo_na_galeria if arquivo_na_galeria in getattr(lista, "output", "") else ""
 
 
-def tirar_foto_da_galeria(d, nome=NOME_DA_FOTO):
-    """Tira da câmera do Android a foto da busca, em qualquer extensão, e avisa a galeria."""
-    for extensao in ("jpg", "png", "webp"):
-        caminho = f"{GALERIA}/{nome}.{extensao}"
-        d.shell(["rm", "-f", caminho])
-        d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + caminho])
+def tirar_foto_da_galeria(d, arquivo=""):
+    """
+    Tira da câmera do Android as fotos da busca (todas as que começam por NOME_DA_FOTO,
+    também a que uma busca interrompida deixou) e avisa a galeria da usada agora e das de
+    nome antigo, sem a hora.
+    """
+    d.shell(["find", GALERIA, "-maxdepth", "1", "-name", f"{NOME_DA_FOTO}*", "-delete"])
+    nomes = ([arquivo] if arquivo else []) + [f"{NOME_DA_FOTO}.{extensao}" for extensao in ("jpg", "png", "webp")]
+    for nome in nomes:
+        d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d",
+                 f"file://{GALERIA}/{nome}"])
 
 
 # --- Busca pela foto (mapeada no Motorola em 28 e 29/10/2026; o caminho está no roteiro) ---
