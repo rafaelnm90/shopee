@@ -33,6 +33,9 @@ COMENTARIOS_NO_FEED_POR_DIA = 3
 # visto. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
 POUCOS_COMENTARIOS = 20
 TAMANHO_DA_RESPOSTA = 150
+# A resposta do robô lida no painel tem pelo menos tantas letras e números (ou todos, na
+# resposta mais curta): o painel corta a longa no fim, mas não a ponto de virar uma palavra.
+MINIMO_DA_RESPOSTA = 20
 TAMANHO_DO_COMENTARIO = 80
 # Os estados de um comentário em que ele não volta mais.
 FINAIS = frozenset({"respondido", "já respondido", "pulado", "desistiu", "anterior", "lugar errado"})
@@ -258,17 +261,49 @@ def do_criador_embaixo(comentarios, i):
     return sum(1 for c in respostas_embaixo(comentarios, i) if c["criador"])
 
 
+def _e_a_resposta(texto, resposta):
+    """
+    O texto lido na tela é a resposta do robô, mesmo cortada no fim? Um comentário curto
+    que só começa igual a ela (o "Lindo" da pessoa e o "Lindo demais! ..." do robô) não é.
+    """
+    return parecidos(texto, resposta) and len(_chave(texto)) >= min(len(_chave(resposta)), MINIMO_DA_RESPOSTA)
+
+
+def _de_cima(comentarios, j):
+    """O comentário de cima da linha j (ela mesma, se não é resposta), ou None se ele não está na tela."""
+    return next((k for k in range(j, -1, -1) if not comentarios[k]["resposta"]), None)
+
+
 def onde_ficou(comentarios, i, resposta):
     """
     Onde a resposta do robô apareceu: "embaixo" (do comentário i, como devia), "outro
-    lugar" (embaixo de outro comentário ou solta na lista) ou None (não apareceu).
+    lugar" (embaixo de outro comentário que está na tela, ou solta na lista) ou None (não
+    apareceu, ou só sem o comentário de cima dela na tela: não dá para dizer onde ficou).
     """
-    if i is not None and any(c["criador"] and parecidos(c["texto"], resposta)
-                             for c in respostas_embaixo(comentarios, i)):
+    if i is not None and any(_e_a_resposta(c["texto"], resposta) for c in respostas_embaixo(comentarios, i)):
         return "embaixo"
-    if any(parecidos(c["texto"], resposta) for c in comentarios):
+    if any(_e_a_resposta(c["texto"], resposta) and _de_cima(comentarios, j) not in (None, i)
+           for j, c in enumerate(comentarios)):
         return "outro lugar"
     return None
+
+
+def como_ficou(comentarios, i, resposta):
+    """
+    O que o painel mostra da resposta do robô, em rótulos fixos (sem nome nem texto), para
+    o registro: o comentário da pessoa na tela ou não, onde a resposta aparece e se tem o
+    selo Criador.
+    """
+    if not comentarios:
+        return "painel sem comentários na tela"
+    comentario = "comentário na tela" if i is not None else "comentário fora da tela"
+    j = next((j for j, c in enumerate(comentarios) if _e_a_resposta(c["texto"], resposta)), None)
+    if j is None:
+        return f"{comentario}, resposta não vista"
+    dono = _de_cima(comentarios, j)
+    lugar = ("resposta solta na lista" if dono == j else "resposta sem o comentário de cima na tela" if dono is None
+             else "resposta embaixo dele" if dono == i else "resposta embaixo de outro comentário")
+    return f"{comentario}, {lugar}, {'com' if comentarios[j]['criador'] else 'sem'} o selo Criador"
 
 
 def produto_do_painel(xml):
