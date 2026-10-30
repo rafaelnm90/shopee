@@ -129,6 +129,35 @@ def test_onde_ficou_a_resposta():
                                               _comentario("Loja Rafa", resposta, 1750, resposta=True, criador=True)))
     assert it.onde_ficou(errado, 0, resposta) == "outro lugar"
     assert it.onde_ficou(certo, 0, "outra coisa") is None
+    assert it.como_ficou(certo, 0, resposta) == "comentário na tela, resposta embaixo dele, com o selo Criador"
+    assert it.como_ficou(errado, 0, resposta) == ("comentário na tela, resposta embaixo de outro comentário, "
+                                                  "com o selo Criador")
+    assert it.como_ficou(certo, 0, "outra coisa") == "comentário na tela, resposta não vista"
+    assert it.como_ficou([], None, resposta) == "painel sem comentários na tela"
+
+
+def test_resposta_so_fica_no_lugar_errado_com_o_comentario_de_cima_dela_na_tela():
+    resposta = "Tem sim! Corre que esse vestido é sucesso"
+    # Logo depois de enviar, o painel pode mostrar a resposta com o comentário de cima dela
+    # fora da tela (Motorola, 30/10/2026): não dá para dizer onde ela ficou.
+    rolado = it.comentarios_do_painel(_painel(_comentario("Loja Rafa", resposta, 960, resposta=True, criador=True),
+                                              _comentario("João", "Chegou rápido", 1250)))
+    assert it.onde_ficou(rolado, None, resposta) is None
+    assert it.como_ficou(rolado, None, resposta) == ("comentário fora da tela, resposta sem o comentário de cima "
+                                                     "na tela, com o selo Criador")
+    # Solta na lista, fora das respostas: lugar errado, mesmo sem o comentário da pessoa na tela.
+    solta = it.comentarios_do_painel(_painel(_comentario("João", "Chegou rápido", 960),
+                                             _comentario("Loja Rafa", resposta, 1250, criador=True)))
+    assert it.onde_ficou(solta, None, resposta) == "outro lugar"
+    assert it.como_ficou(solta, None, resposta).endswith("resposta solta na lista, com o selo Criador")
+    # Embaixo do comentário certo, mesmo ainda sem o selo Criador.
+    sem_selo = it.comentarios_do_painel(_painel(_comentario("Maria Souza", "Tem tamanho 10?", 1250),
+                                                _comentario("Loja Rafa", resposta, 1500, resposta=True)))
+    assert it.onde_ficou(sem_selo, 0, resposta) == "embaixo"
+    # O comentário curto de outra pessoa, que só começa igual à resposta, não é ela.
+    comeco = it.comentarios_do_painel(_painel(_comentario("Maria Souza", "Tem tamanho 10?", 1250),
+                                              _comentario("João", "Tem sim", 1500)))
+    assert it.onde_ficou(comeco, 0, resposta) is None
 
 
 def test_texto_da_ia_sem_aspas_sem_emoji_que_a_tela_nao_le_e_no_limite():
@@ -290,19 +319,23 @@ class CelularDosComentarios:
     """
     O app nas telas das respostas: início, Notificações, o painel do vídeo e o Responder.
     lugar: onde a resposta aparece depois de enviada ("embaixo", "outro" ou "nenhum").
+    rola_ao_enviar: logo depois de enviar, o painel rola até a resposta, e o vídeo e o
+    comentário de cima dela saem da tela até o painel ser aberto de novo.
     """
 
     def __init__(self, linhas=(NOTIFICACAO,), ja_respondido=False, lugar="embaixo", campo="Responder a Maria Souza",
-                 abre_sozinho=False):
+                 abre_sozinho=False, rola_ao_enviar=False):
         self.linhas, self.ja_respondido, self.lugar, self.campo = list(linhas), ja_respondido, lugar, campo
         # Como no Motorola: às vezes o painel abre sozinho; outras, só o vídeo, e o robô toca no balão.
-        self.abre_sozinho = abre_sozinho
+        self.abre_sozinho, self.rola_ao_enviar, self.rolado = abre_sozinho, rola_ao_enviar, False
         self.atual, self.em_foco, self.escrito, self.enviadas, self.toques = "inicio", False, "", [], []
 
     def _comentarios(self):
         nos = [_comentario("Loja Rafa", "Vestido lindo ✨", 960, criador=True),
                _comentario("Maria Souza", "Amei esse vestido, tem tamanho 10?", 1250)]
         y = 1500
+        if self.rolado:
+            nos, y = [], 960
         respostas = (["Tem sim!"] if self.ja_respondido else []) + (self.enviadas if self.lugar == "embaixo" else [])
         for texto in respostas:
             nos.append(_comentario("Loja Rafa", texto, y, resposta=True, criador=True))
@@ -335,14 +368,14 @@ class CelularDosComentarios:
         elif self.atual == "notificacoes" and "Lives, Vídeos e Afiliados" in textos:
             self.atual = "lista"
         elif self.atual == "lista" and any(t in self.linhas for t in textos):
-            self.atual = "painel" if self.abre_sozinho else "player"
+            self.atual, self.rolado = "painel" if self.abre_sozinho else "player", False
         elif self.atual == "player" and "comment video icon" in textos:
             self.atual = "painel"
         elif self.atual == "painel" and "Responder" in textos:
             self.atual, self.em_foco = "respondendo", True
         elif self.atual == "respondendo" and "send comment" in textos:
             self.enviadas.append(self.escrito)
-            self.atual, self.escrito = "painel", ""
+            self.atual, self.escrito, self.rolado = "painel", "", self.rola_ao_enviar
 
     def __call__(self, **seletor):
         return Campo(self)
@@ -418,6 +451,31 @@ def test_resposta_que_vai_para_outro_lugar_avisa_na_hora_e_nao_repete(avisos, ia
     assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 lugar errado"
     assert any("não ficou embaixo do comentário certo" in a for a in avisos)
     assert it.terminado(it.marca(NOTIFICACAO))
+    # Confirmado no painel reaberto, com o caso guardado para o checkup.
+    assert _registro_das_respostas() == [("resposta no lugar errado", (
+        "na hora: comentário na tela, resposta embaixo de outro comentário, com o selo Criador; "
+        "ao reabrir: comentário na tela, resposta embaixo de outro comentário, com o selo Criador"))]
+    assert [c.split("-")[-1] for c in robo.casos_robo.casos()] == ["responder"]
+
+
+def test_resposta_vista_com_o_painel_rolado_e_conferida_no_painel_reaberto_sem_aviso(avisos, ia):
+    # No Motorola (30/10/2026), logo depois de enviar, o painel mostrou as respostas sem o
+    # comentário de cima delas, e as 4 do dia foram dadas como no lugar errado; no app,
+    # estavam embaixo do comentário certo.
+    robo.gravar_estado(respostas_topo="velho")
+    app = CelularDosComentarios(rola_ao_enviar=True)
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
+    assert len(app.enviadas) == 1 and not any("não ficou embaixo" in a for a in avisos)
+    assert it.resultado_de(it.marca(NOTIFICACAO), "comentario") == "respondido"
+    assert _registro_das_respostas() == [("respondido", (
+        "conferida ao reabrir (na hora: comentário fora da tela, resposta sem o comentário de cima na tela, "
+        "com o selo Criador)"))]
+    assert not robo.casos_robo.casos()
+
+
+def _registro_das_respostas():
+    return [(resultado, detalhe) for _m, _p, resultado, detalhe, _o
+            in robo.registro_processos.sequencia("shopee_video", "responder comentário", "2000-01-01 00:00:00")]
 
 
 def test_resposta_que_nao_aparece_tenta_3_vezes_conferindo_antes_e_depois_desiste(avisos, ia):

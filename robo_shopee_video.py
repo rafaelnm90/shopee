@@ -4218,33 +4218,35 @@ def _responder_um(d, texto, agora=None):
         if not campo or not ps._normal(campo["texto"]).startswith("respond"):
             raise Parada("o Responder não abriu o campo da resposta")
         _escrever_e_enviar(d, resposta)
-        xml, painel, i = _achar_no_painel(d, nome, comentario)
-        lugar = interacoes.onde_ficou(painel, i, resposta)
+        lugar, painel, i, visto = _conferir_resposta(d, texto, nome, comentario, resposta)
         if lugar == "embaixo":
             _guardar_o_perfil(painel, i)
             interacoes.guardar(marca, "comentario", "respondido", agora)
             gravar_estado(respostas_textos=(anteriores + [resposta])[-10:])
-            registro_processos.registrar(REGISTRO, "responder comentário", "respondido", ok=True, origem=marca)
+            registro_processos.registrar(REGISTRO, "responder comentário", "respondido", visto, ok=True,
+                                         origem=marca)
             registrar_tentativa("responder", "respondido", produto=produto, agora=agora)
             return "respondido"
         if lugar == "outro lugar":
             # Erro grave (P12): a resposta foi parar embaixo de outro comentário ou solta.
+            motivo = "a resposta não ficou embaixo do comentário certo"
             interacoes.guardar(marca, "comentario", "lugar errado", agora)
-            registro_processos.registrar(REGISTRO, "responder comentário", "resposta no lugar errado", ok=False,
-                                         origem=marca)
-            registrar_tentativa("responder", "parou", "a resposta não ficou embaixo do comentário certo", produto,
-                                agora)
+            registro_processos.registrar(REGISTRO, "responder comentário", "resposta no lugar errado", visto,
+                                         ok=False, origem=marca)
+            registrar_tentativa("responder", "parou", motivo, produto, agora)
+            _guardar_caso(d, "responder", "lugar errado", f"{motivo} ({visto})", agora=agora)
             avisar(f"⚠️ Robô da Shopee Vídeo: a resposta a um comentário no vídeo de {produto or 'um produto'} "
                    f"não ficou embaixo do comentário certo. Confira no app e apague à mão se precisar: "
                    f"\"{resposta}\". Não vou responder esse comentário de novo.")
             return "lugar errado"
-        raise Parada("a resposta não apareceu embaixo do comentário")
+        raise Parada(f"a resposta não apareceu embaixo do comentário; {visto}")
     except Parada as e:
         # Na próxima vez, o robô confere de novo se o perfil já respondeu antes de responder:
         # uma resposta que saiu sem aparecer na tela não vira duas.
         tentativas = interacoes.guardar_falha(marca, "comentario", agora)
         registro_processos.registrar(REGISTRO, "responder comentário", "parou", e.motivo, ok=False, origem=marca)
         registrar_tentativa("responder", "parou", e.motivo, produto, agora)
+        _guardar_caso(d, "responder", "parou", e.motivo, agora=agora)
         if tentativas < interacoes.TENTATIVAS_DO_COMENTARIO:
             return "falhou"
         interacoes.guardar(marca, "comentario", "desistiu", agora)
@@ -4255,6 +4257,30 @@ def _responder_um(d, texto, agora=None):
         return "desistiu"
     finally:
         _sair_sem_salvar(d)
+
+
+def _conferir_resposta(d, texto, nome, comentario, resposta):
+    """
+    Onde a resposta enviada ficou (interacoes.onde_ficou) e o que foi visto, em rótulos
+    fixos para o registro (interacoes.como_ficou): (lugar, painel, i, visto). Primeiro no
+    painel como ficou depois de enviar; sem confirmar ali, de novo com o vídeo reaberto
+    pela notificação. Logo depois de enviar, o painel nem sempre mostra a resposta no lugar
+    em que ela ficou (Motorola, 30/10/2026); reaberto, ele vem recarregado da Shopee.
+    """
+    pausa(3)
+    painel = interacoes.comentarios_do_painel(tela(d))
+    i = interacoes.alvo_no_painel(painel, nome, comentario)
+    if interacoes.onde_ficou(painel, i, resposta) == "embaixo":
+        return "embaixo", painel, i, "conferida na hora"
+    na_hora = interacoes.como_ficou(painel, i, resposta)
+    _sair_sem_salvar(d)
+    _abrir_notificacao(d, texto)
+    _abrir_comentarios(d)
+    _, painel, i = _achar_no_painel(d, nome, comentario)
+    lugar = interacoes.onde_ficou(painel, i, resposta)
+    if lugar == "embaixo":
+        return lugar, painel, i, f"conferida ao reabrir (na hora: {na_hora})"
+    return lugar, painel, i, f"na hora: {na_hora}; ao reabrir: {interacoes.como_ficou(painel, i, resposta)}"
 
 
 def _guardar_o_perfil(painel, i):
