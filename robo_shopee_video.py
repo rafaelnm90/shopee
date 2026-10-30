@@ -604,7 +604,8 @@ def suspensao_na_tela(xml, agora=None):
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
-           "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos")
+           "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
+           "falhas_ao_postar")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -617,8 +618,9 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # (a medição da P76, visualizacoes_shopee_video).
 # links_dos_produtos: no Ver Produtos, o link de cada produto anexado, na ordem do post ("" no que
 # a API não achou), para o Rafael conferir no rascunho, produto por produto (P83).
+# falhas_ao_postar: quantas vezes o aprovado não saiu na hora de postar (P99); zera ao aprovar.
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
-                 "links_dos_produtos")
+                 "links_dos_produtos", "falhas_ao_postar")
 
 
 def _criar_tabela(con):
@@ -913,6 +915,11 @@ def texto_da_fila(config=None, agora=None):
     espera = motivo_da_espera(config, agora)
     for r in aprovados:
         linhas.append(f"• {produto(r)}\n   posta por volta de {curta(r['postar_em'])}")
+        falhas = int(r.get("falhas_ao_postar") or 0)
+        if falhas:
+            # O post que não saiu e vai ser tentado de novo (P99).
+            linhas.append(f"   🔁 não saiu {falhas} vez(es) ({html.escape(r['motivo'] or '?')}); tento de novo "
+                          f"(tentativa {falhas + 1} de {TENTATIVAS_DE_POSTAR})")
         if r["postar_em"] and r["postar_em"] <= agora_txt:
             linhas.append(f"   ⏳ já passou da hora: {html.escape(espera)}")
     if not aprovados:
@@ -1013,7 +1020,7 @@ def proxima_postagem(config, agora=None, sorteio=random):
 def aprovar(ident, agora=None):
     """O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora."""
     quando = proxima_postagem(ler_config(), agora)
-    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando)
+    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0")
     return quando
 
 
@@ -4481,11 +4488,13 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
     except Parada as e:
         if acao != "rascunho" and not e.caso_guardado:
             _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
-        if acao in ("postar", "apagar"):
+        if acao == "postar":
+            _nao_saiu_o_post(ident, e.motivo)
+        elif acao == "apagar":
             # Não insiste: o Rafael decide de novo pelo botão.
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
-            avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
-                   f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
+            avisar(f"⚠️ Robô da Shopee Vídeo: não consegui apagar o rascunho ({e.motivo}). Não toquei em mais "
+                   "nada; ele voltou para Rascunhos do Robô 📝.")
         if acao != "rascunho":
             registrar_tentativa(acao, "parou", e.motivo, produto, agora)
         if acao == "saude" and pedido:
@@ -4501,9 +4510,33 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         if acao != "rascunho":
             _guardar_caso(d, acao, "erro", f"erro inesperado ({type(e).__name__})", ident=ident, agora=agora)
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
+        if acao == "postar":
+            _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})")
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
+
+
+# O aprovado que não sai na hora de postar (a tela que não carregou, o app travado) continua
+# aprovado: o robô tenta de novo nas rodadas seguintes, conferindo tudo antes de tocar em
+# Postar, e só depois de TENTATIVAS_DE_POSTAR vezes ele volta para o Rafael aprovar de novo.
+# Escolha do Rafael (30/10, P99): DECISOES.md, Shopee Vídeo.
+TENTATIVAS_DE_POSTAR = 3
+
+
+def _nao_saiu_o_post(ident, motivo):
+    """Conta a vez em que o aprovado não saiu e avisa: tenta de novo, ou volta para o Rafael na última."""
+    falhas = int((pegar(ident) or {}).get("falhas_ao_postar") or 0) + 1
+    if falhas < TENTATIVAS_DE_POSTAR:
+        atualizar(ident, falhas_ao_postar=str(falhas), motivo=motivo)
+        avisar(f"⚠️ Robô da Shopee Vídeo: não consegui postar o rascunho aprovado ({motivo}). Não toquei em mais "
+               f"nada. Ele continua aprovado: tento de novo na próxima rodada (tentativa {falhas + 1} de "
+               f"{TENTATIVAS_DE_POSTAR}).")
+        return
+    atualizar(ident, estado="rascunho", postar_em=None, falhas_ao_postar="0", motivo=motivo)
+    avisar(f"⚠️ Robô da Shopee Vídeo: tentei postar o rascunho aprovado {TENTATIVAS_DE_POSTAR} vezes e não "
+           f"consegui (da última vez: {motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝 "
+           "para você decidir de novo.")
 
 
 def _suspender(e, acao, preparar, produto="", agora=None):

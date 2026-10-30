@@ -1478,14 +1478,36 @@ def test_aprovado_e_postado_com_a_tela_final_conferida(monkeypatch, avisos, cami
 
 
 def test_rascunho_aberto_com_outro_titulo_nao_e_postado(monkeypatch, avisos, caminho_do_rascunho):
+    # Escolha do Rafael (30/10, P99): o aprovado que não sai continua aprovado e o robô tenta de
+    # novo nas rodadas seguintes, conferindo tudo antes; só na 3ª vez volta para ele aprovar.
     ident = _aprovado(monkeypatch)
-    app = AppComQuadros()
-    app.legenda, app.com_produto = "Outro título de outro rascunho qualquer #outro", True
-    assert "parado" in robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
-    assert "@btn_post" not in app.toques
+    for vez, hora in enumerate(("23:57", "23:58", "23:59"), 1):
+        app = AppComQuadros()
+        app.legenda, app.com_produto = "Outro título de outro rascunho qualquer #outro", True
+        assert "parado" in robo.rodada(d=app, agora=momento(f"2026-10-22 {hora}"))
+        assert "@btn_post" not in app.toques
+        rascunho = robo.pegar(ident)
+        assert "título" in rascunho["motivo"]
+        if vez < robo.TENTATIVAS_DE_POSTAR:
+            assert rascunho["estado"] == "aprovado" and rascunho["falhas_ao_postar"] == str(vez)
+            assert "não consegui postar" in avisos[-1] and f"tentativa {vez + 1} de 3" in avisos[-1]
+            assert f"não saiu {vez} vez(es)" in robo.texto_da_fila(agora=momento(f"2026-10-22 {hora}"))
     rascunho = robo.pegar(ident)
-    assert rascunho["estado"] == "rascunho" and "título" in rascunho["motivo"]
-    assert "não consegui postar" in avisos[-1]
+    assert rascunho["estado"] == "rascunho" and rascunho["falhas_ao_postar"] == "0"
+    assert "tentei postar o rascunho aprovado 3 vezes" in avisos[-1] and "título" in avisos[-1]
+    # Aprovado de novo, ganha mais 3 tentativas.
+    robo.atualizar(ident, falhas_ao_postar="2")
+    robo.aprovar(ident, agora=momento("2026-10-23 08:00"))
+    assert robo.pegar(ident)["falhas_ao_postar"] == "0"
+
+
+def test_erro_inesperado_ao_postar_tambem_conta_nas_3_tentativas(monkeypatch, avisos, caminho_do_rascunho):
+    ident = _aprovado(monkeypatch)
+    monkeypatch.setattr(robo, "abrir_rascunho", lambda d, rascunho: (_ for _ in ()).throw(ConnectionError("caiu")))
+    for hora in ("23:57", "23:58", "23:59"):
+        assert "erro ConnectionError" in robo.rodada(d=AppComQuadros(), agora=momento(f"2026-10-22 {hora}"))
+    assert robo.pegar(ident)["estado"] == "rascunho"
+    assert "tentei postar o rascunho aprovado 3 vezes" in avisos[-1]
 
 
 # --- Telas mapeadas no Motorola em 22/10/2026: aviso de sair, apagar e o link do post ---
