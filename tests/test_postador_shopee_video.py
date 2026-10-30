@@ -852,6 +852,34 @@ def test_conferir_tela_final(anexados, confere, monkeypatch, capsys):
     assert ("tela final confere" in saida) is confere and "Vestido" not in saida and "Fibra" not in saida
 
 
+def test_tela_final_espera_a_fileira_dos_produtos_aparecer(monkeypatch):
+    # No Motorola (30/10, 07:10), o rascunho aprovado com 3 produtos abriu sem o painel deles na
+    # tela final, e a conferência parou o post. Sem produto na primeira leitura, ela relê a tela.
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    _avisos(monkeypatch)
+    esperas = []
+    monkeypatch.setattr(ps.time, "sleep", esperas.append)
+
+    class Lenta(Aparelho):
+        def __init__(self, vazias):
+            super().__init__(tela=_tela_final())
+            self.vazias = vazias
+
+        def dump_hierarchy(self):
+            if self.vazias:
+                self.vazias -= 1
+                return _tela_final()
+            return _tela_final(VESTIDO)
+
+    assert ps.conferir_tela_final(Lenta(vazias=2), {"produtos": [VESTIDO]})[0] and esperas == [3, 3]
+    # Sem produto depois da espera: não confere, como antes.
+    esperas.clear()
+    ok, motivo = ps.conferir_tela_final(Lenta(vazias=99), {"produtos": [VESTIDO]})
+    assert not ok and "0 produto(s) anexado(s)" in motivo
+    assert sum(esperas) == ps.ESPERA_DA_FILEIRA
+
+
 def test_tela_final_que_nao_confere_deixa_no_registro_so_numeros(monkeypatch):
     # 24/10, 09:19: a tela final não conferiu e não deu para saber por quê. O registro
     # diz quantos anexados e o quanto o mais parecido lembra o nome (o nome não vai).
