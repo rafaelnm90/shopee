@@ -767,7 +767,7 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
 
 def _editar_para_postar(chamadas, respostas=None):
     """O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado."""
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_foto=None):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
         chamadas.append((video, foto, produto, avisos))
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
         if not motivo:
@@ -932,7 +932,7 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_foto=None):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
         fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
@@ -3892,6 +3892,8 @@ def _foto_de_teste(forma, loja=None):
     if forma == "cubo":
         desenho.rectangle((100, 120, 300, 320), fill=(230, 120, 30))
         desenho.ellipse((150, 170, 250, 270), fill=(200, 30, 30))
+    elif forma == "triangulo":
+        desenho.polygon(((200, 50), (360, 350), (40, 350)), fill=(40, 140, 60))
     else:
         desenho.ellipse((60, 60, 340, 340), fill=(40, 160, 200))
         desenho.rectangle((180, 100, 220, 300), fill=(250, 220, 0))
@@ -3931,48 +3933,57 @@ def test_rascunho_marca_os_produtos_com_outra_foto_de_capa(monkeypatch):
     assert robo.pegar(ident)["outras_capas"] == [3] and robo.pegar(robo.criar("v12"))["outras_capas"] == []
 
 
-def test_miniatura_troca_com_a_foto_mais_parecida_com_o_video(monkeypatch, tmp_path):
-    # Escolha do Rafael (30/10, P101): no rascunho com produtos a mais (o mesmo item de outras
-    # lojas), quando a foto do 1º mostra o produto de outro jeito que o vídeo, a miniatura troca
-    # entre ela e a do produto do post mais parecida com o vídeo. O registro diz o que saiu.
+def test_miniatura_troca_entre_as_fotos_diferentes_dos_produtos_do_post(monkeypatch, tmp_path):
+    # Escolha do Rafael (30/10, P103): no rascunho com produtos a mais (o mesmo item de outras
+    # lojas), a miniatura troca entre as fotos de capa diferentes dos produtos do post, na ordem
+    # do post, uma volta só, com o vídeo dividido igual e pelo menos 3 s para cada: as que não
+    # cabem, as últimas (as que pagam menos), ficam de fora. A foto de outra loja igual a uma que
+    # já entrou (só com o selo e a moldura dela) conta uma vez, e a que não abre fica de fora.
     import registro_processos as rp
     original, copia = str(tmp_path / "v.mp4"), str(tmp_path / "c.mp4")
     with open(original, "wb") as arquivo:
         arquivo.write(b"v")
-    chamadas, pedidos = [], []
+    chamadas, duracoes = [], [30.0, 7.0, 4.0, 0.0, RuntimeError("sem ffprobe")]
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_foto=None):
-        chamadas.append(outra_foto)
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
+        chamadas.append(list(outras_fotos))
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editado")
         return "", robo.edicao_video.COM_LEGENDAS, ""
 
-    respostas = [(1, "a foto do 2º produto"), (None, "a foto do 1º produto serve"), (None, "a IA não respondeu"),
-                 RuntimeError("sem rede")]
-
-    def ia_foto(video, fotos):
-        pedidos.append(fotos)
-        resposta = respostas.pop(0)
+    def duracao(caminho):
+        resposta = duracoes.pop(0)
         if isinstance(resposta, Exception):
             raise resposta
         return resposta
 
-    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"foto do 1o", "nome": VESTIDO})
-    monkeypatch.setattr(robo.ps, "ia_foto_como_no_video", ia_foto)
+    cubo, bola, triangulo = _foto_de_teste("cubo"), _foto_de_teste("bola"), _foto_de_teste("triangulo")
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": cubo, "nome": VESTIDO})
     monkeypatch.setattr(robo.edicao_video, "editar_para_postar", editar_para_postar)
+    monkeypatch.setattr(robo.videos, "duracao", duracao)
     ativar(edicao_ligada=True)
     video = {"arquivo": original, "link": LINK}
-    for _ in range(4):
-        robo.copiar_para_o_rascunho(video, "viral", copia, [VESTIDO], outras=[b"foto do 2o", b"foto do 3o"])
-    assert chamadas == [b"foto do 2o", None, None, None]
-    assert pedidos[0] == [b"foto do 1o", b"foto do 2o", b"foto do 3o"]
+    outras = [_foto_de_teste("cubo", (20, 20, 200)), bola, b"nao abre", _foto_de_teste("bola", (200, 20, 20)),
+              triangulo]
+    for _ in range(5):
+        robo.copiar_para_o_rascunho(video, "viral", copia, [VESTIDO], outras=outras)
+    # 30 s: as 3 fotos diferentes, 10 s cada; 7 s: só cabem 2; 4 s: nenhuma troca; sem a duração
+    # do vídeo, ou com erro, também não.
+    assert chamadas == [[bola, triangulo], [bola], [], [], []]
+    # Todas iguais à do 1º: uma foto só, sem nem ler a duração.
+    robo.copiar_para_o_rascunho(video, "viral", copia, [VESTIDO], outras=[_foto_de_teste("cubo", (20, 20, 200))])
+    assert chamadas[-1] == [] and not duracoes
     registros = {(l[2], l[3], l[4]) for l in rp.contagem("2000-01-01 00:00:00") if l[1] == robo.PROCESSO_DA_MINIATURA}
-    assert registros == {("alternada", "a foto do 2º produto", 1), ("uma só", "a foto do 1º produto serve", None),
-                         ("uma só", "a IA não respondeu", 0), ("uma só", "erro (RuntimeError)", 0)}
-    # Sem os outros produtos (um produto só, ou o Ver Produtos, de itens que podem ser outros), a
-    # IA nem é chamada, e a miniatura fica uma só.
+    assert registros == {("alternada", "3 fotos, 10,0 s cada", 1),
+                         ("alternada", "2 fotos de 3 diferentes, 3,5 s cada", 1),
+                         ("uma só", "o vídeo é curto para trocar (4 s)", None),
+                         ("uma só", "a duração do vídeo não foi lida", None),
+                         ("uma só", "erro (RuntimeError)", 0),
+                         ("uma só", "nenhuma foto diferente da do 1º produto", None)}
+    # Sem os outros produtos (um produto só, ou o Ver Produtos, de itens que podem ser outros), nada
+    # é comparado, e a miniatura fica uma só.
     robo.copiar_para_o_rascunho(video, "viral", copia, [VESTIDO])
-    assert len(pedidos) == 4 and chamadas[-1] is None
+    assert chamadas[-1] == [] and len(registros) == 6
 
 
 def test_rascunho_guarda_os_produtos_a_mais():

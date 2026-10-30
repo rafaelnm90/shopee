@@ -39,10 +39,10 @@ import videos
 FONTES_COM_EDICAO = tuple(assistente.FONTES)
 # A foto do produto sozinha antes do vídeo, em segundos.
 SEGUNDOS_DA_FOTO = 2
-# Quando a foto do 1º produto mostra o produto de outro jeito que o vídeo, a miniatura troca entre
-# ela e a do produto do post mais parecida com o vídeo, cada uma este tanto de segundos.
-# Escolha do Rafael (30/10, P101): DECISOES.md, Shopee Vídeo.
-SEGUNDOS_DE_CADA_FOTO = 3
+# Nos rascunhos com produtos a mais, a miniatura troca entre as fotos diferentes dos produtos do
+# post, uma volta só, com o vídeo dividido igual entre elas e pelo menos este tanto de segundos
+# para cada: as que não cabem ficam de fora. Escolha do Rafael (30/10, P103): DECISOES.md, Shopee Vídeo.
+MINIMO_POR_FOTO = 3
 # A miniatura e a seta onde o Rafael as põe no LumaFusion (vídeo de 25/10), no vídeo de
 # 720x1280. A miniatura: 25% da largura, com o centro a 80% da largura e 10% da altura
 # (posição X 60 e Y -80 no LumaFusion), do começo do vídeo até o fim.
@@ -292,15 +292,16 @@ def recorte_da_grade(capa):
     return saida.getvalue()
 
 
-def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
+def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
     sem eles, a capa (bytes de uma imagem, como a capa com chamada), quando vem. Com a musica
     (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55). Com miniatura=False (ou 0),
     o vídeo vai sem a nossa miniatura (o canto dela tem coisa do criador, P81); com uma largura
-    menor (miniatura_no_video), ela vai desse tamanho, no mesmo canto (P97). Com a outra_foto
-    (bytes de outra foto do mesmo produto), a miniatura troca entre as duas (P101).
+    menor (miniatura_no_video), ela vai desse tamanho, no mesmo canto (P97). Com as outras_fotos
+    (bytes de outras fotos do mesmo produto, na ordem, as que cabem: fotos_que_cabem), a
+    miniatura troca entre a foto e cada uma delas, uma volta só, o mesmo tempo para cada (P103).
     """
     if avisos and foto:
         capa = capa_com_avisos(foto)
@@ -309,7 +310,7 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     largura = largura_da_miniatura(miniatura)
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
                                        SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica,
-                                       outra=outra_foto, troca=SEGUNDOS_DE_CADA_FOTO)
+                                       outras=outras_fotos)
 
 
 def largura_da_miniatura(miniatura):
@@ -322,6 +323,15 @@ def largura_da_miniatura(miniatura):
 def centro_da_miniatura(largura):
     """O centro da miniatura desta largura, com o canto de cima à direita no lugar de sempre (P97)."""
     return CANTO_DA_MINIATURA[0] - largura // 2, CANTO_DA_MINIATURA[1] + largura // 2
+
+
+def fotos_que_cabem(duracao, quantas):
+    """
+    Quantas das fotos da miniatura que troca (contando a do 1º produto) cabem num vídeo de duracao
+    segundos com pelo menos MINIMO_POR_FOTO segundos cada, uma volta só: as primeiras, as que
+    pagam mais por venda. 1 é a miniatura de uma foto só (P103).
+    """
+    return max(1, min(quantas, int(duracao // MINIMO_POR_FOTO)))
 
 
 # --- Editor 2 ---
@@ -958,7 +968,7 @@ def _letreiros(textos, lugar, duracao):
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-             capa=None, miniatura=True, outra_foto=None):
+             capa=None, miniatura=True, outras_fotos=()):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -972,25 +982,25 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
-                                 musica, capa, miniatura, outra_foto)
+                                 musica, capa, miniatura, outras_fotos)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
-                          musica=None, capa=None, miniatura=True, outra_foto=None):
+                          musica=None, capa=None, miniatura=True, outras_fotos=()):
     """O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo)."""
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (chamada, FUNDO_DA_CHAMADA)], lugar, original)
     resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura}
     if not letreiros:
-        return editar(video, foto, destino, avisos, musica, capa, miniatura, outra_foto), resumo
+        return editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
         motivo = videos.com_cortes_e_ritmo(video, [(0.0, original, 1.0)], corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino, avisos, musica, capa, miniatura, outra_foto), resumo
+        return editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos), resumo
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -1009,7 +1019,7 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_foto=None):
+def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -1023,8 +1033,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_fot
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
     som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA. Com a capa com
     chamada ligada (P76), a vantagem da IA vai na capa de todos os vídeos (P100), e o jeito leva
-    COM_A_CHAMADA. Com a outra_foto (bytes de outra foto do mesmo produto, a mais parecida com o
-    vídeo), a miniatura troca entre ela e a foto (P101), e o jeito leva COM_A_MINIATURA_ALTERNADA.
+    COM_A_CHAMADA. Com as outras_fotos (bytes das outras fotos diferentes dos produtos do post, as
+    que cabem: fotos_que_cabem), a miniatura troca entre a foto e cada uma delas (P103), e o jeito
+    leva COM_A_MINIATURA_ALTERNADA.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -1041,11 +1052,11 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_fot
     avisado = ((COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
                + (SEM_A_MINIATURA if not miniatura
                   else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
-               + (COM_A_MINIATURA_ALTERNADA if outra_foto and miniatura else ""))
+               + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else ""))
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, capa,
-                                    miniatura, outra_foto)
+                                    miniatura, outras_fotos)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -1058,7 +1069,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outra_fot
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica, capa, miniatura, outra_foto), SO_COM_O_EDITOR_1 + avisado,
+    return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos), SO_COM_O_EDITOR_1 + avisado,
             f"o Editor 2 não saiu: {motivo_2}")
 
 
