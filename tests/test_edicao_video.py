@@ -1349,6 +1349,36 @@ def test_capa_com_chamada_alterna_um_video_sim_outro_nao(monkeypatch, tmp_path):
     assert db.ler_config("shopee_video", {})[edicao_video.CHAVE_DA_VEZ] == 4
 
 
+def test_a_vez_da_capa_passa_so_quando_o_video_sai(monkeypatch, tmp_path):
+    # Checkup de 30/10: a vez passava na edição, e o rascunho do robô que ficava de lado depois
+    # dela gastava a vez (postados: 0 com a chamada, 2 sem). O robô edita sem passar a vez e a
+    # passa com o rascunho salvo (P77).
+    capas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+        capas.append(capa is not None)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
+    for _ in range(2):
+        edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa", passar_agora=False)
+
+    def vez():
+        return db.ler_config("shopee_video", {}).get(edicao_video.CHAVE_DA_VEZ, 0)
+    assert capas == [True, True] and vez() == 0      # o que ficou de lado não gastou a vez
+    edicao_video.passar_a_vez(False)                  # a vez da chamada, e o vídeo saiu sem ela: fica
+    assert vez() == 0
+    edicao_video.passar_a_vez(True)
+    assert vez() == 1
+    edicao_video.passar_a_vez(False)                  # a vez sem: passa
+    assert vez() == 2
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: False, edicao_video.CHAVE_DA_VEZ: 2})
+    edicao_video.passar_a_vez(True)                   # com a capa desligada, nada
+    assert vez() == 2
+
+
 def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     _fontes_de_mentira(monkeypatch, {"autorais": [("autorais:1", "/tmp/a.mp4", "https://s.shopee.com.br/a", "")]})
     monkeypatch.setattr(edicao_video.os.path, "exists", lambda caminho: True)

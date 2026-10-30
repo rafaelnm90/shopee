@@ -766,7 +766,9 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
 
 def _editar_para_postar(chamadas, respostas=None):
     """O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado."""
-    def editar_para_postar(video, foto, destino, produto="", avisos=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, passar_agora=True):
+        # O robô passa a vez da capa com chamada só com o rascunho salvo (P77).
+        assert passar_agora is False
         chamadas.append((video, foto, produto, avisos))
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
         if not motivo:
@@ -931,7 +933,8 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, passar_agora=True):
+        assert passar_agora is False
         fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
@@ -1158,6 +1161,33 @@ def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horari
     # O vídeo fica de lado só naquele dia: no dia seguinte ele pode voltar.
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-23 08:00")).get("evitar") is None
     assert robo.proximo_video(robo.ler_config())["id"] in {primeiro, segundo, terceiro, "a1", "a2", "a3", "a4"}
+
+
+def test_a_vez_da_capa_com_chamada_so_passa_com_o_rascunho_salvo(monkeypatch, avisos):
+    # Checkup de 30/10: com a capa com chamada ligada desde 29/10, os postados eram 0 com a chamada
+    # e 2 sem: a vez passava na edição, e o rascunho que ficava de lado depois dela gastava a vez.
+    # Escolha do Rafael (P77): um vídeo com a chamada e o seguinte sem, entre os que saem.
+    _fonte(monkeypatch)
+    for numero in range(2, 5):
+        inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", f"a{numero}", "archive/vestido.mp4",
+                f"Vestido 👗\n{LINK}", f"2026-10-22 0{numero}:00:00")
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    passadas, saidas = [], [robo.Parada("não achei o botão Rascunhos"), "1", ""]
+
+    def preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
+        saida = saidas.pop(0)
+        if isinstance(saida, Exception):
+            raise saida
+        robo.atualizar(ident, estado="rascunho", produtos=[VESTIDO], chamada=saida)
+
+    monkeypatch.setattr(robo, "_preparar", preparar)
+    monkeypatch.setattr(robo.edicao_video, "passar_a_vez", passadas.append)
+    for _ in range(3):
+        try:
+            robo.preparar_rascunho(Intocavel(), robo.ler_config(), momento("2026-10-22 23:59"))
+        except robo.Parada:
+            pass
+    assert not saidas and passadas == [True, False]
 
 
 def test_rascunho_do_plano_que_nao_saiu_avisa_onde_parou_e_quando_tenta_de_novo(monkeypatch, avisos):
