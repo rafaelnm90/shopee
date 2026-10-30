@@ -3220,6 +3220,13 @@ def oferta_pelo_nome(nome):
     return oferta if oferta and parecido >= PARECIDO_DA_FOTO else {}
 
 
+# O que a busca pelo nome achou para os produtos do Ver Produtos: com o nome igual ao do app,
+# parecido ou nada. Antes de a miniatura do Ver Produtos trocar entre as fotos de todos, o
+# Claude confere por estes números se a busca acerta o anúncio de cada produto e pergunta de
+# novo ao Rafael. Escolha dele (30/10, P105): DECISOES.md, Shopee Vídeo.
+PROCESSO_DOS_LINKS_DO_VER_PRODUTOS = "ver produtos: links pelo nome"
+
+
 def links_do_ver_produtos(nomes):
     """
     O link de cada produto anexado num vídeo de Ver Produtos, na ordem do post, para o Rafael
@@ -3227,8 +3234,9 @@ def links_do_ver_produtos(nomes):
     dos links do Canal Afiliados), em link curto com a etiqueta da Shopee Vídeo, como o dos
     produtos a mais; "" no que a API não acha. Dois produtos de nome quase igual que caem no
     mesmo anúncio: o link fica com o de nome igual ao do anúncio (senão, o mais parecido) e o
-    outro fica sem, para nunca mostrar o link de um produto no lugar do de outro. Pedido do
-    Rafael (29/10, P83): DECISOES.md, Shopee Vídeo.
+    outro fica sem, para nunca mostrar o link de um produto no lugar do de outro. O registro
+    conta quantos links vieram com o nome igual ao do app, com o nome parecido e quantos ficaram
+    sem (P105). Pedido do Rafael (29/10, P83): DECISOES.md, Shopee Vídeo.
     """
     achados = []
     for nome in nomes:
@@ -3250,6 +3258,15 @@ def links_do_ver_produtos(nomes):
                                                                    avisar_falha=False)) or endereco
         except Exception:
             links[i] = endereco
+    iguais = sum(1 for link, (_, exato, _o) in zip(links, achados) if link and exato)
+    parecidos = sum(1 for link, (_, exato, _o) in zip(links, achados) if link and not exato)
+    sem = len(links) - iguais - parecidos
+    if links:
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_LINKS_DO_VER_PRODUTOS,
+                                     "todos achados" if not sem else "nenhum achado" if sem == len(links)
+                                     else "achados em parte",
+                                     f"{iguais} com o nome igual, {parecidos} com o nome parecido, {sem} sem",
+                                     ok=True if not sem else None)
     return links
 
 
