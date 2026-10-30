@@ -598,6 +598,10 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert app.toques.index("@tv_drafts_box") < app.toques.index("@buttonItemLiked") and not app.curtido
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["titulo"] == TITULO and rascunho["produtos"] == [VESTIDO] and rascunho["link"] == LINK
+    # O tempo do rascunho salvo vai ao registro em faixas de 5 min, com quantos produtos: a
+    # régua dos prazos da rodada, só números.
+    tempo = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_TEMPO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in tempo] == [("0 a 5 min", "1 produto(s)")]
     assert os.path.exists(rascunho["arquivo"]) and os.path.exists(rascunho["print"])
     assert app.enviados[0][1] == robo.nome_na_galeria(rascunho["id"])
     # Primeiro o aviso de qual vídeo e produto; no fim, o rascunho esperando aprovação.
@@ -3428,6 +3432,46 @@ def test_oferta_do_cartao_e_a_de_mesmo_nome_e_mesmo_preco(monkeypatch):
     assert perdas == {"preço": 1, "nome": 1}
 
 
+def test_oferta_do_cartao_e_o_anuncio_do_cartao_entre_lojas_de_titulo_copiado(monkeypatch):
+    # Lojas diferentes copiam o mesmo título, e o 1º da busca com aquele nome e preço pode ser o
+    # anúncio do próprio post: vale o de taxa de comissão e preço mais perto dos do cartão; no
+    # empate, o mais relevante.
+    async def buscar(termo, limite=20, sort_type=1):
+        nome = "Garrafa Térmica Inox 1 Litro Preta"
+        return [{"productName": nome, "priceMin": "49.90", "commissionRate": "0.08", "itemId": 7},
+                {"productName": nome, "priceMin": "50.50", "commissionRate": "0.12", "itemId": 8},
+                {"productName": nome, "priceMin": "49.90", "commissionRate": "0.12", "itemId": 9},
+                {"productName": nome, "priceMin": "49.90", "commissionRate": "0.12", "itemId": 10}]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    cartao = {"nome": "Garrafa Térmica Inox 1 Litro Preta", "preco": 49.9, "comissao": 12.0, "extra": False}
+    assert robo.oferta_do_cartao(cartao)["itemId"] == 9
+    assert robo.oferta_do_cartao(dict(cartao, comissao=8.0))["itemId"] == 7
+    assert robo.oferta_do_cartao(dict(cartao, preco=50.5))["itemId"] == 8
+    # Sem a taxa no cartão, ficam o preço e a ordem da busca.
+    assert robo.oferta_do_cartao(dict(cartao, comissao=0))["itemId"] == 7
+
+
+def test_candidatos_da_foto_contam_por_que_cada_achado_ficou_de_fora():
+    # Só números para o checkup: os mais caros (e quantos % acima do post está o mais barato
+    # deles), o anúncio do rascunho, o mesmo anúncio de outro cartão e o que veio sem dados.
+    achados = [({}, _oferta_da_foto(7, 50, 10)), ({}, _oferta_da_foto(7, 50, 10)),
+               ({}, _oferta_da_foto(3, 61, 30)), ({}, _oferta_da_foto(4, 75, 30)),
+               ({}, _oferta_da_foto(1, 55, 10)), ({}, _oferta_da_foto(1, 55, 10)),
+               ({}, _oferta_da_foto(5, 40, 5, link=False))]
+    fora = {}
+    assert [c["item"] for c in robo.candidatos_da_foto({"preco": 50.0}, "7", achados, fora)] == ["1"]
+    assert fora == {"o do rascunho": 2, "mais caro": 2, "o mais perto": 22, "repetido": 1, "sem dados": 1}
+    assert robo._fora_do_preco(fora) == " (mais caros 2, o mais perto +22%; o do rascunho 2; repetidos 1; sem dados 1)"
+    fora = {}
+    assert robo.candidatos_da_foto({"preco": 0}, "7", achados, fora) == [] and fora == {"sem o preço do post": 1}
+    assert robo._fora_do_preco(fora) == " (sem o preço do post)" and robo._fora_do_preco({}) == ""
+    # O que passa do teto por pouco nunca aparece como os 20% dele.
+    fora = {}
+    assert robo.candidatos_da_foto({"preco": 50.0}, "", [({}, _oferta_da_foto(3, 60.01, 10))], fora) == []
+    assert fora == {"mais caro": 1, "o mais perto": 21}
+
+
 @pytest.fixture
 def busca_pela_foto(monkeypatch):
     """A busca pela foto e a API de mentira: 3 cartões, todos achados na API, e a IA confirma o 1º e o 3º."""
@@ -3497,7 +3541,67 @@ def test_espacos_livres_contam_os_cartoes_que_nao_acharam_na_api(busca_pela_foto
     original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
     robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [], robo.time.monotonic() + 600)
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
-    assert "3 na busca, 2 na API (sem o nome 1, outro preço 0), 2 no preço" in registro[-1][3]
+    assert "3 na busca, 2 na API (sem o nome 1, outro preço 0), 2 anúncio(s) diferente(s), 2 no preço" in registro[-1][3]
+
+
+class _Relogio:
+    """O time do robô com o monotonic nas marcas dadas, uma por chamada (a última fica)."""
+
+    def __init__(self, *marcas):
+        self.marcas = list(marcas)
+
+    def monotonic(self):
+        return self.marcas.pop(0) if len(self.marcas) > 1 else self.marcas[0]
+
+
+def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_e_o_tempo(busca_pela_foto,
+                                                                                         monkeypatch):
+    video = {"link": LINK, "arquivo": "v.mp4"}
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+
+    def ultimo(processo):
+        return robo.registro_processos.sequencia("shopee_video", processo, "2000-01-01 00:00:00")[-1][2:4]
+
+    # Os 3 cartões caem no anúncio do rascunho: nenhum no preço, e o registro diz por quê; numa
+    # linha à parte, com o mesmo resultado, em que minuto do rascunho a busca começou e quanto
+    # levou cada parte (a régua dos prazos).
+    ofertas = busca_pela_foto["ofertas"]
+    busca_pela_foto["ofertas"] = {nome: _oferta_da_foto(7, 50, 10) for nome in ofertas}
+    monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180))
+    assert robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640) == []
+    assert ultimo(robo.PROCESSO_DOS_ESPACOS) == (
+        "nenhum - nenhum do mesmo preço na API",
+        "3 na busca, 3 na API, 1 anúncio(s) diferente(s), 0 no preço (o do rascunho 3)")
+    assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
+        "nenhum - nenhum do mesmo preço na API", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min")
+    # Com os achados, o tempo da IA também.
+    busca_pela_foto["ofertas"] = ofertas
+    monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1180, 1240))
+    assert len(robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640)) == 2
+    assert ultimo(robo.PROCESSO_DOS_ESPACOS) == (
+        "achados", "2 a mais; 3 na busca, 3 na API, 3 anúncio(s) diferente(s), 3 no preço, 3 na IA, 2 confirmados")
+    assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
+        "achados", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min, IA 1,0 min")
+    # O prazo que passa durante a busca, e o que já tinha passado antes dela.
+    monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1300))
+    assert robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640) == []
+    assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
+        "nenhum - sem tempo na rodada", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min")
+    monkeypatch.setattr(robo, "time", _Relogio(1300))
+    assert robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640) == []
+    assert ultimo(robo.PROCESSO_DOS_ESPACOS) == ("nenhum - sem tempo na rodada", "")
+    assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == ("nenhum - sem tempo na rodada", "aos 11,0 min do rascunho")
+    # A contagem mais longa ainda cabe no detalhe do registro.
+    longa = ("5 a mais; 20 na busca, 15 na API (sem o nome 4, outro preço 1), 12 anúncio(s) diferente(s), 8 no preço"
+             + robo._fora_do_preco({"mais caro": 3, "o mais perto": 135, "o do rascunho": 2, "repetido": 1,
+                                    "sem dados": 1})
+             + ", 11 com o selo colado, 8 na IA, 5 confirmados")
+    assert len(longa) <= robo.registro_processos.TAMANHO_DO_DETALHE
+
+
+def test_faixa_do_tempo_do_rascunho():
+    assert [robo.faixa_do_tempo(s) for s in (0, 299, 300, 754, 1799, 1800)] == [
+        "0 a 5 min", "0 a 5 min", "5 a 10 min", "10 a 15 min", "25 a 30 min", "30 a 35 min"]
 
 
 def test_espacos_livres_sem_resultado_sem_tempo_ou_com_a_busca_parada_seguem_sem_nenhum(busca_pela_foto, monkeypatch):

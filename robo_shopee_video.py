@@ -52,6 +52,7 @@ import html
 import io
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -1772,6 +1773,7 @@ def preparar_rascunho(d, config, agora=None):
     # curtidos: os produtos que o robô curtiu (descurtir_no_fim); celular: se ele já usou o
     # celular (o caso só lê a tela quando ela é deste rascunho).
     curtidos, celular = [], []
+    comeco = time.monotonic()
     try:
         _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora, curtidos, celular)
     except Suspensa as e:
@@ -1804,10 +1806,24 @@ def preparar_rascunho(d, config, agora=None):
         e.id_video = video["id"]
         descurtir_no_fim(d, video, curtidos)
         raise
-    registrar_tentativa("rascunho", "salvo", produto=", ".join((pegar(ident) or {}).get("produtos") or [])
-                        or _produto_do_video(video), agora=agora)
+    produtos = (pegar(ident) or {}).get("produtos") or []
+    registrar_tentativa("rascunho", "salvo", produto=", ".join(produtos) or _produto_do_video(video), agora=agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_TEMPO, faixa_do_tempo(time.monotonic() - comeco),
+                                 f"{max(len(produtos), 1)} produto(s)")
     descurtir_no_fim(d, video, curtidos)
     return "rascunho salvo"
+
+
+# O tempo de cada rascunho salvo, em faixas de 5 min, com quantos produtos ele levou: a régua
+# dos prazos do rascunho (MINUTOS_PARA_OS_ESPACOS e MINUTOS_PARA_ANEXAR_OS_A_MAIS) dentro da
+# rodada (MAXIMO_DA_RODADA). Só números no registro.
+PROCESSO_DO_TEMPO = "tempo do rascunho"
+
+
+def faixa_do_tempo(segundos):
+    """A faixa de 5 min em que cai o tempo (ex.: 754 s → "10 a 15 min")."""
+    comeco = int(segundos // 300) * 5
+    return f"{comeco} a {comeco + 5} min"
 
 
 def descurtir_no_fim(d, video, curtidos):
@@ -2375,6 +2391,9 @@ def _trocar_pela_maior_comissao(video):
 # no rascunho como ele: curtidos, anexados e descurtidos no fim. 6 é o ideal, não obrigatório.
 # Escolhas do Rafael (28/10, P59, P67 e P68): DECISOES.md, Shopee Vídeo.
 PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
+# Em que minuto do rascunho a busca começou e quanto levou cada parte, com o mesmo resultado
+# da linha da contagem: a régua de MINUTOS_PARA_OS_ESPACOS.
+PROCESSO_DO_TEMPO_DOS_ESPACOS = "espaços livres: tempo de cada parte"
 ESPACOS_DO_VIDEO = 6
 RESULTADOS_DA_FOTO = 20
 ROLAGENS_DA_FOTO = 8
@@ -2413,46 +2432,78 @@ def item_do_link(link):
 def oferta_do_cartao(cartao, perdas=None):
     """
     A oferta da API do cartão da busca pela foto: a busca pelo nome, por relevância, e vale a
-    de mesmo nome (igual ou cortado) e mesmo preço (até DIFERENCA_DE_PRECO% de diferença). {}
-    quando não acha: sem a oferta não há o link para curtir e para o canal, nem a foto da IA.
+    de mesmo nome (igual ou cortado) e mesmo preço (até DIFERENCA_DE_PRECO% de diferença). Lojas
+    diferentes costumam copiar o mesmo título; entre as de mesmo nome e preço, fica a de taxa
+    de comissão e preço mais perto dos do cartão (no empate, a mais relevante), que é o anúncio
+    do cartão, e não o primeiro com aquele título, que pode ser o do próprio post. {} quando
+    não acha: sem a oferta não há o link para curtir e para o canal, nem a foto da IA.
     perdas (dict), quando vem, conta por que não achou: "nome" (nenhuma oferta da busca com o
     mesmo nome) ou "preço" (a de mesmo nome tem outro preço), só números para o checkup.
     """
     ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(cartao["nome"]), limite=OFERTAS_NA_BUSCA,
                                                            sort_type=1))
     mesmo_nome = False
-    for oferta in ofertas:
+    iguais = []
+    for ordem, oferta in enumerate(ofertas):
         if not ps.nome_na_pagina(oferta.get("productName") or "", cartao["nome"]):
             continue
         mesmo_nome = True
         preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
         if preco and abs(preco - cartao["preco"]) <= cartao["preco"] * DIFERENCA_DE_PRECO / 100:
-            return oferta
+            taxa = assistente._numero(oferta.get("commissionRate")) * 100
+            # Arredondado: 0.12 * 100 dá 12.000000000000002, e o empate tem de ser empate.
+            longe_da_taxa = round(abs(taxa - cartao["comissao"]), 2) if cartao.get("comissao") else 0
+            iguais.append((longe_da_taxa, round(abs(preco - cartao["preco"]), 2), ordem, oferta))
+    if iguais:
+        return min(iguais, key=lambda igual: igual[:3])[3]
     if perdas is not None:
         motivo = "preço" if mesmo_nome else "nome"
         perdas[motivo] = perdas.get(motivo, 0) + 1
     return {}
 
 
-def candidatos_da_foto(original, item_do_rascunho, achados):
+def candidatos_da_foto(original, item_do_rascunho, achados, fora=None):
     """
     Dos cartões da busca pela foto já achados na API ([(cartão, oferta)], na ordem de Vendas
     Populares), os que podem ir nos espaços livres, do que paga mais por venda para o que paga
     menos (no empate, o mais vendido): até MAIS_CARO_NA_TROCA% mais caros que o produto do link
     (P58), nunca o produto que já está no rascunho nem o mesmo item duas vezes.
     [{nome, endereco, imagem, preco, comissao, valor, item}]. Sem o preço do produto do link, nenhum.
+    fora (dict), quando vem, conta por que cada achado ficou de fora, só números para o
+    checkup: "sem o preço do post", "sem dados" (a API não deu o item, o link ou o preço),
+    "o do rascunho", "repetido" (o mesmo anúncio de outro cartão) e "mais caro", com "o mais
+    perto": quantos % acima do preço do post está o mais barato deles.
     """
+    fora = {} if fora is None else fora
+
+    def contar(motivo):
+        fora[motivo] = fora.get(motivo, 0) + 1
+
     if not original.get("preco"):
+        contar("sem o preço do post")
         return []
     teto = round(original["preco"] * (1 + MAIS_CARO_NA_TROCA / 100), 2)
-    vistos = {str(item_do_rascunho)} if item_do_rascunho else set()
+    vistos = set()
     candidatos = []
     for ordem, (_cartao, oferta) in enumerate(achados):
         item = str(oferta.get("itemId") or "")
         endereco = oferta.get("productLink") or ""
         preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
         comissao = assistente._numero(oferta.get("commissionRate")) * 100
-        if not item or item in vistos or not endereco or not preco or preco > teto:
+        if not item or not endereco or not preco:
+            contar("sem dados")
+            continue
+        if item_do_rascunho and item == str(item_do_rascunho):
+            contar("o do rascunho")
+            continue
+        if item in vistos:
+            contar("repetido")
+            continue
+        if preco > teto:
+            contar("mais caro")
+            # Para cima: o que passou do teto nunca aparece como os 20% dele.
+            acima = math.ceil(round((preco / original["preco"] - 1) * 100, 6))
+            fora["o mais perto"] = min(fora.get("o mais perto", acima), acima)
             continue
         vistos.add(item)
         candidatos.append({"nome": (oferta.get("productName") or "").strip(), "endereco": endereco,
@@ -2519,19 +2570,51 @@ def _buscar_pela_foto(d):
     return cartoes[:RESULTADOS_DA_FOTO], motivo
 
 
-def espacos_livres(d, video, principal, original, vistos, prazo):
+def _minutos(segundos):
+    """Os segundos em minutos com uma casa, no jeito brasileiro (2,5), para o registro."""
+    return f"{segundos / 60:.1f}".replace(".", ",")
+
+
+def _fora_do_preco(fora):
+    """Por que os achados na API ficaram de fora do preço (candidatos_da_foto), em texto curto, só números."""
+    partes = [f"mais caros {fora['mais caro']}, o mais perto +{fora['o mais perto']}%"] if fora.get("mais caro") else []
+    partes += [f"{rotulo} {fora[chave]}" for chave, rotulo in
+               (("o do rascunho", "o do rascunho"), ("repetido", "repetidos"), ("sem dados", "sem dados"))
+               if fora.get(chave)]
+    if fora.get("sem o preço do post"):
+        partes.append("sem o preço do post")
+    return f" ({'; '.join(partes)})" if partes else ""
+
+
+def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
     """
     Os produtos a mais do rascunho de link de produto (P59): até ESPACOS_DO_VIDEO - 1 do mesmo
     item, de outras lojas, conferidos pela IA com o vídeo, do que paga mais por venda para o
     que paga menos: [{nome, link, endereco, preco, comissao, valor, item}], com o link curto
     que o celular abre. Nenhum quando passou o prazo (time.monotonic), a busca não acha ou a
     IA não confirma. Um erro aqui nunca derruba o rascunho; a Verificação, sim.
+    inicio (time.monotonic do começo do rascunho), quando vem, põe no registro em que minuto
+    do rascunho a busca começou e quanto levou cada parte: a régua dos prazos, só números.
     """
     def anotar(resultado, detalhe="", ok=None):
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, resultado, detalhe, ok=ok)
+        # O tempo vai numa linha à parte, com o mesmo resultado: a contagem já enche o detalhe.
+        if inicio is not None:
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_TEMPO_DOS_ESPACOS, resultado, tempos())
+
+    marcas = [("começo", time.monotonic())]
+
+    def marcar(parte):
+        marcas.append((parte, time.monotonic()))
+
+    def tempos():
+        if inicio is None:
+            return ""
+        partes = [f"{parte} {_minutos(fim - comeco)} min" for (_, comeco), (parte, fim) in zip(marcas, marcas[1:])]
+        return f"aos {_minutos(marcas[0][1] - inicio)} min do rascunho" + (": " + ", ".join(partes) if partes else "")
 
     if not ler_config().get("robo_produtos_a_mais", True):
-        anotar("nenhum - desligados")
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "nenhum - desligados")
         return []
     if time.monotonic() > prazo:
         anotar("nenhum - sem tempo na rodada")
@@ -2544,6 +2627,7 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
         return []
     try:
         cartoes, motivo = buscar_pela_foto(d, capa)
+        marcar("busca")
         if not cartoes:
             anotar(f"nenhum - {motivo}")
             return []
@@ -2552,13 +2636,17 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
             oferta = oferta_do_cartao(cartao, perdas)
             if oferta:
                 achados.append((cartao, oferta))
-        candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]),
-                                        achados)[:CANDIDATOS_DOS_ESPACOS]
-        # Por que os outros cartões não foram achados na API: o nome ou o preço. E quantos nomes
-        # vieram com o "0" do selo da loja colado, que sai antes da busca.
+        fora_do_preco = {}
+        candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]), achados,
+                                        fora_do_preco)[:CANDIDATOS_DOS_ESPACOS]
+        # Por que os outros cartões não foram achados na API (o nome ou o preço), em quantos
+        # anúncios diferentes caíram os achados, por que eles ficaram de fora do preço, e quantos
+        # nomes vieram com o "0" do selo da loja colado, que sai antes da busca. Só números.
         fora = f" (sem o nome {perdas.get('nome', 0)}, outro preço {perdas.get('preço', 0)})" if perdas else ""
+        diferentes = len({str(oferta.get("itemId") or "") for _cartao, oferta in achados} - {""})
         selos = sum(1 for cartao in cartoes if cartao.get("selo"))
-        contagem = (f"{len(cartoes)} na busca, {len(achados)} na API{fora}, {len(candidatos)} no preço"
+        contagem = (f"{len(cartoes)} na busca, {len(achados)} na API{fora}, {diferentes} anúncio(s) diferente(s), "
+                    f"{len(candidatos)} no preço{_fora_do_preco(fora_do_preco)}"
                     + (f", {selos} com o selo colado" if selos else ""))
         fotos = []
         for candidato in candidatos:
@@ -2569,6 +2657,7 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
                 foto_do_candidato = None
             if foto_do_candidato:
                 fotos.append((candidato, foto_do_candidato))
+        marcar("API")
         if not fotos:
             anotar("nenhum - nenhum do mesmo preço na API", contagem)
             return []
@@ -2577,6 +2666,7 @@ def espacos_livres(d, video, principal, original, vistos, prazo):
             return []
         posicoes, motivo_da_ia = ps.ia_confere_iguais(video, principal["nome"],
                                                       [(c["nome"], f) for c, f in fotos], capa=capa)
+        marcar("IA")
         # A foto de cada um vai junto: o álbum das capas do rascunho (P75).
         confirmados = [dict(fotos[i][0], foto=fotos[i][1]) for i in posicoes][:ESPACOS_DO_VIDEO - 1]
         if motivo_da_ia:
@@ -2834,7 +2924,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # a foto da edição e o link do rascunho (P57). Escolhas do Rafael:
         # DECISOES.md, Shopee Vídeo.
         celular.append(True)
-        mais = espacos_livres(d, video, principal, original, vistos, prazo)
+        mais = espacos_livres(d, video, principal, original, vistos, prazo, inicio)
         produtos = _curtir_os_produtos(d, video, sorted([principal] + mais, key=lambda p: -p["valor"]), curtidos)
         video["link"] = produtos[0]["link"]
         nomes = [p["nome"] for p in produtos]
