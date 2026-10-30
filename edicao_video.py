@@ -664,9 +664,9 @@ def _so_letras(texto, maximo):
     return " ".join(palavras).rstrip(" ,.-:")
 
 
-# As letras do português, com os acentos que ele tem: letra fora delas (o "ü" de "pelüia", o "ñ")
-# é palavra que a IA escreveu errado. Em 30/10 a capa com chamada saiu com "pelüia" no lugar de
-# "pelúcia", e o Rafael teve de recusar o rascunho.
+# As letras do português, com os acentos que ele tem: letra fora delas (um "ü", um "ñ") é palavra
+# que a IA escreveu errado, e o texto não vai assim para a tela nem para a capa. Pedido do Rafael
+# em 30/10: DECISOES.md, Shopee Vídeo.
 LETRAS_DO_PORTUGUES = frozenset("abcdefghijklmnopqrstuvwxyzáàâãçéêíóôõúªº")
 PROMPT_DA_ORTOGRAFIA = ("Corrija a ortografia e a acentuação deste texto curto em português do Brasil, sem mudar o "
                         "sentido nem acrescentar nada. Responda só com o texto corrigido, sem aspas:\n{texto}")
