@@ -911,6 +911,9 @@ def test_medicao_dos_produtos_a_mais_so_com_numeros():
     assert "vendas: 1 do produto do vídeo, 1 dos produtos a mais (75% da comissão)" in linha
     assert m["tentativas"] == {"salvo": 2, "pulado": 0, "parou": 1, "erro": 0} and m["verificacoes"] == 1
     assert linha.endswith("| tentativas de rascunho: salvo 2, pulado 0, parou 1, erro 0 | verificações: 1")
+    # Em que estado está cada rascunho com produtos a mais: o Rafael não o achou para aprovar (30/10).
+    assert m["estados_com_a_mais"] == {"postado": 1}
+    assert "(com produtos a mais 1: postado 1; produtos a mais 2)" in linha
     assert "Garrafa" not in linha and "R$" not in linha and "Rascunhos" not in linha
 
 
