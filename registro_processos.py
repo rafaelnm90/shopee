@@ -31,7 +31,9 @@ from fuso import fuso_horario
 logger = logging.getLogger(__name__)
 
 DIAS_DO_REGISTRO = 3
-TAMANHO_DO_DETALHE = 120
+# O detalhe é texto fixo e números; cabe a contagem dos produtos a mais da Shopee Vídeo, a mais
+# longa.
+TAMANHO_DO_DETALHE = 240
 
 
 def _criar_tabela(con):
