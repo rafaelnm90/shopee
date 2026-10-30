@@ -1412,6 +1412,24 @@ def _juntar_vistas(vistas):
     return juntos
 
 
+# A tela final que acaba de abrir (o rascunho reaberto para postar, ou logo depois do Feito)
+# pode mostrar a fileira dos produtos só alguns segundos depois: no Motorola, em 30/10, o
+# rascunho aprovado com 3 produtos abriu sem o painel deles, e a conferência parou o post. Sem
+# nenhum produto na primeira leitura, ela relê a tela por até este tempo, em segundos.
+ESPERA_DA_FILEIRA = 15
+
+
+def _tela_com_a_fileira(d):
+    """A tela final, relida por até ESPERA_DA_FILEIRA s enquanto a fileira não mostra produto."""
+    xml = d.dump_hierarchy()
+    for _ in range(ESPERA_DA_FILEIRA // 3):
+        if produtos_na_fileira(xml):
+            break
+        time.sleep(3)
+        xml = d.dump_hierarchy()
+    return xml
+
+
 def conferir_tela_final(d, video):
     """
     Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): os produtos anexados
@@ -1422,7 +1440,7 @@ def conferir_tela_final(d, video):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     nomes = nomes_dos_produtos(video)
-    anexados = [nome for _, nome in produtos_na_fileira(d.dump_hierarchy())]
+    anexados = [nome for _, nome in produtos_na_fileira(_tela_com_a_fileira(d) if nomes else d.dump_hierarchy())]
     if anexados and len(anexados) < len(nomes):
         vistas = vistas_da_fileira(d)
         if _fileira_confere(vistas, nomes):
