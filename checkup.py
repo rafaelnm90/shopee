@@ -382,7 +382,7 @@ SEM_META = {
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
     ("shopee_video", "edição do vídeo: "), ("shopee_video", "visualizações na grade"),
     ("shopee_video", "responder comentário"), ("shopee_video", "espaços livres: "),
-    ("shopee_video", "tempo do rascunho"),
+    ("shopee_video", "tempo do rascunho"), ("shopee_video", "ver produtos: "),
 }
 
 

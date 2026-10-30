@@ -2212,6 +2212,16 @@ def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypa
 
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", fora)
     assert robo.links_do_ver_produtos([cortina_a]) == [""]
+    # Escolha do Rafael (30/10, P105): o registro conta, por rascunho, os links com o nome igual ao
+    # do app, com o nome parecido e os que ficaram sem, para o Claude conferir se a busca acerta
+    # antes de perguntar de novo da miniatura do Ver Produtos.
+    import registro_processos as rp
+    registros = sorted((l[2], l[3], l[4], l[5]) for l in rp.contagem("2000-01-01 00:00:00")
+                       if l[1] == robo.PROCESSO_DOS_LINKS_DO_VER_PRODUTOS)
+    assert registros == [("achados em parte", "1 com o nome igual, 0 com o nome parecido, 2 sem", None, 1),
+                         ("nenhum achado", "0 com o nome igual, 0 com o nome parecido, 1 sem", None, 1),
+                         ("todos achados", "2 com o nome igual, 0 com o nome parecido, 0 sem", 1, 1)]
+    assert robo.links_do_ver_produtos([]) == [] and len(rp.contagem("2000-01-01 00:00:00")) == 3
 
 
 def test_o_0_do_selo_colado_no_nome_nao_atrapalha_a_busca_na_api(monkeypatch):
