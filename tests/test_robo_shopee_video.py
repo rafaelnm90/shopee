@@ -1,4 +1,5 @@
 """Robô automático da Shopee Vídeo (robo_shopee_video): plano do dia, aprovação espalhada, rodada e o caminho no app."""
+import io
 import json
 import os
 import random
@@ -3651,13 +3652,13 @@ def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_
                    "3 na IA, 2 confirmados")
     assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
         "achados", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min, IA 1,0 min")
-    # Por que a IA deixou de fora os outros (30/10: 8 na IA e 2 confirmados, sem dizer o motivo):
-    # o mesmo produto com outra capa (P74) ou outro produto.
-    busca_pela_foto["recusas"] = {"outra capa": 1, "outro produto": 0}
+    # Quantos a IA deixou de fora (30/10: 8 na IA e 2 confirmados, sem dizer o motivo); a outra
+    # foto de capa não tira mais ninguém (P102), e o que fica de fora é outro produto.
+    busca_pela_foto["recusas"] = {"outro produto": 1}
     monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1180, 1240))
     assert len(robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640)) == 2
     assert ultimo(robo.PROCESSO_DOS_ESPACOS)[1].endswith("3 na IA, 2 confirmados")
-    assert ultimo(robo.PROCESSO_DAS_RECUSAS_DA_IA) == ("de fora pela IA", "outra capa 1, outro produto 0 (de 3 na IA)")
+    assert ultimo(robo.PROCESSO_DAS_RECUSAS_DA_IA) == ("de fora pela IA", "outro produto 1 (de 3 na IA)")
     del busca_pela_foto["recusas"]
     # O prazo que passa durante a busca, e o que já tinha passado antes dela.
     monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1300))
@@ -3881,6 +3882,53 @@ def test_rascunho_guarda_as_fotos_de_capa_para_o_album(monkeypatch, tmp_path):
     ident = robo.criar("v9")
     robo.atualizar(ident, capas=capas)
     assert robo.pegar(ident)["capas"] == capas and robo.pegar(robo.criar("v10"))["capas"] == []
+
+
+def _foto_de_teste(forma, loja=None):
+    """Uma foto de anúncio em JPEG; com loja (uma cor), a moldura e o selo que a loja põe na borda."""
+    from PIL import Image, ImageDraw
+    imagem = Image.new("RGB", (400, 400), "white")
+    desenho = ImageDraw.Draw(imagem)
+    if forma == "cubo":
+        desenho.rectangle((100, 120, 300, 320), fill=(230, 120, 30))
+        desenho.ellipse((150, 170, 250, 270), fill=(200, 30, 30))
+    else:
+        desenho.ellipse((60, 60, 340, 340), fill=(40, 160, 200))
+        desenho.rectangle((180, 100, 220, 300), fill=(250, 220, 0))
+    if loja:
+        desenho.rectangle((0, 0, 399, 399), outline=loja, width=18)
+        desenho.rectangle((300, 0, 399, 40), fill=loja)
+    saida = io.BytesIO()
+    imagem.save(saida, format="JPEG")
+    return saida.getvalue()
+
+
+def test_rascunho_marca_os_produtos_com_outra_foto_de_capa(monkeypatch):
+    # Escolha do Rafael (30/10, P102): basta ser o mesmo produto, e a foto de capa diferente da do
+    # anúncio do post vem marcada para ele conferir. A comparação é da imagem: a moldura e o selo
+    # que a loja põe na borda não contam.
+    capa = _foto_de_teste("cubo")
+    pedidos = []
+
+    def anuncio(video):
+        pedidos.append(video["link"])
+        return {"foto": capa}
+
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto", anuncio)
+    produtos = [dict(PRINCIPAL), dict(PRINCIPAL, nome="Loja 2", link="https://s.shopee.com.br/2", do_video=False,
+                                      foto=_foto_de_teste("cubo", loja=(0, 120, 0))),
+                dict(PRINCIPAL, nome="Loja 3", link="https://s.shopee.com.br/3", do_video=False,
+                     foto=_foto_de_teste("outra"))]
+    assert robo.mesma_foto(capa, produtos[1]["foto"]) is True
+    assert robo.mesma_foto(capa, produtos[2]["foto"]) is False
+    assert robo.mesma_foto(capa, b"nao e foto") is None
+    assert robo.com_outra_foto_de_capa({"link": LINK}, produtos, capa) == [3]
+    # A foto do produto do link vem da API uma vez só e fica no produto (o álbum usa a mesma).
+    assert robo.com_outra_foto_de_capa({"link": LINK}, produtos, capa) == [3] and pedidos == [PRINCIPAL["link"]]
+    assert robo.com_outra_foto_de_capa({"link": LINK}, produtos, None) == []
+    ident = robo.criar("v11")
+    robo.atualizar(ident, outras_capas=[3])
+    assert robo.pegar(ident)["outras_capas"] == [3] and robo.pegar(robo.criar("v12"))["outras_capas"] == []
 
 
 def test_rascunho_guarda_os_produtos_a_mais():

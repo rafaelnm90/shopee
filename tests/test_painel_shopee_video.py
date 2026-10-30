@@ -474,6 +474,36 @@ def test_rascunho_com_produtos_a_mais_chega_com_o_album_das_capas(bm, Msg, Est):
     assert [m[0] for m in msg.midias] == ["video", "foto"]
 
 
+def test_album_e_texto_do_rascunho_marcam_os_produtos_com_outra_foto_de_capa(bm, Msg, Est):
+    # Escolha do Rafael (30/10, P102): basta ser o mesmo produto; a foto de capa pode ser outra, e
+    # o álbum e o texto do rascunho dizem quais produtos têm outra foto que a do anúncio do post.
+    sv, est = _painel(bm), Est()
+    ident = _rascunho(sv)
+    capas = []
+    for n in (1, 2, 3):
+        caminho = os.path.join(sv.robo.PASTA_RASCUNHOS, f"{ident}_capa_{n}.jpg")
+        with open(caminho, "wb") as f:
+            f.write(b"\xff\xd8\xff")
+        capas.append(caminho)
+    sv.robo.atualizar(ident, capas=capas, produtos=["Cubo A", "Cubo B", "Cubo C"], outras_capas=[2, 3],
+                      mais_produtos=[{"nome": "Cubo B", "link": "https://s.shopee.com.br/b", "endereco": ""},
+                                     {"nome": "Cubo C", "link": "https://s.shopee.com.br/c", "endereco": ""}])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    legenda = msg.midias[2][2]
+    assert "Confira que são o mesmo item e o mesmo modelo." in legenda and "a mesma foto" not in legenda
+    assert "⚠️ Com outra foto de capa que a do anúncio do post: o 2º e o 3º." in legenda
+    texto = msg.saidas[-1]
+    assert "• Cubo A\n🔗 https://s.shopee.com.br/x" in texto
+    assert "• Cubo B ⚠️ outra foto de capa\n🔗 https://s.shopee.com.br/b" in texto
+    assert "• Cubo C ⚠️ outra foto de capa\n🔗 https://s.shopee.com.br/c" in texto
+    # Todas com a mesma foto: nada marcado.
+    sv.robo.atualizar(ident, outras_capas=[])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert "outra foto" not in msg.midias[2][2] and "outra foto" not in msg.saidas[-1]
+
+
 def test_rascunhos_um_por_um_com_video_print_titulo_e_link(bm, Msg, Est):
     sv, est = _painel(bm), Est()
     primeiro = _rascunho(sv, "Primeiro título #a")

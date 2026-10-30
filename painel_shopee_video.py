@@ -772,15 +772,18 @@ def rotulo_produtos_a_mais(config):
 
 
 def texto_produtos_a_mais(config):
-    """A tela dos Produtos a Mais. Escolhas do Rafael (28/10, P59; 29/10, P73): DECISOES.md, Shopee Vídeo."""
+    """
+    A tela dos Produtos a Mais. Escolhas do Rafael (28/10, P59; 29/10, P73; 30/10, P102):
+    DECISOES.md, Shopee Vídeo.
+    """
     return (
         "🛍️ <b>Produtos a Mais</b>\n"
         "Nos vídeos de link de produto, o robô procura o mesmo item em outras lojas pela busca pela foto do "
         "app (Vendas Populares, os primeiros 20), fica com os até 20% mais caros que o produto do post, e a "
-        "IA confere com o vídeo quais são o mesmo item, com a mesma foto de capa do anúncio do post (selo ou "
-        "moldura da loja por cima pode). Vão até 6 produtos no total, do que paga mais por venda para o que paga "
-        "menos. Sem itens iguais, o rascunho vai só com o produto do link. No rascunho, você vê as fotos de capa "
-        "de todos antes de aprovar.\n\n"
+        "IA confere com o vídeo quais são o mesmo item (a mesma marca, modelo e cor; a foto de capa pode ser "
+        "outra, porque cada loja usa a sua). Vão até 6 produtos no total, do que paga mais por venda para o que "
+        "paga menos. Sem itens iguais, o rascunho vai só com o produto do link. No rascunho, você vê as fotos de "
+        "capa de todos antes de aprovar, com a de outra foto que a do anúncio do post marcada.\n\n"
         f"Agora: {rotulo_produtos_a_mais(config)}\n\n"
         "<b>Medição</b>: até 05/11 o Claude conta as vendas que vieram dos produtos a mais, as punições, as "
         "verificações e os rascunhos que não saíram, e traz os números para você decidir. Se a Shopee der uma "
@@ -1647,6 +1650,18 @@ def linhas_dos_links(rascunho):
 
 
 SEM_O_LINK_DO_PRODUTO = "🔗 (a API não achou o link deste: ele está no Ver Produtos do vídeo original, abaixo)"
+# A marca do produto com outra foto de capa que a do anúncio do post: o mesmo produto basta, e o
+# Rafael confere a foto diferente antes de aprovar. Escolha dele (30/10, P102): DECISOES.md,
+# Shopee Vídeo.
+OUTRA_FOTO_NO_TEXTO = " ⚠️ outra foto de capa"
+
+
+def numeros_por_extenso(posicoes):
+    """As posições (1, 2, ...) como o texto as diz: "o 2º", "o 2º e o 3º", "o 2º, o 3º e o 5º"."""
+    nomes = [f"o {n}º" for n in posicoes]
+    if len(nomes) < 2:
+        return "".join(nomes)
+    return f"{', '.join(nomes[:-1])} e {nomes[-1]}"
 
 
 def linhas_dos_produtos(rascunho):
@@ -1667,8 +1682,11 @@ def linhas_dos_produtos(rascunho):
         links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
         if len(links) != len(nomes):
             return ("\n".join(f"• {html_escape(nome)}" for nome in nomes) or "• ?") + "\n" + linhas_dos_links(rascunho)
-    return "".join(f"• {html_escape(nome)}\n" + (f"🔗 {html_escape(link)}" if link else SEM_O_LINK_DO_PRODUTO) + "\n"
-                   for nome, link in zip(nomes, links)) + fim
+    # O produto com outra foto de capa que a do anúncio do post vem marcado (P102).
+    outras = set(rascunho.get("outras_capas") or [])
+    return "".join(f"• {html_escape(nome)}{OUTRA_FOTO_NO_TEXTO if n in outras else ''}\n"
+                   + (f"🔗 {html_escape(link)}" if link else SEM_O_LINK_DO_PRODUTO) + "\n"
+                   for n, (nome, link) in enumerate(zip(nomes, links), 1)) + fim
 
 
 def texto_rascunho(rascunho, posicao, total):
@@ -1688,6 +1706,17 @@ def texto_rascunho(rascunho, posicao, total):
 
 # O Telegram manda até 10 fotos num álbum; o post tem até 6 produtos.
 LIMITE_DO_ALBUM = 10
+
+
+def legenda_do_album(rascunho, posicao, fotos):
+    """
+    A legenda do álbum das fotos de capa (P75): o mesmo item e o mesmo modelo basta, e os produtos
+    com outra foto de capa que a do anúncio do post vêm ditos, para o Rafael conferir (P102).
+    """
+    outras = sorted(rascunho.get("outras_capas") or [])
+    aviso = f"\n⚠️ Com outra foto de capa que a do anúncio do post: {numeros_por_extenso(outras)}." if outras else ""
+    return (f"🛍️ Rascunho {posicao}: as fotos de capa dos {fotos} produtos, na ordem do post. Confira que são o "
+            "mesmo item e o mesmo modelo." + aviso)
 
 
 def _rascunho_a_mostrar(pendentes, depois_de=None, antes_de=None):
@@ -1734,9 +1763,8 @@ async def mostrar_rascunho(message, state, depois_de=None, antes_de=None):
     capas = [capa for capa in rascunho.get("capas") or [] if os.path.exists(capa)]
     if len(capas) > 1:
         await message.answer_media_group([
-            InputMediaPhoto(media=FSInputFile(capa), caption=(
-                f"🛍️ Rascunho {posicao}: as fotos de capa dos {len(capas)} produtos, na ordem do post. Confira "
-                "que são o mesmo item, o mesmo modelo e a mesma foto.") if n == 0 else None)
+            InputMediaPhoto(media=FSInputFile(capa), caption=legenda_do_album(rascunho, posicao, len(capas))
+                            if n == 0 else None)
             for n, capa in enumerate(capas[:LIMITE_DO_ALBUM])])
     await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
                          disable_web_page_preview=True,
