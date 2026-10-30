@@ -1246,47 +1246,70 @@ def _claros(imagem, caixa, passo=4):
     return sum(1 for x in range(x1, x2, passo) for y in range(y1, y2, passo) if min(imagem.getpixel((x, y))) > 200)
 
 
-def test_capa_com_chamada_nao_atrapalha_o_numero_nem_a_sacolinha():
-    # Pedido do Rafael: a chamada não pode atrapalhar os números da grade do perfil. Ela fica
-    # abaixo da sacolinha e do selo Fixado, e a foto acaba antes do número.
-    capa = _capa("Acaba com a bagunça da cozinha")
+def _cor_de(imagem, ponto, cor):
+    return max(abs(a - b) for a, b in zip(imagem.getpixel(ponto), cor)) < 8
+
+
+def _pretos(imagem, caixa, passo=4):
+    x1, y1, x2, y2 = caixa
+    return all(max(imagem.getpixel((x, y))) < 20 for x in range(x1, x2, passo) for y in range(y1, y2, passo))
+
+
+def test_capa_com_chamada_tem_a_foto_inteira_e_a_frase_numa_faixa_laranja():
+    # Escolha do Rafael (P107): a foto do mesmo tamanho da capa sem texto e a frase em letras
+    # brancas numa faixa laranja por cima do pé da foto, logo acima do número de visualizações.
+    capa = _capa("Organize sua cozinha")
     assert capa.size == edicao_video.TELA
-    assert _claros(capa, edicao_video.AREA_DA_CHAMADA) > 50               # as letras brancas
-    assert _claros(capa, edicao_video.NUMERO_DA_GRADE) == 0               # onde a grade põe o número
-    assert _claros(capa, edicao_video.SACOLINHA_DA_GRADE) == 0            # a sacolinha da Shopee
-    assert _claros(capa, edicao_video.FIXADO_DA_GRADE) == 0               # o selo dos vídeos fixados
-    # A foto no meio, um pouco menor, dentro do que a grade mostra; preto em volta.
-    topo, base = edicao_video.AREA_DA_FOTO_COM_CHAMADA
-    cor = capa.getpixel((360, (topo + base) // 2))
-    assert max(abs(a - b) for a, b in zip(cor, (200, 120, 40))) < 8
-    assert max(capa.getpixel((360, base + 5))) < 20 and max(capa.getpixel((360, topo - 5))) < 20
+    # A foto quadrada ocupa a largura toda, de y 280 a 1000, como no começo do vídeo sem a chamada.
+    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
+    assert (x2 - x1, y2 - y1) == (720, 720) and (y1 + y2) // 2 == edicao_video.TELA[1] // 2
+    for ponto in [(2, y1 + 2), (717, y1 + 2), (360, (y1 + y2) // 2), (2, 850), (717, 850)]:
+        assert _cor_de(capa, ponto, (200, 120, 40))
+    assert _pretos(capa, (0, 0, 720, y1)) and _pretos(capa, (0, y2, 720, 1280))
+    # A faixa laranja no pé da foto, de um lado ao outro, com as letras brancas só dentro dela.
+    faixa = (0, y2 - edicao_video.FAIXA_DA_CHAMADA, 720, y2)
+    assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE) for x in (3, 716) for y in (faixa[1] + 2, y2 - 2))
+    assert _cor_de(capa, (360, faixa[1] - 3), (200, 120, 40))
+    assert _claros(capa, faixa) > 50
+    assert _claros(capa, (0, 0, 720, faixa[1])) == 0 and _claros(capa, (0, y2, 720, 1280)) == 0
+    # Pedido do Rafael: os números da grade ficam livres. O número de visualizações e a sacolinha
+    # da Shopee ficam no preto, e tudo cabe no que a grade mostra da capa.
+    assert _pretos(capa, edicao_video.NUMERO_DA_GRADE) and _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
     cima, baixo = edicao_video.VISIVEL_NA_GRADE
-    assert cima <= edicao_video.AREA_DA_CHAMADA[1] and base <= edicao_video.NUMERO_DA_GRADE[1] < baixo
-    # Nada da chamada fora da faixa dela.
-    x1, y1, x2, y2 = edicao_video.AREA_DA_CHAMADA
-    assert _claros(capa, (0, 0, 720, y1)) == 0 and _claros(capa, (x2, 0, 720, topo)) == 0
+    assert cima <= y1 and y2 <= edicao_video.NUMERO_DA_GRADE[1] < baixo
 
 
-def test_chamada_comprida_cabe_em_duas_linhas_e_sem_chamada_nao_ha_capa():
-    # A vantagem da IA tem até MAXIMO_DA_VANTAGEM caracteres: sempre cabe, numa letra menor.
-    longa = "Organiza todos os temperos em segundos"[:edicao_video.MAXIMO_DA_VANTAGEM]
-    assert _claros(_capa(longa), edicao_video.AREA_DA_CHAMADA) > _claros(_capa("Leve"), edicao_video.AREA_DA_CHAMADA)
-    assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
-    assert edicao_video.capa_com_chamada(b"nao e imagem", "Leve") is None
-    # A chamada curta vai numa linha só, na maior letra; a que não cabe, em duas equilibradas,
-    # sem a 1ª terminar numa palavra de ligação.
+def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa():
+    import io
     import os
 
     import matplotlib
     from PIL import Image, ImageDraw
     desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    # A frase curta (até MAXIMO_DA_CAPA letras, P106) vai numa linha só, em letra grande.
     fonte, linhas = edicao_video._quebra_da_chamada("Leve", desenho, fonte_ttf)
     assert (fonte.size, linhas) == (edicao_video.LETRAS_DA_CHAMADA[0], ["Leve"])
+    for curta in ("Organize sua cozinha", "Mochila impermeável", "Limpeza sem esforço", "Gelado o dia todo"):
+        assert len(curta) <= edicao_video.MAXIMO_DA_CAPA
+        fonte, linhas = edicao_video._quebra_da_chamada(curta, desenho, fonte_ttf)
+        assert linhas == [curta] and fonte.size >= 50
+    # A vantagem comprida (a IA não escreveu a curta) vai em duas linhas equilibradas, sem a 1ª
+    # terminar numa palavra de ligação, e a faixa cresce para cima, sem passar do pé da foto.
     assert edicao_video._quebra_da_chamada("Acaba com a bagunça da cozinha", desenho, fonte_ttf)[1] == [
         "Acaba com a bagunça", "da cozinha"]
+    longa = "Organiza todos os temperos em segundos"[:edicao_video.MAXIMO_DA_VANTAGEM]
+    fonte, linhas = edicao_video._quebra_da_chamada(longa, desenho, fonte_ttf)
+    assert len(linhas) == 2 and fonte.size >= edicao_video.LETRAS_EM_DUAS_LINHAS[1]
+    capa = _capa(longa)
+    _, _, _, y2 = edicao_video.FOTO_DA_CAPA
+    assert _cor_de(capa, (3, y2 - edicao_video.FAIXA_DA_CHAMADA - 10), edicao_video.LARANJA_DA_SHOPEE)
+    assert _cor_de(capa, (3, y2 - 2), edicao_video.LARANJA_DA_SHOPEE) and _pretos(capa, (0, y2, 720, 1280))
+    assert _pretos(capa, edicao_video.NUMERO_DA_GRADE)
+    # Sem a frase ou com a foto que não abre, não há capa com chamada (vai a capa de sempre).
+    assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
+    assert edicao_video.capa_com_chamada(b"nao e imagem", "Leve") is None
     # O exemplo do painel mostra também o pedaço que a grade do perfil mostra.
-    import io
     recorte = Image.open(io.BytesIO(edicao_video.recorte_da_grade(edicao_video.capa_com_chamada(_foto_jpg(), "Leve"))))
     cima, baixo = edicao_video.VISIVEL_NA_GRADE
     assert recorte.size == (720, baixo - cima)

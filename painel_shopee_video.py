@@ -875,13 +875,13 @@ def texto_capa(config, medicao):
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
         "A capa é o que aparece na grade do seu perfil: o primeiro quadro do vídeo (a foto do anúncio dos "
-        f"primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos). Com a capa com chamada, o robô escreve acima da "
-        "foto, em letras grandes, a vantagem que o vídeo mostra (a frase que a IA escreve vendo o vídeo, a mesma "
-        "das legendas do Editor 2), sem marca, sem preço e sem desconto: as diretrizes da Shopee punem promessa que "
-        "o vídeo não mostra e desconto falso, e o preço muda.\n\n"
-        "<b>Os números ficam livres</b>: a chamada fica abaixo da sacolinha da Shopee e do selo \"Fixado\" dos "
-        "vídeos fixados, e a foto, um pouco menor, acaba antes do número de visualizações, embaixo à esquerda. "
-        "Tudo cabe no pedaço da capa que a grade mostra.\n\n"
+        f"primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos). Com a capa com chamada, a foto fica do mesmo "
+        "tamanho da capa sem texto, e o robô escreve por cima do pé dela, numa faixa laranja da Shopee, em letras "
+        "brancas e grandes, a vantagem que o vídeo mostra em poucas palavras (a frase que a IA escreve vendo o "
+        "vídeo), sem marca, sem preço e sem desconto: as diretrizes da Shopee punem promessa que o vídeo não mostra "
+        "e desconto falso, e o preço muda.\n\n"
+        "<b>Os números ficam livres</b>: a faixa acaba logo acima do número de visualizações, embaixo à esquerda, "
+        "e a foto começa logo abaixo da sacolinha da Shopee. Tudo cabe no pedaço da capa que a grade mostra.\n\n"
         "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Ligada, ela "
         "vai em todos os vídeos. Na bebida alcoólica, a capa continua a dos três avisos, e o vídeo sem a vantagem da "
         "IA vai com a capa de sempre.\n\n"
@@ -1121,8 +1121,8 @@ def legenda_do_exemplo_da_capa(nome, chamada):
     return (f"🏷️ <b>Exemplo da capa com chamada</b> (não foi postado): {html_escape(nome)}.\n"
             "1ª foto: a capa inteira, como abre o vídeo. 2ª foto: o pedaço que a grade do seu perfil mostra.\n"
             f"✍️ Chamada (a vantagem que a IA viu no vídeo, em poucas palavras): “{html_escape(chamada)}”\n"
-            "🔢 O número de visualizações fica na faixa preta de baixo, à esquerda, e a sacolinha da Shopee e o "
-            "selo Fixado, na faixa de cima: nenhum deles cobre a chamada nem a foto.\n"
+            "🔢 O número de visualizações fica no preto, logo abaixo da faixa laranja, e a sacolinha da Shopee, "
+            "logo acima da foto: nenhum deles cobre a chamada.\n"
             f"Toque de novo em {BOTAO_EXEMPLO_DA_CAPA} para ver outro vídeo.")
 
 
