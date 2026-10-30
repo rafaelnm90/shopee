@@ -335,6 +335,8 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "ou se o vídeo já tem legenda própria (os quadros do criador com a foto do produto não contam)" in texto
     assert "nem os quadros que o criador pôs por cima" in texto
     assert "a nossa miniatura fica de fora" in texto
+    # Escolha do Rafael (29/10, P97): com a coisa do criador logo abaixo do canto, ela diminui.
+    assert "se a coisa dele fica logo abaixo do canto, ela diminui (até 2/3 do tamanho)" in texto
     assert ("O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições do "
             "editor, como vai ao ar; depois até 2 versões modificadas dele") in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
@@ -1215,6 +1217,13 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     resumo.update(texto_no_video=True)
     assert "📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela." in sv.legenda_das_versoes(
         "Copo", resumo, 1, 2)
+    # Escolhas do Rafael (29/10, P81 e P97): o original diz quando a miniatura ficou de fora ou menor.
+    for miniatura, frase in ((0, "🖼️ Sem a nossa miniatura (neste vídeo e nas versões)"),
+                             (124, "🖼️ Miniatura menor (69% do tamanho de sempre, neste vídeo e nas versões)"),
+                             (180, None), (True, None)):
+        resumo.update(miniatura=miniatura)
+        legenda = sv.legenda_das_versoes("Copo", resumo, 0, 2)
+        assert (frase in legenda) if frase else "🖼️" not in legenda
     # Os botões de antes do Editor 2 e do 4 valem como o Editor 2.
     assert sv.BOTOES_ANTIGOS_EDITOR_2 == ["Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 4 🎬"]
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
