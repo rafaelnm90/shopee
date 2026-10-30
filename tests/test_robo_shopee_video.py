@@ -3478,7 +3478,18 @@ def test_oferta_do_cartao_e_a_de_mesmo_nome_e_mesmo_preco(monkeypatch):
     perdas = {}
     assert robo.oferta_do_cartao(dict(cartao, preco=20.0), perdas) == {} and perdas == {"preço": 1}
     assert robo.oferta_do_cartao(dict(cartao, nome="Panela De Pressão Elétrica"), perdas) == {}
-    assert perdas == {"preço": 1, "nome": 1}
+    assert perdas == {"preço": 1, "nome": 1, "outros produtos": 1}
+    # Conferência de 30/10 (P59): 3 a 15 dos 20 cartões não eram achados pelo nome, sem dizer por
+    # quê. O anúncio de nome um pouco diferente do cartão é "nome parecido"; a busca sem nada,
+    # "busca vazia".
+    assert robo.oferta_do_cartao(dict(cartao, nome="Garrafa Térmica Inox 1 Litro Azul"), perdas) == {}
+    assert perdas["nome parecido"] == 1
+
+    async def nada(termo, limite=20, sort_type=1):
+        return []
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", nada)
+    assert robo.oferta_do_cartao(cartao, perdas) == {} and perdas["busca vazia"] == 1 and perdas["nome"] == 3
 
 
 def test_oferta_do_cartao_e_o_anuncio_do_cartao_entre_lojas_de_titulo_copiado(monkeypatch):
@@ -3550,7 +3561,8 @@ def busca_pela_foto(monkeypatch):
     def oferta(cartao, perdas=None):
         achada = estado["ofertas"].get(cartao["nome"], {})
         if not achada and perdas is not None:
-            perdas["nome"] = perdas.get("nome", 0) + 1
+            for motivo in ("nome", "outros produtos"):
+                perdas[motivo] = perdas.get(motivo, 0) + 1
         return achada
 
     estado["ofertas"] = ofertas
@@ -3594,6 +3606,10 @@ def test_espacos_livres_contam_os_cartoes_que_nao_acharam_na_api(busca_pela_foto
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
     assert ("3 na busca (3 com o nome parecido), 2 na API (sem o nome 1, outro preço 0), 2 anúncio(s) diferente(s), "
             "2 no preço") in registro[-1][3]
+    # E por que o cartão não foi achado pelo nome, numa linha à parte (conferência de 30/10, P59).
+    porque = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_BUSCA_NA_API, "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in porque] == [
+        ("sem o nome", "1 cartão(ões): busca vazia 0, nome parecido 0, outros produtos 1")]
 
 
 class _Relogio:

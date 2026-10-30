@@ -2412,6 +2412,12 @@ PROCESSO_DO_TEMPO_DOS_ESPACOS = "espaços livres: tempo de cada parte"
 # Por que a IA deixou os outros anúncios de fora: o mesmo produto com outra foto de capa (P74)
 # ou outro produto. Pedido do Rafael (30/10): o que dificulta achar a causa vira registro.
 PROCESSO_DAS_RECUSAS_DA_IA = "espaços livres: por que a IA deixou de fora"
+# Por que o cartão não foi achado pelo nome na API, numa linha à parte: a busca sem nenhuma
+# oferta, uma oferta de nome parecido (o anúncio com o nome um pouco diferente do cartão) ou só
+# ofertas de outros produtos (a busca não trouxe o anúncio). Só números, para o checkup achar
+# qual conserto a busca pede.
+PROCESSO_DA_BUSCA_NA_API = "espaços livres: por que a API não achou o cartão"
+PARECIDO_NA_API = 60
 ESPACOS_DO_VIDEO = 6
 RESULTADOS_DA_FOTO = 20
 ROLAGENS_DA_FOTO = 8
@@ -2478,9 +2484,17 @@ def oferta_do_cartao(cartao, perdas=None):
     if iguais:
         return min(iguais, key=lambda igual: igual[:3])[3]
     if perdas is not None:
-        motivo = "preço" if mesmo_nome else "nome"
-        perdas[motivo] = perdas.get(motivo, 0) + 1
+        for motivo in ("preço",) if mesmo_nome else ("nome", _porque_sem_o_nome(ofertas, cartao["nome"])):
+            perdas[motivo] = perdas.get(motivo, 0) + 1
     return {}
+
+
+def _porque_sem_o_nome(ofertas, nome):
+    """Por que nenhuma oferta da busca teve o nome do cartão (PROCESSO_DA_BUSCA_NA_API)."""
+    if not ofertas:
+        return "busca vazia"
+    parecido = ps.mais_parecido([oferta.get("productName") or "" for oferta in ofertas], nome)[0]
+    return "nome parecido" if parecido >= PARECIDO_NA_API else "outros produtos"
 
 
 def nome_parecido(nome_do_cartao, nome_do_post):
@@ -2665,6 +2679,11 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
             oferta = oferta_do_cartao(cartao, perdas)
             if oferta:
                 achados.append((cartao, oferta))
+        if perdas.get("nome"):
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_BUSCA_NA_API, "sem o nome",
+                                         f"{perdas['nome']} cartão(ões): busca vazia {perdas.get('busca vazia', 0)}, "
+                                         f"nome parecido {perdas.get('nome parecido', 0)}, "
+                                         f"outros produtos {perdas.get('outros produtos', 0)}")
         fora_do_preco = {}
         candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]), achados,
                                         fora_do_preco)[:CANDIDATOS_DOS_ESPACOS]
