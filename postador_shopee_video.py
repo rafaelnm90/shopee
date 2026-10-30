@@ -22,11 +22,14 @@ Passos, separados por ponto e vírgula:
     xy:X,Y           toca nesse ponto da tela
     voltar, inicio   as teclas do Android
     rolar:baixo      arrasta a tela (rolar:cima)
+    arrastar:X1,Y1,X2,Y2  arrasta de um ponto ao outro (mover um texto na tela da capa)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte;
                      video:link-de-video, um cujo link abre um vídeo, o Ver Produtos);
-                     video:apagar tira da galeria o vídeo do teste
+                     video:editado, ele editado como o do robô (a foto do anúncio no começo, a
+                     miniatura e a seta, sem os textos da IA), para o 1º quadro, que o app usa
+                     como capa, ficar como o dos posts; video:apagar tira da galeria o vídeo do teste
     foto             põe na galeria a foto do anúncio do produto do vídeo do teste (a da API de
                      afiliado), a mais nova da galeria, para a busca pela foto (a câmera da
                      busca de Criadores & Afiliados); foto:apagar tira
@@ -44,7 +47,8 @@ Passos, separados por ponto e vírgula:
                      Rascunhos faz essa conferência antes, sozinho)
     postar           toca em Postar na tela final, com o produto conferido de novo na hora
     print            manda um print da tela no privado do Rafael (nunca no log); print:postar
-                     avisa que é a tela antes de postar
+                     avisa que é a tela antes de postar; print:capa, que é o exemplo da capa
+                     com a frase para ele aprovar
     legenda          compara a legenda da tela final com o título do passo titulo (só
                      tamanhos e códigos de caractere no log, nunca o texto), lida de três
                      jeitos: pela cópia do campo, pela acessibilidade e pelo retrato da tela;
@@ -52,6 +56,9 @@ Passos, separados por ponto e vírgula:
     colar:TEXTO      troca o texto do campo com o cursor pelo texto, colando (Ctrl+V)
     copiado          diz se o que está copiado no celular é um link da Shopee e o tamanho
                      dele (o link nunca vai para o log): é como o robô pega o link do post
+    caso             guarda o print e a forma da tela como um caso do casos_robo, cifrado, para
+                     o Claude ver a imagem da tela (casos_robo.yml exportar), nunca no log;
+                     caso:TEXTO diz o que é
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
@@ -94,6 +101,7 @@ import android_virtual as av
 import api_gemini
 import assistente_shopee_video as assistente
 import avisar_rafael
+import casos_robo
 import celular_robo
 import db
 import legendas
@@ -114,6 +122,10 @@ HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo: a tela antes de salvar o rascunho."
 LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo: a tela antes de postar. Confira o vídeo, o título "
                         "e o produto: só posto com o seu OK.")
+# O exemplo da capa com a frase pelo Adicionar Texto do app, para o Rafael aprovar antes de o
+# robô fazer assim (P109): DECISOES.md, Shopee Vídeo.
+LEGENDA_PRINT_CAPA = ("🖼️ Robô da Shopee Vídeo: exemplo da capa com a frase pelo Adicionar Texto do app, "
+                      "num vídeo de teste que não vai ao ar. Responda na conversa com o Claude se aprova.")
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado ao vídeo."
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
                     "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
@@ -211,6 +223,8 @@ NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 NOME_DA_FOTO = "busca_pela_foto"
 EXTENSOES_DA_FOTO = (("jpg", b"\xff\xd8\xff"), ("png", b"\x89PNG"))
 SEGUNDOS_DEPOIS_DO_PASSO = 3
+# O arrasto devagar, como um dedo: rápido demais, o app toma por um toque ou um deslize.
+SEGUNDOS_DO_ARRASTO = 0.8
 MAXIMO_ESPERA = 60
 MAXIMO_LINHAS = 150
 # Quantos vídeos da fonte, ainda não usados, o video:link-de-video olha (cada um segue o
@@ -1627,6 +1641,29 @@ def por_na_galeria(d, arquivo, nome=NOME_NA_GALERIA):
     return nome in getattr(lista, "output", "")
 
 
+def por_editado_na_galeria(d, video):
+    """
+    Põe na galeria, no lugar do vídeo do teste, ele editado como o do robô (edicao_video.editar:
+    a foto do anúncio nos primeiros segundos, a miniatura e a seta, sem os textos da IA): o 1º
+    quadro, que o app usa como capa, fica como o dos posts. (ok, o que dizer no log)
+    """
+    import edicao_video   # aqui dentro: o edicao_video importa este módulo
+    foto = anuncio_do_produto(video).get("foto")
+    if not foto:
+        return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
+    descritor, destino = tempfile.mkstemp(suffix=".mp4")
+    os.close(descritor)
+    try:
+        motivo = edicao_video.editar(video["arquivo"], foto, destino)
+        if motivo:
+            return False, f"a edição não saiu: {motivo}"
+        return ((True, "vídeo editado na galeria") if por_na_galeria(d, destino)
+                else (False, "o vídeo não apareceu na galeria"))
+    finally:
+        if os.path.exists(destino):
+            os.remove(destino)
+
+
 def extensao_da_foto(dados):
     """jpg, png ou webp pela assinatura dos bytes; None para o que não é foto."""
     for extensao, assinatura in EXTENSOES_DA_FOTO:
@@ -1874,9 +1911,9 @@ def link_copiado(d):
 
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
-    conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
+    conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "esperar", "escrever",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
-                  "postar", "print", "copiado", "legenda", "colar", "tela"}
+                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -1931,6 +1968,21 @@ def fazer_passo(d, nome, argumento):
     if nome == "rolar":
         rolar(d, para_cima=argumento == "cima")
         return True, "rolado"
+    if nome == "arrastar":
+        try:
+            x1, y1, x2, y2 = (int(n) for n in argumento.split(","))
+        except ValueError:
+            return False, "arrastar pede X1,Y1,X2,Y2"
+        tela = d.dump_hierarchy()
+        # O dedo sai da tela no fim do arrasto: nenhum dos dois pontos pode ser um botão proibido.
+        if proibido_no_ponto(tela, x1, y1) or proibido_no_ponto(tela, x2, y2):
+            return False, RECUSA
+        d.drag(x1, y1, x2, y2, SEGUNDOS_DO_ARRASTO)
+        return True, f"arrastado de ({x1},{y1}) a ({x2},{y2})"
+    if nome == "caso":
+        pasta = casos_robo.guardar(d, "explorar", "tela", argumento or "tela do explorar", passo="explorar")
+        return (True, "tela guardada para o Claude (casos_robo.yml exportar)") if pasta else (
+            False, "a tela não foi guardada")
     if nome == "esperar":
         time.sleep(min(float(argumento or 1), MAXIMO_ESPERA))
         return True, "esperado"
@@ -1975,6 +2027,8 @@ def fazer_passo(d, nome, argumento):
             return conferir_tela_final(d, video)
         if nome == "postar":
             return postar(d, video)
+        if argumento == "editado":
+            return por_editado_na_galeria(d, video)
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
     if nome == "legenda":
@@ -1998,7 +2052,7 @@ def fazer_passo(d, nome, argumento):
         return False, ("nada copiado, ou o Android não deixou ler" if not texto
                        else f"o copiado ({len(texto)} caracteres) não tem link da Shopee")
     if nome == "print":
-        legenda = LEGENDA_PRINT_POSTAR if argumento == "postar" else LEGENDA_PRINT
+        legenda = {"postar": LEGENDA_PRINT_POSTAR, "capa": LEGENDA_PRINT_CAPA}.get(argumento, LEGENDA_PRINT)
         return ((True, "print mandado no privado") if mandar_print(d, legenda)
                 else (False, "o Telegram recusou o print"))
     return True, "só a tela"

@@ -16,6 +16,8 @@ Pedido do Rafael: DECISOES.md, Shopee Vídeo.
 Quem usa:
 - robo_shopee_video: com_historico(d) no celular de cada rodada e guardar(...) em cada
   tentativa que não deu certo;
+- postador_shopee_video: o passo caso do explorar guarda do mesmo jeito a tela do celular
+  (o print e a forma), para o Claude ver a imagem de uma tela que está mapeando;
 - casos_robo.yml: "casos_robo.py contar", "casos_robo.py cifrado" e "casos_robo.py apagar";
 - Claude: "casos_robo.py ler ARQUIVO PASTA" abre no scratchpad o arquivo do ramo.
 
