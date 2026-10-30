@@ -1172,8 +1172,16 @@ def tocar(d, alvo, espera):
     pausa(espera)
 
 
+# A tela que demora a carregar (no Motorola, em 30/10, Criadores & Afiliados ficou em branco
+# mais de 8 s depois do toque): o caminho relê a tela por até este tempo antes de parar.
+ESPERA_A_MAIS_NO_CAMINHO = 12
+
+
 def seguir(d, caminho):
-    """Faz os toques do caminho e confere, depois de cada um, que a tela esperada abriu."""
+    """
+    Faz os toques do caminho e confere, depois de cada um, que a tela esperada abriu (a que
+    demora a carregar tem mais ESPERA_A_MAIS_NO_CAMINHO segundos).
+    """
     for alvo, espera, esperado in caminho:
         tocar(d, alvo, espera)
         xml = tela(d)
@@ -1182,7 +1190,7 @@ def seguir(d, caminho):
             tocar(d, "Ok", 3)
             tocar(d, "Próximo", 8)
             xml = tela(d)
-        if not tem(xml, esperado):
+        if not tem(xml, esperado) and not esperar_na_tela(d, esperado, ESPERA_A_MAIS_NO_CAMINHO):
             raise Parada(f"depois de {alvo}, a tela não mostrou {esperado}")
 
 
