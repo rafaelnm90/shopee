@@ -890,9 +890,29 @@ def test_tela_final_que_nao_confere_deixa_no_registro_so_numeros(monkeypatch):
     assert not ps.explorar("conferir", Aparelho(tela=_tela_final("Vestido Infantil Estampado Rosa")))
     assert not ps.explorar("conferir", Aparelho(tela=_tela_final()))
     linhas = [l[3] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "conferir a tela final"]
-    assert sorted(linhas) == ["0 anexado(s) na tela; 1 do vídeo",
+    assert sorted(linhas) == ["0 anexado(s) na tela; 1 do vídeo; a linha dos produtos sem produto",
                               "1 anexado(s) na tela; 1 do vídeo; o mais parecido com cada um: 42% das palavras"]
     assert not any("Vestido" in l for l in linhas)
+
+
+def test_tela_final_sem_produto_diz_se_a_linha_nem_apareceu_ou_ficou_vazia(monkeypatch):
+    # 30/10: às 07:10 o rascunho reaberto para postar mostrou a tela final sem a linha dos
+    # produtos (o celular lento; os 3 produtos estavam salvos), e às 06:17 a linha ficou vazia
+    # depois do Feito. O registro dizia "0 anexado(s)" nos dois: agora diz qual foi.
+    import registro_processos as rp
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    _avisos(monkeypatch)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    vazia = TELA_FINAL.replace("PRODUTOS", '<node text="Toque para adicionar produtos" '
+                                           'resource-id="com.shopee.br:id/tv_add_product_tip" bounds="[540,717][974,760]" />')
+    sem_a_linha = TELA_FINAL.replace("PRODUTOS", "").replace("tv_add_product_title", "tv_allow_reuse")
+    for tela in (vazia, sem_a_linha):
+        assert not ps.conferir_tela_final(Aparelho(tela=tela), {"produtos": [VESTIDO]})[0]
+    linhas = [l[3] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "conferir a tela final"]
+    assert sorted(linhas) == ["0 anexado(s) na tela; 1 do vídeo; a linha dos produtos vazia",
+                              "0 anexado(s) na tela; 1 do vídeo; sem a linha dos produtos na tela"]
+    assert ps.linha_dos_produtos(_tela_final(VESTIDO)) == "a linha dos produtos com produto"
 
 
 def test_rascunhos_so_e_tocado_com_o_produto_do_video_na_tela_final(monkeypatch, capsys):
@@ -1360,7 +1380,7 @@ def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monke
     linha = [l for l in rp.contagem("2000-01-01 00:00:00")
              if l[1] == "anexar o produto" and l[2] == "nome não achado em Minhas Curtidas"][0]
     assert linha[2] == "nome não achado em Minhas Curtidas"
-    assert linha[3] == ("o mais parecido tem 100% e o nome começa depois de 7 palavra(s); "
+    assert linha[3] == ("2 na lista; o mais parecido tem 100% e o nome começa depois de 7 palavra(s); "
                         "o 1º da lista tem 0%; 1 rolada(s); a lista acabou")
     assert "Vestido" not in linha[3]
     assert ps.parecido_na_tela(TELA_CURTIDAS, "Panela de Pressão Inox") == (0, -1)
@@ -1389,7 +1409,7 @@ def test_nome_nao_achado_diz_onde_o_mais_parecido_difere_e_o_quanto_o_1o_lembra(
     # curtido por último) ou outro produto: as posições que faltam e o 1º, só em números.
     tela = TELA_CURTIDAS.replace(f'text="{VESTIDO}"', 'text="Vestido Infantil Liso Gatinho Para Meninas de 4 a 14 Anos"')
     detalhe = _nao_achado(monkeypatch, tela, VESTIDO)
-    assert detalhe == ("o mais parecido tem 85% (faltam a 3ª; 1 a mais); o 1º da lista tem 0%; "
+    assert detalhe == ("2 na lista; o mais parecido tem 85% (faltam a 3ª; 1 a mais); o 1º da lista tem 0%; "
                        "1 rolada(s); a lista acabou")
     assert len(detalhe) <= 120 and "Vestido" not in detalhe and "Liso" not in detalhe
 
@@ -1397,7 +1417,7 @@ def test_nome_nao_achado_diz_onde_o_mais_parecido_difere_e_o_quanto_o_1o_lembra(
 def test_detalhe_do_nao_achado_cabe_no_registro_com_muitas_diferencas(monkeypatch):
     tela = TELA_CURTIDAS.replace(f'text="{VESTIDO}"', 'text="Vestido Adulto Liso Grande Para Mulheres Festa Noite Longo"')
     detalhe = _nao_achado(monkeypatch, tela, VESTIDO)
-    assert detalhe.startswith("o mais parecido tem ") and "(faltam a 2ª, 3ª, 4ª…;" in detalhe
+    assert detalhe.startswith("2 na lista; o mais parecido tem ") and "(faltam a 2ª, 3ª, 4ª…;" in detalhe
     assert detalhe.endswith("; a lista acabou") and len(detalhe) <= 120
 
 
@@ -1730,6 +1750,24 @@ def test_ia_dos_produtos_a_mais_ve_as_fotos_de_uma_vez_e_fica_so_o_confirmado_na
     pedidos.clear()
     assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios) == ([], "sem a foto de capa do anúncio do post")
     assert pedidos == []
+
+
+def test_ia_dos_produtos_a_mais_diz_quantos_ficaram_de_fora_pela_capa_e_por_outro_produto(monkeypatch):
+    # 30/10: 8 na IA e 2 confirmados, sem saber se os outros eram outro produto ou o mesmo com
+    # outra foto de capa (P74). A IA diz os de outra capa; a escolha não muda.
+    respostas = ['{"iguais": [1, 2], "outra_capa": [2, 3], "motivo": "x"}',
+                 '{"iguais": [1], "outra_capa": [2, 3, "?"], "motivo": "y"}']
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return respostas.pop(0)
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    anuncios = [(f"Garrafa {letra}", b"\xff\xd8" + letra.encode()) for letra in "ABCD"]
+    recusas = {}
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", anuncios, capa=b"\xff\xd8capa",
+                                recusas=recusas) == ([0], "y")
+    assert recusas == {"outra capa": 2, "outro produto": 1}
+    assert '"outra_capa"' in ps.PROMPT_ITENS_IGUAIS
 
 
 def test_troca_de_loja_so_confere_com_o_mesmo_produto_e_a_mesma_foto_de_capa(monkeypatch):

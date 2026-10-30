@@ -363,7 +363,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   intelectual (vídeo copiado; a fonte do painel está fora dos Autorais, escolha do
   Rafael mantê-la). Falta mapear: o link do post (Perfil → o vídeo → compartilhar →
   copiar link) e apagar um rascunho (Selecionar na lista). O rascunho só-vídeo antigo
-  ainda está na lista.
+  ainda está na lista. **Rascunho com vários produtos (30/10/2026):** às 07:10, com o
+  celular lento, um rascunho de 3 produtos reaberto para postar mostrou a tela final sem a
+  linha dos produtos (nem "Adicionar produto"); às 08:12 o mesmo rascunho abriu com a linha
+  e os produtos na hora (`rv_product`, 2 nomes à vista): os produtos ficam salvos no
+  rascunho, a linha só demora. A conferência espera até 15 s por ela.
 
   **Retomada (quinta, 22/10/2026, 15h):** o robô automático foi montado (seção Robô
   automático, no alto). O celular estava desconectado nessa hora (a porta da Depuração

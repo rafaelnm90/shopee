@@ -82,6 +82,54 @@ def test_caso_leva_os_passos_do_registro_desde_o_comeco_do_rascunho():
     assert [linha[0] for linha in _caso(pasta)["registro"]] == ["09:50:00", "09:55:00", "09:58:00"]
 
 
+TELA_DO_FEITO = ('<hierarchy><node package="com.shopee.br" bounds="[0,0][1080,2400]">'
+                 '<node package="com.shopee.br" resource-id="com.shopee.br:id/tv_done" text="Feito" '
+                 'bounds="[900,100][1060,180]"/></node></hierarchy>')
+# O aviso do Telegram por cima da Shopee, no alto da tela (Motorola, 30/10, 07:35).
+TELA_DO_AVISO = TELA_DO_FEITO.replace("</hierarchy>", '<node package="com.android.systemui" text="Telegram" '
+                                                      'bounds="[0,0][1080,300]"/></hierarchy>')
+
+
+def test_caso_guarda_as_ultimas_acoes_com_a_tela_de_antes_e_onde_o_toque_caiu():
+    # 30/10: o produto sumiu depois do Feito (06:17) e um toque abriu o Telegram (07:35), e o
+    # caso só tinha a tela da falha. O celular da rodada anota as últimas ações, e o caso guarda
+    # cada uma com a tela lida logo antes e em que o toque caiu.
+    class Real(Celular):
+        tela, teclas, apelido = TELA_DO_FEITO, [], "motorola"
+
+        def dump_hierarchy(self):
+            return self.tela
+
+        def press(self, tecla):
+            self.teclas.append(tecla)
+
+    real = Real()
+    d = casos_robo.com_historico(real)
+    assert casos_robo.com_historico(d) is d
+    d.dump_hierarchy()
+    d.click(980, 140)
+    d.press("back")
+    real.tela = TELA_DO_AVISO
+    d.dump_hierarchy()
+    d.click(500, 200)
+    # Tudo passa direto para o celular: os toques, as teclas e o resto.
+    assert real.toques == [(980, 140), (500, 200)] and real.teclas == ["back"]
+    assert d.apelido == "motorola" and d.app_current()["package"] == "com.shopee.br"
+    pasta = casos_robo.guardar(d, "rascunho", "parou", "x", agora=AGORA)
+    antes = _caso(pasta)["antes_da_falha"]
+    assert [a["acao"] for a in antes] == ["toque em (980,140)", "tecla back", "toque em (500,200)"]
+    assert antes[0]["caiu_em"] == 'com.shopee.br id=tv_done "Feito"'
+    assert antes[2]["caiu_em"] == 'com.android.systemui "Telegram"' and "caiu_em" not in antes[1]
+    assert open(os.path.join(pasta, antes[2]["tela"]), encoding="utf-8").read() == TELA_DO_AVISO
+    # Ficam só as últimas ACOES_DO_CASO; o celular de antes (sem anotar) segue sem elas.
+    for _ in range(casos_robo.ACOES_DO_CASO + 3):
+        d.click(1, 1)
+    assert len(d.acoes) == casos_robo.ACOES_DO_CASO
+    assert "antes_da_falha" not in _caso(casos_robo.guardar(real, "postar", "parou", "x",
+                                                            agora=AGORA + timedelta(seconds=1)))
+    assert casos_robo.elemento_no_ponto("<quebrado", 1, 1) == "" and casos_robo.elemento_no_ponto(TELA, 50, 50) == ""
+
+
 def test_caso_sem_celular_ou_com_o_celular_caido_nao_derruba_a_rodada():
     pasta = casos_robo.guardar(Celular(quebrado=True), "rascunho", "erro", "erro inesperado (ConnectionError)",
                                agora=AGORA)
