@@ -2400,6 +2400,9 @@ ROLAGENS_DA_FOTO = 8
 CANDIDATOS_DOS_ESPACOS = 8
 # O preço do cartão e o da API podem diferir uns centavos (arredondamento, cupom do app).
 DIFERENCA_DE_PRECO = 5
+# O cartão com esta parte (%) das palavras do nome do produto do post tem o nome parecido: a
+# contagem diz no registro se a busca partiu da foto certa.
+NOME_PARECIDO_NA_BUSCA = 25
 # Passado isto desde o começo do rascunho, os espaços livres ficam de fora: o resto do
 # preparo (título, edição, anexar e conferir) tem de caber na rodada (MAXIMO_DA_RODADA).
 # Depois de MINUTOS_PARA_ANEXAR_OS_A_MAIS, o produto a mais que falta anexar também fica de
@@ -2462,6 +2465,13 @@ def oferta_do_cartao(cartao, perdas=None):
     return {}
 
 
+def nome_parecido(nome_do_cartao, nome_do_post):
+    """O nome do cartão tem NOME_PARECIDO_NA_BUSCA% das palavras (de 3 letras ou mais) do nome do post?"""
+    alvo = {palavra for palavra in ps._nome_normal(nome_do_post).split() if len(palavra) >= 3}
+    palavras = set(ps._nome_normal(nome_do_cartao).split())
+    return bool(alvo) and len(alvo & palavras) * 100 >= NOME_PARECIDO_NA_BUSCA * len(alvo)
+
+
 def candidatos_da_foto(original, item_do_rascunho, achados, fora=None):
     """
     Dos cartões da busca pela foto já achados na API ([(cartão, oferta)], na ordem de Vendas
@@ -2519,12 +2529,13 @@ def buscar_pela_foto(d, foto):
     entra na galeria como a mais nova e sai no fim, deu certo ou não. Nunca toca no botão de
     tirar foto (a câmera do Motorola).
     """
-    if not ps.por_foto_na_galeria(d, foto):
+    arquivo = ps.por_foto_na_galeria(d, foto)
+    if not arquivo:
         return [], "a foto do anúncio não apareceu na galeria"
     try:
         return _buscar_pela_foto(d)
     finally:
-        ps.tirar_foto_da_galeria(d)
+        ps.tirar_foto_da_galeria(d, arquivo)
 
 
 def _buscar_pela_foto(d):
@@ -2639,15 +2650,15 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
         fora_do_preco = {}
         candidatos = candidatos_da_foto(original, principal.get("item") or item_do_link(video["link"]), achados,
                                         fora_do_preco)[:CANDIDATOS_DOS_ESPACOS]
-        # Por que os outros cartões não foram achados na API (o nome ou o preço), em quantos
-        # anúncios diferentes caíram os achados, por que eles ficaram de fora do preço, e quantos
-        # nomes vieram com o "0" do selo da loja colado, que sai antes da busca. Só números.
+        # Quantos cartões têm o nome parecido com o do produto do post (a busca que partiu de
+        # outra foto não traz nenhum), por que os outros não foram achados na API (o nome ou
+        # o preço), em quantos anúncios diferentes caíram os achados e por que eles ficaram de
+        # fora do preço. Só números.
+        parecidos = sum(1 for cartao in cartoes if nome_parecido(cartao["nome"], principal["nome"]))
         fora = f" (sem o nome {perdas.get('nome', 0)}, outro preço {perdas.get('preço', 0)})" if perdas else ""
         diferentes = len({str(oferta.get("itemId") or "") for _cartao, oferta in achados} - {""})
-        selos = sum(1 for cartao in cartoes if cartao.get("selo"))
-        contagem = (f"{len(cartoes)} na busca, {len(achados)} na API{fora}, {diferentes} anúncio(s) diferente(s), "
-                    f"{len(candidatos)} no preço{_fora_do_preco(fora_do_preco)}"
-                    + (f", {selos} com o selo colado" if selos else ""))
+        contagem = (f"{len(cartoes)} na busca ({parecidos} com o nome parecido), {len(achados)} na API{fora}, "
+                    f"{diferentes} anúncio(s) diferente(s), {len(candidatos)} no preço{_fora_do_preco(fora_do_preco)}")
         fotos = []
         for candidato in candidatos:
             try:

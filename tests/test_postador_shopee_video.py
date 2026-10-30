@@ -612,19 +612,39 @@ def test_extensao_da_foto_sai_dos_bytes(dados, extensao):
 def test_foto_do_anuncio_vai_para_a_galeria_e_foto_apagar_tira(monkeypatch, capsys):
     _autorais()
     monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {"foto": JPG, "nome": "Produto", "preco": 9.9})
-    aparelho = Aparelho(galeria=f"Row: 0 _display_name={ps.NOME_DA_FOTO}.jpg")
+    monkeypatch.setattr(ps, "nome_novo_da_foto", lambda: f"{ps.NOME_DA_FOTO}_123")
+    aparelho = Aparelho(galeria=f"Row: 0 _display_name={ps.NOME_DA_FOTO}_123.jpg")
     assert ps.explorar("foto", aparelho)
     [(temporario, destino)] = aparelho.enviados
-    assert destino == f"{ps.GALERIA}/{ps.NOME_DA_FOTO}.jpg" and not os.path.exists(temporario)
+    assert destino == f"{ps.GALERIA}/{ps.NOME_DA_FOTO}_123.jpg" and not os.path.exists(temporario)
     assert ["content", "query", "--uri", "content://media/external/images/media",
             "--projection", "_display_name"] in aparelho.comandos
     assert "foto do anúncio na galeria" in capsys.readouterr().out
-    # Sem a foto na galeria depois do aviso, o passo falha.
+    # Sem a foto na galeria depois do aviso, o passo falha. A de nome antigo, sem a hora, não
+    # é a desta busca: com o mesmo nome toda vez, a galeria ficava com a imagem da anterior.
     assert not ps.explorar("foto", Aparelho(galeria=""))
+    assert not ps.explorar("foto", Aparelho(galeria=f"Row: 0 _display_name={ps.NOME_DA_FOTO}.jpg"))
     aparelho = Aparelho()
     assert ps.explorar("foto:apagar", aparelho)
-    assert ["rm", "-f", f"{ps.GALERIA}/{ps.NOME_DA_FOTO}.jpg"] in aparelho.comandos
+    assert ["find", ps.GALERIA, "-maxdepth", "1", "-name", f"{ps.NOME_DA_FOTO}*", "-delete"] in aparelho.comandos
     assert aparelho.toques == [] and aparelho.enviados == []
+
+
+def test_cada_foto_da_busca_vai_para_a_galeria_com_um_nome_novo():
+    # 29/10: com o mesmo nome toda vez, a galeria e o app ficavam com a imagem da busca
+    # anterior e buscavam por ela (óculos de sol na busca de um liquidificador).
+    class ComAGaleria(Aparelho):
+        def shell(self, partes):
+            self.comandos.append(partes)
+            return Resposta(" ".join(destino.rsplit("/", 1)[-1] for _o, destino in self.enviados))
+
+    aparelho = ComAGaleria()
+    primeira, segunda = ps.por_foto_na_galeria(aparelho, JPG), ps.por_foto_na_galeria(aparelho, JPG)
+    assert primeira.startswith(f"{ps.NOME_DA_FOTO}_") and primeira.endswith(".jpg")
+    assert segunda and segunda != primeira
+    ps.tirar_foto_da_galeria(aparelho, segunda)
+    assert ["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d",
+            f"file://{ps.GALERIA}/{segunda}"] in aparelho.comandos
 
 
 @pytest.mark.parametrize("anuncio", [{}, {"foto": None}, {"foto": b"<html>erro</html>"}])

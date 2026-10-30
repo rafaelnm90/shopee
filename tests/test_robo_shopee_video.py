@@ -3541,7 +3541,8 @@ def test_espacos_livres_contam_os_cartoes_que_nao_acharam_na_api(busca_pela_foto
     original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
     robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [], robo.time.monotonic() + 600)
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
-    assert "3 na busca, 2 na API (sem o nome 1, outro preço 0), 2 anúncio(s) diferente(s), 2 no preço" in registro[-1][3]
+    assert ("3 na busca (3 com o nome parecido), 2 na API (sem o nome 1, outro preço 0), 2 anúncio(s) diferente(s), "
+            "2 no preço") in registro[-1][3]
 
 
 class _Relogio:
@@ -3571,7 +3572,7 @@ def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_
     assert robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640) == []
     assert ultimo(robo.PROCESSO_DOS_ESPACOS) == (
         "nenhum - nenhum do mesmo preço na API",
-        "3 na busca, 3 na API, 1 anúncio(s) diferente(s), 0 no preço (o do rascunho 3)")
+        "3 na busca (3 com o nome parecido), 3 na API, 1 anúncio(s) diferente(s), 0 no preço (o do rascunho 3)")
     assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
         "nenhum - nenhum do mesmo preço na API", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min")
     # Com os achados, o tempo da IA também.
@@ -3579,7 +3580,8 @@ def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_
     monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1180, 1240))
     assert len(robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640)) == 2
     assert ultimo(robo.PROCESSO_DOS_ESPACOS) == (
-        "achados", "2 a mais; 3 na busca, 3 na API, 3 anúncio(s) diferente(s), 3 no preço, 3 na IA, 2 confirmados")
+        "achados", "2 a mais; 3 na busca (3 com o nome parecido), 3 na API, 3 anúncio(s) diferente(s), 3 no preço, "
+                   "3 na IA, 2 confirmados")
     assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
         "achados", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min, IA 1,0 min")
     # O prazo que passa durante a busca, e o que já tinha passado antes dela.
@@ -3592,11 +3594,21 @@ def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_
     assert ultimo(robo.PROCESSO_DOS_ESPACOS) == ("nenhum - sem tempo na rodada", "")
     assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == ("nenhum - sem tempo na rodada", "aos 11,0 min do rascunho")
     # A contagem mais longa ainda cabe no detalhe do registro.
-    longa = ("5 a mais; 20 na busca, 15 na API (sem o nome 4, outro preço 1), 12 anúncio(s) diferente(s), 8 no preço"
+    longa = ("5 a mais; 20 na busca (18 com o nome parecido), 15 na API (sem o nome 4, outro preço 1), "
+             "12 anúncio(s) diferente(s), 8 no preço"
              + robo._fora_do_preco({"mais caro": 3, "o mais perto": 135, "o do rascunho": 2, "repetido": 1,
                                     "sem dados": 1})
-             + ", 11 com o selo colado, 8 na IA, 5 confirmados")
+             + ", 8 na IA, 5 confirmados")
     assert len(longa) <= robo.registro_processos.TAMANHO_DO_DETALHE
+
+
+def test_nome_parecido_diz_se_a_busca_partiu_da_foto_certa():
+    # 29/10: a busca de um liquidificador trouxe só óculos de sol (a foto de outra busca).
+    post = "Meoky Liquidificador Blender Portátil Tritura Gelo 700ml"
+    assert robo.nome_parecido("Liquidificador Portátil Recarregável USB 6 Lâminas", post)
+    assert robo.nome_parecido("0Mini Liquidificador Blender Portátil...", post)
+    assert not robo.nome_parecido("Óculos De Sol Polarizado Masculino Proteção UV400", post)
+    assert not robo.nome_parecido("Liquidificador", "")
 
 
 def test_faixa_do_tempo_do_rascunho():
@@ -3873,7 +3885,12 @@ def test_busca_pela_foto_le_os_cartoes_em_vendas_populares_e_tira_a_foto_da_gale
     # Nunca o botão de tirar foto: a foto mais nova da galeria, e a ordem Vendas Populares (P68).
     assert (541, 1570) not in app.toques and "Vendas Populares" in app.toques
     assert app.toques.count("rolar") == 2 and "@AN_component_IcCloseShape_Img" in app.toques
-    assert ["rm", "-f", f"{robo.ps.GALERIA}/{robo.ps.NOME_DA_FOTO}.jpg"] in app.comandos
+    # A foto entra com um nome novo e sai no fim, com as que outra busca deixou.
+    [(_origem, foto)] = app.enviados
+    assert foto.startswith(f"{robo.ps.NOME_DA_FOTO}_")
+    assert ["find", robo.ps.GALERIA, "-maxdepth", "1", "-name", f"{robo.ps.NOME_DA_FOTO}*", "-delete"] in app.comandos
+    assert ["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d",
+            f"file://{robo.ps.GALERIA}/{foto}"] in app.comandos
 
 
 def test_busca_pela_foto_sem_resultado_nao_le_as_recomendacoes(monkeypatch):
@@ -3882,7 +3899,7 @@ def test_busca_pela_foto_sem_resultado_nao_le_as_recomendacoes(monkeypatch):
     app = AppDaBuscaPelaFoto(sem_resultado=True)
     assert robo.buscar_pela_foto(app, b"\xff\xd8\xfffoto") == ([], "a busca pela foto não achou o produto")
     assert "Vendas Populares" not in app.toques and "rolar" not in app.toques
-    assert ["rm", "-f", f"{robo.ps.GALERIA}/{robo.ps.NOME_DA_FOTO}.jpg"] in app.comandos
+    assert ["find", robo.ps.GALERIA, "-maxdepth", "1", "-name", f"{robo.ps.NOME_DA_FOTO}*", "-delete"] in app.comandos
 
 
 # --- As visualizações na grade do Perfil: a medição da capa com chamada (P76) ---
