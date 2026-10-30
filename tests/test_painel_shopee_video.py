@@ -293,10 +293,14 @@ class MsgComMidia:
     """Mensagem que também guarda os vídeos e as fotos mandados."""
 
     def __init__(self, Msg, texto):
-        self.msg, self.midias = Msg(texto), []
+        self.msg, self.midias, self.teclados = Msg(texto), [], []
 
     def __getattr__(self, nome):
         return getattr(self.msg, nome)
+
+    async def answer(self, texto, **kwargs):
+        self.teclados.append(kwargs.get("reply_markup"))
+        return await self.msg.answer(texto, **kwargs)
 
     async def answer_video(self, video, **kwargs):
         self.midias.append(("video", video.path, kwargs.get("caption", "")))
@@ -509,17 +513,43 @@ def test_aprovar_o_ultimo_mostra_so_as_duas_frases(bm, Msg, Est):
     assert est.estado == sv.ShopeeVideoFluxo.menu
 
 
-def test_proximo_rascunho_da_a_volta(bm, Msg, Est):
+def _botoes(teclado):
+    return [botao.text for linha in teclado.keyboard for botao in linha] if teclado else []
+
+
+def test_anterior_e_proximo_so_quando_ha_e_nenhum_com_um_rascunho_so(bm, Msg, Est):
+    # Pedido do Rafael (30/10, print): com 1 rascunho só, o Próximo Rascunho voltava ao mesmo, num
+    # laço. O Próximo só aparece quando há um depois, o Rascunho Anterior quando há um antes, e com
+    # um rascunho só, nenhum dos dois.
     sv, est = _painel(bm), Est()
     _rascunho(sv, "Primeiro #a")
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert _botoes(msg.teclados[-1]) == [sv.BOTAO_APROVAR, sv.BOTAO_RECUSAR, sv.BOTAO_VOLTAR]
+    # O Próximo de um teclado antigo só avisa: o mesmo rascunho não volta.
+    msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
+    rodar(sv.proximo_handler(msg, est))
+    assert msg.midias == [] and msg.saidas == ["📝 Este é o último rascunho: não há próximo."]
     _rascunho(sv, "Segundo #b", "2026-10-22 11:00:00")
-    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    _rascunho(sv, "Terceiro #c", "2026-10-22 12:00:00")
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert "Primeiro #a" in msg.saidas[-1] and _botoes(msg.teclados[-1])[2:4] == [sv.BOTAO_PROXIMO, sv.BOTAO_VOLTAR]
     msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
     rodar(sv.proximo_handler(msg, est))
+    assert "Segundo #b" in msg.saidas[-1] and _botoes(msg.teclados[-1])[2:4] == [sv.BOTAO_ANTERIOR, sv.BOTAO_PROXIMO]
+    msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
+    rodar(sv.proximo_handler(msg, est))
+    assert "Terceiro #c" in msg.saidas[-1] and _botoes(msg.teclados[-1])[2:4] == [sv.BOTAO_ANTERIOR, sv.BOTAO_VOLTAR]
+    msg = MsgComMidia(Msg, "Rascunho Anterior ⏮️")
+    rodar(sv.anterior_handler(msg, est))
     assert "Segundo #b" in msg.saidas[-1]
-    msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
-    rodar(sv.proximo_handler(msg, est))
-    assert "Primeiro #a" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, "Rascunho Anterior ⏮️")
+    rodar(sv.anterior_handler(msg, est))
+    assert "Primeiro #a" in msg.saidas[-1] and sv.BOTAO_ANTERIOR not in _botoes(msg.teclados[-1])
+    msg = MsgComMidia(Msg, "Rascunho Anterior ⏮️")
+    rodar(sv.anterior_handler(msg, est))
+    assert msg.midias == [] and msg.saidas == ["📝 Este é o primeiro rascunho: não há anterior."]
 
 
 def test_aprovar_rascunho_ja_resolvido_mostra_o_proximo(bm, Msg, Est):
