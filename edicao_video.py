@@ -394,6 +394,11 @@ FUNDO_DA_CHAMADA = (238, 77, 45, 230)  # o laranja da Shopee
 MAXIMO_DO_NOME = 28
 MAXIMO_DA_VANTAGEM = 36
 MAXIMO_DA_CHAMADA = 32
+# A frase da capa com chamada: a vantagem em poucas palavras, que cabe em letra grande na capa
+# (a frase longa encolhia a letra até ficar difícil de ler na grade do perfil). Sem ela, vai a
+# vantagem. Escolha do Rafael (30/10, P106): DECISOES.md, Shopee Vídeo.
+MAXIMO_DA_CAPA = 20
+PROCESSO_DA_FRASE_DA_CAPA = "edição do vídeo: frase da capa"
 
 # A IA escreve o nome, a vantagem e a chamada vendo o vídeo, com as regras da Shopee Vídeo
 # que mais pegam texto na tela (regras 7, 13 e 14 das diretrizes): sem marca, sem prometer o
@@ -404,6 +409,8 @@ MAXIMO_DA_CHAMADA = 32
 # Shopee Vídeo.
 _NOME_NO_PROMPT = ("- \"nome\": o nome genérico do produto, como o comprador procura (ex.: \"Copo Térmico\"), "
                    f"até {MAXIMO_DO_NOME} caracteres;\n")
+_CAPA_NO_PROMPT = ("- \"capa\": a mesma vantagem em poucas palavras, para a capa do vídeo, de 2 a 4 palavras e "
+                   f"até {MAXIMO_DA_CAPA} caracteres (ex.: \"Gelado o dia todo\");\n")
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
@@ -459,13 +466,14 @@ _FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
-    "Escreva três textos curtos para aparecer na tela do vídeo, em português do Brasil:\n"
+    "Escreva quatro textos curtos para a tela e a capa do vídeo, em português do Brasil:\n"
     + _NOME_NO_PROMPT
     + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
+    + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
     + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
     "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": []}}"
 )
 
@@ -710,7 +718,8 @@ PROMPT_DA_REVISAO = (
 # A revisão que muda mais que a ortografia (outra frase, palavra a mais ou a menos, texto cortado)
 # não vale: fica o texto como a IA o deu.
 PARECIDO_NA_REVISAO = 0.8
-MAXIMOS_DOS_TEXTOS = {"nome": MAXIMO_DO_NOME, "vantagem": MAXIMO_DA_VANTAGEM, "chamada": MAXIMO_DA_CHAMADA}
+MAXIMOS_DOS_TEXTOS = {"nome": MAXIMO_DO_NOME, "vantagem": MAXIMO_DA_VANTAGEM, "chamada": MAXIMO_DA_CHAMADA,
+                      "capa": MAXIMO_DA_CAPA}
 
 
 def _so_ortografia(antes, depois, maximo):
@@ -880,18 +889,30 @@ def miniatura_no_video(textos):
 
 
 def _vantagem_e_chamada(dados, textos):
-    """Põe em textos a vantagem e a chamada da resposta da IA, só as que vieram certas."""
-    for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA)):
-        limpo = _texto_certo(str(dados.get(chave) or ""), maximo)
+    """
+    Põe em textos a vantagem, a chamada e a frase da capa da resposta da IA, só as que vieram
+    certas. A frase da capa maior que MAXIMO_DA_CAPA fica de fora sem ser cortada (cortada,
+    perderia o sentido): a capa vai com a vantagem.
+    """
+    for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA), ("capa", MAXIMO_DA_CAPA)):
+        bruto = str(dados.get(chave) or "")
+        if chave == "capa" and len(_so_letras(bruto, 10 ** 6)) > maximo:
+            continue
+        limpo = _texto_certo(bruto, maximo)
         if limpo:
             textos[chave] = limpo
     return textos
 
 
+def frase_da_capa(textos):
+    """A frase da capa com chamada: a curta que a IA escreveu para ela (P106) ou, sem ela, a vantagem."""
+    return textos.get("capa") or textos.get("vantagem", "")
+
+
 def textos_da_tela(video, nome):
     """
-    {"nome", "vantagem", "chamada", "lugar", "texto_no_video", "canto_ocupado", "por_cima"} que
-    a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta.
+    {"nome", "vantagem", "capa", "chamada", "lugar", "texto_no_video", "canto_ocupado",
+    "por_cima"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta.
     """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
     return _revisar_ortografia(_vantagem_e_chamada(dados, _nome_lugar_e_falas(dados)))
@@ -1032,20 +1053,26 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
     som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA. Com a capa com
-    chamada ligada (P76), a vantagem da IA vai na capa de todos os vídeos (P100), e o jeito leva
-    COM_A_CHAMADA. Com as outras_fotos (bytes das outras fotos diferentes dos produtos do post, as
-    que cabem: fotos_que_cabem), a miniatura troca entre a foto e cada uma delas (P103), e o jeito
-    leva COM_A_MINIATURA_ALTERNADA.
+    chamada ligada (P76), a frase curta da IA para a capa (P106; sem ela, a vantagem) vai na capa
+    de todos os vídeos (P100), e o jeito leva COM_A_CHAMADA. Com as outras_fotos (bytes das
+    outras fotos diferentes dos produtos do post, as que cabem: fotos_que_cabem), a miniatura
+    troca entre a foto e cada uma delas (P103), e o jeito leva COM_A_MINIATURA_ALTERNADA.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
         return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), ""
     musica = _caminho(musicas_de_fundo(video)[0])
     textos = textos_da_tela(video, produto) if produto else {}
-    # Sem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a dos avisos.
-    # A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre com a capa dos
-    # avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
-    capa = _capa_da_vez(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
+    # Sem a frase da capa nem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a
+    # dos avisos. A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre
+    # com a capa dos avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
+    frase = frase_da_capa(textos)
+    capa = _capa_da_vez(foto, frase) if capa_ligada() and not avisos else None
+    if capa_ligada() and not avisos and frase:
+        # Quantas capas saem com a frase curta (P106) e quantas com a vantagem, por falta dela.
+        registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA,
+                                     "curta" if textos.get("capa") else "a vantagem (sem a curta)",
+                                     f"{len(frase)} letras", ok=True if textos.get("capa") else None)
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
     miniatura = miniatura_no_video(textos)
@@ -1449,19 +1476,21 @@ def exemplo_editor_2(destino):
 
 def exemplo_capa():
     """
-    O exemplo da capa com chamada (P76), com o próximo vídeo que o robô pegaria: a vantagem que
-    a IA escreve vendo o vídeo, na capa. Tem a lista própria dos já mostrados. Devolve (nome do
-    produto, "", {"capa", "grade", "chamada"}) quando deu certo (as duas imagens em PNG: a capa
-    inteira e o pedaço que a grade do perfil mostra), ou (None, motivo, None).
+    O exemplo da capa com chamada (P76), com o próximo vídeo que o robô pegaria: a frase curta
+    que a IA escreve vendo o vídeo (P106; sem ela, a vantagem), na capa. Tem a lista própria dos
+    já mostrados. Devolve (nome do produto, "", {"capa", "grade", "chamada"}) quando deu certo
+    (as duas imagens em PNG: a capa inteira e o pedaço que a grade do perfil mostra), ou (None,
+    motivo, None).
     """
     def editar_um(arquivo, link, foto):
         produto = _produto_do_link(link)
         textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
-        if not textos.get("vantagem"):
-            return "a IA não escreveu a vantagem do produto deste vídeo", None
-        capa = capa_com_chamada(foto, textos["vantagem"])
+        frase = frase_da_capa(textos)
+        if not frase:
+            return "a IA não escreveu a frase da capa nem a vantagem do produto deste vídeo", None
+        capa = capa_com_chamada(foto, frase)
         if not capa:
             return "a capa com a chamada não saiu", None
-        return "", {"capa": capa, "grade": recorte_da_grade(capa), "chamada": textos["vantagem"]}
+        return "", {"capa": capa, "grade": recorte_da_grade(capa), "chamada": frase}
 
     return _exemplo("ids_capa", editar_um)
