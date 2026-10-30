@@ -1018,6 +1018,41 @@ def test_textos_da_tela_pede_so_o_do_video_completo(monkeypatch):
     assert edicao_video.lugar_dos_textos({"lugar": "meio", "texto_no_video": False}) == "meio"
 
 
+def test_texto_da_ia_com_letra_fora_do_portugues_e_corrigido_ou_sai(monkeypatch):
+    # 30/10: a capa com chamada saiu com "Por dentro tem pelüia bem macia" (o certo é pelúcia), e o
+    # Rafael recusou o rascunho. Letra que não existe no português faz a IA reescrever só o texto;
+    # sem conserto, o texto sai (a capa de sempre), e o registro anota.
+    import api_gemini
+    import registro_processos as rp
+    correcoes = []
+
+    async def analisar(video, prompt, imagens=None):
+        return ('{"nome": "Meia-Calça Térmica", "vantagem": "Por dentro tem pelüia bem macia", '
+                '"chamada": "Confira aqui embaixo"}')
+
+    async def corrigir(prompt, imagens=None):
+        correcoes.append(prompt)
+        return correcoes_da_ia.pop(0)
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", corrigir)
+    correcoes_da_ia = ['"Por dentro tem pelúcia bem macia"']
+    textos = edicao_video.textos_da_tela("v.mp4", "Meia")
+    assert textos["vantagem"] == "Por dentro tem pelúcia bem macia" and textos["nome"] == "Meia-Calça Térmica"
+    assert len(correcoes) == 1 and "pelüia" in correcoes[0]
+    # A correção que volta errada (ou nada) tira o texto: a vantagem não vai para a capa.
+    correcoes_da_ia = ["Por dentro tem pelüia bem macia"]
+    assert "vantagem" not in edicao_video.textos_da_tela("v.mp4", "Meia")
+    correcoes_da_ia = [None]
+    assert "vantagem" not in edicao_video.textos_da_tela("v.mp4", "Meia")
+    linhas = [(l[2], l[5]) for l in rp.contagem("2000-01-01 00:00:00") if l[1] == edicao_video.PROCESSO_DA_ORTOGRAFIA]
+    assert sorted(linhas) == [("corrigida", 1), ("texto tirado", 2)]
+    assert edicao_video.letras_fora_do_portugues("Ação, pão e crème") == ["è"]
+    assert edicao_video.letras_fora_do_portugues("Mantém gelado o dia todo, 100% à prova") == []
+    assert edicao_video.letras_fora_do_portugues("Qualidade de 1ª linha, nº 1") == []
+    assert "ortografia" in edicao_video.PROMPT_DOS_TEXTOS and "ortografia" in edicao_video.PROMPT_DAS_VERSOES
+
+
 def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
     # Os Editores 3 e 4 abrem cada versão com um momento do meio do vídeo: o ffmpeg monta na ordem da lista.
     if not shutil.which("ffmpeg"):
