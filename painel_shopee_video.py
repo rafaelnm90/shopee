@@ -551,6 +551,7 @@ BOTAO_DESLIGAR_A_MAIS = "Desligar Produtos a Mais ⏸️"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
+BOTAO_ANTERIOR = "Rascunho Anterior ⏮️"
 # Os botões de pausar e retomar de cada robô trocam conforme o estado (pausado mostra
 # Retomar). Os antigos "Pausar Robô"/"Retomar Robô" ainda podem estar no teclado do
 # Rafael e valem para o assistente.
@@ -1591,10 +1592,16 @@ async def treino_handler(message: types.Message, state: FSMContext):
 
 # --- Rascunhos do robô: aprovar um por um ---
 
-def teclado_rascunho():
-    return montar_teclado([[KeyboardButton(text=BOTAO_APROVAR), KeyboardButton(text=BOTAO_RECUSAR)],
-                           [KeyboardButton(text=BOTAO_PROXIMO)],
-                           [KeyboardButton(text=BOTAO_VOLTAR)]])
+def teclado_rascunho(anterior=False, proximo=False):
+    """
+    O teclado de um rascunho: o Rascunho Anterior só quando há um antes dele e o Próximo
+    Rascunho só quando há um depois; com um rascunho só, nenhum dos dois (o Próximo não dá a
+    volta). Pedido do Rafael (30/10): DECISOES.md, Shopee Vídeo.
+    """
+    navegar = ([KeyboardButton(text=BOTAO_ANTERIOR)] if anterior else []) + \
+              ([KeyboardButton(text=BOTAO_PROXIMO)] if proximo else [])
+    return montar_teclado([[KeyboardButton(text=BOTAO_APROVAR), KeyboardButton(text=BOTAO_RECUSAR)]]
+                          + ([navegar] if navegar else []) + [[KeyboardButton(text=BOTAO_VOLTAR)]])
 
 
 def linhas_da_origem(fonte):
@@ -1685,7 +1692,22 @@ def texto_rascunho(rascunho, posicao, total):
 LIMITE_DO_ALBUM = 10
 
 
-async def mostrar_rascunho(message, state, depois_de=None):
+def _rascunho_a_mostrar(pendentes, depois_de=None, antes_de=None):
+    """
+    O rascunho da tela: o anterior ao antes_de, o seguinte ao depois_de ou, sem eles, o 1º.
+    O depois_de que já saiu da lista (aprovado ou recusado) dá o seguinte a ele, e depois do
+    último, o 1º dos que sobraram.
+    """
+    ids = [r["id"] for r in pendentes]
+    if antes_de in ids:
+        return pendentes[max(ids.index(antes_de) - 1, 0)]
+    if depois_de in ids:
+        return pendentes[min(ids.index(depois_de) + 1, len(ids) - 1)]
+    seguintes = [r for r in pendentes if depois_de is not None and r["id"] > depois_de]
+    return (seguintes or pendentes)[0]
+
+
+async def mostrar_rascunho(message, state, depois_de=None, antes_de=None):
     """
     Um rascunho por vez, com o vídeo, o print da tela final, o título e o link do produto:
     o Rafael é o validador, e o print prova que o que ele aprova é o que vai ao ar.
@@ -1698,8 +1720,7 @@ async def mostrar_rascunho(message, state, depois_de=None):
         await state.set_state(ShopeeVideoFluxo.menu)
         await message.answer("📝 Nenhum rascunho esperando a sua aprovação.", reply_markup=teclado_painel(ler_config()))
         return
-    seguintes = [r for r in pendentes if depois_de is not None and r["id"] > depois_de]
-    rascunho = (seguintes or pendentes)[0]
+    rascunho = _rascunho_a_mostrar(pendentes, depois_de, antes_de)
     posicao = pendentes.index(rascunho) + 1
     await state.set_state(ShopeeVideoFluxo.rascunho)
     await state.update_data(rascunho_id=rascunho["id"])
@@ -1720,7 +1741,8 @@ async def mostrar_rascunho(message, state, depois_de=None):
                 "que são o mesmo item, o mesmo modelo e a mesma foto.") if n == 0 else None)
             for n, capa in enumerate(capas[:LIMITE_DO_ALBUM])])
     await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
-                         disable_web_page_preview=True, reply_markup=teclado_rascunho())
+                         disable_web_page_preview=True,
+                         reply_markup=teclado_rascunho(posicao > 1, posicao < len(pendentes)))
 
 
 @router.message(F.text == BOTAO_RASCUNHOS, StateFilter("*"))
@@ -1767,7 +1789,26 @@ async def pedir_recusa(message: types.Message, state: FSMContext):
 @router.message(F.text == BOTAO_PROXIMO, StateFilter("*"))
 async def proximo_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
-    await mostrar_rascunho(message, state, depois_de=(await state.get_data()).get("rascunho_id"))
+    ident = (await state.get_data()).get("rascunho_id")
+    ids = [r["id"] for r in robo.esperando_aprovacao()]
+    # O botão de um teclado antigo no último rascunho: só avisa, sem mandar o mesmo de novo.
+    if ident in ids and ids.index(ident) == len(ids) - 1:
+        await message.answer("📝 Este é o último rascunho: não há próximo.",
+                             reply_markup=teclado_rascunho(len(ids) > 1, False))
+        return
+    await mostrar_rascunho(message, state, depois_de=ident)
+
+
+@router.message(F.text == BOTAO_ANTERIOR, StateFilter("*"))
+async def anterior_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    ident = (await state.get_data()).get("rascunho_id")
+    ids = [r["id"] for r in robo.esperando_aprovacao()]
+    if ident in ids and ids.index(ident) == 0:
+        await message.answer("📝 Este é o primeiro rascunho: não há anterior.",
+                             reply_markup=teclado_rascunho(False, len(ids) > 1))
+        return
+    await mostrar_rascunho(message, state, antes_de=ident)
 
 
 # --- Celular do robô ---
