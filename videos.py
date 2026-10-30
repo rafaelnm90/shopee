@@ -158,7 +158,7 @@ SAIDA_DA_MUSICA = 1.5
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
-                             outra=None, troca=3):
+                             outras=(), troca=0.0):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -170,9 +170,9 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     se repete até o fim do vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
     vídeo sem som sai sem som. Com a `musica` (caminho de um arquivo de áudio), ela é o som do
     vídeo inteiro, foto incluída (`total` segundos), em laço se o vídeo for mais longo,
-    entrando e saindo devagar; o som do vídeo não entra. Com a `outra` (caminho de outra foto
-    do produto), a miniatura troca entre as duas a cada `troca` segundos, no mesmo lugar e do
-    mesmo tamanho, a `foto` primeiro.
+    entrando e saindo devagar; o som do vídeo não entra. Com as `outras` (caminhos de outras
+    fotos do produto, na ordem), a miniatura troca entre a `foto` e cada uma delas, uma volta
+    só, `troca` segundos cada, no mesmo lugar: a `foto` primeiro, e a última fica até o fim.
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
@@ -181,16 +181,24 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     filtro = f"[0:v]{tela}[foto];[1:v]{tela}[corpo];"
     if miniatura:
         lugar = f"x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1"
-        filtro += f"[2:v]scale={miniatura}:-2[mini];"
-        if outra:
-            # A outra foto entra por último na lista: os números das outras entradas não mudam.
-            indice = 3 + (1 if seta else 0) + (1 if musica or com_audio else 0)
-            ciclo = 2 * troca
-            filtro += (f"[{indice}:v]scale={miniatura}:-2[mini2];"
-                       f"[corpo][mini]overlay={lugar}:enable='lt(mod(t,{ciclo}),{troca})'[uma];"
-                       f"[uma][mini2]overlay={lugar}:enable='gte(mod(t,{ciclo}),{troca})'[comfoto];")
+        if outras:
+            # As outras fotos entram por último na lista: os números das outras entradas não mudam.
+            # Cada foto cabe no quadrado da miniatura, sem esticar: a de outra loja que não é
+            # quadrada não passa do canto que é conferido livre do que o criador pôs na tela.
+            primeira = 3 + (1 if seta else 0) + (1 if musica or com_audio else 0)
+            indices = [2] + list(range(primeira, primeira + len(outras)))
+            anterior = "corpo"
+            for n, indice in enumerate(indices):
+                ultima = n == len(indices) - 1
+                janela = (f"lt(t,{troca:.3f})" if n == 0 else f"gte(t,{n * troca:.3f})" if ultima
+                          else f"gte(t,{n * troca:.3f})*lt(t,{(n + 1) * troca:.3f})")
+                rotulo = "comfoto" if ultima else f"mini{n}_no_corpo"
+                filtro += (f"[{indice}:v]scale={miniatura}:{miniatura}:force_original_aspect_ratio=decrease,"
+                           f"format=rgba,pad={miniatura}:{miniatura}:(ow-iw)/2:(oh-ih)/2:color=black@0[mini{n}];"
+                           f"[{anterior}][mini{n}]overlay={lugar}:enable='{janela}'[{rotulo}];")
+                anterior = rotulo
         else:
-            filtro += f"[corpo][mini]overlay={lugar}[comfoto];"
+            filtro += f"[2:v]scale={miniatura}:-2[mini];[corpo][mini]overlay={lugar}[comfoto];"
     else:
         # A entrada da foto em laço continua na lista (os números das outras não mudam), sem uso.
         filtro += "[corpo]null[comfoto];"
@@ -217,23 +225,23 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
         filtro += (";[1:a]aresample=44100,aformat=channel_layouts=stereo[som];"
                    f"[{silencio}:a][som]concat=n=2:v=0:a=1[a]")
         saida += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
-    if miniatura and outra:
-        entradas += ["-loop", "1", "-i", outra]
+    if miniatura:
+        for outra in outras:
+            entradas += ["-loop", "1", "-i", outra]
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
             + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", destino])
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
-                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outra=None,
-                         troca=3):
+                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=()):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
     uma imagem), ela abre o vídeo no lugar da foto. Com a `musica` (caminho de um arquivo de
-    áudio), ela é o som do vídeo inteiro. Com a `outra` (bytes de outra foto do produto), a
-    miniatura troca entre as duas a cada `troca` segundos; a outra que não abre fica de fora,
-    sem derrubar a edição. Devolve "" quando deu certo, ou o motivo fixo de não ter dado (o
-    destino não fica pela metade).
+    áudio), ela é o som do vídeo inteiro. Com as `outras` (bytes de outras fotos do produto, na
+    ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
+    igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Devolve "" quando
+    deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
         return "a foto do anúncio não veio"
@@ -251,18 +259,22 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                 arquivo.write(capa)
             if not imagem_abre(caminho_da_capa):
                 return "a capa não é uma imagem que abre"
-        caminho_da_outra = None
-        if outra and miniatura:
-            caminho_da_outra = os.path.join(pasta, "outra.jpg")
-            with open(caminho_da_outra, "wb") as arquivo:
-                arquivo.write(outra)
-            if not imagem_abre(caminho_da_outra):
-                caminho_da_outra = None
+        caminhos_das_outras = []
+        for n, outra in enumerate((outras or ()) if miniatura else ()):
+            caminho = os.path.join(pasta, f"outra_{n}.jpg")
+            with open(caminho, "wb") as arquivo:
+                arquivo.write(outra or b"")
+            if imagem_abre(caminho):
+                caminhos_das_outras.append(caminho)
         temporario = os.path.join(pasta, "editado.mp4")
-        total = segundos + duracao(video) if musica else 0.0
+        corpo = duracao(video) if musica or caminhos_das_outras else 0.0
+        total = segundos + corpo if musica else 0.0
+        # Cada foto da miniatura fica o mesmo tempo; sem a duração do vídeo, a miniatura não troca.
+        troca = corpo / (1 + len(caminhos_das_outras)) if caminhos_das_outras else 0.0
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
-                                           musica if total > segundos else None, total, caminho_da_outra, troca)
+                                           musica if total > segundos else None, total,
+                                           caminhos_das_outras if troca else (), troca)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

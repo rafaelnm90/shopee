@@ -74,6 +74,7 @@ import interacoes_shopee_video as interacoes
 import pedidos_do_canal
 import postador_shopee_video as ps
 import registro_processos
+import videos
 import visualizacoes_shopee_video as visualizacoes
 from api_shopee import eh_video, link_para_converter
 from fuso import fuso_horario
@@ -3046,8 +3047,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
-    # Com produtos a mais (o mesmo item de outras lojas), a miniatura pode trocar entre a foto do
-    # 1º e a mais parecida com o vídeo (P101).
+    # Com produtos a mais (o mesmo item de outras lojas), a miniatura troca entre as fotos de capa
+    # diferentes dos produtos do post (P103).
     outras = [foto for foto in (foto_do_produto_do_post(video, p) for p in (produtos or [])[1:]) if foto]
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
                                   outras=outras)
@@ -3114,7 +3115,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
 
 PROCESSO_DA_EDICAO = "edição do vídeo: rascunho do robô"
-# A miniatura das variações (P101): uma só ou alternada, e com a foto de qual produto.
+# A miniatura das variações (P103): uma só ou alternada, com quantas fotos e o tempo de cada.
 PROCESSO_DA_MINIATURA = "edição do vídeo: miniatura das variações"
 MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à Shopee Vídeo"
 MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
@@ -3133,7 +3134,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     foto, e sem a edição ela não tem como levar os avisos: fica de lado. Devolve como o vídeo
     saiu (o jeito de edicao_video.editar_para_postar; "" sem a edição). outras: as fotos de capa
     dos outros produtos do post, na ordem, no rascunho com produtos a mais (o mesmo item): com
-    elas, a miniatura pode trocar entre duas fotos (foto_da_variacao, P101).
+    elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -3146,9 +3147,10 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
         anuncio = anuncio_do_ver_produtos(nomes[0]) if nomes else {}
     else:
         anuncio = ps.anuncio_do_produto(video)
-    outra = foto_da_variacao(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else None
+    trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
-                                                            anuncio.get("nome", ""), avisos=alcool, outra_foto=outra)
+                                                            anuncio.get("nome", ""), avisos=alcool,
+                                                            outras_fotos=trocam)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -3158,24 +3160,40 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     return como
 
 
-def foto_da_variacao(video, foto, outras):
+def fotos_da_miniatura(video, foto, outras):
     """
-    A outra foto da miniatura (bytes): quando a IA diz que a foto do 1º produto (foto) mostra o
-    produto de outro jeito que o vídeo, a do produto do post (outras, na ordem do post) mais
-    parecida com ele, e a miniatura troca entre as duas. None quando a 1ª serve ou a IA não
-    responde: a miniatura fica uma só. O registro anota o que saiu; um erro aqui nunca derruba
-    o rascunho. Escolha do Rafael (30/10, P101): DECISOES.md, Shopee Vídeo.
+    As outras fotos da miniatura que troca (bytes), depois da foto do 1º produto (foto): as fotos
+    de capa dos outros produtos do post (outras, na ordem do post) diferentes dela e entre si, pela
+    comparação da imagem (mesma_foto; a que não abre fica de fora), só as que cabem no vídeo com
+    pelo menos edicao_video.MINIMO_POR_FOTO segundos cada: ficam as primeiras, as que pagam mais
+    por venda. [] é a miniatura de uma foto só. O registro anota quantas e o tempo de cada; um
+    erro aqui nunca derruba o rascunho. Escolha do Rafael (30/10, P103): DECISOES.md, Shopee Vídeo.
     """
-    fotos = [foto] + list(outras)
     try:
-        indice, porque = ps.ia_foto_como_no_video(video, fotos)
+        diferentes = [foto]
+        for outra in outras:
+            if all(mesma_foto(outra, ja) is False for ja in diferentes):
+                diferentes.append(outra)
+        duracao = videos.duracao(video["arquivo"]) if len(diferentes) > 1 else 0.0
+        cabem = edicao_video.fotos_que_cabem(duracao, len(diferentes))
     except Exception as e:
-        logger.warning(f"⚠️ [Robô Shopee Vídeo] A escolha da foto da miniatura deu erro: {type(e).__name__}")
-        indice, porque = None, f"erro ({type(e).__name__})"
-    falhou = porque.startswith(("a IA não respondeu", "erro"))
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_MINIATURA, "uma só" if indice is None else "alternada",
-                                 porque, ok=True if indice is not None else False if falhou else None)
-    return fotos[indice] if indice is not None else None
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A escolha das fotos da miniatura deu erro: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_MINIATURA, "uma só", f"erro ({type(e).__name__})",
+                                     ok=False)
+        return []
+    if len(diferentes) < 2:
+        resultado, detalhe = "uma só", "nenhuma foto diferente da do 1º produto"
+    elif not duracao:
+        resultado, detalhe = "uma só", "a duração do vídeo não foi lida"
+    elif cabem < 2:
+        resultado, detalhe = "uma só", f"o vídeo é curto para trocar ({duracao:.0f} s)"
+    else:
+        resultado = "alternada"
+        detalhe = (f"{cabem} fotos" + (f" de {len(diferentes)} diferentes" if cabem < len(diferentes) else "")
+                   + f", {duracao / cabem:.1f}".replace(".", ",") + " s cada")
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_MINIATURA, resultado, detalhe,
+                                 ok=True if resultado == "alternada" else None)
+    return diferentes[1:cabem]
 
 
 def _oferta_parecida(nome):

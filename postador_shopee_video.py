@@ -177,18 +177,6 @@ marca, com outro formato ou modelo, o mesmo produto em outra cor ou estampa, out
 acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo produto. Na dúvida, não é.
 Responda só com um JSON: {{"iguais": [os números dos anúncios que são o mesmo produto], \
 "motivo": "uma frase curta"}}"""
-# A foto que troca com a do 1º produto na miniatura do vídeo editado: nos rascunhos com produtos
-# a mais (o mesmo item de outras lojas), quando a foto do 1º mostra o produto de outro jeito que o
-# vídeo, a IA aponta a foto de outro produto do post que o mostra como no vídeo. Escolha do Rafael
-# (30/10, P101): DECISOES.md, Shopee Vídeo.
-PROMPT_FOTO_COMO_NO_VIDEO = """Você escolhe a foto do produto que aparece no canto de um vídeo de afiliado da Shopee.
-Junto com o vídeo vão as fotos de capa dos anúncios do produto do vídeo, cada uma logo depois do seu número. São \
-anúncios do mesmo produto, de lojas diferentes, e as fotos podem mostrar o produto de jeitos diferentes.
-Assista ao vídeo e diga se a foto 1 mostra o produto do mesmo jeito que ele aparece no vídeo (a mesma cor, o mesmo \
-formato e as mesmas partes). Se não mostrar, diga qual das outras fotos mostra o produto mais parecido com o vídeo. \
-Na dúvida, a foto 1 serve.
-Responda só com um JSON: {"foto_1_serve": true ou false, "mais_parecida": o número da outra foto mais parecida \
-com o vídeo, ou 0, "motivo": "uma frase curta"}"""
 # O aviso da página do produto de loja de férias (loja_de_ferias).
 AVISO_DE_FERIAS = "está de férias"
 # A foto do anúncio tem até isto de tamanho (bytes); maior que isso, a conferência segue só pelo nome.
@@ -927,31 +915,6 @@ def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None):
     if recusas is not None:
         recusas["outro produto"] = len(anuncios) - len(confirmados)
     return sorted(numero - 1 for numero in confirmados), motivo
-
-
-def ia_foto_como_no_video(video, fotos):
-    """
-    A outra foto da miniatura (P101): (o índice em fotos da que mostra o produto como no vídeo,
-    1 ou mais, quando a fotos[0], a do 1º produto do post, o mostra de outro jeito; o porquê
-    fixo, para o registro). (None, o porquê) quando a 1ª serve, a IA não responde ou aponta
-    uma foto que não há. fotos = [bytes], na ordem do post, todas do mesmo item.
-    """
-    if not (video or {}).get("arquivo") or len(fotos) < 2:
-        return None, "sem outra foto"
-    imagens = [(foto, tipo_da_foto(foto), f"Foto {i}") for i, foto in enumerate(fotos, 1)]
-    dados = _json_da_ia(asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], PROMPT_FOTO_COMO_NO_VIDEO,
-                                                                     imagens=imagens)))
-    if not isinstance(dados, dict):
-        return None, "a IA não respondeu"
-    if dados.get("foto_1_serve") is not False:
-        return None, "a foto do 1º produto serve"
-    try:
-        numero = int(dados.get("mais_parecida"))
-    except (TypeError, ValueError):
-        numero = 0
-    if not 2 <= numero <= len(fotos):
-        return None, "a IA não apontou outra foto"
-    return numero - 1, f"a foto do {numero}º produto"
 
 
 def _json_da_ia(resposta):
