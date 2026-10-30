@@ -878,6 +878,8 @@ def produtos_a_mais_da_shopee_video(agora=None):
         linhas = []
     salvos = com_a_mais = a_mais = 0
     postados = []
+    # Em que estado está cada rascunho com produtos a mais (esperando o Rafael, aprovado, recusado...).
+    estados_com_a_mais = Counter()
     for estado, postado_em, itens in linhas:
         try:
             itens = json.loads(itens or "[]")
@@ -889,6 +891,8 @@ def produtos_a_mais_da_shopee_video(agora=None):
         quantos = sum(1 for item in itens if item.get("a_mais"))
         com_a_mais += bool(quantos)
         a_mais += quantos
+        if quantos:
+            estados_com_a_mais[estado] += 1
         if estado == "postado" and postado_em:
             postados.append((postado_em[:10], itens))
     contas = vendas.vendas_dos_produtos_a_mais(db.ler_config("banco_pedidos", {}) or {}, postados,
@@ -904,6 +908,7 @@ def produtos_a_mais_da_shopee_video(agora=None):
     return {"ligados": config.get("robo_produtos_a_mais", True),
             "parados": bool(config.get("robo_produtos_a_mais_parados")),
             "salvos": salvos, "com_a_mais": com_a_mais, "a_mais": a_mais, "postados": len(postados),
+            "estados_com_a_mais": dict(sorted(estados_com_a_mais.items())),
             "postados_com_a_mais": sum(1 for _dia, itens in postados if any(i.get("a_mais") for i in itens)),
             "vendas_do_video": contas["do_video"][0], "vendas_a_mais": contas["a_mais"][0],
             "parte_a_mais": round(contas["a_mais"][1] * 100 / total) if total else None,
@@ -920,9 +925,11 @@ def _linha_dos_produtos_a_mais(medicao):
     else:
         situacao = "parados por punição de produto" if medicao["parados"] else "desligados no painel"
     parte = f" ({medicao['parte_a_mais']}% da comissão)" if medicao["parte_a_mais"] is not None else ""
+    estados = ": " + ", ".join(f"{estado} {n}" for estado, n in medicao.get("estados_com_a_mais", {}).items()) \
+        if medicao.get("estados_com_a_mais") else ""
     return (f"Produtos a mais (P73, desde {INICIO_DOS_PRODUTOS_A_MAIS[8:]}/{INICIO_DOS_PRODUTOS_A_MAIS[5:7]}): "
             f"{situacao} | rascunhos de link de produto salvos {medicao['salvos']} (com produtos a mais "
-            f"{medicao['com_a_mais']}; produtos a mais {medicao['a_mais']}) | postados {medicao['postados']} (com "
+            f"{medicao['com_a_mais']}{estados}; produtos a mais {medicao['a_mais']}) | postados {medicao['postados']} (com "
             f"produtos a mais {medicao['postados_com_a_mais']}) | vendas: {medicao['vendas_do_video']} do produto do "
             f"vídeo, {medicao['vendas_a_mais']} dos produtos a mais{parte} | punições de Produto Irrelevante: "
             f"{medicao['punicoes']} | tentativas de rascunho: "
