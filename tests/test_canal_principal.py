@@ -255,6 +255,71 @@ def test_pausa_feita_a_mao_continua_valendo(bm, grupo, relogio):
     assert (bm.GRUPO_ID, "volta") not in grupo.mandados
 
 
+def _retomar(bm, Msg, Est):
+    """O Rafael toca Retomar Postagens ▶️ e aprova o encerramento; devolve a mensagem dele."""
+    msg = Msg("Aprovar Encerramento ✅")
+
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            await bm.processar_encerramento_pausa(msg, Est())
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    rodar(cenario())
+    return msg
+
+
+def test_retomar_postagens_no_meio_da_suspensao_vale_o_que_o_rafael_fez(bm, grupo, Msg, Est, relogio):
+    # Escolha do Rafael (P92): no meio da suspensão, ele toca Retomar Postagens ▶️ e aprova; o
+    # bot pausava o canal de novo 1 min depois, com outro aviso no grupo. Agora o canal fica no
+    # ar até a suspensão acabar, nem com data nova o bot pausa de novo, e a resposta diz até
+    # quando vai a suspensão; na próxima suspensão, ele pausa sozinho de novo.
+    relogio("15:00")
+    agora = datetime.now(bm.fuso_horario).replace(second=0, microsecond=0)
+    ate = agora + timedelta(days=2)
+    _suspensa_ate(bm, ate)
+    _minuto(bm)
+    assert bm.ler_pausa_programada()["ativa"]
+    assert any("Preenchi o Pausar Postagens 🛑" in texto for chat, texto in grupo.mandados if chat == bm.ADMIN_ID)
+    msg = _retomar(bm, Msg, Est)
+    assert not bm.ler_pausa_programada()["ativa"] and _pausados(bm) == (False, False)
+    assert any(f"continua suspensa pela Shopee até {bm.robo_shopee_video.quando_acaba(ate)}" in texto
+               and "não pauso de novo por essa suspensão" in texto for texto in msg.saidas)
+    # Os minutos seguintes, com a mesma suspensão e com data nova: o canal continua no ar.
+    antes = len(grupo.mandados)
+    for nova in (ate, ate + timedelta(days=1)):
+        _suspensa_ate(bm, nova)
+        _minuto(bm)
+        assert not bm.ler_pausa_programada().get("ativa") and len(grupo.mandados) == antes
+    # Uma pausa nova dele, que acaba antes da suspensão, fica como ele fez (não vai até o fim dela).
+    manual = {"ativa": True, "servicos_pausados": [], "id_aviso_imediato": 7, "motivo": "x",
+              "data_retorno": (agora + timedelta(days=1)).strftime("%d/%m/%Y %H:%M")}
+    bm.salvar_pausa_programada(dict(manual))
+    _minuto(bm)
+    assert bm.ler_pausa_programada() == manual and len(grupo.mandados) == antes
+    bm.salvar_pausa_programada({"ativa": False})
+    # A suspensão acabou: a marca sai, e a próxima suspensão pausa sozinha de novo.
+    _suspensa_ate(bm, None)
+    _minuto(bm)
+    _suspensa_ate(bm, agora + timedelta(days=5))
+    _minuto(bm)
+    pausa = bm.ler_pausa_programada()
+    assert pausa["ativa"] and pausa["origem"] == bm.ORIGEM_DA_SUSPENSAO and _pausados(bm) == (True, True)
+    resultados = [r[2] for r in bm.registro_processos.contagem("2000-01-01 00:00:00")
+                  if r[1] == bm.PROCESSO_DA_PAUSA_AUTOMATICA]
+    assert bm.RETOMADA_PELO_RAFAEL in resultados and bm.FIM_DA_RETOMADA in resultados
+
+
+def test_retomar_postagens_sem_suspensao_e_o_mesmo_de_antes(bm, grupo, Msg, Est, relogio):
+    relogio("15:00")
+    bm.salvar_pausa_programada({"ativa": True, "servicos_pausados": [], "id_aviso_imediato": 7, "motivo": "x",
+                                "data_retorno": "30/12/2099 15:00"})
+    msg = _retomar(bm, Msg, Est)
+    assert not bm.ler_pausa_programada()["ativa"] and (bm.GRUPO_ID, "volta") in grupo.mandados
+    assert not any("suspensa" in texto for texto in msg.saidas)
+    assert not bm.db.ler_config(bm.CHAVE_RETOMADA_NA_SUSPENSAO, {})
+
+
 def test_pausar_postagens_do_formulario_e_o_mesmo_de_antes(bm, grupo, Msg, Est):
     rodar(bm.confirmar_pausa_programada_final(Msg("Confirmar Pausa ✅"), Est(
         {"data_retorno_str": "30/12/2099 15:00", "servicos_selecionados": "Apenas Rotina"})))

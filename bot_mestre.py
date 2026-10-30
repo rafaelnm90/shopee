@@ -1515,6 +1515,14 @@ PROCESSO_DA_PAUSA_AUTOMATICA = "pausa automática (suspensão da Shopee Vídeo)"
 # da pausa feita à mão que ela estendeu e os serviços que ela mesma parou nessa pausa.
 CHAVES_DA_PAUSA_AUTOMATICA = ("origem", "suspensao_ate", "retorno_manual", "servicos_da_suspensao")
 FORMATO_DA_VOLTA = "%d/%m/%Y %H:%M"
+# O Rafael encerrou a pausa à mão (Retomar Postagens ▶️) no meio da suspensão: vale o que ele
+# fez, e a pausa automática não volta por essa suspensão, nem com data nova, nem esticando uma
+# pausa nova dele. A marca fica numa chave própria (a pausa nova grava a sua por cima) e sai
+# quando a suspensão acaba: a próxima pausa sozinha de novo. Escolha do Rafael (P92):
+# DECISOES.md, Pausa programada.
+CHAVE_RETOMADA_NA_SUSPENSAO = "pausa_retomada_na_suspensao"
+RETOMADA_PELO_RAFAEL = "retomada pelo Rafael (não pausa de novo nesta suspensão)"
+FIM_DA_RETOMADA = "a suspensão retomada acabou (a próxima pausa de novo)"
 
 
 def _data_da_volta(texto):
@@ -1541,20 +1549,39 @@ async def _avisar_pausa_automatica(resultado, texto):
         logger.error(f"❌ [Pausa automática] O aviso no privado não foi: {e}")
 
 
+def marcar_retomada_na_suspensao(agora=None):
+    """
+    O Rafael vai encerrar a pausa à mão: com a conta de Shopee Vídeo suspensa agora, guarda
+    que ele retomou nesta suspensão, e a pausa automática não volta por ela (P92). Devolve o
+    fim da suspensão (datetime), ou None sem suspensão.
+    """
+    config = robo_shopee_video.ler_config()
+    agora = agora or datetime.now(fuso_horario)
+    if not robo_shopee_video.suspensa(config, agora):
+        return None
+    db.salvar_config(CHAVE_RETOMADA_NA_SUSPENSAO, {"em": agora.strftime("%Y-%m-%d %H:%M:%S")})
+    registro_processos.registrar("bot_mestre", PROCESSO_DA_PAUSA_AUTOMATICA, RETOMADA_PELO_RAFAEL, ok=True)
+    return robo_shopee_video.suspenso_ate(config)
+
+
 async def acompanhar_suspensao_da_shopee_video():
     """
     De minuto em minuto, com o fim da pausa: a pausa automática do Canal Afiliados segue a
     suspensão da conta de Shopee Vídeo. Liga quando ela aparece, muda a volta quando a data
     muda e acaba (ou devolve a pausa feita à mão) quando ela acaba antes. A volta na data
-    marcada fica com o verificar_retorno_pausa_minuto, como na pausa feita à mão.
+    marcada fica com o verificar_retorno_pausa_minuto, como na pausa feita à mão. Retomada
+    pelo Rafael no meio da suspensão, não mexe em nada até ela acabar (P92).
     """
     config = robo_shopee_video.ler_config()
     ate = robo_shopee_video.suspenso_ate(config)
     pausa = ler_pausa_programada()
     automatica = bool(pausa.get("ativa")) and pausa.get("origem") == ORIGEM_DA_SUSPENSAO
     agora = datetime.now(fuso_horario)
+    retomada = (db.ler_config(CHAVE_RETOMADA_NA_SUSPENSAO, {}) or {}).get("em")
 
     if ate and robo_shopee_video.suspensa(config, agora):
+        if retomada:
+            return
         volta = ate + robo_shopee_video.FOLGA_DA_SUSPENSAO
         marca = ate.strftime("%Y-%m-%d %H:%M:%S")
         if not pausa.get("ativa"):
@@ -1562,7 +1589,7 @@ async def acompanhar_suspensao_da_shopee_video():
                                                     extras={"origem": ORIGEM_DA_SUSPENSAO, "suspensao_ate": marca})
             await _avisar_pausa_automatica("ligada", (
                 f"🛑 <b>Canal Afiliados pausado sozinho</b>\n\nA Shopee suspendeu a sua conta de Shopee Vídeo até "
-                f"{robo_shopee_video.quando_acaba(ate)}. Preenchi o Pausar Postagens 🔴: param {_o_que_para(servicos)} "
+                f"{robo_shopee_video.quando_acaba(ate)}. Preenchi o Pausar Postagens 🛑: param {_o_que_para(servicos)} "
                 f"até {volta:%d/%m às %H:%M}, quando o robô da Shopee Vídeo também volta. O aviso já foi para o grupo "
                 "e é trocado todo dia às 9h; na volta, tudo volta sozinho. Se a Shopee tirar a suspensão antes, o canal "
                 "volta na hora."))
@@ -1596,7 +1623,11 @@ async def acompanhar_suspensao_da_shopee_video():
             f"acabar em {manual:%d/%m às %H:%M}."))
         return
 
-    # Sem suspensão agora: a automática que ainda tinha volta pela frente acabou antes.
+    # Sem suspensão agora: a marca da retomada do Rafael sai (a próxima suspensão pausa de
+    # novo), e a automática que ainda tinha volta pela frente acabou antes.
+    if retomada:
+        db.salvar_config(CHAVE_RETOMADA_NA_SUSPENSAO, {})
+        registro_processos.registrar("bot_mestre", PROCESSO_DA_PAUSA_AUTOMATICA, FIM_DA_RETOMADA, ok=True)
     if not automatica:
         return
     volta_marcada = _data_da_volta(pausa.get("data_retorno"))
@@ -13120,10 +13151,20 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
         return
 
     msg_status = await message.answer("⏳ Gerando mensagem de retorno com a IA...", reply_markup=teclado_cancelar)
+    # Antes de encerrar: o minuto da suspensão não pode pausar de novo no meio (P92).
+    suspensa_ate = marcar_retomada_na_suspensao()
     await encerrar_pausa_programada("agora")
     await msg_status.delete()
-    
-    await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
+
+    texto = ("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no "
+             "grupo. Serviços reativados com sucesso!")
+    if suspensa_ate:
+        # Escolha do Rafael (P92): DECISOES.md, Pausa programada.
+        texto += (f"\n\n⚠️ A conta de Shopee Vídeo continua suspensa pela Shopee até "
+                  f"{robo_shopee_video.quando_acaba(suspensa_ate)}. Como você retomou, o Canal Afiliados fica no ar "
+                  "até lá: não pauso de novo por essa suspensão, nem se a Shopee mudar a data. Na próxima suspensão, "
+                  "pauso sozinho de novo.")
+    await message.answer(texto, reply_markup=obter_teclado_principal())
     await state.clear()
 
 # --- SPAM em Grupos (divulgação pelo userbot) ---
