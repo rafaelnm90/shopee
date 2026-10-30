@@ -544,9 +544,10 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
     nome, motivo, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
     # O Editor 1 já mostrou o v1; o Editor 2 tem a lista dele e começa pelo v1 também.
     assert (nome, motivo) == ("Copo Térmico", "") and resumo["textos_da_ia"]
-    assert pedidos == [(1, videos["v1"], versoes, [], True),
+    inteira = edicao_video.LARGURA_DA_MINIATURA
+    assert pedidos == [(1, videos["v1"], versoes, [], inteira),
                        (2, videos["v1"], "Copo Térmico", "Gelado o dia todo", versoes, "Toque no copo aqui embaixo",
-                        "meio", True)]
+                        "meio", inteira)]
     dados = db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})
     assert dados["ids"] == ["viral:1"] and dados["ids_2"] == ["viral:1"]
     edicao_video.exemplo_editor_2("exemplo.mp4")
@@ -563,10 +564,18 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         "nome": "Cortina", "vantagem": "Tecido com relevo", "versoes": versoes, "falas": [], "lugar": "alto",
         "canto_ocupado": True})
     _, _, resumo = edicao_video.exemplo_editor_1("exemplo.mp4")
-    assert pedidos[-1][0] == 1 and pedidos[-1][-1] is False and resumo["miniatura"] is False
+    assert pedidos[-1][0] == 1 and pedidos[-1][-1] == 0 and resumo["miniatura"] == 0
     _, _, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
-    assert pedidos[-1][0] == 2 and pedidos[-1][-1] is False and pedidos[-1][-2] == "alto"
-    assert resumo["miniatura"] is False
+    assert pedidos[-1][0] == 2 and pedidos[-1][-1] == 0 and pedidos[-1][-2] == "alto"
+    assert resumo["miniatura"] == 0
+    # Escolha do Rafael (29/10, P97): com a coisa dele logo abaixo do canto, os dois exemplos levam
+    # a miniatura menor, como o vídeo que vai ao ar.
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+        "nome": "Mercadinho", "vantagem": "Brincar de vender", "versoes": versoes, "falas": [], "lugar": "alto",
+        "canto_ocupado": True, "por_cima": [(55.0, 95.0, 18.0, 24.0)]})
+    for exemplo in (edicao_video.exemplo_editor_1, edicao_video.exemplo_editor_2):
+        _, _, resumo = exemplo("exemplo.mp4")
+        assert pedidos[-1][-1] == 162 and resumo["miniatura"] == 162
 
 
 def test_onde_alguem_fala_o_ritmo_nao_corta_nao_acelera_nem_poe_camera_lenta():
@@ -1265,15 +1274,20 @@ def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
                     "-frames:v", "1", str(foto)], check=True)
     from PIL import Image
-    for miniatura, azul in ((True, True), (False, False)):
+    # Escolha do Rafael (29/10, P97): a miniatura menor fica no mesmo canto de cima à direita;
+    # a ponta de baixo à esquerda da de sempre volta a mostrar o próprio vídeo.
+    dentro_do_canto, ponta_de_baixo = (640, 60), (500, 205)
+    for miniatura, azuis in ((True, (True, True, True)), (False, (False, False, False)),
+                             (124, (True, True, False))):
         destino = tmp_path / f"editado_{miniatura}.mp4"
         assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), miniatura=miniatura) == ""
         quadro = tmp_path / f"quadro_{miniatura}.ppm"
         subprocess.run(["ffmpeg", "-v", "error", "-ss", "3", "-i", str(destino), "-frames:v", "1", str(quadro)],
                        check=True)
         with Image.open(quadro) as imagem:
-            r, g, b = imagem.convert("RGB").getpixel(edicao_video.CENTRO_DA_MINIATURA)
-        assert (b > r + 60) == azul
+            for ponto, azul in zip((edicao_video.CENTRO_DA_MINIATURA, dentro_do_canto, ponta_de_baixo), azuis):
+                r, g, b = imagem.convert("RGB").getpixel(ponto)
+                assert (b > r + 60) == azul, (miniatura, ponto)
 
 
 def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatch, tmp_path):
@@ -1293,14 +1307,14 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     _textos_da_tela(monkeypatch, ocupado)
     assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cortina") == (
         "", edicao_video.COM_LEGENDAS + edicao_video.SEM_A_MINIATURA, "")
-    assert miniaturas == [False]
+    assert miniaturas == [0]
     # Canto livre, ou sem a resposta da IA: a miniatura vai, como sempre.
     for textos in (dict(ocupado, canto_ocupado=False), {}):
         miniaturas.clear()
         _textos_da_tela(monkeypatch, textos)
         assert edicao_video.SEM_A_MINIATURA not in edicao_video.editar_para_postar("v.mp4", b"foto", destino,
                                                                                   "Cortina")[1]
-        assert miniaturas == [True]
+        assert miniaturas == [edicao_video.LARGURA_DA_MINIATURA]
     # Sem o Editor 2, o Editor 1 também vai sem ela.
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
                         lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
@@ -1308,7 +1322,7 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     miniaturas.clear()
     assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cortina")[1] == (
         edicao_video.SO_COM_O_EDITOR_1 + edicao_video.SEM_A_MINIATURA)
-    assert miniaturas == [False]
+    assert miniaturas == [0]
 
 
 
@@ -1316,18 +1330,20 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     # Print do Rafael (29/10): num rascunho, a legenda do criador, centralizada logo abaixo da
     # barra de busca, passava por baixo da ponta da nossa miniatura, e a IA tinha dito que o
     # canto estava livre (P81). Ela diz também onde fica cada coisa que o criador pôs no alto
-    # da tela, e a miniatura sai quando alguma passa por ela, com a folga.
+    # da tela, e a miniatura não passa por nenhuma, com a folga: diminui para ficar acima dela
+    # (P97) ou, quando nem com 2/3 do tamanho cabe, sai.
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
         assert "\"por_cima_no_alto\"" in prompt and "em qualquer momento" in prompt
-    legenda = {"esquerda": 29, "direita": 69, "topo": 15, "base": 18}
+    legenda = {"esquerda": 29, "direita": 69, "topo": 11, "base": 14}
     textos = edicao_video._nome_lugar_e_falas({"canto_ocupado": False, "por_cima_no_alto": [legenda]})
-    assert textos == {"canto_ocupado": False, "por_cima": [(29.0, 69.0, 15.0, 18.0)]}
-    assert edicao_video.com_a_miniatura(textos) is False
+    assert textos == {"canto_ocupado": False, "por_cima": [(29.0, 69.0, 11.0, 14.0)]}
+    assert edicao_video.miniatura_no_video(textos) == 0
     # A IA errando um pouco para fora da miniatura (até 65% da largura) ainda conta, pela folga.
-    assert edicao_video.com_a_miniatura({"por_cima": [(30.0, 65.0, 15.0, 18.0)]}) is False
-    # Longe dela (no alto à esquerda, ou logo abaixo), a miniatura fica.
+    assert edicao_video.miniatura_no_video({"por_cima": [(30.0, 65.0, 11.0, 14.0)]}) == 0
+    # Longe dela (no alto à esquerda, ou logo abaixo), a miniatura fica inteira.
     for longe in ((5.0, 50.0, 5.0, 12.0), (20.0, 80.0, 21.0, 25.0)):
-        assert edicao_video.com_a_miniatura({"canto_ocupado": False, "por_cima": [longe]})
+        assert edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [longe]}) == (
+            edicao_video.LARGURA_DA_MINIATURA)
     # Resposta em fração, com os lados trocados, ou sem os quatro números.
     assert edicao_video._por_cima_no_alto([{"esquerda": 0.69, "direita": 0.29, "topo": 0.18, "base": 0.15},
                                            {"esquerda": "x"}, "texto", {"esquerda": 1, "direita": 2},
@@ -1345,9 +1361,55 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     monkeypatch.setattr(edicao_video, "editar", editar)
     _textos_da_tela(monkeypatch, {"nome": "Clipe de Unha", "vantagem": "Tira o gel sem esforço", "lugar": "alto",
                                   "texto_no_video": True, "canto_ocupado": False,
-                                  "por_cima": [(29.0, 69.0, 15.0, 18.0)]})
+                                  "por_cima": [(29.0, 69.0, 11.0, 14.0)]})
     como = edicao_video.editar_para_postar("v.mp4", b"foto", str(tmp_path / "r.mp4"), "Clipe de Unha")[1]
-    assert como.endswith(edicao_video.SEM_A_MINIATURA) and miniaturas == [False]
+    assert como.endswith(edicao_video.SEM_A_MINIATURA) and miniaturas == [0]
+
+
+def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, tmp_path):
+    # Escolha do Rafael (29/10, P97): no rascunho das 23:09, o balão de resposta da criadora
+    # ficava logo abaixo do canto da nossa miniatura, e a folga a tirou, mas ela caberia acima
+    # dele. A miniatura diminui, no mesmo canto, só o necessário para ficar acima da coisa do
+    # criador sem encostar (a folga); menor que 2/3 do tamanho de sempre, fica de fora.
+    editar_de_verdade = edicao_video.editar
+    assert edicao_video.CANTO_DA_MINIATURA == (666, 38) and edicao_video.MENOR_MINIATURA == 120
+    assert edicao_video.centro_da_miniatura(edicao_video.LARGURA_DA_MINIATURA) == edicao_video.CENTRO_DA_MINIATURA
+    balao = (55.0, 95.0, 18.0, 24.0)
+    largura = edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [balao]})
+    assert largura == 162 and not edicao_video._cruza_a_miniatura(balao, largura)
+    x, y = edicao_video.centro_da_miniatura(largura)
+    assert (x + largura // 2, y - largura // 2) == edicao_video.CANTO_DA_MINIATURA
+    # Sem encostar: a base da miniatura fica a folga acima do topo do balão.
+    assert y + largura // 2 + edicao_video.FOLGA_DA_MINIATURA <= balao[2] * edicao_video.TELA[1] / 100
+    # A IA viu o balão no canto (canto_ocupado) e disse onde: vale a conta do lugar.
+    assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [balao]}) == 162
+    # Com 2/3 do tamanho ainda vai; menor que isso, fica de fora.
+    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 14.7, 24.0)]}) == 120
+    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 14.0, 24.0)]}) == 0
+    # Com várias, a mais alta decide.
+    assert edicao_video.miniatura_no_video({"por_cima": [balao, (40.0, 80.0, 16.0, 20.0)]}) == 136
+    # O canto ocupado sem nenhuma coisa no canto dizendo onde: fica de fora, como na P81.
+    assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [(5.0, 40.0, 2.0, 8.0)]}) == 0
+    # O que vai ao ar leva a miniatura menor, e o registro diz.
+    _versoes_de_mentira(monkeypatch)
+    miniaturas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+        miniaturas.append(miniatura)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    _textos_da_tela(monkeypatch, {"nome": "Mercadinho", "vantagem": "Brincar de vender", "lugar": "alto",
+                                  "canto_ocupado": True, "por_cima": [balao]})
+    como = edicao_video.editar_para_postar("v.mp4", b"foto", str(tmp_path / "r.mp4"), "Mercadinho")[1]
+    assert como.endswith(edicao_video.COM_A_MINIATURA_MENOR) and miniaturas == [162]
+    # A edição recebe a largura e o centro no mesmo canto.
+    pedidos = []
+    monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura",
+                        lambda video, foto, destino, segundos, miniatura, centro, *resto: pedidos.append(
+                            (miniatura, centro)) or "")
+    for pedida, esperada in ((True, (180, (576, 128))), (162, (162, (585, 119))), (False, (0, (666, 38)))):
+        assert editar_de_verdade("v.mp4", b"foto", str(tmp_path / "r.mp4"), miniatura=pedida) == ""
+        assert pedidos.pop() == esperada
 
 def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
     # Escolha do Rafael (29/10, P82): a IA contava como texto próprio do vídeo (P52) os quadros
@@ -1360,5 +1422,6 @@ def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
         assert "\"canto_ocupado\"" in prompt and "não contam marca d'água, logo nem nome do perfil" in prompt
     assert edicao_video._nome_lugar_e_falas({"canto_ocupado": True, "texto_no_video": "sim"}) == {
         "canto_ocupado": True}
-    assert edicao_video.com_a_miniatura({"canto_ocupado": True}) is False
-    assert edicao_video.com_a_miniatura({"canto_ocupado": False}) and edicao_video.com_a_miniatura({})
+    assert edicao_video.miniatura_no_video({"canto_ocupado": True}) == 0
+    assert edicao_video.miniatura_no_video({"canto_ocupado": False}) == edicao_video.LARGURA_DA_MINIATURA
+    assert edicao_video.miniatura_no_video({}) == edicao_video.LARGURA_DA_MINIATURA

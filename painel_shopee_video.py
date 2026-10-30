@@ -803,7 +803,8 @@ def texto_edicao(config):
         f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
         "no canto de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
-        "(a foto do produto, um quadro ou um texto), a nossa miniatura fica de fora.\n\n"
+        "(a foto do produto, um quadro ou um texto), a nossa miniatura fica de fora; se a coisa dele fica logo "
+        "abaixo do canto, ela diminui (até 2/3 do tamanho) para ficar acima dela.\n\n"
         "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
         "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto, uma vantagem que o vídeo "
         "mostra e, no fim, uma chamada para o produto anexado embaixo, no laranja da Shopee (escritos pela IA, "
@@ -1272,10 +1273,16 @@ def legenda_das_versoes(nome, resumo, indice, editor):
         linhas.append(f"🎵 Música de fundo: {versao['musica']} (o vídeo original não tem som)")
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
         linhas.append("⚠️ A IA não escreveu o nome, a vantagem e a chamada desta vez.")
-    if not gancho and resumo.get("miniatura") is False:
+    largura = edicao_video.largura_da_miniatura(resumo.get("miniatura", True))
+    if not gancho and not largura:
         # Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
         linhas.append("🖼️ Sem a nossa miniatura (neste vídeo e nas versões): o criador já pôs coisa no canto de "
                       "cima à direita.")
+    elif not gancho and largura < edicao_video.LARGURA_DA_MINIATURA:
+        # Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
+        linhas.append(f"🖼️ Miniatura menor ({round(largura * 100 / edicao_video.LARGURA_DA_MINIATURA)}% do tamanho "
+                      "de sempre, neste vídeo e nas versões): o criador pôs coisa logo abaixo do canto de cima à "
+                      "direita, e a miniatura diminuiu para ficar acima.")
     if indice < total - 1:
         return "\n".join(linhas)
     if total < edicao_video.VERSOES_POR_VIDEO:

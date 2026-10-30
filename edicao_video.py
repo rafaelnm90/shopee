@@ -43,6 +43,10 @@ SEGUNDOS_DA_FOTO = 2
 # (posição X 60 e Y -80 no LumaFusion), do começo do vídeo até o fim.
 LARGURA_DA_MINIATURA = 180
 CENTRO_DA_MINIATURA = (576, 128)
+# O canto de cima à direita da miniatura (x 666, y 38) fica sempre no mesmo lugar: menor, ela
+# encolhe para dentro dele. Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
+CANTO_DA_MINIATURA = (CENTRO_DA_MINIATURA[0] + LARGURA_DA_MINIATURA // 2,
+                      CENTRO_DA_MINIATURA[1] - LARGURA_DA_MINIATURA // 2)
 # A seta é a do Rafael (o arquivo Seta_da_Shopee que ele usa no LumaFusion), com o fundo
 # preto tirado: só o pedaço com a seta, já no tamanho dele (62,9%, posição X -23), perto do
 # canto de baixo à esquerda, inteira logo acima do cartão do produto que o app mostra e
@@ -309,16 +313,29 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
     sem eles, a capa (bytes de uma imagem, como a capa com chamada), quando vem. Com a musica
-    (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55). Com miniatura=False, o
-    vídeo vai sem a nossa miniatura (o canto dela tem coisa do criador, P81).
+    (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55). Com miniatura=False (ou 0),
+    o vídeo vai sem a nossa miniatura (o canto dela tem coisa do criador, P81); com uma largura
+    menor (miniatura_no_video), ela vai desse tamanho, no mesmo canto (P97).
     """
     if avisos and foto:
         capa = capa_com_avisos(foto)
         if not capa:
             return "a capa com os avisos da bebida alcoólica não saiu"
-    return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO,
-                                       LARGURA_DA_MINIATURA if miniatura else 0, CENTRO_DA_MINIATURA, SETA,
-                                       CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica)
+    largura = largura_da_miniatura(miniatura)
+    return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
+                                       SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica)
+
+
+def largura_da_miniatura(miniatura):
+    """A largura da miniatura pedida, em px: True é a de sempre; False ou 0, sem ela; um número, essa (P97)."""
+    if miniatura is True:
+        return LARGURA_DA_MINIATURA
+    return int(miniatura or 0)
+
+
+def centro_da_miniatura(largura):
+    """O centro da miniatura desta largura, com o canto de cima à direita no lugar de sempre (P97)."""
+    return CANTO_DA_MINIATURA[0] - largura // 2, CANTO_DA_MINIATURA[1] + largura // 2
 
 
 # --- Editor 2 ---
@@ -427,9 +444,10 @@ _TEXTO_NO_VIDEO_NO_PROMPT = (
 # perfil não contam. Ela fica lá o vídeo inteiro: o que passa por ela em qualquer momento
 # conta. Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
 # A IA também diz onde fica cada coisa que o criador pôs no alto da tela, e a conta de cruzar
-# com a miniatura é feita aqui (com_a_miniatura): no print de 29/10, a legenda do criador,
+# com a miniatura é feita aqui (miniatura_no_video): no print de 29/10, a legenda do criador,
 # centralizada logo abaixo da barra de busca, passava por baixo da ponta da miniatura, e a IA
-# tinha dito que o canto estava livre.
+# tinha dito que o canto estava livre. Com o lugar dito, a coisa do criador logo abaixo do
+# canto faz a miniatura diminuir em vez de sair (escolha do Rafael, 29/10, P97).
 _CANTO_NO_PROMPT = (
     "Diga também se o canto de cima à direita do vídeo (de uns 65% a 95% da largura e até uns 20% da altura) "
     "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, em "
@@ -715,25 +733,51 @@ def _por_cima_no_alto(lista):
 # alto conta como em cima da miniatura também quando passa a esta folga dela (px do vídeo de
 # 720x1280). A miniatura é tomada como quadrada, como a foto do anúncio quase sempre é.
 FOLGA_DA_MINIATURA = 30
+# Com a coisa do criador logo abaixo do canto, a miniatura diminui, no mesmo canto, só o
+# necessário para ficar acima dela, com a folga (sem encostar); se precisar ficar menor que
+# 2/3 do tamanho de sempre, fica de fora. Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
+MENOR_MINIATURA = LARGURA_DA_MINIATURA * 2 // 3
+# O canto que a IA olha para dizer se está ocupado (_CANTO_NO_PROMPT), em % do vídeo: da
+# esquerda à direita e até a altura.
+CANTO_OLHADO_PELA_IA = (65, 95, 20)
 
 
-def _cruza_a_miniatura(caixa):
-    """A caixa (em % do vídeo) passa pela miniatura, com a folga?"""
+def _cruza_a_miniatura(caixa, largura=LARGURA_DA_MINIATURA):
+    """A caixa (em % do vídeo) passa pela miniatura desta largura, com a folga?"""
     esquerda, direita, topo, base = caixa
-    largura, altura = TELA
-    meia = LARGURA_DA_MINIATURA / 2 + FOLGA_DA_MINIATURA
-    x, y = CENTRO_DA_MINIATURA
-    return (esquerda * largura / 100 < x + meia and direita * largura / 100 > x - meia
+    largura_da_tela, altura = TELA
+    meia = largura / 2 + FOLGA_DA_MINIATURA
+    x, y = centro_da_miniatura(largura)
+    return (esquerda * largura_da_tela / 100 < x + meia and direita * largura_da_tela / 100 > x - meia
             and topo * altura / 100 < y + meia and base * altura / 100 > y - meia)
 
 
-def com_a_miniatura(textos):
+def _no_canto_olhado(caixa):
+    """A caixa (em % do vídeo) entra no canto que a IA olha para o canto_ocupado?"""
+    esquerda, direita, topo, _base = caixa
+    comeco, fim, ate = CANTO_OLHADO_PELA_IA
+    return esquerda < fim and direita > comeco and topo < ate
+
+
+def miniatura_no_video(textos):
     """
-    A nossa miniatura vai no vídeo? Não quando a IA viu coisa do criador no canto dela, nem
-    quando alguma das que ela diz que o criador pôs no alto passa por ela (P81); sem a
-    resposta, vai.
+    A largura da nossa miniatura neste vídeo, em px: a de sempre com o canto livre ou sem a
+    resposta da IA. Quando alguma das coisas que ela diz que o criador pôs no alto passa pela
+    miniatura, a miniatura diminui no mesmo canto até ficar acima dela, com a folga, e fica de
+    fora (0) se precisar ficar menor que MENOR_MINIATURA (P81 e P97). Com o canto ocupado sem
+    nenhuma coisa no canto dizendo onde, também fica de fora (P81).
     """
-    return not textos.get("canto_ocupado") and not any(map(_cruza_a_miniatura, textos.get("por_cima", ())))
+    caixas = list(textos.get("por_cima", ()))
+    if textos.get("canto_ocupado") and not any(map(_no_canto_olhado, caixas)):
+        return 0
+    largura = LARGURA_DA_MINIATURA
+    for caixa in caixas:
+        if _cruza_a_miniatura(caixa, largura):
+            # A base da miniatura sobe até ficar a folga acima do topo da caixa. Menor, ela
+            # só encolhe para dentro do canto: a caixa que não passava não passa a passar.
+            cabe = caixa[2] * TELA[1] / 100 - FOLGA_DA_MINIATURA - CANTO_DA_MINIATURA[1]
+            largura = min(largura, int(cabe) // 2 * 2)
+    return largura if largura >= MENOR_MINIATURA else 0
 
 
 def _vantagem_e_chamada(dados, textos):
@@ -868,6 +912,7 @@ COM_OS_AVISOS = ", com os avisos"
 COM_A_CHAMADA = ", com a chamada na capa"
 COM_MUSICA = ", com música de fundo"
 SEM_A_MINIATURA = ", sem a nossa miniatura"
+COM_A_MINIATURA_MENOR = ", com a miniatura menor"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
 TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
@@ -897,10 +942,12 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False):
     textos = textos_da_tela(video, produto) if produto else {}
     # Sem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a dos avisos.
     capa = _capa_alternada(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
-    # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81).
-    miniatura = com_a_miniatura(textos)
+    # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
+    # coisa dele fica logo abaixo do canto (P97).
+    miniatura = miniatura_no_video(textos)
     avisado = ((COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
-               + ("" if miniatura else SEM_A_MINIATURA))
+               + (SEM_A_MINIATURA if not miniatura
+                  else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else ""))
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, capa,
@@ -1267,7 +1314,7 @@ def _exemplo_das_versoes(destino, lista, editar_versoes):
         motivo, resumo = editar_versoes(arquivo, foto, textos, produto)
         resumo["lugar_da_ia"] = "lugar" in textos
         resumo["texto_no_video"] = bool(textos.get("texto_no_video"))
-        resumo["miniatura"] = com_a_miniatura(textos)
+        resumo["miniatura"] = miniatura_no_video(textos)
         resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem") or textos.get("chamada"))
         resumo["versoes_da_ia"] = len(textos.get("versoes", []))
         return motivo, resumo
@@ -1282,7 +1329,7 @@ def exemplo_editor_1(destino):
     produto, "", resumo) quando deu certo, ou (None, motivo, resumo ou None).
     """
     return _exemplo_das_versoes(destino, "ids", lambda arquivo, foto, textos, produto: editar_1_e_versoes(
-        arquivo, foto, destino, textos.get("versoes", []), textos.get("falas"), com_a_miniatura(textos)))
+        arquivo, foto, destino, textos.get("versoes", []), textos.get("falas"), miniatura_no_video(textos)))
 
 
 def exemplo_editor_2(destino):
@@ -1292,7 +1339,7 @@ def exemplo_editor_2(destino):
     """
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
-        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), com_a_miniatura(textos)))
+        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), miniatura_no_video(textos)))
 
 
 def exemplo_capa():
