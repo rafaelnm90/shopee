@@ -3,8 +3,9 @@ Acesso ao Gemini (Google) para gerar texto e analisar vídeos.
 
 As duas funções tentam os modelos de MODELOS_CASCATA_GEMINI em ordem e passam
 para o próximo quando um falha, estoura a cota ou responde vazio. Modelo sem
-cota ou que não existe fica de fora da cascata por um tempo (_fora_ate). A
-chave fica em GEMINI_KEY no .env.
+cota ou que não existe fica de fora da cascata por um tempo, para todos os
+robôs (_fora_ate e a chave ia_modelos_fora no banco). A chave fica em
+GEMINI_KEY no .env.
 """
 import os
 import re
@@ -15,6 +16,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from google import genai
+
+import db
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
@@ -56,9 +59,12 @@ logger = logging.getLogger("API_Gemini")
 
 # Modelo que respondeu "sem cota" (429) ou "modelo não existe" (404) fica de fora
 # da cascata por um tempo, em vez de gastar uma chamada a cada pedido: eram ~300
-# por dia batendo em cota estourada. Vale por processo (cada robô descobre sozinho).
+# por dia batendo em cota estourada. A pausa vale para todos os robôs: fica também
+# no banco (CHAVE_DA_PAUSA), porque cada rodada do robô da Shopee Vídeo é um processo
+# novo, que sem o banco gastaria de novo uma chamada no modelo sem cota.
 # Se todos estiverem de fora, a cascata tenta todos, como se não houvesse a pausa.
-_fora_ate = {}                      # modelo -> time.monotonic() em que volta
+_fora_ate = {}                      # modelo -> time.time() em que volta
+CHAVE_DA_PAUSA = "ia_modelos_fora"  # {modelo: time.time() em que volta}
 ESPERA_COTA_S = 10 * 60             # cota estourada sem prazo informado
 ESPERA_MODELO_INEXISTENTE_S = 6 * 3600
 
@@ -87,19 +93,49 @@ def tempo_fora(erro_txt):
     return None
 
 
+def _pausas_do_banco():
+    """{modelo: hora em que volta} que os robôs guardaram no banco; {} quando não dá para ler."""
+    try:
+        dados = db.ler_config(CHAVE_DA_PAUSA, {})
+        return {modelo: float(volta) for modelo, volta in dados.items()} if isinstance(dados, dict) else {}
+    except Exception:
+        return {}
+
+
+def _guardar_pausa(modelo, volta):
+    """Grava no banco a pausa do modelo, para os outros robôs e as próximas rodadas; tira as vencidas."""
+    def alterar(dados):
+        agora = time.time()
+        for vencido in [m for m, v in dados.items() if not isinstance(v, (int, float)) or v <= agora]:
+            del dados[vencido]
+        dados[modelo] = max(volta, dados.get(modelo, 0))
+
+    try:
+        # A tabela, caso este robô grave antes de o bot_mestre criá-la.
+        with db.conexao() as con:
+            con.execute("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+        db.atualizar_config(CHAVE_DA_PAUSA, alterar)
+    except Exception:
+        pass
+
+
 def _modelos_da_vez():
-    agora = time.monotonic()
-    livres = [m for m in MODELOS_CASCATA_GEMINI if _fora_ate.get(m, 0) <= agora]
+    agora = time.time()
+    fora = _pausas_do_banco()
+    for modelo, volta in _fora_ate.items():
+        fora[modelo] = max(volta, fora.get(modelo, 0))
+    livres = [m for m in MODELOS_CASCATA_GEMINI if fora.get(m, 0) <= agora]
     return livres or list(MODELOS_CASCATA_GEMINI)
 
 
 def _tirar_da_vez(modelo, erro_txt):
-    """Tira o modelo da cascata conforme o erro. True se tirou."""
+    """Tira o modelo da cascata conforme o erro, neste robô e no banco. True se tirou."""
     fora = tempo_fora(erro_txt)
     if fora is None:
         return False
     segundos, motivo = fora
-    _fora_ate[modelo] = time.monotonic() + segundos
+    _fora_ate[modelo] = time.time() + segundos
+    _guardar_pausa(modelo, _fora_ate[modelo])
     volta = datetime.now() + timedelta(seconds=segundos)
     logger.warning(f"⏸️ [IA] {modelo} fora da cascata até {volta:%d/%m %H:%M} ({motivo}).")
     return True

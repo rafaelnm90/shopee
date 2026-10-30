@@ -37,6 +37,32 @@ def test_modelo_sem_cota_fica_de_fora_nas_proximas(gemini):
     assert gemini.chamadas == ["a", "b", "c", "c"]
 
 
+def test_pausa_do_modelo_sem_cota_vale_para_os_outros_robos(gemini, monkeypatch):
+    # Cada rodada do robô da Shopee Vídeo é um processo novo: sem a pausa no banco, ela gastava
+    # de novo uma chamada no modelo sem cota (70 pausas em 24 h em 29/10).
+    import time
+
+    import db
+    gemini.respostas = {"a": COTA_DO_DIA}
+    assert rodar(ia.gerar_texto_gemini("p")) == "ok"
+    monkeypatch.setattr(ia, "_fora_ate", {})  # o processo seguinte começa sem a memória do anterior
+    assert rodar(ia.gerar_texto_gemini("p")) == "ok"
+    assert gemini.chamadas == ["a", "b", "b"]
+    assert db.ler_config(ia.CHAVE_DA_PAUSA)["a"] > time.time() + 60
+    # A pausa vencida não segura o modelo, e a próxima gravação a tira do banco.
+    db.salvar_config(ia.CHAVE_DA_PAUSA, {"a": time.time() - 1, "c": "torta"})
+    gemini.respostas = {"b": NAO_EXISTE}
+    assert rodar(ia.gerar_texto_gemini("p")) == "ok"
+    assert gemini.chamadas[3:] == ["a"]
+    gemini.respostas = {"a": COTA_DO_MINUTO}
+    assert rodar(ia.gerar_texto_gemini("p")) == "ok"
+    assert sorted(db.ler_config(ia.CHAVE_DA_PAUSA)) == ["a"]
+    # Sem o banco, vale a memória do próprio robô, como antes.
+    monkeypatch.setattr(ia.db, "ler_config", lambda *a, **k: 1 / 0)
+    monkeypatch.setattr(ia, "_fora_ate", {"a": time.time() + 60})
+    assert ia._modelos_da_vez() == ["b", "c"]
+
+
 def test_texto_com_imagem_manda_a_imagem_antes_do_pedido(gemini):
     # A IA do feed comenta vendo a tela do vídeo (P70): a imagem vai junto com o pedido.
     assert rodar(ia.gerar_texto_gemini("comente", imagens=[(b"\xff\xd8jpeg", "image/jpeg")])) == "ok"
