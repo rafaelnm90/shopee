@@ -172,26 +172,31 @@ def capa_com_avisos(foto):
     return saida.getvalue()
 
 
-# A capa com chamada: a foto do anúncio no fundo preto, um pouco menor, e acima dela a
-# vantagem que o vídeo mostra, em letras grandes (a frase que a IA escreve para as legendas
-# do Editor 2: sem marca, sem preço e sem promoção, regras 9, 13 e 14). Tudo dentro do que a
-# grade do perfil mostra da capa (o corte do meio, medido no print do Rafael de 29/10: de y
-# 196 a 1116 da tela de 720x1280) e longe do que a grade põe por cima: o número de
-# visualizações, embaixo à esquerda (NUMERO_DA_GRADE), a sacolinha da Shopee, em cima à
-# direita (SACOLINHA_DA_GRADE), e o selo "Fixado" dos vídeos fixados no perfil, em cima à
-# esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10): pedido do Rafael, não atrapalhar os
-# números. Começa desligada (chave capa_com_chamada de shopee_video): ele vê o exemplo no
-# privado e liga no painel. A bebida alcoólica fica com a capa dos avisos. Escolha do Rafael
-# (29/10, P76): DECISOES.md, Shopee Vídeo.
+# A capa com chamada: a foto do anúncio do mesmo tamanho da capa sem texto (a foto quadrada
+# ocupa a largura toda, no meio da tela, como no FILTRO_720P do começo do vídeo) e, por cima do
+# pé da foto, uma faixa laranja da Shopee com a frase da capa em letras brancas (a frase curta
+# que a IA escreve para ela, P106; sem marca, sem preço e sem promoção, regras 9, 13 e 14).
+# Tudo dentro do que a grade do perfil mostra da capa (o corte do meio, medido no print do
+# Rafael de 29/10: de y 196 a 1116 da tela de 720x1280) e longe do que a grade põe por cima: o
+# número de visualizações, embaixo à esquerda (NUMERO_DA_GRADE), fica logo abaixo da faixa, no
+# preto, e a sacolinha da Shopee, em cima à direita (SACOLINHA_DA_GRADE), logo acima da foto;
+# o selo "Fixado" dos vídeos fixados no perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no
+# Motorola em 29/10), pega só a ponta de cima da foto, como na capa sem texto: pedido do
+# Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
+# shopee_video): ele vê o exemplo no privado e liga no painel. A bebida alcoólica fica com a
+# capa dos avisos. Escolhas do Rafael (29/10, P76; 30/10, P107): DECISOES.md, Shopee Vídeo.
 CHAVE_DA_CAPA = "capa_com_chamada"
 VISIVEL_NA_GRADE = (196, 1116)                  # de cima a baixo, em y
 NUMERO_DA_GRADE = (52, 1005, 228, 1055)         # x1, y1, x2, y2
 SACOLINHA_DA_GRADE = (587, 210, 667, 278)
 FIXADO_DA_GRADE = (36, 200, 252, 305)
-AREA_DA_CHAMADA = (52, 312, 668, 452)           # abaixo do selo e da sacolinha, acima da foto
-AREA_DA_FOTO_COM_CHAMADA = (466, 995)           # de cima a baixo, em y: acaba antes do número
-LETRAS_DA_CHAMADA = (64, 36)                    # a maior e a menor
-LINHAS_DA_CHAMADA = 2
+FOTO_DA_CAPA = (0, 280, 720, 1000)              # entre a sacolinha e o número: a foto quadrada, 720x720
+LARANJA_DA_SHOPEE = (238, 77, 45)
+FAIXA_DA_CHAMADA = 104                          # a altura da faixa com uma linha
+FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da faixa, com duas linhas
+MARGEM_DA_FAIXA = 30                            # entre as letras e os lados da tela
+LETRAS_DA_CHAMADA = (72, 44)                    # a maior e a menor numa linha
+LETRAS_EM_DUAS_LINHAS = (56, 36)                # quando não cabe numa linha: a faixa cresce para cima
 
 
 def capa_ligada():
@@ -205,27 +210,31 @@ PENALIDADE_DA_QUEBRA = 8
 
 def _quebra_da_chamada(texto, desenho, fonte_ttf):
     """
-    (fonte, linhas) da chamada: a maior letra em que ela cabe em até LINHAS_DA_CHAMADA linhas
-    na AREA_DA_CHAMADA, com as duas linhas equilibradas e, se der, sem a 1ª terminar numa
-    palavra de ligação. None quando não cabe nem na menor letra.
+    (fonte, linhas) da chamada na faixa: numa linha só, na maior letra de LETRAS_DA_CHAMADA em
+    que ela cabe na largura (a faixa fina do exemplo que o Rafael escolheu, P107); quando não
+    cabe, em duas, na maior letra de LETRAS_EM_DUAS_LINHAS, equilibradas e, se der, sem a 1ª
+    terminar numa palavra de ligação. None quando não cabe nem assim.
     """
     from PIL import ImageFont
-    x1, y1, x2, y2 = AREA_DA_CHAMADA
-    palavras = texto.split(" ")
-    melhor = None
+    largura = TELA[0] - 2 * MARGEM_DA_FAIXA
     maior, menor = LETRAS_DA_CHAMADA
     for tamanho in range(maior, menor - 1, -2):
         fonte = ImageFont.truetype(fonte_ttf, tamanho)
-        opcoes = [[texto]]
-        if LINHAS_DA_CHAMADA >= 2:
-            opcoes += [[" ".join(palavras[:k]), " ".join(palavras[k:])] for k in range(1, len(palavras))]
-        cabem = [linhas for linhas in opcoes if round(tamanho * 1.2) * len(linhas) <= y2 - y1
-                 and all(desenho.textlength(l, font=fonte) <= x2 - x1 for l in linhas)]
-        for linhas in cabem:
-            ligacao = len(linhas) > 1 and linhas[0].split(" ")[-1].lower().strip(",.-:") in PALAVRAS_DE_LIGACAO
-            # Uma linha só é a melhor; em duas, as de tamanho parecido.
-            nota = (tamanho - (PENALIDADE_DA_QUEBRA if ligacao else 0), len(linhas) == 1,
-                    -max(desenho.textlength(l, font=fonte) for l in linhas))
+        if desenho.textlength(texto, font=fonte) <= largura:
+            return fonte, [texto]
+    palavras = texto.split(" ")
+    melhor = None
+    maior, menor = LETRAS_EM_DUAS_LINHAS
+    for tamanho in range(maior, menor - 1, -2):
+        fonte = ImageFont.truetype(fonte_ttf, tamanho)
+        for k in range(1, len(palavras)):
+            linhas = [" ".join(palavras[:k]), " ".join(palavras[k:])]
+            larguras = [desenho.textlength(linha, font=fonte) for linha in linhas]
+            if max(larguras) > largura:
+                continue
+            ligacao = linhas[0].split(" ")[-1].lower().strip(",.-:") in PALAVRAS_DE_LIGACAO
+            # As duas linhas de tamanho parecido.
+            nota = (tamanho - (PENALIDADE_DA_QUEBRA if ligacao else 0), -max(larguras))
             if melhor is None or nota > melhor[0]:
                 melhor = (nota, fonte, linhas)
     return (melhor[1], melhor[2]) if melhor else None
@@ -233,9 +242,10 @@ def _quebra_da_chamada(texto, desenho, fonte_ttf):
 
 def capa_com_chamada(foto, chamada):
     """
-    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) no fundo preto e a
-    chamada em cima, em até LINHAS_DA_CHAMADA linhas, na maior letra que cabe. None sem a
-    chamada, com a foto que não abre ou com a chamada que não cabe nem na menor letra.
+    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) do tamanho da capa
+    sem texto, no fundo preto, e a chamada em letras brancas numa faixa laranja por cima do pé
+    da foto, logo acima do número de visualizações. None sem a chamada, com a foto que não abre
+    ou com a chamada que não cabe nem na menor letra.
     """
     import io
 
@@ -250,10 +260,11 @@ def capa_com_chamada(foto, chamada):
         return None
     largura, _altura = TELA
     capa = Image.new("RGB", TELA, "black")
-    topo, base = AREA_DA_FOTO_COM_CHAMADA
-    escala = min(largura / imagem.width, (base - topo) / imagem.height)
+    x1, y1, x2, y2 = FOTO_DA_CAPA
+    escala = min((x2 - x1) / imagem.width, (y2 - y1) / imagem.height)
     imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
-    capa.paste(imagem, ((largura - imagem.width) // 2, topo + (base - topo - imagem.height) // 2))
+    cima = y1 + (y2 - y1 - imagem.height) // 2
+    capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, cima))
 
     desenho = ImageDraw.Draw(capa)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
@@ -261,12 +272,14 @@ def capa_com_chamada(foto, chamada):
     if not quebra:
         return None
     fonte, linhas = quebra
-    x1, y1, x2, y2 = AREA_DA_CHAMADA
     altura_da_linha = round(fonte.size * 1.2)
-    # Alinhada à esquerda, na mesma coluna do número de visualizações, e no meio da faixa.
-    cima = y1 + (y2 - y1 - altura_da_linha * len(linhas)) / 2
+    pe = cima + imagem.height
+    alto = max(FAIXA_DA_CHAMADA, altura_da_linha * len(linhas) + 2 * FOLGA_DA_FAIXA)
+    desenho.rectangle((0, pe - alto, largura - 1, pe - 1), fill=LARANJA_DA_SHOPEE)
+    meio = pe - alto / 2
     for i, linha in enumerate(linhas):
-        desenho.text((x1, cima + altura_da_linha * (i + 0.5)), linha, font=fonte, fill="white", anchor="lm")
+        desenho.text((largura / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
+                     fill="white", anchor="mm")
     saida = io.BytesIO()
     capa.save(saida, format="PNG")
     return saida.getvalue()
