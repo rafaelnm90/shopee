@@ -707,7 +707,8 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
     monkeypatch.setattr(edicao_video, "editar",
-                        lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True: "")
+                        lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True,
+                               outra_foto=None: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -842,7 +843,7 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         montados.append((list(trechos), len(letreiros)))
         return ""
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -998,7 +999,8 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     _textos_da_tela(monkeypatch, {"nome": "Vinho Tinto", "vantagem": "Encorpado", "falas": [], "lugar": "alto"})
     avisos = []
 
-    def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True,
+               outra_foto=None):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1295,7 +1297,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
     capas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
         capas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1333,7 +1335,7 @@ def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     _versoes_de_mentira(monkeypatch)
     capas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
         capas.append(capa is not None)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1390,6 +1392,72 @@ def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):
                 assert (b > r + 60) == azul, (miniatura, ponto)
 
 
+def test_a_miniatura_troca_entre_as_duas_fotos_do_produto(monkeypatch, tmp_path):
+    # Escolha do Rafael (30/10, P101): quando a foto do 1º produto mostra o produto de outro jeito
+    # que o vídeo, a miniatura troca, no mesmo canto, entre ela e a foto do produto do post mais
+    # parecida com o vídeo, a cada 3 s. A outra foto entra por último: a seta e o som continuam
+    # com os mesmos números.
+    comandos = _programas(monkeypatch)
+    destino = str(tmp_path / "r.mp4")
+    assert edicao_video.SEGUNDOS_DE_CADA_FOTO == 3
+    assert edicao_video.editar("video.mp4", b"foto", destino, outra_foto=b"outra") == ""
+    ffmpeg = comandos[-1]
+    filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
+    entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
+    assert len(entradas) == 6 and entradas[3] == edicao_video.SETA and entradas[5].endswith("outra.jpg")
+    assert "[5:v]scale=180:-2[mini2]" in filtro
+    assert "[corpo][mini]overlay=x=576-w/2:y=128-h/2:shortest=1:enable='lt(mod(t,6),3)'[uma]" in filtro
+    assert "[uma][mini2]overlay=x=576-w/2:y=128-h/2:shortest=1:enable='gte(mod(t,6),3)'[comfoto]" in filtro
+    assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    # Sem a nossa miniatura (P81), nada troca, e a outra foto nem entra.
+    assert edicao_video.editar("video.mp4", b"foto", destino, miniatura=False, outra_foto=b"outra") == ""
+    ffmpeg = comandos[-1]
+    assert "mini2" not in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 5
+    # No que vai ao ar, o registro diz; sem a nossa miniatura, não.
+    _versoes_de_mentira(monkeypatch)
+    pedidas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
+        pedidas.append(outra_foto)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    _textos_da_tela(monkeypatch, {"nome": "Cubo", "vantagem": "Estimula o bebê", "lugar": "alto"})
+    como = edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cubo", outra_foto=b"outra")[1]
+    assert como.endswith(edicao_video.COM_A_MINIATURA_ALTERNADA) and pedidas == [b"outra"]
+    _textos_da_tela(monkeypatch, {"nome": "Cubo", "vantagem": "Estimula o bebê", "lugar": "alto",
+                                  "canto_ocupado": True})
+    como = edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cubo", outra_foto=b"outra")[1]
+    assert edicao_video.COM_A_MINIATURA_ALTERNADA not in como
+    como = edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Cubo")[1]
+    assert edicao_video.COM_A_MINIATURA_ALTERNADA not in como
+
+
+def test_a_miniatura_alternada_de_verdade_troca_a_cada_3_segundos(tmp_path):
+    # Com o ffmpeg de verdade (P101): a foto do 1º produto primeiro, depois a outra, e de novo.
+    if not shutil.which("ffmpeg"):
+        return
+    video, azul, vermelha = tmp_path / "v.mp4", tmp_path / "azul.jpg", tmp_path / "vermelha.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=9",
+                    str(video)], check=True)
+    for arquivo, cor in ((azul, "0x3060a0"), (vermelha, "0xc03030")):
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"color=c={cor}:size=200x200",
+                        "-frames:v", "1", str(arquivo)], check=True)
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), azul.read_bytes(), str(destino), outra_foto=vermelha.read_bytes()) == ""
+    from PIL import Image
+
+    def cor_da_miniatura(segundo):
+        quadro = tmp_path / f"quadro_{segundo}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
+                        str(quadro)], check=True)
+        with Image.open(quadro) as imagem:
+            r, _g, b = imagem.convert("RGB").getpixel(edicao_video.CENTRO_DA_MINIATURA)
+        return "azul" if b > r + 60 else "vermelha" if r > b + 60 else "?"
+
+    # O vídeo começa depois dos 2 s da foto: 1,5 s, 4,5 s e 7,5 s do vídeo.
+    assert [cor_da_miniatura(s) for s in (3.5, 6.5, 9.5)] == ["azul", "vermelha", "azul"]
+
+
 def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatch, tmp_path):
     # Escolha do Rafael (29/10, P81): no vídeo da cortina, o criador já tinha posto a colagem das
     # cores no alto, e a nossa miniatura cobriu a ponta dela. Quando a IA vê foto, quadro, texto
@@ -1398,7 +1466,7 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1455,7 +1523,7 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1494,7 +1562,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outra_foto=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1505,7 +1573,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     # A edição recebe a largura e o centro no mesmo canto.
     pedidos = []
     monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura",
-                        lambda video, foto, destino, segundos, miniatura, centro, *resto: pedidos.append(
+                        lambda video, foto, destino, segundos, miniatura, centro, *resto, **opcoes: pedidos.append(
                             (miniatura, centro)) or "")
     for pedida, esperada in ((True, (180, (576, 128))), (162, (162, (585, 119))), (False, (0, (666, 38)))):
         assert editar_de_verdade("v.mp4", b"foto", str(tmp_path / "r.mp4"), miniatura=pedida) == ""
