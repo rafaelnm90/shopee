@@ -1809,6 +1809,37 @@ def test_troca_de_loja_confere_o_mesmo_produto_mesmo_com_outra_foto_de_capa(monk
     assert not ok and motivo == "sem a foto do anúncio para comparar com a capa do post" and len(pedidos) == 1
 
 
+def test_ia_aponta_a_foto_como_no_video_quando_a_do_1o_produto_e_de_outro_jeito(monkeypatch):
+    # Escolha do Rafael (30/10, P101): a IA vê o vídeo com as fotos de capa dos produtos do post
+    # (o mesmo item de outras lojas) e diz se a do 1º mostra o produto como no vídeo; se não,
+    # qual das outras mostra. O porquê do registro é sempre um texto fixo.
+    pedidos, respostas = [], ['{"foto_1_serve": false, "mais_parecida": 3, "motivo": "a 3 é colorida"}',
+                              '{"foto_1_serve": true, "mais_parecida": 0, "motivo": "igual"}',
+                              '{"foto_1_serve": false, "mais_parecida": 7, "motivo": "x"}',
+                              '{"foto_1_serve": false, "mais_parecida": "?", "motivo": "x"}',
+                              "não sei"]
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append((prompt, imagens))
+        return respostas.pop(0)
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    fotos = [b"\xff\xd8um", b"\x89PNGdois", b"\xff\xd8tres"]
+    video = {"arquivo": "v.mp4"}
+    assert ps.ia_foto_como_no_video(video, fotos) == (2, "a foto do 3º produto")
+    prompt, imagens = pedidos[0]
+    assert prompt == ps.PROMPT_FOTO_COMO_NO_VIDEO and "Na dúvida, a foto 1 serve" in prompt
+    assert [(foto, tipo, rotulo) for foto, tipo, rotulo in imagens] == [
+        (fotos[0], "image/jpeg", "Foto 1"), (fotos[1], "image/png", "Foto 2"), (fotos[2], "image/jpeg", "Foto 3")]
+    assert ps.ia_foto_como_no_video(video, fotos) == (None, "a foto do 1º produto serve")
+    assert ps.ia_foto_como_no_video(video, fotos) == (None, "a IA não apontou outra foto")
+    assert ps.ia_foto_como_no_video(video, fotos) == (None, "a IA não apontou outra foto")
+    assert ps.ia_foto_como_no_video(video, fotos) == (None, "a IA não respondeu")
+    # Com uma foto só, ou sem o vídeo, nem pergunta.
+    assert ps.ia_foto_como_no_video(video, fotos[:1]) == (None, "sem outra foto")
+    assert ps.ia_foto_como_no_video({}, fotos) == (None, "sem outra foto") and len(pedidos) == 5
+
+
 def test_video_apagar_tira_o_video_do_teste_da_galeria():
     aparelho = Aparelho()
     assert ps.explorar("video:apagar", aparelho)
