@@ -32,6 +32,7 @@ import os
 import assistente_shopee_video as assistente
 import db
 import postador_shopee_video as ps
+import registro_processos
 import videos
 
 # Todas as fontes do robô, na ordem em que o exemplo procura um vídeo.
@@ -412,7 +413,8 @@ _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com 
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
 _REGRAS_NO_PROMPT = ("Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; "
-                     "sem preço, desconto, promoção, emoji ou hashtag.\n")
+                     "sem preço, desconto, promoção, emoji ou hashtag. Escreva com a ortografia e a acentuação "
+                     "certas do português do Brasil e confira cada palavra antes de responder.\n")
 _FALAS_NO_PROMPT = (
     "Diga também onde alguém fala no vídeo (voz de gente, não música): \"falas\", a lista dos trechos em "
     "segundos desde o começo do vídeo, como [[início, fim], ...]; [] se ninguém fala.\n"
@@ -662,6 +664,46 @@ def _so_letras(texto, maximo):
     return " ".join(palavras).rstrip(" ,.-:")
 
 
+# As letras do português, com os acentos que ele tem: letra fora delas (o "ü" de "pelüia", o "ñ")
+# é palavra que a IA escreveu errado. Em 30/10 a capa com chamada saiu com "pelüia" no lugar de
+# "pelúcia", e o Rafael teve de recusar o rascunho.
+LETRAS_DO_PORTUGUES = frozenset("abcdefghijklmnopqrstuvwxyzáàâãçéêíóôõúªº")
+PROMPT_DA_ORTOGRAFIA = ("Corrija a ortografia e a acentuação deste texto curto em português do Brasil, sem mudar o "
+                        "sentido nem acrescentar nada. Responda só com o texto corrigido, sem aspas:\n{texto}")
+PROCESSO_DA_ORTOGRAFIA = "edição do vídeo: ortografia da IA"
+
+
+def letras_fora_do_portugues(texto):
+    """As letras do texto que não existem no português (ex.: ["ü"]), em ordem; [] quando todas existem."""
+    return sorted({letra for letra in (texto or "").lower() if letra.isalpha() and letra not in LETRAS_DO_PORTUGUES})
+
+
+def _texto_certo(texto, maximo):
+    """
+    O texto da IA limpo (_so_letras) e com as letras do português. Com letra que não existe
+    nele, a IA reescreve só o texto, uma vez, com a ortografia certa; ainda errado, ou sem
+    resposta, "": o texto sai, como quando a IA não o dá (a capa de sempre, uma legenda a menos).
+    """
+    import asyncio
+
+    import api_gemini
+    limpo = _so_letras(texto, maximo)
+    if not limpo or not letras_fora_do_portugues(limpo):
+        return limpo
+    try:
+        resposta = asyncio.run(api_gemini.gerar_texto_gemini(PROMPT_DA_ORTOGRAFIA.format(texto=limpo)))
+    except Exception:
+        resposta = ""
+    corrigido = _so_letras(str(resposta or "").strip().strip('"\''), maximo)
+    if corrigido and not letras_fora_do_portugues(corrigido):
+        registro_processos.registrar("shopee_video", PROCESSO_DA_ORTOGRAFIA, "corrigida", "letra fora do português",
+                                     ok=True)
+        return corrigido
+    registro_processos.registrar("shopee_video", PROCESSO_DA_ORTOGRAFIA, "texto tirado",
+                                 "letra fora do português, sem a correção", ok=False)
+    return ""
+
+
 def _resposta_da_ia(video, prompt):
     """O JSON que a IA respondeu vendo o vídeo (dict); {} quando ela não respondeu."""
     import asyncio
@@ -687,7 +729,7 @@ def _nome_lugar_e_falas(dados):
     coisa do criador, da resposta da IA, só os que vieram certos.
     """
     textos = {}
-    nome = _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
+    nome = _texto_certo(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
     if nome:
         textos["nome"] = nome
     if dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
@@ -783,7 +825,7 @@ def miniatura_no_video(textos):
 def _vantagem_e_chamada(dados, textos):
     """Põe em textos a vantagem e a chamada da resposta da IA, só as que vieram certas."""
     for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA)):
-        limpo = _so_letras(str(dados.get(chave) or ""), maximo)
+        limpo = _texto_certo(str(dados.get(chave) or ""), maximo)
         if limpo:
             textos[chave] = limpo
     return textos
@@ -1116,10 +1158,10 @@ def textos_das_versoes(video, nome):
             inicio, fim = float(bruta.get("inicio")), float(bruta.get("fim"))
         except (TypeError, ValueError):
             continue
-        vantagem = _so_letras(str(bruta.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
+        vantagem = _texto_certo(str(bruta.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
         if vantagem and fim > inicio >= 0:
             versoes.append({"vantagem": vantagem, "inicio": inicio, "fim": fim,
-                            "chamada": _so_letras(str(bruta.get("chamada") or ""), MAXIMO_DA_CHAMADA)})
+                            "chamada": _texto_certo(str(bruta.get("chamada") or ""), MAXIMO_DA_CHAMADA)})
     if versoes:
         textos["versoes"] = versoes[:VERSOES_POR_VIDEO]
     return textos
