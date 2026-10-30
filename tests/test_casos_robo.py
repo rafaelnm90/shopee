@@ -62,6 +62,26 @@ def test_caso_guarda_o_motivo_o_titulo_os_produtos_o_print_e_a_tela():
     assert casos_robo.casos() == [os.path.basename(pasta)]
 
 
+def test_caso_leva_os_passos_do_registro_desde_o_comeco_do_rascunho():
+    # 29/10, 22:41: o produto curtido não estava em Minhas Curtidas, e o caso não dizia o que o
+    # curtir anotou antes. Os passos do registro do rascunho vão junto (textos fixos e números).
+    import registro_processos
+    for minuto, processo, resultado in ((50, "curtir o produto", "curtido agora"),     # de outro rascunho
+                                        (55, "curtir o produto", "curtido agora"),
+                                        (58, "anexar o produto", "nome não achado em Minhas Curtidas")):
+        registro_processos.registrar("shopee_video", processo, resultado, "1 rolada(s)",
+                                     agora=AGORA - timedelta(minutes=60 - minuto))
+    registro_processos.registrar("bot_mestre", "postagem Viral", "postado", agora=AGORA - timedelta(minutes=3))
+    pasta = casos_robo.guardar(None, "rascunho", "pulado", "x", "anexar o produto",
+                               rascunho={"id": 3, "criado_em": "2026-10-25 09:52:00"}, agora=AGORA)
+    assert _caso(pasta)["registro"] == [["09:55:00", "curtir o produto", "curtido agora", "1 rolada(s)"],
+                                        ["09:58:00", "anexar o produto", "nome não achado em Minhas Curtidas",
+                                         "1 rolada(s)"]]
+    # Sem o começo do rascunho, os últimos MINUTOS_DO_REGISTRO.
+    pasta = casos_robo.guardar(None, "postar", "parou", "x", agora=AGORA + timedelta(seconds=1))
+    assert [linha[0] for linha in _caso(pasta)["registro"]] == ["09:50:00", "09:55:00", "09:58:00"]
+
+
 def test_caso_sem_celular_ou_com_o_celular_caido_nao_derruba_a_rodada():
     pasta = casos_robo.guardar(Celular(quebrado=True), "rascunho", "erro", "erro inesperado (ConnectionError)",
                                agora=AGORA)

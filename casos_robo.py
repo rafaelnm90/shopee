@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 
 from cryptography.fernet import Fernet, InvalidToken
 
+import registro_processos
 import videos
 from fuso import fuso_horario
 
@@ -45,10 +46,25 @@ DIAS_DOS_CASOS = 3
 LARGURA_DO_PRINT = 540
 QUADROS_DO_VIDEO = 4
 LARGURA_DOS_QUADROS = 360
+# Sem o começo do rascunho, o registro do caso volta até estes minutos antes dele.
+MINUTOS_DO_REGISTRO = 30
 
 
 def _agora(agora=None):
     return agora or datetime.now(fuso_horario)
+
+
+def registro_do_caso(desde, momento):
+    """
+    O que o robô da Shopee Vídeo anotou no registro dos processos desde o começo do rascunho
+    ("AAAA-MM-DD HH:MM:SS"; sem ele, MINUTOS_DO_REGISTRO antes do caso) até o caso:
+    [[HH:MM:SS, processo, resultado, detalhe]].
+    """
+    desde = desde or (momento - timedelta(minutes=MINUTOS_DO_REGISTRO)).strftime("%Y-%m-%d %H:%M:%S")
+    ate = momento.strftime("%Y-%m-%d %H:%M:%S")
+    return [[quando[11:19], processo, resultado, detalhe]
+            for quando, processo, resultado, detalhe, _origem in registro_processos.sequencia("shopee_video", "", desde)
+            if quando <= ate]
 
 
 def casos():
@@ -82,6 +98,9 @@ def guardar(d, acao, resultado, motivo, passo="", video=None, rascunho=None, ago
                 "id", "id_video", "estado", "fonte", "link", "titulo", "comentario", "produtos", "conferencia",
                 "rotulo_ia", "motivo", "criado_em", "postar_em") if rascunho.get(chave) is not None},
         }
+        # Os passos que o robô anotou desde o começo do rascunho (textos fixos e números): a
+        # ordem do que aconteceu antes da falha, como o produto curtido antes do anexar.
+        caso["registro"] = registro_do_caso(rascunho.get("criado_em"), momento)
         if d is not None:
             caso["app"] = _tela_do_celular(d, pasta)
         arquivo = rascunho.get("arquivo") or video.get("arquivo")
