@@ -595,8 +595,9 @@ def test_feed_prefere_o_video_com_poucos_comentarios(avisos, ia_do_feed):
     app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda", 500), ("Ana Achados", "Copo térmico que gela", 4)])
     assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
     assert app.comentarios == {1: ["Que achado! 0"]}
-    vistos = [r for _m, _p, r, _d, _o in robo.registro_processos.sequencia("shopee_video", "feed: vídeo olhado", "")]
-    assert vistos[0] == "muitos comentários"
+    vistos = [(r, d) for _m, _p, r, d, _o in robo.registro_processos.sequencia("shopee_video", "feed: vídeo olhado", "")]
+    # O escolhido leva a faixa dos comentários: o checkup mostra que o robô leu o número.
+    assert vistos == [("muitos comentários", ""), ("escolhido", "até 20 comentários")]
 
 
 def test_feed_sem_video_de_poucos_comentarios_comenta_um_qualquer_na_2a_metade(monkeypatch, avisos, ia_do_feed):
@@ -604,6 +605,18 @@ def test_feed_sem_video_de_poucos_comentarios_comenta_um_qualquer_na_2a_metade(m
     app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda", 500), ("Ana Achados", "Copo térmico", 300)])
     assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
     assert app.comentarios == {1: ["Que achado! 0"]}
+    vistos = [(r, d) for _m, _p, r, d, _o in robo.registro_processos.sequencia("shopee_video", "feed: vídeo olhado", "")]
+    assert vistos == [("muitos comentários", ""), ("escolhido", "mais de 20 comentários")]
+
+
+def test_feed_anota_quando_nao_le_o_numero_de_comentarios(monkeypatch, avisos, ia_do_feed):
+    # Sem o número embaixo do balão, a preferência pelos de poucos comentários não funciona:
+    # o registro diz, e o checkup mostra.
+    monkeypatch.setattr(robo.random, "randint", lambda a, b: 1)
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda"), ("Ana Achados", "Copo térmico", 7)])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    vistos = [(r, d) for _m, _p, r, d, _o in robo.registro_processos.sequencia("shopee_video", "feed: vídeo olhado", "")]
+    assert vistos == [("deixado passar", "sem o número de comentários"), ("escolhido", "até 20 comentários")]
 
 
 def test_feed_manda_a_tela_do_video_para_a_ia(avisos, ia_do_feed):

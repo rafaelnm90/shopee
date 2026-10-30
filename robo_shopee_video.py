@@ -4173,9 +4173,11 @@ def interagir_no_feed(d, agora=None):
     try:
         for olhada in range(VIDEOS_OLHADOS_NO_FEED):
             # Cada tela olhada fica no registro com o que o robô viu nela (um texto fixo):
-            # o checkup mostra onde ele se perde quando nenhum vídeo serve.
+            # o checkup mostra onde ele se perde quando nenhum vídeo serve. O vídeo que
+            # serviria leva a faixa dos comentários dele.
             video, motivo = interacoes.ler_o_feed(tela(d))
             marca = interacoes.marca(video["autor"], video["legenda"]) if video else None
+            faixa = ""
             if not video:
                 visto = "live pulada" if motivo == "live" else f"pulada: {motivo}"
             elif interacoes.resultado_de(marca, "video_feed"):
@@ -4185,13 +4187,14 @@ def interagir_no_feed(d, agora=None):
             elif _muitos_comentarios(video, olhada):
                 visto = "muitos comentários"
             else:
+                faixa = faixa_dos_comentarios(video)
                 pausa(random.uniform(6, 14))  # assiste um pouco antes
                 if not pular:
-                    registro_processos.registrar(REGISTRO, "feed: vídeo olhado", "escolhido", ok=None)
+                    registro_processos.registrar(REGISTRO, "feed: vídeo olhado", "escolhido", faixa, ok=None)
                     return _interagir_com(d, video, marca, anteriores, agora)
                 pular -= 1
                 visto = "deixado passar"
-            registro_processos.registrar(REGISTRO, "feed: vídeo olhado", visto, ok=None)
+            registro_processos.registrar(REGISTRO, "feed: vídeo olhado", visto, faixa, ok=None)
             pausa(random.uniform(2, 6))
             ps.rolar(d)
             pausa(4)
@@ -4204,6 +4207,18 @@ def interagir_no_feed(d, agora=None):
         raise
     finally:
         _sair_sem_salvar(d)
+
+
+def faixa_dos_comentarios(video):
+    """
+    Quantos comentários tem o vídeo do feed, em faixa, para o registro: mostra se o robô
+    lê o número embaixo do balão, de que depende a preferência pelos de poucos (P70).
+    """
+    numero = video.get("comentarios")
+    if numero is None:
+        return "sem o número de comentários"
+    return (f"até {interacoes.POUCOS_COMENTARIOS} comentários" if numero <= interacoes.POUCOS_COMENTARIOS
+            else f"mais de {interacoes.POUCOS_COMENTARIOS} comentários")
 
 
 def _muitos_comentarios(video, olhada):
