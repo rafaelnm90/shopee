@@ -704,6 +704,68 @@ def _texto_certo(texto, maximo):
     return ""
 
 
+# A revisão de todos os textos de um vídeo, numa chamada só de texto, pega o erro feito só com
+# letras do português (o acento que falta, a letra trocada), que a conferência das letras não vê.
+# Pedido do Rafael em 30/10: DECISOES.md, Shopee Vídeo.
+PROMPT_DA_REVISAO = (
+    "Revise a ortografia e a acentuação destes textos curtos em português do Brasil, que vão na tela de um "
+    "vídeo. Corrija só letras, acentos e palavras escritas errado: não mude o sentido, não troque palavra "
+    "certa, não acrescente nem tire nada. Responda só com o mesmo JSON, as mesmas chaves e os textos "
+    "revisados:\n{textos}")
+# A revisão que muda mais que a ortografia (outra frase, palavra a mais ou a menos, texto cortado)
+# não vale: fica o texto como a IA o deu.
+PARECIDO_NA_REVISAO = 0.8
+MAXIMOS_DOS_TEXTOS = {"nome": MAXIMO_DO_NOME, "vantagem": MAXIMO_DA_VANTAGEM, "chamada": MAXIMO_DA_CHAMADA}
+
+
+def _so_ortografia(antes, depois, maximo):
+    """O texto revisado (depois) quando a revisão mexeu só na ortografia de antes; "" quando não."""
+    import difflib
+    revisado = _so_letras(depois, 10 ** 6)
+    if (not revisado or revisado == antes or letras_fora_do_portugues(revisado) or len(revisado) > maximo
+            or abs(len(revisado.split()) - len(antes.split())) > 1
+            or difflib.SequenceMatcher(None, antes.lower(), revisado.lower()).ratio() < PARECIDO_NA_REVISAO):
+        return ""
+    return revisado
+
+
+def _revisar_ortografia(textos):
+    """
+    Revisa pela IA, numa chamada só, os textos da tela (o nome, a vantagem e a chamada, também os
+    das versões) e troca cada um pelo revisado quando a revisão mexeu só na ortografia. Sem
+    resposta, os textos ficam como vieram. Muda textos e o devolve.
+    """
+    import asyncio
+    import json
+    import re
+
+    import api_gemini
+    lugares = [(textos, chave) for chave in MAXIMOS_DOS_TEXTOS if textos.get(chave)]
+    lugares += [(versao, chave) for versao in textos.get("versoes") or [] for chave in ("vantagem", "chamada")
+                if versao.get(chave)]
+    if not lugares:
+        return textos
+    pedido = json.dumps({f"t{i}": lugar[chave] for i, (lugar, chave) in enumerate(lugares)}, ensure_ascii=False)
+    try:
+        resposta = asyncio.run(api_gemini.gerar_texto_gemini(PROMPT_DA_REVISAO.format(textos=pedido)))
+        achado = re.search(r"\{.*\}", resposta or "", re.S)
+        revisados = json.loads(achado.group(0)) if achado else {}
+    except Exception:
+        revisados = {}
+    if not isinstance(revisados, dict) or not revisados:
+        registro_processos.registrar("shopee_video", PROCESSO_DA_ORTOGRAFIA, "sem a revisão", "a IA não respondeu")
+        return textos
+    corrigidos = 0
+    for i, (lugar, chave) in enumerate(lugares):
+        revisado = _so_ortografia(lugar[chave], str(revisados.get(f"t{i}") or ""), MAXIMOS_DOS_TEXTOS[chave])
+        if revisado:
+            lugar[chave] = revisado
+            corrigidos += 1
+    registro_processos.registrar("shopee_video", PROCESSO_DA_ORTOGRAFIA, "revisada",
+                                 f"{corrigidos} corrigido(s)" if corrigidos else "nada a corrigir", ok=True)
+    return textos
+
+
 def _resposta_da_ia(video, prompt):
     """O JSON que a IA respondeu vendo o vídeo (dict); {} quando ela não respondeu."""
     import asyncio
@@ -837,7 +899,7 @@ def textos_da_tela(video, nome):
     a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta.
     """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
-    return _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados))
+    return _revisar_ortografia(_vantagem_e_chamada(dados, _nome_lugar_e_falas(dados)))
 
 
 def _falas(bruto):
@@ -1164,7 +1226,7 @@ def textos_das_versoes(video, nome):
                             "chamada": _texto_certo(str(bruta.get("chamada") or ""), MAXIMO_DA_CHAMADA)})
     if versoes:
         textos["versoes"] = versoes[:VERSOES_POR_VIDEO]
-    return textos
+    return _revisar_ortografia(textos)
 
 
 def planejar_versoes(trechos, ganchos, com_fala, inteira=None):
