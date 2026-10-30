@@ -23,6 +23,8 @@ Passos, separados por ponto e vírgula:
     voltar, inicio   as teclas do Android
     rolar:baixo      arrasta a tela (rolar:cima)
     arrastar:X1,Y1,X2,Y2  arrasta de um ponto ao outro (mover um texto na tela da capa)
+    aumentar:X,Y,DE,ATE   dois dedos na linha do ponto X,Y, afastando um do outro de DE a ATE
+                     px (aumentar a figurinha na tela da capa; ATE menor que DE diminui)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte;
@@ -32,7 +34,9 @@ Passos, separados por ponto e vírgula:
                      como capa, ficar como o dos posts; video:apagar tira da galeria o vídeo do teste
     foto             põe na galeria a foto do anúncio do produto do vídeo do teste (a da API de
                      afiliado), a mais nova da galeria, para a busca pela foto (a câmera da
-                     busca de Criadores & Afiliados); foto:apagar tira
+                     busca de Criadores & Afiliados); foto:capa, a capa com a frase que a IA
+                     escreve vendo o vídeo do teste (a da edição), para a figurinha da capa;
+                     foto:apagar tira as duas
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     curtir           na página que o link abriu, toca no nome do produto (abre a página
                      completa) e curte; já curtido, segue sem tocar no coração
@@ -225,6 +229,8 @@ EXTENSOES_DA_FOTO = (("jpg", b"\xff\xd8\xff"), ("png", b"\x89PNG"))
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 # O arrasto devagar, como um dedo: rápido demais, o app toma por um toque ou um deslize.
 SEGUNDOS_DO_ARRASTO = 0.8
+# Os passos do gesto de dois dedos (uns 5 ms cada): devagar como os dedos de uma pessoa.
+PASSOS_DOS_DEDOS = 100
 MAXIMO_ESPERA = 60
 MAXIMO_LINHAS = 150
 # Quantos vídeos da fonte, ainda não usados, o video:link-de-video olha (cada um segue o
@@ -1664,6 +1670,26 @@ def por_editado_na_galeria(d, video):
             os.remove(destino)
 
 
+def capa_na_galeria(d, video):
+    """
+    Põe na galeria, como a foto mais nova, a capa com chamada do vídeo do teste (a foto do
+    anúncio e a frase que a IA escreve vendo o vídeo, P106 e P107), para a figurinha da tela
+    da capa. O nome é o da foto da busca: o foto:apagar a tira. (ok, o que dizer no log)
+    """
+    import edicao_video   # aqui dentro: o edicao_video importa este módulo
+    anuncio = anuncio_do_produto(video)
+    if not anuncio.get("foto"):
+        return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
+    frase = edicao_video.frase_da_capa(edicao_video.textos_da_tela(video["arquivo"], anuncio.get("nome") or ""))
+    if not frase:
+        return False, "a IA não escreveu a frase da capa nem a vantagem do produto"
+    capa = edicao_video.capa_com_chamada(anuncio["foto"], frase)
+    if not capa:
+        return False, "a capa com a chamada não saiu"
+    return ((True, f"capa com a frase na galeria ({len(frase)} letras)") if por_foto_na_galeria(d, capa)
+            else (False, "a capa não apareceu na galeria"))
+
+
 def extensao_da_foto(dados):
     """jpg, png ou webp pela assinatura dos bytes; None para o que não é foto."""
     for extensao, assinatura in EXTENSOES_DA_FOTO:
@@ -1911,7 +1937,8 @@ def link_copiado(d):
 
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
-    conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "esperar", "escrever",
+    conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "aumentar", "esperar",
+                  "escrever",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
                   "postar", "print", "copiado", "legenda", "colar", "caso", "tela"}
     passos = []
@@ -1979,6 +2006,18 @@ def fazer_passo(d, nome, argumento):
             return False, RECUSA
         d.drag(x1, y1, x2, y2, SEGUNDOS_DO_ARRASTO)
         return True, f"arrastado de ({x1},{y1}) a ({x2},{y2})"
+    if nome == "aumentar":
+        try:
+            x, y, de, ate = (int(n) for n in argumento.split(","))
+        except ValueError:
+            return False, "aumentar pede X,Y,DE,ATE"
+        dedos = [(x - de // 2, y), (x + de // 2, y), (x - ate // 2, y), (x + ate // 2, y)]
+        tela = d.dump_hierarchy()
+        # Os dois dedos tocam no começo e saem no fim: nenhum dos quatro pontos pode ser um botão proibido.
+        if any(proibido_no_ponto(tela, px, py) for px, py in dedos):
+            return False, RECUSA
+        d(packageName=PACOTE).gesture(*dedos, steps=PASSOS_DOS_DEDOS)
+        return True, f"dois dedos de {de} a {ate} px em ({x},{y})"
     if nome == "caso":
         pasta = casos_robo.guardar(d, "explorar", "tela", argumento or "tela do explorar", passo="explorar")
         return (True, "tela guardada para o Claude (casos_robo.yml exportar)") if pasta else (
@@ -2001,6 +2040,8 @@ def fazer_passo(d, nome, argumento):
         video = video_do_teste()
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
+        if argumento == "capa":
+            return capa_na_galeria(d, video)
         foto = anuncio_do_produto(video).get("foto")
         if not foto:
             return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
