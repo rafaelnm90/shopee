@@ -3097,6 +3097,33 @@ def test_sem_a_caixa_de_marcar_tudo_marca_um_por_um_rolando(monkeypatch, avisos)
     assert app.favoritos == [] and "rolar" in app.toques
 
 
+def test_caminho_espera_a_tela_que_demora_a_carregar(monkeypatch):
+    # No Motorola (30/10, 06:38), Criadores & Afiliados ficou em branco mais de 8 s depois do
+    # toque, e o rascunho parava. O caminho relê a tela por mais um tempo antes de parar.
+    monkeypatch.setattr(robo, "pausa", lambda segundos: None)
+
+    class Lenta:
+        def __init__(self, em_branco):
+            self.tocado, self.em_branco = False, em_branco
+
+        def dump_hierarchy(self, *a, **k):
+            if not self.tocado:
+                return _xml(_no("Criadores & Afiliados", caixa=(600, 1630, 1000, 1700)))
+            if self.em_branco:
+                self.em_branco -= 1
+                return _xml()
+            return _xml(_no("Conta", caixa=(0, 300, 200, 360)))
+
+        def click(self, x, y):
+            self.tocado = True
+
+    caminho = [("Criadores & Afiliados", 8, "Conta")]
+    robo.seguir(Lenta(em_branco=3), caminho)
+    # Em branco depois da espera a mais: para, como antes.
+    with pytest.raises(robo.Parada, match="depois de Criadores & Afiliados, a tela não mostrou Conta"):
+        robo.seguir(Lenta(em_branco=99), caminho)
+
+
 def test_sem_nada_curtido_nao_ha_o_que_descurtir(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22)
     assert robo.rodada(d=AppDosFavoritos(favoritos=0), agora=momento("2026-10-25 04:05")) == (
