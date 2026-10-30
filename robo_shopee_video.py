@@ -2402,6 +2402,9 @@ PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
 # Em que minuto do rascunho a busca começou e quanto levou cada parte, com o mesmo resultado
 # da linha da contagem: a régua de MINUTOS_PARA_OS_ESPACOS.
 PROCESSO_DO_TEMPO_DOS_ESPACOS = "espaços livres: tempo de cada parte"
+# Por que a IA deixou os outros anúncios de fora: o mesmo produto com outra foto de capa (P74)
+# ou outro produto. Pedido do Rafael (30/10): o que dificulta achar a causa vira registro.
+PROCESSO_DAS_RECUSAS_DA_IA = "espaços livres: por que a IA deixou de fora"
 ESPACOS_DO_VIDEO = 6
 RESULTADOS_DA_FOTO = 20
 ROLAGENS_DA_FOTO = 8
@@ -2683,8 +2686,9 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
         if time.monotonic() > prazo:
             anotar("nenhum - sem tempo na rodada", contagem)
             return []
+        recusas = {}
         posicoes, motivo_da_ia = ps.ia_confere_iguais(video, principal["nome"],
-                                                      [(c["nome"], f) for c, f in fotos], capa=capa)
+                                                      [(c["nome"], f) for c, f in fotos], capa=capa, recusas=recusas)
         marcar("IA")
         # A foto de cada um vai junto: o álbum das capas do rascunho (P75).
         confirmados = [dict(fotos[i][0], foto=fotos[i][1]) for i in posicoes][:ESPACOS_DO_VIDEO - 1]
@@ -2698,6 +2702,13 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
             if link and link != candidato["endereco"]:
                 mais.append({**candidato, "link": link})
         contagem += f", {len(fotos)} na IA, {len(posicoes)} confirmados"
+        if recusas and len(posicoes) < len(fotos):
+            # Por que a IA deixou os outros de fora, numa linha à parte (a contagem já enche o
+            # detalhe): o mesmo produto com outra capa (P74) ou outro produto. O checkup mostra
+            # qual regra mais segura os produtos a mais.
+            registro_processos.registrar(REGISTRO, PROCESSO_DAS_RECUSAS_DA_IA, "de fora pela IA",
+                                         f"outra capa {recusas.get('outra capa', 0)}, outro produto "
+                                         f"{recusas.get('outro produto', 0)} (de {len(fotos)} na IA)")
         if mais:
             anotar("achados", f"{len(mais)} a mais; {contagem}", ok=True)
         else:
@@ -4379,7 +4390,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             acao, ident = o_que_fazer(config, agora) or (None, None)
         if not acao:
             return "nada a fazer agora"
-        d = d or ps.conectar(celular=True)
+        # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
+        d = d or casos_robo.com_historico(ps.conectar(celular=True))
         try:
             resultado = _agir(d, acao, ident, preparar, config, agora, pedido=saude and na_hora)
             if acao != "saude" and saude_pedida_pela_notificacao(agora):

@@ -3513,9 +3513,11 @@ def busca_pela_foto(monkeypatch):
             raise estado["cartoes"]
         return estado["cartoes"], estado["motivo"]
 
-    def iguais(video, nome, anuncios, capa=None):
+    def iguais(video, nome, anuncios, capa=None, recusas=None):
         estado["fotos_da_ia"] = [n for n, _ in anuncios]
         estado["capa"] = capa
+        if recusas is not None and "recusas" in estado:
+            recusas.update(estado["recusas"])
         return estado["iguais"], "a mesma garrafa"
 
     async def converter(endereco, etiqueta, avisar_falha=True):
@@ -3611,6 +3613,14 @@ def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_
                    "3 na IA, 2 confirmados")
     assert ultimo(robo.PROCESSO_DO_TEMPO_DOS_ESPACOS) == (
         "achados", "aos 6,0 min do rascunho: busca 2,5 min, API 0,5 min, IA 1,0 min")
+    # Por que a IA deixou de fora os outros (30/10: 8 na IA e 2 confirmados, sem dizer o motivo):
+    # o mesmo produto com outra capa (P74) ou outro produto.
+    busca_pela_foto["recusas"] = {"outra capa": 1, "outro produto": 0}
+    monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1180, 1240))
+    assert len(robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640)) == 2
+    assert ultimo(robo.PROCESSO_DOS_ESPACOS)[1].endswith("3 na IA, 2 confirmados")
+    assert ultimo(robo.PROCESSO_DAS_RECUSAS_DA_IA) == ("de fora pela IA", "outra capa 1, outro produto 0 (de 3 na IA)")
+    del busca_pela_foto["recusas"]
     # O prazo que passa durante a busca, e o que já tinha passado antes dela.
     monkeypatch.setattr(robo, "time", _Relogio(1000, 1000, 1150, 1180, 1300))
     assert robo.espacos_livres(None, video, PRINCIPAL, original, [], 1240, inicio=640) == []

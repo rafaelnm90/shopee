@@ -181,6 +181,7 @@ outro produto do mesmo tipo, de outra marca, com outro formato ou modelo, o mesm
 estampa, outra quantidade no kit, só um acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é \
 o mesmo produto. A mesma capa: {regra}. Na dúvida, não é.
 Responda só com um JSON: {{"iguais": [os números dos anúncios que são o mesmo produto, com a mesma capa], \
+"outra_capa": [os números dos anúncios que são o mesmo produto, mas com outra foto de capa], \
 "motivo": "uma frase curta"}}"""
 # O aviso da página do produto de loja de férias (loja_de_ferias).
 AVISO_DE_FERIAS = "está de férias"
@@ -749,7 +750,8 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
         return ok, motivo
     esperar_a_lista(d)
     tela = d.dump_hierarchy()
-    topo = produtos_da_lista(tela)[:max(no_topo, 1)]
+    na_lista = produtos_da_lista(tela)
+    topo = na_lista[:max(no_topo, 1)]
     escolhido = no_topo_pelo_nome(topo, nome)
     if escolhido:
         return _tocar_em_adicionar(d, tela, escolhido["botao"], escolhido["nome"], "no topo, pelo nome", anexados)
@@ -777,7 +779,9 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     # embaixo do que o robô rolou, ou não estava (a lista acabou). O 1º da lista é o
     # curtido por último: parecido com o nome, é o produto com o nome mostrado de outro
     # jeito; diferente, o produto curtido não entrou na lista.
-    # O registro guarda até 120 caracteres: o detalhe fica curto ("%" = das palavras do nome).
+    # O registro guarda até 240 caracteres: o detalhe fica curto ("%" = das palavras do nome).
+    # Quantos produtos a lista mostrou: com a lista limpa e o produto curtido agora, só ele
+    # devia estar nela; vários, de antes, é a lista desatualizada (30/10/2026, às 05:40).
     comum, antes, texto = melhor
     diferenca = ""
     if texto and comum < 100:
@@ -786,7 +790,7 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
         diferenca = (f" (faltam a {posicoes}" if faltam else " (nenhuma falta") + f"; {sobram} a mais)"
     topo_txt = f"; o 1º da lista tem {parecido_entre([primeiro], nome)[0]}%" if primeiro else ""
     registro_processos.registrar("shopee_video", "anexar o produto", "nome não achado em Minhas Curtidas",
-                                 f"o mais parecido tem {comum}%" + diferenca
+                                 f"{len(na_lista)} na lista; o mais parecido tem {comum}%" + diferenca
                                  + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else "")
                                  + topo_txt
                                  + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else "")
@@ -879,7 +883,7 @@ def tipo_da_foto(dados):
     return {"png": "image/png", "webp": "image/webp"}.get(extensao_da_foto(dados or b""), "image/jpeg")
 
 
-def ia_confere_iguais(video, nome, anuncios, capa=None):
+def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None):
     """
     Quais anúncios de outras lojas são o mesmo item do vídeo, com a mesma foto de capa do
     anúncio do post (os produtos a mais, P59 e P74): anuncios = [(nome, foto em bytes)], capa
@@ -887,6 +891,10 @@ def ia_confere_iguais(video, nome, anuncios, capa=None):
     uma depois do seu nome, VEZES_DA_IA vezes; fica só o confirmado em todas. Devolve (as
     posições confirmadas, em ordem, o que a IA disse da última vez), ou ([], o motivo fixo)
     quando falta o que conferir ou ela não responde.
+    recusas (dict) recebe por que os outros ficaram de fora, pela última resposta: quantos
+    eram o mesmo produto com outra capa ("outra capa") e quantos outro produto ("outro
+    produto"). Só para o registro: a escolha é a mesma (pedido do Rafael de 30/10, o que
+    dificulta achar a causa vira registro).
     """
     if not (video or {}).get("arquivo") or not anuncios:
         return [], "sem o vídeo ou sem anúncio para conferir"
@@ -909,8 +917,18 @@ def ia_confere_iguais(video, nome, anuncios, capa=None):
                 continue
         confirmados &= iguais
         motivo = str(dados.get("motivo") or "").strip()
+        outra_capa = set()
+        for numero in dados.get("outra_capa") or []:
+            try:
+                outra_capa.add(int(numero))
+            except (TypeError, ValueError):
+                continue
         if not confirmados:
             break
+    if recusas is not None:
+        fora = set(range(1, len(anuncios) + 1)) - confirmados
+        recusas["outra capa"] = len(fora & outra_capa)
+        recusas["outro produto"] = len(fora - outra_capa)
     return sorted(numero - 1 for numero in confirmados), motivo
 
 
@@ -1430,6 +1448,23 @@ def _tela_com_a_fileira(d):
     return xml
 
 
+def linha_dos_produtos(xml):
+    """
+    Como está a linha dos produtos na tela final, em texto fixo para o registro: com
+    produtos, vazia ("Toque para adicionar produtos") ou nem a linha na tela. Separa o
+    produto que não ficou anexado da tela que não carregou a linha (no rascunho reaberto
+    para postar, em 30/10/2026, a linha nem apareceu).
+    """
+    ids = {el["id"] for el in elementos(xml)}
+    if FILEIRA_DOS_PRODUTOS in ids or "tv_product_title" in ids:
+        return "a linha dos produtos com produto"
+    if "tv_add_product_tip" in ids:
+        return "a linha dos produtos vazia"
+    if "add_product_panel_view" in ids or "tv_add_product_title" in ids:
+        return "a linha dos produtos sem produto"
+    return "sem a linha dos produtos na tela"
+
+
 def conferir_tela_final(d, video):
     """
     Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): os produtos anexados
@@ -1440,7 +1475,8 @@ def conferir_tela_final(d, video):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     nomes = nomes_dos_produtos(video)
-    anexados = [nome for _, nome in produtos_na_fileira(_tela_com_a_fileira(d) if nomes else d.dump_hierarchy())]
+    xml = _tela_com_a_fileira(d) if nomes else d.dump_hierarchy()
+    anexados = [nome for _, nome in produtos_na_fileira(xml)]
     if anexados and len(anexados) < len(nomes):
         vistas = vistas_da_fileira(d)
         if _fileira_confere(vistas, nomes):
@@ -1467,7 +1503,8 @@ def conferir_tela_final(d, video):
     parecidos = "; ".join(partes)
     registro_processos.registrar("shopee_video", "conferir a tela final", "produto não confere",
                                  f"{len(anexados)} anexado(s) na tela; {len(nomes)} do vídeo"
-                                 + (f"; o mais parecido com cada um: {parecidos}" if nomes and anexados else ""), ok=False)
+                                 + (f"; o mais parecido com cada um: {parecidos}" if nomes and anexados
+                                    else f"; {linha_dos_produtos(xml)}"), ok=False)
     avisar_rafael.mandar_texto(f"{AVISO_TELA_FINAL}\n\nProduto(s) do vídeo: {'; '.join(nomes) or 'o link não diz'}")
     return False, (f"tela final com {len(anexados)} produto(s) anexado(s) que não confere(m) com o(s) "
                    f"{len(nomes)} do vídeo: nada salvo (aviso no privado)")
