@@ -222,6 +222,26 @@ def ler_eventos_do_systemd(servico):
     return eventos_do_systemd(r.stdout.splitlines())
 
 
+def inicios_de_hoje(linhas):
+    """Os minutos do dia em que o systemd ligou o robô (deploy, reinício), das linhas em short-iso."""
+    return [_minutos(linha[11:16]) for linha in linhas
+            if " systemd[1]: " in linha and linha.split(" systemd[1]: ", 1)[1].startswith("Started ")]
+
+
+def ler_inicios_de_hoje(servico):
+    """
+    Quando o systemd ligou o serviço hoje, na hora de Brasília: o bot_mestre refaz a grade das
+    rotinas ao ligar. [] sem acesso ao journal.
+    """
+    try:
+        r = subprocess.run(["sudo", "-n", "journalctl", "-u", f"{servico}.service", "--since", "today",
+                            "-o", "short-iso", "-q"], capture_output=True, text=True, timeout=180,
+                           env={**os.environ, "TZ": "America/Sao_Paulo"})
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return inicios_de_hoje(r.stdout.splitlines())
+
+
 def _lugar_do_quadro(caminho, linha, funcao):
     """O quadro do rastro como arquivo:linha (função); de biblioteca, o caminho dentro dela."""
     if "site-packages/" in caminho:
@@ -445,7 +465,7 @@ def _hhmm(minutos):
     return f"{minutos // 60:02d}:{minutos % 60:02d}"
 
 
-def rotinas_do_dia(agora=None):
+def rotinas_do_dia(agora=None, inicios=()):
     """
     As rotinas de texto de hoje por canal, pelo histórico que o bot guarda
     (config_rotina.historico_diario: cada rotina e os horários em que saiu): quantas
@@ -455,6 +475,10 @@ def rotinas_do_dia(agora=None):
     daquela rotina e sem pausa). A que
     falta mas foi adiada há pouco (MINUTOS_DA_ADIADA) ainda vai tentar: fica em "adiadas",
     sem cobrar; a de ontem que ficou adiada e não saiu vem em "ontem_sem_sair".
+    inicios: os minutos do dia em que o bot_mestre ligou (ler_inicios_de_hoje). Ao ligar,
+    ele refaz a grade, e a rotina cuja janela já passou sai logo, para não se perder (P85):
+    a que saiu depois do fim da janela com o bot ligado depois dele vem em
+    "depois_do_reinicio", sem cobrar.
     """
     agora = _agora(agora)
     config = db.ler_config("config_rotina", {}) or {}
@@ -479,8 +503,18 @@ def rotinas_do_dia(agora=None):
         pares = [(a, b, any(tipo == b[1] and -1 <= minuto - b[0] <= MINUTOS_DA_ANOTACAO for tipo, minuto in sem_outro))
                  for a, b in zip(lista, lista[1:]) if a[1] == b[1]]
         por_assunto = Counter(tipo for _m, tipo in lista)
-        fora_da_janela = [f"{_hhmm(minuto)} {tipo} (janela {config[tipo]['inicio']}h às {config[tipo]['fim']}h)"
-                          for minuto, tipo in lista if _fora_da_janela(config.get(tipo), minuto)]
+        fora_da_janela, tipos_fora_da_janela, depois_do_reinicio = [], [], []
+        for minuto, tipo in lista:
+            if not _fora_da_janela(config.get(tipo), minuto):
+                continue
+            texto = f"{_hhmm(minuto)} {tipo} (janela {config[tipo]['inicio']}h às {config[tipo]['fim']}h)"
+            fim = int(config[tipo]["fim"]) * 60
+            reinicio = max((i for i in inicios if fim <= i <= minuto), default=None) if minuto > fim else None
+            if reinicio is not None:
+                depois_do_reinicio.append(f"{texto}, com o bot ligado às {_hhmm(reinicio)}")
+            else:
+                fora_da_janela.append(texto)
+                tipos_fora_da_janela.append(tipo)
         fora, adiadas, linhas = [], [], {}
         for tipo, regra in config.items():
             if (not isinstance(regra, dict) or "frequencia" not in regra or not rotinas.conhecida(tipo)
@@ -499,7 +533,7 @@ def rotinas_do_dia(agora=None):
                     fora.append((tipo, feitas, esperado, "a menos"))
         resultado[canal] = {
             "linha_do_tempo": {tipo: linhas.get(tipo) or linha_do_tempo_da_rotina(canal, tipo, agora)
-                               for tipo, *_ in fora},
+                               for tipo in [t for t, *_ in fora] + tipos_fora_da_janela},
             "adiadas": adiadas, "ontem_sem_sair": adiadas_de_ontem(canal, agora),
             "enviadas": len(lista), "menor": min(intervalos) if intervalos else None,
             "curtos": sum(1 for i in intervalos if i < INTERVALO_CURTO_ROTINA),
@@ -508,7 +542,8 @@ def rotinas_do_dia(agora=None):
             "pares_seguidos": [f"{_hhmm(a[0])} {a[1]} → {_hhmm(b[0])} {b[1]}"
                                + (" (sem outro assunto marcado)" if deixado else "") for a, b, deixado in pares],
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
-            "fora_da_janela": fora_da_janela,
+            "fora_da_janela": fora_da_janela, "tipos_fora_da_janela": tipos_fora_da_janela,
+            "depois_do_reinicio": depois_do_reinicio,
         }
     return resultado
 
@@ -1058,14 +1093,22 @@ PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário"
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
                         "preparo interrompido")
-ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed",), ("rascunho", "postar", "apagar")
+ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed",), ("rascunho", "postar")
+# Apagar um rascunho recusado pode rodar no Horário das Interações e no de postar (P22 a
+# P24): não é preparo, mas conta na hora do descurtir. Decisão do Rafael: DECISOES.md,
+# Shopee Vídeo.
+ACOES_EM_QUALQUER_HORARIO = ("apagar",)
 
 
 def _tipo_da_atividade(processo=None, acao=None):
-    """'descurtir', 'interação' (o feed), 'respostas', 'preparo' (preparar, postar, apagar) ou None (outra coisa)."""
+    """
+    'descurtir', 'interação' (o feed), 'respostas', 'preparo' (preparar e postar), 'apagar'
+    (o rascunho recusado) ou None (outra coisa).
+    """
     if acao:
         return ("descurtir" if acao == "descurtir" else "interação" if acao in ACOES_DE_INTERACAO
-                else "respostas" if acao == "responder" else "preparo" if acao in ACOES_DE_PREPARO else None)
+                else "respostas" if acao == "responder" else "preparo" if acao in ACOES_DE_PREPARO
+                else "apagar" if acao in ACOES_EM_QUALQUER_HORARIO else None)
     if processo.startswith(PROCESSOS_DO_DESCURTIR):
         return "descurtir"
     if processo.startswith(PROCESSOS_DE_INTERACAO):
@@ -1490,7 +1533,7 @@ def main():
         print(f"{'✅' if feito >= minimo else '⚠️'} {robo}: {processo}: {feito} de {esperado}")
 
     print("\n== Rotinas de texto de hoje (por canal)")
-    rotinas_hoje = rotinas_do_dia(agora)
+    rotinas_hoje = rotinas_do_dia(agora, ler_inicios_de_hoje("bot_mestre_bot"))
     for canal, r in rotinas_hoje.items():
         menor = "—" if r["menor"] is None else f"{r['menor']} min"
         print(f"{canal}{' (pausado)' if r['pausado'] else ''}: enviadas {r['enviadas']} | menor intervalo {menor} | "
@@ -1508,8 +1551,11 @@ def main():
             print(f"   {tipo} ({feitas} de {esperado}): adiada às {hora}, ainda vai tentar de novo")
         for tipo, hora in r["ontem_sem_sair"]:
             print(f"   ontem: {tipo} ficou adiada às {hora} e não saiu")
-        for linha in r["fora_da_janela"]:
-            print(f"   fora da janela do painel: {linha}")
+        for linha, tipo in zip(r["fora_da_janela"], r.get("tipos_fora_da_janela", [])):
+            passos = ", ".join(f"{hora} {resultado}" for hora, resultado in r["linha_do_tempo"].get(tipo, []))
+            print(f"   fora da janela do painel: {linha}: {passos or 'nada no registro hoje'}")
+        for linha in r.get("depois_do_reinicio", []):
+            print(f"   depois do fim da janela, logo depois de o bot ligar (a grade refeita, P85): {linha}")
     divulgacao = divulgacao_do_dia(agora)
     menor = "—" if divulgacao["menor"] is None else f"{divulgacao['menor']:.0f} min"
     print(f"Divulgação (24 h): envios {divulgacao['envios']} | grupos {divulgacao['grupos']} | "

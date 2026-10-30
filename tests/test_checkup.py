@@ -364,6 +364,10 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # antes dos 3 do feed
     robo.registrar_tentativa("rascunho", "salvo", agora=em("13:00"))                # fora da janela: certo
     robo.registrar_tentativa("responder", "respondido", agora=em("17:05"))          # as respostas: em qualquer hora (P70)
+    # Apagar o rascunho recusado roda nos dois horários (P22 a P24): não é preparo na janela,
+    # mas na hora do descurtir conta.
+    robo.registrar_tentativa("apagar", "apagado", agora=em("09:40"))
+    robo.registrar_tentativa("apagar", "apagado", agora=em("04:30"))
     registro_processos.registrar("shopee_video", "notificações (respostas)", "topo achado", agora=em("17:00"))
     registro_processos.registrar("shopee_video", "descurtir tudo (4h)", "descurtido", agora=em("04:12"))
     registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", agora=em("04:05"))
@@ -374,14 +378,14 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
         "link_grupo_viral": ["10:00", "18:00"], "promo_principal": ["10:00"]}}})
     r = checkup.sobreposicoes(AGORA)
     assert r["janela"] == (9, 11)
-    assert [hora for hora, _o in r["no_descurtir"]] == ["04:05", "04:20"]
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:05", "04:20", "04:30"]
     assert [hora for hora, _o in r["fora_da_janela"]] == ["04:20", "15:00"]
     assert [hora for hora, _o in r["preparo_na_janela"]] == ["09:30"]
     assert r["rotinas_coladas"] == {"Viral": [("10:00", "link_grupo_viral", "10:00", "promo_principal")]}
     assert r["assistente"] == [("15:20", "postagem mandada no seu privado")]
     pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "ruins": [], "salvos": 0, "vencidos": 0},
                                        {}, None, AGORA, sobre=r)
-    assert "Sobreposição: 2 atividade(s) do robô da Shopee Vídeo na hora do descurtir (4h)" in pontos
+    assert "Sobreposição: 3 atividade(s) do robô da Shopee Vídeo na hora do descurtir (4h)" in pontos
     assert "Sobreposição: 2 interação(ões) do robô fora do Horário das Interações" in pontos
     assert ("Sobreposição: 1 passo(s) de preparo ou postagem no Horário das Interações antes dos comentários "
             "do feed") in pontos
@@ -486,6 +490,24 @@ def test_rotina_fora_da_janela_do_painel_e_cobrada():
                                        {}, ("x", 1.0, 1), AGORA, {}, r, None)
     assert "Rotinas do canal principal: 1 vez(es) fora da janela do painel" in pontos
     assert "Rotinas do Viral: 1 vez(es) fora da janela do painel" in pontos
+    # 29/10: o deploy das 20:33 religou o bot depois do fim das janelas, e a grade refeita
+    # mandou logo as que se perderiam (P85). Essa não é cobrada; a de antes do começo, sim.
+    r = checkup.rotinas_do_dia(AGORA, inicios=[8 * 60, 21 * 60 + 35])
+    assert r["Viral"]["fora_da_janela"] == []
+    assert r["Viral"]["depois_do_reinicio"] == ["21:40 link_grupo_viral (janela 9h às 21h), com o bot ligado às 21:35"]
+    assert r["canal principal"]["fora_da_janela"] == ["09:45 incentivo (janela 10h às 20h)"]
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA, {}, r, None)
+    assert "Rotinas do Viral: 1 vez(es) fora da janela do painel" not in pontos
+    assert "Rotinas do canal principal: 1 vez(es) fora da janela do painel" in pontos
+
+
+def test_inicios_do_bot_saem_das_linhas_do_systemd():
+    linhas = ["2026-10-29T20:33:05-0300 servidor systemd[1]: Started bot_mestre_bot.service - Bot Mestre.",
+              "2026-10-29T20:33:09-0300 servidor python3[812]: Started a rodada",
+              "2026-10-29T20:40:00-0300 servidor systemd[1]: Stopping bot_mestre_bot.service - Bot Mestre...",
+              "2026-10-29T21:02:44-0300 servidor systemd[1]: Started bot_mestre_bot.service - Bot Mestre."]
+    assert checkup.inicios_de_hoje(linhas) == [20 * 60 + 33, 21 * 60 + 2]
 
 
 def test_rotina_em_seguida_sem_outro_assunto_marcado_nao_e_cobrada():
