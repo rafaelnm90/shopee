@@ -11,6 +11,18 @@ import edicao_video
 from conftest import inserir
 
 
+@pytest.fixture(autouse=True)
+def _revisao_sem_resposta(monkeypatch):
+    # Os textos da tela passam pela revisão da ortografia, uma chamada de texto à IA: nos testes
+    # ela fica sem resposta, como sem rede, e o teste que a confere põe a sua.
+    import api_gemini
+
+    async def sem_resposta(prompt, imagens=None):
+        return None
+
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", sem_resposta)
+
+
 def _programas(monkeypatch, largura_da_foto="800", audio="1", codigo_ffmpeg=0):
     """ffprobe e ffmpeg de mentira: guarda cada comando e, no ffmpeg que dá certo, cria a saída."""
     comandos = []
@@ -1031,6 +1043,8 @@ def test_texto_da_ia_com_letra_fora_do_portugues_e_corrigido_ou_sai(monkeypatch)
                 '"chamada": "Confira aqui embaixo"}')
 
     async def corrigir(prompt, imagens=None):
+        if prompt.startswith("Revise a ortografia"):
+            return None
         correcoes.append(prompt)
         return correcoes_da_ia.pop(0)
 
@@ -1045,12 +1059,65 @@ def test_texto_da_ia_com_letra_fora_do_portugues_e_corrigido_ou_sai(monkeypatch)
     assert "vantagem" not in edicao_video.textos_da_tela("v.mp4", "Meia")
     correcoes_da_ia = [None]
     assert "vantagem" not in edicao_video.textos_da_tela("v.mp4", "Meia")
-    linhas = [(l[2], l[5]) for l in rp.contagem("2000-01-01 00:00:00") if l[1] == edicao_video.PROCESSO_DA_ORTOGRAFIA]
+    linhas = [(l[2], l[5]) for l in rp.contagem("2000-01-01 00:00:00")
+              if l[1] == edicao_video.PROCESSO_DA_ORTOGRAFIA and l[2] in ("corrigida", "texto tirado")]
     assert sorted(linhas) == [("corrigida", 1), ("texto tirado", 2)]
     assert edicao_video.letras_fora_do_portugues("Ação, pão e crème") == ["è"]
     assert edicao_video.letras_fora_do_portugues("Mantém gelado o dia todo, 100% à prova") == []
     assert edicao_video.letras_fora_do_portugues("Qualidade de 1ª linha, nº 1") == []
     assert "ortografia" in edicao_video.PROMPT_DOS_TEXTOS and "ortografia" in edicao_video.PROMPT_DAS_VERSOES
+
+
+def test_revisao_pega_o_erro_so_com_letras_do_portugues(monkeypatch):
+    # Pedido do Rafael (30/10): pegar também o erro feito só com letras do português (o acento que
+    # falta, a letra trocada), que a conferência das letras não vê. Uma chamada de texto revisa
+    # todos os textos do vídeo de uma vez, e fica só a revisão que mexeu na ortografia.
+    import json
+    import re
+
+    import api_gemini
+    import registro_processos as rp
+    pedidos = []
+    revisoes = {"Garrafa Termica": "Garrafa Térmica", "Mantem gelado o dia todo": "Mantém gelado o dia todo",
+                "Toque no produtu": "Toque no produto",
+                "Gelada por horas": "Compre agora a melhor garrafa do Brasil"}
+
+    async def analisar(video, prompt, imagens=None):
+        return ('{"nome": "Garrafa Termica", "vantagem": "Mantem gelado o dia todo", "chamada": "Veja aqui embaixo", '
+                '"versoes": [{"vantagem": "Gelada por horas", "inicio": 1, "fim": 3, "chamada": "Toque no produtu"}]}')
+
+    async def revisar(prompt, imagens=None):
+        pedidos.append(prompt)
+        textos = json.loads(re.search(r"\{.*\}", prompt, re.S).group(0))
+        return json.dumps({chave: revisoes.get(texto, texto) for chave, texto in textos.items()}, ensure_ascii=False)
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", revisar)
+    textos = edicao_video.textos_da_tela("v.mp4", "Garrafa")
+    assert (textos["nome"], textos["vantagem"], textos["chamada"]) == (
+        "Garrafa Térmica", "Mantém gelado o dia todo", "Veja aqui embaixo")
+    assert len(pedidos) == 1 and pedidos[0].startswith("Revise a ortografia") and "Mantem gelado" in pedidos[0]
+    # As versões do exemplo vão na mesma chamada; a revisão que muda a frase não vale.
+    pedidos.clear()
+    textos = edicao_video.textos_das_versoes("v.mp4", "Garrafa")
+    assert len(pedidos) == 1 and textos["vantagem"] == "Mantém gelado o dia todo"
+    assert [(v["vantagem"], v["chamada"]) for v in textos["versoes"]] == [("Gelada por horas", "Toque no produto")]
+    # Sem resposta, os textos ficam como a IA os deu.
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", lambda prompt, imagens=None: _sem_resposta())
+    assert edicao_video.textos_da_tela("v.mp4", "Garrafa")["nome"] == "Garrafa Termica"
+    linhas = [(l[2], l[3]) for l in rp.contagem("2000-01-01 00:00:00") if l[1] == edicao_video.PROCESSO_DA_ORTOGRAFIA]
+    assert sorted(linhas) == [("revisada", "2 corrigido(s)"), ("revisada", "3 corrigido(s)"),
+                              ("sem a revisão", "a IA não respondeu")]
+    # Só a ortografia: palavra a mais, texto maior que o máximo, letra fora do português ou nada mudado não valem.
+    assert edicao_video._so_ortografia("Mantem gelado", "Mantém gelado", 36) == "Mantém gelado"
+    assert edicao_video._so_ortografia("Leve", "Leve e muito resistente", 36) == ""
+    assert edicao_video._so_ortografia("Copo Termico de Inox Grande", "Copo Térmico de Inox Grandes", 27) == ""
+    assert edicao_video._so_ortografia("pelucia macia", "pelüia macia", 36) == ""
+    assert edicao_video._so_ortografia("Leve", "Leve", 36) == ""
+
+
+async def _sem_resposta():
+    return None
 
 
 def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
