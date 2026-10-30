@@ -1821,12 +1821,8 @@ def preparar_rascunho(d, config, agora=None):
         e.id_video = video["id"]
         descurtir_no_fim(d, video, curtidos)
         raise
-    rascunho = pegar(ident) or {}
-    produtos = rascunho.get("produtos") or []
+    produtos = (pegar(ident) or {}).get("produtos") or []
     registrar_tentativa("rascunho", "salvo", produto=", ".join(produtos) or _produto_do_video(video), agora=agora)
-    # A capa com chamada alterna entre os rascunhos salvos: o que ficou de lado depois da edição
-    # não gastou a vez. Escolha do Rafael (29/10, P77): DECISOES.md, Shopee Vídeo.
-    edicao_video.passar_a_vez(bool(rascunho.get("chamada")))
     registro_processos.registrar(REGISTRO, PROCESSO_DO_TEMPO, faixa_do_tempo(time.monotonic() - comeco),
                                  f"{max(len(produtos), 1)} produto(s)")
     descurtir_no_fim(d, video, curtidos)
@@ -3062,10 +3058,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
         anuncio = anuncio_do_ver_produtos(nomes[0]) if nomes else {}
     else:
         anuncio = ps.anuncio_do_produto(video)
-    # A vez da capa com chamada passa só com o rascunho salvo (preparar_rascunho).
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
-                                                            anuncio.get("nome", ""), avisos=alcool,
-                                                            passar_agora=False)
+                                                            anuncio.get("nome", ""), avisos=alcool)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -3533,7 +3527,7 @@ def _anotar_visualizacoes_junto(d, agora=None):
 def medicao_da_capa(agora=None):
     """
     A comparação da capa com chamada (P76) com os vídeos postados nos últimos
-    DIAS_DA_COMPARACAO dias; depois que o Rafael liga a capa, só os de depois (P77).
+    DIAS_DA_COMPARACAO dias; depois que o Rafael liga a capa, só os de depois.
     """
     limite = _momento(agora_br(agora) - timedelta(days=DIAS_DA_COMPARACAO))
     return visualizacoes.comparar([r for r in listar("postado") if (r["postado_em"] or "") >= limite],

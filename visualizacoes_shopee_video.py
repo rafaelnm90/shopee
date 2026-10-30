@@ -97,8 +97,9 @@ def vistas_com_a_idade(postado_em, leituras, dias):
 def comparar(videos, desde=None):
     """
     A comparação da capa com chamada. videos: os postados pelo robô, [{"postado_em",
-    "chamada", "marca", "vistas"}]; desde: o momento em que o Rafael ligou a capa (com ela
-    ligada, os vídeos alternam, P77, e só os de depois entram, os dois grupos dos mesmos dias).
+    "chamada", "marca", "vistas"}]; desde: o momento em que o Rafael ligou a capa (só os de
+    depois entram; com ela ligada, a chamada vai em todos, P100, e os sem são os que ficaram
+    sem a vantagem da IA).
     Devolve {"com": grupo, "sem": grupo, "sem_marca": n}: cada grupo é {"videos", "lidos",
     "idades": {dias: (quantos, mediana ou None)}}, e sem_marca conta os postados sem a marca da
     capa desde o primeiro que a teve (os de antes da medição nunca a tiveram).

@@ -194,45 +194,6 @@ def capa_ligada():
     return bool((db.ler_config("shopee_video", {}) or {}).get(CHAVE_DA_CAPA))
 
 
-# Ligada, a chamada vai num vídeo e no seguinte não: os dois grupos saem nos mesmos dias, para o
-# mesmo público, e a diferença nas visualizações é da capa (a conta cresce toda semana, e uma
-# comparação com os vídeos de antes favoreceria a chamada). A vez fica na chave shopee_video.
-# Escolha do Rafael (29/10, P77): DECISOES.md, Shopee Vídeo.
-CHAVE_DA_VEZ = "capa_com_chamada_vez"
-
-
-def _capa_alternada(foto, vantagem, passar=True):
-    """
-    A capa do vídeo com a capa com chamada ligada: a com chamada na vez dela, None na vez sem
-    (a capa de sempre). Com passar, a vez passa já (o modo assistente manda o vídeo na hora);
-    sem, quem chamou a passa quando o vídeo sai de verdade (passar_a_vez).
-    """
-    vez = int((db.ler_config("shopee_video", {}) or {}).get(CHAVE_DA_VEZ) or 0)
-    capa = _capa_da_vez(foto, vantagem) if vez % 2 == 0 else None
-    if passar:
-        passar_a_vez(capa is not None)
-    return capa
-
-
-def passar_a_vez(com_chamada):
-    """
-    Passa a vez da capa com chamada depois que um vídeo saiu (o rascunho do robô salvo, o vídeo
-    do assistente mandado): o rascunho que fica de lado depois da edição não gasta a vez, e os
-    dois grupos da comparação crescem juntos. Na vez com a chamada, passa só se o vídeo saiu
-    com ela (o que devia levar a chamada e ficou sem, sem a vantagem da IA, deixa a vez para o
-    próximo); na vez sem, sempre. Com a capa desligada, nada.
-    """
-    if not capa_ligada():
-        return
-
-    def alterar(dados):
-        vez = int(dados.get(CHAVE_DA_VEZ) or 0)
-        if com_chamada or vez % 2:
-            dados[CHAVE_DA_VEZ] = vez + 1
-
-    db.atualizar_config("shopee_video", alterar)
-
-
 # A linha que termina numa palavra de ligação ("Acaba com a / bagunça") vale como uma letra
 # PENALIDADE_DA_QUEBRA px menor: a quebra boa ganha, se a letra não ficar muito menor.
 PENALIDADE_DA_QUEBRA = 8
@@ -1041,7 +1002,7 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", avisos=False, passar_agora=True):
+def editar_para_postar(video, foto, destino, produto="", avisos=False):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -1054,9 +1015,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, passar_ag
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
     som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA. Com a capa com
-    chamada ligada (P76), a vantagem da IA vai na capa, um vídeo sim e o seguinte não (P77), e o
-    jeito leva COM_A_CHAMADA; com passar_agora=False (o rascunho do robô), a vez só passa quando
-    quem chamou a passa (passar_a_vez), com o vídeo salvo.
+    chamada ligada (P76), a vantagem da IA vai na capa de todos os vídeos (P100), e o jeito leva
+    COM_A_CHAMADA.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -1064,7 +1024,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, passar_ag
     musica = _caminho(musicas_de_fundo(video)[0])
     textos = textos_da_tela(video, produto) if produto else {}
     # Sem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a dos avisos.
-    capa = _capa_alternada(foto, textos.get("vantagem", ""), passar_agora) if capa_ligada() and not avisos else None
+    # A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre com a capa dos
+    # avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
+    capa = _capa_da_vez(foto, textos.get("vantagem", "")) if capa_ligada() and not avisos else None
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
     miniatura = miniatura_no_video(textos)
