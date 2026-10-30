@@ -1358,9 +1358,55 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     nome, motivo, exemplo = edicao_video.exemplo_capa()
     assert (nome, motivo, exemplo["chamada"]) == ("Copo Térmico", "", "Gelado por 12 horas")
     assert exemplo["capa"][:4] == b"\x89PNG" and exemplo["grade"][:4] == b"\x89PNG"
+    # Com a frase curta da IA para a capa (P106), é ela que vai.
+    _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas", "capa": "Gelado 12 horas"})
+    assert edicao_video.exemplo_capa()[2]["chamada"] == "Gelado 12 horas"
     # Sem a vantagem da IA, o exemplo diz por quê.
     _textos_da_tela(monkeypatch, {"nome": "Copo Térmico"})
-    assert edicao_video.exemplo_capa()[:2] == (None, "a IA não escreveu a vantagem do produto deste vídeo")
+    assert edicao_video.exemplo_capa()[:2] == (
+        None, "a IA não escreveu a frase da capa nem a vantagem do produto deste vídeo")
+
+
+def test_frase_curta_da_capa_vem_da_ia_e_a_longa_fica_de_fora_sem_ser_cortada(monkeypatch):
+    # Escolha do Rafael (30/10, P106): a IA escreve a vantagem em 2 a 4 palavras, até 20 letras,
+    # só para a capa, que sai em letra grande; a maior que isso não é cortada (perderia o
+    # sentido) e a capa vai com a vantagem.
+    import api_gemini
+    respostas = iter([
+        '{"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "capa": "Estimula o bebê"}',
+        '{"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "capa": "Estimula o desenvolvimento"}'])
+
+    async def analisar(video, prompt, imagens=None):
+        return next(respostas)
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(edicao_video, "_revisar_ortografia", lambda textos: textos)
+    assert '"capa"' in edicao_video.PROMPT_DOS_TEXTOS and "até 20 caracteres" in edicao_video.PROMPT_DOS_TEXTOS
+    curta = edicao_video.textos_da_tela("v.mp4", "Cubo")
+    assert curta["capa"] == "Estimula o bebê" and edicao_video.frase_da_capa(curta) == "Estimula o bebê"
+    longa = edicao_video.textos_da_tela("v.mp4", "Cubo")
+    assert "capa" not in longa and edicao_video.frase_da_capa(longa) == "Estimula o desenvolvimento do bebê"
+    assert edicao_video.MAXIMOS_DOS_TEXTOS["capa"] == edicao_video.MAXIMO_DA_CAPA == 20
+
+
+def test_capa_vai_com_a_frase_curta_e_sem_ela_com_a_vantagem(monkeypatch, tmp_path):
+    import registro_processos as rp
+    _versoes_de_mentira(monkeypatch)
+    frases = []
+    monkeypatch.setattr(edicao_video, "_capa_da_vez", lambda foto, frase: frases.append(frase) or b"\x89PNG")
+    monkeypatch.setattr(edicao_video, "editar", lambda *a, **k: "")
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    destino = str(tmp_path / "r.mp4")
+    longa = {"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "lugar": "alto"}
+    _textos_da_tela(monkeypatch, dict(longa, capa="Estimula o bebê"))
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Cubo")
+    _textos_da_tela(monkeypatch, longa)
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Cubo")
+    assert frases == ["Estimula o bebê", "Estimula o desenvolvimento do bebê"]
+    registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", edicao_video.PROCESSO_DA_FRASE_DA_CAPA,
+                                                            "2000-01-01 00:00:00")]
+    assert registro == [("curta", "15 letras"), ("a vantagem (sem a curta)", "34 letras")]
 
 
 def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):

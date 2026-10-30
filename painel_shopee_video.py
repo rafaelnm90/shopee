@@ -1120,7 +1120,7 @@ async def ligar_capa_handler(message: types.Message, state: FSMContext):
 def legenda_do_exemplo_da_capa(nome, chamada):
     return (f"🏷️ <b>Exemplo da capa com chamada</b> (não foi postado): {html_escape(nome)}.\n"
             "1ª foto: a capa inteira, como abre o vídeo. 2ª foto: o pedaço que a grade do seu perfil mostra.\n"
-            f"✍️ Chamada (a vantagem que a IA viu no vídeo): “{html_escape(chamada)}”\n"
+            f"✍️ Chamada (a vantagem que a IA viu no vídeo, em poucas palavras): “{html_escape(chamada)}”\n"
             "🔢 O número de visualizações fica na faixa preta de baixo, à esquerda, e a sacolinha da Shopee e o "
             "selo Fixado, na faixa de cima: nenhum deles cobre a chamada nem a foto.\n"
             f"Toque de novo em {BOTAO_EXEMPLO_DA_CAPA} para ver outro vídeo.")
