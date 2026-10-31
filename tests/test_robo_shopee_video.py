@@ -1817,9 +1817,11 @@ def test_o_compartilhar_do_perfil_nao_serve_para_o_link_do_post():
     assert robo.botao_de_compartilhar(perfil) is None
 
 
-def test_da_edicao_de_um_video_novo_o_robo_descarta_e_volta_ao_inicio(monkeypatch):
-    # Na edição de um vídeo novo, o voltar pergunta se salva como rascunho: o robô
-    # descarta, para a lista do app só ter os rascunhos que ele terminou.
+def _saida_da_tela_final(monkeypatch, **voltar):
+    """
+    O app de mentira com a saída da tela final de um vídeo novo, como no Motorola: o aviso de
+    sair, a edição e o "Deseja sair da página de edição?". voltar: telas a mais no voltar.
+    """
     monkeypatch.setitem(TELAS, "sair_da_edicao", [
         _no("Deseja sair da página de edição?", "tv_main_title", (100, 1780, 980, 1840), clicavel=False),
         _no("Salvar Rascunho", "tv_save", (100, 2090, 980, 2150)),
@@ -1828,12 +1830,42 @@ def test_da_edicao_de_um_video_novo_o_robo_descarta_e_volta_ao_inicio(monkeypatc
     monkeypatch.setitem(CAMINHO, ("sair_da_edicao", "@tv_no_save"), "galeria")
     app = AppComVoltar()
     monkeypatch.setattr(app, "VOLTAR", {**AppComVoltar.VOLTAR, "aviso": "final", "edicao": "sair_da_edicao",
-                                        "sair_da_edicao": "edicao", "galeria": "camera", "camera": "perfil"})
+                                        "sair_da_edicao": "edicao", "galeria": "camera", "camera": "perfil",
+                                        **voltar})
     monkeypatch.setitem(CAMINHO, ("aviso", "@buttonDefaultPositive"), "edicao")
+    return app
+
+
+def test_da_edicao_de_um_video_novo_o_robo_descarta_e_volta_ao_inicio(monkeypatch):
+    # Na edição de um vídeo novo, o voltar pergunta se salva como rascunho: o robô
+    # descarta, para a lista do app só ter os rascunhos que ele terminou.
+    app = _saida_da_tela_final(monkeypatch)
     app.atual = "final"
     robo.ir_ao_inicio(app)
     assert app.atual == "eu"
     assert "@buttonDefaultPositive" in app.toques and "@tv_no_save" in app.toques and "@tv_save" not in app.toques
+
+
+def test_da_selecao_da_capa_com_mudanca_o_robo_confirma_o_descartar_e_volta_ao_inicio(monkeypatch):
+    # Como no Motorola em 30/10 (21:20 e 21:35, com o celular deixado na capa de um teste):
+    # na Selecione sua capa com uma figurinha posta, o voltar pergunta se descarta as
+    # alterações, e o voltar na pergunta só a fecha. O robô ficava indo e vindo entre as duas
+    # até desistir; agora confirma e segue a saída de sempre da tela final.
+    monkeypatch.setitem(TELAS, "capa", [
+        _no(ident="cancel_btn", caixa=(42, 157, 116, 231)),
+        _no("Selecione sua capa", "title_tv", (116, 162, 964, 225), clicavel=False),
+        _no(ident="save_btn", caixa=(964, 157, 1038, 231)),
+        _no("Adicionar figurinha", "tv_add_sticker", (679, 2288, 994, 2339), clicavel=False)])
+    monkeypatch.setitem(TELAS, "descartar_capa", [
+        _no("Descartar Alterações na Capa?", "tv_title", (92, 1229, 988, 1286), clicavel=False),
+        _no("Cancelar", "tv_cancel", (92, 1350, 539, 1476)),
+        _no("Confirmar", "tv_discard", (540, 1350, 988, 1476))])
+    monkeypatch.setitem(CAMINHO, ("descartar_capa", "@tv_discard"), "final")
+    app = _saida_da_tela_final(monkeypatch, capa="descartar_capa", descartar_capa="capa")
+    app.atual = "capa"
+    robo.ir_ao_inicio(app)
+    assert app.atual == "eu"
+    assert app.toques[0] == "@tv_discard" and "@tv_cancel" not in app.toques and "@tv_no_save" in app.toques
 
 
 # --- Preparar 1 Agora e o que o rascunho guarda para o Rafael validar (23/10/2026) ---

@@ -1262,6 +1262,16 @@ def sair_da_edicao(xml):
     return tem(xml, "@tv_no_save") and tem(xml, "sair da página de edição")
 
 
+def descartar_a_capa(xml):
+    """
+    A pergunta que o voltar abre na Selecione sua capa (SSZMediaCoverEditActivity) com alguma
+    mudança na capa (Motorola, 30/10/2026): "Descartar Alterações na Capa?", com Cancelar
+    (@tv_cancel) e Confirmar (@tv_discard). O voltar na pergunta só a fecha e volta para a capa:
+    o robô confirma, como no Descartar da edição, e a capa sai sem a mudança.
+    """
+    return tem(xml, "@tv_discard") and tem(xml, "Descartar Alterações na Capa")
+
+
 def fora_da_shopee(xml):
     """
     A tela é de outro app (o Telegram, a tela inicial do celular): um voltar a mais na
@@ -1296,6 +1306,9 @@ def voltar(d, ate, vezes=15):
             continue
         if sair_da_edicao(xml):
             tocar(d, "@tv_no_save", 4)
+            continue
+        if descartar_a_capa(xml):
+            tocar(d, "@tv_discard", 3)
             continue
         d.press("back")
         pausa(3)
