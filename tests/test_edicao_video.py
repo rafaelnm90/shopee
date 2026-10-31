@@ -1,4 +1,5 @@
 """edicao_video e videos.com_foto_e_miniatura: a foto do produto no começo, a miniatura no canto e a seta do Rafael, com o ffmpeg de mentira (e de verdade, quando a máquina tem)."""
+import io
 import os
 import shutil
 import subprocess
@@ -1384,6 +1385,68 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     monkeypatch.setattr(edicao_video, "capa_com_chamada", quebrada)
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == edicao_video.COM_LEGENDAS
     assert capas[-1] is None
+
+
+def test_rascunho_do_robo_abre_com_a_foto_e_a_capa_com_a_frase_vai_para_a_figurinha(monkeypatch, tmp_path):
+    # Escolha do Rafael (31/10, P110): a capa com a frase vai pelo Selecionar Capa do app, por
+    # último; o vídeo abre com a foto no mesmo lugar, sem a frase. O modo assistente (sem a
+    # figurinha) continua com a frase dentro do vídeo.
+    import io
+
+    from PIL import Image
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "capa": "Leve e forte",
+                                  "lugar": "alto"})
+    aberturas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+        aberturas.append(capa)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    destino = str(tmp_path / "r.mp4")
+    figurinha = {}
+    como = edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", figurinha=figurinha)[1]
+    assert como == edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA_PARA_A_FIGURINHA
+    abertura = Image.open(io.BytesIO(aberturas[-1])).convert("RGB")
+    capa = Image.open(io.BytesIO(figurinha["capa"])).convert("RGB")
+    assert figurinha["capa"] == edicao_video.capa_com_chamada(_foto_jpg(), "Leve e forte")
+    # A abertura não tem a faixa; a capa tem, e fora da faixa as duas são a mesma imagem.
+    assert edicao_video.faixa_laranja(abertura) is None
+    cima, baixo, _, _ = edicao_video.faixa_laranja(capa)
+    assert abertura.crop((0, 0, 720, cima)).tobytes() == capa.crop((0, 0, 720, cima)).tobytes()
+    assert abertura.crop((0, baixo, 720, 1280)).tobytes() == capa.crop((0, baixo, 720, 1280)).tobytes()
+    # Sem a figurinha (o modo assistente), a frase vai no vídeo, como antes.
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == (
+        edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
+    assert aberturas[-1] == figurinha["capa"]
+    # Desligada, nada vai para a figurinha.
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: False})
+    figurinha = {}
+    assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa", figurinha=figurinha)[1] == (
+        edicao_video.COM_LEGENDAS)
+    assert figurinha == {} and aberturas[-1] is None
+
+
+def test_faixa_laranja_acha_a_faixa_da_capa_no_print_e_nao_acha_sem_ela():
+    # O robô mede a figurinha pela faixa laranja no print da tela da capa (P110): na capa, a faixa
+    # está onde o desenho a pôs; num print com a capa reduzida dentro de um quadro, no lugar
+    # proporcional, mesmo com as letras brancas no meio.
+    from PIL import Image
+    capa = _capa("Organize sua cozinha")
+    cima, baixo, esquerda, direita = edicao_video.faixa_laranja(capa)
+    assert (esquerda, direita) == (0, 720) and baixo == edicao_video.FOTO_DA_CAPA[3]
+    assert baixo - cima == edicao_video.FAIXA_DA_CHAMADA
+    tela = Image.new("RGB", (1080, 2400), (30, 30, 30))
+    escala = 957 / 720
+    tela.paste(capa.resize((957, round(1280 * escala))), (61, 267))
+    medida = edicao_video.faixa_laranja(tela, (61, 267, 1018, 1969))
+    assert medida is not None
+    assert abs(medida[0] - (267 + cima * escala)) <= 2 and abs(medida[1] - (267 + baixo * escala)) <= 2
+    assert abs(medida[2] - 61) <= 2 and abs(medida[3] - 1018) <= 2
+    # A foto sem a faixa (a capa de sempre) não tem faixa nenhuma.
+    assert edicao_video.faixa_laranja(Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg())))) is None
 
 
 def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):

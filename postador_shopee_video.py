@@ -1814,6 +1814,33 @@ def por_foto_na_galeria(d, dados, nome=None):
     return arquivo_na_galeria if arquivo_na_galeria in getattr(lista, "output", "") else ""
 
 
+def arrastar(d, x1, y1, x2, y2):
+    """
+    Arrasta de um ponto ao outro (mover a figurinha na tela da capa). O dedo sai da tela no fim
+    do arrasto: nenhum dos dois pontos pode ser um botão proibido. (ok, o que dizer no log)
+    """
+    tela = d.dump_hierarchy()
+    if proibido_no_ponto(tela, x1, y1) or proibido_no_ponto(tela, x2, y2):
+        return False, RECUSA
+    d.drag(x1, y1, x2, y2, SEGUNDOS_DO_ARRASTO)
+    return True, f"arrastado de ({x1},{y1}) a ({x2},{y2})"
+
+
+def dois_dedos(d, x, y, de, ate):
+    """
+    Dois dedos na linha do ponto x,y, afastando um do outro de `de` a `ate` px (ate menor que de
+    aproxima): aumenta ou diminui a figurinha na tela da capa em volta desse ponto. Os dois
+    dedos tocam no começo e saem no fim: nenhum dos quatro pontos pode ser um botão proibido.
+    (ok, o que dizer no log)
+    """
+    dedos = [(x - de // 2, y), (x + de // 2, y), (x - ate // 2, y), (x + ate // 2, y)]
+    tela = d.dump_hierarchy()
+    if any(proibido_no_ponto(tela, px, py) for px, py in dedos):
+        return False, RECUSA
+    d(packageName=PACOTE).gesture(*dedos, steps=PASSOS_DOS_DEDOS)
+    return True, f"dois dedos de {de} a {ate} px em ({x},{y})"
+
+
 def tirar_foto_da_galeria(d, arquivo=""):
     """
     Tira da câmera do Android as fotos da busca (todas as que começam por NOME_DA_FOTO,
@@ -2085,24 +2112,13 @@ def fazer_passo(d, nome, argumento):
             x1, y1, x2, y2 = (int(n) for n in argumento.split(","))
         except ValueError:
             return False, "arrastar pede X1,Y1,X2,Y2"
-        tela = d.dump_hierarchy()
-        # O dedo sai da tela no fim do arrasto: nenhum dos dois pontos pode ser um botão proibido.
-        if proibido_no_ponto(tela, x1, y1) or proibido_no_ponto(tela, x2, y2):
-            return False, RECUSA
-        d.drag(x1, y1, x2, y2, SEGUNDOS_DO_ARRASTO)
-        return True, f"arrastado de ({x1},{y1}) a ({x2},{y2})"
+        return arrastar(d, x1, y1, x2, y2)
     if nome == "aumentar":
         try:
             x, y, de, ate = (int(n) for n in argumento.split(","))
         except ValueError:
             return False, "aumentar pede X,Y,DE,ATE"
-        dedos = [(x - de // 2, y), (x + de // 2, y), (x - ate // 2, y), (x + ate // 2, y)]
-        tela = d.dump_hierarchy()
-        # Os dois dedos tocam no começo e saem no fim: nenhum dos quatro pontos pode ser um botão proibido.
-        if any(proibido_no_ponto(tela, px, py) for px, py in dedos):
-            return False, RECUSA
-        d(packageName=PACOTE).gesture(*dedos, steps=PASSOS_DOS_DEDOS)
-        return True, f"dois dedos de {de} a {ate} px em ({x},{y})"
+        return dois_dedos(d, x, y, de, ate)
     if nome == "caso":
         pasta = casos_robo.guardar(d, "explorar", "tela", argumento or "tela do explorar", passo="explorar")
         return (True, "tela guardada para o Claude (casos_robo.yml exportar)") if pasta else (

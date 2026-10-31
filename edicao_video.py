@@ -251,6 +251,45 @@ def _quebra_da_chamada(texto, desenho, fonte_ttf):
     return (melhor[1], melhor[2]) if melhor else None
 
 
+def _foto_na_capa(foto):
+    """
+    (a capa do PIL, 720x1280, cima, pe): a foto do anúncio (bytes) do tamanho da capa sem texto
+    (FOTO_DA_CAPA), no fundo preto, e onde ela começa e termina em y. None com a foto que não abre.
+    """
+    import io
+
+    from PIL import Image
+    try:
+        imagem = Image.open(io.BytesIO(foto)).convert("RGB")
+    except Exception:
+        return None
+    capa = Image.new("RGB", TELA, "black")
+    x1, y1, x2, y2 = FOTO_DA_CAPA
+    escala = min((x2 - x1) / imagem.width, (y2 - y1) / imagem.height)
+    imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
+    cima = y1 + (y2 - y1 - imagem.height) // 2
+    capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, cima))
+    return capa, cima, cima + imagem.height
+
+
+def _png(imagem):
+    import io
+    saida = io.BytesIO()
+    imagem.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def capa_sem_chamada(foto):
+    """
+    A abertura do vídeo quando a frase vai na capa pela figurinha (P110): a foto do anúncio
+    (bytes) no lugar e do tamanho da capa com chamada, sem a faixa (PNG, bytes, 720x1280). A
+    figurinha com o miolo da capa cai em cima da mesma foto; sem a figurinha, ela é a capa de
+    sempre. None com a foto que não abre.
+    """
+    montada = _foto_na_capa(foto)
+    return _png(montada[0]) if montada else None
+
+
 def capa_com_chamada(foto, chamada):
     """
     A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) do tamanho da capa
@@ -258,24 +297,16 @@ def capa_com_chamada(foto, chamada):
     da foto, logo acima do número de visualizações. None sem a chamada, com a foto que não abre
     ou com a chamada que não cabe nem na menor letra.
     """
-    import io
-
     import matplotlib
-    from PIL import Image, ImageDraw
+    from PIL import ImageDraw
     chamada = " ".join((chamada or "").split())
     if not chamada:
         return None
-    try:
-        imagem = Image.open(io.BytesIO(foto)).convert("RGB")
-    except Exception:
+    montada = _foto_na_capa(foto)
+    if not montada:
         return None
+    capa, _cima, pe = montada
     largura, _altura = TELA
-    capa = Image.new("RGB", TELA, "black")
-    x1, y1, x2, y2 = FOTO_DA_CAPA
-    escala = min((x2 - x1) / imagem.width, (y2 - y1) / imagem.height)
-    imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
-    cima = y1 + (y2 - y1 - imagem.height) // 2
-    capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, cima))
 
     desenho = ImageDraw.Draw(capa)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
@@ -284,7 +315,6 @@ def capa_com_chamada(foto, chamada):
         return None
     fonte, linhas = quebra
     altura_da_linha = round(fonte.size * 1.2)
-    pe = cima + imagem.height
     alto = max(FAIXA_DA_CHAMADA, altura_da_linha * len(linhas) + 2 * FOLGA_DA_FAIXA)
     desenho.rectangle((0, pe - alto, largura - 1, pe - 1), fill=LARANJA_DA_SHOPEE)
     meio = pe - alto / 2
@@ -292,9 +322,62 @@ def capa_com_chamada(foto, chamada):
     for i, linha in enumerate(linhas):
         desenho.text((centro, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
                      fill="white", anchor="mm")
-    saida = io.BytesIO()
-    capa.save(saida, format="PNG")
-    return saida.getvalue()
+    return _png(capa)
+
+
+# A faixa laranja da capa com chamada num print (a tela da capa do app, o quadro da grade do
+# perfil): por ela o robô mede a figurinha, para a capa ficar do tamanho do desenho (P110), e
+# confere a capa do post. Laranja: até TOLERANCIA_DO_LARANJA de LARANJA_DA_SHOPEE (a soma das
+# diferenças das três cores). A faixa são linhas seguidas com o laranja nas mesmas pontas (a
+# faixa é um retângulo), cheias (pelo menos LINHA_CHEIA entre as pontas) ou com as letras
+# brancas (pelo menos LINHA_COM_LETRAS), de pelo menos LARGURA_MINIMA_DA_FAIXA da caixa.
+TOLERANCIA_DO_LARANJA = 60
+LINHA_CHEIA = 0.9
+LINHA_COM_LETRAS = 0.4
+LARGURA_MINIMA_DA_FAIXA = 0.15
+PONTAS_DA_FAIXA = 4                             # em px: quanto as pontas variam de uma linha para a outra
+LINHAS_CHEIAS_DA_FAIXA = 2
+
+
+def faixa_laranja(imagem, caixa=None):
+    """
+    A faixa laranja dentro da caixa (x1, y1, x2, y2; sem ela, a imagem inteira) da imagem do
+    PIL: (cima, baixo, esquerda, direita), em pontos da imagem, a de mais linhas entre as achadas
+    (com pelo menos LINHAS_CHEIAS_DA_FAIXA linhas cheias). None sem ela.
+    """
+    import numpy
+    x1, y1, x2, y2 = caixa or (0, 0, imagem.width, imagem.height)
+    pontos = numpy.asarray(imagem.convert("RGB").crop((x1, y1, x2, y2)), dtype=numpy.int16)
+    laranja = numpy.abs(pontos - numpy.array(LARANJA_DA_SHOPEE, dtype=numpy.int16)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
+    minimo = max(2, int(laranja.shape[1] * LARGURA_MINIMA_DA_FAIXA))
+    blocos, atual = [], None
+    for y, linha in enumerate(laranja):
+        colunas = numpy.flatnonzero(linha)
+        faixa = None
+        if len(colunas) and colunas[-1] - colunas[0] + 1 >= minimo:
+            esquerda, direita = int(colunas[0]), int(colunas[-1])
+            cheio = len(colunas) / (direita - esquerda + 1)
+            if cheio >= LINHA_COM_LETRAS:
+                faixa = (esquerda, direita, cheio >= LINHA_CHEIA)
+        mesma = (atual is not None and faixa is not None and abs(faixa[0] - atual["esquerda"]) <= PONTAS_DA_FAIXA
+                 and abs(faixa[1] - atual["direita"]) <= PONTAS_DA_FAIXA)
+        if mesma:
+            atual["baixo"] = y + 1
+            atual["cheias"] += faixa[2]
+            if faixa[2]:
+                atual["esquerda"], atual["direita"] = faixa[0], faixa[1]
+            continue
+        if atual is not None:
+            blocos.append(atual)
+        atual = ({"cima": y, "baixo": y + 1, "esquerda": faixa[0], "direita": faixa[1], "cheias": int(faixa[2])}
+                 if faixa else None)
+    if atual is not None:
+        blocos.append(atual)
+    blocos = [b for b in blocos if b["cheias"] >= LINHAS_CHEIAS_DA_FAIXA]
+    if not blocos:
+        return None
+    melhor = max(blocos, key=lambda b: b["baixo"] - b["cima"])
+    return (y1 + melhor["cima"], y1 + melhor["baixo"], x1 + melhor["esquerda"], x1 + melhor["direita"] + 1)
 
 
 def _capa_da_vez(foto, vantagem):
@@ -1069,6 +1152,8 @@ SEM_LEGENDAS_NA_TELA = "editado com o Editor 2, sem legendas na tela"
 SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
 COM_A_CHAMADA = ", com a chamada na capa"
+# A frase vai na capa pela figurinha do Selecionar Capa (P110): o vídeo abre com a foto, sem ela.
+COM_A_CHAMADA_PARA_A_FIGURINHA = ", com a chamada para a figurinha da capa"
 COM_MUSICA = ", com música de fundo"
 SEM_A_MINIATURA = ", sem a nossa miniatura"
 COM_A_MINIATURA_MENOR = ", com a miniatura menor"
@@ -1079,7 +1164,7 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
+def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -1096,6 +1181,10 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     de todos os vídeos (P100), e o jeito leva COM_A_CHAMADA. Com as outras_fotos (bytes das
     outras fotos diferentes dos produtos do post, as que cabem: fotos_que_cabem), a miniatura
     troca entre a foto e cada uma delas (P103), e o jeito leva COM_A_MINIATURA_ALTERNADA.
+    Com figurinha (um dict, o rascunho do robô), a capa com a frase fica em figurinha["capa"]
+    para o Selecionar Capa do app, e o vídeo abre com a foto no mesmo lugar, sem a frase
+    (capa_sem_chamada); o jeito leva COM_A_CHAMADA_PARA_A_FIGURINHA. Escolha do Rafael (31/10,
+    P110): DECISOES.md, Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -1112,16 +1201,21 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA,
                                      "curta" if textos.get("capa") else "a vantagem (sem a curta)",
                                      f"{len(frase)} letras", ok=True if textos.get("capa") else None)
+    abertura = capa
+    if capa and figurinha is not None:
+        abertura = capa_sem_chamada(foto)
+        figurinha["capa"] = capa
+    chamada = (COM_A_CHAMADA_PARA_A_FIGURINHA if figurinha is not None else COM_A_CHAMADA) if capa else ""
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
     miniatura = miniatura_no_video(textos)
-    avisado = ((COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if capa else "") + (COM_MUSICA if musica else "")
+    avisado = ((COM_OS_AVISOS if avisos else "") + chamada + (COM_MUSICA if musica else "")
                + (SEM_A_MINIATURA if not miniatura
                   else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
                + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else ""))
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                                    textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, capa,
+                                    textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
                                     miniatura, outras_fotos)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
@@ -1135,7 +1229,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos), SO_COM_O_EDITOR_1 + avisado,
+    return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos), SO_COM_O_EDITOR_1 + avisado,
             f"o Editor 2 não saiu: {motivo_2}")
 
 

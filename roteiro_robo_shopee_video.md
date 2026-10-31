@@ -365,8 +365,17 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   7. o **X** com alguma mudança pergunta **Descartar Alterações na Capa?** (`@tv_cancel`
      Cancelar, `@tv_discard` Confirmar); o voltar também a abre, e o voltar nela só a fecha
      (o robô confirma: `descartar_a_capa`); depois, a saída da tela final é a de sempre
-     (voltar, voltar, `@tv_no_save`). Falta testar o **✓** e como a capa aparece na tela final e no
-     rascunho.
+     (voltar, voltar, `@tv_no_save`);
+  8. **teste de 31/10/2026** (09:50 a 09:56, com o miolo 2:3): a aba da foto (`@image`, a 1ª da
+     `@tab_layout`) mostrou a lista das já usadas, com o **+** no 1º quadro; o **✓** (`@save_btn`)
+     voltou à tela final com a capa nova na miniatura. Os dois dedos de 200 a 900 px deixaram a
+     figurinha **um terço maior** que o desenho (a faixa de ~178 px de alto no print, contra ~138
+     no desenho): a imagem passou da largura do quadro e a faixa desceu até o número de
+     visualizações. **O robô (P110):** mede a faixa laranja no print dentro do quadro do vídeo
+     (`edicao_video.faixa_laranja`), compara com a do desenho (`faixa_esperada`, a capa do tamanho
+     do quadro) e ajusta: dois dedos em volta do meio da faixa pela razão das alturas e, com o
+     tamanho certo, arrasta pelo que falta no lugar, até 5 vezes; só então o ✓. Falta ver se a
+     capa fica no rascunho reaberto para postar: o registro do post diz se a faixa chegou à grade.
 
   **Teste completo (18/10/2026)**, da tela final em diante:
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →
