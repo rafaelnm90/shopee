@@ -724,6 +724,7 @@ PASSOS = (
     ("não está respondendo", "app travado"),
     ("edição do vídeo não saiu", "edição do vídeo"),
     ("bebida alcoólica só vai", "edição do vídeo"),
+    ("bebida alcoólica em espera", "bebida alcoólica em espera"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
     ("busca pela foto", "busca pela foto"),
     ("câmera da busca", "busca pela foto"),
@@ -3336,6 +3337,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         avisar(f"⚠️ Robô da Shopee Vídeo: pulei o vídeo. A IA viu possível violação das diretrizes: "
                f"{textos['motivo'] or 'sem motivo'}")
         raise Parada("a IA viu violação das diretrizes", do_video=True)
+    # Bebida alcoólica em espera enquanto a página oficial das diretrizes a proíbe: fica de lado
+    # antes dos produtos a mais e da edição. Escolha do Rafael (31/10, P111): DECISOES.md,
+    # Shopee Vídeo.
+    if assistente.bebida_em_espera(textos):
+        raise Parada(assistente.MOTIVO_BEBIDA_EM_ESPERA, do_video=True)
 
     # Vídeo claramente feito por IA vai com o Rótulo de IA ligado; na dúvida, desligado.
     # Escolha do Rafael (24/10, P8): DECISOES.md, Shopee Vídeo.
