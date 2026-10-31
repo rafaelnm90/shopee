@@ -1,6 +1,7 @@
 """Robô automático da Shopee Vídeo (robo_shopee_video): plano do dia, aprovação espalhada, rodada e o caminho no app."""
 import io
 import json
+import math
 import os
 import random
 from datetime import datetime
@@ -779,14 +780,20 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     assert json.loads(robo.pegar(rascunho["id"])["conferencia"]) == ["mesmo vestido", "mesmo vestido"]
 
 
-def _editar_para_postar(chamadas, respostas=None):
-    """O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado."""
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
+def _editar_para_postar(chamadas, respostas=None, capa=None):
+    """
+    O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado. Com a
+    capa (bytes), ela vai para a figurinha do rascunho, como na capa com chamada ligada (P110).
+    """
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
         chamadas.append((video, foto, produto, avisos))
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
         if not motivo:
             with open(destino, "wb") as arquivo:
                 arquivo.write(b"com os avisos" if avisos else b"editado")
+        if capa and figurinha is not None and not motivo:
+            figurinha["capa"] = capa
+            como += robo.edicao_video.COM_A_CHAMADA_PARA_A_FIGURINHA
         return motivo, como + (robo.edicao_video.COM_OS_AVISOS if avisos else ""), detalhe
     return editar_para_postar
 
@@ -818,7 +825,9 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
 
 
 def test_rascunho_com_a_capa_com_chamada_fica_marcado_para_a_medicao(monkeypatch, avisos):
-    # Escolha do Rafael (29/10, P76): a medição compara os vídeos com a chamada com os de antes.
+    # Escolha do Rafael (29/10, P76): a medição compara os vídeos com a chamada com os de antes. A
+    # capa com a frase vai pela figurinha, por último, depois do título e dos produtos (P110): o
+    # rascunho só fica marcado quando ela ficou.
     _fonte(monkeypatch)
 
     async def analisar(arquivo, prompt, imagens=None):
@@ -827,11 +836,21 @@ def test_rascunho_com_a_capa_com_chamada_fica_marcado_para_a_medicao(monkeypatch
     monkeypatch.setattr(robo.ps, "anuncio_do_produto",
                         lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
     monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
-    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], [
-        ("", robo.edicao_video.COM_LEGENDAS + robo.edicao_video.COM_A_CHAMADA, "")]))
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa"))
+    postas = []
+
+    def capa_pela_figurinha(d, capa):
+        postas.append((capa, list(d.toques)))
+        return len(postas) == 1, "a faixa do tamanho do desenho (1 ajuste(s))" if len(postas) == 1 else "o motivo"
+
+    monkeypatch.setattr(robo, "capa_pela_figurinha", capa_pela_figurinha)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     assert robo.esperando_aprovacao()[0]["chamada"] == "1"
+    capa, antes = postas[0]
+    assert capa == b"a capa" and "@tv_right" in antes and "Feito" in antes
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_CAPA) == ("posta", 1)
 
 
 def test_produto_recusado_pela_ia_deixa_no_caso_o_produto_e_o_que_ela_viu(monkeypatch, avisos):
@@ -946,7 +965,7 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
         fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
@@ -4276,7 +4295,7 @@ def test_miniatura_troca_entre_as_fotos_diferentes_dos_produtos_do_post(monkeypa
         arquivo.write(b"v")
     chamadas, duracoes = [], [30.0, 7.0, 4.0, 0.0, RuntimeError("sem ffprobe")]
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=()):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
         chamadas.append(list(outras_fotos))
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editado")
@@ -4526,3 +4545,217 @@ def test_sem_video_com_marca_nao_abre_o_perfil(monkeypatch):
     monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: pytest.fail("não precisava abrir o Perfil"))
     _rascunho("postado", postado_em="2026-10-29 10:00:00")
     assert robo.anotar_visualizacoes(object(), momento("2026-10-30 09:00")) == (0, 0)
+
+
+# --- A capa com a frase pela figurinha (P110) ---
+
+def _foto_do_anuncio():
+    """Uma foto com desenho (um degradê azul), para a marca da capa na grade sair."""
+    from PIL import Image
+    foto = Image.new("RGB", (800, 800))
+    foto.putdata([(40 + x // 8, 100 + y // 6, 200) for y in range(800) for x in range(800)])
+    saida = io.BytesIO()
+    foto.save(saida, "JPEG")
+    return saida.getvalue()
+
+
+CAPA_DA_FIGURINHA = robo.edicao_video.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor")
+QUADRO_DA_CAPA = (61, 267, 1018, 1969)
+ESCALA_DO_DESENHO = (QUADRO_DA_CAPA[2] - QUADRO_DA_CAPA[0]) / 720
+
+
+class CelularDaCapa:
+    """
+    A tela final, a Selecione sua capa e as telas da figurinha com foto, como no Motorola em
+    30 e 31/10. A figurinha (o miolo da capa) entra com a escala de entrada (px da tela por px
+    da capa) no meio do quadro; dois dedos a aumentam pela razão das distâncias vezes o ganho
+    (o app não segue os dedos à risca), até a escala máxima, e o arrastar a move.
+    """
+
+    def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False):
+        self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
+        self.entrada, self.ganho, self.maxima, self.meio = entrada, ganho, maxima, meio
+        self.galeria, self.toques, self.gestos, self.arrastos, self.teclas = set(), [], [], [], []
+
+    def _nos(self):
+        capa = [_no(ident="player_container", caixa=(0, 267, 1080, 1969), clicavel=False),
+                _no(ident="cancel_btn", caixa=(40, 150, 120, 240)), _no(ident="save_btn", caixa=(960, 150, 1040, 240)),
+                _no("Adicionar Texto", "fl_add_text", (40, 2260, 520, 2366)),
+                _no("Adicionar figurinha", "fl_add_sticker", (560, 2260, 1040, 2366))]
+        if self.atual == "final":
+            return _tela_final(TITULO, self.salva is not None) + [
+                _no("Selecionar Capa", "tv_select_cover", (42, 563, 305, 632))]
+        if self.atual == "capa":
+            return capa
+        if self.atual == "figurinhas":
+            painel = [_no(ident="tab_layout", caixa=(0, 1260, 1080, 1366), clicavel=False,
+                          filhos=_no(ident="image", caixa=(20, 1270, 110, 1342), clicavel=False)
+                          + _no("Texto", "text", (380, 1280, 470, 1332))),
+                      _no(ident="local_sticker_frame_layout", caixa=(0, 1400, 1080, 2366), clicavel=False)]
+            if self.usadas:
+                painel += [_no(caixa=(90, 1450, 200, 1560)), _no(caixa=(350, 1450, 470, 1560))]
+            else:
+                painel += [_no("Enviar", "btn_upload", (440, 1880, 640, 1956))]
+            return capa + painel
+        if self.atual == "fotos":
+            return [_no(ident="iv_picture", caixa=(60, 330, 206, 476)), _no(ident="iv_picture", caixa=(220, 330, 366, 476))]
+        if self.atual == "recorte":
+            return [_no("Próximo", "tv_next_full", (860, 2230, 1014, 2306))]
+        if self.atual == "descartar":
+            return capa + [_no("Descartar Alterações na Capa?", caixa=(200, 1100, 880, 1160), clicavel=False),
+                           _no("Cancelar", "tv_cancel", (200, 1300, 520, 1380)),
+                           _no("Confirmar", "tv_discard", (560, 1300, 880, 1380))]
+        return []
+
+    def dump_hierarchy(self):
+        return _xml(*self._nos())
+
+    def click(self, x, y):
+        tocados = [el for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])]
+        tocados.sort(key=lambda el: (el["caixa"][2] - el["caixa"][0]) * (el["caixa"][3] - el["caixa"][1]))
+        ids = {"@" + el["id"] for el in tocados if el["id"]}
+        # O menor elemento no ponto é o que o dedo tocou.
+        self.toques.append(next(("@" + el["id"] for el in tocados if el["id"]), (x, y)))
+        if self.atual == "final" and "@tv_select_cover" in ids:
+            self.atual = "capa"
+        elif self.atual == "capa" and "@fl_add_sticker" in ids:
+            self.atual = "figurinhas"
+        elif self.atual == "figurinhas" and ("@btn_upload" in ids or (self.usadas and 1450 <= y <= 1560 and x < 200)):
+            self.atual = "fotos"
+        elif self.atual == "fotos" and "@iv_picture" in ids:
+            self.atual = "recorte"
+        elif self.atual == "recorte" and "@tv_next_full" in ids:
+            self.atual, self.figurinha = "capa", {"escala": self.entrada, "x": self.meio[0], "y": self.meio[1]}
+        elif self.atual == "capa" and "@save_btn" in ids:
+            self.atual, self.salva = "final", self.figurinha
+        elif self.atual == "capa" and "@cancel_btn" in ids:
+            self.atual = "descartar" if self.figurinha else "final"
+        elif self.atual == "descartar" and "@tv_discard" in ids:
+            self.atual, self.figurinha = "final", None
+
+    def press(self, tecla, meta=None):
+        self.teclas.append(tecla)
+        self.atual = {"figurinhas": "capa", "fotos": "figurinhas", "recorte": "fotos",
+                      "capa": "descartar" if self.figurinha else "final"}.get(self.atual, self.atual)
+
+    def __call__(self, **seletor):
+        celular = self
+
+        class Gesto:
+            def gesture(self, *dedos, steps=0):
+                (a, b, c, d) = dedos
+                de = math.dist(a, b)
+                ate = math.dist(c, d)
+                meio_x, meio_y = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+                celular.gestos.append((de, ate))
+                f = celular.figurinha
+                nova = min(celular.maxima, f["escala"] * (ate / de) ** celular.ganho)
+                razao = nova / f["escala"]
+                f.update(escala=nova, x=meio_x + (f["x"] - meio_x) * razao, y=meio_y + (f["y"] - meio_y) * razao)
+        return Gesto()
+
+    def drag(self, x1, y1, x2, y2, duracao=0):
+        self.arrastos.append((x1, y1, x2, y2))
+        if self.figurinha:
+            self.figurinha["x"] += x2 - x1
+            self.figurinha["y"] += y2 - y1
+
+    def screenshot(self, caminho=None):
+        from PIL import Image
+        tela = Image.new("RGB", (1080, 2400), (25, 25, 25))
+        x1, y1, x2, y2 = QUADRO_DA_CAPA
+        quadro = Image.new("RGB", (x2 - x1, y2 - y1), "black")
+        if self.atual == "capa" and self.figurinha:
+            miolo = Image.open(io.BytesIO(robo.edicao_video.recorte_da_figurinha(CAPA_DA_FIGURINHA))).convert("RGB")
+            f = self.figurinha
+            largura, altura = round(miolo.width * f["escala"]), round(miolo.height * f["escala"])
+            quadro.paste(miolo.resize((largura, altura)), (round(f["x"] - largura / 2) - x1, round(f["y"] - altura / 2) - y1))
+        tela.paste(quadro, (x1, y1))
+        return tela
+
+    def shell(self, partes):
+        if partes[0] == "find":
+            self.galeria = {n for n in self.galeria if not n.startswith(robo.ps.NOME_DA_FOTO)}
+        saida = "\n".join(sorted(self.galeria)) if partes[0] == "content" else ""
+        return type("R", (), {"output": saida})()
+
+    def push(self, origem, destino):
+        self.galeria.add(destino.rsplit("/", 1)[-1])
+
+
+def _faixa_na_tela(celular):
+    return robo.edicao_video.faixa_laranja(celular.screenshot(), QUADRO_DA_CAPA)
+
+
+def _no_desenho(celular):
+    """
+    A figurinha salva deixa a faixa do tamanho e no lugar do desenho, de uma borda à outra do
+    quadro? (A medida do print erra uma ou duas linhas.)
+    """
+    atual, celular.atual, celular.figurinha = celular.atual, "capa", celular.salva
+    cima, baixo, esquerda, direita = _faixa_na_tela(celular)
+    celular.atual, celular.figurinha = atual, None
+    e_cima, e_baixo, e_esquerda, e_direita = robo.faixa_esperada(CAPA_DA_FIGURINHA, QUADRO_DA_CAPA)
+    return (abs((baixo - cima) / (e_baixo - e_cima) - 1) <= robo.FOLGA_DA_ESCALA + 0.01
+            and abs((cima + baixo) / 2 - (e_cima + e_baixo) / 2) <= robo.FOLGA_DA_POSICAO + 1
+            and abs(esquerda - e_esquerda) <= robo.FOLGA_DAS_PONTAS and abs(direita - e_direita) <= robo.FOLGA_DAS_PONTAS)
+
+
+def test_capa_pela_figurinha_fica_do_tamanho_do_desenho_e_volta_a_tela_final(monkeypatch):
+    # Escolha do Rafael (31/10, P110): a capa com a frase pela figurinha com foto, do tamanho do
+    # desenho da P107 (a faixa logo acima do número de visualizações da grade).
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa()
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and motivo.startswith("a faixa do tamanho do desenho")
+    assert celular.atual == "final" and _no_desenho(celular)
+    # A foto da capa saiu da galeria, e nada de voltar na tela final.
+    assert celular.galeria == set() and celular.teclas == []
+
+
+def test_figurinha_que_cresce_mais_que_os_dedos_e_ajustada_ate_o_desenho(monkeypatch):
+    # No teste de 31/10, os dois dedos de 200 a 900 px deixaram a figurinha um terço maior que o
+    # desenho (a faixa caiu sobre o número de visualizações): o robô mede e corrige. A
+    # figurinha que entra fora do meio é arrastada para o lugar.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(ganho=1.25, meio=(540, 1000), usadas=True)
+    ok, _ = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and _no_desenho(celular)
+    assert len(celular.gestos) >= 2 and celular.arrastos
+    # Com fotos já usadas, a figurinha nova entra pelo + (o 1º quadro da lista).
+    assert "@btn_upload" not in celular.toques
+
+
+def test_figurinha_que_nao_chega_ao_desenho_e_descartada_e_vai_a_capa_de_sempre(monkeypatch, avisos):
+    # O app que não deixa a figurinha crescer até o desenho: o robô desiste, confirma o
+    # "Descartar Alterações na Capa?" e segue com a capa de sempre; o registro diz por quê.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(maxima=0.9)
+    assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA) is False
+    assert celular.atual == "final" and celular.salva is None and "@tv_discard" in celular.toques
+    assert celular.galeria == set()
+    resultado, detalhe, ok = consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                                       robo.PROCESSO_DA_CAPA)
+    assert (resultado, ok) == ("de fora", None) and detalhe.startswith("a faixa não ficou do tamanho do desenho")
+
+
+def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
+    # A capa vai no rascunho guardado e reaberto para postar: o registro diz se a faixa chegou ao post.
+    from PIL import Image
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+
+    def grade(capa_png):
+        tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((0, 196, 720, 1116))
+        tela.paste(capa.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
+        return type("Celular", (), {"screenshot": lambda self, caminho=None: tela})()
+
+    com = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1")
+    assert robo.marcar_o_post(grade(CAPA_DA_FIGURINHA), com, caixa)
+    sem = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
+    assert robo.marcar_o_post(grade(robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())), sem, caixa)
+    # Sem a capa pela figurinha, nada a dizer.
+    outro = _rascunho("postado", postado_em="2026-10-31 12:00:00")
+    assert robo.marcar_o_post(grade(CAPA_DA_FIGURINHA), outro, caixa)
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [r[2] for r in linhas] == ["no post com a faixa", "no post sem a faixa"]

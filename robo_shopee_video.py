@@ -3079,6 +3079,204 @@ def escrever_a_legenda(d, titulo):
     tocar(d, "@tv_right", 3)
 
 
+# --- A capa com a frase pela figurinha (P110, 31/10/2026) ---
+# O vídeo abre com a foto do produto, sem a frase, e a capa com a frase entra por cima pelo
+# Selecionar Capa da tela final, por último (depois do título e dos produtos: o vídeo precisa
+# terminar de processar): a figurinha com foto é o miolo da capa (edicao_video.recorte_da_figurinha),
+# e o robô a deixa do tamanho do desenho (a faixa logo acima do número de visualizações da
+# grade, P76 e P107), medindo a faixa laranja no print e ajustando com dois dedos (no teste de
+# 31/10, os dois dedos de 200 a 900 px a deixaram um terço maior que o desenho). Não ficando
+# certa, descarta e segue com a capa de sempre. Mapa no roteiro; escolha do Rafael (P110):
+# DECISOES.md, Shopee Vídeo.
+PROCESSO_DA_CAPA = "capa pela figurinha"
+AJUSTES_DA_FIGURINHA = 5
+FOLGA_DA_ESCALA = 0.03                          # a altura da faixa pode errar 3% do desenho
+FOLGA_DA_POSICAO = 12                           # e o meio dela, 12 px
+FOLGA_DAS_PONTAS = 10                           # as pontas da faixa ficam nas bordas do quadro do vídeo
+DEDOS_DA_FIGURINHA = 400                        # a maior distância de partida dos dois dedos, em px
+PROPORCAO_DO_VIDEO = 9 / 16
+
+
+def quadro_da_capa(xml):
+    """
+    O quadro do vídeo na tela da capa (x1, y1, x2, y2): o vídeo 9:16 no meio do
+    @player_container, da altura dele. None sem o player na tela.
+    """
+    player = next((el for el in ps.elementos(xml) if el["id"] == "player_container"), None)
+    if not player:
+        return None
+    x1, y1, x2, y2 = player["caixa"]
+    largura = round((y2 - y1) * PROPORCAO_DO_VIDEO)
+    esquerda = x1 + (x2 - x1 - largura) // 2
+    return esquerda, y1, esquerda + largura, y2
+
+
+def faixa_esperada(capa, quadro):
+    """
+    Onde a faixa laranja da capa (PNG, bytes) fica no quadro do vídeo da tela da capa, com a capa
+    do tamanho do quadro: (cima, baixo, esquerda, direita). None sem a faixa na capa.
+    """
+    from PIL import Image
+    with Image.open(io.BytesIO(capa)) as imagem:
+        faixa = edicao_video.faixa_laranja(imagem)
+        largura = imagem.width
+    if not faixa:
+        return None
+    x1, y1, x2, _y2 = quadro
+    escala = (x2 - x1) / largura
+    cima, baixo, esquerda, direita = faixa
+    return (y1 + cima * escala, y1 + baixo * escala, x1 + esquerda * escala, x1 + direita * escala)
+
+
+def ajustar_a_figurinha(d, capa, quadro):
+    """
+    Deixa a figurinha do tamanho e no lugar do desenho: mede a faixa laranja no print, aumenta ou
+    diminui com dois dedos em volta do meio dela e arrasta quando só o lugar está errado, até
+    AJUSTES_DA_FIGURINHA vezes. (ok, o que dizer no registro, só números)
+    """
+    esperada = faixa_esperada(capa, quadro)
+    if not esperada:
+        return False, "a capa não tem a faixa laranja"
+    e_cima, e_baixo, e_esquerda, e_direita = esperada
+    medida = None
+    for ajuste in range(AJUSTES_DA_FIGURINHA + 1):
+        medida = edicao_video.faixa_laranja(d.screenshot(), quadro)
+        if not medida:
+            return False, f"a faixa laranja não apareceu na capa ({ajuste} ajuste(s))"
+        cima, baixo, esquerda, direita = medida
+        razao = (e_baixo - e_cima) / (baixo - cima)
+        centro_x, centro_y = (esquerda + direita) / 2, (cima + baixo) / 2
+        delta_y = (e_cima + e_baixo) / 2 - centro_y
+        delta_x = (e_esquerda + e_direita) / 2 - centro_x
+        tamanho_certo = abs(razao - 1) <= FOLGA_DA_ESCALA
+        lugar_certo = abs(delta_y) <= FOLGA_DA_POSICAO and abs(delta_x) <= FOLGA_DA_POSICAO
+        pontas_certas = (abs(esquerda - e_esquerda) <= FOLGA_DAS_PONTAS
+                         and abs(direita - e_direita) <= FOLGA_DAS_PONTAS)
+        if tamanho_certo and lugar_certo and pontas_certas:
+            return True, f"a faixa do tamanho do desenho ({ajuste} ajuste(s))"
+        if ajuste == AJUSTES_DA_FIGURINHA:
+            break
+        x, y = round(centro_x), round(centro_y)
+        if not tamanho_certo:
+            # Os dedos começam dentro da faixa, que é a largura da figurinha.
+            de = max(40, min(DEDOS_DA_FIGURINHA, round((direita - esquerda) * 0.6)))
+            ok, motivo = ps.dois_dedos(d, x, y, de, round(de * razao))
+        else:
+            ok, motivo = ps.arrastar(d, x, y, round(x + delta_x), round(y + delta_y))
+        if not ok:
+            return False, motivo
+        pausa(2)
+    cima, baixo, esquerda, direita = medida
+    return False, (f"a faixa não ficou do tamanho do desenho: {round(baixo - cima)} px de alto (o desenho, "
+                   f"{round(e_baixo - e_cima)}), o meio a {round((e_cima + e_baixo - cima - baixo) / 2)} px")
+
+
+def aba_da_foto(xml):
+    """A aba da foto da figurinha: a 1ª aba, só um ícone (@image), na fileira das abas (@tab_layout). None sem ela."""
+    lista = ps.elementos(xml)
+    abas = next((el for el in lista if el["id"] == "tab_layout"), None)
+    icones = [el for el in lista if el["id"] == "image" and (not abas or ps._dentro(ps._centro(el), abas["caixa"]))]
+    return ps._centro(min(icones, key=lambda el: el["caixa"][0])) if icones else None
+
+
+def mais_da_figurinha(xml):
+    """
+    Onde tocar para pôr uma foto nova na figurinha: o Enviar (@btn_upload) quando nenhuma foto
+    foi usada antes; depois, o + (o 1º quadro da lista das já usadas). None sem nenhum.
+    """
+    enviar = ps.achar(xml, "@btn_upload")
+    if enviar:
+        return enviar
+    lista = ps.elementos(xml)
+    usadas = next((el for el in lista if el["id"] == "local_sticker_frame_layout"), None)
+    if not usadas:
+        return None
+    quadros = [el for el in lista if el["clicavel"] and el is not usadas and ps._dentro(ps._centro(el), usadas["caixa"])]
+    return ps._centro(min(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0]))) if quadros else None
+
+
+def sair_da_capa(d, vezes=5):
+    """
+    Volta da tela da capa (ou de uma tela dela: as figurinhas, as Fotos, o recorte) para a tela
+    final sem a capa nova: o X da capa e o Confirmar do "Descartar Alterações na Capa?". Na tela
+    final, nunca aperta voltar. Sem voltar a ela, para a rodada.
+    """
+    for _ in range(vezes):
+        xml = tela(d)
+        if tem(xml, "@et_caption") and not tem(xml, "@fl_add_sticker"):
+            return
+        if descartar_a_capa(xml):
+            tocar(d, "@tv_discard", 4)
+        elif tem(xml, "@cancel_btn"):
+            tocar(d, "@cancel_btn", 3)
+        else:
+            d.press("back")
+            pausa(3)
+    if not tem(tela(d), "@et_caption"):
+        raise Parada("a capa pela figurinha não deu certo, e o robô não voltou à tela final")
+
+
+def capa_pela_figurinha(d, capa):
+    """
+    Põe a capa com a frase (PNG, bytes) pelo Selecionar Capa da tela final: o miolo dela na
+    galeria, a figurinha com foto, do tamanho do desenho (ajustar_a_figurinha), e o ✓. Não dando
+    certo, descarta a capa nova e volta à tela final. A foto sai da galeria no fim. (ok, o que
+    dizer no registro)
+    """
+    nome = ps.por_foto_na_galeria(d, edicao_video.recorte_da_figurinha(capa))
+    if not nome:
+        return False, "a capa não apareceu na galeria"
+    try:
+        tocar(d, "@tv_select_cover", 6)
+        if not esperar_na_tela(d, "@fl_add_sticker", ESPERA_A_MAIS_NO_CAMINHO):
+            return False, "a tela da capa não abriu"
+        tocar(d, "@fl_add_sticker", 4)
+        aba = aba_da_foto(tela(d))
+        if not aba:
+            return False, "a aba da foto da figurinha não apareceu"
+        d.click(*aba)
+        pausa(3)
+        mais = mais_da_figurinha(tela(d))
+        if not mais:
+            return False, "nem o Enviar nem o + da figurinha apareceram"
+        d.click(*mais)
+        pausa(5)
+        if not esperar_na_tela(d, "@iv_picture", ESPERA_A_MAIS_NO_CAMINHO):
+            return False, "as Fotos não abriram"
+        tocar(d, "@iv_picture", 6)
+        if not esperar_na_tela(d, "@tv_next_full", ESPERA_A_MAIS_NO_CAMINHO):
+            return False, "o recorte da foto não abriu"
+        tocar(d, "@tv_next_full", 6)
+        xml = esperar_na_tela(d, "@save_btn", ESPERA_A_MAIS_NO_CAMINHO)
+        quadro = quadro_da_capa(xml) if xml else None
+        if not quadro:
+            return False, "a figurinha não voltou para a capa"
+        ok, motivo = ajustar_a_figurinha(d, capa, quadro)
+        if not ok:
+            return False, motivo
+        tocar(d, "@save_btn", 5)
+        if not esperar_na_tela(d, "@et_caption", ESPERA_A_MAIS_NO_CAMINHO):
+            return False, "o ✓ da capa não voltou à tela final"
+        return True, motivo
+    except Parada as e:
+        return False, e.motivo
+    finally:
+        sair_da_capa(d)
+        ps.tirar_foto_da_galeria(d, nome)
+
+
+def por_a_capa(d, capa):
+    """
+    A capa pela figurinha no rascunho, com o registro: posta, ou de fora com o motivo (a capa de
+    sempre). Depois, a edição da legenda que reabriu por cima da tela final na volta da capa é
+    fechada. True quando a capa com a frase ficou.
+    """
+    ok, motivo = capa_pela_figurinha(d, capa)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "posta" if ok else "de fora", motivo, ok=ok or None)
+    fechar_a_edicao_da_legenda(d, tela(d))
+    return ok
+
+
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     """
     O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim);
@@ -3160,8 +3358,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # Com produtos a mais (o mesmo item de outras lojas), a miniatura troca entre as fotos de capa
     # diferentes dos produtos do post (P103).
     outras = [foto for foto in (foto_do_produto_do_post(video, p) for p in (produtos or [])[1:]) if foto]
+    figurinha = {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
-                                  outras=outras)
+                                  outras=outras, figurinha=figurinha)
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
@@ -3186,6 +3385,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # A legenda vai depois dos produtos: em foco nas idas à lista de Minhas Curtidas, o 1º
     # produto às vezes não fica (VEZES_DO_PRIMEIRO_PRODUTO).
     escrever_a_legenda(d, textos["titulo"])
+    # A capa com a frase por último, pela figurinha (P110); sem ela, a capa de sempre.
+    if figurinha.get("capa") and por_a_capa(d, figurinha["capa"]):
+        atualizar(ident, chamada="1")
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
         ordem = [produtos[i] for i in no_post]
@@ -3220,7 +3422,7 @@ MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à S
 MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
 
 
-def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=()):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
@@ -3233,7 +3435,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     foto, e sem a edição ela não tem como levar os avisos: fica de lado. Devolve como o vídeo
     saiu (o jeito de edicao_video.editar_para_postar; "" sem a edição). outras: as fotos de capa
     dos outros produtos do post, na ordem, no rascunho com produtos a mais (o mesmo item): com
-    elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103).
+    elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103). Com a capa com
+    chamada ligada, figurinha (dict) recebe em "capa" a capa com a frase, que vai pelo Selecionar
+    Capa (P110), e o vídeo abre com a foto sem ela.
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -3249,7 +3453,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
                                                             anuncio.get("nome", ""), avisos=alcool,
-                                                            outras_fotos=trocam)
+                                                            outras_fotos=trocam, figurinha=figurinha)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -3696,15 +3900,21 @@ def marcar_o_post(d, ident, caixa):
     """
     Guarda no rascunho a marca da capa do vídeo que acabou de ir ao ar (o quadro da grade em
     caixa). Sem a marca (a capa não carregou, o print falhou), o vídeo fica fora da medição, e o
-    checkup conta. Nada aqui segura o post nem o link.
+    checkup conta. Com a capa pela figurinha (P110), o registro diz se a faixa laranja chegou ao
+    post (o rascunho guardado e reaberto). Nada aqui segura o post nem o link.
     """
     try:
         for tentativa in range(TENTATIVAS_DA_MARCA):
             if tentativa:
                 pausa(PAUSA_DA_MARCA)
-            marca = visualizacoes.marca_da_capa(d.screenshot(), caixa)
+            imagem = d.screenshot()
+            marca = visualizacoes.marca_da_capa(imagem, caixa)
             if marca:
                 atualizar(ident, marca=marca)
+                if (pegar(ident) or {}).get("chamada"):
+                    faixa = edicao_video.faixa_laranja(imagem, caixa)
+                    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
+                                                 "no post com a faixa" if faixa else "no post sem a faixa", ok=bool(faixa))
                 return marca
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A marca da capa do post não saiu: {type(e).__name__}")

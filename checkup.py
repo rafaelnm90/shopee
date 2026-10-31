@@ -384,6 +384,7 @@ SEM_META = {
     ("shopee_video", "responder comentário"), ("shopee_video", "curtir comentário"),
     ("shopee_video", "espaços livres: "),
     ("shopee_video", "tempo do rascunho"), ("shopee_video", "ver produtos: "),
+    ("shopee_video", "capa pela figurinha"),
 }
 
 
