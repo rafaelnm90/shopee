@@ -1943,6 +1943,9 @@ def _desfazer_reserva(ident, id_video, motivo, do_video):
         con.execute("DELETE FROM shopee_video_enviados WHERE id_unico = ? AND status = 'robo'", (id_video,))
 
 
+MOTIVO_DA_RODADA_INTERROMPIDA = "a rodada foi interrompida no meio do preparo"
+
+
 def soltar_preparos_interrompidos(agora=None):
     """
     Rascunho que ficou em "preparando" por mais que uma rodada inteira: a rodada morreu no
@@ -1953,8 +1956,11 @@ def soltar_preparos_interrompidos(agora=None):
     limite = _momento(agora_br(agora) - timedelta(seconds=MAXIMO_DA_RODADA))
     presos = [r for r in listar("preparando") if (r["criado_em"] or "") < limite]
     for rascunho in presos:
+        # O caso leva o que a rodada morta anotou desde o começo do rascunho: o último passo
+        # diz onde ela parou. Sem o celular: quem vai usá-lo agora é a rodada de agora.
+        _guardar_caso(None, "rascunho", "parou", MOTIVO_DA_RODADA_INTERROMPIDA, ident=rascunho["id"], agora=agora)
         _desfazer_reserva(rascunho["id"], rascunho["id_video"], "a rodada foi interrompida", False)
-        registrar_tentativa("rascunho", "parou", "a rodada foi interrompida no meio do preparo", agora=agora)
+        registrar_tentativa("rascunho", "parou", MOTIVO_DA_RODADA_INTERROMPIDA, agora=agora)
         registro_processos.registrar(REGISTRO, "preparo interrompido", "solto", "o vídeo voltou para a fila", ok=False)
     estado = estado_do_dia(ler_config(), agora)
     if estado.get("em_preparo"):
