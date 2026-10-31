@@ -324,6 +324,35 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   6. **Rascunhos** salva (barra de progresso "carregando, aguarde") e volta para a aba
      Live e Vídeo, sem pedir confirmação.
 
+  **Selecionar Capa (mapeado no Motorola em 30/10/2026, à noite, num vídeo de teste):**
+  1. na tela final, **Selecionar Capa** (`@tv_select_cover`, ~173,597) abre **Selecione sua
+     capa** (`SSZMediaCoverEditActivity`): a capa no meio (`@player_container`, de 0,267 a
+     1080,1969; o quadro do vídeo vai de 61,267 a 1018,1969), a fileira de quadros embaixo
+     (`@iv_thumbnail`, em y ~2116; o 1º, o do começo, vem marcado), **Adicionar Texto**
+     (`@fl_add_text`, ~280,2313) e **Adicionar figurinha** (`@fl_add_sticker`, ~799,2313); no
+     alto, **X** (`@cancel_btn`, ~79,194) e **✓** (`@save_btn`, ~1001,194). O Rafael escolhe
+     a capa por último, depois do título e dos produtos: o vídeo precisa terminar de processar;
+  2. **Adicionar figurinha** abre as abas (em y ~1306): a 1ª, só um ícone (`@image`, ~65,1306),
+     é a da **foto**; depois vêm Texto, outras e Shopee. Sem foto usada antes, a aba da foto
+     mostra **Enviar** (`@btn_upload`, ~540,1918); depois do 1º uso, mostra a lista
+     (`@local_sticker_frame_layout`) com o **+** em 1º (~146,1507) e as fotos já usadas
+     ("toque e segure para excluir");
+  3. **Enviar** (ou o **+**) abre **Fotos** (`SSZMediaAlbumSingleChoiceActivity`), com a mais
+     nova em 1º (`@iv_picture`, ~133,403);
+  4. a foto abre no recorte (`SSZMediaStickerCropActivity`), com a foto inteira marcada e o
+     **Remover fundo** desligado (`@cb_full`) → **Próximo** (`@tv_next_full`, ~937,2268);
+  5. de volta à capa, a figurinha entra no meio da capa (~540,1118) com 540 px de altura (a
+     caixa: 304x540 numa imagem 9:16, 539x540 numa quadrada; a imagem ocupa uns 88,6% dela);
+  6. dois dedos (o passo `aumentar`) aumentam a figurinha em volta do meio deles, só até 3
+     vezes o tamanho com que ela entrou (mais que isso, nada muda): a capa inteira (9:16) para
+     em 84% da largura; uma imagem 2:3 ou mais larga cobre a largura toda, e em cima e embaixo
+     sobra o quadro do vídeo (por isso vai à galeria o miolo 2:3 da capa,
+     `edicao_video.recorte_da_figurinha`);
+  7. o **X** com alguma mudança pergunta **Descartar Alterações na Capa?** (`@tv_cancel`
+     Cancelar, `@tv_discard` Confirmar); depois, a saída da tela final é a de sempre (voltar,
+     voltar, `@tv_no_save`). Falta testar o **✓** e como a capa aparece na tela final e no
+     rascunho.
+
   **Teste completo (18/10/2026)**, da tela final em diante:
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →
      **OK** no alto à direita (`@tv_right`, ~1012,178), que fecha o teclado;
