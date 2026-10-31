@@ -363,7 +363,8 @@ def elementos(xml):
         if texto or descricao or ident or clicavel:
             achados.append({"texto": texto, "descricao": descricao, "id": ident, "clicavel": clicavel,
                             "classe": no.get("class", "").rsplit(".", 1)[-1], "caixa": caixa,
-                            "marcado": no.get("checked") == "true", "pacote": no.get("package", "")})
+                            "marcado": no.get("checked") == "true", "pacote": no.get("package", ""),
+                            "foco": no.get("focused") == "true"})
     return achados
 
 
@@ -1535,6 +1536,22 @@ def linha_dos_produtos(xml):
     if "add_product_panel_view" in ids or "tv_add_product_title" in ids:
         return "a linha dos produtos sem produto"
     return "sem a linha dos produtos na tela"
+
+
+def como_esta_a_tela_final(xml):
+    """
+    Como está a tela final, em rótulos fixos para o registro (o checkup é público): a linha dos
+    produtos, a edição da legenda aberta por cima (rl_overlay, a tela escurecida) e a legenda em
+    foco. Diz como a tela voltou do Feito quando o produto não ficou (Motorola, 31/10/2026: a
+    edição da legenda aberta, a legenda em foco e a linha vazia).
+    """
+    lista = elementos(xml)
+    partes = [linha_dos_produtos(xml)]
+    if any(el["id"] == "rl_overlay" for el in lista):
+        partes.append("a edição da legenda aberta por cima")
+    if any(el["id"] == "et_caption" and el.get("foco") for el in lista):
+        partes.append("a legenda em foco")
+    return "; ".join(partes)
 
 
 def conferir_tela_final(d, video):

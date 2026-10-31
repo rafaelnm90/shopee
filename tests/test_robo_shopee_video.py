@@ -3946,6 +3946,7 @@ def test_anexa_na_ordem_e_o_a_mais_que_nao_anexa_fica_de_fora(monkeypatch):
     caminhos, voltas, chamadas = [], [], []
     monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append(caminho[0][0]))
     monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
+    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1: True)
     monkeypatch.setattr(robo, "voltar_a_tela_final", lambda d: voltas.append(True))
 
     def adicionar(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ultima_chance=True, avisar=True):
@@ -3973,6 +3974,7 @@ def test_passado_o_prazo_os_a_mais_que_faltam_anexar_ficam_de_fora(monkeypatch):
     caminhos, chamadas = [], []
     monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append(caminho[0][0]))
     monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
+    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1: True)
     # Cada anexar leva 250 s no relógio do teste.
     relogio = [0.0]
     monkeypatch.setattr(robo.time, "monotonic", lambda: relogio[0])
@@ -3989,6 +3991,134 @@ def test_passado_o_prazo_os_a_mais_que_faltam_anexar_ficam_de_fora(monkeypatch):
     assert anexados == ["X", "A"] and no_post == [0, 1] and chamadas == ["X", "A"]
     assert caminhos == ["@ll_add_product_symbol", "@tv_add_more"]
     assert _registro_dos_espacos() == ["produto a mais de fora", "produto a mais de fora"]
+
+
+class AppQueReabreALegenda(AppDeMentira):
+    """
+    Como o Motorola em 31/10 (09:15 e 09:35): a legenda editada fica em foco, e o Feito volta à
+    tela final com a edição da legenda aberta por cima (a tela escurecida) e sem o produto.
+    perdidos diz quantos Feitos perdem o produto mesmo sem a legenda editada (None: nenhum).
+    """
+
+    def __init__(self, perdidos=None):
+        super().__init__()
+        self.legenda_editada, self.por_cima, self.perdidos = False, False, perdidos
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.atual != "final":
+            return nos
+        if not self.com_produto:
+            nos = nos + [_no("Adicionar produto", "tv_add_product_title", (32, 713, 326, 764), clicavel=False),
+                         _no("Toque para adicionar produtos", "tv_add_product_tip", (870, 717, 974, 760),
+                             clicavel=False)]
+        if self.por_cima:
+            nos = nos + [_no(ident="rl_overlay", caixa=(0, 674, 1080, 2394))]
+        return nos
+
+    def click(self, x, y):
+        no_feito = self.atual == "janela"
+        super().click(x, y)
+        tocado = self.toques[-1] if self.toques else None
+        if tocado == "@et_caption":
+            self.legenda_editada = True
+        if tocado == "@tv_add_product_title" and self.por_cima:
+            self.por_cima = False
+        if no_feito and self.atual == "final":
+            perde = self.legenda_editada or (self.perdidos or 0) > 0
+            if self.perdidos:
+                self.perdidos -= 1
+            if perde:
+                self.com_produto, self.por_cima = False, True
+
+
+def _anexar_no_app(app):
+    """O rascunho do vestido no app de mentira, já na tela final: os produtos e a legenda, como o robô faz."""
+    app.atual = "final"
+    anexados, no_post = robo.anexar_os_produtos(app, {"link": LINK, "produto": VESTIDO}, [VESTIDO])
+    robo.escrever_a_legenda(app, TITULO)
+    return anexados, no_post
+
+
+def _registro_do_anexar():
+    registro = robo.registro_processos.sequencia("shopee_video", "anexar o produto", "2000-01-01 00:00:00")
+    return [(r[2], r[3]) for r in registro if r[2] != "anexado"]
+
+
+def test_produto_vai_antes_da_legenda_e_fica_na_tela_final(monkeypatch, avisos):
+    # No Motorola (31/10, 09:15 e 09:35), com a legenda escrita antes, o Feito voltava com a edição
+    # da legenda aberta e sem o produto: o rascunho parou e foi pulado. Os produtos vão antes.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = AppQueReabreALegenda()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.toques.index("Feito") < app.toques.index("@et_caption") and app.legenda == TITULO
+    assert robo.esperando_aprovacao()[0]["produtos"] == [VESTIDO]
+    assert _registro_do_anexar() == []
+
+
+def test_primeiro_produto_que_nao_ficou_depois_do_feito_e_anexado_de_novo(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    app = AppQueReabreALegenda(perdidos=1)
+    anexados, no_post = _anexar_no_app(app)
+    assert anexados == [VESTIDO] and no_post == [0] and app.com_produto and not app.por_cima
+    # A edição da legenda por cima fecha no rótulo "Adicionar produto" (não é botão), e o produto
+    # vai de novo pelo mesmo caminho.
+    assert app.toques.count("Feito") == 2 and "@tv_add_product_title" in app.toques
+    assert app.toques.index("@tv_add_product_title") < len(app.toques) - app.toques[::-1].index("Feito") - 1
+    assert _registro_do_anexar() == [
+        ("não ficou depois do Feito", "1ª vez; a linha dos produtos vazia; a edição da legenda aberta por cima"),
+        ("anexado na 2ª vez", "a linha dos produtos com produto")]
+
+
+def test_primeiro_produto_que_nao_fica_nem_na_segunda_vez_para_o_rascunho(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    app = AppQueReabreALegenda(perdidos=5)
+    with pytest.raises(robo.Parada) as parada:
+        _anexar_no_app(app)
+    # Não é culpa do vídeo (o app não guardou o produto): ele pode ir numa próxima vez.
+    assert parada.value.motivo == robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU and not parada.value.do_video
+    assert robo.passo_do_motivo(parada.value.motivo) == "anexar o produto"
+    assert app.toques.count("Feito") == robo.VEZES_DO_PRIMEIRO_PRODUTO and "@et_caption" not in app.toques
+    assert [r[0] for r in _registro_do_anexar()] == ["não ficou depois do Feito"] * robo.VEZES_DO_PRIMEIRO_PRODUTO
+
+
+class ListaQueDemoraAVoltar:
+    """O voltar da lista de Minhas Curtidas que leva uns segundos para mostrar a tela final."""
+
+    def __init__(self):
+        self.voltas, self.leituras = 0, 0
+
+    def dump_hierarchy(self):
+        self.leituras += 1
+        if self.voltas and self.leituras > 2:
+            return _xml(*_tela_final())
+        return _xml(*TELAS["curtidas"])
+
+    def press(self, tecla, meta=None):
+        self.voltas += 1
+
+
+def test_voltar_a_tela_final_espera_a_tela_antes_de_outro_voltar():
+    # Sem a legenda escrita (os produtos vão antes dela), um voltar a mais na tela final leva à
+    # edição do vídeo sem aviso: o robô espera a tela final aparecer antes de apertar de novo.
+    d = ListaQueDemoraAVoltar()
+    robo.voltar_a_tela_final(d)
+    assert d.voltas == 1
+
+
+def test_como_esta_a_tela_final_diz_a_edicao_da_legenda_e_o_foco():
+    # A tela final de 31/10, às 09:35, só com os ids que contam (rótulos fixos, nunca o texto).
+    tela = ('<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+            '<node resource-id="com.shopee.br:id/et_caption" text="Título" focused="true" clickable="true" '
+            'bounds="[337,280][1080,537]" />'
+            '<node resource-id="com.shopee.br:id/rl_overlay" clickable="true" bounds="[0,674][1080,2394]" />'
+            '<node resource-id="com.shopee.br:id/tv_add_product_tip" text="Toque para adicionar produtos" '
+            'bounds="[539,717][974,760]" /></node></hierarchy>')
+    assert robo.ps.como_esta_a_tela_final(tela) == ("a linha dos produtos vazia; a edição da legenda aberta por cima; "
+                                                    "a legenda em foco")
+    sem_nada = tela.replace('focused="true"', 'focused="false"').replace("rl_overlay", "outro")
+    assert robo.ps.como_esta_a_tela_final(sem_nada) == "a linha dos produtos vazia"
 
 
 def test_descurtir_no_fim_desfaz_cada_produto_curtido_pelo_link_dele(monkeypatch):
