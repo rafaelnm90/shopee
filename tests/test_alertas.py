@@ -19,8 +19,10 @@ def base(monkeypatch):
 
 
 def test_chaves_do_robo_sao_as_mesmas():
+    import celular_robo
     import robo_shopee_video as robo
     assert alertas.CHAVE_CONFIG_SV == robo.CHAVE_CONFIG and alertas.CHAVE_ESTADO_SV == robo.CHAVE_ESTADO
+    assert alertas.CHAVE_CELULAR == celular_robo.CHAVE and alertas.OPCAO_DO_PRAZO == celular_robo.OPCAO_DO_PRAZO
 
 
 def test_grave_avisado_uma_vez_de_novo_em_6_h_e_o_voltou_ao_normal(monkeypatch):
@@ -51,7 +53,7 @@ def test_disco_backup_erros_e_robo_da_shopee_video_parado(monkeypatch):
     db.salvar_config("shopee_video", {"robo_pausado": False, "robo_inicio": 9, "robo_fim": 21})
     db.salvar_config("shopee_video_robo", {"ultima_rodada_em": "2026-10-24 13:30:00"})
     graves = alertas.graves([], AGORA)
-    assert sorted(graves) == ["backup", "disco", "erros", "robo_sv"]
+    assert sorted(c for c, texto in graves.items() if texto) == ["backup", "disco", "erros", "robo_sv"]
     assert "93%" in graves["disco"] and "30 h" in graves["backup"] and "90 min" in graves["robo_sv"]
     # Pausado ou fora do horário, o robô parado não é grave.
     db.salvar_config("shopee_video", {"robo_pausado": True, "robo_inicio": 9, "robo_fim": 21})
@@ -123,4 +125,32 @@ def test_bot_mestre_confere_os_graves_do_servidor_de_hora_em_hora(bm, monkeypatc
     # para o diagnóstico (nada de "voltou ao normal" falso).
     monkeypatch.setattr(bm.alertas, "servicos_fora", lambda: None)
     rodar(bm.conferir_graves_do_servidor())
-    assert chamadas[-1] == ([], ("robo_sv",))
+    assert chamadas[-1] == ([], ("robo_sv", "prazo_adb"))
+
+
+def test_opcao_do_prazo_desligada_no_celular_avisa_e_volta_ao_normal():
+    # Sem a opção, o Android corta o pareamento em 7 dias e o robô perde o celular: o bot
+    # avisa na hora, de novo depois de 6 h, e o voltou ao normal quando ela é ligada.
+    # Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    mandados = []
+
+    def mandar(texto):
+        mandados.append(texto)
+        return True
+
+    def lido(prazo, quando):
+        db.salvar_config(alertas.CHAVE_CELULAR, {"prazo_da_autorizacao": prazo,
+                                                 "prazo_lido_em": quando.strftime("%Y-%m-%d %H:%M:%S")})
+
+    lido(7, AGORA - timedelta(minutes=30))
+    assert alertas.verificar([], AGORA, mandar, alertas.GRAVES_DO_SERVIDOR) == ["prazo_adb"]
+    assert len(mandados) == 1 and alertas.OPCAO_DO_PRAZO in mandados[0] and "7 dia(s)" in mandados[0]
+    alertas.verificar([], AGORA + timedelta(hours=1), mandar, alertas.GRAVES_DO_SERVIDOR)
+    assert len(mandados) == 1
+    # Sem leitura recente (robô pausado, celular fora): não lembra nem dá o voltou ao normal.
+    assert alertas.verificar([], AGORA + timedelta(hours=7), mandar, alertas.GRAVES_DO_SERVIDOR) == []
+    assert len(mandados) == 1 and "prazo_adb" in db.ler_config(alertas.CHAVE, {})
+    lido(0, AGORA + timedelta(hours=8))
+    alertas.verificar([], AGORA + timedelta(hours=8), mandar, alertas.GRAVES_DO_SERVIDOR)
+    assert mandados[-1] == "✅ Voltou ao normal: prazo do pareamento ligado no celular do robô."
+    assert db.ler_config(alertas.CHAVE, {}) == {}

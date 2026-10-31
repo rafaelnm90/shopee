@@ -1858,7 +1858,9 @@ PASSO_A_PASSO = (
     "📖 <b>Passo a passo do celular do robô</b>\n"
     "Para quando você resetar o celular guardado (ou trocar de celular). Faça na ordem.\n\n"
     "🔁 <b>Só reiniciou ou desligou a depuração?</b> Não precisa de tudo: ligue a "
-    f"<b>Depuração por Wi-Fi</b> (passo 6) e toque em <b>{BOTAO_RECONECTAR}</b>.\n\n"
+    f"<b>Depuração por Wi-Fi</b> (passo 6) e toque em <b>{BOTAO_RECONECTAR}</b>.\n"
+    "🔑 <b>O bot disse que o celular não reconhece mais o servidor?</b> O pareamento venceu: confira o "
+    "passo 6 e refaça só a Parte 2.\n\n"
     "<b>Parte 1: no celular guardado</b>\n"
     "1️⃣ <b>Ligar:</b> configure o celular, entre na sua conta Google e conecte no <b>Wi-Fi de casa</b>. "
     "Deixe no carregador.\n"
@@ -1869,8 +1871,9 @@ PASSO_A_PASSO = (
     "Depois: Configurações → Rede e Internet → VPN → ⚙️ do Tailscale → ligue <b>VPN sempre ativa</b>.\n"
     "5️⃣ <b>Modo desenvolvedor:</b> Configurações → Sobre o telefone → toque <b>7 vezes</b> em "
     "\"Número da versão\" (ele pede o PIN).\n"
-    "6️⃣ <b>Opções do desenvolvedor:</b> ligue <b>Manter ativado</b> e <b>Depuração por Wi-Fi</b> "
-    "(toque em Permitir).\n"
+    "6️⃣ <b>Opções do desenvolvedor:</b> ligue <b>Manter ativado</b>, <b>Depuração por Wi-Fi</b> "
+    f"(toque em Permitir) e <b>{celular_robo.OPCAO_DO_PRAZO}</b> (logo abaixo dela). Essa última fica "
+    "<b>sempre ligada</b>: sem ela, o Android corta o pareamento em 7 dias e o robô perde o celular.\n"
     "💡 Não achou uma opção? Use a lupa 🔍 no alto das Configurações e digite o nome dela.\n\n"
     "<b>Parte 2: aqui no bot</b>\n"
     f"7️⃣ Toque em <b>{BOTAO_PAREAR}</b>.\n"
@@ -1895,6 +1898,8 @@ async def texto_celular():
     dados = celular_robo.ler()
     rede = await asyncio.to_thread(celular_robo.celulares_na_rede)
     conectado = await asyncio.to_thread(celular_robo.conectado) if dados.get("porta") else False
+    # Conectado, lê o prazo do pareamento na hora (e guarda, para o aviso do alertas.py).
+    prazo = await asyncio.to_thread(celular_robo.anotar_prazo, True) if conectado else None
     if not rede:
         linha_rede = "❌ nenhum celular (ligue o Tailscale no celular guardado)"
     else:
@@ -1907,7 +1912,17 @@ async def texto_celular():
         conexao = f"⚠️ desconectado: toque em {BOTAO_RECONECTAR}"
     else:
         conexao = "⏳ ainda não"
-    if conectado:
+    if prazo == 0:
+        linha_prazo = f"✅ sem prazo ({html_escape(celular_robo.OPCAO_DO_PRAZO)} ligada)"
+    elif prazo:
+        linha_prazo = (f"⚠️ vence {prazo} dia(s) depois de feito: no Motorola, em Opções do desenvolvedor, ligue "
+                       f"<b>{html_escape(celular_robo.OPCAO_DO_PRAZO)}</b>")
+    else:
+        linha_prazo = "⏳ lido só com o celular conectado"
+    if conectado and prazo:
+        situacao = ("⚠️ <b>Conectado, mas o pareamento vence</b>: ligue no Motorola a opção do "
+                    "\"Prazo do pareamento\", abaixo.")
+    elif conectado:
         situacao = "✅ <b>Tudo certo</b>: o robô consegue usar o Motorola."
     elif dados.get("pareado_em"):
         situacao = f"⚠️ <b>Desconectado</b>: toque em <b>{BOTAO_RECONECTAR}</b>."
@@ -1919,13 +1934,15 @@ async def texto_celular():
             f"{situacao}\n"
             f"🌐 Na rede privada: {linha_rede}\n"
             f"🔗 Pareado: {pareado}\n"
-            f"📶 Conexão: {conexao}\n\n"
+            f"📶 Conexão: {conexao}\n"
+            f"⏳ Prazo do pareamento: {linha_prazo}\n\n"
             "<b>O que cada botão faz</b>\n"
             f"🔄 <b>{BOTAO_RECONECTAR}</b>: use quando aparecer \"desconectado\". O servidor acha o "
             "celular sozinho; se não achar, ligue a Depuração por Wi-Fi no Motorola e toque de novo.\n"
             f"🖥️ <b>{BOTAO_TELA}</b>: manda aqui um link de 30 min para ver e tocar na tela do Motorola de "
             "longe (por exemplo, para resolver a verificação da Shopee).\n"
-            f"🔗 <b>{BOTAO_PAREAR}</b>: só depois de resetar o Motorola ou trocar de celular.\n"
+            f"🔗 <b>{BOTAO_PAREAR}</b>: depois de resetar o Motorola, trocar de celular ou quando eu disser que o "
+            "celular não reconhece mais o servidor (o pareamento venceu).\n"
             f"📖 <b>{BOTAO_PASSO_A_PASSO}</b>: o guia completo para deixar o celular pronto de novo.")
 
 
@@ -2044,6 +2061,11 @@ async def pedir_reconexao(message: types.Message, state: FSMContext):
         logger.info("✅ Celular do robô: reconectado sozinho.")
         await message.answer(f"✅ <b>Celular conectado:</b> {html_escape(resultado)}.", parse_mode="HTML")
         await mostrar_celular(message, state)
+        return
+    if celular_robo.pede_pareamento(resultado):
+        logger.warning("⚠️ Celular do robô: o pareamento venceu; o Rafael precisa parear de novo.")
+        await message.answer(f"⚠️ Não reconectei: {html_escape(resultado)}.", reply_markup=teclado_celular())
+        await state.set_state(ShopeeVideoFluxo.celular)
         return
     await message.answer(f"⚠️ Não achei sozinho: {html_escape(resultado)}.")
     await _escolher_celular(message, state, "reconectar")
@@ -2250,12 +2272,17 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
     if not ok:
         logger.warning(f"⚠️ Robô automático: não retomou, celular fora ({resultado}).")
+        if celular_robo.pede_pareamento(resultado):
+            dica = "Depois de parear, toque de novo em <b>Retomar Postagem ▶️</b>."
+        else:
+            dica = ("No Motorola: Configurações → Sistema → Opções do desenvolvedor → ligue a <b>Depuração por "
+                    "Wi-Fi</b> (se ela já estiver ligada, desligue e ligue de novo) e confira se o <b>Tailscale</b> "
+                    "está ligado. Depois toque de novo em <b>Retomar Postagem ▶️</b>. Se ainda não der, pareie de "
+                    "novo em <b>Celular do Robô 📱 → Parear Celular 🔗</b> e deixe ligada, nas Opções do "
+                    f"desenvolvedor, a opção <b>{html_escape(celular_robo.OPCAO_DO_PRAZO)}</b>.")
         await message.answer(
-            f"⚠️ Não retomei: {html_escape(resultado)}.\n\nNo Motorola: Configurações → Sistema → Opções do "
-            "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b> (se ela já estiver ligada, desligue e ligue de "
-            "novo) e confira se o <b>Tailscale</b> está ligado. Depois toque de novo em <b>Retomar Postagem "
-            "▶️</b>. Se ainda não der, pareie de novo em <b>Celular do Robô 📱 → Parear Celular 🔗</b>. "
-            "Enquanto isso, o modo assistente continua mandando as postagens aqui.", parse_mode="HTML")
+            f"⚠️ Não retomei: {html_escape(resultado)}.\n\n{dica} Enquanto isso, o modo assistente continua "
+            "mandando as postagens aqui.", parse_mode="HTML")
         await mostrar_robo(message, state)
         return
     # A hora da retomada: o alerta de robô sem rodar conta dela, não da rodada de antes da pausa.
@@ -2346,6 +2373,11 @@ async def receber_porta(message: types.Message, state: FSMContext):
     ok, resultado = await asyncio.to_thread(celular_robo.conectar, dados["celular_ip"], porta)
     if not ok:
         logger.warning(f"⚠️ Celular do robô: conexão falhou ({resultado}).")
+        if celular_robo.pede_pareamento(resultado):
+            # A porta está certa: o celular é que não reconhece mais o servidor.
+            await message.answer(f"⚠️ Não conectou: {resultado}.", reply_markup=teclado_celular())
+            await state.set_state(ShopeeVideoFluxo.celular)
+            return
         await message.answer(f"⚠️ Não conectou: {resultado}. Confira a porta e mande de novo.",
                              reply_markup=teclado_cancelar)
         return

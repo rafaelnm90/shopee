@@ -20,6 +20,12 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   32768 a 60999 do IP do celular na rede privada) e conecta. Sem conseguir (depuração
   desligada, celular fora do Tailscale), a Postagem pausa sozinha e o assistente assume;
   Retomar Postagem ▶️ procura de novo antes de retomar.
+- **Pareamento vencido (31/10/2026):** sem a opção **Desativar o tempo limite da
+  autorização adb** (Opções do desenvolvedor), o Android corta o pareamento 7 dias depois
+  de feito: a porta abre, e o adb responde "failed to connect to ENDEREÇO" (sem motivo) ou
+  "failed to authenticate". Só parear de novo resolve. A opção fica **sempre ligada**
+  (pedido do Rafael); o robô a lê de hora em hora (`settings get global
+  adb_allowed_connection_time`: 0 é ligada) e o `alertas.py` avisa se ela desligar.
 - **Conta suspensa pela Shopee (mapeado no Motorola em 23/10/2026):** com a conta de
   Shopee Vídeo suspensa, tocar em **Postar vídeo** não abre nada (a tela fica no Perfil).
   O aviso fica em **Notificações** (aba de baixo, `title` "Notificações") → filtro
@@ -575,7 +581,7 @@ Celular guardado (perfil pessoal do Rafael, carregador, Wi-Fi)
 
 | Fase | Quem | O quê | Situação |
 |---|---|---|---|
-| 0 | Rafael | Celular só para isso: no carregador e no Wi-Fi, sem economia de bateria para a Shopee; Shopee pela Play Store com o **perfil pessoal** do Rafael (sem perfil reserva: escolha dele em 09/10/2026); modo desenvolvedor com "depuração sem fio" (no Motorola, "Depuração por Wi-Fi") e "Manter ativado"; app Tailscale com VPN sempre ativa | feita em 17/10/2026 (Motorola) |
+| 0 | Rafael | Celular só para isso: no carregador e no Wi-Fi, sem economia de bateria para a Shopee; Shopee pela Play Store com o **perfil pessoal** do Rafael (sem perfil reserva: escolha dele em 09/10/2026); modo desenvolvedor com "depuração sem fio" (no Motorola, "Depuração por Wi-Fi"), "Manter ativado" e "Desativar o tempo limite da autorização adb" (sempre ligada: sem ela, o pareamento vence em 7 dias; 31/10/2026); app Tailscale com VPN sempre ativa | feita em 17/10/2026 (Motorola) |
 | 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa. A chave do servidor não expira (Disable key expiry em Machines → shopee-servidor) | feita em 05/10/2026 |
 | 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas), com o nome `shopee-servidor` | feita em 05/10/2026: conectado |
 | 1c | Claude + Rafael | Parear o adb com o celular pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱, `celular_robo.py`): o código vai só no privado e o bot apaga a mensagem; Reconectar quando a porta muda. O explorar aceita o celular (`android.yml` → `explorar-celular`) | feita em 17/10/2026: pareado e conectado (moto g(100)). Depois de um reset, o Rafael refaz as fases 0 e 1c pelo botão Passo a Passo 📖 do Celular do Robô 📱 |

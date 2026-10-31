@@ -17693,13 +17693,15 @@ async def monitor_saude():
 @registro_processos.anotar("bot_mestre", "graves: robôs fora do ar")
 async def conferir_graves_do_servidor():
     """
-    De hora em hora, os graves que só o alertas.py vê (robô fora do ar e o robô da Shopee
-    Vídeo sem rodar), avisados no privado do Rafael como no diagnóstico: o GitHub pula boa
-    parte das rodadas agendadas dele, e o aviso chegava horas depois. Sem resposta do
-    systemctl, confere só o robô da Shopee Vídeo (os robôs fora do ar ficam para o diagnóstico).
+    De hora em hora, os graves que só o alertas.py vê (robô fora do ar, o robô da Shopee
+    Vídeo sem rodar e o prazo do pareamento ligado no Motorola dele), avisados no privado do
+    Rafael como no diagnóstico: o GitHub pula boa parte das rodadas agendadas dele, e o aviso
+    chegava horas depois. Sem resposta do systemctl, confere só os outros (os robôs fora do
+    ar ficam para o diagnóstico).
     """
     caidos = await asyncio.to_thread(alertas.servicos_fora)
-    so = alertas.GRAVES_DO_SERVIDOR if caidos is not None else ("robo_sv",)
+    so = alertas.GRAVES_DO_SERVIDOR if caidos is not None else tuple(
+        c for c in alertas.GRAVES_DO_SERVIDOR if c != "fora:")
     if caidos is None:
         logger.warning("🩺 [Graves] O systemctl não respondeu: os robôs fora do ar ficam para o diagnóstico.")
     await asyncio.to_thread(alertas.verificar, caidos or [], None, None, so)

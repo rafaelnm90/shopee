@@ -13,7 +13,8 @@ sem esperar o checkup da noite.
 Os robôs já avisam na hora os graves que eles mesmos veem (conta suspensa, celular
 desconectado, resposta no lugar errado, comentário sem resposta); aqui ficam os que
 nenhum robô vê sozinho: robô fora do ar, disco cheio, backup atrasado, erros demais na
-última hora e o robô da Shopee Vídeo sem rodar.
+última hora, o robô da Shopee Vídeo sem rodar e, no Motorola dele, a opção que impede o
+Android de cortar o pareamento desligada (o robô a lê de hora em hora: celular_robo).
 
 O GitHub pula boa parte das rodadas agendadas do diagnóstico (em 27 e 28/10, 8 de 37), e o
 aviso "na hora" chegava com horas de atraso. Por isso o bot_mestre também confere, de hora
@@ -43,13 +44,19 @@ SEM_RODADA = timedelta(minutes=60)
 # As chaves do robo_shopee_video (sem importá-lo, que traz a IA e o celular junto; o
 # tests/test_alertas.py confere que são as mesmas).
 CHAVE_CONFIG_SV, CHAVE_ESTADO_SV = "shopee_video", "shopee_video_robo"
+# O celular do robô (celular_robo.CHAVE e celular_robo.OPCAO_DO_PRAZO, conferidas no mesmo
+# teste): o prazo do pareamento que o robô leu, e até quando a leitura vale. Sem leitura
+# recente (robô pausado, celular fora), não avisa nem dá o "voltou ao normal".
+CHAVE_CELULAR = "celular_robo"
+OPCAO_DO_PRAZO = "Desativar o tempo limite da autorização adb"
+LEITURA_DO_PRAZO_VALE = timedelta(hours=3)
 NOMES = {"bot_mestre_bot": "bot principal (bot_mestre)", "divulgacao_canal_bot": "da divulgação",
          "motor_userbot_bot": "do Espião e do Espelhador", "espelhador_videos_autorais_bot": "dos Autorais",
          "downloader_bot": "Baixador"}
 
 
 # O que o bot_mestre confere sozinho de hora em hora (o começo da chave de cada grave).
-GRAVES_DO_SERVIDOR = ("fora:", "robo_sv")
+GRAVES_DO_SERVIDOR = ("fora:", "robo_sv", "prazo_adb")
 # Como o diagnóstico: um serviço parado é conferido de novo depois disto, porque o systemd
 # o religa sozinho em segundos e o reinício não é grave.
 ESPERA_PARA_CONFIRMAR = 60
@@ -119,8 +126,28 @@ def _robo_sem_rodar(agora):
     return int(parada.total_seconds() // 60) if parada > SEM_RODADA else None
 
 
+def _prazo_do_pareamento(agora):
+    """
+    Em quantos dias o Android corta o pareamento do celular do robô, pela última leitura do
+    robô (0: a opção OPCAO_DO_PRAZO ligada, sem prazo); None sem leitura recente.
+    """
+    dados = db.ler_config(CHAVE_CELULAR, {}) or {}
+    try:
+        lido_em = datetime.strptime(dados.get("prazo_lido_em") or "", "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if agora.replace(tzinfo=None) - lido_em > LEITURA_DO_PRAZO_VALE:
+        return None
+    prazo = dados.get("prazo_da_autorizacao")
+    return prazo if isinstance(prazo, int) else None
+
+
 def graves(caidos=(), agora=None):
-    """{chave: texto do aviso} dos graves de agora. caidos: os serviços fora do ar (o diagnóstico confere 2 vezes)."""
+    """
+    {chave: texto do aviso} dos graves de agora. caidos: os serviços fora do ar (o
+    diagnóstico confere 2 vezes). Texto None: o grave não deu para conferir agora (fica
+    como está, sem aviso novo nem "voltou ao normal").
+    """
     agora = _agora(agora)
     achados = {}
     for servico in caidos:
@@ -140,11 +167,22 @@ def graves(caidos=(), agora=None):
     if parado:
         achados["robo_sv"] = (f"🚨 O robô da Shopee Vídeo está ativo e no horário, mas não roda há {parado} min. "
                               "O Claude investiga na próxima retomada.")
+    # A opção fica sempre ligada (pedido do Rafael: DECISOES.md, Shopee Vídeo): sem ela, o
+    # pareamento vence e o robô perde o celular.
+    prazo = _prazo_do_pareamento(agora)
+    if prazo is None:
+        achados["prazo_adb"] = None
+    elif prazo:
+        achados["prazo_adb"] = (f"🚨 No Motorola do robô, a opção {OPCAO_DO_PRAZO} está desligada: sem ela, o "
+                                f"Android corta o pareamento {prazo} dia(s) depois de feito e o robô perde o "
+                                "celular. Ligue em Configurações → Sistema → Opções do desenvolvedor → "
+                                f"{OPCAO_DO_PRAZO} (logo abaixo da Depuração por Wi-Fi).")
     return achados
 
 
 ROTULOS = {"disco": "disco cheio", "backup": "backup atrasado", "erros": "erros demais na última hora",
-           "robo_sv": "robô da Shopee Vídeo sem rodar"}
+           "robo_sv": "robô da Shopee Vídeo sem rodar",
+           "prazo_adb": "prazo do pareamento ligado no celular do robô"}
 
 
 def rotulo(chave):
@@ -169,14 +207,14 @@ def verificar(caidos=(), agora=None, mandar=None, so=None):
     atuais = {c: t for c, t in graves(caidos, agora).items() if conferido(c)}
     avisados = db.ler_config(CHAVE, {}) or {}
     for chave, texto in atuais.items():
-        if avisados.get(chave, "") <= _momento(agora - REPETIR_DEPOIS):
+        if texto and avisados.get(chave, "") <= _momento(agora - REPETIR_DEPOIS):
             if mandar(texto):
                 avisados[chave] = _momento(agora)
     for chave in [c for c in avisados if c not in atuais and conferido(c)]:
         mandar(f"✅ Voltou ao normal: {rotulo(chave)}.")
         del avisados[chave]
     db.salvar_config(CHAVE, avisados)
-    return sorted(atuais)
+    return sorted(c for c, texto in atuais.items() if texto)
 
 
 def main(argumentos):
