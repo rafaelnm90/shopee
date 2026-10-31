@@ -1774,6 +1774,27 @@ def test_ia_dos_produtos_a_mais_aceita_o_mesmo_produto_com_outra_foto_de_capa(mo
     assert ps.A_CAPA_PODE_SER_OUTRA in pedidos[0]
 
 
+def test_outra_capacidade_ou_medida_e_outro_modelo_na_troca_e_nos_produtos_a_mais(monkeypatch):
+    # O Rafael recusou (31/10, vídeo das 07:54) um rascunho com uma air fryer de 12 L anexada
+    # como a mesma de 17 L do vídeo: a IA passa a comparar a capacidade e as medidas, pelos
+    # números do nome e os escritos nas fotos, na troca de loja e nos produtos a mais.
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(prompt)
+        return '{"iguais": [], "confere": false, "motivo": "outra capacidade"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Air Fryer 12L")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\xff\xd8outra")
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Air Fryer 17L", [("Air Fryer 12L", b"\xff\xd8a")],
+                                capa=b"\xff\xd8capa")[0] == []
+    ok, _motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=b"\xff\xd8capa")
+    assert not ok and len(pedidos) == 2
+    for prompt in pedidos:
+        assert ps.OUTRA_MEDIDA in prompt and "12L e 17L são modelos diferentes" in prompt
+
+
 def test_troca_de_loja_confere_o_mesmo_produto_mesmo_com_outra_foto_de_capa(monkeypatch):
     # Escolha do Rafael (30/10, P102): o anúncio de outra loja entra no lugar do produto do link
     # sendo o mesmo produto, mesmo com outra foto de capa; a capa do post vai junto como o
