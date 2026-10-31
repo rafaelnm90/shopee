@@ -2190,11 +2190,20 @@ def no_horario_das_rodadas(agora=None):
     return inicio <= (agora or datetime.now(fuso_horario)).hour < fim
 
 
+# Quanto o explorar no celular espera o robô automático soltar o celular, olhando a trava a
+# cada PAUSA_DA_ESPERA: um rascunho leva até a rodada inteira, e o explorar que desiste na
+# hora quase nunca acha o celular livre num dia de rascunhos seguidos. Cabe no tempo do
+# comando do android.yml (25 min), com o explorar depois.
+ESPERA_DO_CELULAR = 15 * 60
+PAUSA_DA_ESPERA = 15
+
+
 def explorar(texto, d=None, celular=False):
     """
     Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar
     e na Verificação da Shopee. True se todos deram certo, False se um falhou ou a
-    verificação apareceu e None se nem começou (passo desconhecido ou Android desligado).
+    verificação apareceu e None se nem começou (passo desconhecido, Android desligado ou
+    o robô automático no celular por mais que ESPERA_DO_CELULAR).
 
     O log do Actions é público: nele só entram as linhas do próprio explorar (a forma
     da tela, estados e números). O log dos módulos que ele usa fica calado, porque a
@@ -2203,11 +2212,18 @@ def explorar(texto, d=None, celular=False):
     logging.disable(logging.CRITICAL)
     try:
         if celular and d is None:
-            with celular_robo.trava() as livre:
-                if not livre:
-                    print("celular: o robô automático está tocando no celular agora; nada foi tocado")
-                    return None
-                return _explorar(texto, d, celular)
+            tentativas = ESPERA_DO_CELULAR // PAUSA_DA_ESPERA + 1
+            for tentativa in range(tentativas):
+                with celular_robo.trava() as livre:
+                    if livre:
+                        return _explorar(texto, d, celular)
+                if tentativa == 0:
+                    print(f"celular: o robô automático está tocando no celular; esperando ele soltar "
+                          f"(até {ESPERA_DO_CELULAR // 60} min)")
+                if tentativa < tentativas - 1:
+                    time.sleep(PAUSA_DA_ESPERA)
+            print("celular: o robô automático continua tocando no celular; nada foi tocado")
+            return None
         return _explorar(texto, d, celular)
     finally:
         logging.disable(logging.NOTSET)

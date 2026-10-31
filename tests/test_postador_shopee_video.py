@@ -139,6 +139,32 @@ def test_acha_igual_antes_de_parecido():
     assert ps.achar("isso não é xml", "Postar") is None
 
 
+def test_explorar_no_celular_espera_o_robo_soltar_o_celular(monkeypatch, capsys):
+    # 31/10: o teste da capa parou na hora duas vezes (09:05 e 09:28) com o robô no meio de
+    # rascunhos seguidos; o explorar espera ele soltar o celular, até ESPERA_DO_CELULAR.
+    import contextlib
+    ocupado = {"vezes": 3}
+
+    @contextlib.contextmanager
+    def trava():
+        if ocupado["vezes"] > 0:
+            ocupado["vezes"] -= 1
+            yield False
+        else:
+            yield True
+
+    pausas, feitos = [], []
+    monkeypatch.setattr(ps.celular_robo, "trava", trava)
+    monkeypatch.setattr(ps.time, "sleep", lambda segundos: pausas.append(segundos))
+    monkeypatch.setattr(ps, "_explorar", lambda texto, d, celular: feitos.append(texto) or True)
+    assert ps.explorar("tela", celular=True) is True and feitos == ["tela"]
+    assert pausas == [ps.PAUSA_DA_ESPERA] * 3 and "esperando ele soltar" in capsys.readouterr().out
+    # O robô que não solta o celular no tempo: nada é tocado.
+    ocupado["vezes"], feitos[:], pausas[:] = 10 ** 6, [], []
+    assert ps.explorar("tela", celular=True) is None and feitos == []
+    assert sum(pausas) == ps.ESPERA_DO_CELULAR and "nada foi tocado" in capsys.readouterr().out
+
+
 def test_explorar_toca_e_descreve_cada_tela(capsys):
     aparelho = Aparelho()
     assert ps.explorar("abrir; tocar:Postar vídeo; voltar", aparelho)
