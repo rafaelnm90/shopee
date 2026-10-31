@@ -1,7 +1,8 @@
 """
 Manda um aviso curto no privado do Rafael pelo bot principal. Usado pelo
-workflow avisar.yml para o lembrete diário das pendências (as perguntas do
-Claude vão pelo perguntas_rafael.py, que usa o mandar_texto). O tela_android.py
+workflow avisar.yml para o lembrete diário das pendências e os pedidos de ajuda
+do Claude (as perguntas do Claude vão pelo perguntas_rafael.py, que usa o
+mandar_texto). O tela_android.py
 usa o mandar_texto para levar o link da tela do Android, o
 postador_shopee_video.py usa o mandar_foto para o print do rascunho, e o
 robo_shopee_video.py usa o mandar_video para o vídeo que o Google recusou.
@@ -37,10 +38,14 @@ def montar_texto(assunto, link=""):
     """
     O lembrete diário das pendências (assunto começando com "Lembrete") não é pergunta:
     dizer que o Claude espera uma resposta fazia o Rafael procurar uma pergunta que não
-    existia.
+    existia. O pedido de ajuda (assunto começando com "Pedido de ajuda": um vídeo dele
+    ensinando algo, um print, um teste no celular) também não: diz o que o Claude pediu.
+    Pedido do Rafael (31/10): DECISOES.md, Trabalho com o Claude.
     """
     if assunto.strip().casefold().startswith("lembrete"):
         topo, fim = "🤖 Lembrete do Claude: o que está pendente.", "Abra a conversa com o Claude para ver a lista."
+    elif assunto.strip().casefold().startswith("pedido de ajuda"):
+        topo, fim = "🤖 O Claude pediu uma ajuda sua.", "Abra a conversa com o Claude para ver o que ele precisa."
     else:
         topo, fim = "🤖 O Claude está esperando uma resposta sua.", "Abra a conversa com o Claude para responder."
     texto = f"{topo}\n\n📌 {assunto.strip()[:300]}\n\n{fim}"

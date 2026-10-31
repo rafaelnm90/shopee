@@ -1,7 +1,8 @@
 name: Avisar o Rafael
 
 # O Claude dispara este workflow para falar com o Rafael no privado do bot principal:
-#   aviso       o lembrete diário das pendências (avisar_rafael.py), com assunto curto;
+#   aviso       o lembrete diário das pendências (avisar_rafael.py), com assunto curto, ou um
+#               pedido de ajuda do Claude (assunto começando com "Pedido de ajuda");
 #   pergunta    uma pergunta do Claude, cifrada em "dados" (perguntas_rafael.py cifrar):
 #               o servidor guarda, manda na hora e o bot_mestre lembra de hora em hora
 #               até ela ser respondida; o log mostra só o código (P1, P2...);
@@ -14,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       acao:
-        description: "aviso (lembrete diário), pergunta (nova, cifrada) ou respondida"
+        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada) ou respondida"
         required: false
         type: choice
         options: [aviso, pergunta, respondida]
