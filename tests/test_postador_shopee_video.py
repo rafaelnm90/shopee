@@ -1821,6 +1821,29 @@ def test_outra_capacidade_ou_medida_e_outro_modelo_na_troca_e_nos_produtos_a_mai
         assert ps.OUTRA_MEDIDA in prompt and "12L e 17L são modelos diferentes" in prompt
 
 
+def test_outro_sabor_fragrancia_ou_kit_e_outro_produto_na_troca_e_nos_produtos_a_mais(monkeypatch):
+    # A Política de Relevância de Produto da Shopee Vídeo (vídeo do Rafael de 31/10) dá como
+    # irrelevante o chocolate ao leite no lugar do amargo, o perfume floral no lugar do
+    # amadeirado da mesma marca e o kit com itens que o vídeo não mostra: a IA compara isso na
+    # troca de loja e nos produtos a mais.
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(prompt)
+        return '{"iguais": [], "confere": false, "motivo": "outro sabor"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Chocolate Amargo 70%")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\xff\xd8outra")
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Chocolate ao Leite", [("Chocolate Amargo 70%", b"\xff\xd8a")],
+                                capa=b"\xff\xd8capa")[0] == []
+    ok, _motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=b"\xff\xd8capa")
+    assert not ok and len(pedidos) == 2
+    for prompt in pedidos:
+        assert ps.OUTRA_VERSAO in " ".join(prompt.split())
+        assert "chocolate ao leite e amargo" in prompt and "um kit com itens que não aparecem no vídeo" in prompt
+
+
 def test_marca_painel_e_desenho_diferentes_sao_outro_produto_e_a_ia_descreve_antes_de_decidir(monkeypatch):
     # O Rafael (31/10, depois do vídeo das 07:54): além da capacidade, a air fryer a mais era de
     # outra marca, com muito mais botões e outro desenho, "visivelmente outra". Na troca de loja
