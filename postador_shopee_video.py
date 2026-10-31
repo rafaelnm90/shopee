@@ -160,14 +160,19 @@ Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta
 # capas, onde a foto diferente vem marcada. Escolha dele (30/10, P102): DECISOES.md, Shopee Vídeo.
 ROTULO_DA_CAPA = "Foto de capa do anúncio do post"
 A_CAPA_PODE_SER_OUTRA = "A foto de capa pode ser outra (cada loja usa a sua): o que conta é o produto."
+# Outra capacidade, tamanho ou medida é outro modelo: os números do nome e os escritos na foto
+# contam (o Rafael recusou, em 31/10, uma air fryer de 12 L anexada como a de 17 L do vídeo).
+# Pedido dele: DECISOES.md, Shopee Vídeo.
+OUTRA_MEDIDA = ("com outra capacidade, tamanho ou medida (compare os números do nome e os escritos nas fotos, como "
+                "litros, centímetros e polegadas: 12L e 17L são modelos diferentes)")
 PROMPT_PRODUTO_COM_CAPA = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 Junto com o vídeo vão duas imagens, cada uma logo depois do seu nome: a foto de capa do anúncio do post (o produto \
 do vídeo) e a foto do anúncio de outra loja que vai ser anexado: "{nome}".
 A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro e diga se ele mostra o mesmo produto do anúncio de outra loja: o mesmo item, da mesma \
 marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} Outro produto do mesmo tipo com outro formato ou \
-modelo, o mesmo produto em outra cor ou estampa, só um acessório dele, ou um vídeo em que o produto não aparece, \
-não confere. Na dúvida, não.
+modelo, {outra_medida}, o mesmo produto em outra cor ou estampa, só um acessório dele, ou um vídeo em que o \
+produto não aparece, não confere. Na dúvida, não.
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
 # A última chance do anexar (P18): o recorte do 1º da lista de Minhas Curtidas (a foto
 # pequena, o nome e o preço) com o vídeo. Mesma régua da foto do anúncio, com a mesma cor
@@ -190,8 +195,9 @@ vídeo) e, depois, as fotos de anúncios de outras lojas, cada uma logo depois d
 A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro, compare com cada foto e diga quais anúncios são o mesmo produto do vídeo: o mesmo item, \
 da mesma marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} Outro produto do mesmo tipo, de outra \
-marca, com outro formato ou modelo, o mesmo produto em outra cor ou estampa, outra quantidade no kit, só um \
-acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo produto. Na dúvida, não é.
+marca, com outro formato ou modelo, {outra_medida}, o mesmo produto em outra cor ou estampa, outra quantidade \
+no kit, só um acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo produto. Na dúvida, \
+não é.
 Responda só com um JSON: {{"iguais": [os números dos anúncios que são o mesmo produto], \
 "motivo": "uma frase curta"}}"""
 # O aviso da página do produto de loja de férias (loja_de_ferias).
@@ -916,7 +922,8 @@ def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None):
         return [], "sem a foto de capa do anúncio do post"
     imagens = [(capa, tipo_da_foto(capa), ROTULO_DA_CAPA)] + [
         (foto, tipo_da_foto(foto), f"Anúncio {i}: {nome_do_anuncio}") for i, (nome_do_anuncio, foto) in enumerate(anuncios, 1)]
-    prompt = PROMPT_ITENS_IGUAIS.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA)
+    prompt = PROMPT_ITENS_IGUAIS.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA,
+                                        outra_medida=OUTRA_MEDIDA)
     confirmados, motivo = set(range(1, len(anuncios) + 1)), ""
     for vez in range(1, VEZES_DA_IA + 1):
         resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, imagens=imagens))
@@ -1079,7 +1086,8 @@ def _confere_com_a_capa(video, nome, foto, capa, vistos):
     capa pode ser outra (P102).
     """
     imagens = [(capa, tipo_da_foto(capa), ROTULO_DA_CAPA), (foto, tipo_da_foto(foto), f"Anúncio de outra loja: {nome}")]
-    prompt = PROMPT_PRODUTO_COM_CAPA.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA)
+    prompt = PROMPT_PRODUTO_COM_CAPA.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA,
+                                             outra_medida=OUTRA_MEDIDA)
     for vez in range(1, VEZES_DA_IA + 1):
         dados = _json_da_ia(asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, imagens=imagens)))
         if not isinstance(dados, dict):
