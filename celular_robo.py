@@ -15,6 +15,11 @@ A porta da Depuração por Wi-Fi muda cada vez que ela é ligada (o celular rein
 trocou de Wi-Fi). Com ela ligada, reconectar_sozinho() acha a porta nova pela rede
 privada, sem o Rafael mandar nada; só a depuração desligada pede a mão dele.
 
+O Android corta o pareamento 7 dias depois de feito, a não ser que a opção OPCAO_DO_PRAZO
+(Opções do desenvolvedor) esteja ligada: aí o celular abre a ligação, mas não reconhece
+mais o servidor, e só parear de novo resolve. A opção fica sempre ligada (pedido do
+Rafael); o robô a lê de hora em hora (anotar_prazo) e o alertas.py avisa se ela desligar.
+
 O código de pareamento vale só enquanto a janela dele está aberta no celular e passa
 só pelo bot: nunca vai para o log nem para o banco. No banco (chave CHAVE) ficam o
 nome do celular na rede, o endereço e a porta da conexão, o modelo e as datas.
@@ -27,7 +32,7 @@ import json
 import os
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import android_virtual as av
 import db
@@ -35,6 +40,17 @@ from fuso import fuso_horario
 
 CHAVE = "celular_robo"
 ARQUIVO_TRAVA = os.path.join(av.PASTA_TRABALHO, "celular.trava")
+# A opção que impede o Android de cortar o pareamento (nome como aparece no Motorola). Ligada,
+# a configuração CONFIG_DO_PRAZO vale 0; sem ela, vale o padrão de PRAZO_PADRAO_DIAS.
+OPCAO_DO_PRAZO = "Desativar o tempo limite da autorização adb"
+CONFIG_DO_PRAZO = "adb_allowed_connection_time"
+PRAZO_PADRAO_DIAS = 7
+LER_O_PRAZO_A_CADA = timedelta(hours=1)
+# O celular abre a ligação e não reconhece mais o servidor: o pareamento venceu, e nem a
+# porta nem o Reconectar resolvem. O botão é o BOTAO_PAREAR do painel_shopee_video.
+MOTIVO_DO_PAREAMENTO = "o celular não reconhece mais este servidor (o pareamento venceu)"
+COMO_PAREAR = ("pareie de novo em Celular do Robô 📱 → Parear Celular 🔗 e deixe ligada, nas Opções do "
+               f"desenvolvedor do Motorola, a opção {OPCAO_DO_PRAZO}")
 # Onde o Android abre a porta da Depuração por Wi-Fi: as portas "efêmeras" do Linux,
 # sorteadas cada vez que a depuração é ligada.
 PORTAS_DA_DEPURACAO = range(32768, 61000)
@@ -106,20 +122,39 @@ def _motivo(resultado):
     for trecho, motivo in (("wrong password", "o código não confere (ou a janela já fechou)"),
                            ("protocol fault", "o código não confere (ou a janela já fechou)"),
                            ("connection refused", "o celular recusou: a porta mudou ou a depuração está desligada"),
-                           # 24/10/2026: com a depuração ligada e a porta aberta, o celular parou de
-                           # aceitar o servidor; parear de novo resolveu.
-                           ("failed to authenticate", "o celular não reconhece mais este servidor: parear de novo"),
+                           # Com a depuração ligada e a porta aberta, o celular não aceita mais o
+                           # servidor: o pareamento venceu.
+                           ("failed to authenticate", f"{MOTIVO_DO_PAREAMENTO}: {COMO_PAREAR}"),
                            ("timed out", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
                            ("no route", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
+                           ("unreachable", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
                            ("unauthorized", "o celular ainda não autorizou este servidor"),
-                           # 31/10/2026: a porta da depuração respondia, e o adb via o celular
-                           # "offline"; o servidor do adb pode ficar preso (reconectar_sozinho).
+                           # A porta da depuração responde e o adb vê o celular "offline": o servidor
+                           # do adb pode ter ficado preso (reconectar_sozinho o reinicia).
                            ("offline", "o adb vê o celular desligado (offline)"),
                            ("daemon", "o adb do servidor não respondeu")):
         if trecho in saida:
             return motivo
+    if _ligacao_sem_aceite(resultado[1]):
+        return f"{MOTIVO_DO_PAREAMENTO}: {COMO_PAREAR}"
     resumo = _resumo_do_adb(resultado[1])
     return f"o adb não conseguiu (tente de novo; o adb disse: {resumo})" if resumo else "o adb não conseguiu (tente de novo)"
+
+
+def _ligacao_sem_aceite(saida):
+    """
+    O adb abriu a ligação, mas o celular não aceitou o servidor: "failed to connect to
+    ENDEREÇO", sem o motivo do sistema. A ligação recusada ou sem resposta vem com ele (o
+    endereço entre aspas e o motivo depois dos dois-pontos). Na Depuração por Wi-Fi é o
+    pareamento vencido: o celular corta a ligação sem dizer por quê.
+    """
+    return any(re.fullmatch(r"failed to connect to [^'\s]+", linha.strip())
+               for linha in str(saida or "").lower().splitlines())
+
+
+def pede_pareamento(motivo):
+    """O motivo de uma falha diz que só parear de novo resolve (nem a porta nem o Reconectar)?"""
+    return MOTIVO_DO_PAREAMENTO in (motivo or "")
 
 
 def _resumo_do_adb(saida):
@@ -206,8 +241,9 @@ def reconectar_sozinho():
     Reconecta sem o Rafael mandar a porta: primeiro a porta guardada, refazendo a conexão
     do adb (ela pode ficar presa com o celular e a depuração ligados); se não der, procura
     a porta nova da Depuração por Wi-Fi no celular, pela rede privada, e conecta nela.
-    Só a depuração desligada (ou o celular fora da rede) impede. (True, modelo) ou
-    (False, motivo em palavras simples, que diz se a porta da depuração respondia).
+    Só a depuração desligada, o celular fora da rede ou o pareamento vencido impedem.
+    (True, modelo) ou (False, motivo em palavras simples, que diz se a porta da depuração
+    respondia e se é preciso parear de novo: pede_pareamento).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if conectado():
@@ -220,6 +256,7 @@ def reconectar_sozinho():
     rede = {c["ip"]: c for c in celulares_na_rede()}
     if not rede.get(dados["ip"], {}).get("online"):
         return False, "o celular não está na rede privada (Tailscale desligado ou celular sem internet)"
+    motivos = []
     if dados.get("porta"):
         # A conexão sem fio do adb pode ficar presa ("offline") com a depuração ligada: o
         # "adb connect" diz que já está conectado e nada responde. Desfazer e refazer resolve.
@@ -227,6 +264,7 @@ def reconectar_sozinho():
         ok, resultado = conectar(dados["ip"], dados["porta"])
         if ok:
             return True, resultado
+        motivos.append(resultado)
     abertas = portas_abertas(dados["ip"])
     for porta in abertas:
         if porta == dados.get("porta"):
@@ -234,16 +272,24 @@ def reconectar_sozinho():
         ok, resultado = conectar(dados["ip"], porta)
         if ok:
             return True, resultado
+        motivos.append(resultado)
     if dados.get("porta") in abertas:
         # A porta da depuração responde e o adb não conecta: o servidor do adb pode ter ficado
-        # preso (31/10/2026: o Retomar não achava o celular com a depuração ligada). Reiniciá-lo
-        # (as chaves do pareamento ficam) e tentar de novo uma vez, antes de pedir o pareamento.
+        # preso. Reiniciá-lo (as chaves do pareamento ficam) e tentar de novo uma vez, antes de
+        # pedir o pareamento.
         av._rodar("adb", "kill-server", timeout=20)
         ok, resultado = conectar(dados["ip"], dados["porta"])
         if ok:
             return True, resultado
+        if pede_pareamento(resultado):
+            return False, f"a Depuração por Wi-Fi responde, mas {resultado}"
         return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "
                        "se continuar, parear de novo pelo Celular do Robô")
+    # A porta nova (a depuração foi desligada e ligada) também não aceita o servidor: não é a
+    # porta, é o pareamento.
+    vencido = next((m for m in motivos if pede_pareamento(m)), None)
+    if vencido:
+        return False, f"a Depuração por Wi-Fi responde, mas {vencido}"
     if abertas:
         return False, (f"o celular tem {len(abertas)} porta(s) aberta(s), mas nenhuma é a da Depuração por Wi-Fi; "
                        "se ela estiver ligada, parear de novo pelo Celular do Robô")
@@ -261,12 +307,64 @@ def _estado_do_adb(resultado):
     return "sem resposta"
 
 
+def ler_prazo_da_autorizacao():
+    """
+    Em quantos dias o Android corta o pareamento do servidor: 0 com a opção OPCAO_DO_PRAZO
+    ligada (sem prazo), PRAZO_PADRAO_DIAS sem ela. None sem o celular conectado ou sem
+    resposta. Só lê a configuração; não muda nada no celular.
+    """
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", "settings", "get", "global", CONFIG_DO_PRAZO, timeout=15)
+    if not av._ok(r):
+        return None
+    valor = r[1].strip().lower()
+    if valor in ("", "null"):
+        return PRAZO_PADRAO_DIAS
+    try:
+        milissegundos = int(valor)
+    except ValueError:
+        return None
+    return 0 if milissegundos <= 0 else max(1, round(milissegundos / 86_400_000))
+
+
+def anotar_prazo(forcar=False, agora=None):
+    """
+    Lê o prazo do pareamento no celular e guarda no banco (prazo_da_autorizacao e
+    prazo_lido_em), no máximo uma vez por LER_O_PRAZO_A_CADA; forcar=True lê na hora (o
+    painel). O alertas.py avisa o Rafael quando a leitura recente não é 0. Devolve o prazo
+    (o lido agora ou o guardado), ou None.
+    """
+    agora = agora or datetime.now(fuso_horario)
+    dados = ler()
+    if not forcar:
+        try:
+            lido_em = datetime.strptime(dados.get("prazo_lido_em") or "", "%Y-%m-%d %H:%M:%S")
+            if agora.replace(tzinfo=None) - lido_em < LER_O_PRAZO_A_CADA:
+                return dados.get("prazo_da_autorizacao")
+        except ValueError:
+            pass
+    prazo = ler_prazo_da_autorizacao()
+    if prazo is not None:
+        _gravar(prazo_da_autorizacao=prazo, prazo_lido_em=agora.strftime("%Y-%m-%d %H:%M:%S"))
+    return prazo
+
+
+def descrever_prazo(prazo):
+    """O prazo do pareamento em palavras curtas, para o estado e o painel."""
+    if prazo is None:
+        return "não lido"
+    return "sem prazo" if prazo == 0 else f"{prazo} dia(s)"
+
+
 def descrever_estado():
     """
     A ligação com o celular guardado em uma linha, para o android.yml (estado), só com
     estados e números (o log do Actions é público: nunca o endereço, a porta nem o nome):
-    se está na rede privada, se a porta guardada está aberta, o estado do adb nela e
-    quantas portas abertas o celular tem. Só lê: não conecta nem desconecta nada.
+    se está na rede privada, se a porta guardada está aberta, o estado do adb nela,
+    quantas portas abertas o celular tem e o prazo do pareamento (com o celular
+    conectado). Só lê: não conecta nem desconecta nada.
     """
     dados = ler()
     if not dados.get("pareado_em") or not dados.get("ip"):
@@ -279,8 +377,10 @@ def descrever_estado():
     abertas = portas_abertas(dados["ip"])
     alvo = endereco()
     estado = _estado_do_adb(av._rodar("adb", "-s", alvo, "get-state", timeout=10)) if alvo else "sem porta guardada"
+    prazo = ler_prazo_da_autorizacao() if estado == "device" else None
     return (f"na rede privada: sim | porta guardada: {'aberta' if dados.get('porta') in abertas else 'fechada'} | "
-            f"adb: {estado} | portas abertas no celular: {len(abertas)}")
+            f"adb: {estado} | portas abertas no celular: {len(abertas)} | "
+            f"prazo do pareamento: {descrever_prazo(prazo)}")
 
 
 def ocupado():

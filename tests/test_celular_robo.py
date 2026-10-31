@@ -321,10 +321,154 @@ def test_ocupado_ve_a_trava_de_outra_rodada(cr, monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("saida, motivo", [
-    ("failed to authenticate to x", "parear de novo"),
+    ("failed to authenticate to x", "pareie de novo"),
     ("failed to connect to x: Connection refused", "a porta mudou ou a depuração está desligada"),
     ("algo novo", "o adb não conseguiu"),
 ])
 def test_motivo_do_adb_em_palavras_simples_sem_o_endereco(cr, saida, motivo):
     assert motivo in cr._motivo((1, saida.replace("x", f"{IP}:37000")))
     assert IP not in cr._motivo((1, saida.replace("x", f"{IP}:37000")))
+
+
+# --- O pareamento vencido (31/10, 16:09: 7 dias depois do pareamento de 24/10, 16:05) ---
+
+@pytest.mark.parametrize("saida, vencido", [
+    ("failed to connect to x", True),                                    # a ligação abriu e o celular cortou
+    ("failed to authenticate to x", True),
+    ("failed to connect to 'x': Connection refused", False),             # a porta não abriu
+    ("failed to connect to 'x': Connection timed out", False),
+    ("failed to connect to x: Connection reset by peer", False),
+])
+def test_ligacao_aberta_que_o_celular_nao_aceita_pede_para_parear(cr, saida, vencido):
+    # O Rafael mandou a porta certa duas vezes e o bot dizia "confira a porta": o celular não
+    # reconhecia mais o servidor, e só parear de novo resolvia.
+    motivo = cr._motivo((1, saida.replace("x", f"{IP}:41999")))
+    assert cr.pede_pareamento(motivo) is vencido and IP not in motivo and "41999" not in motivo
+    if vencido:
+        assert "Parear Celular 🔗" in motivo and cr.OPCAO_DO_PRAZO in motivo
+
+
+def test_o_botao_de_parear_no_motivo_e_o_do_painel(bm, cr):
+    assert bm.painel_shopee_video.BOTAO_PAREAR in cr.COMO_PAREAR
+
+
+def _vencido(cr):
+    return cr._motivo((1, f"failed to connect to {IP}:41999"))
+
+
+def test_porta_nova_que_nao_aceita_o_servidor_nao_culpa_a_porta(cr, monkeypatch):
+    # 18:32: com a depuração desligada e ligada, a porta nova abriu, e o bot dizia que nenhuma
+    # porta aberta era a da depuração.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41999])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, _vencido(cr)) if porta == 41999
+                        else (False, "o celular recusou: a porta mudou ou a depuração está desligada"))
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and cr.pede_pareamento(motivo) and "nenhuma é a da Depuração" not in motivo
+
+
+def test_porta_guardada_aberta_com_o_pareamento_vencido_pede_para_parear(cr, monkeypatch):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, _vencido(cr)))
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and cr.pede_pareamento(motivo) and motivo.startswith("a Depuração por Wi-Fi responde, mas")
+    assert "se continuar" not in motivo
+
+
+@pytest.mark.parametrize("resposta, prazo", [
+    ((0, "0"), 0), ((0, "null"), 7), ((0, "604800000"), 7), ((0, "86400000"), 1),
+    ((1, "error: device offline"), None), (None, None), ((0, "abc"), None),
+])
+def test_prazo_do_pareamento_lido_no_celular(cr, monkeypatch, resposta, prazo):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or resposta)
+    assert cr.ler_prazo_da_autorizacao() == prazo
+    # Só lê a configuração do Android: nada é mudado no celular.
+    assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "settings", "get", "global", cr.CONFIG_DO_PRAZO)]
+
+
+def test_prazo_anotado_de_hora_em_hora_e_na_hora_pelo_painel(cr, monkeypatch):
+    from datetime import datetime, timedelta
+    from fuso import fuso_horario
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    lidas = []
+    monkeypatch.setattr(cr, "ler_prazo_da_autorizacao", lambda: lidas.append(1) or 7)
+    agora = datetime(2026, 10, 31, 19, 0, tzinfo=fuso_horario)
+    assert cr.anotar_prazo(agora=agora) == 7 and lidas == [1]
+    assert cr.ler()["prazo_da_autorizacao"] == 7 and cr.ler()["prazo_lido_em"] == "2026-10-31 19:00:00"
+    assert cr.anotar_prazo(agora=agora + timedelta(minutes=30)) == 7 and lidas == [1]
+    assert cr.anotar_prazo(agora=agora + timedelta(minutes=61)) == 7 and lidas == [1, 1]
+    assert cr.anotar_prazo(forcar=True, agora=agora + timedelta(minutes=62)) == 7 and len(lidas) == 3
+
+
+def test_estado_mostra_o_prazo_do_pareamento(cr, monkeypatch):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "0") if "settings" in partes else (0, "device"))
+    assert cr.descrever_estado().endswith("adb: device | portas abertas no celular: 1 | prazo do pareamento: sem prazo")
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, "error: device offline"))
+    assert cr.descrever_estado().endswith("prazo do pareamento: não lido")
+
+
+def test_reconectar_com_o_pareamento_vencido_manda_parear_sem_pedir_a_porta(bm, cr, monkeypatch, Msg, Est):
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    monkeypatch.setattr(cr, "reconectar_sozinho", lambda: (False, f"a Depuração por Wi-Fi responde, mas {_vencido(cr)}"))
+    monkeypatch.setattr(sv, "_escolher_celular", lambda *a: pytest.fail("não devia pedir a porta"))
+    msg, est = Msg("Reconectar Celular 🔄"), Est()
+    rodar(sv.pedir_reconexao(msg, est))
+    assert "Não reconectei" in msg.saidas[-1] and "Parear Celular 🔗" in msg.saidas[-1]
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.celular.state
+
+
+def test_porta_certa_com_o_pareamento_vencido_manda_parear(bm, cr, monkeypatch, Msg, Est):
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, _vencido(cr)))
+    msg, est = Msg("41999"), Est(dados={"celular_ip": IP}, estado=sv.ShopeeVideoFluxo.aguardando_porta)
+    rodar(sv.receber_porta(msg, est))
+    assert "Parear Celular 🔗" in msg.saidas[-1] and "Confira a porta" not in msg.saidas[-1]
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.celular.state
+
+
+def test_retomar_com_o_pareamento_vencido_diz_para_parear(bm, cr, monkeypatch, Msg, Est):
+    sv = bm.painel_shopee_video
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo=sv.robo.MOTIVO_DA_DESCONEXAO)
+    monkeypatch.setattr(cr, "reconectar_sozinho", lambda: (False, f"a Depuração por Wi-Fi responde, mas {_vencido(cr)}"))
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, Est(estado=sv.ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo)))
+    resposta = next(t for t in msg.saidas if "Não retomei" in t)
+    assert "Parear Celular 🔗" in resposta and "Depois de parear" in resposta
+    assert "desligue e ligue de novo" not in resposta and sv.ler_config()["robo_pausado"] is True
+
+
+def test_painel_do_celular_mostra_o_prazo_do_pareamento(bm, cr, monkeypatch, Msg, Est):
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00", modelo="moto g(100)")
+    monkeypatch.setattr(cr, "conectado", lambda: True)
+    monkeypatch.setattr(cr, "ler_prazo_da_autorizacao", lambda: 7)
+    tela = Msg("Celular do Robô 📱")
+    rodar(sv.celular_handler(tela, Est()))
+    assert "Conectado, mas o pareamento vence" in tela.saidas[0] and "vence 7 dia(s)" in tela.saidas[0]
+    assert cr.OPCAO_DO_PRAZO in tela.saidas[0] and cr.ler()["prazo_da_autorizacao"] == 7
+    monkeypatch.setattr(cr, "ler_prazo_da_autorizacao", lambda: 0)
+    tela = Msg("Celular do Robô 📱")
+    rodar(sv.celular_handler(tela, Est()))
+    assert "Tudo certo" in tela.saidas[0] and "✅ sem prazo" in tela.saidas[0]
+
+
+def test_passo_a_passo_manda_deixar_a_opcao_do_prazo_sempre_ligada(bm, cr, monkeypatch, Msg, Est):
+    # Pedido do Rafael (31/10): a opção entra em tudo, inclusive no Passo a Passo do botão.
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    msg = Msg("Passo a Passo 📖")
+    rodar(sv.passo_a_passo_handler(msg, Est()))
+    assert cr.OPCAO_DO_PRAZO in msg.saidas[0] and "sempre ligada" in msg.saidas[0]
+    assert "não reconhece mais o servidor" in msg.saidas[0] and len(msg.saidas[0]) < 4096

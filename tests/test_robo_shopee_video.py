@@ -369,6 +369,35 @@ def test_celular_desconectado_tenta_sozinho_e_sem_ele_pausa_e_avisa(monkeypatch,
     assert len(avisos) == 1 and tentativas == [1]
 
 
+def test_pareamento_vencido_avisa_para_parear_e_nao_para_ligar_a_depuracao(monkeypatch, avisos):
+    # 31/10, 16:09: o pareamento venceu 7 dias depois de feito; desligar e ligar a depuração
+    # não adiantava, e o aviso mandava fazer isso.
+    ativar(robo_inicio=0, robo_fim=24)
+    vencido = f"a Depuração por Wi-Fi responde, mas {robo.celular_robo.MOTIVO_DO_PAREAMENTO}: x"
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (False, vencido))
+    assert "desconectado" in robo.rodada(agora=momento("2026-10-31 16:09"))
+    assert len(avisos) == 1 and robo.celular_robo.COMO_PAREAR in avisos[0]
+    assert "desligue e ligue de novo" not in avisos[0] and "Retomar Postagem ▶️" in avisos[0]
+
+
+def test_rodada_anota_o_prazo_do_pareamento(monkeypatch, avisos):
+    # Pedido do Rafael (31/10): a opção que impede o pareamento de vencer fica sempre ligada; o
+    # robô a lê quando usa o celular, e o alertas.py avisa se ela desligar.
+    ativar(robo_inicio=0, robo_fim=24)
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-22 10:00")))
+    anotados = []
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(robo.celular_robo, "anotar_prazo", lambda agora=None: anotados.append(agora) or 0)
+    assert robo.rodada(agora=momento("2026-10-22 00:01")) == "nada a fazer agora"
+    assert anotados == [momento("2026-10-22 00:01")]
+    # Um erro na leitura não derruba a rodada.
+    monkeypatch.setattr(robo.celular_robo, "anotar_prazo", lambda agora=None: 1 / 0)
+    assert robo.rodada(agora=momento("2026-10-22 00:02")) == "nada a fazer agora"
+
+
 def test_celular_que_reconecta_sozinho_segue_a_rodada(monkeypatch, avisos):
     ativar(robo_inicio=0, robo_fim=24)
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-22 10:00")))

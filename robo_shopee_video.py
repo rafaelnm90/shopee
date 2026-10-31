@@ -4970,11 +4970,15 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
 # mostra diferente da pausa do botão.
 MOTIVO_DA_DESCONEXAO = "celular desconectado"
 # O caminho de volta ao automático, com o botão onde ele está no painel (Robô Automático 🤖) e
-# o pareamento para quando a depuração já está ligada e o adb não conecta (31/10/2026).
+# o pareamento para quando a depuração já está ligada e o adb não conecta.
 COMO_RETOMAR = ("no Motorola, em Opções do desenvolvedor, deixe a Depuração por Wi-Fi ligada (se ela já estiver "
                 "ligada, desligue e ligue de novo) e, no bot, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → "
                 "Retomar Postagem ▶️. Eu acho o celular sozinho. Se ainda não der, pareie de novo em Robô "
-                "Automático 🤖 → Celular do Robô 📱 → Parear Celular 🔗.")
+                "Automático 🤖 → Celular do Robô 📱 → Parear Celular 🔗 e deixe ligada, nas Opções do "
+                f"desenvolvedor, a opção {celular_robo.OPCAO_DO_PRAZO}.")
+# Com o pareamento vencido, ligar e desligar a depuração não adianta: só parear de novo.
+COMO_RETOMAR_PAREANDO = (f"{celular_robo.COMO_PAREAR}. Depois, no bot, toque em Shopee Vídeo 🎬 → Robô "
+                         "Automático 🤖 → Retomar Postagem ▶️.")
 
 
 def pausar_por_desconexao(motivo):
@@ -4986,9 +4990,10 @@ def pausar_por_desconexao(motivo):
     db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=True,
                                                                 robo_pausa_motivo=MOTIVO_DA_DESCONEXAO))
     logger.warning(f"⚠️ [Robô Shopee Vídeo] Celular desconectado ({motivo}): Postagem pausada.")
+    como = COMO_RETOMAR_PAREANDO if celular_robo.pede_pareamento(motivo) else COMO_RETOMAR
     avisar(f"📱 Robô da Shopee Vídeo: perdi a conexão com o celular guardado ({motivo}). Pausei a Postagem, "
            "e o modo assistente volta a mandar as postagens aqui no privado para você postar à mão.\n\n"
-           f"Para voltar ao automático: {COMO_RETOMAR}")
+           f"Para voltar ao automático: {como}")
 
 
 def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
@@ -5040,6 +5045,13 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
                     pausar_por_desconexao(motivo)
                 registrar_tentativa("rodada", "parou", f"celular desconectado ({motivo})", agora=agora)
                 return _resposta(preparar, f"celular desconectado ({motivo})")
+        # De hora em hora, o prazo do pareamento no Motorola: sem a opção que o desliga, o
+        # Android corta o pareamento em 7 dias, e o alertas.py avisa o Rafael antes.
+        # Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+        try:
+            celular_robo.anotar_prazo(agora=agora)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Prazo do pareamento não lido: {type(e).__name__}")
     with celular_robo.trava() as livre:
         if not livre:
             return _resposta(preparar, "o explorar está tocando no celular")
