@@ -1795,6 +1795,34 @@ def test_outra_capacidade_ou_medida_e_outro_modelo_na_troca_e_nos_produtos_a_mai
         assert ps.OUTRA_MEDIDA in prompt and "12L e 17L são modelos diferentes" in prompt
 
 
+def test_marca_painel_e_desenho_diferentes_sao_outro_produto_e_a_ia_descreve_antes_de_decidir(monkeypatch):
+    # O Rafael (31/10, depois do vídeo das 07:54): além da capacidade, a air fryer a mais era de
+    # outra marca, com muito mais botões e outro desenho, "visivelmente outra". Na troca de loja
+    # e nos produtos a mais, a IA compara o que se vê e escreve o produto do vídeo e as
+    # diferenças antes da decisão.
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(prompt)
+        return ('{"produto_do_video": "air fryer preta, painel de 2 botões", "diferencas": "1: outra marca, '
+                '8 botões", "iguais": [], "confere": false, "motivo": "outra air fryer"}')
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Air Fryer Digital")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\xff\xd8outra")
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Air Fryer", [("Air Fryer Digital", b"\xff\xd8a")],
+                                capa=b"\xff\xd8capa")[0] == []
+    ok, _motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=b"\xff\xd8capa")
+    assert not ok and len(pedidos) == 2
+    for prompt in pedidos:
+        assert ps.DETALHES_QUE_SE_VEEM in prompt
+        for detalhe in ("a marca ou o logotipo", "quantos botões", "o desenho do corpo", "Basta um desses diferente"):
+            assert detalhe in prompt
+        json_pedido = prompt[prompt.index("Responda só com um JSON"):]
+        decisao = '"iguais"' if '"iguais"' in json_pedido else '"confere"'
+        assert json_pedido.index('"produto_do_video"') < json_pedido.index('"diferencas"') < json_pedido.index(decisao)
+
+
 def test_troca_de_loja_confere_o_mesmo_produto_mesmo_com_outra_foto_de_capa(monkeypatch):
     # Escolha do Rafael (30/10, P102): o anúncio de outra loja entra no lugar do produto do link
     # sendo o mesmo produto, mesmo com outra foto de capa; a capa do post vai junto como o
