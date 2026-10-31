@@ -2252,9 +2252,10 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
         logger.warning(f"⚠️ Robô automático: não retomou, celular fora ({resultado}).")
         await message.answer(
             f"⚠️ Não retomei: {html_escape(resultado)}.\n\nNo Motorola: Configurações → Sistema → Opções do "
-            "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b> e confira se o <b>Tailscale</b> está ligado. "
-            "Depois toque de novo em <b>Retomar Postagem ▶️</b>. Enquanto isso, o modo assistente continua "
-            "mandando as postagens aqui.", parse_mode="HTML")
+            "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b> (se ela já estiver ligada, desligue e ligue de "
+            "novo) e confira se o <b>Tailscale</b> está ligado. Depois toque de novo em <b>Retomar Postagem "
+            "▶️</b>. Se ainda não der, pareie de novo em <b>Celular do Robô 📱 → Parear Celular 🔗</b>. "
+            "Enquanto isso, o modo assistente continua mandando as postagens aqui.", parse_mode="HTML")
         await mostrar_robo(message, state)
         return
     # A hora da retomada: o alerta de robô sem rodar conta dela, não da rodada de antes da pausa.
