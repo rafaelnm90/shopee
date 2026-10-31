@@ -4225,6 +4225,46 @@ def test_primeiro_produto_que_nao_fica_nem_na_segunda_vez_para_o_rascunho(monkey
     assert [r[0] for r in _registro_do_anexar()] == ["não ficou depois do Feito"] * robo.VEZES_DO_PRIMEIRO_PRODUTO
 
 
+class AppQueAvisaNoFeito(AppQueReabreALegenda):
+    """O app que perde o produto no Feito e mostra um aviso curto (toast), como o uiautomator2 lê."""
+
+    def __init__(self, perdidos=None, aviso="Não foi possível adicionar o produto 1"):
+        super().__init__(perdidos)
+        self.aviso, self.ultimo_aviso = aviso, None
+
+    def clear_toast(self):
+        self.ultimo_aviso = None
+
+    def last_toast(self):
+        return self.ultimo_aviso
+
+    def click(self, x, y):
+        no_feito = self.atual == "janela"
+        super().click(x, y)
+        if no_feito and self.atual == "final" and not self.com_produto:
+            self.ultimo_aviso = self.aviso
+
+
+def test_produto_que_nao_fica_no_feito_diz_o_aviso_do_app(monkeypatch, avisos):
+    # 31/10, 15:21 e 15:35: o mesmo produto não ficou depois do Feito, duas vezes, e a tela não
+    # dizia por quê. A parada traz o aviso curto que o app mostrou (sem os números); o registro, que
+    # sai no checkup público, diz só que houve aviso.
+    _fonte(monkeypatch)
+    app = AppQueAvisaNoFeito(perdidos=5)
+    with pytest.raises(robo.Parada) as parada:
+        _anexar_no_app(app)
+    assert parada.value.motivo == (robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU
+                                   + "; o app avisou: Não foi possível adicionar o produto #")
+    assert robo.passo_do_motivo(parada.value.motivo) == "anexar o produto"
+    assert [d for _r, d in _registro_do_anexar()] == [
+        f"{vez}ª vez; a linha dos produtos vazia; a edição da legenda aberta por cima; o app mostrou um aviso"
+        for vez in range(1, robo.VEZES_DO_PRIMEIRO_PRODUTO + 1)]
+    # Sem aviso nenhum depois do Feito, o registro também diz.
+    app = AppQueAvisaNoFeito(perdidos=1, aviso=None)
+    _anexar_no_app(app)
+    assert _registro_do_anexar()[-2][1].endswith("; sem aviso do app")
+
+
 class ListaQueDemoraAVoltar:
     """O voltar da lista de Minhas Curtidas que leva uns segundos para mostrar a tela final."""
 
