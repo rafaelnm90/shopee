@@ -839,7 +839,7 @@ def test_rascunho_com_a_capa_com_chamada_fica_marcado_para_a_medicao(monkeypatch
     monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa"))
     postas = []
 
-    def capa_pela_figurinha(d, capa):
+    def capa_pela_figurinha(d, capa, ao_falhar=None):
         postas.append((capa, list(d.toques)))
         return len(postas) == 1, "a faixa do tamanho do desenho (1 ajuste(s))" if len(postas) == 1 else "o motivo"
 
@@ -851,6 +851,42 @@ def test_rascunho_com_a_capa_com_chamada_fica_marcado_para_a_medicao(monkeypatch
     assert capa == b"a capa" and "@tv_right" in antes and "Feito" in antes
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_CAPA) == ("posta", 1)
+
+
+def test_capa_pela_figurinha_que_nao_deu_certo_guarda_o_caso_e_o_rascunho_segue(monkeypatch, avisos):
+    # Na 1ª capa pela figurinha de verdade (31/10), a faixa parou menor que o desenho e não havia
+    # como ver a tela: o caso da capa (o print da tela da capa, o vídeo e o rascunho) fica para
+    # o checkup do Claude, e o rascunho segue com a capa de sempre (DECISOES.md, Trabalho com o
+    # Claude: o que dificulta a análise vira registro).
+    import json
+    _fonte(monkeypatch)
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa"))
+    motivo = "a faixa não ficou do tamanho do desenho; alto x largura e o meio da faixa a cada medida"
+
+    def capa_pela_figurinha(d, capa, ao_falhar=None):
+        if ao_falhar:
+            ao_falhar(motivo)
+        return False, motivo
+
+    monkeypatch.setattr(robo, "capa_pela_figurinha", capa_pela_figurinha)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert not rascunho["chamada"]
+    (caso,) = robo.casos_robo.casos()
+    with open(os.path.join(robo.casos_robo.PASTA, caso, "caso.json"), encoding="utf-8") as f:
+        dados = json.load(f)
+    assert (dados["acao"], dados["resultado"], dados["passo"], dados["motivo"]) == (
+        "capa", "de fora", "capa pela figurinha", motivo)
+    assert dados["rascunho"]["id"] == rascunho["id"] and dados["video"]["link"]
+    assert "app" in dados
 
 
 def test_produto_recusado_pela_ia_deixa_no_caso_o_produto_e_o_que_ela_viu(monkeypatch, avisos):
@@ -4781,6 +4817,58 @@ def test_figurinha_que_nao_chega_ao_desenho_e_descartada_e_vai_a_capa_de_sempre(
     resultado, detalhe, ok = consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
                                        robo.PROCESSO_DA_CAPA)
     assert (resultado, ok) == ("de fora", None) and detalhe.startswith("a faixa não ficou do tamanho do desenho")
+
+
+def test_figurinha_que_nao_chega_ao_desenho_anota_a_medida_de_cada_ajuste(monkeypatch, avisos):
+    # Na 1ª capa pela figurinha de verdade (31/10), a faixa parou em 2/3 do desenho, e o registro
+    # só tinha a última medida: não dava para saber se o app não deixou a figurinha crescer ou se
+    # a medida pegou outra coisa laranja. Agora o registro diz a faixa de cada medida, só números.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(maxima=0.9)
+    assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA) is False
+    (detalhe,) = consultar("SELECT detalhe FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_CAPA)
+    e_cima, e_baixo, e_esquerda, e_direita = robo.faixa_esperada(CAPA_DA_FIGURINHA, QUADRO_DA_CAPA)
+    inicio = ("a faixa não ficou do tamanho do desenho; alto x largura e o meio da faixa a cada medida (o "
+              f"desenho, {round(e_baixo - e_cima)}x{round(e_direita - e_esquerda)} e 0): ")
+    assert detalhe.startswith(inicio)
+    medidas = [medida.split(" ") for medida in detalhe[len(inicio):].split(", ")]
+    assert len(medidas) == robo.AJUSTES_DA_FIGURINHA + 1
+    altos = [int(tamanho.split("x")[0]) for tamanho, _meio in medidas]
+    # Os dois dedos aumentaram a figurinha até o máximo do app, e ali ela parou, abaixo do desenho.
+    assert altos[0] < altos[-1] == altos[-2] < round(e_baixo - e_cima)
+    assert all(meio[0] in "+-" for _tamanho, meio in medidas)
+    # Cabe inteiro no registro (os detalhes passam de 240 letras cortados).
+    assert len(detalhe) < robo.registro_processos.TAMANHO_DO_DETALHE
+
+
+def test_capa_pela_figurinha_guarda_o_caso_com_a_tela_da_capa_antes_de_descartar(monkeypatch):
+    # O caso da capa que não deu certo sai com a figurinha ainda na tela da capa (o print mostra
+    # como ela ficou); só depois o robô descarta e volta à tela final. A capa que deu certo não
+    # guarda caso.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular, vistos = CelularDaCapa(maxima=0.9), []
+    ok, motivo = robo.capa_pela_figurinha(
+        celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append((celular.atual, celular.figurinha is not None, motivo)))
+    assert not ok and vistos == [("capa", True, motivo)]
+    assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
+    celular, vistos = CelularDaCapa(), []
+    ok, _ = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, vistos.append)
+    assert ok and vistos == []
+
+
+def test_falhas_da_capa_pela_figurinha_ficam_no_passo_dela():
+    # O caso e o histórico dizem que a falha foi na capa pela figurinha, não num passo do rascunho.
+    for motivo in ("a faixa não ficou do tamanho do desenho; alto x largura e o meio da faixa a cada medida",
+                   "a faixa laranja não apareceu na capa (0 ajuste(s))", "a capa não tem a faixa laranja",
+                   "a tela da capa não abriu", "a aba da foto da figurinha não apareceu",
+                   "nem o Enviar nem o + da figurinha apareceram", "as Fotos não abriram",
+                   "o recorte da foto não abriu", "a figurinha não voltou para a capa",
+                   "o ✓ da capa não voltou à tela final", f"a figurinha não foi ajustada: {robo.ps.RECUSA}",
+                   "a capa pela figurinha não deu certo, e o robô não voltou à tela final"):
+        assert robo.passo_do_motivo(motivo) == "capa pela figurinha", motivo
+    # As outras fotos e vídeos da galeria continuam no passo da galeria.
+    assert robo.passo_do_motivo("a foto do anúncio não apareceu na galeria") == "escolher o vídeo na galeria"
+    assert robo.passo_do_motivo("o vídeo não apareceu na galeria do celular") == "escolher o vídeo na galeria"
 
 
 def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
