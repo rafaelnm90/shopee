@@ -4656,6 +4656,7 @@ class CelularDaCapa:
         self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
         self.entrada, self.ganho, self.maxima, self.meio = entrada, ganho, maxima, meio
         self.galeria, self.toques, self.gestos, self.arrastos, self.teclas = set(), [], [], [], []
+        self.pontos = []
 
     def _nos(self):
         capa = [_no(ident="player_container", caixa=(0, 267, 1080, 1969), clicavel=False),
@@ -4723,6 +4724,9 @@ class CelularDaCapa:
 
         class Gesto:
             def gesture(self, *dedos, steps=0):
+                # O uiautomator2 recusa ponto negativo com AssertionError (pos_rel2abs).
+                assert all(x >= 0 and y >= 0 for x, y in dedos)
+                celular.pontos.append(dedos)
                 (a, b, c, d) = dedos
                 de = math.dist(a, b)
                 ate = math.dist(c, d)
@@ -4854,6 +4858,79 @@ def test_capa_pela_figurinha_guarda_o_caso_com_a_tela_da_capa_antes_de_descartar
     celular, vistos = CelularDaCapa(), []
     ok, _ = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, vistos.append)
     assert ok and vistos == []
+
+
+def test_dedos_da_figurinha_ficam_no_quadro_mesmo_com_a_faixa_medida_fina(monkeypatch, avisos):
+    # 31/10, 14:18 e 14:42: a faixa medida fina demais pediu um gesto maior que a tela, o celular
+    # recusou o ponto negativo (AssertionError do uiautomator2) e o rascunho se perdeu. Os dedos
+    # ficam sempre dentro do quadro do vídeo, e a figurinha muda no máximo 3 vezes por ajuste.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    real, finas = robo.edicao_video.faixa_laranja, [(1300, 1306, 380, 700)]
+
+    def faixa_laranja(imagem, caixa=None):
+        # A 1ª medida no print pega só um fio da faixa; a do desenho (sem caixa) é a de sempre.
+        return finas.pop() if caixa is not None and finas else real(imagem, caixa)
+
+    monkeypatch.setattr(robo.edicao_video, "faixa_laranja", faixa_laranja)
+    celular = CelularDaCapa()
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and _no_desenho(celular), motivo
+    x1, y1, x2, y2 = QUADRO_DA_CAPA
+    assert celular.pontos and all(x1 < x < x2 and y1 < y < y2 for gesto in celular.pontos for x, y in gesto)
+    assert all(ate / de <= robo.RAZAO_MAXIMA_POR_AJUSTE + 0.01 for de, ate in celular.gestos)
+
+
+def test_dedos_da_figurinha_perto_da_borda_chegam_para_dentro():
+    x1, _y1, x2, _y2 = QUADRO_DA_CAPA
+    for x, largura, razao in ((540, 319, 23), (100, 200, 2), (1000, 150, 0.2), (70, 956, 3), (540, 956, 0.01)):
+        meio, de, ate = robo.dedos_da_figurinha(x, QUADRO_DA_CAPA, largura, razao)
+        pontos = (meio - de / 2, meio + de / 2, meio - ate / 2, meio + ate / 2)
+        assert all(x1 + robo.MARGEM_DOS_DEDOS <= p <= x2 - robo.MARGEM_DOS_DEDOS for p in pontos), (x, razao)
+        assert min(de, ate) >= robo.MENOR_DISTANCIA_DOS_DEDOS
+        assert 1 / robo.RAZAO_MAXIMA_POR_AJUSTE - 0.01 <= ate / de <= robo.RAZAO_MAXIMA_POR_AJUSTE + 0.01
+
+
+def test_erro_no_gesto_da_figurinha_descarta_a_capa_e_o_rascunho_segue(monkeypatch, avisos):
+    # O gesto que o celular recusa não derruba o rascunho: a figurinha sai (de fora, com as
+    # medidas), o caso é guardado com a tela da capa ainda aberta e o rascunho segue com a capa
+    # de sempre.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+
+    def recusa(*args, **kwargs):
+        raise AssertionError()
+
+    monkeypatch.setattr(robo.ps, "dois_dedos", recusa)
+    celular, vistos = CelularDaCapa(), []
+    assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append((celular.atual, motivo))) is False
+    assert [atual for atual, _motivo in vistos] == ["capa"]
+    assert vistos[0][1].startswith("a figurinha não foi ajustada: erro AssertionError no gesto; alto x largura")
+    assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
+    resultado, detalhe = consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                                   robo.PROCESSO_DA_CAPA)
+    assert resultado == "de fora" and "AssertionError" in detalhe
+
+
+def test_erro_inesperado_na_capa_descarta_a_figurinha_mas_a_verificacao_para(monkeypatch):
+    # Faltando algum passo da capa, a figurinha sai e o rascunho segue (P110), também num erro
+    # que o robô não esperava; a Verificação da Shopee continua parando a rodada.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+
+    def quebra(xml):
+        raise ValueError()
+
+    monkeypatch.setattr(robo, "quadro_da_capa", quebra)
+    celular, vistos = CelularDaCapa(), []
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append(celular.atual))
+    assert (ok, motivo) == (False, "a capa pela figurinha deu erro (ValueError)") and vistos == ["capa"]
+    assert celular.atual == "final" and celular.galeria == set()
+    assert robo.passo_do_motivo(motivo) == "capa pela figurinha"
+
+    def verificacao(xml):
+        raise robo.Verificacao()
+
+    monkeypatch.setattr(robo, "quadro_da_capa", verificacao)
+    with pytest.raises(robo.Verificacao):
+        robo.capa_pela_figurinha(CelularDaCapa(), CAPA_DA_FIGURINHA)
 
 
 def test_falhas_da_capa_pela_figurinha_ficam_no_passo_dela():

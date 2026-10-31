@@ -3102,6 +3102,11 @@ FOLGA_DA_ESCALA = 0.03                          # a altura da faixa pode errar 3
 FOLGA_DA_POSICAO = 12                           # e o meio dela, 12 px
 FOLGA_DAS_PONTAS = 10                           # as pontas da faixa ficam nas bordas do quadro do vídeo
 DEDOS_DA_FIGURINHA = 400                        # a maior distância de partida dos dois dedos, em px
+MENOR_DISTANCIA_DOS_DEDOS = 40                  # a menor distância entre os dois dedos, em px
+MARGEM_DOS_DEDOS = 10                           # os dedos ficam a esta distância das bordas do quadro
+# Num ajuste, a figurinha muda no máximo 3 vezes (o app não a deixa crescer mais que isso
+# desde que entrou): uma medida errada da faixa não pede um gesto do tamanho da tela.
+RAZAO_MAXIMA_POR_AJUSTE = 3.0
 PROPORCAO_DO_VIDEO = 9 / 16
 
 
@@ -3167,16 +3172,43 @@ def ajustar_a_figurinha(d, capa, quadro):
         if ajuste == AJUSTES_DA_FIGURINHA:
             break
         x, y = round(centro_x), round(centro_y)
-        if not tamanho_certo:
-            # Os dedos começam dentro da faixa, que é a largura da figurinha.
-            de = max(40, min(DEDOS_DA_FIGURINHA, round((direita - esquerda) * 0.6)))
-            ok, motivo = ps.dois_dedos(d, x, y, de, round(de * razao))
-        else:
-            ok, motivo = ps.arrastar(d, x, y, round(x + delta_x), round(y + delta_y))
+        try:
+            if not tamanho_certo:
+                meio, de, ate = dedos_da_figurinha(x, quadro, direita - esquerda, razao)
+                ok, motivo = ps.dois_dedos(d, meio, y, de, ate)
+            else:
+                ok, motivo = ps.arrastar(d, x, y, round(x + delta_x), round(y + delta_y))
+        except Exception as e:
+            # O gesto recusado pelo celular (um ponto fora da tela, a conexão que caiu) descarta a
+            # figurinha, e o rascunho segue com a capa de sempre; o rastro fica no log.
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] O gesto na figurinha deu erro: {type(e).__name__}", exc_info=True)
+            ok, motivo = False, f"erro {type(e).__name__} no gesto"
         if not ok:
             return False, _com_as_medidas(f"a figurinha não foi ajustada: {motivo}", medidas, esperada)
         pausa(2)
     return False, _com_as_medidas("a faixa não ficou do tamanho do desenho", medidas, esperada)
+
+
+def dedos_da_figurinha(x, quadro, largura, razao):
+    """
+    Onde e quanto os dois dedos abrem ou fecham para mudar a figurinha pela razão: (o x do meio
+    deles, a distância de partida, a de chegada). Os dedos começam dentro da faixa (a largura da
+    figurinha), em volta do meio dela, e os quatro pontos ficam dentro do quadro do vídeo (fora
+    dele ficam os botões da tela, e o celular recusa ponto fora da tela): perto da borda, o meio
+    dos dedos chega para dentro. A razão vai até RAZAO_MAXIMA_POR_AJUSTE; sem espaço para ela
+    inteira, as duas distâncias diminuem juntas.
+    """
+    razao = min(RAZAO_MAXIMA_POR_AJUSTE, max(1 / RAZAO_MAXIMA_POR_AJUSTE, razao))
+    espaco = quadro[2] - quadro[0] - 2 * MARGEM_DOS_DEDOS
+    # As duas distâncias com pelo menos MENOR_DISTANCIA_DOS_DEDOS (ao diminuir, a de chegada é a menor).
+    de = max(min(DEDOS_DA_FIGURINHA, round(largura * 0.6)), MENOR_DISTANCIA_DOS_DEDOS,
+             round(MENOR_DISTANCIA_DOS_DEDOS / razao))
+    if de * max(1, razao) > espaco:
+        de = round(espaco / max(1, razao))
+    ate = round(de * razao)
+    meia = max(de, ate) / 2
+    meio = min(max(x, quadro[0] + MARGEM_DOS_DEDOS + meia), quadro[2] - MARGEM_DOS_DEDOS - meia)
+    return round(meio), de, ate
 
 
 def _com_as_medidas(motivo, medidas, esperada):
@@ -3255,6 +3287,13 @@ def capa_pela_figurinha(d, capa, ao_falhar=None):
             ok, motivo = _figurinha_na_capa(d, capa)
         except Parada as e:
             ok, motivo = False, e.motivo
+        except (Verificacao, Suspensa):
+            raise
+        except Exception as e:
+            # A capa com a frase é um extra: faltando algum passo, a figurinha sai e o rascunho
+            # segue com a capa de sempre (P110); o rastro fica no log para o checkup.
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] A capa pela figurinha deu erro: {type(e).__name__}", exc_info=True)
+            ok, motivo = False, f"a capa pela figurinha deu erro ({type(e).__name__})"
         if not ok and ao_falhar:
             ao_falhar(motivo)
         return ok, motivo
