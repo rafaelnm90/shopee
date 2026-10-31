@@ -349,8 +349,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      sobra o quadro do vídeo (por isso vai à galeria o miolo 2:3 da capa,
      `edicao_video.recorte_da_figurinha`);
   7. o **X** com alguma mudança pergunta **Descartar Alterações na Capa?** (`@tv_cancel`
-     Cancelar, `@tv_discard` Confirmar); depois, a saída da tela final é a de sempre (voltar,
-     voltar, `@tv_no_save`). Falta testar o **✓** e como a capa aparece na tela final e no
+     Cancelar, `@tv_discard` Confirmar); o voltar também a abre, e o voltar nela só a fecha
+     (o robô confirma: `descartar_a_capa`); depois, a saída da tela final é a de sempre
+     (voltar, voltar, `@tv_no_save`). Falta testar o **✓** e como a capa aparece na tela final e no
      rascunho.
 
   **Teste completo (18/10/2026)**, da tela final em diante:
