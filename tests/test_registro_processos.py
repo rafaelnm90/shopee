@@ -107,3 +107,17 @@ def test_apelido_da_origem_e_sequencia_em_ordem():
     assert [l[1] for l in linhas] == ["envio (viral)", "envio (principal)"]
     assert linhas[0][4] == linhas[1][4] == rp.apelido("-1001234567890") and len(linhas[0][4]) == 8
     assert "1234567890" not in str(linhas)
+
+
+def test_so_o_fechamento_das_23h55_dos_parceiros_fica_no_registro(bm):
+    # O checkup de 30/10 contou 706 fechamentos do dia dos parceiros (a meta é 1): a recuperação
+    # do motor dos parceiros, a cada 2 min, também anotava, e a meta ficava cumprida mesmo sem
+    # o fechamento das 23:55.
+    def fechamentos():
+        return sum(linha[-1] for linha in rp.contagem("2000-01-01 00:00:00")
+                   if linha[1] == "fechamento do dia dos parceiros")
+
+    rodar(bm.motor_parceiros_step())
+    assert fechamentos() == 0
+    rodar(bm.fechamento_do_dia_dos_parceiros())
+    assert fechamentos() == 1

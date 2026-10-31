@@ -4021,7 +4021,6 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
         logger.error(f"❌ [Parceiros] Erro ao agrupar a fila por dia de captura: {e}")
     return grupos
 
-@registro_processos.anotar("bot_mestre", "fechamento do dia dos parceiros")
 async def fechar_dia_captura_parceiros(incluir_hoje=False):
     """
     Fecha o dia de captura: sorteia a cota do dia e apaga do disco o excedente na hora,
@@ -4072,6 +4071,15 @@ async def fechar_dia_captura_parceiros(incluir_hoje=False):
     except Exception as e:
         logger.error(f"❌ [Parceiros] Falha no fechamento do dia de captura: {e}")
         registrar_erro_json(f"fechar_dia_captura_parceiros: {e}", origem="bot_mestre.py")
+
+@registro_processos.anotar("bot_mestre", "fechamento do dia dos parceiros")
+async def fechamento_do_dia_dos_parceiros():
+    """
+    O fechamento das 23:55, com o dia corrente. Só este fica no registro: a recuperação do
+    motor dos parceiros, a cada 2 min, chama o fechamento direto, e a meta do checkup (1 por
+    dia) seria cumprida por ela mesmo sem o das 23:55.
+    """
+    await fechar_dia_captura_parceiros(incluir_hoje=True)
 
 async def motor_parceiros_step():
     """
@@ -17887,9 +17895,8 @@ async def main():
 
     # Fechamento do dia de captura dos parceiros: sorteia a cota e apaga o excedente
     # do disco no mesmo dia, sem esperar os 30 dias do D+X.
-    scheduler.add_job(fechar_dia_captura_parceiros, 'cron', hour=23, minute=55,
-                      timezone=FUSO_STR, kwargs={"incluir_hoje": True},
-                      id='fechamento_dia_parceiros', replace_existing=True)
+    scheduler.add_job(fechamento_do_dia_dos_parceiros, 'cron', hour=23, minute=55,
+                      timezone=FUSO_STR, id='fechamento_dia_parceiros', replace_existing=True)
 
     # Métricas do dia (prova social das rotinas)
     scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
