@@ -725,6 +725,13 @@ PASSOS = (
     ("edição do vídeo não saiu", "edição do vídeo"),
     ("bebida alcoólica só vai", "edição do vídeo"),
     ("bebida alcoólica em espera", "bebida alcoólica em espera"),
+    ("figurinha", "capa pela figurinha"),
+    ("faixa laranja", "capa pela figurinha"),
+    ("do tamanho do desenho", "capa pela figurinha"),
+    ("tela da capa", "capa pela figurinha"),
+    ("✓ da capa", "capa pela figurinha"),
+    ("as Fotos não abriram", "capa pela figurinha"),
+    ("o recorte da foto não abriu", "capa pela figurinha"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
     ("busca pela foto", "busca pela foto"),
     ("câmera da busca", "busca pela foto"),
@@ -3139,12 +3146,14 @@ def ajustar_a_figurinha(d, capa, quadro):
     if not esperada:
         return False, "a capa não tem a faixa laranja"
     e_cima, e_baixo, e_esquerda, e_direita = esperada
-    medida = None
+    medidas = []
     for ajuste in range(AJUSTES_DA_FIGURINHA + 1):
         medida = edicao_video.faixa_laranja(d.screenshot(), quadro)
         if not medida:
-            return False, f"a faixa laranja não apareceu na capa ({ajuste} ajuste(s))"
+            return False, _com_as_medidas(f"a faixa laranja não apareceu na capa ({ajuste} ajuste(s))",
+                                          medidas, esperada)
         cima, baixo, esquerda, direita = medida
+        medidas.append((round(baixo - cima), round(direita - esquerda), round((cima + baixo - e_cima - e_baixo) / 2)))
         razao = (e_baixo - e_cima) / (baixo - cima)
         centro_x, centro_y = (esquerda + direita) / 2, (cima + baixo) / 2
         delta_y = (e_cima + e_baixo) / 2 - centro_y
@@ -3165,11 +3174,24 @@ def ajustar_a_figurinha(d, capa, quadro):
         else:
             ok, motivo = ps.arrastar(d, x, y, round(x + delta_x), round(y + delta_y))
         if not ok:
-            return False, motivo
+            return False, _com_as_medidas(f"a figurinha não foi ajustada: {motivo}", medidas, esperada)
         pausa(2)
-    cima, baixo, esquerda, direita = medida
-    return False, (f"a faixa não ficou do tamanho do desenho: {round(baixo - cima)} px de alto (o desenho, "
-                   f"{round(e_baixo - e_cima)}), o meio a {round((e_cima + e_baixo - cima - baixo) / 2)} px")
+    return False, _com_as_medidas("a faixa não ficou do tamanho do desenho", medidas, esperada)
+
+
+def _com_as_medidas(motivo, medidas, esperada):
+    """
+    O motivo da figurinha que não chegou ao desenho, com a faixa medida no print antes de cada
+    ajuste: alto x largura e o meio dela, em px da tela, acima (-) ou abaixo (+) do meio do
+    desenho. Mostra no checkup se os dois dedos mudaram a figurinha (o app pode não deixar crescer
+    mais) ou se a medida pegou outra coisa laranja da tela. Só números.
+    """
+    if not medidas:
+        return motivo
+    e_cima, e_baixo, e_esquerda, e_direita = esperada
+    return (f"{motivo}; alto x largura e o meio da faixa a cada medida (o desenho, "
+            f"{round(e_baixo - e_cima)}x{round(e_direita - e_esquerda)} e 0): "
+            + ", ".join(f"{alto}x{largura} {meio:+d}" for alto, largura, meio in medidas))
 
 
 def aba_da_foto(xml):
@@ -3217,62 +3239,72 @@ def sair_da_capa(d, vezes=5):
         raise Parada("a capa pela figurinha não deu certo, e o robô não voltou à tela final")
 
 
-def capa_pela_figurinha(d, capa):
+def capa_pela_figurinha(d, capa, ao_falhar=None):
     """
     Põe a capa com a frase (PNG, bytes) pelo Selecionar Capa da tela final: o miolo dela na
     galeria, a figurinha com foto, do tamanho do desenho (ajustar_a_figurinha), e o ✓. Não dando
-    certo, descarta a capa nova e volta à tela final. A foto sai da galeria no fim. (ok, o que
-    dizer no registro)
+    certo, ao_falhar(motivo) guarda o caso com a tela da capa ainda aberta (o print mostra a
+    figurinha como ficou), e a capa nova é descartada na volta à tela final. A foto sai da galeria
+    no fim. (ok, o que dizer no registro)
     """
     nome = ps.por_foto_na_galeria(d, edicao_video.recorte_da_figurinha(capa))
     if not nome:
         return False, "a capa não apareceu na galeria"
     try:
-        tocar(d, "@tv_select_cover", 6)
-        if not esperar_na_tela(d, "@fl_add_sticker", ESPERA_A_MAIS_NO_CAMINHO):
-            return False, "a tela da capa não abriu"
-        tocar(d, "@fl_add_sticker", 4)
-        aba = aba_da_foto(tela(d))
-        if not aba:
-            return False, "a aba da foto da figurinha não apareceu"
-        d.click(*aba)
-        pausa(3)
-        mais = mais_da_figurinha(tela(d))
-        if not mais:
-            return False, "nem o Enviar nem o + da figurinha apareceram"
-        d.click(*mais)
-        pausa(5)
-        if not esperar_na_tela(d, "@iv_picture", ESPERA_A_MAIS_NO_CAMINHO):
-            return False, "as Fotos não abriram"
-        tocar(d, "@iv_picture", 6)
-        if not esperar_na_tela(d, "@tv_next_full", ESPERA_A_MAIS_NO_CAMINHO):
-            return False, "o recorte da foto não abriu"
-        tocar(d, "@tv_next_full", 6)
-        xml = esperar_na_tela(d, "@save_btn", ESPERA_A_MAIS_NO_CAMINHO)
-        quadro = quadro_da_capa(xml) if xml else None
-        if not quadro:
-            return False, "a figurinha não voltou para a capa"
-        ok, motivo = ajustar_a_figurinha(d, capa, quadro)
-        if not ok:
-            return False, motivo
-        tocar(d, "@save_btn", 5)
-        if not esperar_na_tela(d, "@et_caption", ESPERA_A_MAIS_NO_CAMINHO):
-            return False, "o ✓ da capa não voltou à tela final"
-        return True, motivo
-    except Parada as e:
-        return False, e.motivo
+        try:
+            ok, motivo = _figurinha_na_capa(d, capa)
+        except Parada as e:
+            ok, motivo = False, e.motivo
+        if not ok and ao_falhar:
+            ao_falhar(motivo)
+        return ok, motivo
     finally:
         sair_da_capa(d)
         ps.tirar_foto_da_galeria(d, nome)
 
 
-def por_a_capa(d, capa):
+def _figurinha_na_capa(d, capa):
+    """Os toques da capa_pela_figurinha, da tela final até o ✓ (o miolo já na galeria). (ok, motivo)"""
+    tocar(d, "@tv_select_cover", 6)
+    if not esperar_na_tela(d, "@fl_add_sticker", ESPERA_A_MAIS_NO_CAMINHO):
+        return False, "a tela da capa não abriu"
+    tocar(d, "@fl_add_sticker", 4)
+    aba = aba_da_foto(tela(d))
+    if not aba:
+        return False, "a aba da foto da figurinha não apareceu"
+    d.click(*aba)
+    pausa(3)
+    mais = mais_da_figurinha(tela(d))
+    if not mais:
+        return False, "nem o Enviar nem o + da figurinha apareceram"
+    d.click(*mais)
+    pausa(5)
+    if not esperar_na_tela(d, "@iv_picture", ESPERA_A_MAIS_NO_CAMINHO):
+        return False, "as Fotos não abriram"
+    tocar(d, "@iv_picture", 6)
+    if not esperar_na_tela(d, "@tv_next_full", ESPERA_A_MAIS_NO_CAMINHO):
+        return False, "o recorte da foto não abriu"
+    tocar(d, "@tv_next_full", 6)
+    xml = esperar_na_tela(d, "@save_btn", ESPERA_A_MAIS_NO_CAMINHO)
+    quadro = quadro_da_capa(xml) if xml else None
+    if not quadro:
+        return False, "a figurinha não voltou para a capa"
+    ok, motivo = ajustar_a_figurinha(d, capa, quadro)
+    if not ok:
+        return False, motivo
+    tocar(d, "@save_btn", 5)
+    if not esperar_na_tela(d, "@et_caption", ESPERA_A_MAIS_NO_CAMINHO):
+        return False, "o ✓ da capa não voltou à tela final"
+    return True, motivo
+
+
+def por_a_capa(d, capa, ao_falhar=None):
     """
     A capa pela figurinha no rascunho, com o registro: posta, ou de fora com o motivo (a capa de
-    sempre). Depois, a edição da legenda que reabriu por cima da tela final na volta da capa é
-    fechada. True quando a capa com a frase ficou.
+    sempre; ao_falhar guarda o caso com a tela da capa). Depois, a edição da legenda que reabriu
+    por cima da tela final na volta da capa é fechada. True quando a capa com a frase ficou.
     """
-    ok, motivo = capa_pela_figurinha(d, capa)
+    ok, motivo = capa_pela_figurinha(d, capa, ao_falhar)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "posta" if ok else "de fora", motivo, ok=ok or None)
     fechar_a_edicao_da_legenda(d, tela(d))
     return ok
@@ -3392,7 +3424,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # produto às vezes não fica (VEZES_DO_PRIMEIRO_PRODUTO).
     escrever_a_legenda(d, textos["titulo"])
     # A capa com a frase por último, pela figurinha (P110); sem ela, a capa de sempre.
-    if figurinha.get("capa") and por_a_capa(d, figurinha["capa"]):
+    if figurinha.get("capa") and por_a_capa(
+            d, figurinha["capa"], lambda motivo: _guardar_caso(d, "capa", "de fora", motivo, video, ident, agora)):
         atualizar(ident, chamada="1")
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
