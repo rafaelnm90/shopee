@@ -25,6 +25,15 @@ def test_lembrete_do_dia_nao_diz_que_espera_resposta():
     assert "para ver a lista" in texto and "📌 Lembrete do dia: 3 pendências" in texto
 
 
+def test_pedido_de_ajuda_diz_o_que_o_claude_pediu():
+    # Pedido do Rafael (31/10): o Claude pode pedir uma ajuda dele (um vídeo ensinando algo) e
+    # lembrar até ele entregar; o aviso não pode parecer uma pergunta esperando resposta.
+    texto = avisar_rafael.montar_texto("Pedido de ajuda: gravar o toque no Ver Mais do Ver Produtos")
+    assert texto.startswith("🤖 O Claude pediu uma ajuda sua.") and "esperando uma resposta" not in texto
+    assert "📌 Pedido de ajuda: gravar o toque no Ver Mais do Ver Produtos" in texto
+    assert "para ver o que ele precisa" in texto
+
+
 def test_envia_para_o_admin_pelo_bot(bm, monkeypatch):
     pedidos = []
 
