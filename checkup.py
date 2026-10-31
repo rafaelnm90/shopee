@@ -849,10 +849,15 @@ def robo_da_shopee_video(agora=None):
     pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
     # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
     punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
+    # O que o Espião trouxe do Canal Afiliados para a fila do Viral: o robô e o modo assistente
+    # não pegam (o loop; pedido do Rafael, 30/10).
+    fila_viral = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
+    do_canal = sum(1 for item in fila_viral if str(item.get("chat_origem")) == pedidos_do_canal.CANAL)
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
             "sem_tentar": sem_tentar, "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
-            "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora)}
+            "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora),
+            "do_canal_no_viral": do_canal}
 
 
 # A medição dos produtos a mais da Shopee Vídeo (P73) conta desde o dia em que eles entraram
@@ -1626,6 +1631,8 @@ def main():
         print(f"   aprovado {aprovado} → previsto {previsto} → postado {postado} (atraso {atraso} min)")
     print(f"Canal Afiliados: postados esperando a fila do canal há mais de {ESPERA_DO_CANAL} min: "
           f"{robo_sv['canal_parados']}")
+    print(f"Fila do Viral: vídeos que vieram do Canal Afiliados (o robô e o assistente não os pegam): "
+          f"{robo_sv['do_canal_no_viral']}")
     print(_linha_dos_produtos_a_mais(produtos_a_mais_da_shopee_video(agora)))
     print(_linha_da_capa_com_chamada(capa_com_chamada_da_shopee_video(agora)))
 

@@ -40,6 +40,22 @@ def test_pedido_guarda_uma_copia_e_o_mesmo_rascunho_nao_dobra(tmp_path):
     assert pedidos.pendentes() == []
 
 
+def test_a_marca_do_video_levado_ao_canal_reconhece_o_mesmo_arquivo_por_outro_caminho(tmp_path, monkeypatch):
+    # Contra o loop (vídeo do Rafael, 30/10, 22:28): o vídeo que o robô levou ao canal volta
+    # pelo Viral com outro nome de arquivo; a marca (SHA-256) o reconhece.
+    video = _video(tmp_path, conteudo=b"postado")
+    assert not pedidos.ja_foi_ao_canal(video)
+    pedidos.pedir(1, video, LINK_DO_POST, [], agora=AGORA)
+    de_volta = _video(tmp_path, "de_volta.mp4", b"postado")
+    assert pedidos.ja_foi_ao_canal(de_volta)
+    assert not pedidos.ja_foi_ao_canal(_video(tmp_path, "outro.mp4", b"outro"))
+    # Ficam só as marcas mais novas.
+    monkeypatch.setattr(pedidos, "MARCAS_GUARDADAS", 2)
+    for n in range(2, 4):
+        pedidos.pedir(n, _video(tmp_path, f"v{n}.mp4", f"video {n}".encode()), LINK_DO_POST, [], agora=AGORA)
+    assert not pedidos.ja_foi_ao_canal(de_volta)
+
+
 def test_parados_sao_so_os_que_esperam_mais_que_o_prazo(tmp_path):
     video = _video(tmp_path)
     pedidos.pedir(1, video, LINK_DO_POST, [], agora=AGORA - timedelta(minutes=40))

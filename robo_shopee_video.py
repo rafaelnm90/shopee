@@ -1745,7 +1745,9 @@ def proximo_video(config, evitar=()):
     """
     O vídeo da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou,
     com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário), fora os de
-    evitar (os que esgotaram as tentativas hoje). Sem nenhum, None.
+    evitar (os que esgotaram as tentativas hoje) e o arquivo que o robô já levou ao Canal
+    Afiliados, que volta pelo Viral (o loop; pedido do Rafael, 30/10:
+    DECISOES.md, Shopee Vídeo). Sem nenhum, None.
     """
     fonte = config.get("fonte", assistente.FONTE_PADRAO)
     usados = ids_usados() | set(evitar)
@@ -1755,7 +1757,8 @@ def proximo_video(config, evitar=()):
     for id_video, arquivo, link, legenda in assistente._candidatos(fonte if fonte in assistente.FONTES
                                                                       else assistente.FONTE_PADRAO):
         if (id_video in mandados or id_video in usados or not arquivo or not link
-                or not os.path.exists(arquivo) or arquivo.lower().endswith(assistente.EXTENSOES_DE_IMAGEM)):
+                or not os.path.exists(arquivo) or arquivo.lower().endswith(assistente.EXTENSOES_DE_IMAGEM)
+                or pedidos_do_canal.ja_foi_ao_canal(arquivo)):
             continue
         return {"id": id_video, "arquivo": os.path.abspath(arquivo), "link": link, "nome": nome_da_legenda(legenda),
                 "de_video": eh_video(asyncio.run(link_para_converter(link)))}
