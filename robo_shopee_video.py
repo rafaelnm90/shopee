@@ -2942,6 +2942,16 @@ def itens_postados():
     return [((r["postado_em"] or "")[:10], r["itens"]) for r in listar("postado") if r["itens"] and r["postado_em"]]
 
 
+# Depois do Feito, o produto aparece na fileira da tela final. No Motorola, em 30/10 (06:17) e
+# em 31/10 (09:15 e 09:35), o 1º produto não ficou: a tela final voltou com a edição da legenda
+# aberta por cima (a legenda já escrita, em foco e com o texto marcado pela cópia) e a linha dos
+# produtos vazia. Por isso os produtos vão antes da legenda, e o 1º anexado é conferido na tela
+# final: sem ele, o robô o anexa de novo, uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
+VEZES_DO_PRIMEIRO_PRODUTO = 2
+MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU = ("o produto anexado pelo Adicionar não ficou na tela final depois do Feito, "
+                                    "nem na 2ª vez")
+
+
 def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
     """
     Anexa os produtos curtidos, na ordem de nomes (o 1º pelo Adicionar produto, os outros
@@ -2950,7 +2960,8 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
     para o rascunho. Devolve (os nomes como a lista os mostrou, as posições anexadas). Os
     curtidos ficam no alto da lista: cada um é procurado entre os que ainda não foram
     anexados. Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado
-    rolando a lista inteira (P27).
+    rolando a lista inteira (P27). O 1º anexado é conferido na tela final depois do Feito e,
+    sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
     """
     anexados, no_post = [], []
     for i, nome in enumerate(nomes):
@@ -2958,25 +2969,80 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
             registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora",
                                          "sem tempo na rodada", ok=None)
             continue
-        seguir(d, CAMINHO_PRODUTO if not anexados else CAMINHO_MAIS_UM_PRODUTO)
-        ok, motivo = ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=len(nomes) - len(anexados),
-                                          rolar_a_lista=not limpa, ultima_chance=i not in a_mais,
-                                          avisar=i not in a_mais)
-        if not ok and i in a_mais:
-            registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora", "não anexou",
-                                         ok=None)
-            voltar_a_tela_final(d)
-            continue
-        _conferir((ok, motivo))
-        no_post.append(i)
-        tocar(d, "Feito", 6)
+        primeiro = not anexados
+        for vez in range(1, (VEZES_DO_PRIMEIRO_PRODUTO if primeiro else 1) + 1):
+            if not _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados), limpa, i in a_mais):
+                break
+            if not primeiro or primeiro_na_tela_final(d, vez):
+                no_post.append(i)
+                break
+            # O Feito não deixou o produto na tela final: ele sai da conta e vai de novo.
+            anexados.clear()
+        else:
+            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU)
     return anexados, no_post
+
+
+def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais):
+    """
+    Um produto: o caminho até Minhas Curtidas, o Adicionar dele e o Feito. False quando é um
+    produto a mais que não anexou: ele fica de fora, e o robô volta à tela final.
+    """
+    seguir(d, CAMINHO_PRODUTO if not anexados else CAMINHO_MAIS_UM_PRODUTO)
+    ok, motivo = ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=no_topo,
+                                      rolar_a_lista=not limpa, ultima_chance=not a_mais, avisar=not a_mais)
+    if not ok and a_mais:
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora", "não anexou", ok=None)
+        voltar_a_tela_final(d)
+        return False
+    _conferir((ok, motivo))
+    tocar(d, "Feito", 6)
+    return True
+
+
+def primeiro_na_tela_final(d, vez=1):
+    """
+    Depois do Feito do 1º produto, a tela final mostra o produto na fileira? Relê a tela por
+    até ps.ESPERA_DA_FILEIRA s. Sem ele, ou quando ele só veio na 2ª vez, o registro diz como a
+    tela voltou (a linha dos produtos, a edição da legenda aberta por cima, a legenda em foco),
+    só com rótulos fixos: o próximo caso mostra a causa (pedido do Rafael de 30/10).
+    """
+    xml = tela(d)
+    for _ in range(ps.ESPERA_DA_FILEIRA // 3):
+        if ps.produtos_na_fileira(xml):
+            break
+        pausa(3)
+        xml = tela(d)
+    if ps.produtos_na_fileira(xml):
+        if vez > 1:
+            registro_processos.registrar(REGISTRO, "anexar o produto", f"anexado na {vez}ª vez",
+                                         ps.como_esta_a_tela_final(xml), ok=True)
+        return True
+    registro_processos.registrar(REGISTRO, "anexar o produto", "não ficou depois do Feito",
+                                 f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}", ok=False)
+    fechar_a_edicao_da_legenda(d, xml)
+    return False
+
+
+def fechar_a_edicao_da_legenda(d, xml):
+    """
+    A edição da legenda aberta por cima da tela final (rl_overlay, a tela escurecida) cobre a
+    linha dos produtos, e o toque no Adicionar produto cairia nela. Um toque no rótulo
+    "Adicionar produto", que não é botão, a fecha; sem ela por cima, o toque não faz nada.
+    """
+    rotulo = ps.achar(xml, "@tv_add_product_title")
+    if tem(xml, "@rl_overlay") and rotulo and not ps.proibido_no_ponto(xml, *rotulo):
+        d.click(*rotulo)
+        pausa(3)
 
 
 def voltar_a_tela_final(d, vezes=3):
     """
     Depois do produto a mais que não anexou, volta da lista de Minhas Curtidas (ou da janela de
-    editar o nome) para a tela final; o aviso de sair dela, se abrir, fica no Cancelar.
+    editar o nome) para a tela final; o aviso de sair dela, se abrir, fica no Cancelar. Os
+    produtos vão antes da legenda, e sem a legenda escrita um voltar a mais na tela final leva à
+    edição do vídeo sem aviso: depois de cada voltar, a tela final tem uns segundos para
+    aparecer antes do próximo.
     """
     for _ in range(vezes):
         xml = tela(d)
@@ -2987,8 +3053,30 @@ def voltar_a_tela_final(d, vezes=3):
             continue
         d.press("back")
         pausa(3)
+        if esperar_na_tela(d, "@et_caption", ESPERA_A_MAIS_NO_CAMINHO):
+            return
     if not tem(tela(d), "@et_caption"):
         raise Parada("o produto a mais não anexou, e o voltar não voltou à tela final")
+
+
+def escrever_a_legenda(d, titulo):
+    """
+    O título da IA na legenda da tela final, conferido pela cópia do campo (com os emojis), e o
+    OK que fecha a edição dela. Vai depois dos produtos (VEZES_DO_PRIMEIRO_PRODUTO diz por quê).
+    """
+    tocar(d, "@et_caption", 3)
+    ps.escrever(d, titulo)
+    pausa(3)
+    copiada = ps.legenda_copiada(d)
+    na_tela = copiada or ps.legenda_lida(d)
+    if not mesma_legenda(na_tela, titulo):
+        # Por onde leu, tamanhos e códigos de caractere, nunca o texto: o diagnóstico do
+        # servidor, que é público, mostra esta conferência para achar o que não bateu.
+        conferencia = (f"{'pela cópia' if copiada else 'sem a cópia, pela acessibilidade'}: "
+                       f"{ps.comparar_legenda(na_tela, titulo)}; {_forma_do_titulo(titulo)}")
+        gravar_estado(ultima_legenda=conferencia, ultima_legenda_em=_momento())
+        raise Parada(f"o título não ficou na legenda ({conferencia})")
+    tocar(d, "@tv_right", 3)
 
 
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
@@ -3087,20 +3175,6 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     marcar_so_o_mais_novo(d)
     seguir(d, CAMINHO_EDICAO)
 
-    tocar(d, "@et_caption", 3)
-    ps.escrever(d, textos["titulo"])
-    pausa(3)
-    copiada = ps.legenda_copiada(d)
-    na_tela = copiada or ps.legenda_lida(d)
-    if not mesma_legenda(na_tela, textos["titulo"]):
-        # Por onde leu, tamanhos e códigos de caractere, nunca o texto: o diagnóstico do
-        # servidor, que é público, mostra esta conferência para achar o que não bateu.
-        conferencia = (f"{'pela cópia' if copiada else 'sem a cópia, pela acessibilidade'}: "
-                       f"{ps.comparar_legenda(na_tela, textos['titulo'])}; {_forma_do_titulo(textos['titulo'])}")
-        gravar_estado(ultima_legenda=conferencia, ultima_legenda_em=_momento())
-        raise Parada(f"o título não ficou na legenda ({conferencia})")
-    tocar(d, "@tv_right", 3)
-
     # Os curtidos agora ficam em cima da lista: o 2º produto do vídeo procura entre os que
     # sobraram no topo. A tela final e o postar conferem o nome que a lista mostra, que pode
     # ser outro que o da API. Escolha do Rafael (P18): DECISOES.md, Shopee Vídeo.
@@ -3109,6 +3183,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     a_mais = {i for i, produto in enumerate(produtos or []) if not produto.get("do_video")}
     anexados, no_post = anexar_os_produtos(d, video, nomes, a_mais, lista_limpa(),
                                            inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60)
+    # A legenda vai depois dos produtos: em foco nas idas à lista de Minhas Curtidas, o 1º
+    # produto às vezes não fica (VEZES_DO_PRIMEIRO_PRODUTO).
+    escrever_a_legenda(d, textos["titulo"])
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
         ordem = [produtos[i] for i in no_post]

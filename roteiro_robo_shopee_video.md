@@ -163,6 +163,15 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     Feito, e a tela final mostra os produtos lado a lado (`rv_product`, um `tv_product_title`
     e um X `iv_close` cada). Sem legenda escrita, o voltar da tela final vai direto à edição,
     sem o aviso de sair.
+  - **o produto que não fica depois do Feito** (30/10/2026 às 06:17; 31/10/2026 às 09:15 e
+    09:35): com a legenda já escrita (em foco e com o texto marcado pela cópia), o Feito às vezes
+    voltava à tela final com a edição da legenda aberta por cima (`rl_overlay`, a tela escurecida,
+    sem o OK) e a linha dos produtos vazia ("Toque para adicionar produtos"). O robô anexa os
+    produtos antes de escrever a legenda e confere o 1º na fileira depois do Feito; sem ele, anota
+    como a tela voltou (a linha dos produtos, a edição da legenda por cima, a legenda em foco),
+    fecha a edição com um toque no rótulo "Adicionar produto" (`tv_add_product_title`, que não é
+    botão) e anexa de novo, uma vez. Sem a legenda escrita, o voltar da tela final vai à edição do
+    vídeo sem aviso: depois do voltar da lista, o robô espera a tela final aparecer antes de outro.
   - **o robô com link de vídeo:** abre o vídeo, toca em Ver Produtos e, em cada produto
     vinculado (até 6, nunca os recomendados), lê o nome na página, a IA confere vídeo × nome 2
     vezes, e o confirmado é curtido. Anexa todos os confirmados (o 1º pelo Adicionar produto,
