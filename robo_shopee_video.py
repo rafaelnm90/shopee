@@ -1256,6 +1256,17 @@ def aviso_de_sair(xml):
             and any(el["id"] == "content" and "voltar" in el["texto"].casefold() for el in ps.elementos(xml)))
 
 
+# O aviso de erro do app da Shopee ("Ops! Algo deu errado. Estamos verificando nisso.") não
+# fecha com o voltar (Motorola, 31/10/2026, 15:48 e 15:59: o robô apertou voltar até desistir);
+# o único botão dele leva à página inicial do app.
+BOTAO_DO_ERRO_DO_APP = "Voltar à Página Inicial"
+
+
+def erro_do_app(xml):
+    """O aviso de erro do app, com o Voltar à Página Inicial, está na tela?"""
+    return tem_exato(xml, BOTAO_DO_ERRO_DO_APP)
+
+
 def tem_exato(xml, texto):
     """Algum elemento com exatamente esse texto (o "Eu" da barra, não um "seu" no meio de outro)."""
     return any(ps._normal(el["texto"]) == ps._normal(texto) for el in ps.elementos(xml))
@@ -1317,6 +1328,11 @@ def voltar(d, ate, vezes=15):
             continue
         if descartar_a_capa(xml):
             tocar(d, "@tv_discard", 3)
+            continue
+        if erro_do_app(xml):
+            registro_processos.registrar(REGISTRO, "voltar no app", "aviso de erro do app",
+                                         f"{BOTAO_DO_ERRO_DO_APP} tocado", ok=None)
+            tocar(d, BOTAO_DO_ERRO_DO_APP, 5)
             continue
         d.press("back")
         pausa(3)
