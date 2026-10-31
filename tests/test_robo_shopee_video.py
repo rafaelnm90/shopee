@@ -3166,6 +3166,21 @@ def test_preparo_interrompido_pelo_reinicio_volta_para_a_fila_na_rodada_seguinte
     assert robo.tentativas_desde("2026-10-24 00:00:00")[0]["passo"] == "rodada interrompida"
 
 
+def test_preparo_interrompido_guarda_o_caso_com_os_passos_da_rodada_que_morreu():
+    # Retomada de 31/10: a rodada das 05:30 morreu no meio do preparo e nada dizia onde.
+    import json
+    robo.criar("video:9", momento("2026-10-24 09:20"))
+    robo.registro_processos.registrar(robo.REGISTRO, "anexar o produto", "anexado", "no topo, pelo nome",
+                                      agora=momento("2026-10-24 09:50"))
+    assert robo.soltar_preparos_interrompidos(momento("2026-10-24 10:30")) == 1
+    casos = robo.casos_robo.casos()
+    assert len(casos) == 1
+    with open(os.path.join(robo.casos_robo.PASTA, casos[0], "caso.json"), encoding="utf-8") as f:
+        caso = json.load(f)
+    assert caso["passo"] == "rodada interrompida" and caso["rascunho"]["id_video"] == "video:9"
+    assert [linha[1:3] for linha in caso["registro"]][-1] == ["anexar o produto", "anexado"]
+
+
 def test_horario_do_plano_interrompido_no_meio_tenta_de_novo(monkeypatch):
     # 24/10/2026: os deploys da manhã mataram a rodada no meio do preparo; o vídeo voltou
     # para a fila, mas o horário do plano ficou como feito, e o robô dizia "nada a fazer
