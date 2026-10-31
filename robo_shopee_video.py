@@ -4919,6 +4919,12 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
 # A pausa que o robô faz sozinho quando perde o celular (robo_pausa_motivo); o painel a
 # mostra diferente da pausa do botão.
 MOTIVO_DA_DESCONEXAO = "celular desconectado"
+# O caminho de volta ao automático, com o botão onde ele está no painel (Robô Automático 🤖) e
+# o pareamento para quando a depuração já está ligada e o adb não conecta (31/10/2026).
+COMO_RETOMAR = ("no Motorola, em Opções do desenvolvedor, deixe a Depuração por Wi-Fi ligada (se ela já estiver "
+                "ligada, desligue e ligue de novo) e, no bot, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → "
+                "Retomar Postagem ▶️. Eu acho o celular sozinho. Se ainda não der, pareie de novo em Robô "
+                "Automático 🤖 → Celular do Robô 📱 → Parear Celular 🔗.")
 
 
 def pausar_por_desconexao(motivo):
@@ -4932,8 +4938,7 @@ def pausar_por_desconexao(motivo):
     logger.warning(f"⚠️ [Robô Shopee Vídeo] Celular desconectado ({motivo}): Postagem pausada.")
     avisar(f"📱 Robô da Shopee Vídeo: perdi a conexão com o celular guardado ({motivo}). Pausei a Postagem, "
            "e o modo assistente volta a mandar as postagens aqui no privado para você postar à mão.\n\n"
-           "Para voltar ao automático: no Motorola, ligue a Depuração por Wi-Fi (Opções do desenvolvedor) e, "
-           "no bot, toque em Shopee Vídeo 🎬 → Retomar Postagem ▶️. Eu acho o celular sozinho.")
+           f"Para voltar ao automático: {COMO_RETOMAR}")
 
 
 def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):

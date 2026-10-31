@@ -256,6 +256,31 @@ def test_porta_guardada_aberta_que_nao_conecta_nao_culpa_a_depuracao(cr, monkeyp
     assert "desligada" not in motivo
 
 
+def test_porta_aberta_que_nao_conecta_reinicia_o_adb_do_servidor_e_tenta_de_novo(cr, monkeypatch):
+    # 31/10, 16:09: a porta da depuração respondia, o adb não conectava, e o Retomar também não
+    # achava o celular. O servidor do adb preso volta com o kill-server (as chaves do pareamento
+    # ficam), e o robô tenta de novo antes de pedir o pareamento.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)") if ("adb", "kill-server") in pedidos
+                        else (False, "o adb vê o celular desligado (offline)"))
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert ("adb", "kill-server") in pedidos
+
+
+@pytest.mark.parametrize("saida, motivo", [
+    ("error: device offline", "o adb vê o celular desligado (offline)"),
+    ("failed to connect to x: Connection reset by peer",
+     "o adb não conseguiu (tente de novo; o adb disse: failed to connect to …: Connection reset by peer)"),
+])
+def test_motivo_do_adb_diz_o_que_o_adb_respondeu_sem_o_endereco(cr, saida, motivo):
+    assert cr._motivo((1, saida.replace("x", f"{IP}:37000"))) == motivo
+
+
 @pytest.mark.parametrize("resposta, esperado", [
     ((0, "device"), "adb: device"), ((1, "error: device offline"), "adb: offline"),
     ((1, "error: device unauthorized"), "adb: não autorizado"), (None, "adb: sem resposta"),

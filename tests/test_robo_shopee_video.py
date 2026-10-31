@@ -361,6 +361,10 @@ def test_celular_desconectado_tenta_sozinho_e_sem_ele_pausa_e_avisa(monkeypatch,
     assert tentativas == [1] and config["robo_pausado"] is True
     assert config["robo_pausa_motivo"] == "celular desconectado"
     assert len(avisos) == 1 and "Retomar Postagem ▶️" in avisos[0] and "assistente" in avisos[0]
+    # 31/10: o aviso mandava a "Shopee Vídeo 🎬 → Retomar Postagem ▶️", mas o botão fica em Robô
+    # Automático 🤖; com a depuração ligada e o adb sem conectar, o caminho é parear de novo.
+    assert "Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️" in avisos[0]
+    assert "Celular do Robô 📱 → Parear Celular 🔗" in avisos[0] and "desligue e ligue de novo" in avisos[0]
     assert robo.rodada(agora=momento("2026-10-22 10:15")) == "pausado"
     assert len(avisos) == 1 and tentativas == [1]
 

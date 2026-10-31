@@ -111,10 +111,27 @@ def _motivo(resultado):
                            ("failed to authenticate", "o celular não reconhece mais este servidor: parear de novo"),
                            ("timed out", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
                            ("no route", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
-                           ("unauthorized", "o celular ainda não autorizou este servidor")):
+                           ("unauthorized", "o celular ainda não autorizou este servidor"),
+                           # 31/10/2026: a porta da depuração respondia, e o adb via o celular
+                           # "offline"; o servidor do adb pode ficar preso (reconectar_sozinho).
+                           ("offline", "o adb vê o celular desligado (offline)"),
+                           ("daemon", "o adb do servidor não respondeu")):
         if trecho in saida:
             return motivo
-    return "o adb não conseguiu (tente de novo)"
+    resumo = _resumo_do_adb(resultado[1])
+    return f"o adb não conseguiu (tente de novo; o adb disse: {resumo})" if resumo else "o adb não conseguiu (tente de novo)"
+
+
+def _resumo_do_adb(saida):
+    """
+    A 1ª linha da saída do adb sem o endereço, a porta, os números e os nomes de serviço
+    (adb-...): o motivo vai para o registro e o aviso, e o log do checkup é público.
+    """
+    linha = next((l.strip() for l in str(saida or "").splitlines() if l.strip()), "")
+    linha = re.sub(r"\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?", "…", linha)
+    linha = re.sub(r"adb-[\w.-]+", "…", linha)
+    linha = re.sub(r"\d+", "#", linha)
+    return re.sub(r"['\"`]", "", linha)[:80].strip()
 
 
 def parear(ip, porta, codigo):
@@ -203,7 +220,6 @@ def reconectar_sozinho():
     rede = {c["ip"]: c for c in celulares_na_rede()}
     if not rede.get(dados["ip"], {}).get("online"):
         return False, "o celular não está na rede privada (Tailscale desligado ou celular sem internet)"
-    motivo_da_guardada = ""
     if dados.get("porta"):
         # A conexão sem fio do adb pode ficar presa ("offline") com a depuração ligada: o
         # "adb connect" diz que já está conectado e nada responde. Desfazer e refazer resolve.
@@ -211,7 +227,6 @@ def reconectar_sozinho():
         ok, resultado = conectar(dados["ip"], dados["porta"])
         if ok:
             return True, resultado
-        motivo_da_guardada = resultado
     abertas = portas_abertas(dados["ip"])
     for porta in abertas:
         if porta == dados.get("porta"):
@@ -220,7 +235,14 @@ def reconectar_sozinho():
         if ok:
             return True, resultado
     if dados.get("porta") in abertas:
-        return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({motivo_da_guardada}); "
+        # A porta da depuração responde e o adb não conecta: o servidor do adb pode ter ficado
+        # preso (31/10/2026: o Retomar não achava o celular com a depuração ligada). Reiniciá-lo
+        # (as chaves do pareamento ficam) e tentar de novo uma vez, antes de pedir o pareamento.
+        av._rodar("adb", "kill-server", timeout=20)
+        ok, resultado = conectar(dados["ip"], dados["porta"])
+        if ok:
+            return True, resultado
+        return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "
                        "se continuar, parear de novo pelo Celular do Robô")
     if abertas:
         return False, (f"o celular tem {len(abertas)} porta(s) aberta(s), mas nenhuma é a da Depuração por Wi-Fi; "
