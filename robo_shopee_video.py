@@ -725,6 +725,7 @@ PASSOS = (
     ("edição do vídeo não saiu", "edição do vídeo"),
     ("bebida alcoólica só vai", "edição do vídeo"),
     ("bebida alcoólica em espera", "bebida alcoólica em espera"),
+    ("depois do Feito", "anexar o produto"),
     ("figurinha", "capa pela figurinha"),
     ("faixa laranja", "capa pela figurinha"),
     ("do tamanho do desenho", "capa pela figurinha"),
@@ -2988,6 +2989,7 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
     sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
     """
     anexados, no_post = [], []
+    _AVISO_DO_FEITO["texto"] = ""
     for i, nome in enumerate(nomes):
         if i in a_mais and prazo is not None and time.monotonic() > prazo:
             registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora",
@@ -3003,7 +3005,8 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
             # O Feito não deixou o produto na tela final: ele sai da conta e vai de novo.
             anexados.clear()
         else:
-            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU)
+            aviso = _AVISO_DO_FEITO["texto"]
+            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU + (f"; o app avisou: {aviso}" if aviso else ""))
     return anexados, no_post
 
 
@@ -3020,6 +3023,7 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais):
         voltar_a_tela_final(d)
         return False
     _conferir((ok, motivo))
+    limpar_aviso_do_app(d)
     tocar(d, "Feito", 6)
     return True
 
@@ -3042,10 +3046,40 @@ def primeiro_na_tela_final(d, vez=1):
             registro_processos.registrar(REGISTRO, "anexar o produto", f"anexado na {vez}ª vez",
                                          ps.como_esta_a_tela_final(xml), ok=True)
         return True
+    lido, aviso = aviso_do_app(d)
+    _AVISO_DO_FEITO["texto"] = aviso
+    # O texto do aviso pode trazer o nome do produto: no registro (o checkup é público), só se houve.
+    sobre_o_aviso = ("; o app mostrou um aviso" if aviso else "; sem aviso do app") if lido else ""
     registro_processos.registrar(REGISTRO, "anexar o produto", "não ficou depois do Feito",
-                                 f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}", ok=False)
+                                 f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}{sobre_o_aviso}", ok=False)
     fechar_a_edicao_da_legenda(d, xml)
     return False
+
+
+# O último aviso curto (toast) do app depois do Feito do produto que não ficou, para a parada dizer
+# o que o app respondeu (31/10/2026, 15:21 e 15:35: o mesmo produto não ficou duas vezes, e a tela
+# não dizia por quê).
+_AVISO_DO_FEITO = {"texto": ""}
+
+
+def limpar_aviso_do_app(d):
+    """Esquece o último aviso curto (toast) do app: o que vier depois do próximo toque é dele."""
+    try:
+        d.clear_toast()
+    except Exception:
+        pass
+
+
+def aviso_do_app(d):
+    """
+    O último aviso curto (toast) que o app mostrou, pelo uiautomator2: (lido, texto, sem os
+    números). Sem conseguir ler, (False, ""); lido e sem aviso, (True, "").
+    """
+    try:
+        texto = d.last_toast()
+    except Exception:
+        return False, ""
+    return True, re.sub(r"\d+", "#", str(texto or "")).strip()[:100]
 
 
 def fechar_a_edicao_da_legenda(d, xml):
