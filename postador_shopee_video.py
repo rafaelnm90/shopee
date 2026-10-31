@@ -34,9 +34,9 @@ Passos, separados por ponto e vírgula:
                      como capa, ficar como o dos posts; video:apagar tira da galeria o vídeo do teste
     foto             põe na galeria a foto do anúncio do produto do vídeo do teste (a da API de
                      afiliado), a mais nova da galeria, para a busca pela foto (a câmera da
-                     busca de Criadores & Afiliados); foto:capa, a capa com a frase que a IA
-                     escreve vendo o vídeo do teste (a da edição), para a figurinha da capa;
-                     foto:apagar tira as duas
+                     busca de Criadores & Afiliados); foto:capa, o miolo (2:3) da capa com a
+                     frase que a IA escreve vendo o vídeo do teste (a da edição), para a
+                     figurinha da capa; foto:apagar tira as duas
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     curtir           na página que o link abriu, toca no nome do produto (abre a página
                      completa) e curte; já curtido, segue sem tocar no coração
@@ -126,10 +126,11 @@ HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo: a tela antes de salvar o rascunho."
 LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo: a tela antes de postar. Confira o vídeo, o título "
                         "e o produto: só posto com o seu OK.")
-# O exemplo da capa com a frase pelo Adicionar Texto do app, para o Rafael aprovar antes de o
-# robô fazer assim (P109): DECISOES.md, Shopee Vídeo.
-LEGENDA_PRINT_CAPA = ("🖼️ Robô da Shopee Vídeo: exemplo da capa com a frase pelo Adicionar Texto do app, "
-                      "num vídeo de teste que não vai ao ar. Responda na conversa com o Claude se aprova.")
+# O exemplo da capa com a frase pela figurinha com foto do Selecionar Capa do app, para o
+# Rafael aprovar antes de o robô fazer assim (vídeo dele de 30/10, 20:07): DECISOES.md, Shopee Vídeo.
+LEGENDA_PRINT_CAPA = ("🖼️ Robô da Shopee Vídeo: exemplo da capa com a frase, posta pela figurinha com foto do "
+                      "Selecionar Capa, num vídeo de teste que não vai ao ar. Responda na conversa com o Claude "
+                      "se aprova.")
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado ao vídeo."
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
                     "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
@@ -1672,9 +1673,10 @@ def por_editado_na_galeria(d, video):
 
 def capa_na_galeria(d, video):
     """
-    Põe na galeria, como a foto mais nova, a capa com chamada do vídeo do teste (a foto do
-    anúncio e a frase que a IA escreve vendo o vídeo, P106 e P107), para a figurinha da tela
-    da capa. O nome é o da foto da busca: o foto:apagar a tira. (ok, o que dizer no log)
+    Põe na galeria, como a foto mais nova, o miolo da capa com chamada do vídeo do teste (a
+    foto do anúncio e a frase que a IA escreve vendo o vídeo, P106 e P107; o recorte_da_figurinha),
+    para a figurinha da tela da capa. O nome é o da foto da busca: o foto:apagar a tira. (ok, o
+    que dizer no log)
     """
     import edicao_video   # aqui dentro: o edicao_video importa este módulo
     anuncio = anuncio_do_produto(video)
@@ -1686,7 +1688,8 @@ def capa_na_galeria(d, video):
     capa = edicao_video.capa_com_chamada(anuncio["foto"], frase)
     if not capa:
         return False, "a capa com a chamada não saiu"
-    return ((True, f"capa com a frase na galeria ({len(frase)} letras)") if por_foto_na_galeria(d, capa)
+    miolo = edicao_video.recorte_da_figurinha(capa)
+    return ((True, f"miolo da capa com a frase na galeria ({len(frase)} letras)") if por_foto_na_galeria(d, miolo)
             else (False, "a capa não apareceu na galeria"))
 
 

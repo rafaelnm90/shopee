@@ -1315,6 +1315,26 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     assert recorte.size == (720, baixo - cima)
 
 
+def test_miolo_da_capa_para_a_figurinha_tem_a_foto_e_a_faixa_inteiras_em_2_por_3():
+    # A capa pelo Selecionar Capa do app (vídeo do Rafael de 30/10, 20:07): a figurinha cresce
+    # só até 3 vezes o tamanho com que entra, e só o miolo em 2:3 cobre a capa de lado a lado,
+    # em cima da mesma foto do 1º quadro do vídeo.
+    import io
+
+    from PIL import Image
+    capa_png = edicao_video.capa_com_chamada(_foto_jpg(), "Leve")
+    capa = Image.open(io.BytesIO(capa_png)).convert("RGB")
+    miolo = Image.open(io.BytesIO(edicao_video.recorte_da_figurinha(capa_png))).convert("RGB")
+    assert miolo.size == (720, 1080) and miolo.width * 3 == miolo.height * 2
+    cima, baixo = edicao_video.RECORTE_DA_FIGURINHA
+    assert list(miolo.getdata()) == list(capa.crop((0, cima, 720, baixo)).getdata())
+    # A foto e a faixa laranja ficam inteiras no miolo; fora dele, a capa só tem preto.
+    _, y1, _, y2 = edicao_video.FOTO_DA_CAPA
+    assert cima < y1 and y2 < baixo
+    assert _cor_de(miolo, (3, y2 - cima - 2), edicao_video.LARANJA_DA_SHOPEE)
+    assert _pretos(capa, (0, 0, 720, cima)) and _pretos(capa, (0, baixo, 720, 1280))
+
+
 def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkeypatch, tmp_path):
     _versoes_de_mentira(monkeypatch)
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})

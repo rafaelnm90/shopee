@@ -191,6 +191,13 @@ NUMERO_DA_GRADE = (52, 1005, 228, 1055)         # x1, y1, x2, y2
 SACOLINHA_DA_GRADE = (587, 210, 667, 278)
 FIXADO_DA_GRADE = (36, 200, 252, 305)
 FOTO_DA_CAPA = (0, 280, 720, 1000)              # entre a sacolinha e o número: a foto quadrada, 720x720
+# A capa pelo Selecionar Capa do app (vídeo do Rafael de 30/10, 20:07): a imagem entra como
+# figurinha, que o app deixa crescer só até 3 vezes o tamanho com que ela entra (540 px de
+# altura, perto de um terço da capa, no Motorola em 30/10); no máximo, a imagem tem uns 1436 px
+# de alto na capa de 957x1702. Com a capa inteira (9:16), ela não passa de 84% da largura; com o miolo
+# em 2:3 (720x1080, só preto acima e abaixo da foto), ela fica com a largura da capa, na mesma
+# escala do vídeo, e cai em cima da mesma foto do 1º quadro. DECISOES.md, Shopee Vídeo.
+RECORTE_DA_FIGURINHA = (100, 1180)              # de cima a baixo, em y: o miolo 720x1080
 LARANJA_DA_SHOPEE = (238, 77, 45)
 FAIXA_DA_CHAMADA = 104                          # a altura da faixa com uma linha
 FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da faixa, com duas linhas
@@ -295,11 +302,25 @@ def _capa_da_vez(foto, vantagem):
 
 def recorte_da_grade(capa):
     """O pedaço da capa (PNG, bytes) que a grade do perfil mostra (VISIVEL_NA_GRADE), em PNG: o exemplo do painel."""
+    return _faixa_da_capa(capa, VISIVEL_NA_GRADE)
+
+
+def recorte_da_figurinha(capa):
+    """
+    O miolo da capa (PNG, bytes) que vai à galeria para a figurinha da tela da capa do app
+    (RECORTE_DA_FIGURINHA), em PNG: no maior tamanho que o app deixa, ele cobre a capa de lado
+    a lado, em cima da mesma foto do 1º quadro do vídeo.
+    """
+    return _faixa_da_capa(capa, RECORTE_DA_FIGURINHA)
+
+
+def _faixa_da_capa(capa, faixa):
+    """A faixa da capa (PNG, bytes) de y cima a baixo, na largura toda, em PNG."""
     import io
 
     from PIL import Image
     with Image.open(io.BytesIO(capa)) as imagem:
-        cima, baixo = VISIVEL_NA_GRADE
+        cima, baixo = faixa
         saida = io.BytesIO()
         imagem.crop((0, cima, imagem.width, baixo)).save(saida, format="PNG")
     return saida.getvalue()

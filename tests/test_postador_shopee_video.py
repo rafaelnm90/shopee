@@ -2023,9 +2023,12 @@ def test_foto_capa_poe_na_galeria_a_capa_com_a_frase_da_ia(monkeypatch):
     monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: pedidos.append((video, nome)) or {
         "capa": "Leve e prático", "vantagem": "Uma vantagem maior"})
     monkeypatch.setattr(edicao_video, "capa_com_chamada", lambda foto, frase: b"\x89PNG" + frase.encode())
+    # Vai à galeria só o miolo da capa: a figurinha do app cresce só até 3 vezes (teste no
+    # Motorola em 30/10), e a capa inteira não cobriria a largura.
+    monkeypatch.setattr(edicao_video, "recorte_da_figurinha", lambda capa: b"miolo:" + capa)
     monkeypatch.setattr(ps, "por_foto_na_galeria", lambda d, dados, nome=None: na_galeria.append(dados) or "x.png")
-    assert ps.fazer_passo(Aparelho(), "foto", "capa") == (True, "capa com a frase na galeria (14 letras)")
-    assert pedidos == [("teste.mp4", "Produto")] and na_galeria == [b"\x89PNG" + "Leve e prático".encode()]
+    assert ps.fazer_passo(Aparelho(), "foto", "capa") == (True, "miolo da capa com a frase na galeria (14 letras)")
+    assert pedidos == [("teste.mp4", "Produto")] and na_galeria == [b"miolo:\x89PNG" + "Leve e prático".encode()]
     monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {})
     assert ps.fazer_passo(Aparelho(), "foto", "capa") == (
         False, "a IA não escreveu a frase da capa nem a vantagem do produto")
