@@ -938,7 +938,8 @@ def test_sem_o_editor_2_o_rascunho_vai_com_o_editor_1_e_o_registro_anota(monkeyp
 
 
 def test_bebida_alcoolica_vai_com_a_capa_dos_avisos_e_sem_edicao_fica_de_lado(monkeypatch, tmp_path):
-    # Escolha do Rafael (26/10, P43): o robô põe os avisos da Shopee na capa do vídeo.
+    # Escolha do Rafael (26/10, P43): o robô põe os avisos da Shopee na capa do vídeo. É o
+    # caminho que volta quando a página oficial trouxer a regra nova (P111, em espera).
     original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
     with open(original, "wb") as arquivo:
         arquivo.write(b"original")
@@ -956,6 +957,49 @@ def test_bebida_alcoolica_vai_com_a_capa_dos_avisos_e_sem_edicao_fica_de_lado(mo
     assert [c[-1] for c in chamadas] == [True] and open(copia, "rb").read() == b"com os avisos"
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS + robo.edicao_video.COM_OS_AVISOS,)
+
+def _ate_os_textos_da_ia(monkeypatch, alcool):
+    """O rascunho de link de produto até a conferência dos textos da IA, sem o celular."""
+    monkeypatch.setattr(robo.ps, "nome_do_produto", lambda video: "Vinho Tinto Seco 750ml")
+
+    async def produtos(link):
+        return [{"nome": "Vinho Tinto Seco 750ml", "preco": 39.9, "comissao": 8.0}], link
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos)
+    monkeypatch.setattr(robo.ps, "ia_confere_produto", lambda video, vistos: (True, "confere"))
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "123")
+    monkeypatch.setattr(robo, "_textos_da_ia", lambda video, nomes=None: {
+        "violacao": False, "motivo": "", "bebida_alcoolica": alcool, "titulo": "Vinho Tinto 🍷 #vinho",
+        "comentario": "c"})
+
+
+def test_bebida_alcoolica_em_espera_fica_de_lado_antes_dos_produtos_a_mais(monkeypatch, avisos):
+    # Escolha do Rafael (31/10, P111): a página oficial das diretrizes da Shopee Vídeo ainda
+    # proíbe divulgar bebida alcoólica. Até ela trazer a regra nova, o vídeo de bebida alcoólica
+    # fica de lado (não volta) antes dos produtos a mais, da edição e do celular.
+    _ate_os_textos_da_ia(monkeypatch, alcool=True)
+    seguiu = []
+    monkeypatch.setattr(robo, "espacos_livres", lambda *a, **k: seguiu.append("espaços livres") or [])
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", lambda *a, **k: seguiu.append("cópia") or "")
+    with pytest.raises(robo.Parada) as parada:
+        robo._preparar(None, robo.criar("video:1"), {"id": "video:1", "arquivo": "v.mp4", "link": LINK}, "viral")
+    assert parada.value.motivo == robo.assistente.MOTIVO_BEBIDA_EM_ESPERA and parada.value.do_video
+    assert not seguiu
+    assert robo.passo_do_motivo(parada.value.motivo) == "bebida alcoólica em espera"
+
+
+def test_sem_a_espera_a_bebida_alcoolica_segue_para_os_avisos_da_p43(monkeypatch, avisos):
+    # Quando a página trouxer a regra nova, BEBIDA_EM_ESPERA volta a False e a bebida segue o
+    # caminho da P43 (os avisos na capa e no título); o vídeo que não é bebida segue sempre.
+    def parar(*a, **k):
+        raise RuntimeError("seguiu para os produtos a mais")
+    monkeypatch.setattr(robo, "espacos_livres", parar)
+    for alcool, espera in ((True, False), (False, True)):
+        monkeypatch.setattr(robo.assistente, "BEBIDA_EM_ESPERA", espera)
+        _ate_os_textos_da_ia(monkeypatch, alcool=alcool)
+        with pytest.raises(RuntimeError, match="seguiu para os produtos a mais"):
+            robo._preparar(None, robo.criar(f"video:{alcool}"),
+                           {"id": f"video:{alcool}", "arquivo": "v.mp4", "link": LINK}, "viral")
+
 
 def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, tmp_path):
     # Escolha do Rafael (25/10, P39): no vídeo de Ver Produtos (vários produtos), a foto da

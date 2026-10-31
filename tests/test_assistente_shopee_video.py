@@ -638,6 +638,8 @@ def test_mensagem_da_bebida_alcoolica_pede_para_deixar_a_capa_e_os_avisos():
 
 
 def test_bebida_alcoolica_vai_editada_com_os_avisos_na_capa(monkeypatch):
+    # O caminho da P43, que volta quando a página oficial trouxer a regra nova (P111).
+    monkeypatch.setattr(asv, "BEBIDA_EM_ESPERA", False)
     conteudos, ias, editados = [], [], []
     bot = _com_edicao(monkeypatch, conteudos, ias, editados)
 
@@ -653,7 +655,9 @@ def test_bebida_alcoolica_vai_editada_com_os_avisos_na_capa(monkeypatch):
 
 
 def test_bebida_alcoolica_sem_a_edicao_fica_de_lado_e_vai_o_proximo(monkeypatch):
-    # Sem a edição não há como pôr os avisos na capa: o vídeo de bebida alcoólica fica de lado.
+    # Sem a edição não há como pôr os avisos na capa: o vídeo de bebida alcoólica fica de lado
+    # (o caminho da P43, que volta quando a página oficial trouxer a regra nova, P111).
+    monkeypatch.setattr(asv, "BEBIDA_EM_ESPERA", False)
     ias = []
 
     async def gerar(arquivo, nome="", leves=False):
@@ -670,6 +674,51 @@ def test_bebida_alcoolica_sem_a_edicao_fica_de_lado_e_vai_o_proximo(monkeypatch)
           ("cerveja", LEGENDA, "archive/cerveja.mp4", "2026-10-02 10:00"))
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
     assert bot.videos == [(42, "copo.mp4")] and asv.proximo_video() is None
+
+
+def test_bebida_alcoolica_em_espera_fica_de_lado_e_vai_o_proximo(monkeypatch):
+    # Escolha do Rafael (31/10, P111): a página oficial das diretrizes da Shopee Vídeo ainda
+    # proíbe divulgar bebida alcoólica; até ela trazer a regra nova, o vídeo de bebida
+    # alcoólica fica de lado, mesmo com a edição ligada, e vai o próximo.
+    assert asv.BEBIDA_EM_ESPERA
+    conteudos, ias, editados = [], [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias, editados)
+
+    async def gerar(arquivo, nome="", leves=False):
+        ias.append(arquivo)
+        return {**TEXTOS, "bebida_alcoolica": "cerveja" in arquivo}
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    _fila(("copo", LEGENDA, "archive/copo.mp4", "2026-10-02 09:00"),
+          ("cerveja", LEGENDA, "archive/cerveja.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    # A cerveja não ganha a capa dos avisos: só o copo vai, editado sem os avisos.
+    assert list(dict.fromkeys(os.path.basename(arquivo) for arquivo in ias)) == ["cerveja.mp4", "copo.mp4"]
+    assert all(not avisos for _foto, _produto, avisos in editados) and b"capa com os avisos" not in conteudos
+    assert consultar("SELECT status, motivo FROM shopee_video_enviados WHERE id_unico = 'cerveja'") == (
+        "bebida_em_espera", asv.MOTIVO_BEBIDA_EM_ESPERA)
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'assistente: envio' "
+                     "ORDER BY rowid LIMIT 1") == (asv.SEM_BEBIDA, None)
+
+
+def test_bebida_em_espera_so_com_o_true_da_ia_e_a_espera_ligada(monkeypatch):
+    assert asv.bebida_em_espera({"bebida_alcoolica": True})
+    for textos in ({"bebida_alcoolica": False}, {"bebida_alcoolica": "true"}, {}, None):
+        assert not asv.bebida_em_espera(textos)
+    monkeypatch.setattr(asv, "BEBIDA_EM_ESPERA", False)
+    assert not asv.bebida_em_espera({"bebida_alcoolica": True})
+
+
+def test_resumo_das_diretrizes_segue_a_pagina_oficial_e_a_politica_de_relevancia():
+    # P111 (31/10): o resumo que a IA recebe ganhou os detalhes da página oficial e a regra dos
+    # produtos irrelevantes da Política de Relevância de Produto (o vídeo do Rafael de 31/10).
+    diretrizes = " ".join(asv.ler_diretrizes().split())
+    for trecho in ("beijo erótico", "print de conversa sem autorização", "procedimento estético que dá aflição",
+                   "fingir ser a loja oficial da marca", "logo ou tela de outro app",
+                   "título, capa ou descrição que prometem", "por 3, 7 ou 30 dias ou para sempre",
+                   "Com mais da metade dos produtos do vídeo irrelevantes, o vídeo é excluído e a conta ganha 1 ponto",
+                   "com menos, só os links irrelevantes saem", "em espera desde 31/10/2026"):
+        assert trecho in diretrizes, trecho
+    assert "15 e 30 dias" not in diretrizes
 
 
 def test_video_mudo_pede_musica_da_shopee_na_postagem(monkeypatch):

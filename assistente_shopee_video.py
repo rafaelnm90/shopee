@@ -62,6 +62,21 @@ TITULO_MIN, TITULO_MAX = 130, 150
 AVISOS_DE_ALCOOL = ("Produto destinado a adultos", "Consumo proibido para menores de 18 anos", "Beba com moderação")
 TEXTO_DOS_AVISOS = ". ".join(AVISOS_DE_ALCOOL) + "."
 SEM_AVISOS = "vídeo de lado: bebida alcoólica só vai com os avisos na capa, e a edição não saiu"
+# A bebida alcoólica fica em espera: a página oficial das Diretrizes da Comunidade Shopee Vídeo
+# (Central de Ajuda, lida em 31/10/2026) ainda proíbe vendê-la ou divulgá-la, e só o e-mail de
+# 26/10 a liberou com os avisos. Enquanto a página não trouxer a regra nova, o robô e o modo
+# assistente deixam de lado todo vídeo de bebida alcoólica; o Claude confere a página toda
+# segunda e, quando ela mudar, volta isto a False (os avisos da P43 seguem prontos). Escolha
+# do Rafael (31/10, P111): DECISOES.md, Shopee Vídeo.
+BEBIDA_EM_ESPERA = True
+MOTIVO_BEBIDA_EM_ESPERA = ("bebida alcoólica em espera: a página oficial das diretrizes da Shopee Vídeo ainda "
+                           "proíbe divulgá-la (P111)")
+SEM_BEBIDA = "vídeo de lado: bebida alcoólica em espera (a página oficial ainda proíbe)"
+
+
+def bebida_em_espera(textos):
+    """Se o vídeo é de bebida alcoólica (a IA disse) e a bebida está em espera (BEBIDA_EM_ESPERA)."""
+    return bool(BEBIDA_EM_ESPERA and textos and textos.get("bebida_alcoolica") is True)
 URL_API = "https://open-api.affiliate.shopee.com.br/graphql"
 LINK_DO_POST = re.compile(r"https?://[^\s<>\"]*shopee[^\s<>\"]*")
 EXTENSOES_DE_IMAGEM = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -352,6 +367,7 @@ TROCAS_LEVES = [
     ("Nudez e sexo", "Conteúdo adulto"),
     ("menor em atividade", "criança em atividade"),
     ("linguagem sexual", "linguagem adulta"),
+    ("beijo erótico", "beijo provocante"),
     ("ambiente íntimo", "ambiente particular"),
     ("partes íntimas", "partes do corpo"),
     ("violência realista", "cenas fortes"),
@@ -608,9 +624,9 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
             raise
         # As frases do resultado são fixas (_preparar_e_enviar).
         registro_processos.registrar("shopee_video", "assistente: envio", resultado,
-                                     ok=None if resultado == SEM_PRODUTO_NO_LINK
+                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA)
                                      else resultado == "postagem mandada no seu privado")
-        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK):
+        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA):
             return resultado
     return f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos saiu editado (só vídeo editado vai); tento de novo no próximo horário"
 
@@ -673,6 +689,10 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
                                f"possível violação das diretrizes: {html.escape(textos['motivo'] or 'sem motivo')}",
                                parse_mode="HTML")
         return "vídeo pulado por possível violação das diretrizes"
+    # Bebida alcoólica em espera (P111): fica de lado, e vai o próximo vídeo.
+    if bebida_em_espera(textos):
+        registrar(video["id"], "bebida_em_espera", MOTIVO_BEBIDA_EM_ESPERA, agora)
+        return SEM_BEBIDA
     # Bebida alcoólica vai com os avisos da Shopee na capa: o vídeo editado é refeito com
     # eles; sem a edição, fica de lado. Escolha do Rafael (P43): DECISOES.md, Shopee Vídeo.
     if textos.get("bebida_alcoolica"):
