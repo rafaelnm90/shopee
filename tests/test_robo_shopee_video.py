@@ -2292,6 +2292,36 @@ def test_o_0_do_selo_colado_no_nome_nao_atrapalha_a_busca_na_api(monkeypatch):
     assert not any(t.startswith("0") for t in termos)
 
 
+def test_a_foto_do_ver_produtos_que_nao_vem_fica_no_registro_com_o_porque(monkeypatch):
+    # Caso das 17:29 de 30/10: o vídeo de Ver Produtos ficou de lado sem a foto do 1º produto, e o
+    # registro não dizia se a busca pelo nome não achou nada, achou um nome pouco parecido ou se
+    # a foto não baixou.
+    import registro_processos as rp
+    nome = "Tênis Feminino Slip On Casual Conforto Esportivo Amortecedor"
+    respostas = {
+        "nada": [],
+        "outro": [{"itemId": 1, "productName": "Sandália Rasteira Feminina Conforto",
+                   "imageUrl": "https://cf.shopee.com.br/outra"}],
+        "igual": [{"itemId": 2, "productName": nome, "imageUrl": "https://cf.shopee.com.br/foto"}],
+        "quebrada": [{"itemId": 3, "productName": nome, "imageUrl": "https://cf.shopee.com.br/quebrada"}]}
+    vez = []
+
+    async def buscar(termo, limite=10, sort_type=2):
+        return respostas[vez[-1]]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: None if "quebrada" in endereco else "/tmp/foto.jpg")
+    esperado = {"nada": {}, "outro": {}, "igual": {"foto": "/tmp/foto.jpg", "nome": nome},
+                "quebrada": {"foto": None, "nome": nome}}
+    for caso, anuncio in esperado.items():
+        vez.append(caso)
+        assert robo.anuncio_do_ver_produtos(nome) == anuncio, caso
+    registros = sorted((l[2], l[3], l[4]) for l in rp.contagem("2000-01-01 00:00:00")
+                       if l[1] == robo.PROCESSO_DA_FOTO_DO_VER_PRODUTOS)
+    assert registros == [("a foto não baixou", "100% das palavras", 0), ("achada", "100% das palavras", 1),
+                         ("nenhuma oferta na busca", "", 0), ("nome pouco parecido", "14% das palavras", 0)]
+
+
 def test_link_de_video_deixa_de_fora_o_produto_que_a_ia_recusa(monkeypatch, avisos):
     _fonte_de_video(monkeypatch, confirma=(PRODUTO_B,))
     app = AppDoVerProdutos()
