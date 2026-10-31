@@ -44,8 +44,8 @@ def _notificacoes(*linhas, y=600):
     return _xml(*(nos + BARRA))
 
 
-def _comentario(nome, texto, y, resposta=False, criador=False, ver=""):
-    """Um comentário do painel: foto, nome (e o selo), texto, coração, data, Responder."""
+def _comentario(nome, texto, y, resposta=False, criador=False, ver="", curtido=False):
+    """Um comentário do painel: foto, nome (e o selo), texto, coração, data, Responder (e o "Curtido pelo criador")."""
     x = 178 if resposta else 84
     nos = [_el(desc="avatar comment item", classe="ImageView", caixa=(x - 40, y - 40, x + 40, y + 40)),
            _el(nome, caixa=(x + 80, y - 30, x + 400, y + 10))]
@@ -55,6 +55,8 @@ def _comentario(nome, texto, y, resposta=False, criador=False, ver=""):
             _el(desc="button comment like", classe="ViewGroup", caixa=(990, y, 1040, y + 50), clicavel=True),
             _el("há 2 horas", caixa=(x + 80, y + 100, x + 250, y + 140)),
             _el("Responder", caixa=(x + 280, y + 100, x + 420, y + 140))]
+    if curtido:
+        nos.append(_el("Curtido pelo criador", caixa=(x + 450, y + 100, x + 750, y + 140)))
     if ver:
         nos.append(_el(ver, caixa=(x + 80, y + 150, x + 400, y + 190)))
     return nos
@@ -324,15 +326,17 @@ class CelularDosComentarios:
     """
 
     def __init__(self, linhas=(NOTIFICACAO,), ja_respondido=False, lugar="embaixo", campo="Responder a Maria Souza",
-                 abre_sozinho=False, rola_ao_enviar=False):
+                 abre_sozinho=False, rola_ao_enviar=False, ja_curtido=False, curte=True):
         self.linhas, self.ja_respondido, self.lugar, self.campo = list(linhas), ja_respondido, lugar, campo
+        # O coração do comentário da Maria: já curtido antes, e se o toque nele curte (o "Curtido pelo criador").
+        self.curtido, self.curte = ja_curtido, curte
         # Como no Motorola: às vezes o painel abre sozinho; outras, só o vídeo, e o robô toca no balão.
         self.abre_sozinho, self.rola_ao_enviar, self.rolado = abre_sozinho, rola_ao_enviar, False
         self.atual, self.em_foco, self.escrito, self.enviadas, self.toques = "inicio", False, "", [], []
 
     def _comentarios(self):
         nos = [_comentario("Loja Rafa", "Vestido lindo ✨", 960, criador=True),
-               _comentario("Maria Souza", "Amei esse vestido, tem tamanho 10?", 1250)]
+               _comentario("Maria Souza", "Amei esse vestido, tem tamanho 10?", 1250, curtido=self.curtido)]
         y = 1500
         if self.rolado:
             nos, y = [], 960
@@ -373,6 +377,8 @@ class CelularDosComentarios:
             self.atual = "painel"
         elif self.atual == "painel" and "Responder" in textos:
             self.atual, self.em_foco = "respondendo", True
+        elif self.atual == "painel" and "button comment like" in textos and not self.rolado and 1250 <= y < 1300:
+            self.curtido = self.curtido or self.curte
         elif self.atual == "respondendo" and "send comment" in textos:
             self.enviadas.append(self.escrito)
             self.atual, self.escrito, self.rolado = "painel", "", self.rola_ao_enviar
@@ -811,3 +817,49 @@ def test_feed_que_para_guarda_o_caso_com_a_tela_da_hora(monkeypatch, avisos, ia_
     with pytest.raises(robo.Parada, match="painel de comentários") as erro:
         robo.interagir_no_feed(app, momento("2026-10-24 10:00"))
     assert telas == ["travado"] and erro.value.caso_guardado
+
+
+def test_comentarios_do_painel_dizem_onde_curtir_e_se_ja_esta_curtido():
+    painel = it.comentarios_do_painel(_painel(_comentario("Maria Souza", "Amei!", 1250, curtido=True),
+                                              _comentario("João", "Chegou rápido", 1500)))
+    assert [(c["nome"], c["curtir"], c["curtido"]) for c in painel] == [
+        ("Maria Souza", (1015, 1275), True), ("João", (1015, 1525), False)]
+    # O "Curtido pelo criador" não vira o texto do comentário.
+    assert painel[0]["texto"] == "Amei!"
+
+
+def test_comentario_respondido_tambem_e_curtido(avisos, ia):
+    # Print do Rafael (30/10, 20:57): a resposta saiu, mas o comentário da pessoa ficou sem a curtida.
+    robo.gravar_estado(respostas_topo="velho")
+    app = CelularDosComentarios()
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
+    assert app.curtido and app.toques.count("button comment like") == 1
+    assert _registro_das_curtidas() == ["curtido"]
+
+
+def test_comentario_ja_curtido_nao_e_tocado_de_novo(avisos, ia):
+    robo.gravar_estado(respostas_topo="velho")
+    app = CelularDosComentarios(ja_curtido=True)
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
+    assert "button comment like" not in app.toques
+    assert _registro_das_curtidas() == ["já curtido"]
+
+
+def test_curtida_que_nao_aparece_fica_no_registro_e_a_resposta_vale(avisos, ia):
+    robo.gravar_estado(respostas_topo="velho")
+    app = CelularDosComentarios(curte=False)
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
+    assert _registro_das_curtidas() == ["não confirmado"]
+    assert it.resultado_de(it.marca(NOTIFICACAO), "comentario") == "respondido"
+
+
+def test_resposta_no_lugar_errado_nao_curte_o_comentario(avisos, ia):
+    robo.gravar_estado(respostas_topo="velho")
+    app = CelularDosComentarios(lugar="outro")
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 lugar errado"
+    assert "button comment like" not in app.toques and not _registro_das_curtidas()
+
+
+def _registro_das_curtidas():
+    return [resultado for _m, _p, resultado, _d, _o
+            in robo.registro_processos.sequencia("shopee_video", "curtir comentário", "2000-01-01 00:00:00")]
