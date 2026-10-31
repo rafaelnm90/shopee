@@ -2935,6 +2935,106 @@ def test_rotulo_de_ia_embaixo_da_tela_e_achado_rolando_e_a_tela_volta_ao_alto():
     assert robo.passo_do_motivo(motivo) == "rótulo de IA"
 
 
+# As chaves da tela final como no Motorola em 31/10: desenhos (View) sem clicável nem marcado no
+# XML; ligada ou desligada só se vê pela cor no print (a de reutilização vem ligada).
+CHAVE_DO_REUSO = (917, 1126, 1038, 1194)
+CHAVE_DO_DISPOSITIVO = (917, 1288, 1038, 1356)
+CHAVE_DESENHADA = (917, 1495, 1038, 1563)
+
+
+def _chave_desenhada(ident, caixa):
+    x1, y1, x2, y2 = caixa
+    return (f'<node text="" resource-id="com.shopee.br.dfpluginshopee16:id/{ident}" class="android.view.View" '
+            f'checkable="false" checked="false" clickable="false" bounds="[{x1},{y1}][{x2},{y2}]"/>')
+
+
+def _linhas_das_chaves_desenhadas():
+    return [_no("Permitir a reutilização do conteúdo", ident="tv_allow_reuse", caixa=(42, 1111, 615, 1162),
+                clicavel=False),
+            _chave_desenhada("allow_reuse_toggle", CHAVE_DO_REUSO),
+            _no("Salvar no dispositivo", ident="tv_device_toggle", caixa=(42, 1288, 382, 1339), clicavel=False),
+            _chave_desenhada("save_device_toggle", CHAVE_DO_DISPOSITIVO),
+            _no(robo.ps.ROTULO_DE_IA, ident="tv_ai_generated_title", caixa=(42, 1434, 885, 1485), clicavel=False),
+            _no("Ative isso se o seu vídeo incluir conteúdo gerado por IA", ident="tv_ai_generated_desc",
+                caixa=(42, 1490, 885, 1625), clicavel=False),
+            _chave_desenhada("ai_generated_toggle", CHAVE_DESENHADA),
+            _no(ident="iv_facebook", caixa=(959, 1696, 1038, 1775))]
+
+
+class ComRotuloDesenhado(ComRotuloDeIA):
+    """A tela final do app de hoje: a chave do Rótulo de IA só mostra se está ligada pela cor no print."""
+
+    def _nos(self):
+        nos = AppComQuadros._nos(self)
+        return nos + _linhas_das_chaves_desenhadas() if self.atual in ("final", "final_editando") else nos
+
+    def click(self, x, y):
+        x1, y1, x2, y2 = CHAVE_DESENHADA
+        if self.atual in ("final", "final_editando") and x1 <= x <= x2 and y1 <= y <= y2:
+            self.toques.append("rotulo_ia")
+            self.rotulo = self.rotulo != self.chave_funciona
+            return
+        AppComQuadros.click(self, x, y)
+
+    def screenshot(self, caminho=None):
+        if caminho:
+            return super().screenshot(caminho)
+        from PIL import Image, ImageDraw
+        imagem = Image.new("RGB", (1080, 2400), "white")
+        desenho = ImageDraw.Draw(imagem)
+        for caixa, ligada in ((CHAVE_DO_REUSO, True), (CHAVE_DO_DISPOSITIVO, False), (CHAVE_DESENHADA, self.rotulo)):
+            x1, y1, x2, y2 = caixa
+            altura = y2 - y1
+            desenho.rounded_rectangle(caixa, radius=altura // 2, fill=(20, 200, 60) if ligada else (226, 226, 226))
+            esquerda = x2 - altura if ligada else x1
+            desenho.ellipse((esquerda + 5, y1 + 5, esquerda + altura - 5, y2 - 5), fill="white")
+        return imagem
+
+
+def test_chave_desenhada_do_rotulo_de_ia_e_lida_pela_cor_do_print():
+    # Retomada de 31/10: o app trocou a chave do rótulo por um desenho sem clicável nem marcado
+    # no XML, e dois vídeos com voz sintética ficaram de lado ("a chave não está na tela").
+    chave = robo.ps.chave_do_rotulo_de_ia(robo.ps.elementos(_xml(*_linhas_das_chaves_desenhadas())))
+    assert chave and chave["id"] == "ai_generated_toggle"
+    app = ComRotuloDesenhado()
+    app.atual = "final"
+    assert robo.ps.ajustar_rotulo_de_ia(app, False) == (True, "Rótulo de IA já desligado") and app.toques == []
+    assert robo.ps.ajustar_rotulo_de_ia(app, True) == (True, "Rótulo de IA ligado")
+    assert app.rotulo and app.toques == ["rotulo_ia"]
+    assert robo.ps.ajustar_rotulo_de_ia(app, True) == (True, "Rótulo de IA já ligado")
+    # A chave que não muda com o toque: não vai sem o rótulo.
+    app = ComRotuloDesenhado(chave_funciona=False)
+    app.atual = "final"
+    ok, motivo = robo.ps.ajustar_rotulo_de_ia(app, True)
+    assert not ok and robo.passo_do_motivo(motivo) == "rótulo de IA"
+
+    class SemPrint(ComRotuloDesenhado):
+        def screenshot(self, caminho=None):
+            if caminho:
+                return super().screenshot(caminho)
+            raise OSError("o print não veio")
+
+    # Sem o print não dá para saber: ligado não vai; desligado fica como o app abre.
+    app = SemPrint()
+    app.atual = "final"
+    ok, motivo = robo.ps.ajustar_rotulo_de_ia(app, True)
+    assert not ok and robo.passo_do_motivo(motivo) == "rótulo de IA" and app.toques == []
+    assert robo.ps.ajustar_rotulo_de_ia(app, False)[0] and app.toques == []
+
+
+def test_video_com_voz_de_ia_vai_com_a_chave_desenhada_ligada(monkeypatch, avisos, caminho_do_rascunho):
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+
+    async def textos(arquivo, nome):
+        return {"violacao": False, "motivo": "", "feito_por_ia": True, "sinal_ia": "narração com voz sintética",
+                "titulo": TITULO, "comentario": "Amei!"}
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    app = ComRotuloDesenhado()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.rotulo and app.toques.index("rotulo_ia") < app.toques.index("@tv_drafts_box")
+
+
 def test_video_real_fica_com_o_rotulo_desligado(monkeypatch, avisos, caminho_do_rascunho):
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)

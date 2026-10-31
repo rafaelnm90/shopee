@@ -316,8 +316,13 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      final sem perder o vídeo), as chaves Permitir a reutilização, Salvar no dispositivo,
      Rótulo de IA e Compartilhar automaticamente, e embaixo **Rascunhos** e **Postar**.
      O Rótulo de conteúdo gerado por IA tem a explicação embaixo do nome e a chave à
-     direita, na mesma linha; o robô acha a chave pela linha do nome e confere o
-     `checked` depois do toque (a classe e o id dela ainda não foram vistos no Motorola).
+     direita, na mesma linha; o robô acha a chave pela linha do nome e confere depois do
+     toque. No Motorola (31/10/2026), as chaves dessa tela são desenhos (`View`, ids
+     `allow_reuse_toggle`, `save_device_toggle` e `ai_generated_toggle`) com `clickable` e
+     `checked` sempre falsos: ligada, a trilha é verde e a bolinha branca fica à direita;
+     desligada, tudo cinza. O robô acha a do rótulo pelo id e lê ligada ou desligada pela
+     cor no print (`chave_colorida`); a Permitir a reutilização abre ligada, as outras duas
+     desligadas.
      Com produto anexado, a linha pode ficar abaixo da tela (24/10/2026, de madrugada, o
      rascunho parou sem achá-la): o robô rola até 3 vezes atrás dela e depois volta ao
      alto; sem achar, o motivo diz se a linha do nome estava e quantas chaves viu;

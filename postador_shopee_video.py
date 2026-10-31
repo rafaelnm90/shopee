@@ -1291,6 +1291,13 @@ def nomes_dos_produtos(video):
 ROTULO_DE_IA = "Rótulo de conteúdo gerado por IA"
 # Quantas vezes o robô rola a tela final atrás da linha do Rótulo de IA.
 ROLAGENS_DO_ROTULO = 3
+# No app de hoje, as chaves da tela final (Permitir reutilização, Salvar no dispositivo e o
+# Rótulo de IA) são desenhos (View) que o XML não diz se estão ligados nem que aceitam toque:
+# quem diz é a cor no print da tela, com a trilha colorida (verde) ligada e cinza desligada.
+CHAVE_DO_ROTULO = "ai_generated_toggle"
+# Parte colorida da chave no print para ela contar como ligada: ligada, a trilha verde passa
+# de 40% do quadro da chave (o resto é a bolinha branca e o fundo); desligada, nada é colorido.
+COLORIDO_DA_CHAVE_LIGADA = 0.2
 
 
 def tem_rotulo_de_ia(lista):
@@ -1308,12 +1315,44 @@ def chave_do_rotulo_de_ia(lista):
         return None
     _x0, topo, _x1, base = nome["caixa"]
     direita = 0.7 * max(el["caixa"][2] for el in lista)
-    candidatas = [el for el in lista if el is not nome and (el["clicavel"] or "switch" in el["classe"].lower())
+    candidatas = [el for el in lista if el is not nome and (el["clicavel"] or _e_chave(el))
                   and _centro(el)[0] >= direita and topo - 40 <= _centro(el)[1] <= base + 120]
     centro = (topo + base) / 2
-    # A chave de verdade é a de classe Switch; sem ela, o que aceita toque mais perto do nome.
-    return min(candidatas, key=lambda el: ("switch" not in el["classe"].lower(), abs(_centro(el)[1] - centro)),
-               default=None)
+    # A chave de verdade é a desenhada do rótulo ou a de classe Switch; sem elas, o que aceita
+    # toque mais perto do nome.
+    return min(candidatas, key=lambda el: (not _e_chave(el), abs(_centro(el)[1] - centro)), default=None)
+
+
+def _e_chave(el):
+    """A chave liga e desliga: a de classe Switch ou a desenhada do app de hoje (id ..._toggle)."""
+    return "switch" in el["classe"].lower() or el["id"] == CHAVE_DO_ROTULO or el["id"].endswith("_toggle")
+
+
+def chave_colorida(imagem):
+    """
+    Se a chave do recorte do print está ligada: boa parte dela colorida (a trilha verde).
+    Desligada, ela é toda cinza e branca.
+    """
+    from PIL import ImageChops
+    _matiz, saturacao, brilho = imagem.convert("RGB").convert("HSV").split()
+    colorido = ImageChops.multiply(saturacao.point(lambda v: 255 if v > 90 else 0),
+                                   brilho.point(lambda v: 255 if v > 90 else 0))
+    pontos = imagem.width * imagem.height
+    return bool(pontos) and colorido.histogram()[255] / pontos >= COLORIDO_DA_CHAVE_LIGADA
+
+
+def chave_ligada(d, chave):
+    """
+    Se a chave está ligada: a de classe Switch diz no XML; a desenhada, pela cor no print da
+    tela. None quando o print não vem.
+    """
+    if "switch" in chave["classe"].lower():
+        return chave["marcado"]
+    try:
+        return chave_colorida(d.screenshot().crop(chave["caixa"]))
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] O print da chave do Rótulo de IA não veio: {type(e).__name__}")
+        return None
 
 
 def ajustar_rotulo_de_ia(d, ligado):
@@ -1339,12 +1378,17 @@ def ajustar_rotulo_de_ia(d, ligado):
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
         if not chave:
             if ligado:
-                chaves = sum(1 for el in lista if "switch" in el["classe"].lower())
+                chaves = sum(1 for el in lista if _e_chave(el))
                 linha = "a linha do nome está, mas a chave não" if tem_rotulo_de_ia(lista) else "nem a linha do nome"
                 return False, (f"o Rótulo de IA não está na tela final ({linha}; {chaves} chave(s) na tela; "
                                f"{rolagens} rolada(s)): nada salvo")
             return True, "o Rótulo de IA não está na tela: fica como o app abre (desligado)"
-        if chave["marcado"] == ligado:
+        agora = chave_ligada(d, chave)
+        if agora is None:
+            if ligado:
+                return False, "o print da tela não veio para ver se o Rótulo de IA está ligado: nada salvo"
+            return True, "o print da tela não veio para ver o Rótulo de IA: fica como o app abre (desligado)"
+        if agora == ligado:
             return True, f"Rótulo de IA já {estado}"
         x, y = _centro(chave)
         if proibido_no_ponto(tela, x, y):
@@ -1352,7 +1396,7 @@ def ajustar_rotulo_de_ia(d, ligado):
         d.click(x, y)
         time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
         depois = chave_do_rotulo_de_ia(elementos(d.dump_hierarchy()))
-        if not depois or depois["marcado"] != ligado:
+        if not depois or chave_ligada(d, depois) != ligado:
             return False, f"toquei no Rótulo de IA, mas ele não ficou {estado}"
         return True, f"Rótulo de IA {estado}"
     finally:
