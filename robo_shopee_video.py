@@ -3286,21 +3286,37 @@ def links_do_ver_produtos(nomes):
     return links
 
 
+# O que a busca pelo nome deu para a foto do 1º produto do Ver Produtos: sem a foto, o vídeo
+# fica de lado, e o registro diz por quê (nenhuma oferta na busca, o nome pouco parecido, com a
+# porcentagem, ou a foto que não baixou), só com rótulos e números.
+PROCESSO_DA_FOTO_DO_VER_PRODUTOS = "ver produtos: foto pelo nome"
+
+
 def anuncio_do_ver_produtos(nome):
     """
-    {"foto", "nome"} do anúncio do 1º produto anexado num vídeo de Ver Produtos,
-    achado pelo nome (oferta_pelo_nome). {} quando não acha, e foto None quando ela não
-    baixa: o vídeo fica de lado (só vídeo editado vai). A IA já conferiu esse produto com o
-    vídeo, e o nome fica o do app (o que ela conferiu).
+    {"foto", "nome"} do anúncio do 1º produto anexado num vídeo de Ver Produtos, achado
+    pelo nome (a oferta de nome mais parecido, com pelo menos PARECIDO_DA_FOTO% das palavras,
+    como em oferta_pelo_nome). {} quando não acha, e foto None quando ela não baixa: o vídeo
+    fica de lado (só vídeo editado vai). A IA já conferiu esse produto com o vídeo, e o nome
+    fica o do app (o que ela conferiu).
     Escolha do Rafael (25/10, P39): DECISOES.md, Shopee Vídeo.
     """
     try:
-        oferta = oferta_pelo_nome(nome)
-        if not oferta:
+        parecido, _exato, oferta = _oferta_parecida(nome)
+        if not oferta or parecido < PARECIDO_DA_FOTO:
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_FOTO_DO_VER_PRODUTOS,
+                                         "nome pouco parecido" if oferta else "nenhuma oferta na busca",
+                                         f"{parecido}% das palavras" if oferta else "", ok=False)
             return {}
-        return {"foto": ps.baixar_foto(oferta.get("imageUrl") or ""), "nome": nome}
+        foto = ps.baixar_foto(oferta.get("imageUrl") or "")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_FOTO_DO_VER_PRODUTOS,
+                                     "achada" if foto else "a foto não baixou", f"{parecido}% das palavras",
+                                     ok=bool(foto))
+        return {"foto": foto, "nome": nome}
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto do produto do Ver Produtos não veio: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_FOTO_DO_VER_PRODUTOS, "a busca falhou",
+                                     type(e).__name__, ok=False)
         return {}
 
 
