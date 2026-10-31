@@ -201,7 +201,10 @@ RECORTE_DA_FIGURINHA = (100, 1180)              # de cima a baixo, em y: o miolo
 LARANJA_DA_SHOPEE = (238, 77, 45)
 FAIXA_DA_CHAMADA = 104                          # a altura da faixa com uma linha
 FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da faixa, com duas linhas
-MARGEM_DA_FAIXA = 30                            # entre as letras e os lados da tela
+# O app, com o vídeo aberto, corta os lados do quadro (VISIVEL_NO_APP): a frase fica dentro
+# do que ele mostra, com esta folga de cada lado, para as pontas não sumirem. Pedido do Rafael
+# (vídeo de 31/10, 08:38): DECISOES.md, Shopee Vídeo.
+MARGEM_DA_FAIXA = 12
 LETRAS_DA_CHAMADA = (72, 44)                    # a maior e a menor numa linha
 LETRAS_EM_DUAS_LINHAS = (56, 36)                # quando não cabe numa linha: a faixa cresce para cima
 
@@ -218,12 +221,13 @@ PENALIDADE_DA_QUEBRA = 8
 def _quebra_da_chamada(texto, desenho, fonte_ttf):
     """
     (fonte, linhas) da chamada na faixa: numa linha só, na maior letra de LETRAS_DA_CHAMADA em
-    que ela cabe na largura (a faixa fina do exemplo que o Rafael escolheu, P107); quando não
-    cabe, em duas, na maior letra de LETRAS_EM_DUAS_LINHAS, equilibradas e, se der, sem a 1ª
-    terminar numa palavra de ligação. None quando não cabe nem assim.
+    que ela cabe na largura que o app mostra do vídeo aberto (a faixa fina do exemplo que o
+    Rafael escolheu, P107); quando não cabe, em duas, na maior letra de LETRAS_EM_DUAS_LINHAS,
+    equilibradas e, se der, sem a 1ª terminar numa palavra de ligação. None quando não cabe
+    nem assim.
     """
     from PIL import ImageFont
-    largura = TELA[0] - 2 * MARGEM_DA_FAIXA
+    largura = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * MARGEM_DA_FAIXA
     maior, menor = LETRAS_DA_CHAMADA
     for tamanho in range(maior, menor - 1, -2):
         fonte = ImageFont.truetype(fonte_ttf, tamanho)
@@ -284,8 +288,9 @@ def capa_com_chamada(foto, chamada):
     alto = max(FAIXA_DA_CHAMADA, altura_da_linha * len(linhas) + 2 * FOLGA_DA_FAIXA)
     desenho.rectangle((0, pe - alto, largura - 1, pe - 1), fill=LARANJA_DA_SHOPEE)
     meio = pe - alto / 2
+    centro = sum(VISIVEL_NO_APP) / 2
     for i, linha in enumerate(linhas):
-        desenho.text((largura / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
+        desenho.text((centro, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
                      fill="white", anchor="mm")
     saida = io.BytesIO()
     capa.save(saida, format="PNG")

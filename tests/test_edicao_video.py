@@ -1279,6 +1279,20 @@ def test_capa_com_chamada_tem_a_foto_inteira_e_a_frase_numa_faixa_laranja():
     assert cima <= y1 and y2 <= edicao_video.NUMERO_DA_GRADE[1] < baixo
 
 
+def test_frase_da_capa_fica_dentro_do_que_o_app_mostra_do_video_aberto():
+    # Vídeo do Rafael (31/10, 08:38): com o vídeo aberto, o app corta os lados do quadro, e o
+    # "C" e o "l" de "Caimento impecável" ficavam cortados nas pontas da faixa.
+    _, _, _, y2 = edicao_video.FOTO_DA_CAPA
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    folga = edicao_video.MARGEM_DA_FAIXA // 2
+    for frase in ("Caimento impecável", "Organize sua cozinha", "Acaba com a bagunça da cozinha"):
+        capa = _capa(frase)
+        cima = y2 - edicao_video.FAIXA_DA_CHAMADA - 60
+        assert _claros(capa, (esquerda + folga, cima, direita - folga, y2), passo=2) > 50
+        assert _claros(capa, (0, cima, esquerda + folga, y2), passo=1) == 0, frase
+        assert _claros(capa, (direita - folga, cima, 720, y2), passo=1) == 0, frase
+
+
 def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa():
     import io
     import os
