@@ -587,6 +587,20 @@ def _fonte(monkeypatch, confere=True, violacao=False):
     monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
 
 
+def test_robo_nao_pega_de_volta_o_video_que_levou_ao_canal(monkeypatch):
+    # O loop do vídeo do Rafael (30/10, 22:28): o vídeo que o robô postou vai ao Canal Afiliados
+    # e volta por uma fila (o Viral, pelo Espião); o mesmo arquivo não vira rascunho de novo.
+    _fonte(monkeypatch)
+    with open("archive/outro.mp4", "wb") as f:
+        f.write(b"outro video")
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "a2", "archive/outro.mp4",
+            f"Vestido 👗\n{LINK}", "2026-10-22 08:00:00")
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    robo.pedidos_do_canal.pedir(9, "archive/vestido.mp4", "https://sv.shopee.com.br/share-video/abc", [])
+    assert robo.proximo_video(robo.ler_config())["id"] == "a2"
+    assert robo.assistente.proximo_video("autorais")["id"] == "a2"
+
+
 def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypatch, avisos):
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)

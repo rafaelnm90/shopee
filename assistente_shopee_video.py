@@ -44,6 +44,7 @@ import api_gemini
 import api_shopee
 import db
 import legendas
+import pedidos_do_canal
 import registro_processos
 import videos
 from fuso import fuso_horario
@@ -209,6 +210,9 @@ def _candidatos(fonte):
     """(id, arquivo, link, legenda) dos vídeos da fonte, do mais novo para o mais velho."""
     if fonte == "viral":
         fila = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
+        # O que o Espião trouxe do Canal Afiliados é nosso (o vídeo que o robô postou, os posts
+        # do Rafael): pegar de volta daria loop. Pedido do Rafael (30/10): DECISOES.md, Shopee Vídeo.
+        fila = [item for item in fila if str(item.get("chat_origem")) != pedidos_do_canal.CANAL]
         fila = sorted(fila, key=lambda item: item.get("data_captura") or "", reverse=True)
         return [(f"viral:{item.get('id')}", item.get("caminho_video"), item.get("link_original"), "")
                 for item in fila]
@@ -241,7 +245,8 @@ def candidatos_nao_usados(fonte):
 def proximo_video(fonte=FONTE_PADRAO):
     """
     {"id", "arquivo", "link", "nome"} do vídeo mais novo da fonte que ainda tem o
-    arquivo e o link e não foi mandado; None se não há nenhum.
+    arquivo e o link e não foi mandado, fora o arquivo que o robô já levou ao Canal
+    Afiliados (o loop); None se não há nenhum.
     """
     try:
         candidatos = _candidatos(fonte if fonte in FONTES else FONTE_PADRAO)
@@ -253,7 +258,7 @@ def proximo_video(fonte=FONTE_PADRAO):
         return None
     for id_unico, arquivo, link, legenda in candidatos:
         if (id_unico in mandados or not arquivo or not link or not os.path.exists(arquivo)
-                or arquivo.lower().endswith(EXTENSOES_DE_IMAGEM)):
+                or arquivo.lower().endswith(EXTENSOES_DE_IMAGEM) or pedidos_do_canal.ja_foi_ao_canal(arquivo)):
             continue
         return {"id": id_unico, "arquivo": arquivo, "link": link, "nome": legendas.nome_da_legenda(legenda)}
     return None

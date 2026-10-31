@@ -546,6 +546,32 @@ def test_viral_usa_a_fila_do_espiao_com_o_link_original():
     assert asv.proximo_video("viral") is None
 
 
+def test_viral_deixa_de_fora_o_que_veio_do_canal_afiliados_e_o_video_que_o_robo_levou_ao_canal():
+    # Vídeo do Rafael (30/10, 22:28): o vídeo que o robô posta vai ao Canal Afiliados, o Espião
+    # traz o canal para a fila do Viral, e o robô pegava de volta o que tinha postado (o loop).
+    import db
+    import pedidos_do_canal
+
+    def _video(caminho, conteudo):
+        with open(caminho, "wb") as f:
+            f.write(conteudo)
+        return caminho
+
+    postado = _video("temp/postado.mp4", b"o video que o robo postou")
+    pedidos_do_canal.pedir(1, postado, "https://sv.shopee.com.br/share-video/abc", [])
+    db.salvar_config("fila_clonagem", {"fila": [
+        {"id": "do_canal", "chat_origem": pedidos_do_canal.CANAL, "caminho_video": _video("temp/c1.mp4", b"outro"),
+         "link_original": "https://br.shp.ee/post", "data_captura": "2026-10-30 21:52:00"},
+        {"id": "espelhado", "chat_origem": "-1001", "caminho_video": _video("temp/c2.mp4", b"o video que o robo postou"),
+         "link_original": "https://s.shopee.com.br/v2", "data_captura": "2026-10-30 21:51:00"},
+        {"id": "de_fora", "chat_origem": "-1002", "caminho_video": _video("temp/c3.mp4", b"de um criador"),
+         "link_original": "https://s.shopee.com.br/v3", "data_captura": "2026-10-30 21:00:00"},
+    ]})
+    # O do canal nem entra na lista; o mesmo arquivo do robô, vindo de outro grupo, fica de fora na escolha.
+    assert [c[0] for c in asv.candidatos_nao_usados("viral")] == ["viral:espelhado", "viral:de_fora"]
+    assert asv.proximo_video("viral")["id"] == "viral:de_fora"
+
+
 def test_canal_afiliados_pula_imagem_e_usa_a_legenda():
     inserir("CREATE TABLE fila_postagens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_unico TEXT UNIQUE, "
             "caminho_video TEXT, legenda TEXT)")

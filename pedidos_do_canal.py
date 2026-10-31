@@ -8,6 +8,11 @@ configuracoes, gravada sem um processo apagar o que o outro gravou (db.atualizar
 A cópia que sobra sai na faxina do disco do bot_mestre (faxina), e o checkup cobra o
 pedido que demora a entrar na fila (parados).
 Decisões do Rafael (28/10, P62 a P64): DECISOES.md, Canal principal.
+
+Contra o loop (pedido do Rafael, 30/10): o Espião traz o canal para a fila do Viral, e o
+robô e o modo assistente pegam os vídeos do Viral. Eles deixam de fora o que veio do canal
+(CANAL) e o arquivo que o robô já levou ao canal (ja_foi_ao_canal, pela marca guardada no
+pedido), venha de onde vier.
 """
 import os
 import shutil
@@ -15,9 +20,17 @@ import time
 from datetime import datetime, timedelta
 
 import db
+import videos
 from fuso import fuso_horario
 
 CHAVE = "canal_afiliados_do_robo"
+# O Canal Afiliados (@shopee_video_afiliado), pelo id com que o Espião guarda a origem do que
+# pega dele (chat_origem da fila do Viral).
+CANAL = "-1003909405581"
+# As marcas (SHA-256) dos arquivos que o robô levou ao canal: o mesmo vídeo que volta por outro
+# caminho (o canal espelhado num grupo que o Espião vigia) é reconhecido pelo arquivo. Ficam as
+# MARCAS_GUARDADAS mais novas.
+MARCAS_GUARDADAS = 500
 # A cópia do vídeo fica aqui até ir ao ar: a fila do canal a apaga depois do post, e a do
 # rascunho o robô apaga sozinho depois de usada.
 PASTA = os.path.expanduser("~/shopee_video/canal")
@@ -35,14 +48,24 @@ def pedir(ident, arquivo, link_post, links, produto="", agora=None):
     os.makedirs(PASTA, exist_ok=True)
     copia = os.path.join(PASTA, f"{ident}.mp4")
     shutil.copyfile(arquivo, copia)
+    marca = videos.calcular_hash_video(copia)
     pedido = {"id": ident, "arquivo": copia, "link_post": link_post, "links": list(links or []),
               "produto": produto or "", "tentativas": 0,
               "pedido_em": (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")}
 
     def trocar(dados):
         dados["pedidos"] = [p for p in dados.get("pedidos", []) if p.get("id") != ident] + [pedido]
+        marcas = dados.get("marcas", [])
+        if marca and marca not in marcas:
+            dados["marcas"] = (marcas + [marca])[-MARCAS_GUARDADAS:]
     db.atualizar_config(CHAVE, trocar)
     return copia
+
+
+def ja_foi_ao_canal(arquivo):
+    """True se o arquivo é o de um vídeo que o robô levou ao canal (pela marca do pedido)."""
+    marcas = db.ler_config(CHAVE, {}).get("marcas", [])
+    return bool(marcas) and videos.calcular_hash_video(arquivo) in marcas
 
 
 def pendentes():

@@ -305,6 +305,15 @@ def test_robo_agora_mostra_as_falhas_recentes_e_o_aprovado_que_passou_da_hora():
     assert "Postagem: pausada" in checkup.robo_agora(AGORA)[-1]
 
 
+def test_checkup_conta_os_videos_do_canal_afiliados_na_fila_do_viral():
+    # O loop (vídeo do Rafael, 30/10, 22:28): o Espião traz o Canal Afiliados para a fila do
+    # Viral; o checkup mostra quantos são, que o robô e o assistente não pegam.
+    import pedidos_do_canal
+    db.salvar_config("fila_clonagem", {"fila": [{"id": "1", "chat_origem": pedidos_do_canal.CANAL},
+                                                {"id": "2", "chat_origem": "-1001"}]})
+    assert checkup.robo_da_shopee_video(AGORA)["do_canal_no_viral"] == 1
+
+
 def test_video_postado_que_nao_entra_na_fila_do_canal_e_cobrado(tmp_path):
     # Pedido do Rafael (28/10, P62): o vídeo que o robô postou vai à fila do Canal Afiliados;
     # o que fica esperando (o bot_mestre confere a cada 5 min) vira ponto de atenção.
