@@ -1780,6 +1780,45 @@ def test_voltar_que_nao_chega_anota_a_tela_em_que_ficou_sem_o_texto_dela():
         "não chegou ao Eu", onde, 0)
 
 
+class CelularComErroDoApp:
+    """
+    O app da Shopee no aviso de erro (Motorola, 31/10, 15:48 e 15:59): "Ops! Algo deu errado.
+    Estamos verificando nisso.", que o voltar não fecha; o Voltar à Página Inicial leva ao início.
+    """
+
+    info = {"screenOn": True}
+
+    def __init__(self):
+        self.teclas, self.toques, self.no_inicio = [], [], False
+
+    def dump_hierarchy(self):
+        if self.no_inicio:
+            return _xml(_no_do_app(robo.ps.PACOTE, "Eu", (860, 2250, 1080, 2400)))
+        return _xml(_no_do_app(robo.ps.PACOTE, "Ops! Algo deu errado. Estamos verificando nisso.", (70, 1150, 1010, 1250)),
+                    _no_do_app(robo.ps.PACOTE, "Voltar à Página Inicial", (70, 1290, 1010, 1390)))
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+        self.no_inicio = self.no_inicio or (70 <= x <= 1010 and 1290 <= y <= 1390)
+
+    def app_current(self):
+        return {"package": robo.ps.PACOTE, "activity": "com.shopee.app.react.ReactActivity_"}
+
+
+def test_voltar_sai_do_aviso_de_erro_do_app_pelo_voltar_a_pagina_inicial(monkeypatch):
+    # 31/10, 15:48 e 15:59: o app caiu no aviso de erro e o robô apertou voltar até desistir; o
+    # rascunho parou duas vezes. O botão do aviso leva ao início, e o registro anota o aviso.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularComErroDoApp()
+    robo.voltar(celular, "Eu", vezes=3)
+    assert celular.no_inicio and celular.teclas == []
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'voltar no app'") == (
+        "aviso de erro do app", "Voltar à Página Inicial tocado", None)
+
+
 AVISO_DE_APP_TRAVADO = _xml(
     '<node text="Shopee não está respondendo" resource-id="android:id/alertTitle" package="android" '
     'class="android.widget.TextView" clickable="false" bounds="[100,1090][980,1160]"></node>',
