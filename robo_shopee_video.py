@@ -4220,6 +4220,7 @@ def _responder_um(d, texto, agora=None):
         _escrever_e_enviar(d, resposta)
         lugar, painel, i, visto = _conferir_resposta(d, texto, nome, comentario, resposta)
         if lugar == "embaixo":
+            _curtir_o_comentario(d, nome, comentario, marca)
             _guardar_o_perfil(painel, i)
             interacoes.guardar(marca, "comentario", "respondido", agora)
             gravar_estado(respostas_textos=(anteriores + [resposta])[-10:])
@@ -4257,6 +4258,35 @@ def _responder_um(d, texto, agora=None):
         return "desistiu"
     finally:
         _sair_sem_salvar(d)
+
+
+def _curtir_o_comentario(d, nome, comentario, marca):
+    """
+    Curte o comentário da pessoa que o robô acabou de responder, pelo coração da linha dele,
+    e confere pelo "Curtido pelo criador" que aparece embaixo. Pedido do Rafael (30/10):
+    DECISOES.md, Shopee Vídeo. A curtida que não sai fica só no registro: a resposta já foi.
+    """
+    try:
+        xml = tela(d)
+        painel = interacoes.comentarios_do_painel(xml)
+        i = interacoes.alvo_no_painel(painel, nome, comentario)
+        if i is not None and painel[i]["curtido"]:
+            resultado = "já curtido"
+        elif i is None or not painel[i]["curtir"]:
+            resultado = "sem o coração na tela"
+        elif ps.proibido_no_ponto(xml, *painel[i]["curtir"]):
+            resultado = "recusado"
+        else:
+            d.click(*painel[i]["curtir"])
+            pausa(2)
+            depois = interacoes.comentarios_do_painel(tela(d))
+            j = interacoes.alvo_no_painel(depois, nome, comentario)
+            resultado = "curtido" if j is not None and depois[j]["curtido"] else "não confirmado"
+    except Exception as e:
+        resultado = f"erro ({type(e).__name__})"
+    registro_processos.registrar(REGISTRO, "curtir comentário", resultado,
+                                 ok=True if resultado in ("curtido", "já curtido") else False, origem=marca)
+    return resultado
 
 
 def _conferir_resposta(d, texto, nome, comentario, resposta):

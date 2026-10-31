@@ -1,7 +1,8 @@
 """
 As interações do robô da Shopee Vídeo além de postar: responder os comentários dos
-vídeos do Rafael e curtir e comentar vídeos de outros criadores no feed Live e Vídeo →
-Para você. Pedidos do Rafael de 24/10/2026 (P9, P10 e P11): DECISOES.md, Shopee Vídeo.
+vídeos do Rafael (e curtir o comentário respondido) e curtir e comentar vídeos de outros
+criadores no feed Live e Vídeo → Para você. Pedidos do Rafael de 24/10/2026 (P9, P10 e
+P11) e de 30/10/2026 (a curtida): DECISOES.md, Shopee Vídeo.
 
 Aqui fica o que não toca no celular: a leitura das telas (a lista das Notificações, o
 painel de comentários e o player do feed), o texto da IA e as marcas do que já foi
@@ -48,9 +49,13 @@ COMENTOU = re.compile(r"^(?P<nome>.+?)\s+comentou no seu v[ií]deo\s*:?\s*(?P<te
 ASPAS = "\"“”'‘’"
 # A hora de cada linha das Notificações ("Hoje 10:15", "24-10 14:32").
 HORA_DA_LINHA = re.compile(r"^(?:\S+\s+)?\d{1,2}:\d{2}$")
+# O coração de cada comentário do painel (desc "button comment like", na ponta direita da
+# linha) e o "Curtido pelo criador" que aparece embaixo do comentário curtido pelo Rafael.
+CORACAO_DO_COMENTARIO = "comment like"
+CURTIDO_PELO_CRIADOR = re.compile(r"^curtido pel[oa] criador")
 # O que acompanha cada comentário no painel e não é o nome nem o texto.
 EM_VOLTA_DO_COMENTARIO = (
-    re.compile(r"^criador$"), re.compile(r"^responder$"), re.compile(r"^curtido pel[oa] criador"),
+    re.compile(r"^criador$"), re.compile(r"^responder$"), CURTIDO_PELO_CRIADOR,
     re.compile(r"^há \d+"), re.compile(r"^\d{1,2} de \w+"), re.compile(r"^\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?$"),
     re.compile(r"^[\d.,]+( ?mil)?$"), re.compile(r"^(ver|ocultar) (\d+ )?respostas?"), re.compile(r"^ver tradução"),
 )
@@ -207,9 +212,10 @@ def comentarios_do_painel(xml):
     """
     Os comentários do painel aberto, de cima para baixo: {"nome", "texto", "resposta" (a
     linha recuada, resposta a um comentário), "criador" (o selo Criador: é do dono do vídeo),
-    "responder" e "ver_respostas" (os pontos de tocar, ou None), "y"}. Cada comentário
-    começa na foto (x pequeno, com "comment" na descrição) e vai até a foto seguinte.
-    Lista vazia se o painel não está aberto.
+    "responder", "ver_respostas" e "curtir" (os pontos de tocar, ou None; "curtir" é o
+    coração da linha), "curtido" (o "Curtido pelo criador" embaixo dele), "y"}. Cada
+    comentário começa na foto (x pequeno, com "comment" na descrição) e vai até a foto
+    seguinte. Lista vazia se o painel não está aberto.
     """
     elementos = ps.elementos(xml)
     cabecalho = _cabecalho(elementos)
@@ -229,11 +235,15 @@ def comentarios_do_painel(xml):
         textos = [el["texto"] for el in dentro if _do_comentario(el["texto"])]
         responder = next((ps._centro(el) for el in dentro if ps._normal(el["texto"]) == "responder"), None)
         ver = next((ps._centro(el) for el in dentro if VER_RESPOSTAS.match(ps._normal(el["texto"]))), None)
+        curtir = next((ps._centro(el) for el in elementos if CORACAO_DO_COMENTARIO in el["descricao"].casefold()
+                       and comeco <= ps._centro(el)[1] < fim), None)
         comentarios.append({
             "nome": textos[0] if textos else "", "texto": " ".join(textos[1:2]),
             "resposta": ps._centro(foto)[0] >= 130,
             "criador": any(ps._normal(el["texto"]) == "criador" for el in dentro),
-            "responder": responder, "ver_respostas": ver, "y": ps._centro(foto)[1],
+            "responder": responder, "ver_respostas": ver, "curtir": curtir,
+            "curtido": any(CURTIDO_PELO_CRIADOR.match(ps._normal(el["texto"])) for el in dentro),
+            "y": ps._centro(foto)[1],
         })
     return comentarios
 

@@ -381,7 +381,8 @@ SEM_META = {
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
     ("shopee_video", "edição do vídeo: "), ("shopee_video", "visualizações na grade"),
-    ("shopee_video", "responder comentário"), ("shopee_video", "espaços livres: "),
+    ("shopee_video", "responder comentário"), ("shopee_video", "curtir comentário"),
+    ("shopee_video", "espaços livres: "),
     ("shopee_video", "tempo do rascunho"), ("shopee_video", "ver produtos: "),
 }
 
@@ -1318,6 +1319,9 @@ def interacoes_da_shopee_video(agora=None):
         "feed_horas": [momento[11:16] for momento, *_ in feed if momento >= hoje],
         "feed_repetidos": sum(1 for n in Counter(o for *_x, o in feed if o).values() if n > 1),
         "curtidas": dict(Counter(resultado for _m, _p, resultado, _d, _o in curtidas)),
+        # O comentário respondido também é curtido (pedido do Rafael, 30/10).
+        "curtir_comentarios": dict(Counter(resultado for _m, _p, resultado, _d, _o in registro_processos.sequencia(
+            "shopee_video", "curtir comentário", desde))),
         "lives": len(registro_processos.sequencia("shopee_video", "feed: vídeo olhado", desde, resultado="live pulada")),
         "seguidores": seguidores_da_shopee_video(agora),
     }
@@ -1627,9 +1631,10 @@ def main():
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
+    curtir = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["curtir_comentarios"].items()))
     print(f"Respostas aos comentários (24 h): {respostas or 'nenhuma'} | com mais de uma resposta do perfil: "
           f"{interacoes['duplicadas']} | Notificações lidas hoje: {interacoes['leituras_hoje']} de "
-          f"{interacoes['leituras_esperadas']} vezes")
+          f"{interacoes['leituras_esperadas']} vezes | curtir o comentário respondido: {curtir or 'nenhum'}")
     curtidas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["curtidas"].items()))
     horas = f" ({', '.join(interacoes['feed_horas'])})" if interacoes.get("feed_horas") else ""
     print(f"Feed: comentados hoje {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA}{horas} | mesmo vídeo "
