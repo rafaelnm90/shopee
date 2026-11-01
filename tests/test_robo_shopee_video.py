@@ -5058,8 +5058,11 @@ class CelularDaCapa:
     """
 
     def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False, parado=1.0,
-                 letras_grossas=False, teimosas=0):
+                 letras_grossas=False, teimosas=0, fundo=None, jpeg=None):
         self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
+        # fundo: o 1º quadro do vídeo (PNG, bytes), que a tela da capa mostra embaixo da
+        # figurinha; jpeg: a qualidade do print, como o do celular (o uiautomator2 manda em JPEG).
+        self.fundo, self.jpeg = fundo, jpeg
         # teimosas: as primeiras figurinhas que entram não mudam com os dois dedos.
         self.teimosas, self.entradas = teimosas, 0
         self.entrada, self.ganho, self.maxima, self.meio = entrada, ganho, maxima, meio
@@ -5163,13 +5166,20 @@ class CelularDaCapa:
         tela = Image.new("RGB", (1080, 2400), (25, 25, 25))
         x1, y1, x2, y2 = QUADRO_DA_CAPA
         quadro = Image.new("RGB", (x2 - x1, y2 - y1), "black")
+        if self.atual == "capa" and self.fundo:
+            quadro = Image.open(io.BytesIO(self.fundo)).convert("RGB").resize(quadro.size)
         if self.atual == "capa" and self.figurinha:
             miolo = Image.open(io.BytesIO(robo.edicao_video.recorte_da_figurinha(CAPA_DA_FIGURINHA))).convert("RGB")
             f = self.figurinha
             largura, altura = round(miolo.width * f["escala"]), round(miolo.height * f["escala"])
             quadro.paste(miolo.resize((largura, altura)), (round(f["x"] - largura / 2) - x1, round(f["y"] - altura / 2) - y1))
         tela.paste(quadro, (x1, y1))
-        return _com_letras_grossas(tela) if self.letras_grossas else tela
+        tela = _com_letras_grossas(tela) if self.letras_grossas else tela
+        if self.jpeg:
+            saida = io.BytesIO()
+            tela.save(saida, format="JPEG", quality=self.jpeg)
+            tela = Image.open(io.BytesIO(saida.getvalue())).convert("RGB")
+        return tela
 
     def shell(self, partes):
         if partes[0] == "find":
@@ -5222,6 +5232,19 @@ def test_capa_pela_figurinha_fica_do_tamanho_do_desenho_e_volta_a_tela_final(mon
     assert celular.atual == "final" and _no_desenho(celular)
     # A foto da capa saiu da galeria, e nada de voltar na tela final.
     assert celular.galeria == set() and celular.teclas == []
+
+
+def test_capa_pela_figurinha_em_cima_da_moldura_do_video_no_print_do_celular(monkeypatch):
+    # 01/11, 20:07: a tela da capa mostra o 1º quadro do vídeo, com a moldura laranja (P115),
+    # embaixo da figurinha. Com ela recém-posta, pequena, as bordas dos lados da moldura e as
+    # letras borradas do print em JPEG do celular faziam a medida não achar a faixa, e as 3
+    # tentativas saíram sem a capa com a frase.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    fundo = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
+    celular = CelularDaCapa(fundo=fundo, jpeg=80)
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and motivo.startswith("a faixa do tamanho do desenho"), motivo
+    assert celular.atual == "final" and _no_desenho(celular)
 
 
 def test_figurinha_que_cresce_mais_que_os_dedos_e_ajustada_ate_o_desenho(monkeypatch):

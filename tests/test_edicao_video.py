@@ -1506,6 +1506,35 @@ def test_faixa_laranja_mede_a_faixa_inteira_com_letras_grossas_e_cortadas_nas_po
     assert edicao_video.faixa_laranja(tela) == (200, 300, 100, 700)
 
 
+def test_faixa_laranja_da_figurinha_pequena_em_cima_da_moldura_do_video_no_print_do_celular():
+    # 01/11, 20:07: na tela da capa, a figurinha recém-posta (pequena) fica em cima do 1º quadro
+    # do vídeo, que tem a moldura laranja (P115). Na linha da faixa, as bordas dos lados da
+    # moldura esticavam as pontas dela, e no print do celular (JPEG, qualidade 80) as letras
+    # pequenas cortavam a faixa em dois pedaços baixos demais: a medida não achava a faixa, e as
+    # 3 tentativas da capa pela figurinha saíram sem ela.
+    from PIL import Image
+    quadro, meio = (61, 267, 1018, 1969), (540, 1118)
+    capa = edicao_video.capa_com_chamada(_foto_jpg(), "Madeira maciça")
+    fundo = Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg()))).convert("RGB")
+    miolo = Image.open(io.BytesIO(edicao_video.recorte_da_figurinha(capa))).convert("RGB")
+    cima, baixo, esquerda, direita = edicao_video.faixa_laranja(Image.open(io.BytesIO(capa)))
+    alto_do_miolo = edicao_video.RECORTE_DA_FIGURINHA[0]
+    for escala in (0.443, 0.8, 957 / 720):
+        tela = Image.new("RGB", (1080, 2520), "black")
+        tela.paste(fundo.resize((quadro[2] - quadro[0], quadro[3] - quadro[1])), quadro[:2])
+        figurinha = miolo.resize((round(miolo.width * escala), round(miolo.height * escala)))
+        x, y = meio[0] - figurinha.width // 2, meio[1] - figurinha.height // 2
+        tela.paste(figurinha, (x, y))
+        jpeg = io.BytesIO()
+        tela.save(jpeg, format="JPEG", quality=80)
+        medida = edicao_video.faixa_laranja(Image.open(io.BytesIO(jpeg.getvalue())).convert("RGB"), quadro)
+        assert medida is not None, escala
+        # A faixa da figurinha, no tamanho dela (a medida do print erra uns pontos).
+        esperada = (y + (cima - alto_do_miolo) * escala, y + (baixo - alto_do_miolo) * escala,
+                    x + esquerda * escala, x + direita * escala)
+        assert all(abs(m - e) <= 4 for m, e in zip(medida, esperada)), (escala, medida, esperada)
+
+
 def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     # Escolha do Rafael (30/10, P100): ligada, a chamada vai na capa de todos os vídeos (antes,
     # P77, alternava um sim e outro não); o vídeo sem a vantagem da IA vai com a capa de sempre.
