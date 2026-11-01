@@ -418,7 +418,7 @@ def test_estado_mostra_o_prazo_do_pareamento(cr, monkeypatch):
     monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
     monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "0") if "settings" in partes else (0, "device"))
-    assert cr.descrever_estado().endswith("adb: device | portas abertas no celular: 1 | prazo do pareamento: sem prazo")
+    assert "adb: device | portas abertas no celular: 1 | prazo do pareamento: sem prazo" in cr.descrever_estado()
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, "error: device offline"))
     assert cr.descrever_estado().endswith("prazo do pareamento: não lido")
 
@@ -479,10 +479,10 @@ def test_passo_a_passo_manda_deixar_a_opcao_do_prazo_sempre_ligada(bm, cr, monke
 
 
 class CelularQueVoltou:
-    """O adb do celular que acabou de voltar: há quanto tempo está ligado e o registro do Android."""
+    """O adb do celular que acabou de voltar: há quanto tempo está ligado, o registro do Android e o Wi-Fi."""
 
-    def __init__(self, ligado_ha=None, logcat=""):
-        self.ligado_ha, self.logcat, self.pedidos = ligado_ha, logcat, []
+    def __init__(self, ligado_ha=None, logcat="", wifi=""):
+        self.ligado_ha, self.logcat, self.wifi, self.pedidos = ligado_ha, logcat, wifi, []
 
     def __call__(self, *partes, timeout=0):
         self.pedidos.append(partes)
@@ -490,7 +490,42 @@ class CelularQueVoltou:
             return (0, f"{self.ligado_ha} 99999.0") if self.ligado_ha is not None else (1, "")
         if "logcat" in partes:
             return 0, self.logcat
+        if "dumpsys" in partes:
+            return 0, self.wifi
         return 0, ""
+
+
+# Um pedaço do "dumpsys wifi": a conexão de agora (5 GHz) e a última busca de redes, com o mesmo
+# ponto duas vezes, o mesmo nome em 2,4 GHz, uma rede de nome parecido e outra rede; depois da
+# linha em branco, outra seção do Android, que não conta.
+WIFI = "\n".join([
+    "Dump of ClientModeImpl:",
+    'mWifiInfo SSID: "RedeDeTeste", BSSID: 02:00:00:00:00:01, MAC: 02:00:00:00:00:99, IP: /10.0.0.5, '
+    "Security type: 2, Supplicant state: COMPLETED, RSSI: -50, Link speed: 433Mbps, Frequency: 5180MHz, Net ID: 3",
+    "Latest scan results:",
+    "    BSSID              Frequency      RSSI           Age(sec)     SSID                                 Flags",
+    "  02:00:00:00:00:01       5180    -50(0:-52/1:-53)    1.234    RedeDeTeste                       [WPA2-PSK-CCMP][ESS]",
+    "  02:00:00:00:00:02       2437    -45(0:-47/1:-48)    1.234    RedeDeTeste                       [WPA2-PSK-CCMP][ESS]",
+    "  02:00:00:00:00:03       2412      -70    2.000    RedeDeTeste 2                     [WPA2-PSK-CCMP][ESS]",
+    "  02:00:00:00:00:04       5745      -80    3.100    OutraRede                         [WPA2-PSK-CCMP][ESS]",
+    "  02:00:00:00:00:01       5180      -51    4.000    RedeDeTeste                       [WPA2-PSK-CCMP][ESS]",
+    "",
+    "  02:00:00:00:00:05       2437      -40    1.000    RedeDeTeste                       [ESS]",
+])
+
+
+def test_wifi_conta_os_pontos_com_o_mesmo_nome_sem_mostrar_o_nome(cr):
+    # Pedido do Rafael (01/11): numa queda longa o registro do Android some; os pontos de Wi-Fi com o
+    # mesmo nome dizem se o celular pode ter trocado de ponto (o que desliga a Depuração por Wi-Fi).
+    wifi = cr.interpretar_wifi(WIFI)
+    assert wifi == {"faixa": "5 GHz", "pontos": 2, "por_faixa": {"2,4 GHz": 1, "5 GHz": 1}}
+    texto = cr.descrever_wifi(wifi)
+    assert texto == "Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
+    # O log do android.yml é público: nem o nome da rede nem o endereço do ponto.
+    assert "RedeDeTeste" not in texto and "02:00" not in texto
+    assert cr.interpretar_wifi("sem conexão") is None and cr.descrever_wifi(None) == "Wi-Fi não lido"
+    so_a_conexao = WIFI.split("Latest scan results")[0]
+    assert cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao)) == "Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome"
 
 
 def _linha_do_android(texto):
@@ -521,6 +556,43 @@ def test_motivo_da_queda_lido_no_celular_na_volta(cr, monkeypatch, ligado_ha, lo
     assert motivo in achado and "fora há 120 min" in detalhe
     # A linha crua do Android nunca sai: só o motivo fixo.
     assert "adbwifi" not in achado.casefold() and "1234" not in detalhe
+
+
+def test_queda_longa_guarda_o_tempo_fora_o_tempo_ligado_e_o_wifi_no_registro_e_no_estado(cr, monkeypatch):
+    # Queda de 22:05 de 31/10: 13 h fora, o registro do Android já renovado e o motivo perdido. O
+    # detalhe (fora há, ligado há e os pontos de Wi-Fi) vai ao registro, ao banco e ao estado.
+    from datetime import datetime
+    from conftest import consultar
+    from fuso import fuso_horario
+    cr._gravar(ip=IP, porta=41000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(259200, "", wifi=WIFI))
+    agora = datetime(2026, 11, 1, 11, 35, tzinfo=fuso_horario)
+    assert cr.anotar_motivo_da_queda("2026-10-31 22:05:00", agora=agora) == cr.SEM_O_MOTIVO
+    esperado = "fora há 810 min; ligado há 4320 min; Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
+    assert cr.ler()["ultima_queda"]["detalhe"] == esperado
+    assert consultar("SELECT detalhe FROM registro_processos WHERE processo = ?", cr.PROCESSO_DA_QUEDA)[0] == esperado
+    # O estado (android.yml), com o celular conectado: há quanto tempo está ligado, o Wi-Fi de agora
+    # e a última queda com o detalhe.
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
+    voltou = CelularQueVoltou(7200, "", wifi=WIFI)
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "device") if "get-state" in partes
+                        else (0, "0") if "settings" in partes else voltou(*partes))
+    linha = cr.descrever_estado()
+    assert "prazo do pareamento: sem prazo | ligado há 2 h | Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome" in linha
+    assert f"última queda: {cr.SEM_O_MOTIVO}; fora há 810 min; ligado há 4320 min" in linha
+    assert "RedeDeTeste" not in linha and "02:00" not in linha and IP not in linha
+
+
+def test_wifi_que_falha_nao_derruba_o_motivo_da_queda(cr, monkeypatch):
+    from datetime import datetime
+    from fuso import fuso_horario
+    cr._gravar(ip=IP, porta=41000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(259200, ""))
+    monkeypatch.setattr(cr, "ler_wifi", lambda: 1 / 0)
+    agora = datetime(2026, 11, 1, 17, 0, tzinfo=fuso_horario)
+    motivo, detalhe = cr.motivo_da_queda("2026-11-01 15:00:00", agora=agora)
+    assert motivo == cr.SEM_O_MOTIVO and detalhe.endswith("Wi-Fi não lido (erro ZeroDivisionError)")
 
 
 def test_ligacao_presa_na_mesma_porta_nao_le_o_celular(cr, monkeypatch):
