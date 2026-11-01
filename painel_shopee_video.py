@@ -1723,6 +1723,15 @@ def legenda_do_album(rascunho, posicao, fotos):
             "mesmo item e o mesmo modelo." + aviso)
 
 
+def legenda_dos_recusados(posicao, fotos):
+    """A legenda do álbum dos anúncios de outras lojas que a IA recusou nos produtos a mais."""
+    return (f"❌ Rascunho {posicao}: recusados pela IA. As fotos de capa dos {fotos} anúncio(s) de outras lojas "
+            "que a IA achou diferentes do produto do vídeo. Nenhum vai no post: é só para você conferir se ela "
+            "está acertando." if fotos > 1 else
+            f"❌ Rascunho {posicao}: recusado pela IA. A foto de capa do anúncio de outra loja que a IA achou "
+            "diferente do produto do vídeo. Ele não vai no post: é só para você conferir se ela está acertando.")
+
+
 def _rascunho_a_mostrar(pendentes, depois_de=None, antes_de=None):
     """
     O rascunho da tela: o anterior ao antes_de, o seguinte ao depois_de ou, sem eles, o 1º.
@@ -1770,6 +1779,17 @@ async def mostrar_rascunho(message, state, depois_de=None, antes_de=None):
             InputMediaPhoto(media=FSInputFile(capa), caption=legenda_do_album(rascunho, posicao, len(capas))
                             if n == 0 else None)
             for n, capa in enumerate(capas[:LIMITE_DO_ALBUM])])
+    # Os anúncios de outras lojas que a IA recusou, só a foto de capa, para o Rafael conferir se ela
+    # está acertando; nenhum vai no post. Provisório: sai quando ele pedir. Pedido dele (01/11):
+    # DECISOES.md, Shopee Vídeo.
+    recusadas = [foto for foto in rascunho.get("recusadas") or [] if os.path.exists(foto)][:LIMITE_DO_ALBUM]
+    if len(recusadas) == 1:
+        await message.answer_photo(FSInputFile(recusadas[0]), caption=legenda_dos_recusados(posicao, 1))
+    elif recusadas:
+        await message.answer_media_group([
+            InputMediaPhoto(media=FSInputFile(foto), caption=legenda_dos_recusados(posicao, len(recusadas))
+                            if n == 0 else None)
+            for n, foto in enumerate(recusadas)])
     await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
                          disable_web_page_preview=True,
                          reply_markup=teclado_rascunho(posicao > 1, posicao < len(pendentes)))

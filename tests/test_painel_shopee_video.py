@@ -496,6 +496,36 @@ def test_rascunho_com_produtos_a_mais_chega_com_o_album_das_capas(bm, Msg, Est):
     assert [m[0] for m in msg.midias] == ["video", "foto"]
 
 
+def test_rascunho_mostra_a_parte_os_anuncios_que_a_ia_recusou(bm, Msg, Est):
+    # Pedido do Rafael (01/11, provisório): para ele conferir se a IA está acertando nos produtos a
+    # mais, o rascunho mostra também, num álbum à parte, a foto de capa de cada anúncio que ela
+    # recusou, mesmo sem nenhum aprovado. Nenhum vai no post.
+    sv, est = _painel(bm), Est()
+    ident = _rascunho(sv)
+    recusadas = []
+    for n in (1, 2, 3):
+        caminho = os.path.join(sv.robo.PASTA_RASCUNHOS, f"{ident}_recusado_{n}.jpg")
+        with open(caminho, "wb") as f:
+            f.write(b"\xff\xd8\xff")
+        recusadas.append(caminho)
+    sv.robo.atualizar(ident, recusadas=recusadas + [os.path.join(sv.robo.PASTA_RASCUNHOS, "sumiu.jpg")])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "foto", "album"]
+    assert msg.midias[2][1] == recusadas and "recusados pela IA" in msg.midias[2][2]
+    assert "Nenhum vai no post" in msg.midias[2][2]
+    # Um só: vai como foto (o álbum do Telegram pede pelo menos 2).
+    sv.robo.atualizar(ident, recusadas=recusadas[:1])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "foto", "foto"] and "recusado pela IA" in msg.midias[2][2]
+    # Sem recusados, nada a mais.
+    sv.robo.atualizar(ident, recusadas=[])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "foto"]
+
+
 def test_album_e_texto_do_rascunho_marcam_os_produtos_com_outra_foto_de_capa(bm, Msg, Est):
     # Escolha do Rafael (30/10, P102): basta ser o mesmo produto; a foto de capa pode ser outra, e
     # o álbum e o texto do rascunho dizem quais produtos têm outra foto que a do anúncio do post.
