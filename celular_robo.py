@@ -83,6 +83,8 @@ SEM_O_MOTIVO = "o Android não guardou o motivo (desligada à mão, ou o registr
 # Trabalho com o Claude.
 FAIXAS_DO_WIFI = ((3000, "2,4 GHz"), (5925, "5 GHz"), (7200, "6 GHz"))
 CONEXAO_DO_WIFI = re.compile(r'mWifiInfo SSID: "(?P<nome>[^"\n]*)"[^\n]*?Frequency: (?P<mhz>\d+) ?MHz')
+# A força do sinal da conexão de agora (dBm: perto de -50 é forte; abaixo de uns -75, fraco).
+SINAL_DO_WIFI = re.compile(r'mWifiInfo SSID: "[^"\n]*"[^\n]*?RSSI: (?P<rssi>-?\d+)')
 PONTO = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}")
 FREQUENCIA = re.compile(r"(?<![\d.:])(2[4-9]\d\d|[3-6]\d{3}|7[01]\d\d)(?![\d.])")
 # A forma de uma linha da busca de redes quando nenhum ponto é achado (o formato do Android pode
@@ -426,6 +428,9 @@ def interpretar_wifi(saida, lista=""):
         por_faixa[faixa] = por_faixa.get(faixa, 0) + 1
     wifi = {"faixa": _faixa(int(conexao.group("mhz"))), "pontos": len(pontos),
             "por_faixa": dict(sorted(por_faixa.items()))}
+    sinal = SINAL_DO_WIFI.search(saida or "")
+    if sinal and -120 < int(sinal.group("rssi")) < 0:
+        wifi["sinal"] = int(sinal.group("rssi"))
     if not pontos:
         com_ponto = [linha for linha in linhas if PONTO.search(linha)]
         erro = " (a lista deu erro)" if ERRO_DA_LISTA.search(lista or "") else ""
@@ -451,12 +456,20 @@ def descrever_wifi(wifi):
     """A rede do celular em palavras curtas, só com a faixa e os números."""
     if not wifi:
         return "Wi-Fi não lido"
-    texto = f"Wi-Fi em {wifi['faixa']}, {wifi['pontos']} ponto(s) com o mesmo nome"
+    texto = (f"Wi-Fi em {wifi['faixa']}" + (f", sinal {wifi['sinal']} dBm" if wifi.get("sinal") is not None else "")
+             + f", {wifi['pontos']} ponto(s) com o mesmo nome")
     if wifi["pontos"]:
         texto += " (" + ", ".join(f"{faixa}: {n}" for faixa, n in wifi["por_faixa"].items()) + ")"
     elif wifi.get("forma"):
         texto += f" ({wifi['forma']})"
     return texto
+
+
+def resumo_do_wifi(wifi):
+    """A faixa e o sinal em poucas palavras ("5 GHz, -61 dBm"), para guardar e mostrar na volta."""
+    if not wifi:
+        return ""
+    return wifi["faixa"] + (f", {wifi['sinal']} dBm" if wifi.get("sinal") is not None else "")
 
 
 def _wifi_agora():
@@ -476,8 +489,9 @@ def motivo_da_queda(visto_em, mesma_porta=False, agora=None):
     Por que o celular tinha saído, lido nele logo depois de voltar, em palavras fixas: a ligação
     do adb travou (voltou na mesma porta), o celular reiniciou, o motivo do Android para desligar
     a Depuração por Wi-Fi (MOTIVOS_DA_QUEDA) ou SEM_O_MOTIVO. (motivo, detalhe só com números:
-    quanto tempo ficou fora, há quanto tempo está ligado e, quando não reiniciou, os pontos de
-    Wi-Fi com o mesmo nome da rede dele)
+    quanto tempo ficou fora, há quanto tempo está ligado e, quando não reiniciou, a faixa e o
+    sinal do Wi-Fi na última leitura antes da queda (anotar_wifi, de hora em hora) e na volta,
+    com os pontos de Wi-Fi com o mesmo nome da rede dele)
     """
     agora = agora or datetime.now(fuso_horario)
     fora = None
@@ -497,7 +511,10 @@ def motivo_da_queda(visto_em, mesma_porta=False, agora=None):
     r = av._rodar("adb", "-s", alvo, "shell", "logcat", "-d", "-s", f"{TAG_DA_DEPURACAO}:*", timeout=20)
     linhas = [linha.casefold() for linha in (r[1] if av._ok(r) else "").splitlines()
               if "adbwifi" in linha.casefold() and ("disabl" in linha.casefold() or "not enabl" in linha.casefold())]
-    detalhe += f"; {_wifi_agora()}"
+    antes = ler().get("ultimo_wifi") or {}
+    if antes.get("resumo"):
+        detalhe += f"; antes da queda ({str(antes.get('lido_em') or '')[11:16]}): {antes['resumo']}"
+    detalhe += f"; na volta: {_wifi_agora()}"
     if linhas:
         return next((motivo for trecho, motivo in MOTIVOS_DA_QUEDA if trecho in linhas[-1]),
                     "o Android desligou a Depuração por Wi-Fi por outro motivo"), detalhe
@@ -571,7 +588,23 @@ def anotar_prazo(forcar=False, agora=None):
     prazo = ler_prazo_da_autorizacao()
     if prazo is not None:
         _gravar(prazo_da_autorizacao=prazo, prazo_lido_em=agora.strftime("%Y-%m-%d %H:%M:%S"))
+    anotar_wifi(agora)
     return prazo
+
+
+def anotar_wifi(agora=None):
+    """
+    Guarda a faixa e o sinal do Wi-Fi de agora (ultimo_wifi), para a volta de uma queda mostrar
+    como estava a rede antes dela (sinal fraco, outra faixa). Só lê; um erro aqui não atrapalha.
+    """
+    agora = agora or datetime.now(fuso_horario)
+    try:
+        resumo = resumo_do_wifi(ler_wifi())
+    except Exception:
+        # Sem a leitura desta hora, fica a anterior; a volta mostra quando ela foi lida.
+        return
+    if resumo:
+        _gravar(ultimo_wifi={"resumo": resumo, "lido_em": agora.strftime("%Y-%m-%d %H:%M:%S")})
 
 
 def descrever_prazo(prazo):

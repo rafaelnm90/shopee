@@ -520,15 +520,16 @@ def test_wifi_conta_os_pontos_com_o_mesmo_nome_sem_mostrar_o_nome(cr):
     # Pedido do Rafael (01/11): numa queda longa o registro do Android some; os pontos de Wi-Fi com o
     # mesmo nome dizem se o celular pode ter trocado de ponto (o que desliga a Depuração por Wi-Fi).
     wifi = cr.interpretar_wifi(WIFI)
-    assert wifi == {"faixa": "5 GHz", "pontos": 2, "por_faixa": {"2,4 GHz": 1, "5 GHz": 1}}
+    assert wifi == {"faixa": "5 GHz", "sinal": -50, "pontos": 2, "por_faixa": {"2,4 GHz": 1, "5 GHz": 1}}
     texto = cr.descrever_wifi(wifi)
-    assert texto == "Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
+    assert texto == "Wi-Fi em 5 GHz, sinal -50 dBm, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
     # O log do android.yml é público: nem o nome da rede nem o endereço do ponto.
     assert "RedeDeTeste" not in texto and "02:00" not in texto
     assert cr.interpretar_wifi("sem conexão") is None and cr.descrever_wifi(None) == "Wi-Fi não lido"
     so_a_conexao = WIFI.split("Latest scan results")[0]
     assert cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao)) == (
-        "Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s) no dumpsys, 0 na lista, 0 com ponto)")
+        "Wi-Fi em 5 GHz, sinal -50 dBm, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s) no dumpsys, 0 na "
+        "lista, 0 com ponto)")
 
 
 def test_wifi_le_a_busca_no_formato_de_rotulos_e_mostra_a_forma_quando_nada_bate(cr):
@@ -551,7 +552,7 @@ def test_wifi_le_a_busca_no_formato_de_rotulos_e_mostra_a_forma_quando_nada_bate
         "  02:00:00:00:00:01       5180      -50    1.234    5265646554657374                  [WPA2-PSK-CCMP][ESS]",
         ""])
     texto = cr.descrever_wifi(cr.interpretar_wifi(estranho))
-    assert texto == ("Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 2 linha(s) no dumpsys, 0 na lista, "
+    assert texto == ("Wi-Fi em 5 GHz, sinal -50 dBm, 0 ponto(s) com o mesmo nome (busca de redes: 2 linha(s) no dumpsys, 0 na lista, "
                      "1 com ponto; forma: MAC NUM NUM DEC NUM [..])")
     assert "02:00" not in texto and "5180" not in texto and "RedeDeTeste" not in texto
     # Pedaço do nome de outra rede com cara de rótulo ("Casa:") não aparece: só os rótulos do Android.
@@ -604,7 +605,8 @@ def test_queda_longa_guarda_o_tempo_fora_o_tempo_ligado_e_o_wifi_no_registro_e_n
     monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(259200, "", wifi=WIFI))
     agora = datetime(2026, 11, 1, 11, 35, tzinfo=fuso_horario)
     assert cr.anotar_motivo_da_queda("2026-10-31 22:05:00", agora=agora) == cr.SEM_O_MOTIVO
-    esperado = "fora há 810 min; ligado há 4320 min; Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
+    esperado = ("fora há 810 min; ligado há 4320 min; na volta: Wi-Fi em 5 GHz, sinal -50 dBm, 2 ponto(s) com o mesmo "
+                "nome (2,4 GHz: 1, 5 GHz: 1)")
     assert cr.ler()["ultima_queda"]["detalhe"] == esperado
     assert consultar("SELECT detalhe FROM registro_processos WHERE processo = ?", cr.PROCESSO_DA_QUEDA)[0] == esperado
     # O estado (android.yml), com o celular conectado: há quanto tempo está ligado, o Wi-Fi de agora
@@ -615,7 +617,7 @@ def test_queda_longa_guarda_o_tempo_fora_o_tempo_ligado_e_o_wifi_no_registro_e_n
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "device") if "get-state" in partes
                         else (0, "0") if "settings" in partes else voltou(*partes))
     linha = cr.descrever_estado()
-    assert "prazo do pareamento: sem prazo | ligado há 2 h | Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome" in linha
+    assert "prazo do pareamento: sem prazo | ligado há 2 h | Wi-Fi em 5 GHz, sinal -50 dBm, 2 ponto(s) com o mesmo nome" in linha
     assert f"última queda: {cr.SEM_O_MOTIVO}; fora há 810 min; ligado há 4320 min" in linha
     assert "RedeDeTeste" not in linha and "02:00" not in linha and IP not in linha
 
@@ -628,15 +630,43 @@ def test_wifi_do_motorola_vem_da_lista_do_cmd_wifi(cr, monkeypatch):
     assert cr.interpretar_wifi(so_a_conexao, tabela)["por_faixa"] == {"2,4 GHz": 1, "5 GHz": 1}
     recusa = "Exception occurred while executing 'list-scan-results':\njava.lang.SecurityException: sem permissão"
     texto = cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao, recusa))
-    assert texto == ("Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s) no dumpsys, 2 na lista "
+    assert texto == ("Wi-Fi em 5 GHz, sinal -50 dBm, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s) no dumpsys, 2 na lista "
                      "(a lista deu erro), 0 com ponto)")
     # Pelo adb do celular: os dois comandos só leem.
     cr._gravar(ip=IP, porta=41000, pareado_em="2026-10-17 10:00:00")
     adb = CelularQueVoltou(7200, "", wifi=so_a_conexao, lista=tabela)
     monkeypatch.setattr(cr.av, "_rodar", adb)
-    assert cr.descrever_wifi(cr.ler_wifi()) == "Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
+    assert cr.descrever_wifi(cr.ler_wifi()) == (
+        "Wi-Fi em 5 GHz, sinal -50 dBm, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)")
     comandos = [" ".join(p[p.index("shell") + 1:]) for p in adb.pedidos if "shell" in p]
     assert comandos == ["dumpsys wifi", "cmd wifi list-scan-results"]
+
+
+def test_sinal_do_wifi_de_hora_em_hora_aparece_na_volta_da_queda(cr, monkeypatch):
+    # 01/11: o celular enxerga um ponto só com o nome da rede (5 GHz), então a queda das 22:05 não
+    # foi troca de ponto; falta saber se foi o sinal fraco. A leitura de hora em hora (junto do
+    # prazo do pareamento) guarda a faixa e o sinal, e a volta mostra os de antes da queda.
+    from datetime import datetime
+    from fuso import fuso_horario
+    cr._gravar(ip=IP, porta=41000, pareado_em="2026-10-17 10:00:00")
+    fraco = WIFI.replace("RSSI: -50", "RSSI: -81")
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "0") if "settings" in partes
+                        else CelularQueVoltou(7200, "", wifi=fraco)(*partes))
+    monkeypatch.setattr(cr.shutil, "which", lambda nome: "/usr/bin/adb")
+    assert cr.anotar_prazo(agora=datetime(2026, 11, 1, 21, 0, tzinfo=fuso_horario)) == 0
+    assert cr.ler()["ultimo_wifi"] == {"resumo": "5 GHz, -81 dBm", "lido_em": "2026-11-01 21:00:00"}
+    # Dentro da mesma hora, nada é lido de novo.
+    ler_wifi = cr.ler_wifi
+    monkeypatch.setattr(cr, "ler_wifi", lambda: pytest.fail("leu o Wi-Fi antes de uma hora"))
+    cr.anotar_prazo(agora=datetime(2026, 11, 1, 21, 30, tzinfo=fuso_horario))
+    monkeypatch.setattr(cr, "ler_wifi", ler_wifi)
+    monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(259200, "", wifi=WIFI))
+    agora = datetime(2026, 11, 2, 11, 35, tzinfo=fuso_horario)
+    motivo, detalhe = cr.motivo_da_queda("2026-11-01 22:05:00", agora=agora)
+    assert motivo == cr.SEM_O_MOTIVO
+    assert detalhe == ("fora há 810 min; ligado há 4320 min; antes da queda (21:00): 5 GHz, -81 dBm; na volta: "
+                       "Wi-Fi em 5 GHz, sinal -50 dBm, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)")
+    assert "RedeDeTeste" not in detalhe and "02:00" not in detalhe and len(detalhe) < 240
 
 
 def test_wifi_que_falha_nao_derruba_o_motivo_da_queda(cr, monkeypatch):
