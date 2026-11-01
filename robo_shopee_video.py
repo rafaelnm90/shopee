@@ -368,22 +368,82 @@ def horarios_vencidos(estado, agora=None):
     return sum(1 for h in estado["horarios"] if h <= hora)
 
 
+# Os horários do plano que passaram sem o robô (o celular fora, o robô fora do ar) não se
+# perdem: o primeiro sai na volta e os outros voltam espalhados no resto do dia, junto dos que
+# ainda faltam, com ESPACO_MEDIO em média e nunca menos de ESPACO_MINIMO entre um e outro (o
+# mesmo espaço das postagens); o que não cabe sem apertar fica de fora. Só os do dia: o plano
+# recomeça à meia-noite. A pausa do Rafael e a suspensão continuam pulando. Pedido do Rafael
+# (01/11, no lugar da P16): DECISOES.md, Shopee Vídeo.
+ESPACO_MEDIO = 60
+ESPACO_MINIMO = INTERVALO_DAS_POSTAGENS[0]
+PROCESSO_DOS_PERDIDOS = "horários perdidos na volta"
+
+
+def _espalhar(trechos, quantos, sorteio):
+    """quantos horários ("HH:MM") nos trechos (minutos do dia): partes iguais, um minuto sorteado no meio de cada."""
+    total = sum(b - a for a, b in trechos)
+    parte = total / quantos
+    horarios = []
+    for i in range(quantos):
+        # No meio da parte (de 1/4 a 3/4): entre um horário e o seguinte fica no mínimo meia parte.
+        corrido = int(i * parte + sorteio.uniform(parte / 4, parte * 3 / 4))
+        for a, b in trechos:
+            if corrido < b - a:
+                minuto = a + corrido
+                break
+            corrido -= b - a
+        else:
+            minuto = trechos[-1][1] - 1
+        horarios.append(f"{minuto // 60:02d}:{minuto % 60:02d}")
+    return sorted(horarios)
+
+
+def recuperar_horarios(config, estado, perdidos, agora=None):
+    """
+    Devolve ao plano de hoje os perdidos (os horários que passaram sem rascunho, fora o que sai
+    agora): com os que ainda faltam, espalhados nos trechos de postar a partir de ESPACO_MINIMO
+    depois de agora. Cabem tantos quantos deixam ESPACO_MEDIO em média; os que faltavam nunca
+    saem do plano (só mudam de minuto, para o espaço ficar natural), e os perdidos que não cabem
+    ficam de fora. Muda estado["horarios"] (o mesmo número de horários no dia) e devolve
+    (recuperados, de fora).
+    """
+    momento = agora_br(agora)
+    hora = momento.strftime("%H:%M")
+    passados = [h for h in estado["horarios"] if h <= hora]
+    futuros = [h for h in estado["horarios"] if h > hora]
+    inicio = momento.hour * 60 + momento.minute + ESPACO_MINIMO
+    trechos = [(max(a, inicio), b) for a, b in trechos_de_postar(config) if b > inicio]
+    cabem = int(sum(b - a for a, b in trechos) // ESPACO_MEDIO)
+    recuperados = max(0, min(perdidos, cabem - len(futuros)))
+    if recuperados:
+        sorteio = random.Random(f"{CHAVE_ESTADO}:{estado['data']}:{hora}")
+        estado["horarios"] = sorted(passados[:len(passados) - recuperados]
+                                    + _espalhar(trechos, len(futuros) + recuperados, sorteio))
+    return recuperados, perdidos - recuperados
+
+
 def consumir_horarios(config, agora=None, pular=False):
     """
     Marca como feitos os horários que já passaram e diz se havia algum novo. Vários de uma
-    vez (robô pausado ou fora do ar) contam como um só: retomar não solta tudo de uma vez.
-    O horário novo ganha as tentativas a mais, começa no primeiro vídeo e tira a repetição
-    do anterior. pular=True (a pausa do Rafael, a suspensão): passam sem rascunho. Os que
-    passam sem tentativa, pulados ou juntados num só, somam em "sem_tentar", que o checkup
-    desconta do que cobra.
+    vez (o celular fora, o robô fora do ar): o primeiro sai agora e os outros voltam ao resto
+    do dia (recuperar_horarios), nunca todos de uma vez. O horário novo ganha as tentativas a
+    mais, começa no primeiro vídeo e tira a repetição do anterior. pular=True (a pausa do
+    Rafael, a suspensão): passam sem rascunho. Os que passam sem tentativa, pulados ou de
+    fora por falta de espaço no dia, somam em "sem_tentar", que o checkup desconta do que cobra.
     """
     estado = estado_do_dia(config, agora)
     passados = horarios_vencidos(estado, agora)
     if passados <= estado["feitos"]:
         return False
     novos = passados - estado["feitos"]
+    de_fora = novos if pular else novos - 1
+    if not pular and novos > 1:
+        recuperados, de_fora = recuperar_horarios(config, estado, novos - 1, agora)
+        passados -= recuperados
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_PERDIDOS, f"{recuperados} de {novos - 1} de volta ao plano",
+                                     f"de fora por falta de espaço no dia: {de_fora}", ok=None, agora=agora)
     estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, videos=1, repetir=False,
-                  sem_tentar=estado.get("sem_tentar", 0) + (novos if pular else novos - 1))
+                  sem_tentar=estado.get("sem_tentar", 0) + de_fora)
     db.salvar_config(CHAVE_DIA, estado)
     return True
 
@@ -1031,6 +1091,12 @@ def proxima_postagem(config, agora=None, sorteio=random):
     return _momento(quando)
 
 
+def postou_ha_pouco(agora=None):
+    """O último post saiu há menos de ESPACO_MINIMO? Aí o aprovado atrasado espera (o_que_fazer)."""
+    ultimo = max((r["postado_em"] for r in listar("postado") if r["postado_em"]), default="")
+    return bool(ultimo) and ultimo > _momento(agora_br(agora) - timedelta(minutes=ESPACO_MINIMO))
+
+
 def aprovar(ident, agora=None):
     """O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora."""
     quando = proxima_postagem(ler_config(), agora)
@@ -1074,6 +1140,13 @@ def o_que_fazer(config, agora=None):
     agora_txt = _momento(agora)
     aprovados = listar("aprovado")
     prontos = [r for r in aprovados if r["postar_em"] and r["postar_em"] <= agora_txt]
+    if postar and prontos and postou_ha_pouco(agora):
+        # Dois posts nunca saem colados (na volta do celular, com o robô fora do ar): os
+        # aprovados que esperavam ganham horário novo, espalhados como na aprovação.
+        # Pedido do Rafael (01/11): DECISOES.md, Shopee Vídeo.
+        remarcar_aprovados(config, agora)
+        aprovados = listar("aprovado")
+        prontos = [r for r in aprovados if r["postar_em"] and r["postar_em"] <= agora_txt]
     if postar and prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
     # Um aprovado vai ao ar antes da próxima rodada: nada de tarefa longa (Saúde, rascunho,

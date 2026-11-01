@@ -2302,8 +2302,19 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     agora_menos = (datetime.now(fuso_horario) - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
     motivo_da_queda = (f"\n\n📵 Por que o celular tinha saído: {html_escape(queda['motivo'])}."
                        if queda.get("motivo") and (queda.get("voltou_em") or "") >= agora_menos else "")
+    # O que ficou para trás hoje volta espalhado no resto do dia, nunca colado (o robô:
+    # recuperar_horarios e o_que_fazer). Pedido do Rafael (01/11): DECISOES.md, Shopee Vídeo.
+    estado = robo.estado_do_dia(config)
+    perdidos = robo.horarios_vencidos(estado) - estado["feitos"]
+    agora_txt = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+    atrasados = sum(1 for r in robo.listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt)
+    para_tras = (f"\n\n🗓️ Ficou para trás hoje: {perdidos} horário(s) de rascunho e {atrasados} aprovado(s) "
+                 "atrasado(s). O primeiro sai na próxima rodada, e os outros voltam espalhados no resto do dia, "
+                 f"com pelo menos {robo.ESPACO_MINIMO} min entre um e outro (1 h em média). O rascunho que não "
+                 "couber sem apertar fica de fora; o aprovado que não couber hoje sai amanhã cedo."
+                 if perdidos > 1 or atrasados > 1 else "")
     await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
-                         f"assistente fica em espera.{motivo_da_queda}{suspensao}", parse_mode="HTML")
+                         f"assistente fica em espera.{motivo_da_queda}{para_tras}{suspensao}", parse_mode="HTML")
     await mostrar_robo(message, state)
 
 

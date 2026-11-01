@@ -73,13 +73,62 @@ def test_plano_do_dia_fica_na_faixa_e_no_horario_e_varia_de_um_dia_para_outro():
     assert len({tuple(p) for p in planos}) > 10 and len({len(p) for p in planos}) > 1
 
 
-def test_horarios_que_passam_de_uma_vez_contam_como_um_so():
+def test_horarios_que_passam_de_uma_vez_sem_espaco_no_dia_contam_como_um_so():
+    # Às 19:59 de um Horário do Robô que acaba às 20h, não cabe mais nenhum: sai um só.
     config = {**robo.PADRAO, "robo_limite_min": 3, "robo_limite_max": 3, "robo_inicio": 8, "robo_fim": 20}
     assert not robo.consumir_horarios(config, momento("2026-10-22 08:00"))
     assert robo.consumir_horarios(config, momento("2026-10-22 19:59"))
     assert not robo.consumir_horarios(config, momento("2026-10-22 19:59"))
     assert robo.consumir_horarios(config, momento("2026-10-23 19:59"))  # dia novo, plano novo
 
+
+
+def test_horarios_perdidos_voltam_espalhados_no_resto_do_dia():
+    # Pedido do Rafael (01/11, no lugar da P16): com o celular fora das 22:05 às 11:35, 5 dos 9
+    # horários do dia passaram e só 1 rascunho saiu por eles. Agora o 1º sai na volta e os outros
+    # voltam ao resto do dia, com os que faltavam: 1 h em média, nunca menos de 30 min entre um e
+    # outro, fora do Horário das Interações; o que não cabe sem apertar fica de fora.
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_inicio": 8, "robo_fim": 22,
+              "robo_interacoes_inicio": 20, "robo_interacoes_fim": 21}
+    horarios = ["08:30", "09:30", "10:30", "11:30", "12:30", "14:30", "16:30", "18:30", "21:30"]
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-11-01", "horarios": horarios, "feitos": 0})
+    agora = momento("2026-11-01 13:00")
+    assert robo.consumir_horarios(config, agora) is True                # o 1º dos perdidos, agora
+    estado = robo.estado_do_dia(config, agora)
+    futuros = [h for h in estado["horarios"] if h > "13:00"]
+    # Das 13:30 às 22:00, sem as 20h, cabem 7: os 4 que faltavam e 3 dos 4 perdidos; 1 fica de fora.
+    assert len(estado["horarios"]) == 9 and len(futuros) == 7
+    assert (estado["feitos"], estado["sem_tentar"]) == (2, 1)
+    minutos = [int(h[:2]) * 60 + int(h[3:]) for h in futuros]
+    assert minutos[0] >= 13 * 60 + 30 and not any(20 * 60 <= m < 21 * 60 for m in minutos)
+    assert all(depois - antes >= 30 for antes, depois in zip(minutos, minutos[1:]))
+    assert robo.consumir_horarios(config, agora) is False
+    resultado, detalhe = consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                                   robo.PROCESSO_DOS_PERDIDOS)
+    assert resultado == "3 de 4 de volta ao plano" and detalhe == "de fora por falta de espaço no dia: 1"
+    # Cada perdido que volta sai no seu horário, um de cada vez.
+    assert robo.consumir_horarios(config, momento(f"2026-11-01 {futuros[0]}")) is True
+    assert robo.estado_do_dia(config, agora)["feitos"] == 3
+
+
+def test_dois_posts_nunca_saem_colados_e_os_atrasados_se_espalham():
+    # Pedido do Rafael (01/11): na volta do celular, os 2 aprovados atrasados saíam um logo depois
+    # do outro. Com um post saído há menos de 30 min, os atrasados ganham horário novo, espalhados.
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_limite_min": 1, "robo_limite_max": 1,
+              "robo_inicio": 0, "robo_fim": 24}
+    agora = momento("2026-11-01 12:00")
+    robo.gravar_estado(treino_semana=robo.semana(agora))
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-11-01", "horarios": [], "feitos": 0})
+    postado = _rascunho("postado", postado_em="2026-11-01 11:50:00")
+    primeiro = _rascunho("aprovado", postar_em="2026-10-31 21:54:00")
+    segundo = _rascunho("aprovado", postar_em="2026-10-31 22:47:00")
+    assert robo.o_que_fazer(config, agora) != ("postar", primeiro)
+    horas = [datetime.strptime(robo.pegar(i)["postar_em"], "%Y-%m-%d %H:%M:%S") for i in (primeiro, segundo)]
+    assert horas[0] >= datetime(2026, 11, 1, 12, 30) and 30 <= (horas[1] - horas[0]).total_seconds() / 60 <= 90
+    # Com o último post há mais de 30 min, o atrasado sai na hora.
+    robo.atualizar(postado, postado_em="2026-11-01 11:20:00")
+    robo.atualizar(primeiro, postar_em="2026-11-01 11:55:00")
+    assert robo.o_que_fazer(config, agora) == ("postar", primeiro)
 
 # --- Aprovação: postagens espalhadas ---
 
@@ -328,19 +377,20 @@ def test_pausado_nao_toca_e_pula_os_horarios(monkeypatch, avisos):
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["sem_tentar"] == 1
 
 
-def test_pausa_por_desconexao_guarda_os_horarios_e_na_volta_contam_como_um(monkeypatch, avisos):
-    # 24/10/2026: o celular caiu às 15:09 e o horário das 15:29 foi pulado na pausa sozinha.
-    # Escolha do Rafael (P16): na volta do celular, os perdidos contam como um só.
+def test_pausa_por_desconexao_guarda_os_horarios_e_na_volta_sem_espaco_ficam_de_fora(monkeypatch, avisos):
+    # 24/10/2026: o celular caiu às 15:09 e o horário das 15:29 foi pulado na pausa sozinha. Na
+    # pausa sozinha os horários ficam; na volta (pedido do Rafael de 01/11, no lugar da P16), o 1º
+    # sai e os outros voltam ao resto do dia. Às 21:59 não cabe mais nenhum.
     robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_limite_min": 2, "robo_limite_max": 2,
                                               "robo_pausado": True, "robo_pausa_motivo": robo.MOTIVO_DA_DESCONEXAO})
     monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("pausado nem olha o celular"))
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 21:59")) == "pausado"
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["feitos"] == 0
-    # Retomado: os 2 horários que passaram viram um só, feito agora.
+    # Retomado: o 1º dos 2 horários que passaram sai agora; o outro não cabe mais no dia.
     robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=False, robo_pausa_motivo=""))
     assert robo.consumir_horarios(robo.ler_config(), momento("2026-10-22 21:59")) is True
     assert robo.consumir_horarios(robo.ler_config(), momento("2026-10-22 21:59")) is False
-    # Os 2 viraram uma tentativa só: o outro fica como sem tentativa, e o checkup não o cobra.
+    # O que não coube fica como sem tentativa, e o checkup não o cobra.
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["sem_tentar"] == 1
 
 

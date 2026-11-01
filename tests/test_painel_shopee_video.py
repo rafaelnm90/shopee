@@ -174,8 +174,8 @@ def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatc
 
 def test_pausa_sem_o_celular_guarda_os_horarios_e_a_do_rafael_pula(bm, monkeypatch):
     # 28/10: o celular caiu às 15:05 e, na volta, nenhum rascunho saiu pelos horários da tarde:
-    # o painel pulava os horários em qualquer pausa. Escolha do Rafael (P16): na pausa sozinha,
-    # sem o celular, eles ficam e na volta contam como um só.
+    # o painel pulava os horários em qualquer pausa. Na pausa sozinha, sem o celular, eles ficam,
+    # e na volta voltam ao resto do dia (pedido do Rafael de 01/11, no lugar da P16).
     from datetime import datetime
     from fuso import fuso_horario
     sv = _painel(bm)
@@ -196,6 +196,25 @@ def test_pausa_sem_o_celular_guarda_os_horarios_e_a_do_rafael_pula(bm, monkeypat
     estado = sv.robo.estado_do_dia(sv.robo.ler_config())
     assert (estado["feitos"], estado["sem_tentar"]) == (1, 1) and rodadas == []
 
+
+
+def test_retomar_diz_o_que_ficou_para_tras_e_como_volta(bm, Msg, Est, monkeypatch):
+    # Pedido do Rafael (01/11): o que ficou para trás no dia (horários de rascunho e aprovados
+    # atrasados) volta sozinho, espalhado no resto do dia; a resposta do Retomar diz isso.
+    from datetime import datetime
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho", lambda: (True, "moto g(100)"))
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado", robo_inicio=0, robo_fim=24)
+    hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    sv.robo.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": ["00:00"] * 3, "feitos": 0})
+    for _ in range(2):
+        sv.robo.atualizar(sv.robo.criar("video:1", None), estado="aprovado", postar_em="2026-01-01 10:00:00")
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, Est()))
+    texto = next(t for t in msg.saidas if "retomado" in t)
+    assert "Ficou para trás hoje: 3 horário(s) de rascunho e 2 aprovado(s) atrasado(s)" in texto
+    assert "pelo menos 30 min entre um e outro" in texto and "sai amanhã cedo" in texto
 
 def test_reconectar_acha_a_porta_sozinho_antes_de_pedir(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
