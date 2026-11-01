@@ -331,12 +331,34 @@ def capa_com_chamada(foto, chamada):
 # diferenças das três cores). A faixa são linhas seguidas com o laranja nas mesmas pontas (a
 # faixa é um retângulo), cheias (pelo menos LINHA_CHEIA entre as pontas) ou com as letras
 # brancas (pelo menos LINHA_COM_LETRAS), de pelo menos LARGURA_MINIMA_DA_FAIXA da caixa.
+# Nas linhas do meio das letras, o branco pode passar do laranja (letra grossa, o print em JPEG
+# borrando a borda delas) e, com a figurinha maior que o quadro, as letras chegam às pontas:
+# entre as pontas da faixa, essas linhas são só laranja, branco e a mistura dos dois (a borda
+# das letras), pelo menos LINHA_DA_FAIXA delas, com um pouco de laranja (LARANJA_COM_LETRAS: o
+# branco da foto, sem laranja nenhum, não é faixa). Sem isso, a medida pegava só o pedaço da
+# faixa acima das letras, e o robô aumentava a figurinha demais (casos de 31/10).
 TOLERANCIA_DO_LARANJA = 60
 LINHA_CHEIA = 0.9
 LINHA_COM_LETRAS = 0.4
+LINHA_DA_FAIXA = 0.95
+LARANJA_COM_LETRAS = 0.1
 LARGURA_MINIMA_DA_FAIXA = 0.15
 PONTAS_DA_FAIXA = 4                             # em px: quanto as pontas variam de uma linha para a outra
 LINHAS_CHEIAS_DA_FAIXA = 2
+BRANCO_DAS_LETRAS = (255, 255, 255)
+
+
+def cores_da_faixa(pontos):
+    """
+    Os pontos (numpy, altura x largura x 3) no laranja, no branco das letras ou na mistura dos
+    dois (a borda das letras), até TOLERANCIA_DO_LARANJA do caminho entre as duas cores.
+    """
+    import numpy
+    laranja = numpy.array(LARANJA_DA_SHOPEE, dtype=numpy.float32)
+    rumo = numpy.array(BRANCO_DAS_LETRAS, dtype=numpy.float32) - laranja
+    pontos = pontos.astype(numpy.float32)
+    passo = numpy.clip(((pontos - laranja) @ rumo) / float(rumo @ rumo), 0, 1)
+    return numpy.abs(pontos - (laranja + passo[..., None] * rumo)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
 
 
 def faixa_laranja(imagem, caixa=None):
@@ -349,6 +371,7 @@ def faixa_laranja(imagem, caixa=None):
     x1, y1, x2, y2 = caixa or (0, 0, imagem.width, imagem.height)
     pontos = numpy.asarray(imagem.convert("RGB").crop((x1, y1, x2, y2)), dtype=numpy.int16)
     laranja = numpy.abs(pontos - numpy.array(LARANJA_DA_SHOPEE, dtype=numpy.int16)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
+    da_faixa = cores_da_faixa(pontos)
     minimo = max(2, int(laranja.shape[1] * LARGURA_MINIMA_DA_FAIXA))
     blocos, atual = [], None
     for y, linha in enumerate(laranja):
@@ -361,6 +384,13 @@ def faixa_laranja(imagem, caixa=None):
                 faixa = (esquerda, direita, cheio >= LINHA_CHEIA)
         mesma = (atual is not None and faixa is not None and abs(faixa[0] - atual["esquerda"]) <= PONTAS_DA_FAIXA
                  and abs(faixa[1] - atual["direita"]) <= PONTAS_DA_FAIXA)
+        if not mesma and atual is not None and not (faixa and faixa[2]):
+            # A linha do meio das letras: entre as pontas da faixa, só as cores dela. (Uma linha
+            # cheia com outras pontas é outra faixa.)
+            trecho = slice(atual["esquerda"], atual["direita"] + 1)
+            if da_faixa[y, trecho].mean() >= LINHA_DA_FAIXA and linha[trecho].mean() >= LARANJA_COM_LETRAS:
+                atual["baixo"] = y + 1
+                continue
         if mesma:
             atual["baixo"] = y + 1
             atual["cheias"] += faixa[2]

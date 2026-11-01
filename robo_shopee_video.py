@@ -3252,6 +3252,14 @@ MARGEM_DOS_DEDOS = 10                           # os dedos ficam a esta distânc
 # desde que entrou): uma medida errada da faixa não pede um gesto do tamanho da tela.
 RAZAO_MAXIMA_POR_AJUSTE = 3.0
 PROPORCAO_DO_VIDEO = 9 / 16
+# O app não segue os dois dedos à risca: em 31/10, os dedos 3 vezes mais abertos deixaram a
+# figurinha 2 vezes maior, e 1,5 vez mais abertos não a mudaram. O robô aprende com cada gesto
+# quanto a figurinha mudou pelos dedos (a figurinha muda pela razão dos dedos elevada ao ganho)
+# e pede os próximos dedos por ele; o gesto que não mudou nada (até SEM_EFEITO_DOS_DEDOS) diminui
+# o ganho, e o próximo abre ou fecha mais.
+GANHO_DOS_DEDOS = (0.3, 1.5)                    # o menor e o maior ganho que o robô aceita
+REDUCAO_SEM_EFEITO = 0.6
+SEM_EFEITO_DOS_DEDOS = 0.02
 
 
 def quadro_da_capa(xml):
@@ -3288,21 +3296,26 @@ def faixa_esperada(capa, quadro):
 def ajustar_a_figurinha(d, capa, quadro):
     """
     Deixa a figurinha do tamanho e no lugar do desenho: mede a faixa laranja no print, aumenta ou
-    diminui com dois dedos em volta do meio dela e arrasta quando só o lugar está errado, até
-    AJUSTES_DA_FIGURINHA vezes. (ok, o que dizer no registro, só números)
+    diminui com dois dedos em volta do meio dela (pelo ganho aprendido com os gestos de antes,
+    ganho_dos_dedos) e arrasta quando só o lugar está errado, até AJUSTES_DA_FIGURINHA vezes.
+    (ok, o que dizer no registro, só números)
     """
     esperada = faixa_esperada(capa, quadro)
     if not esperada:
         return False, "a capa não tem a faixa laranja"
     e_cima, e_baixo, e_esquerda, e_direita = esperada
-    medidas = []
+    medidas, ganho, gesto = [], 1.0, None
     for ajuste in range(AJUSTES_DA_FIGURINHA + 1):
         medida = edicao_video.faixa_laranja(d.screenshot(), quadro)
         if not medida:
             return False, _com_as_medidas(f"a faixa laranja não apareceu na capa ({ajuste} ajuste(s))",
                                           medidas, esperada)
         cima, baixo, esquerda, direita = medida
-        medidas.append((round(baixo - cima), round(direita - esquerda), round((cima + baixo - e_cima - e_baixo) / 2)))
+        if gesto:
+            dedos, alto_antes = gesto
+            ganho = ganho_dos_dedos(ganho, dedos, alto_antes, baixo - cima)
+            gesto = None
+        medidas.append([round(baixo - cima), round(direita - esquerda), round((cima + baixo - e_cima - e_baixo) / 2), ""])
         razao = (e_baixo - e_cima) / (baixo - cima)
         centro_x, centro_y = (esquerda + direita) / 2, (cima + baixo) / 2
         delta_y = (e_cima + e_baixo) / 2 - centro_y
@@ -3318,9 +3331,12 @@ def ajustar_a_figurinha(d, capa, quadro):
         x, y = round(centro_x), round(centro_y)
         try:
             if not tamanho_certo:
-                meio, de, ate = dedos_da_figurinha(x, quadro, direita - esquerda, razao)
+                meio, de, ate = dedos_da_figurinha(x, quadro, direita - esquerda, razao ** (1 / ganho))
+                medidas[-1][3] = f"{de}→{ate}"
                 ok, motivo = ps.dois_dedos(d, meio, y, de, ate)
+                gesto = (ate / de, baixo - cima)
             else:
+                medidas[-1][3] = f"arrasto {round(delta_y):+d}"
                 ok, motivo = ps.arrastar(d, x, y, round(x + delta_x), round(y + delta_y))
         except Exception as e:
             # O gesto recusado pelo celular (um ponto fora da tela, a conexão que caiu) descarta a
@@ -3355,19 +3371,38 @@ def dedos_da_figurinha(x, quadro, largura, razao):
     return round(meio), de, ate
 
 
+def ganho_dos_dedos(ganho, dedos, alto_antes, alto):
+    """
+    O ganho dos dois dedos depois de um gesto: a figurinha mudou pela razão dos dedos (dedos)
+    elevada a quanto? Pela altura da faixa antes e depois. O gesto que não mudou a figurinha
+    diminui o ganho (o próximo abre ou fecha mais os dedos); o que a mudou para o outro lado não
+    ensina nada. Sempre entre os limites de GANHO_DOS_DEDOS.
+    """
+    menor, maior = GANHO_DOS_DEDOS
+    mudou = alto / alto_antes
+    if abs(mudou - 1) <= SEM_EFEITO_DOS_DEDOS:
+        return max(menor, ganho * REDUCAO_SEM_EFEITO)
+    if abs(math.log(dedos)) < 0.01 or (mudou > 1) != (dedos > 1):
+        return ganho
+    return min(maior, max(menor, math.log(mudou) / math.log(dedos)))
+
+
 def _com_as_medidas(motivo, medidas, esperada):
     """
     O motivo da figurinha que não chegou ao desenho, com a faixa medida no print antes de cada
-    ajuste: alto x largura e o meio dela, em px da tela, acima (-) ou abaixo (+) do meio do
-    desenho. Mostra no checkup se os dois dedos mudaram a figurinha (o app pode não deixar crescer
-    mais) ou se a medida pegou outra coisa laranja da tela. Só números.
+    ajuste (alto x largura e o meio dela, em px da tela, acima (-) ou abaixo (+) do meio do
+    desenho) e o gesto que veio depois dela: os dois dedos, de quanto a quanto abertos em px, ou
+    o arrasto, quanto para baixo (+) ou para cima (-). Mostra no checkup se os dois dedos mudaram
+    a figurinha (o app pode não deixar crescer mais) ou se a medida pegou outra coisa laranja da
+    tela. Só números.
     """
     if not medidas:
         return motivo
     e_cima, e_baixo, e_esquerda, e_direita = esperada
-    return (f"{motivo}; alto x largura e o meio da faixa a cada medida (o desenho, "
+    return (f"{motivo}; a cada medida, alto x largura, meio e o gesto (o desenho, "
             f"{round(e_baixo - e_cima)}x{round(e_direita - e_esquerda)} e 0): "
-            + ", ".join(f"{alto}x{largura} {meio:+d}" for alto, largura, meio in medidas))
+            + ", ".join(f"{alto}x{largura} {meio:+d}" + (f" {gesto}" if gesto else "")
+                        for alto, largura, meio, gesto in medidas))
 
 
 def aba_da_foto(xml):
