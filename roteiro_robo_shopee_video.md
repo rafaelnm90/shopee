@@ -344,7 +344,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      Highlight, Caption Style e Reset) gera as legendas sozinha em poucos segundos; num vídeo
      só com música saiu uma palavra só ("muzik" e, na vez seguinte, "música"). O ✓ volta à
      edição com as legendas; o ✕ pergunta "Confirm discard all captions?" (Cancel
-     `@tv_cancel`, Discard `@tv_discard`). O Captions no robô espera a P118. O voltar na edição abre "Deseja sair da página de edição?" (Salvar
+     `@tv_cancel`, Discard `@tv_discard`). O robô não usa o Captions: as legendas da fala são nossas, na edição (P118). O voltar na edição abre "Deseja sair da página de edição?" (Salvar
      Rascunho `@tv_save`, Descartar `@tv_no_save`, Cancelar `@tv_cancel`);
   5. tela final (`PublishVideoActivity`): **Adicionar legenda** (onde vai o título),
      Selecionar Capa, Hashtag, **Adicionar produto** (abre a lista com busca, abas

@@ -70,6 +70,24 @@ VISIVEL_NO_APP = (47, 673)
 FIM_DA_BARRA_DE_BUSCA = 140
 COMECO_DO_CARTAO_DO_PRODUTO = 870
 PULSO_DA_SETA = (72, 30)
+# As legendas da fala: o que as pessoas falam no vídeo, escrito pela IA vendo o vídeo e posto por
+# nós na edição (não o Captions do app: assim o Rafael vê a legenda no rascunho antes de aprovar).
+# O pé da legenda fica na altura do pé da seta, porque logo abaixo vem o cartão do produto que o app
+# mostra; ela vai à direita da seta, sem cobri-la, até perto da borda que o app corta, em letra
+# pequena, branca com contorno preto. O vídeo sem fala (só música ou canto) e o que já tem a fala
+# escrita na tela vão sem ela. Escolha do Rafael (01/11, P118): DECISOES.md, Shopee Vídeo.
+TAMANHO_DA_SETA = (182, 140)        # o arquivo da seta (o tests/test_edicao_video.py confere)
+PE_DA_LEGENDA = CENTRO_DA_SETA[1] + TAMANHO_DA_SETA[1] // 2
+ESQUERDA_DA_LEGENDA = CENTRO_DA_SETA[0] + TAMANHO_DA_SETA[0] // 2 + 12
+DIREITA_DA_LEGENDA = VISIVEL_NO_APP[1] - 12
+LETRA_DA_LEGENDA = (26, 22)         # a maior e a menor
+LINHAS_DA_LEGENDA = 2
+CONTORNO_DA_LEGENDA = 3
+# Cada trecho que a IA escreve; o que não cabe em LINHAS_DA_LEGENDA linhas é dividido em dois.
+MAXIMO_DA_LEGENDA = 50
+# Um trecho mais curto que isto passa rápido demais para ler e sai.
+MINIMO_NA_TELA = 0.4
+PROCESSO_DAS_LEGENDAS = "edição do vídeo: legendas da fala"
 # Uns minutos bastam para um vídeo curto; depois disso a edição desiste (e o vídeo fica para depois).
 ESPERA_MAXIMA = 300
 # Quantos vídeos de cada fonte o exemplo tenta até achar um com a foto do anúncio na API:
@@ -694,7 +712,19 @@ _CANTO_NO_PROMPT = (
     "porcentagem da largura e da altura do vídeo, contando da borda esquerda e da borda de cima, como "
     "[{{\"esquerda\": 30, \"direita\": 70, \"topo\": 14, \"base\": 19}}]; [] se não há nenhum.\n"
 )
-_FALAS_E_LUGAR_NO_PROMPT = _FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
+# As legendas da fala (P118): só a voz de gente falando em português, como foi dita; sem fala, só
+# música ou canto, ou com a fala em outra língua, nenhuma.
+_LEGENDAS_NO_PROMPT = (
+    "Escreva também as legendas do que as pessoas falam no vídeo (voz de gente falando, não música nem canto), "
+    "como foi dito, em português do Brasil, com a ortografia e a acentuação certas: \"legendas\", a lista dos "
+    "trechos na ordem, cada um com o começo e o fim em segundos desde o começo do vídeo e o texto falado, "
+    f"em trechos curtos de até {MAXIMO_DA_LEGENDA} caracteres, "
+    "como [{{\"inicio\": 0.0, \"fim\": 2.0, \"texto\": \"...\"}}]; [] se ninguém fala, se só tem música ou "
+    "canto, ou se a fala não é em português. Diga também se o próprio vídeo já mostra o que as pessoas falam "
+    "escrito na tela (legenda da fala): \"legenda_no_video\", true ou false.\n"
+)
+_FALAS_E_LUGAR_NO_PROMPT = (_FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
+                            + _LEGENDAS_NO_PROMPT)
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
@@ -704,9 +734,10 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
-    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
-    "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": []}}"
+    "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": [], "
+    "\"legendas\": [], \"legenda_no_video\": false}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -1041,6 +1072,11 @@ def _nome_lugar_e_falas(dados):
     falas = _falas(dados.get("falas"))
     if falas is not None:
         textos["falas"] = falas
+    legendas = _legendas(dados.get("legendas"))
+    if legendas is not None:
+        textos["legendas"] = legendas
+    if isinstance(dados.get("legenda_no_video"), bool):
+        textos["legenda_no_video"] = dados["legenda_no_video"]
     return textos
 
 
@@ -1165,6 +1201,133 @@ def _falas(bruto):
     return falas
 
 
+def _legendas(bruto):
+    """
+    As legendas da fala que a IA deu ([(início, fim, texto)], em ordem), só os trechos certos: com o
+    começo antes do fim e o texto com as letras do português (o trecho com letra de outra língua sai);
+    None quando a lista não veio.
+    """
+    if not isinstance(bruto, list):
+        return None
+    legendas = []
+    for trecho in bruto:
+        if not isinstance(trecho, dict):
+            continue
+        try:
+            inicio, fim = float(trecho.get("inicio")), float(trecho.get("fim"))
+        except (TypeError, ValueError):
+            continue
+        texto = _so_letras(str(trecho.get("texto") or ""), 10 ** 6)
+        if texto and fim > inicio >= 0 and not letras_fora_do_portugues(texto):
+            legendas.append((inicio, fim, texto))
+    return sorted(legendas)
+
+
+# Por que o vídeo vai sem as legendas da fala (textos fixos: o registro e o checkup contam por eles).
+SEM_FALA = "ninguém fala em português no vídeo"
+LEGENDA_JA_NO_VIDEO = "o vídeo já tem a fala escrita na tela"
+SEM_AS_LEGENDAS_DA_IA = "a IA não deu as legendas"
+
+
+def legendas_da_fala(textos):
+    """
+    ([(início, fim, texto)], porquê): as legendas da fala que vão no vídeo, e o porquê fixo quando não
+    vai nenhuma. Escolha do Rafael (01/11, P118): DECISOES.md, Shopee Vídeo.
+    """
+    if textos.get("legenda_no_video"):
+        return [], LEGENDA_JA_NO_VIDEO
+    if "legendas" not in textos:
+        return [], SEM_AS_LEGENDAS_DA_IA
+    if not textos["legendas"]:
+        return [], SEM_FALA
+    return list(textos["legendas"]), ""
+
+
+def _linhas_da_legenda(texto, fonte, rascunho):
+    """As linhas do texto quebradas na largura da legenda (só no espaço comum)."""
+    limite = DIREITA_DA_LEGENDA - ESQUERDA_DA_LEGENDA - 2 * CONTORNO_DA_LEGENDA
+    linhas, linha = [], ""
+    for palavra in texto.split():
+        tentativa = f"{linha} {palavra}".strip()
+        if not linha or rascunho.textlength(tentativa, font=fonte) <= limite:
+            linha = tentativa
+        else:
+            linhas.append(linha)
+            linha = palavra
+    if linha:
+        linhas.append(linha)
+    return linhas, all(rascunho.textlength(t, font=fonte) <= limite for t in linhas)
+
+
+def legenda_da_fala(texto):
+    """
+    A legenda (PNG com fundo transparente, bytes): letras brancas com contorno preto, sem caixa,
+    centralizadas, na maior letra de LETRA_DA_LEGENDA em que o texto cabe em LINHAS_DA_LEGENDA linhas
+    da largura dela. None quando nem a menor letra cabe (o trecho é dividido antes).
+    """
+    import io
+
+    import matplotlib
+    from PIL import Image, ImageDraw, ImageFont
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    maior, menor = LETRA_DA_LEGENDA
+    for tamanho in range(maior, menor - 1, -2):
+        fonte = ImageFont.truetype(fonte_ttf, tamanho)
+        linhas, cabe = _linhas_da_legenda(texto, fonte, rascunho)
+        if cabe and len(linhas) <= LINHAS_DA_LEGENDA:
+            break
+    else:
+        return None
+    altura_da_linha = round(tamanho * 1.25)
+    borda = CONTORNO_DA_LEGENDA + 2
+    largura = round(max(rascunho.textlength(t, font=fonte) for t in linhas)) + 2 * borda
+    altura = altura_da_linha * len(linhas) + 2 * borda
+    imagem = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
+    desenho = ImageDraw.Draw(imagem)
+    for i, linha in enumerate(linhas):
+        desenho.text((largura / 2, borda + altura_da_linha * (i + 0.5)), linha, font=fonte, fill="white",
+                     anchor="mm", stroke_width=CONTORNO_DA_LEGENDA, stroke_fill="black")
+    saida = io.BytesIO()
+    imagem.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def _trechos_que_cabem(inicio, fim, texto):
+    """[(início, fim, imagem)] do trecho: o que não cabe numa legenda é dividido ao meio pelas palavras,
+    com o tempo repartido pelo tamanho de cada metade."""
+    imagem = legenda_da_fala(texto)
+    palavras = texto.split()
+    if imagem or len(palavras) < 2:
+        return [(inicio, fim, imagem)] if imagem else []
+    meio = len(palavras) // 2
+    primeira, segunda = " ".join(palavras[:meio]), " ".join(palavras[meio:])
+    corte = inicio + (fim - inicio) * len(primeira) / (len(primeira) + len(segunda))
+    return _trechos_que_cabem(inicio, corte, primeira) + _trechos_que_cabem(corte, fim, segunda)
+
+
+def letreiros_da_fala(legendas, duracao):
+    """
+    [(imagem, início, fim, x, y)]: as legendas da fala no vídeo, cada uma até a seguinte começar,
+    dentro da duração do vídeo; o trecho curto demais para ler (MINIMO_NA_TELA) sai. O pé de cada uma
+    fica em PE_DA_LEGENDA, e ela vai centralizada entre ESQUERDA_DA_LEGENDA e DIREITA_DA_LEGENDA.
+    """
+    pedacos = []
+    for inicio, fim, texto in sorted(legendas):
+        pedacos += _trechos_que_cabem(max(0.0, inicio), min(duracao, fim), texto)
+    letreiros = []
+    for i, (inicio, fim, imagem) in enumerate(pedacos):
+        if i + 1 < len(pedacos):
+            fim = min(fim, pedacos[i + 1][0])
+        if fim - inicio < MINIMO_NA_TELA:
+            continue
+        # A largura e a altura estão no cabeçalho do PNG (bytes 16 a 24).
+        largura, altura = int.from_bytes(imagem[16:20], "big"), int.from_bytes(imagem[20:24], "big")
+        x = ESQUERDA_DA_LEGENDA + (DIREITA_DA_LEGENDA - ESQUERDA_DA_LEGENDA - largura) // 2
+        letreiros.append((imagem, round(inicio, 2), round(fim, 2), x, PE_DA_LEGENDA - altura))
+    return letreiros
+
+
 def horarios_dos_textos(textos, duracao):
     """[(texto, início, fim)]: um de cada vez, cada um na sua parte do vídeo remontado; o que não cabe sai."""
     while textos and duracao / len(textos) < 1.5:
@@ -1221,7 +1384,7 @@ def _letreiros(textos, lugar, duracao):
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-             capa=None, miniatura=True, outras_fotos=()):
+             capa=None, miniatura=True, outras_fotos=(), legendas=()):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -1229,22 +1392,29 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     isso fica para as versões modificadas do exemplo (pedido do Rafael de 28/10/2026:
     DECISOES.md, Shopee Vídeo). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA;
     SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
-    vídeo inteiro. Devolve (motivo, resumo {original, lugar, textos}): motivo "" quando deu certo.
+    vídeo inteiro. As legendas da fala ([(início, fim, texto)], P118) vão embaixo, à direita da seta.
+    Devolve (motivo, resumo {original, lugar, textos, legendas}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
-                                 musica, capa, miniatura, outras_fotos)
+                                 musica, capa, miniatura, outras_fotos, legendas)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
-                          musica=None, capa=None, miniatura=True, outras_fotos=()):
-    """O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo)."""
+                          musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=()):
+    """
+    O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
+    Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta.
+    """
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (chamada, FUNDO_DA_CHAMADA)], lugar, original)
-    resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura}
+    da_fala = letreiros_da_fala(legendas, original) if legendas else []
+    letreiros += da_fala
+    resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura,
+              "legendas": len(da_fala)}
     if not letreiros:
         return editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
@@ -1268,6 +1438,7 @@ COM_MUSICA = ", com música de fundo"
 SEM_A_MINIATURA = ", sem a nossa miniatura"
 COM_A_MINIATURA_MENOR = ", com a miniatura menor"
 COM_A_MINIATURA_ALTERNADA = ", com a miniatura alternada"
+COM_AS_LEGENDAS_DA_FALA = ", com as legendas da fala"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
 SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
 TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
@@ -1323,14 +1494,21 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                + (SEM_A_MINIATURA if not miniatura
                   else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
                + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else ""))
+    # As legendas da fala (P118): só o que alguém fala, num vídeo que ainda não a tem escrita na tela.
+    legendas, sem_legendas = legendas_da_fala(textos) if produto else ([], SEM_AS_LEGENDAS_DA_IA)
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
-                                    miniatura, outras_fotos)
+                                    miniatura, outras_fotos, legendas)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
     if not motivo_2:
+        postas = resumo.get("legendas", 0)
+        registro_processos.registrar("shopee_video", PROCESSO_DAS_LEGENDAS, "postas" if postas else "sem as legendas",
+                                     f"{postas} trecho(s)" if postas else sem_legendas or "nenhum trecho cabe",
+                                     ok=True if postas else None)
+        avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         detalhe = ""
         if textos.get("texto_no_video"):
             detalhe = TEXTO_JA_NO_VIDEO
@@ -1471,7 +1649,8 @@ PROMPT_DAS_VERSOES = (
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
-    "\"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": []}}"
+    "\"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": [], \"legendas\": [], "
+    "\"legenda_no_video\": false}}"
 )
 
 
@@ -1645,7 +1824,7 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                       lugar=None, miniatura=True):
+                       lugar=None, miniatura=True, legendas=()):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
@@ -1664,7 +1843,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
-                                                musica=_caminho(musicas[0]), miniatura=miniatura)
+                                                musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas)
     resumo = {"original": original, "inteiro": original, "lugar": lugar, "miniatura": miniatura,
               "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
@@ -1710,11 +1889,12 @@ def exemplo_editor_1(destino):
 def exemplo_editor_2(destino):
     """
     O exemplo do Editor 2 (com legendas), como o do Editor 1, com os textos na tela (o nome, a
-    vantagem e a chamada).
+    vantagem e a chamada) e, no vídeo completo, as legendas da fala, como vai ao ar (P118).
     """
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
-        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), miniatura_no_video(textos)))
+        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), miniatura_no_video(textos),
+        legendas_da_fala(textos)[0]))
 
 
 def exemplo_capa():
