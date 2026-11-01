@@ -386,6 +386,7 @@ SEM_META = {
     ("shopee_video", "tempo do rascunho"), ("shopee_video", "ver produtos: "),
     ("shopee_video", "capa pela figurinha"), ("shopee_video", "efeitos na edição"),
     ("shopee_video", "preparar 1 agora"), ("shopee_video", "celular: motivo da queda"),
+    ("shopee_video", "horários perdidos na volta"),
 }
 
 
@@ -836,8 +837,8 @@ def robo_da_shopee_video(agora=None):
     hoje = agora.strftime("%Y-%m-%d")
     horarios = plano.get("horarios", []) if plano.get("data") == hoje else []
     vencidos = sum(1 for h in horarios if h <= agora.strftime("%H:%M"))
-    # Os que passaram sem tentativa: pulados na pausa do Rafael ou na suspensão, ou juntados
-    # num só na volta do celular (P16). O checkup não os cobra.
+    # Os que passaram sem tentativa: pulados na pausa do Rafael ou na suspensão, ou de fora na
+    # volta do celular por falta de espaço no resto do dia. O checkup não os cobra.
     sem_tentar = int(plano.get("sem_tentar") or 0) if plano.get("data") == hoje else 0
     # Pela tabela dos rascunhos, que guarda todos; o histórico das tentativas pode ter
     # começado depois.
