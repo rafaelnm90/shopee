@@ -3241,6 +3241,7 @@ def escrever_a_legenda(d, titulo):
 # certa, descarta e segue com a capa de sempre. Mapa no roteiro; escolha do Rafael (P110):
 # DECISOES.md, Shopee Vídeo.
 PROCESSO_DA_CAPA = "capa pela figurinha"
+PROCESSO_DO_BOTAO = "preparar 1 agora"
 AJUSTES_DA_FIGURINHA = 5
 FOLGA_DA_ESCALA = 0.03                          # a altura da faixa pode errar 3% do desenho
 FOLGA_DA_POSICAO = 12                           # e o meio dela, 12 px
@@ -5202,6 +5203,10 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             acao, ident = o_que_fazer(config, agora) or (None, None)
         if not acao:
             return "nada a fazer agora"
+        if preparar:
+            # O rascunho pedido no botão vale a qualquer hora, também no Horário das Interações: o
+            # checkup o separa do preparo do plano, que ali espera os comentários do feed.
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "pedido", ok=None, agora=agora)
         # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
         d = d or casos_robo.com_historico(ps.conectar(celular=True))
         try:

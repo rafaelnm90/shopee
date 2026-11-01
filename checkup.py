@@ -385,6 +385,7 @@ SEM_META = {
     ("shopee_video", "espaços livres: "),
     ("shopee_video", "tempo do rascunho"), ("shopee_video", "ver produtos: "),
     ("shopee_video", "capa pela figurinha"), ("shopee_video", "efeitos na edição"),
+    ("shopee_video", "preparar 1 agora"),
 }
 
 
@@ -1112,6 +1113,10 @@ ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed",), ("rascunho", "postar")
 # P24): não é preparo, mas conta na hora do descurtir. Decisão do Rafael: DECISOES.md,
 # Shopee Vídeo.
 ACOES_EM_QUALQUER_HORARIO = ("apagar",)
+# O rascunho que o Rafael pede no Preparar 1 Agora vale a qualquer hora: o preparo que começa
+# até PREPARO_DO_BOTAO depois do pedido (o registro "preparar 1 agora") não é sobreposição.
+PROCESSO_DO_BOTAO = "preparar 1 agora"
+PREPARO_DO_BOTAO = timedelta(minutes=30)
 
 
 def _tipo_da_atividade(processo=None, acao=None):
@@ -1183,7 +1188,14 @@ def sobreposicoes(agora=None):
     # A janela só vale do momento em que o Rafael a escolheu: o que veio antes seguia a regra
     # de então e não conta como sobreposição.
     janela_desde = config.get("robo_interacoes_desde") or ""
-    fora_da_janela, preparo_na_janela = [], []
+    fora_da_janela, preparo_na_janela, pedidos_no_botao = [], [], []
+    botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S") for m, _p, _r, _d, _o in registro_processos.sequencia(
+        "shopee_video", PROCESSO_DO_BOTAO, _momento(agora - timedelta(hours=24)))]
+
+    def pedido_no_botao(momento):
+        quando = datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")
+        return any(b <= quando <= b + PREPARO_DO_BOTAO for b in botao)
+
     if janela:
         feitos = defaultdict(int)
         for momento, tipo, o_que in atividades:
@@ -1196,7 +1208,7 @@ def sobreposicoes(agora=None):
                 fora_da_janela.append((momento[11:16], o_que))
             elif (tipo == "preparo" and dentro and int(momento[11:13]) != HORA_DO_DESCURTIR_SV
                   and feitos[momento[:10]] < COMENTARIOS_NO_FEED_POR_DIA):
-                preparo_na_janela.append((momento[11:16], o_que))
+                (pedidos_no_botao if pedido_no_botao(momento) else preparo_na_janela).append((momento[11:16], o_que))
     coladas = {}
     for canal, horarios in rotinas_coladas(agora).items():
         if horarios:
@@ -1205,7 +1217,8 @@ def sobreposicoes(agora=None):
         "shopee_video", "assistente: envio", _momento(agora - timedelta(hours=24)))]
     return {"janela": janela, "janela_desde": janela_desde, "no_descurtir": no_descurtir,
             "fora_da_janela": fora_da_janela,
-            "preparo_na_janela": preparo_na_janela, "rotinas_coladas": coladas, "assistente": assistente,
+            "preparo_na_janela": preparo_na_janela, "pedidos_no_botao": pedidos_no_botao,
+            "rotinas_coladas": coladas, "assistente": assistente,
             "robo_ativo": not config.get("robo_pausado", True)}
 
 
@@ -1662,6 +1675,9 @@ def main():
         print(f"{titulo}: {len(lista)}")
         for hora, o_que in lista[:10]:
             print(f"   {hora} {o_que}")
+    if sobre["pedidos_no_botao"]:
+        print(f"   à parte, pedidos no Preparar 1 Agora (valem a qualquer hora): {len(sobre['pedidos_no_botao'])} - "
+              + ", ".join(hora for hora, _o in sobre["pedidos_no_botao"][:10]))
     if not sobre["janela"]:
         print("   (Horário das Interações não escolhido: interações e preparo dividem o Horário do Robô)")
     elif sobre["janela_desde"]:
