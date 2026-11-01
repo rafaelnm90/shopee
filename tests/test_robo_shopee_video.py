@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+import re
 from datetime import datetime
 from xml.sax.saxutils import escape
 
@@ -4862,9 +4863,13 @@ class CelularDaCapa:
     (o app não segue os dedos à risca), até a escala máxima, e o arrastar a move.
     """
 
-    def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False):
+    def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False, parado=1.0,
+                 letras_grossas=False):
         self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
         self.entrada, self.ganho, self.maxima, self.meio = entrada, ganho, maxima, meio
+        # parado: dedos que abrem ou fecham menos que essa razão não mudam a figurinha.
+        # letras_grossas: no print, as letras brancas da faixa mais grossas (como no Motorola).
+        self.parado, self.letras_grossas = parado, letras_grossas
         self.galeria, self.toques, self.gestos, self.arrastos, self.teclas = set(), [], [], [], []
         self.pontos = []
 
@@ -4943,6 +4948,8 @@ class CelularDaCapa:
                 meio_x, meio_y = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
                 celular.gestos.append((de, ate))
                 f = celular.figurinha
+                if 1 / celular.parado < ate / de < celular.parado:
+                    return
                 nova = min(celular.maxima, f["escala"] * (ate / de) ** celular.ganho)
                 razao = nova / f["escala"]
                 f.update(escala=nova, x=meio_x + (f["x"] - meio_x) * razao, y=meio_y + (f["y"] - meio_y) * razao)
@@ -4965,7 +4972,7 @@ class CelularDaCapa:
             largura, altura = round(miolo.width * f["escala"]), round(miolo.height * f["escala"])
             quadro.paste(miolo.resize((largura, altura)), (round(f["x"] - largura / 2) - x1, round(f["y"] - altura / 2) - y1))
         tela.paste(quadro, (x1, y1))
-        return tela
+        return _com_letras_grossas(tela) if self.letras_grossas else tela
 
     def shell(self, partes):
         if partes[0] == "find":
@@ -4975,6 +4982,19 @@ class CelularDaCapa:
 
     def push(self, origem, destino):
         self.galeria.add(destino.rsplit("/", 1)[-1])
+
+
+def _com_letras_grossas(imagem, px=3):
+    """
+    O print com o branco px pontos mais largo para cada lado: as letras da faixa ficam como no
+    print do Motorola em 31/10, com mais branco que laranja nas linhas do meio delas.
+    """
+    import numpy
+    from PIL import Image, ImageFilter
+    pontos = numpy.asarray(imagem.convert("RGB")).copy()
+    branco = Image.fromarray(((pontos.min(axis=2) > 200) * 255).astype("uint8")).filter(ImageFilter.MaxFilter(2 * px + 1))
+    pontos[numpy.asarray(branco) > 0] = 255
+    return Image.fromarray(pontos)
 
 
 def _faixa_na_tela(celular):
@@ -5042,17 +5062,44 @@ def test_figurinha_que_nao_chega_ao_desenho_anota_a_medida_de_cada_ajuste(monkey
     assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA) is False
     (detalhe,) = consultar("SELECT detalhe FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_CAPA)
     e_cima, e_baixo, e_esquerda, e_direita = robo.faixa_esperada(CAPA_DA_FIGURINHA, QUADRO_DA_CAPA)
-    inicio = ("a faixa não ficou do tamanho do desenho; alto x largura e o meio da faixa a cada medida (o "
+    inicio = ("a faixa não ficou do tamanho do desenho; a cada medida, alto x largura, meio e o gesto (o "
               f"desenho, {round(e_baixo - e_cima)}x{round(e_direita - e_esquerda)} e 0): ")
     assert detalhe.startswith(inicio)
     medidas = [medida.split(" ") for medida in detalhe[len(inicio):].split(", ")]
     assert len(medidas) == robo.AJUSTES_DA_FIGURINHA + 1
-    altos = [int(tamanho.split("x")[0]) for tamanho, _meio in medidas]
+    altos = [int(medida[0].split("x")[0]) for medida in medidas]
     # Os dois dedos aumentaram a figurinha até o máximo do app, e ali ela parou, abaixo do desenho.
     assert altos[0] < altos[-1] == altos[-2] < round(e_baixo - e_cima)
-    assert all(meio[0] in "+-" for _tamanho, meio in medidas)
+    assert all(medida[1][0] in "+-" for medida in medidas)
+    # Depois de cada medida, menos a última, os dois dedos: de quanto a quanto abertos, em px.
+    assert all(len(medida) == 3 and re.fullmatch(r"\d+→\d+", medida[2]) for medida in medidas[:-1])
+    assert len(medidas[-1]) == 2
     # Cabe inteiro no registro (os detalhes passam de 240 letras cortados).
     assert len(detalhe) < robo.registro_processos.TAMANHO_DO_DETALHE
+
+
+def test_figurinha_com_letras_grossas_e_dedos_que_nao_mexem_chega_ao_desenho(monkeypatch):
+    # 31/10, 18:49, 19:02 e 19:37: no print do Motorola, as letras da faixa tinham mais branco que
+    # laranja nas linhas do meio, a medida pegava só o pedaço acima delas, e o robô aumentava a
+    # figurinha além do quadro; e os dedos 3 vezes mais abertos a deixaram 2 vezes maior, e os 1,5
+    # vez mais abertos não a mudaram. O robô mede a faixa inteira e aprende com cada gesto.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(ganho=0.66, parado=1.6, letras_grossas=True)
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and _no_desenho(celular), motivo
+    assert len(celular.gestos) >= 2
+
+
+def test_ganho_dos_dedos_aprende_com_o_gesto():
+    menor, maior = robo.GANHO_DOS_DEDOS
+    # Os dedos 3 vezes mais abertos deixaram a figurinha 2 vezes maior: o ganho é log 2 / log 3.
+    assert robo.ganho_dos_dedos(1.0, 3.0, 50, 100) == pytest.approx(math.log(2) / math.log(3))
+    # Nada mudou: o ganho diminui, e o próximo gesto abre mais os dedos; nunca abaixo do menor.
+    assert robo.ganho_dos_dedos(1.0, 1.5, 93, 93) == pytest.approx(robo.REDUCAO_SEM_EFEITO)
+    assert robo.ganho_dos_dedos(menor, 1.5, 93, 94) == menor
+    # Mudou para o outro lado (a medida errou): nada se aprende. E o ganho fica nos limites.
+    assert robo.ganho_dos_dedos(0.8, 2.0, 100, 90) == 0.8
+    assert robo.ganho_dos_dedos(1.0, 1.1, 100, 300) == maior
 
 
 def test_capa_pela_figurinha_guarda_o_caso_com_a_tela_da_capa_antes_de_descartar(monkeypatch):
@@ -5113,7 +5160,8 @@ def test_erro_no_gesto_da_figurinha_descarta_a_capa_e_o_rascunho_segue(monkeypat
     celular, vistos = CelularDaCapa(), []
     assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append((celular.atual, motivo))) is False
     assert [atual for atual, _motivo in vistos] == ["capa"]
-    assert vistos[0][1].startswith("a figurinha não foi ajustada: erro AssertionError no gesto; alto x largura")
+    assert vistos[0][1].startswith("a figurinha não foi ajustada: erro AssertionError no gesto; a cada medida, "
+                                   "alto x largura")
     assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
     resultado, detalhe = consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
                                    robo.PROCESSO_DA_CAPA)

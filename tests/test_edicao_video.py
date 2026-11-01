@@ -1449,6 +1449,28 @@ def test_faixa_laranja_acha_a_faixa_da_capa_no_print_e_nao_acha_sem_ela():
     assert edicao_video.faixa_laranja(Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg())))) is None
 
 
+def test_faixa_laranja_mede_a_faixa_inteira_com_letras_grossas_e_cortadas_nas_pontas():
+    # 31/10, 18:49, 19:02 e 19:37: no print da tela da capa, as linhas do meio das letras tinham
+    # mais branco (e a borda borrada delas) que laranja, e a medida pegava só o pedaço da faixa
+    # acima das letras; com a figurinha maior que o quadro, as letras chegavam às pontas.
+    from PIL import Image, ImageDraw
+    laranja, branco, borda = edicao_video.LARANJA_DA_SHOPEE, (255, 255, 255), (246, 166, 150)
+    for cortadas in (False, True):
+        tela = Image.new("RGB", (800, 600), (20, 20, 20))
+        desenho = ImageDraw.Draw(tela)
+        desenho.rectangle((100, 200, 699, 299), fill=laranja)
+        for x in range(100 if cortadas else 130, 699 if cortadas else 669, 20):
+            desenho.rectangle((x, 230, x + 12, 269), fill=branco)
+            desenho.rectangle((x + 13, 230, x + 14, 269), fill=borda)
+        assert edicao_video.faixa_laranja(tela) == (200, 300, 100, 700), cortadas
+    # O branco da foto logo acima da faixa (sem laranja nenhum) não entra na medida.
+    tela = Image.new("RGB", (800, 600), (20, 20, 20))
+    desenho = ImageDraw.Draw(tela)
+    desenho.rectangle((100, 100, 699, 199), fill=branco)
+    desenho.rectangle((100, 200, 699, 299), fill=laranja)
+    assert edicao_video.faixa_laranja(tela) == (200, 300, 100, 700)
+
+
 def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     # Escolha do Rafael (30/10, P100): ligada, a chamada vai na capa de todos os vídeos (antes,
     # P77, alternava um sim e outro não); o vídeo sem a vantagem da IA vai com a capa de sempre.
