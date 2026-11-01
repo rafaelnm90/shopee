@@ -4790,6 +4790,37 @@ def test_miniatura_troca_entre_as_fotos_diferentes_dos_produtos_do_post(monkeypa
     assert chamadas[-1] == [] and len(registros) == 6
 
 
+def _puff(cor, luz=0):
+    """O mesmo modelo fotografado do mesmo jeito, na cor pedida (e com um pouco mais de luz)."""
+    from PIL import Image, ImageDraw
+    mais = lambda c: tuple(min(255, max(0, v) + luz) for v in c)
+    imagem = Image.new("RGB", (600, 600), mais((245, 245, 245)))
+    desenho = ImageDraw.Draw(imagem)
+    desenho.ellipse((150, 120, 450, 300), fill=mais(cor))
+    desenho.rectangle((180, 300, 420, 470), fill=mais(tuple(v - 40 for v in cor)))
+    desenho.rectangle((160, 470, 440, 490), fill=mais((200, 160, 60)))
+    saida = io.BytesIO()
+    imagem.save(saida, format="JPEG")
+    return saida.getvalue()
+
+
+def test_mesma_foto_olha_tambem_a_cor():
+    # O mesmo modelo em outra cor, fotografado igual, dava a mesma marca (ela é do desenho, em preto
+    # e branco) e ficava de fora da miniatura que troca, contra a regra do Rafael (01/11: toda
+    # variação entra na miniatura). A mesma foto com um pouco mais de luz continua a mesma.
+    cinza = _puff((128, 128, 128))
+    assert robo.mesma_foto(cinza, _puff((240, 110, 170))) is False
+    assert robo.mesma_foto(cinza, _puff((70, 110, 200))) is False
+    assert robo.mesma_foto(cinza, _puff((128, 128, 128), luz=8)) is True
+
+
+def test_miniatura_troca_para_o_mesmo_modelo_em_outra_cor(monkeypatch):
+    rosa = _puff((240, 110, 170))
+    monkeypatch.setattr(robo.videos, "duracao", lambda caminho: 30.0)
+    video = {"arquivo": "v.mp4"}
+    assert robo.fotos_da_miniatura(video, _puff((128, 128, 128)), [rosa, _puff((128, 128, 128), luz=8)]) == [rosa]
+
+
 def test_rascunho_guarda_os_produtos_a_mais():
     ident = robo.criar("v1")
     robo.atualizar(ident, produtos=["A", "B"], mais_produtos=[{"nome": "B", "link": "l", "endereco": "e"}])
