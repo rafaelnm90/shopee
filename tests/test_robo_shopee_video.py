@@ -5122,8 +5122,10 @@ def test_figurinha_que_nao_chega_ao_desenho_e_descartada_e_vai_a_capa_de_sempre(
                                        robo.PROCESSO_DA_CAPA)
     assert (resultado, ok) == ("de fora", None)
     assert detalhe.startswith("3 tentativas; a última: a faixa não ficou do tamanho do desenho")
-    # Nenhuma receita guardada: nenhuma deu certo.
-    assert not robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    # Nenhuma receita de gestos (nenhuma deu certo), mas o ganho dos dedos aprendido fica para a
+    # próxima capa: "invés de desistir, aprender para que na próxima dê certo" (Rafael, 01/11).
+    guardado = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    assert "gestos" not in guardado and robo.GANHO_DOS_DEDOS[0] <= guardado["ganho"] <= robo.GANHO_DOS_DEDOS[1]
 
 
 def test_figurinha_que_nao_chega_ao_desenho_anota_a_medida_de_cada_ajuste(monkeypatch, avisos):
@@ -5211,6 +5213,27 @@ def test_receita_que_nao_chega_fica_de_lado_e_a_nova_toma_o_lugar(monkeypatch):
     assert celular.arrastos[0] == (540, 1118, 540, 900)
     nova = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
     assert ["arrasto", 540, 1118, 540, 900] not in nova["gestos"] and nova["gestos"]
+
+
+def test_capa_de_fora_ensina_a_proxima_pelo_ganho_dos_dedos(monkeypatch):
+    # Os dedos 3 vezes mais abertos deixam a figurinha só 2 vezes maior (31/10): a capa que ficou
+    # de fora guarda o ganho que aprendeu, e a próxima já começa com ele, sem a receita velha.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    robo.db.salvar_config(robo.CHAVE_FIGURINHA, {"quadro": list(QUADRO_DA_CAPA), "entrada": [46, 318],
+                                                 "gestos": [["arrasto", 540, 1118, 540, 900]], "ganho": 1.0})
+    ok, _ = robo.capa_pela_figurinha(CelularDaCapa(ganho=0.63, maxima=0.9), CAPA_DA_FIGURINHA)
+    guardado = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    assert not ok and "gestos" not in guardado and guardado["ganho"] < 1.0
+    vistos = []
+    real = robo.ajustar_a_figurinha
+
+    def ajustar(d, capa, quadro, receita=None, aprendida=None):
+        vistos.append(dict(receita or {}))
+        return real(d, capa, quadro, receita, aprendida)
+
+    monkeypatch.setattr(robo, "ajustar_a_figurinha", ajustar)
+    ok, motivo = robo.capa_pela_figurinha(CelularDaCapa(ganho=0.63), CAPA_DA_FIGURINHA)
+    assert ok and vistos[0]["ganho"] == guardado["ganho"] and "gestos" not in vistos[0], motivo
 
 
 def test_receita_so_serve_no_mesmo_quadro_e_com_a_figurinha_do_mesmo_tamanho():

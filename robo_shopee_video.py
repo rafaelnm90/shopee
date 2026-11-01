@@ -3596,7 +3596,7 @@ def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
     nome = ps.por_foto_na_galeria(d, edicao_video.recorte_da_figurinha(capa))
     if not nome:
         return False, "a capa não apareceu na galeria"
-    receita, motivos = db.ler_config(CHAVE_FIGURINHA, {}) or {}, []
+    receita, motivos, ganho = db.ler_config(CHAVE_FIGURINHA, {}) or {}, [], None
     try:
         for tentativa in range(1, TENTATIVAS_DA_FIGURINHA + 1):
             aprendida = {}
@@ -3616,12 +3616,17 @@ def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
                     db.salvar_config(CHAVE_FIGURINHA, dict(aprendida, em=_momento()))
                 return True, motivo + (f", na {tentativa}ª tentativa" if tentativa > 1 else "")
             motivos.append(motivo)
+            ganho = aprendida.get("ganho") or ganho
             if tentativa == TENTATIVAS_DA_FIGURINHA or (prazo and time.monotonic() > prazo):
                 break
             # A próxima começa sem a receita (pode ser ela que não serve mais), com o ganho aprendido.
             receita = {"ganho": aprendida["ganho"]} if aprendida.get("ganho") else {}
             sair_da_capa(d)
             fechar_a_edicao_da_legenda(d, tela(d))
+        # A capa que ficou de fora também ensina a próxima (pedido do Rafael, 01/11): o ganho dos
+        # dedos aprendido fica guardado, e a receita que não levou ao desenho sai.
+        if ganho:
+            db.salvar_config(CHAVE_FIGURINHA, {"ganho": ganho, "em": _momento()})
         # O registro (até 240 letras) leva a última; o caso, todas.
         if len(motivos) == 1:
             resumo = todos = motivos[0]
