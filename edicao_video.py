@@ -436,6 +436,13 @@ LINHAS_CHEIAS_DA_FAIXA = 2
 # na tela da capa, a menor, fica em uns 3%; a borda da moldura, em uns 1%).
 ALTURA_MINIMA_DA_FAIXA = 0.02
 BRANCO_DAS_LETRAS = (255, 255, 255)
+# Na mesma linha da faixa, o laranja de fora dela (as bordas dos lados da moldura do 1º quadro do
+# vídeo, com a figurinha ainda pequena em cima, P115) fica separado dela por outras cores: as
+# pontas da faixa saem só do pedaço da linha nas cores dela, com fendas de até FENDA_NA_FAIXA px
+# (o borrado do JPEG em volta das letras).
+FENDA_NA_FAIXA = 3
+# As linhas do meio das letras entre dois pedaços da mesma faixa (_juntar_os_pedacos).
+LINHA_ENTRE_PEDACOS = 0.75
 
 
 def cores_da_faixa(pontos):
@@ -449,6 +456,48 @@ def cores_da_faixa(pontos):
     pontos = pontos.astype(numpy.float32)
     passo = numpy.clip(((pontos - laranja) @ rumo) / float(rumo @ rumo), 0, 1)
     return numpy.abs(pontos - (laranja + passo[..., None] * rumo)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
+
+
+def _laranja_do_pedaco(laranja, cores):
+    """
+    As colunas laranja (numpy) do pedaço da linha que tem a faixa: a linha é cortada onde passa
+    uma cor que não é da faixa (cores: o laranja, o branco das letras e a mistura dos dois), com
+    fendas de até FENDA_NA_FAIXA px, e fica o pedaço de mais laranja.
+    """
+    import numpy
+    colunas = numpy.flatnonzero(laranja)
+    if not len(colunas):
+        return colunas
+    pontos = numpy.flatnonzero(cores | laranja)
+    cortes = numpy.flatnonzero(numpy.diff(pontos) > FENDA_NA_FAIXA + 1)
+    inicios = numpy.concatenate(([pontos[0]], pontos[cortes + 1]))
+    fins = numpy.concatenate((pontos[cortes], [pontos[-1]]))
+    soma = numpy.concatenate(([0], numpy.cumsum(laranja)))
+    melhor = int(numpy.argmax(soma[fins + 1] - soma[inicios]))
+    return colunas[(colunas >= inicios[melhor]) & (colunas <= fins[melhor])]
+
+
+def _juntar_os_pedacos(blocos, laranja, da_faixa):
+    """
+    Os blocos (na ordem, de cima para baixo) com os pedaços da mesma faixa juntos: a figurinha
+    recém-posta é pequena, e no print em JPEG do celular as linhas do meio das letras dela ficam
+    com menos de LINHA_DA_FAIXA nas cores da faixa e cortam a faixa em dois, cada um mais baixo
+    que ALTURA_MINIMA_DA_FAIXA. Dois pedaços com as mesmas pontas, separados só por linhas com
+    pelo menos LINHA_ENTRE_PEDACOS nas cores da faixa e LARANJA_COM_LETRAS de laranja entre
+    elas, são a mesma faixa.
+    """
+    juntos = []
+    for bloco in blocos:
+        antes = juntos[-1] if juntos else None
+        if antes and abs(bloco["esquerda"] - antes["esquerda"]) <= PONTAS_DA_FAIXA and abs(
+                bloco["direita"] - antes["direita"]) <= PONTAS_DA_FAIXA:
+            trecho, meio = slice(antes["esquerda"], antes["direita"] + 1), slice(antes["baixo"], bloco["cima"])
+            if ((da_faixa[meio, trecho].mean(axis=1) >= LINHA_ENTRE_PEDACOS).all()
+                    and (laranja[meio, trecho].mean(axis=1) >= LARANJA_COM_LETRAS).all()):
+                antes.update(baixo=bloco["baixo"], cheias=antes["cheias"] + bloco["cheias"])
+                continue
+        juntos.append(dict(bloco))
+    return juntos
 
 
 def faixa_laranja(imagem, caixa=None):
@@ -465,7 +514,7 @@ def faixa_laranja(imagem, caixa=None):
     minimo = max(2, int(laranja.shape[1] * LARGURA_MINIMA_DA_FAIXA))
     blocos, atual = [], None
     for y, linha in enumerate(laranja):
-        colunas = numpy.flatnonzero(linha)
+        colunas = _laranja_do_pedaco(linha, da_faixa[y])
         faixa = None
         if len(colunas) and colunas[-1] - colunas[0] + 1 >= minimo:
             esquerda, direita = int(colunas[0]), int(colunas[-1])
@@ -493,8 +542,8 @@ def faixa_laranja(imagem, caixa=None):
                  if faixa else None)
     if atual is not None:
         blocos.append(atual)
-    blocos = [b for b in blocos if b["cheias"] >= LINHAS_CHEIAS_DA_FAIXA
-              and b["baixo"] - b["cima"] >= ALTURA_MINIMA_DA_FAIXA * laranja.shape[0]]
+    blocos = _juntar_os_pedacos([b for b in blocos if b["cheias"] >= LINHAS_CHEIAS_DA_FAIXA], laranja, da_faixa)
+    blocos = [b for b in blocos if b["baixo"] - b["cima"] >= ALTURA_MINIMA_DA_FAIXA * laranja.shape[0]]
     if not blocos:
         return None
     melhor = max(blocos, key=lambda b: b["baixo"] - b["cima"])
