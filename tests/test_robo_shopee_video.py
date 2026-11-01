@@ -4203,6 +4203,35 @@ def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_qu
     assert _registro_dos_espacos() == ["achados"]
 
 
+def test_espacos_livres_guardam_as_fotos_dos_que_a_ia_recusou(busca_pela_foto, monkeypatch, tmp_path):
+    # Pedido do Rafael (01/11, provisório): a foto de capa de cada anúncio que a IA conferiu e
+    # recusou vai a um álbum à parte do rascunho, para ele conferir se ela está acertando.
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"\xff\xd8" + endereco.encode())
+    busca_pela_foto["recusas"] = {"outro produto": 1}
+    recusados = []
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [],
+                               robo.time.monotonic() + 600, recusados=recusados)
+    # A IA confirmou o 1º e o 3º (do que paga mais para o que paga menos): o 2º foi recusado.
+    assert [p["foto"] for p in mais] == [b"\xff\xd8https://img.exemplo/1.jpg", b"\xff\xd8https://img.exemplo/3.jpg"]
+    assert recusados == [b"\xff\xd8https://img.exemplo/2.jpg"]
+    # Quando a IA não respondeu, nenhum foi recusado por ela: o álbum não ganha nada.
+    del busca_pela_foto["recusas"]
+    busca_pela_foto["iguais"] = []
+    recusados = []
+    robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [],
+                        robo.time.monotonic() + 600, recusados=recusados)
+    assert recusados == []
+    # As fotos ficam ao lado do vídeo do rascunho e saem com ele depois de usadas.
+    monkeypatch.setattr(robo, "PASTA_RASCUNHOS", str(tmp_path))
+    caminhos = robo.guardar_recusados(7, [b"\xff\xd8\xffum", b"\x89PNG\r\n\x1a\ndois"])
+    assert [os.path.basename(c) for c in caminhos] == ["7_recusado_1.jpg", "7_recusado_2.png"]
+    assert all(robo.ARQUIVO_NO_SERVIDOR.match(os.path.basename(c)) for c in caminhos)
+    ident = robo.criar("v11")
+    robo.atualizar(ident, recusadas=caminhos)
+    assert robo.pegar(ident)["recusadas"] == caminhos and robo.pegar(robo.criar("v12"))["recusadas"] == []
+
+
 def test_espacos_livres_contam_os_cartoes_que_nao_acharam_na_api(busca_pela_foto):
     # Só números no registro: por que os cartões da busca não foram achados na API.
     del busca_pela_foto["ofertas"]["Garrafa 2"]

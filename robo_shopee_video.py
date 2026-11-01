@@ -666,7 +666,7 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas")
+           "falhas_ao_postar", "outras_capas", "recusadas")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -682,8 +682,10 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # falhas_ao_postar: quantas vezes o aprovado não saiu na hora de postar (P99); zera ao aprovar.
 # outras_capas: as posições (1, 2, ...) dos produtos do post cuja foto de capa não é a do anúncio
 # do post: o álbum e o texto do rascunho as marcam (P102).
+# recusadas: os arquivos das fotos de capa dos anúncios que a IA recusou nos produtos a mais: o
+# Rafael os vê num álbum à parte, para conferir a IA (pedido dele de 01/11, provisório).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
-                 "links_dos_produtos", "falhas_ao_postar", "outras_capas")
+                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas")
 
 
 def _criar_tabela(con):
@@ -711,6 +713,7 @@ def _linha_para_dict(linha):
     rascunho["vistas"] = json.loads(rascunho["vistas"] or "[]")
     rascunho["links_dos_produtos"] = json.loads(rascunho["links_dos_produtos"] or "[]")
     rascunho["outras_capas"] = json.loads(rascunho["outras_capas"] or "[]")
+    rascunho["recusadas"] = json.loads(rascunho["recusadas"] or "[]")
     return rascunho
 
 
@@ -733,7 +736,8 @@ def pegar(ident):
 
 
 def atualizar(ident, **campos):
-    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas"):
+    for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
+                   "recusadas"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2848,7 +2852,7 @@ def _fora_do_preco(fora):
     return f" ({'; '.join(partes)})" if partes else ""
 
 
-def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
+def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, recusados=None):
     """
     Os produtos a mais do rascunho de link de produto (P59): até ESPACOS_DO_VIDEO - 1 do mesmo
     item, de outras lojas, conferidos pela IA com o vídeo, do que paga mais por venda para o
@@ -2937,6 +2941,10 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None):
         marcar("IA")
         # A foto de cada um vai junto: o álbum das capas do rascunho (P75).
         confirmados = [dict(fotos[i][0], foto=fotos[i][1]) for i in posicoes][:ESPACOS_DO_VIDEO - 1]
+        # Os que a IA conferiu e recusou (só quando ela respondeu): o álbum dos recusados, para o
+        # Rafael conferir se ela está acertando. Pedido dele (01/11): DECISOES.md, Shopee Vídeo.
+        if recusados is not None and "outro produto" in recusas:
+            recusados.extend(foto for i, (_candidato, foto) in enumerate(fotos) if i not in set(posicoes))
         if motivo_da_ia:
             vistos.append(f"Produtos a mais ({len(confirmados)} de {len(fotos)}): {motivo_da_ia}")
         mais = []
@@ -3066,6 +3074,26 @@ def guardar_capas(ident, video, produtos):
             caminhos.append(caminho)
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto de capa de um produto não foi guardada: {type(e).__name__}")
+    return caminhos
+
+
+def guardar_recusados(ident, fotos):
+    """
+    As fotos de capa dos anúncios de outras lojas que a IA recusou nos produtos a mais, em
+    arquivos ao lado do vídeo do rascunho ({ident}_recusado_{n}): o Rafael as vê num álbum à
+    parte em Rascunhos do Robô, para conferir se a IA está acertando; nenhuma vai no post, e
+    saem com o vídeo depois de usadas. Provisório: quando o Rafael pedir, o álbum sai. Devolve
+    os caminhos. Pedido dele (01/11): DECISOES.md, Shopee Vídeo.
+    """
+    caminhos = []
+    for n, foto in enumerate(fotos, 1):
+        try:
+            caminho = os.path.join(PASTA_RASCUNHOS, f"{ident}_recusado_{n}.{ps.extensao_da_foto(foto) or 'jpg'}")
+            with open(caminho, "wb") as arquivo:
+                arquivo.write(foto)
+            caminhos.append(caminho)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto de um recusado não foi guardada: {type(e).__name__}")
     return caminhos
 
 
@@ -3706,8 +3734,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # principal: o produto do link (ou o da troca); produtos: os do rascunho de link de
     # produto na ordem do post, com o link de cada um. No Ver Produtos, os dois ficam None.
     principal = produtos = None
-    # No Ver Produtos, os de outra cor (nome, foto da página): a foto deles vai na miniatura.
-    variacoes = []
+    # No Ver Produtos, os de outra cor (nome, foto da página): a foto deles vai na miniatura. Nos
+    # produtos a mais, as fotos de capa dos que a IA recusou: o álbum dos recusados do rascunho.
+    variacoes, recusados = [], []
     if video.get("de_video"):
         celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
@@ -3770,7 +3799,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # a foto da edição e o link do rascunho (P57). Escolhas do Rafael:
         # DECISOES.md, Shopee Vídeo.
         celular.append(True)
-        mais = espacos_livres(d, video, principal, original, vistos, prazo, inicio)
+        mais = espacos_livres(d, video, principal, original, vistos, prazo, inicio, recusados)
         produtos = _curtir_os_produtos(d, video, sorted([principal] + mais, key=lambda p: -p["valor"]), curtidos)
         video["link"] = produtos[0]["link"]
         nomes = [p["nome"] for p in produtos]
@@ -3826,7 +3855,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # Os de outra foto de capa que a do anúncio do post vêm marcados (P102).
         outras = com_outra_foto_de_capa(video, ordem, foto_do_anuncio(original.get("imagem"))) if capas else []
         atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
-                  itens=_itens(ordem), capas=capas, outras_capas=outras)
+                  itens=_itens(ordem), capas=capas, outras_capas=outras,
+                  recusadas=guardar_recusados(ident, recusados))
     else:
         atualizar(ident, produtos=anexados, links_dos_produtos=links_do_ver_produtos(anexados))
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
@@ -4169,8 +4199,9 @@ def nome_na_galeria(ident):
     return f"robo_shopee_video_{ident}.mp4"
 
 
-# O vídeo, o print e as fotos de capa (P75) de cada rascunho: {id}.mp4, {id}.png e {id}_capa_{n}.jpg.
-ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_capa_\d+\.(?:jpg|png|webp)|\.(?:mp4|png))$")
+# O vídeo, o print, as fotos de capa (P75) e as dos recusados de cada rascunho: {id}.mp4, {id}.png,
+# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg.
+ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado)_\d+\.(?:jpg|png|webp)|\.(?:mp4|png))$")
 
 
 # --- Os rascunhos no app ---
