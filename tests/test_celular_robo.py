@@ -228,7 +228,9 @@ def test_reconecta_sozinho_procurando_a_porta_nova(cr, monkeypatch):
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
     assert cr.reconectar_sozinho() == (True, "moto g(100)")
     # A porta guardada é tentada uma vez, depois de desfazer a conexão presa; na busca, não de novo.
-    assert pedidos == [("adb", "disconnect", f"{IP}:37000")] and tentadas == [37000, 39999, 41000]
+    # (Os comandos "shell" são a leitura do motivo da queda, na volta.)
+    assert [p for p in pedidos if "shell" not in p] == [("adb", "disconnect", f"{IP}:37000")]
+    assert tentadas == [37000, 39999, 41000]
 
 
 def test_conexao_presa_volta_na_porta_guardada_sem_procurar_outra(cr, monkeypatch):
@@ -472,3 +474,78 @@ def test_passo_a_passo_manda_deixar_a_opcao_do_prazo_sempre_ligada(bm, cr, monke
     rodar(sv.passo_a_passo_handler(msg, Est()))
     assert cr.OPCAO_DO_PRAZO in msg.saidas[0] and "sempre ligada" in msg.saidas[0]
     assert "não reconhece mais o servidor" in msg.saidas[0] and len(msg.saidas[0]) < 4096
+
+
+class CelularQueVoltou:
+    """O adb do celular que acabou de voltar: há quanto tempo está ligado e o registro do Android."""
+
+    def __init__(self, ligado_ha=None, logcat=""):
+        self.ligado_ha, self.logcat, self.pedidos = ligado_ha, logcat, []
+
+    def __call__(self, *partes, timeout=0):
+        self.pedidos.append(partes)
+        if "/proc/uptime" in partes:
+            return (0, f"{self.ligado_ha} 99999.0") if self.ligado_ha is not None else (1, "")
+        if "logcat" in partes:
+            return 0, self.logcat
+        return 0, ""
+
+
+def _linha_do_android(texto):
+    return f"10-31 22:01:13.456  1234  5678 I AdbDebuggingManager: {texto}"
+
+
+@pytest.mark.parametrize("ligado_ha, logcat, motivo", [
+    # Ligado há 10 min, fora há 2 h: reiniciou no meio.
+    (600, "", "reiniciou"),
+    # Ligado há 3 dias: a Depuração caiu com o Wi-Fi, pela última linha do Android que a desliga.
+    (259200, "\n".join([_linha_do_android("Network disconnected. Disabling adbwifi."),
+                        _linha_do_android("Detected wifi network change. Disabling adbwifi.")]), "trocou de ponto"),
+    (259200, _linha_do_android("Network disconnected. Disabling adbwifi."), "o Wi-Fi caiu"),
+    (259200, _linha_do_android("Wifi disabled. Disabling adbwifi."), "o Wi-Fi foi desligado"),
+    (259200, _linha_do_android("Starting adbwifi on port 41999"), "não guardou o motivo"),
+    (None, "", "não guardou o motivo"),
+])
+def test_motivo_da_queda_lido_no_celular_na_volta(cr, monkeypatch, ligado_ha, logcat, motivo):
+    # Pergunta do Rafael (31/10, 22:05): por que o celular desconectou de novo? O Android desliga a
+    # Depuração por Wi-Fi quando o Wi-Fi cai, quando o celular troca de ponto de Wi-Fi ou quando
+    # ele reinicia; na volta, o servidor lê no celular qual foi.
+    from datetime import datetime
+    from fuso import fuso_horario
+    cr._gravar(ip=IP, porta=41000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(ligado_ha, logcat))
+    agora = datetime(2026, 11, 1, 17, 0, tzinfo=fuso_horario)
+    achado, detalhe = cr.motivo_da_queda("2026-11-01 15:00:00", agora=agora)
+    assert motivo in achado and "fora há 120 min" in detalhe
+    # A linha crua do Android nunca sai: só o motivo fixo.
+    assert "adbwifi" not in achado.casefold() and "1234" not in detalhe
+
+
+def test_ligacao_presa_na_mesma_porta_nao_le_o_celular(cr, monkeypatch):
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pytest.fail("não devia ler o celular"))
+    assert cr.motivo_da_queda("2026-11-01 15:00:00", mesma_porta=True)[0] == cr.LIGACAO_PRESA
+
+
+def test_volta_do_celular_anota_o_motivo_no_registro_no_estado_e_no_retomar(bm, cr, monkeypatch, Msg, Est):
+    from conftest import consultar
+    sv = bm.painel_shopee_video
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00", visto_em="2026-10-31 21:50:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)") if porta == 41000 else (False, "x"))
+    monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(
+        259200, _linha_do_android("Detected wifi network change. Disabling adbwifi.")))
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo=sv.robo.MOTIVO_DA_DESCONEXAO)
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, Est(estado=sv.ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo)))
+    resultado, detalhe = consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                                   cr.PROCESSO_DA_QUEDA)
+    assert "trocou de ponto de Wi-Fi" in resultado and detalhe.startswith("fora há")
+    assert "trocou de ponto de Wi-Fi" in (cr.ler().get("ultima_queda") or {}).get("motivo", "")
+    retomado = next(t for t in msg.saidas if "retomado" in t)
+    assert "Por que o celular tinha saído: o celular trocou de ponto de Wi-Fi" in retomado
+    # O estado (android.yml) mostra a última queda, só com o motivo fixo e a hora.
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
+    cr._gravar(porta=41000)
+    assert "última queda: o celular trocou de ponto de Wi-Fi" in cr.descrever_estado()
