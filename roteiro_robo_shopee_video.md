@@ -179,8 +179,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     botão) e anexa de novo, uma vez. Sem a legenda escrita, o voltar da tela final vai à edição do
     vídeo sem aviso: depois do voltar da lista, o robô espera a tela final aparecer antes de outro.
   - **o robô com link de vídeo:** abre o vídeo, toca em Ver Produtos e, em cada produto
-    vinculado (até 6, nunca os recomendados), lê o nome na página, a IA confere vídeo × nome 2
-    vezes, e o confirmado é curtido. Anexa todos os confirmados (o 1º pelo Adicionar produto,
+    vinculado (até 6, nunca os recomendados), lê o nome na página, a IA compara a foto da página
+    (o recorte entre a barra de cima e a linha do preço, a do coração) com o vídeo 2 vezes, e o
+    confirmado é curtido; o mesmo modelo em outra cor entra, com a foto na miniatura (01/11/2026). Anexa todos os confirmados (o 1º pelo Adicionar produto,
     os outros pelo Adicionar Mais) e confere a tela final um a um. Nenhum confirmado, ou vídeo
     removido: o vídeo fica de lado. Os produtos de "Ver Mais" ainda não entram.
   - **link de vídeo sem o Ver Produtos** (23/10/2026: 3 vídeos pulados assim no dia): o robô

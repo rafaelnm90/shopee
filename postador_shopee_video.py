@@ -221,6 +221,27 @@ produto. Na dúvida, não é. {detalhes}
 Responda só com um JSON, nesta ordem: {{"produto_do_video": "a marca, o painel e o desenho do produto do vídeo", \
 "diferencas": "para cada anúncio, o número e o que o produto dele tem de diferente do produto do vídeo", \
 "iguais": [os números dos anúncios que são o mesmo produto], "motivo": "uma frase curta"}}"""
+# Os produtos que a criadora vinculou ao vídeo (Ver Produtos): a IA vê a foto da página de cada
+# um no app. O mesmo modelo em outra cor ou estampa entra como variação, e a foto dele vai na
+# miniatura que troca (P103); outro produto fica de fora. Pedido do Rafael (01/11, depois de um
+# produto de outra cor num post de Ver Produtos): DECISOES.md, Shopee Vídeo.
+PROMPT_PRODUTO_DO_CRIADOR = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
+A imagem que vai junto com o vídeo é a página, no app, de um produto que a criadora do vídeo vinculou a ele: \
+"{nome}". A foto do produto fica no alto da imagem.
+A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
+Assista ao vídeo inteiro, compare com a foto e diga se o vídeo mostra esse produto: o mesmo item, da mesma marca e \
+modelo. O mesmo modelo em outra cor ou estampa é uma variação: confere, com "outra_cor": true. Outro produto do \
+mesmo tipo, de outra marca, com outro formato ou modelo, {outra_medida}, {outra_versao}, só um acessório dele, ou \
+um produto que não aparece no vídeo, não confere. Na dúvida, não confere.
+Compare os detalhes do produto que se veem no vídeo e na foto, não o fundo nem a arrumação da foto: a marca ou o \
+logotipo, o painel e os controles, e o formato e o desenho do corpo.
+Responda só com um JSON: {{"confere": true ou false, "outra_cor": true ou false, "motivo": "uma frase curta"}}"""
+# Na página do produto (HalfPdpActivity), a foto do anúncio fica entre a barra de cima da página
+# (os botões buttonActionBar...) e a linha do preço, a do coração (buttonItemLike). O recorte
+# para um pouco acima dela; mais baixo que ALTURA_MINIMA_DA_FOTO, vai o print inteiro.
+FOLGA_DA_FOTO_DA_PAGINA = 20
+ALTURA_MINIMA_DA_FOTO = 300
+LINHA_DO_PRECO = ("buttonItemLike", "buttonItemLiked", "labelSoldCount")
 # O aviso da página do produto de loja de férias (loja_de_ferias).
 AVISO_DE_FERIAS = "está de férias"
 # A foto do anúncio tem até isto de tamanho (bytes); maior que isso, a conferência segue só pelo nome.
@@ -890,6 +911,58 @@ def _pelo_primeiro_com_a_ia(d, video, rolagens, anexados):
     if not ok:
         return False, motivo
     return _tocar_em_adicionar(d, tela, primeiro["botao"], primeiro["nome"], "o 1º da lista, pela IA", anexados)
+
+
+def foto_da_pagina_do_produto(d, xml):
+    """
+    A foto do produto na página dele no app (JPEG, bytes): o recorte entre a barra de cima e a
+    linha do preço, ou o print inteiro quando a página não mostra onde ela fica. É o anúncio exato
+    que a criadora vinculou ao vídeo, para a IA conferir o item e a cor, e a foto que vai na
+    miniatura quando ele é de outra cor. None quando o print não vem.
+    """
+    lista = elementos(xml)
+    preco = [el["caixa"][1] for el in lista if (el["id"] or "") in LINHA_DO_PRECO]
+    barra = [el["caixa"][3] for el in lista if (el["id"] or "").startswith("buttonActionBar")
+             and (not preco or el["caixa"][3] < min(preco))]
+    try:
+        imagem = d.screenshot()
+        largura, altura = imagem.size
+        cima = max(barra, default=0)
+        baixo = min(preco) - FOLGA_DA_FOTO_DA_PAGINA if preco else altura
+        caixa = (0, cima, largura, baixo) if baixo - cima >= ALTURA_MINIMA_DA_FOTO else (0, 0, largura, altura)
+        saida = io.BytesIO()
+        imagem.crop(caixa).convert("RGB").save(saida, format="JPEG", quality=88)
+        return saida.getvalue()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] A foto da página do produto não veio: {type(e).__name__}")
+        return None
+
+
+def ia_confere_do_criador(video, nome, foto, vistos=None):
+    """
+    Um produto que a criadora vinculou ao vídeo (Ver Produtos), pela foto da página dele no app
+    (foto, bytes), VEZES_DA_IA vezes: (confere, outra cor, o que a IA disse). Confere só o
+    confirmado em todas; é de outra cor quando alguma vez ela viu o mesmo modelo em outra cor ou
+    estampa (a foto dele vai na miniatura). Sem o vídeo, sem a foto ou sem resposta, não confere.
+    vistos (lista) recebe o que ela disse em cada vez. Pedido do Rafael (01/11): DECISOES.md,
+    Shopee Vídeo.
+    """
+    if not (video or {}).get("arquivo") or not foto:
+        return False, False, "sem o vídeo ou sem a foto da página do produto"
+    prompt = PROMPT_PRODUTO_DO_CRIADOR.format(nome=nome, outra_medida=OUTRA_MEDIDA, outra_versao=OUTRA_VERSAO)
+    outra_cor, motivo = False, ""
+    for vez in range(1, VEZES_DA_IA + 1):
+        dados = _json_da_ia(asyncio.run(api_gemini.analisar_video_gemini(
+            video["arquivo"], prompt, imagens=[(foto, tipo_da_foto(foto))])))
+        if not isinstance(dados, dict):
+            return False, False, f"a IA não respondeu à conferência pela foto da página ({vez}ª vez)"
+        motivo = str(dados.get("motivo") or "").strip()
+        if vistos is not None:
+            vistos.append(motivo)
+        if dados.get("confere") is not True:
+            return False, False, f"a IA viu outro produto no vídeo ({vez}ª vez)"
+        outra_cor = outra_cor or dados.get("outra_cor") is True
+    return True, outra_cor, motivo
 
 
 def recorte_da_tela(d, caixa):
