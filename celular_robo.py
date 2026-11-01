@@ -83,7 +83,19 @@ SEM_O_MOTIVO = "o Android não guardou o motivo (desligada à mão, ou o registr
 # Trabalho com o Claude.
 FAIXAS_DO_WIFI = ((3000, "2,4 GHz"), (5925, "5 GHz"), (7200, "6 GHz"))
 CONEXAO_DO_WIFI = re.compile(r'mWifiInfo SSID: "(?P<nome>[^"\n]*)"[^\n]*?Frequency: (?P<mhz>\d+) ?MHz')
-PONTO_DA_BUSCA = re.compile(r"^\s*(?P<ponto>(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})\s+(?P<mhz>\d{4,5})\s+(?P<resto>.*)$")
+PONTO = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}")
+FREQUENCIA = re.compile(r"(?<![\d.:])(2[4-9]\d\d|[3-6]\d{3}|7[01]\d\d)(?![\d.])")
+# A forma de uma linha da busca de redes quando nenhum ponto é achado (o formato do Android pode
+# mudar): só o tipo de cada pedaço, nunca o nome da rede, o endereço ou os números.
+TIPOS_DA_FORMA = ((re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2},?$"), "MAC"),
+                  (re.compile(r"^-?\d+,?$"), "NUM"), (re.compile(r"^-?\d+\.\d+,?$"), "DEC"),
+                  (re.compile(r"^-?\d+\("), "NUM(..)"), (re.compile(r"^-?\d+[A-Za-z]+,?$"), "NUM+unid"),
+                  (re.compile(r"^\["), "[..]"))
+# Só estes rótulos aparecem na forma como são ("SSID:", "level=…"): outro pedaço com ":" ou "="
+# pode ser parte do nome da rede e vira TXT.
+ROTULOS_DA_FORMA = {"ssid", "bssid", "freq", "frequency", "level", "rssi", "flags", "capabilities", "age",
+                    "timestamp", "ts", "dist", "distsd", "channelwidth", "centerfreq0", "centerfreq1",
+                    "standard", "wifistandard", "band", "security", "type"}
 
 
 def ler():
@@ -355,33 +367,64 @@ def _faixa(mhz):
     return next((nome for limite, nome in FAIXAS_DO_WIFI if mhz < limite), "outra faixa")
 
 
+def _linhas_da_busca(saida):
+    """As linhas das buscas de redes do "dumpsys wifi": depois de "Latest scan results", até a linha em branco."""
+    linhas, dentro = [], False
+    for linha in (saida or "").splitlines():
+        if "latest scan results" in linha.casefold():
+            dentro = True
+        elif dentro and not linha.strip():
+            dentro = False
+        elif dentro:
+            linhas.append(linha)
+    return linhas
+
+
+def _forma(linha):
+    """A forma de uma linha, pedaço por pedaço: o tipo (MAC, NUM...), o rótulo conhecido ("SSID:") ou TXT."""
+    partes = []
+    for pedaco in linha.split():
+        tipo = next((nome for rx, nome in TIPOS_DA_FORMA if rx.match(pedaco)), None)
+        if not tipo:
+            rotulo = re.fullmatch(r"([A-Za-z_]+)([:=])(.*)", pedaco)
+            conhecido = rotulo and rotulo.group(1).casefold() in ROTULOS_DA_FORMA
+            tipo = (rotulo.group(1) + rotulo.group(2) + ("…" if rotulo.group(3) else "")) if conhecido else "TXT"
+        partes.append(tipo)
+    return " ".join(partes)
+
+
 def interpretar_wifi(saida):
     """
     A rede do celular no texto do "dumpsys wifi": {"faixa", "pontos", "por_faixa"}, com a faixa
     da conexão de agora e os pontos (endereços diferentes) da última busca de redes que têm o
     mesmo nome da rede dele; None sem a conexão. O nome da rede só é comparado aqui dentro.
+    Sem nenhum ponto, "forma" diz como eram as linhas da busca, sem os valores.
     """
     conexao = CONEXAO_DO_WIFI.search(saida or "")
     if not conexao or not conexao.group("nome"):
         return None
-    # Na busca, a coluna do nome é preenchida com espaços até o "[" das proteções: o nome
-    # termina em dois espaços, num "[" ou no fim da linha (assim "Casa" não conta "Casa 2").
-    nome = re.compile(r"(?<!\S)\"?" + re.escape(conexao.group("nome")) + r"\"?(?=\s{2,}|\s*\[|\s*$)")
-    pontos, linhas = {}, saida.splitlines()
-    inicio = next((i for i, linha in enumerate(linhas) if "Latest scan results" in linha), None)
-    for linha in linhas[inicio + 1:] if inicio is not None else []:
-        if "BSSID" in linha and "Frequency" in linha:
+    # O nome aparece na coluna da busca, preenchida com espaços até o "[" das proteções, ou
+    # depois de "SSID:" ou "SSID=", entre aspas: ele termina em dois espaços, num "[", numa
+    # vírgula ou no fim da linha (assim "Casa" não conta "Casa 2").
+    nome = re.compile(r'(?<=[\s=:])"?' + re.escape(conexao.group("nome")) + r'"?(?=\s{2,}|\s*\[|\s*$|,)')
+    linhas = _linhas_da_busca(saida)
+    pontos = {}
+    for linha in linhas:
+        ponto = PONTO.search(linha)
+        if not ponto or not nome.search(" " + linha):
             continue
-        ponto = PONTO_DA_BUSCA.match(linha)
-        if not ponto:
-            break
-        if nome.search(ponto.group("resto")):
-            pontos[ponto.group("ponto").lower()] = _faixa(int(ponto.group("mhz")))
+        frequencia = FREQUENCIA.search(linha, ponto.end())
+        pontos[ponto.group(0).lower()] = _faixa(int(frequencia.group(1))) if frequencia else "outra faixa"
     por_faixa = {}
     for faixa in pontos.values():
         por_faixa[faixa] = por_faixa.get(faixa, 0) + 1
-    return {"faixa": _faixa(int(conexao.group("mhz"))), "pontos": len(pontos),
+    wifi = {"faixa": _faixa(int(conexao.group("mhz"))), "pontos": len(pontos),
             "por_faixa": dict(sorted(por_faixa.items()))}
+    if not pontos:
+        com_ponto = [linha for linha in linhas if PONTO.search(linha)]
+        wifi["forma"] = (f"busca de redes: {len(linhas)} linha(s), {len(com_ponto)} com ponto"
+                         + (f"; forma: {_forma(com_ponto[0])}" if com_ponto else ""))
+    return wifi
 
 
 def ler_wifi():
@@ -398,6 +441,8 @@ def descrever_wifi(wifi):
     texto = f"Wi-Fi em {wifi['faixa']}, {wifi['pontos']} ponto(s) com o mesmo nome"
     if wifi["pontos"]:
         texto += " (" + ", ".join(f"{faixa}: {n}" for faixa, n in wifi["por_faixa"].items()) + ")"
+    elif wifi.get("forma"):
+        texto += f" ({wifi['forma']})"
     return texto
 
 

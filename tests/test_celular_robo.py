@@ -525,7 +525,41 @@ def test_wifi_conta_os_pontos_com_o_mesmo_nome_sem_mostrar_o_nome(cr):
     assert "RedeDeTeste" not in texto and "02:00" not in texto
     assert cr.interpretar_wifi("sem conexão") is None and cr.descrever_wifi(None) == "Wi-Fi não lido"
     so_a_conexao = WIFI.split("Latest scan results")[0]
-    assert cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao)) == "Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome"
+    assert cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao)) == (
+        "Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s), 0 com ponto)")
+
+
+def test_wifi_le_a_busca_no_formato_de_rotulos_e_mostra_a_forma_quando_nada_bate(cr):
+    # 01/11: no Motorola, a contagem saiu 0, e o celular sempre enxerga o próprio ponto. A busca
+    # também pode vir como "SSID: ..., BSSID: ..., frequency: ...", e quando nenhuma linha bate, o
+    # estado mostra a forma das linhas (o tipo de cada pedaço), nunca o nome, o endereço ou os números.
+    conexao = WIFI.split("Latest scan results")[0]
+    rotulos = conexao + "\n".join([
+        "Latest scan results:",
+        '  SSID: "RedeDeTeste", BSSID: 02:00:00:00:00:01, capabilities: [WPA2-PSK-CCMP][ESS], level: -50, '
+        "frequency: 5180, timestamp: 123456",
+        '  SSID: "RedeDeTeste", BSSID: 02:00:00:00:00:02, capabilities: [WPA2-PSK-CCMP][ESS], level: -45, '
+        "frequency: 2437, timestamp: 123456",
+        '  SSID: "RedeDeTeste 2", BSSID: 02:00:00:00:00:03, capabilities: [ESS], level: -70, frequency: 2412',
+        ""])
+    assert cr.interpretar_wifi(rotulos)["por_faixa"] == {"2,4 GHz": 1, "5 GHz": 1}
+    estranho = conexao + "\n".join([
+        "Latest scan results:",
+        "    BSSID              Frequency      RSSI           Age(sec)     SSID                                 Flags",
+        "  02:00:00:00:00:01       5180      -50    1.234    5265646554657374                  [WPA2-PSK-CCMP][ESS]",
+        ""])
+    texto = cr.descrever_wifi(cr.interpretar_wifi(estranho))
+    assert texto == ("Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 2 linha(s), 1 com ponto; "
+                     "forma: MAC NUM NUM DEC NUM [..])")
+    assert "02:00" not in texto and "5180" not in texto and "RedeDeTeste" not in texto
+    # Pedaço do nome de outra rede com cara de rótulo ("Casa:") não aparece: só os rótulos do Android.
+    outra = conexao + "\n".join([
+        "Latest scan results:",
+        "  SSID: Casa: 5G, BSSID: 02:00:00:00:00:04, frequency: 5180 level=-60",
+        ""])
+    texto = cr.descrever_wifi(cr.interpretar_wifi(outra))
+    assert texto.endswith("forma: SSID: TXT NUM+unid BSSID: MAC frequency: NUM level=…)")
+    assert "Casa" not in texto
 
 
 def _linha_do_android(texto):
