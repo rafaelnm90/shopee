@@ -726,6 +726,7 @@ PASSOS = (
     ("bebida alcoólica só vai", "edição do vídeo"),
     ("bebida alcoólica em espera", "bebida alcoólica em espera"),
     ("depois do Feito", "anexar o produto"),
+    ("efeitos na edição", "efeitos na edição"),
     ("figurinha", "capa pela figurinha"),
     ("faixa laranja", "capa pela figurinha"),
     ("do tamanho do desenho", "capa pela figurinha"),
@@ -1232,6 +1233,20 @@ CAMINHO_EDICAO = [
     ("@tv_pick_top_next", 10, "@tv_compress"),
     ("@tv_compress", 10, "@et_caption"),
 ]
+# Na edição, antes do Próximo, em todos os vídeos: o Realçar ligado e o efeito Giro no começo
+# (Efeitos → aba Transição → Giro → ✓). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+# A tela de Efeitos (SSZMultipleEffectActivity) tem o ✕ (@iv_close), o ✓ (@iv_done) e a
+# lista da aba Transição com o Giro primeiro; o efeito posto mostra o Desfazer (@ll_undo). Na
+# primeira vez num celular, o toque no Giro só baixa o efeito, e o seguinte o põe. O Realçar
+# não diz na tela se está ligado (o ON e o OFF ficam no desenho do botão): toda edição nova
+# começa com ele desligado, e o app avisa o que o toque fez ("Realce ativado"/"desativado").
+REALCAR = "Realçar"
+EFEITOS = "Efeitos"
+GIRO = "Giro"
+ABA_DO_GIRO = "Transição"
+VEZES_DO_GIRO = 3
+ESPERA_DO_GIRO = 6
+EFEITOS_COMPLETOS = "realce e giro"
 CAMINHO_PRODUTO = [
     ("@ll_add_product_symbol", 8, "Minhas Curtidas"),
     ("Minhas Curtidas", 5, "Mais Recente"),
@@ -1244,6 +1259,85 @@ CAMINHO_MAIS_UM_PRODUTO = [
     ("Minhas Curtidas", 5, "Mais Recente"),
     ("Mais Recente", 5, "Adicionar"),
 ]
+
+
+def ligar_o_realce(d):
+    """
+    Liga o Realçar da edição. Com o aviso do app de que o toque desligou (já estava ligado),
+    toca de novo. Devolve como ficou, em palavras curtas, para o registro.
+    """
+    for _ in range(2):
+        limpar_aviso_do_app(d)
+        tocar(d, REALCAR, 2)
+        lido, aviso = aviso_do_app(d)
+        if not lido or not aviso:
+            return "tocado, sem o aviso do app"
+        if "desativ" not in aviso.casefold():
+            return "ligado"
+    return "o app avisou que desligou"
+
+
+def por_o_giro(d):
+    """
+    Põe o efeito Giro onde está o cursor da linha do tempo, que a tela de Efeitos abre parado no
+    começo do vídeo, e confirma no ✓. Sem o Desfazer depois de VEZES_DO_GIRO toques (o
+    primeiro pode só baixar o efeito), sai pelo ✕ sem mudar nada. True se o efeito ficou.
+    """
+    tocar(d, EFEITOS, 4)
+    xml = esperar_na_tela(d, "@iv_done", 8)
+    if not xml:
+        raise Parada("efeitos na edição: a tela de Efeitos não abriu")
+    if not tem(xml, GIRO) and tem(xml, ABA_DO_GIRO):
+        tocar(d, ABA_DO_GIRO, 2)
+    for _ in range(VEZES_DO_GIRO):
+        tocar(d, GIRO, 2)
+        if esperar_na_tela(d, "@ll_undo", ESPERA_DO_GIRO):
+            tocar(d, "@iv_done", 3)
+            return True
+    tocar(d, "@iv_close", 3)
+    return False
+
+
+def voltar_para_a_edicao(d):
+    """
+    Volta à edição do vídeo (com o Próximo, @tv_compress) se um efeito deixou outra tela
+    aberta. A tela de Efeitos tem o ✓; o ✕ dela sai sem mudar nada. Na edição, o voltar
+    abriria a pergunta de sair: nele, nada é tocado.
+    """
+    for _ in range(3):
+        xml = tela(d)
+        if tem(xml, "@tv_compress") and not tem(xml, "@iv_done"):
+            return
+        if tem(xml, "@iv_done") and tem(xml, "@iv_close"):
+            tocar(d, "@iv_close", 3)
+            continue
+        d.press("back")
+        pausa(3)
+    raise Parada("efeitos na edição: a edição do vídeo não voltou")
+
+
+def efeitos_na_edicao(d):
+    """
+    O Realçar e o Giro na edição do vídeo, antes do Próximo (pedido do Rafael: DECISOES.md,
+    Shopee Vídeo). Um efeito que não dá certo não derruba o rascunho: o vídeo segue sem ele, e
+    o registro diz qual e por quê (o checkup mostra). Devolve o que ficou, para o treino.
+    """
+    try:
+        realce = ligar_o_realce(d)
+    except Parada as e:
+        realce = f"não: {e.motivo}"
+    try:
+        giro = "posto" if por_o_giro(d) else f"não ficou depois de {VEZES_DO_GIRO} toques"
+    except Parada as e:
+        giro = f"não: {e.motivo}"
+    voltar_para_a_edicao(d)
+    com_realce = realce in ("ligado", "tocado, sem o aviso do app")
+    com_giro = giro == "posto"
+    ficou = (EFEITOS_COMPLETOS if com_realce and com_giro else "só o realce" if com_realce
+             else "só o giro" if com_giro else "nenhum")
+    registro_processos.registrar(REGISTRO, "efeitos na edição", ficou, f"realce: {realce}; giro: {giro}",
+                                 ok=ficou == EFEITOS_COMPLETOS)
+    return ficou
 
 
 def aviso_de_sair(xml):
@@ -3499,7 +3593,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         raise Parada("o vídeo não apareceu na galeria do celular")
     abrir_galeria(d, agora)
     marcar_so_o_mais_novo(d)
-    seguir(d, CAMINHO_EDICAO)
+    seguir(d, CAMINHO_EDICAO[:1])
+    efeitos_na_edicao(d)
+    seguir(d, CAMINHO_EDICAO[1:])
 
     # Os curtidos agora ficam em cima da lista: o 2º produto do vídeo procura entre os que
     # sobraram no topo. A tela final e o postar conferem o nome que a lista mostra, que pode
@@ -4283,7 +4379,11 @@ def treinar(d, agora=None):
         ir_ao_perfil(d)
         abrir_galeria(d, agora)
         marcar_so_o_mais_novo(d)
-        seguir(d, CAMINHO_EDICAO)
+        seguir(d, CAMINHO_EDICAO[:1])
+        efeitos = efeitos_na_edicao(d)
+        if efeitos != EFEITOS_COMPLETOS:
+            raise Parada(f"efeitos na edição: ficou {efeitos}")
+        seguir(d, CAMINHO_EDICAO[1:])
         xml = tela(d)
         faltam = [alvo for alvo in ("@et_caption", "@ll_add_product_symbol", "@tv_drafts_box", "@btn_post")
                   if not tem(xml, alvo)]

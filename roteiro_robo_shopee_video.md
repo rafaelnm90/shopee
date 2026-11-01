@@ -320,8 +320,17 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      à direita, fica **Rascunhos** (`@ll_draft`, ~914,193): a lista dos rascunhos;
   3. na primeira vez aparece a janela **Dicas de Upload** → **Ok** → **Próximo**; nas
      outras, a prévia do vídeo → **Próximo** no alto (`@tv_pick_top_next`);
-  4. edição do vídeo (Adicionar Música, Efeito de giro, Filtro, Efeitos; Cortar, Texto,
-     Captions, Figurinha) → **Próximo** (`@tv_compress`);
+  4. edição do vídeo (`SSZMultipleEditActivity`; à direita Filtro, **Efeitos** e **Realçar**,
+     os textos em `@tv_content`; embaixo Cortar, Texto, Captions e Figurinha) → **Próximo**
+     (`@tv_compress`). Antes do Próximo, em todos os vídeos (pedido do Rafael, 31/10/2026):
+     **Realçar** (o ligado e o desligado ficam só no desenho do botão; toda edição nova
+     começa desligada, e o app avisa num toast "Realce ativado"/"desativado") e **Efeitos**
+     (`SSZMultipleEffectActivity`: ✕ `@iv_close`, ✓ `@iv_done`; na aba Transição, o **Giro**
+     primeiro; na primeira vez num celular o toque só baixa o efeito; posto, aparece o
+     **Desfazer** `@ll_undo`) → ✓. O **Captions** abre, na primeira vez, o "Aviso" dos
+     termos de uso do serviço (Cancelar `@tv_cancel`, Concordar `@tv_discard`): só com o OK
+     do Rafael (P112). O voltar na edição abre "Deseja sair da página de edição?" (Salvar
+     Rascunho `@tv_save`, Descartar `@tv_no_save`, Cancelar `@tv_cancel`);
   5. tela final (`PublishVideoActivity`): **Adicionar legenda** (onde vai o título),
      Selecionar Capa, Hashtag, **Adicionar produto** (abre a lista com busca, abas
      **Minhas Curtidas** e **Todos** (em 24/10/2026, no Motorola, vieram também **Minha
@@ -454,7 +463,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
 1. Abrir o link do post e, em "Ver Produtos", curtir só os produtos que o criador
    vinculou (nunca os de "Você Também Pode Gostar").
 2. Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → Postar vídeo → o vídeo na
-   galeria → Próximo. Efeito de giro é opcional.
+   galeria → Próximo. Na edição, o Realçar e o Giro em todos os vídeos (31/10/2026).
 3. Adicionar Produto → Minhas Curtidas → Mais Recente: os curtidos agora ficam em
    cima (curtiu 2, são os 2 primeiros). Entre eles, o de menor preço primeiro; no
    empate, o de maior comissão. O app pode mostrar o nome de outro jeito que a API (em
