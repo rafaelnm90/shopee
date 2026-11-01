@@ -91,6 +91,8 @@ TIPOS_DA_FORMA = ((re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2},?$"), "MAC
                   (re.compile(r"^-?\d+,?$"), "NUM"), (re.compile(r"^-?\d+\.\d+,?$"), "DEC"),
                   (re.compile(r"^-?\d+\("), "NUM(..)"), (re.compile(r"^-?\d+[A-Za-z]+,?$"), "NUM+unid"),
                   (re.compile(r"^\["), "[..]"))
+# A lista que o Android recusa (permissão, comando desconhecido) só aparece como "deu erro".
+ERRO_DA_LISTA = re.compile(r"exception|permission|denied|unknown command", re.IGNORECASE)
 # Só estes rótulos aparecem na forma como são ("SSID:", "level=…"): outro pedaço com ":" ou "="
 # pode ser parte do nome da rede e vira TXT.
 ROTULOS_DA_FORMA = {"ssid", "bssid", "freq", "frequency", "level", "rssi", "flags", "capabilities", "age",
@@ -393,12 +395,14 @@ def _forma(linha):
     return " ".join(partes)
 
 
-def interpretar_wifi(saida):
+def interpretar_wifi(saida, lista=""):
     """
     A rede do celular no texto do "dumpsys wifi": {"faixa", "pontos", "por_faixa"}, com a faixa
     da conexão de agora e os pontos (endereços diferentes) da última busca de redes que têm o
-    mesmo nome da rede dele; None sem a conexão. O nome da rede só é comparado aqui dentro.
-    Sem nenhum ponto, "forma" diz como eram as linhas da busca, sem os valores.
+    mesmo nome da rede dele; None sem a conexão. A busca vem do próprio dumpsys ("Latest scan
+    results") e de lista, a saída do "cmd wifi list-scan-results" (o Motorola não põe a busca
+    no dumpsys). O nome da rede só é comparado aqui dentro. Sem nenhum ponto, "forma" diz como
+    eram as linhas da busca, sem os valores.
     """
     conexao = CONEXAO_DO_WIFI.search(saida or "")
     if not conexao or not conexao.group("nome"):
@@ -407,7 +411,9 @@ def interpretar_wifi(saida):
     # depois de "SSID:" ou "SSID=", entre aspas: ele termina em dois espaços, num "[", numa
     # vírgula ou no fim da linha (assim "Casa" não conta "Casa 2").
     nome = re.compile(r'(?<=[\s=:])"?' + re.escape(conexao.group("nome")) + r'"?(?=\s{2,}|\s*\[|\s*$|,)')
-    linhas = _linhas_da_busca(saida)
+    do_dumpsys = _linhas_da_busca(saida)
+    da_lista = [linha for linha in (lista or "").splitlines() if linha.strip()]
+    linhas = do_dumpsys + da_lista
     pontos = {}
     for linha in linhas:
         ponto = PONTO.search(linha)
@@ -422,16 +428,23 @@ def interpretar_wifi(saida):
             "por_faixa": dict(sorted(por_faixa.items()))}
     if not pontos:
         com_ponto = [linha for linha in linhas if PONTO.search(linha)]
-        wifi["forma"] = (f"busca de redes: {len(linhas)} linha(s), {len(com_ponto)} com ponto"
-                         + (f"; forma: {_forma(com_ponto[0])}" if com_ponto else ""))
+        erro = " (a lista deu erro)" if ERRO_DA_LISTA.search(lista or "") else ""
+        wifi["forma"] = (f"busca de redes: {len(do_dumpsys)} linha(s) no dumpsys, {len(da_lista)} na lista{erro}, "
+                         f"{len(com_ponto)} com ponto" + (f"; forma: {_forma(com_ponto[0])}" if com_ponto else ""))
     return wifi
 
 
 def ler_wifi():
-    """interpretar_wifi do "dumpsys wifi" do celular (só lê); None sem resposta."""
+    """
+    interpretar_wifi do "dumpsys wifi" e da lista da última busca de redes do celular (só lê,
+    nunca pede uma busca nova); None sem resposta.
+    """
     alvo = endereco()
     r = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "wifi", timeout=30) if alvo else None
-    return interpretar_wifi(r[1]) if av._ok(r) else None
+    if not av._ok(r):
+        return None
+    lista = av._rodar("adb", "-s", alvo, "shell", "cmd", "wifi", "list-scan-results", timeout=30)
+    return interpretar_wifi(r[1], lista[1] if lista else "")
 
 
 def descrever_wifi(wifi):

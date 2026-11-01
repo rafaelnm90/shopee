@@ -481,8 +481,8 @@ def test_passo_a_passo_manda_deixar_a_opcao_do_prazo_sempre_ligada(bm, cr, monke
 class CelularQueVoltou:
     """O adb do celular que acabou de voltar: há quanto tempo está ligado, o registro do Android e o Wi-Fi."""
 
-    def __init__(self, ligado_ha=None, logcat="", wifi=""):
-        self.ligado_ha, self.logcat, self.wifi, self.pedidos = ligado_ha, logcat, wifi, []
+    def __init__(self, ligado_ha=None, logcat="", wifi="", lista=""):
+        self.ligado_ha, self.logcat, self.wifi, self.lista, self.pedidos = ligado_ha, logcat, wifi, lista, []
 
     def __call__(self, *partes, timeout=0):
         self.pedidos.append(partes)
@@ -492,6 +492,8 @@ class CelularQueVoltou:
             return 0, self.logcat
         if "dumpsys" in partes:
             return 0, self.wifi
+        if "list-scan-results" in partes:
+            return 0, self.lista
         return 0, ""
 
 
@@ -526,7 +528,7 @@ def test_wifi_conta_os_pontos_com_o_mesmo_nome_sem_mostrar_o_nome(cr):
     assert cr.interpretar_wifi("sem conexão") is None and cr.descrever_wifi(None) == "Wi-Fi não lido"
     so_a_conexao = WIFI.split("Latest scan results")[0]
     assert cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao)) == (
-        "Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s), 0 com ponto)")
+        "Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s) no dumpsys, 0 na lista, 0 com ponto)")
 
 
 def test_wifi_le_a_busca_no_formato_de_rotulos_e_mostra_a_forma_quando_nada_bate(cr):
@@ -549,8 +551,8 @@ def test_wifi_le_a_busca_no_formato_de_rotulos_e_mostra_a_forma_quando_nada_bate
         "  02:00:00:00:00:01       5180      -50    1.234    5265646554657374                  [WPA2-PSK-CCMP][ESS]",
         ""])
     texto = cr.descrever_wifi(cr.interpretar_wifi(estranho))
-    assert texto == ("Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 2 linha(s), 1 com ponto; "
-                     "forma: MAC NUM NUM DEC NUM [..])")
+    assert texto == ("Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 2 linha(s) no dumpsys, 0 na lista, "
+                     "1 com ponto; forma: MAC NUM NUM DEC NUM [..])")
     assert "02:00" not in texto and "5180" not in texto and "RedeDeTeste" not in texto
     # Pedaço do nome de outra rede com cara de rótulo ("Casa:") não aparece: só os rótulos do Android.
     outra = conexao + "\n".join([
@@ -616,6 +618,25 @@ def test_queda_longa_guarda_o_tempo_fora_o_tempo_ligado_e_o_wifi_no_registro_e_n
     assert "prazo do pareamento: sem prazo | ligado há 2 h | Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome" in linha
     assert f"última queda: {cr.SEM_O_MOTIVO}; fora há 810 min; ligado há 4320 min" in linha
     assert "RedeDeTeste" not in linha and "02:00" not in linha and IP not in linha
+
+
+def test_wifi_do_motorola_vem_da_lista_do_cmd_wifi(cr, monkeypatch):
+    # 01/11: no Motorola, o "dumpsys wifi" veio sem a busca de redes (0 linhas); a lista da última
+    # busca vem do "cmd wifi list-scan-results", que o celular só lê (nenhuma busca nova é pedida).
+    so_a_conexao = WIFI.split("Latest scan results")[0]
+    tabela = WIFI.split("Latest scan results:\n")[1].split("\n\n")[0]
+    assert cr.interpretar_wifi(so_a_conexao, tabela)["por_faixa"] == {"2,4 GHz": 1, "5 GHz": 1}
+    recusa = "Exception occurred while executing 'list-scan-results':\njava.lang.SecurityException: sem permissão"
+    texto = cr.descrever_wifi(cr.interpretar_wifi(so_a_conexao, recusa))
+    assert texto == ("Wi-Fi em 5 GHz, 0 ponto(s) com o mesmo nome (busca de redes: 0 linha(s) no dumpsys, 2 na lista "
+                     "(a lista deu erro), 0 com ponto)")
+    # Pelo adb do celular: os dois comandos só leem.
+    cr._gravar(ip=IP, porta=41000, pareado_em="2026-10-17 10:00:00")
+    adb = CelularQueVoltou(7200, "", wifi=so_a_conexao, lista=tabela)
+    monkeypatch.setattr(cr.av, "_rodar", adb)
+    assert cr.descrever_wifi(cr.ler_wifi()) == "Wi-Fi em 5 GHz, 2 ponto(s) com o mesmo nome (2,4 GHz: 1, 5 GHz: 1)"
+    comandos = [" ".join(p[p.index("shell") + 1:]) for p in adb.pedidos if "shell" in p]
+    assert comandos == ["dumpsys wifi", "cmd wifi list-scan-results"]
 
 
 def test_wifi_que_falha_nao_derruba_o_motivo_da_queda(cr, monkeypatch):
