@@ -5,6 +5,7 @@ import math
 import os
 import random
 import re
+import time
 from datetime import datetime
 from xml.sax.saxutils import escape
 
@@ -1021,7 +1022,9 @@ def test_rascunho_com_a_capa_com_chamada_fica_marcado_para_a_medicao(monkeypatch
     monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa"))
     postas = []
 
-    def capa_pela_figurinha(d, capa, ao_falhar=None):
+    def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
+        # O rascunho dá à capa o prazo para começar outra tentativa (MINUTOS_PARA_A_CAPA).
+        assert prazo > time.monotonic()
         postas.append((capa, list(d.toques)))
         return len(postas) == 1, "a faixa do tamanho do desenho (1 ajuste(s))" if len(postas) == 1 else "o motivo"
 
@@ -1052,7 +1055,7 @@ def test_capa_pela_figurinha_que_nao_deu_certo_guarda_o_caso_e_o_rascunho_segue(
     monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa"))
     motivo = "a faixa não ficou do tamanho do desenho; alto x largura e o meio da faixa a cada medida"
 
-    def capa_pela_figurinha(d, capa, ao_falhar=None):
+    def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
         if ao_falhar:
             ao_falhar(motivo)
         return False, motivo
@@ -4926,8 +4929,10 @@ class CelularDaCapa:
     """
 
     def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False, parado=1.0,
-                 letras_grossas=False):
+                 letras_grossas=False, teimosas=0):
         self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
+        # teimosas: as primeiras figurinhas que entram não mudam com os dois dedos.
+        self.teimosas, self.entradas = teimosas, 0
         self.entrada, self.ganho, self.maxima, self.meio = entrada, ganho, maxima, meio
         # parado: dedos que abrem ou fecham menos que essa razão não mudam a figurinha.
         # letras_grossas: no print, as letras brancas da faixa mais grossas (como no Motorola).
@@ -4984,6 +4989,7 @@ class CelularDaCapa:
             self.atual = "recorte"
         elif self.atual == "recorte" and "@tv_next_full" in ids:
             self.atual, self.figurinha = "capa", {"escala": self.entrada, "x": self.meio[0], "y": self.meio[1]}
+            self.entradas += 1
         elif self.atual == "capa" and "@save_btn" in ids:
             self.atual, self.salva = "final", self.figurinha
         elif self.atual == "capa" and "@cancel_btn" in ids:
@@ -5010,7 +5016,7 @@ class CelularDaCapa:
                 meio_x, meio_y = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
                 celular.gestos.append((de, ate))
                 f = celular.figurinha
-                if 1 / celular.parado < ate / de < celular.parado:
+                if 1 / celular.parado < ate / de < celular.parado or celular.entradas <= celular.teimosas:
                     return
                 nova = min(celular.maxima, f["escala"] * (ate / de) ** celular.ganho)
                 razao = nova / f["escala"]
@@ -5108,11 +5114,16 @@ def test_figurinha_que_nao_chega_ao_desenho_e_descartada_e_vai_a_capa_de_sempre(
     monkeypatch.setattr(robo, "pausa", lambda s: None)
     celular = CelularDaCapa(maxima=0.9)
     assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA) is False
-    assert celular.atual == "final" and celular.salva is None and "@tv_discard" in celular.toques
+    assert celular.atual == "final" and celular.salva is None
+    # Antes de desistir, a figurinha foi posta e descartada TENTATIVAS_DA_FIGURINHA vezes (01/11).
+    assert celular.entradas == celular.toques.count("@tv_discard") == robo.TENTATIVAS_DA_FIGURINHA
     assert celular.galeria == set()
     resultado, detalhe, ok = consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
                                        robo.PROCESSO_DA_CAPA)
-    assert (resultado, ok) == ("de fora", None) and detalhe.startswith("a faixa não ficou do tamanho do desenho")
+    assert (resultado, ok) == ("de fora", None)
+    assert detalhe.startswith("3 tentativas; a última: a faixa não ficou do tamanho do desenho")
+    # Nenhuma receita guardada: nenhuma deu certo.
+    assert not robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
 
 
 def test_figurinha_que_nao_chega_ao_desenho_anota_a_medida_de_cada_ajuste(monkeypatch, avisos):
@@ -5121,7 +5132,8 @@ def test_figurinha_que_nao_chega_ao_desenho_anota_a_medida_de_cada_ajuste(monkey
     # a medida pegou outra coisa laranja. Agora o registro diz a faixa de cada medida, só números.
     monkeypatch.setattr(robo, "pausa", lambda s: None)
     celular = CelularDaCapa(maxima=0.9)
-    assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA) is False
+    # Uma tentativa só (sem tempo para outra): o registro traz as medidas dela inteiras.
+    assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA, prazo=time.monotonic() - 1) is False
     (detalhe,) = consultar("SELECT detalhe FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_CAPA)
     e_cima, e_baixo, e_esquerda, e_direita = robo.faixa_esperada(CAPA_DA_FIGURINHA, QUADRO_DA_CAPA)
     inicio = ("a faixa não ficou do tamanho do desenho; a cada medida, alto x largura, meio e o gesto (o "
@@ -5152,6 +5164,74 @@ def test_figurinha_com_letras_grossas_e_dedos_que_nao_mexem_chega_ao_desenho(mon
     assert len(celular.gestos) >= 2
 
 
+def test_figurinha_que_nao_ficou_tenta_de_novo_e_fica_na_2a_vez(monkeypatch):
+    # Pedido do Rafael (01/11): a capa que não fica certa não é descartada de cara; o robô sai da
+    # capa sem salvar, põe a figurinha de novo e ajusta outra vez, e só desiste depois de
+    # TENTATIVAS_DA_FIGURINHA vezes.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(teimosas=1)
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and motivo.endswith(", na 2ª tentativa") and _no_desenho(celular), motivo
+    assert celular.entradas == 2 and celular.toques.count("@tv_discard") == 1
+    assert celular.atual == "final" and celular.galeria == set()
+    # A receita da que deu certo fica guardada para a próxima capa.
+    receita = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    assert receita["gestos"] and receita["quadro"] == list(QUADRO_DA_CAPA) and receita["entrada"][1] > 0
+
+
+def test_figurinha_comeca_pela_receita_da_ultima_que_deu_certo(monkeypatch):
+    # "a capa uma vez dando certo sempre vai dar dali pra frente" (Rafael, 01/11): a figurinha entra
+    # sempre do mesmo tamanho e no mesmo lugar, então os gestos da última que deu certo, refeitos de
+    # uma vez, a deixam no desenho, e a medida só confere.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    primeira = CelularDaCapa(ganho=0.66, parado=1.6)
+    ok, motivo = robo.capa_pela_figurinha(primeira, CAPA_DA_FIGURINHA)
+    assert ok and "da última que deu certo" not in motivo, motivo
+    receita = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    assert len(receita["gestos"]) == len(primeira.gestos) + len(primeira.arrastos) >= 2
+    segunda = CelularDaCapa(ganho=0.66, parado=1.6)
+    ok, motivo = robo.capa_pela_figurinha(segunda, CAPA_DA_FIGURINHA)
+    assert ok and _no_desenho(segunda), motivo
+    assert motivo == f"a faixa do tamanho do desenho (1 ajuste(s), o 1º com os {len(receita['gestos'])} gesto(s) da última que deu certo)"
+    # Os mesmos gestos, e nenhum a mais.
+    assert segunda.gestos == primeira.gestos and segunda.arrastos == primeira.arrastos
+    assert robo.db.ler_config(robo.CHAVE_FIGURINHA, {})["gestos"] == receita["gestos"]
+
+
+def test_receita_que_nao_chega_fica_de_lado_e_a_nova_toma_o_lugar(monkeypatch):
+    # A receita que não leva ao desenho (o app mudou, a figurinha não cresceu) não é refeita de
+    # novo no mesmo rascunho: a 2ª tentativa começa do zero, e a receita dela toma o lugar.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    robo.capa_pela_figurinha(CelularDaCapa(), CAPA_DA_FIGURINHA)
+    antiga = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    robo.db.salvar_config(robo.CHAVE_FIGURINHA, dict(antiga, gestos=[["arrasto", 540, 1118, 540, 900]]))
+    celular = CelularDaCapa(teimosas=1)
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and motivo.endswith(", na 2ª tentativa") and "da última que deu certo" not in motivo, motivo
+    assert celular.arrastos[0] == (540, 1118, 540, 900)
+    nova = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
+    assert ["arrasto", 540, 1118, 540, 900] not in nova["gestos"] and nova["gestos"]
+
+
+def test_receita_so_serve_no_mesmo_quadro_e_com_a_figurinha_do_mesmo_tamanho():
+    receita = {"quadro": list(QUADRO_DA_CAPA), "entrada": [46, 318], "gestos": [["dedos", 540, 1118, 300, 900]]}
+    assert robo.receita_serve(receita, QUADRO_DA_CAPA, [46, 330])
+    assert not robo.receita_serve(receita, QUADRO_DA_CAPA, [46, 400])
+    assert not robo.receita_serve(receita, (0, 0, 10, 10), [46, 318])
+    assert not robo.receita_serve(dict(receita, gestos=[]), QUADRO_DA_CAPA, [46, 318])
+    assert not robo.receita_serve({}, QUADRO_DA_CAPA, [46, 318])
+
+
+def test_sem_tempo_no_rascunho_a_capa_nao_tenta_de_novo(monkeypatch):
+    # A rodada tem 30 min: depois do prazo (MINUTOS_PARA_A_CAPA do começo do rascunho), a figurinha
+    # que não ficou vai direto para a capa de sempre, sem outra tentativa.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(maxima=0.9)
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, prazo=time.monotonic() - 1)
+    assert not ok and motivo.startswith("a faixa não ficou do tamanho do desenho; a cada medida")
+    assert celular.entradas == 1 and celular.atual == "final" and celular.galeria == set()
+
+
 def test_ganho_dos_dedos_aprende_com_o_gesto():
     menor, maior = robo.GANHO_DOS_DEDOS
     # Os dedos 3 vezes mais abertos deixaram a figurinha 2 vezes maior: o ganho é log 2 / log 3.
@@ -5172,7 +5252,10 @@ def test_capa_pela_figurinha_guarda_o_caso_com_a_tela_da_capa_antes_de_descartar
     celular, vistos = CelularDaCapa(maxima=0.9), []
     ok, motivo = robo.capa_pela_figurinha(
         celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append((celular.atual, celular.figurinha is not None, motivo)))
-    assert not ok and vistos == [("capa", True, motivo)]
+    # Um caso só, o da última tentativa, com o motivo de todas.
+    assert not ok and [visto[:2] for visto in vistos] == [("capa", True)]
+    assert vistos[0][2].startswith("3 tentativas: 1ª: a faixa não ficou do tamanho do desenho")
+    assert "; 2ª: " in vistos[0][2] and "; 3ª: " in vistos[0][2]
     assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
     celular, vistos = CelularDaCapa(), []
     ok, _ = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, vistos.append)
@@ -5222,8 +5305,8 @@ def test_erro_no_gesto_da_figurinha_descarta_a_capa_e_o_rascunho_segue(monkeypat
     celular, vistos = CelularDaCapa(), []
     assert robo.por_a_capa(celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append((celular.atual, motivo))) is False
     assert [atual for atual, _motivo in vistos] == ["capa"]
-    assert vistos[0][1].startswith("a figurinha não foi ajustada: erro AssertionError no gesto; a cada medida, "
-                                   "alto x largura")
+    assert vistos[0][1].startswith("3 tentativas: 1ª: a figurinha não foi ajustada: erro AssertionError no gesto; "
+                                   "a cada medida, alto x largura")
     assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
     resultado, detalhe = consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
                                    robo.PROCESSO_DA_CAPA)
@@ -5241,7 +5324,8 @@ def test_erro_inesperado_na_capa_descarta_a_figurinha_mas_a_verificacao_para(mon
     monkeypatch.setattr(robo, "quadro_da_capa", quebra)
     celular, vistos = CelularDaCapa(), []
     ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append(celular.atual))
-    assert (ok, motivo) == (False, "a capa pela figurinha deu erro (ValueError)") and vistos == ["capa"]
+    assert (ok, motivo) == (False, "3 tentativas; a última: a capa pela figurinha deu erro (ValueError)")
+    assert vistos == ["capa"]
     assert celular.atual == "final" and celular.galeria == set()
     assert robo.passo_do_motivo(motivo) == "capa pela figurinha"
 
