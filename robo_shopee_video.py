@@ -3115,16 +3115,25 @@ def foto_do_produto_do_post(video, produto):
 # A parte da foto que entra na marca da comparação, em fração da largura e da altura: sem a
 # borda, onde a loja põe selo, moldura ou texto.
 MIOLO_DA_FOTO = (0.1, 0.9)
+# A marca do miolo é do desenho, em preto e branco: o mesmo modelo em outra cor, fotografado
+# igual, dava a mesma marca e ficava de fora da miniatura que troca, contra a regra do Rafael
+# (01/11: toda variação entra na miniatura). A mesma foto tem também as mesmas cores: o miolo é
+# dividido numa grade de GRADE_DA_COR x GRADE_DA_COR, e a cor média de cada pedaço pode variar até
+# COR_PARECIDA (a soma das diferenças das três cores, de 0 a 765). A compressão e um ajuste de luz
+# da loja ficam abaixo disso.
+GRADE_DA_COR = 8
+COR_PARECIDA = 80
 
 
 def mesma_foto(foto, outra):
     """
-    Se as duas fotos (bytes) são a mesma imagem, pela marca do miolo (o dHash da medição da capa,
-    visualizacoes_shopee_video): o selo, a moldura ou o texto que a loja põe na borda não contam.
-    None quando alguma não abre ou não tem desenho para a marca.
+    Se as duas fotos (bytes) são a mesma imagem: o mesmo desenho, pela marca do miolo (o dHash da
+    medição da capa, visualizacoes_shopee_video), e as mesmas cores (GRADE_DA_COR). O selo, a
+    moldura ou o texto que a loja põe na borda não contam. None quando alguma não abre ou não tem
+    desenho para a marca.
     """
     from PIL import Image
-    marcas = []
+    marcas, cores = [], []
     for dados in (foto, outra):
         try:
             imagem = Image.open(io.BytesIO(dados or b"")).convert("RGB")
@@ -3132,12 +3141,17 @@ def mesma_foto(foto, outra):
             return None
         largura, altura = imagem.size
         de, ate = MIOLO_DA_FOTO
-        marca = visualizacoes.marca_da_capa(imagem, (int(largura * de), int(altura * de),
-                                                     int(largura * ate), int(altura * ate)))
+        miolo = (int(largura * de), int(altura * de), int(largura * ate), int(altura * ate))
+        marca = visualizacoes.marca_da_capa(imagem, miolo)
         if not marca:
             return None
         marcas.append(marca)
-    return visualizacoes.diferenca(*marcas) <= visualizacoes.MARCA_PARECIDA
+        cores.append(imagem.crop(miolo).resize((GRADE_DA_COR, GRADE_DA_COR), Image.BOX).tobytes())
+    if visualizacoes.diferenca(*marcas) > visualizacoes.MARCA_PARECIDA:
+        return False
+    um, outro = cores
+    return all(sum(abs(a - b) for a, b in zip(um[i:i + 3], outro[i:i + 3])) <= COR_PARECIDA
+               for i in range(0, len(um), 3))
 
 
 def com_outra_foto_de_capa(video, produtos, capa):
