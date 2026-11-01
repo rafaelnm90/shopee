@@ -178,6 +178,8 @@ def test_passo_a_passo_para_refazer_depois_do_reset(bm, cr, monkeypatch, Msg, Es
     for trecho in ("Shopee", "Tailscale", "VPN sempre ativa", "7 vezes", "Manter ativado",
                    "Depuração por Wi-Fi", "Parear Celular 🔗", "Reconectar Celular 🔄", "Disable key expiry"):
         assert trecho in texto
+    # O Manter ativado com o texto que o Motorola mostra e o porquê (print do Rafael de 01/11).
+    assert "Nunca deixar a tela em modo ocioso" in texto and "a tela não apaga" in texto
     assert len(texto) < 4096                                             # cabe numa mensagem do Telegram
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.celular.state
 
