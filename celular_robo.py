@@ -75,6 +75,15 @@ MOTIVOS_DA_QUEDA = (
 REINICIOU = "o celular reiniciou"
 LIGACAO_PRESA = "a ligação do adb travou (a Depuração por Wi-Fi ficou ligada)"
 SEM_O_MOTIVO = "o Android não guardou o motivo (desligada à mão, ou o registro dele já foi renovado)"
+# O registro do Android se renova em poucas horas, e numa queda longa o motivo some. Para ainda dar
+# uma pista, a volta e o estado contam quantos pontos de Wi-Fi o celular enxerga com o mesmo nome
+# da rede dele (ler_wifi, pelo "dumpsys wifi"): com mais de um (repetidor, roteador em malha, ou
+# o 2,4 GHz e o 5 GHz com o mesmo nome), ele pode trocar de ponto. Só a faixa e os números saem
+# daqui, nunca o nome da rede nem o endereço do ponto. Pedido do Rafael (01/11): DECISOES.md,
+# Trabalho com o Claude.
+FAIXAS_DO_WIFI = ((3000, "2,4 GHz"), (5925, "5 GHz"), (7200, "6 GHz"))
+CONEXAO_DO_WIFI = re.compile(r'mWifiInfo SSID: "(?P<nome>[^"\n]*)"[^\n]*?Frequency: (?P<mhz>\d+) ?MHz')
+PONTO_DA_BUSCA = re.compile(r"^\s*(?P<ponto>(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})\s+(?P<mhz>\d{4,5})\s+(?P<resto>.*)$")
 
 
 def ler():
@@ -342,11 +351,75 @@ def ligado_ha():
         return None
 
 
+def _faixa(mhz):
+    return next((nome for limite, nome in FAIXAS_DO_WIFI if mhz < limite), "outra faixa")
+
+
+def interpretar_wifi(saida):
+    """
+    A rede do celular no texto do "dumpsys wifi": {"faixa", "pontos", "por_faixa"}, com a faixa
+    da conexão de agora e os pontos (endereços diferentes) da última busca de redes que têm o
+    mesmo nome da rede dele; None sem a conexão. O nome da rede só é comparado aqui dentro.
+    """
+    conexao = CONEXAO_DO_WIFI.search(saida or "")
+    if not conexao or not conexao.group("nome"):
+        return None
+    # Na busca, a coluna do nome é preenchida com espaços até o "[" das proteções: o nome
+    # termina em dois espaços, num "[" ou no fim da linha (assim "Casa" não conta "Casa 2").
+    nome = re.compile(r"(?<!\S)\"?" + re.escape(conexao.group("nome")) + r"\"?(?=\s{2,}|\s*\[|\s*$)")
+    pontos, linhas = {}, saida.splitlines()
+    inicio = next((i for i, linha in enumerate(linhas) if "Latest scan results" in linha), None)
+    for linha in linhas[inicio + 1:] if inicio is not None else []:
+        if "BSSID" in linha and "Frequency" in linha:
+            continue
+        ponto = PONTO_DA_BUSCA.match(linha)
+        if not ponto:
+            break
+        if nome.search(ponto.group("resto")):
+            pontos[ponto.group("ponto").lower()] = _faixa(int(ponto.group("mhz")))
+    por_faixa = {}
+    for faixa in pontos.values():
+        por_faixa[faixa] = por_faixa.get(faixa, 0) + 1
+    return {"faixa": _faixa(int(conexao.group("mhz"))), "pontos": len(pontos),
+            "por_faixa": dict(sorted(por_faixa.items()))}
+
+
+def ler_wifi():
+    """interpretar_wifi do "dumpsys wifi" do celular (só lê); None sem resposta."""
+    alvo = endereco()
+    r = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "wifi", timeout=30) if alvo else None
+    return interpretar_wifi(r[1]) if av._ok(r) else None
+
+
+def descrever_wifi(wifi):
+    """A rede do celular em palavras curtas, só com a faixa e os números."""
+    if not wifi:
+        return "Wi-Fi não lido"
+    texto = f"Wi-Fi em {wifi['faixa']}, {wifi['pontos']} ponto(s) com o mesmo nome"
+    if wifi["pontos"]:
+        texto += " (" + ", ".join(f"{faixa}: {n}" for faixa, n in wifi["por_faixa"].items()) + ")"
+    return texto
+
+
+def _wifi_agora():
+    """descrever_wifi(ler_wifi()) sem nunca derrubar quem chama (o motivo da queda, o estado)."""
+    try:
+        return descrever_wifi(ler_wifi())
+    except Exception as e:
+        return f"Wi-Fi não lido (erro {type(e).__name__})"
+
+
+def _duracao(segundos):
+    return f"{round(segundos / 60)} min" if segundos < 7200 else f"{round(segundos / 3600)} h"
+
+
 def motivo_da_queda(visto_em, mesma_porta=False, agora=None):
     """
     Por que o celular tinha saído, lido nele logo depois de voltar, em palavras fixas: a ligação
     do adb travou (voltou na mesma porta), o celular reiniciou, o motivo do Android para desligar
-    a Depuração por Wi-Fi (MOTIVOS_DA_QUEDA) ou SEM_O_MOTIVO. (motivo, detalhe só com números)
+    a Depuração por Wi-Fi (MOTIVOS_DA_QUEDA) ou SEM_O_MOTIVO. (motivo, detalhe só com números:
+    quanto tempo ficou fora, há quanto tempo está ligado e, quando não reiniciou, os pontos de
+    Wi-Fi com o mesmo nome da rede dele)
     """
     agora = agora or datetime.now(fuso_horario)
     fora = None
@@ -366,6 +439,7 @@ def motivo_da_queda(visto_em, mesma_porta=False, agora=None):
     r = av._rodar("adb", "-s", alvo, "shell", "logcat", "-d", "-s", f"{TAG_DA_DEPURACAO}:*", timeout=20)
     linhas = [linha.casefold() for linha in (r[1] if av._ok(r) else "").splitlines()
               if "adbwifi" in linha.casefold() and ("disabl" in linha.casefold() or "not enabl" in linha.casefold())]
+    detalhe += f"; {_wifi_agora()}"
     if linhas:
         return next((motivo for trecho, motivo in MOTIVOS_DA_QUEDA if trecho in linhas[-1]),
                     "o Android desligou a Depuração por Wi-Fi por outro motivo"), detalhe
@@ -383,7 +457,7 @@ def anotar_motivo_da_queda(visto_em, mesma_porta=False, agora=None):
     except Exception as e:
         motivo, detalhe = f"não lido (erro {type(e).__name__})", ""
     registro_processos.registrar("shopee_video", PROCESSO_DA_QUEDA, motivo, detalhe, ok=None, agora=agora)
-    _gravar(ultima_queda={"motivo": motivo, "voltou_em": agora.strftime("%Y-%m-%d %H:%M:%S")})
+    _gravar(ultima_queda={"motivo": motivo, "detalhe": detalhe, "voltou_em": agora.strftime("%Y-%m-%d %H:%M:%S")})
     return motivo
 
 
@@ -454,9 +528,10 @@ def descrever_estado():
     A ligação com o celular guardado em uma linha, para o android.yml (estado), só com
     estados e números (o log do Actions é público: nunca o endereço, a porta nem o nome):
     se está na rede privada, se a porta guardada está aberta, o estado do adb nela,
-    quantas portas abertas o celular tem, o prazo do pareamento (com o celular
-    conectado) e o motivo da última queda (ultima_queda). Só lê: não conecta nem
-    desconecta nada.
+    quantas portas abertas o celular tem, o prazo do pareamento, há quanto tempo ele está
+    ligado e os pontos de Wi-Fi com o mesmo nome da rede dele (esses três com o celular
+    conectado) e o motivo da última queda, com o detalhe (ultima_queda). Só lê: não conecta
+    nem desconecta nada.
     """
     dados = ler()
     if not dados.get("pareado_em") or not dados.get("ip"):
@@ -470,12 +545,18 @@ def descrever_estado():
     alvo = endereco()
     estado = _estado_do_adb(av._rodar("adb", "-s", alvo, "get-state", timeout=10)) if alvo else "sem porta guardada"
     prazo = ler_prazo_da_autorizacao() if estado == "device" else None
+    conectado_agora = ""
+    if estado == "device":
+        ligado = ligado_ha()
+        conectado_agora = (f" | ligado há {_duracao(ligado)}" if ligado is not None else "") + f" | {_wifi_agora()}"
     queda = dados.get("ultima_queda") or {}
+    detalhe = f"; {queda['detalhe']}" if queda.get("detalhe") else ""
     return (f"na rede privada: sim | porta guardada: {'aberta' if dados.get('porta') in abertas else 'fechada'} | "
             f"adb: {estado} | portas abertas no celular: {len(abertas)} | "
-            f"prazo do pareamento: {descrever_prazo(prazo)}"
-            + (f" | última queda: {queda['motivo']} (voltou em {queda['voltou_em'][8:10]}/{queda['voltou_em'][5:7]} "
-               f"{queda['voltou_em'][11:16]})" if queda.get("motivo") and queda.get("voltou_em") else ""))
+            f"prazo do pareamento: {descrever_prazo(prazo)}{conectado_agora}"
+            + (f" | última queda: {queda['motivo']}{detalhe} (voltou em {queda['voltou_em'][8:10]}/"
+               f"{queda['voltou_em'][5:7]} {queda['voltou_em'][11:16]})"
+               if queda.get("motivo") and queda.get("voltou_em") else ""))
 
 
 def ocupado():
