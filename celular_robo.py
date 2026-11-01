@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 
 import android_virtual as av
 import db
+import registro_processos
 from fuso import fuso_horario
 
 CHAVE = "celular_robo"
@@ -54,6 +55,26 @@ COMO_PAREAR = ("pareie de novo em Celular do Robô 📱 → Parear Celular 🔗 
 # Onde o Android abre a porta da Depuração por Wi-Fi: as portas "efêmeras" do Linux,
 # sorteadas cada vez que a depuração é ligada.
 PORTAS_DA_DEPURACAO = range(32768, 61000)
+
+# Por que o celular saiu: o Android desliga a Depuração por Wi-Fi sozinho quando o Wi-Fi cai,
+# quando o celular troca de ponto de Wi-Fi (outro roteador, um repetidor ou a outra frequência do
+# mesmo roteador) e quando o celular reinicia. Na volta, o servidor lê no próprio celular qual
+# foi (motivo_da_queda): reiniciou, se ele está ligado há menos tempo que desde a última vez em
+# que o servidor o viu (visto_em); senão, a última linha do AdbDebuggingManager no registro do
+# Android (logcat) que desliga a depuração. Só o motivo fixo vai ao registro e ao banco, nunca a
+# linha crua. Pergunta do Rafael (31/10): por que desconectou. DECISOES.md, Trabalho com o Claude.
+PROCESSO_DA_QUEDA = "celular: motivo da queda"
+TAG_DA_DEPURACAO = "AdbDebuggingManager"
+MOTIVOS_DA_QUEDA = (
+    ("network disconnected", "o Wi-Fi caiu"),
+    ("network change", "o celular trocou de ponto de Wi-Fi (outro roteador, repetidor ou a outra frequência)"),
+    ("wifi disabled", "o Wi-Fi foi desligado"),
+    ("bssid", "o Wi-Fi ficou sem o ponto de acesso"),
+    ("not connected to any", "o celular ficou sem rede Wi-Fi"),
+)
+REINICIOU = "o celular reiniciou"
+LIGACAO_PRESA = "a ligação do adb travou (a Depuração por Wi-Fi ficou ligada)"
+SEM_O_MOTIVO = "o Android não guardou o motivo (desligada à mão, ou o registro dele já foi renovado)"
 
 
 def ler():
@@ -208,14 +229,17 @@ def endereco():
 
 
 def conectado():
-    """O adb fala com o celular agora?"""
+    """O adb fala com o celular agora? Quando fala, guarda a hora (visto_em, para o motivo_da_queda)."""
     alvo = endereco()
     if not alvo or shutil.which("adb") is None:
         return False
     # Prazo curto: a tela do celular no bot espera esta resposta.
     av._rodar("adb", "connect", alvo, timeout=10)
     r = av._rodar("adb", "-s", alvo, "get-state", timeout=10)
-    return av._ok(r) and r[1].strip() == "device"
+    ligado = av._ok(r) and r[1].strip() == "device"
+    if ligado:
+        _gravar(visto_em=_agora())
+    return ligado
 
 
 def portas_abertas(ip, portas=PORTAS_DA_DEPURACAO, prazo=0.5, juntas=400):
@@ -243,19 +267,29 @@ def reconectar_sozinho():
     a porta nova da Depuração por Wi-Fi no celular, pela rede privada, e conecta nela.
     Só a depuração desligada, o celular fora da rede ou o pareamento vencido impedem.
     (True, modelo) ou (False, motivo em palavras simples, que diz se a porta da depuração
-    respondia e se é preciso parear de novo: pede_pareamento).
+    respondia e se é preciso parear de novo: pede_pareamento). Na volta, anota por que o
+    celular tinha saído (anotar_motivo_da_queda).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if conectado():
         return True, ler().get("modelo") or "celular"
+    visto_em = ler().get("visto_em")
+    ok, resultado, mesma_porta = _reconectar()
+    if ok:
+        anotar_motivo_da_queda(visto_em, mesma_porta)
+    return ok, resultado
+
+
+def _reconectar():
+    """Os passos do reconectar_sozinho: (ok, modelo ou motivo, voltou na mesma porta?)."""
     dados = ler()
     if not dados.get("pareado_em") or not dados.get("ip"):
-        return False, "o celular ainda não foi pareado com o servidor"
+        return False, "o celular ainda não foi pareado com o servidor", False
     if shutil.which("adb") is None:
-        return False, "o adb não está instalado no servidor"
+        return False, "o adb não está instalado no servidor", False
     rede = {c["ip"]: c for c in celulares_na_rede()}
     if not rede.get(dados["ip"], {}).get("online"):
-        return False, "o celular não está na rede privada (Tailscale desligado ou celular sem internet)"
+        return False, "o celular não está na rede privada (Tailscale desligado ou celular sem internet)", False
     motivos = []
     if dados.get("porta"):
         # A conexão sem fio do adb pode ficar presa ("offline") com a depuração ligada: o
@@ -263,7 +297,7 @@ def reconectar_sozinho():
         av._rodar("adb", "disconnect", endereco(), timeout=10)
         ok, resultado = conectar(dados["ip"], dados["porta"])
         if ok:
-            return True, resultado
+            return True, resultado, True
         motivos.append(resultado)
     abertas = portas_abertas(dados["ip"])
     for porta in abertas:
@@ -271,7 +305,7 @@ def reconectar_sozinho():
             continue
         ok, resultado = conectar(dados["ip"], porta)
         if ok:
-            return True, resultado
+            return True, resultado, False
         motivos.append(resultado)
     if dados.get("porta") in abertas:
         # A porta da depuração responde e o adb não conecta: o servidor do adb pode ter ficado
@@ -280,20 +314,77 @@ def reconectar_sozinho():
         av._rodar("adb", "kill-server", timeout=20)
         ok, resultado = conectar(dados["ip"], dados["porta"])
         if ok:
-            return True, resultado
+            return True, resultado, True
         if pede_pareamento(resultado):
-            return False, f"a Depuração por Wi-Fi responde, mas {resultado}"
+            return False, f"a Depuração por Wi-Fi responde, mas {resultado}", False
         return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "
-                       "se continuar, parear de novo pelo Celular do Robô")
+                       "se continuar, parear de novo pelo Celular do Robô"), False
     # A porta nova (a depuração foi desligada e ligada) também não aceita o servidor: não é a
     # porta, é o pareamento.
     vencido = next((m for m in motivos if pede_pareamento(m)), None)
     if vencido:
-        return False, f"a Depuração por Wi-Fi responde, mas {vencido}"
+        return False, f"a Depuração por Wi-Fi responde, mas {vencido}", False
     if abertas:
         return False, (f"o celular tem {len(abertas)} porta(s) aberta(s), mas nenhuma é a da Depuração por Wi-Fi; "
-                       "se ela estiver ligada, parear de novo pelo Celular do Robô")
-    return False, "a Depuração por Wi-Fi está desligada no celular (nenhuma porta dela aberta)"
+                       "se ela estiver ligada, parear de novo pelo Celular do Robô"), False
+    return False, "a Depuração por Wi-Fi está desligada no celular (nenhuma porta dela aberta)", False
+
+
+def ligado_ha():
+    """Há quantos segundos o celular está ligado (desde que ligou pela última vez); None sem resposta."""
+    alvo = endereco()
+    r = av._rodar("adb", "-s", alvo, "shell", "cat", "/proc/uptime", timeout=15) if alvo else None
+    if not av._ok(r):
+        return None
+    try:
+        return float(r[1].split()[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def motivo_da_queda(visto_em, mesma_porta=False, agora=None):
+    """
+    Por que o celular tinha saído, lido nele logo depois de voltar, em palavras fixas: a ligação
+    do adb travou (voltou na mesma porta), o celular reiniciou, o motivo do Android para desligar
+    a Depuração por Wi-Fi (MOTIVOS_DA_QUEDA) ou SEM_O_MOTIVO. (motivo, detalhe só com números)
+    """
+    agora = agora or datetime.now(fuso_horario)
+    fora = None
+    try:
+        fora = (agora.replace(tzinfo=None) - datetime.strptime(visto_em or "", "%Y-%m-%d %H:%M:%S")).total_seconds()
+    except ValueError:
+        pass
+    detalhe = f"fora há {round(fora / 60)} min" if fora is not None else "sem a última vez em que foi visto"
+    if mesma_porta:
+        return LIGACAO_PRESA, detalhe
+    ligado = ligado_ha()
+    if ligado is not None:
+        detalhe += f"; ligado há {round(ligado / 60)} min"
+        if fora is not None and ligado < fora:
+            return REINICIOU, detalhe
+    alvo = endereco()
+    r = av._rodar("adb", "-s", alvo, "shell", "logcat", "-d", "-s", f"{TAG_DA_DEPURACAO}:*", timeout=20)
+    linhas = [linha.casefold() for linha in (r[1] if av._ok(r) else "").splitlines()
+              if "adbwifi" in linha.casefold() and ("disabl" in linha.casefold() or "not enabl" in linha.casefold())]
+    if linhas:
+        return next((motivo for trecho, motivo in MOTIVOS_DA_QUEDA if trecho in linhas[-1]),
+                    "o Android desligou a Depuração por Wi-Fi por outro motivo"), detalhe
+    return SEM_O_MOTIVO, detalhe
+
+
+def anotar_motivo_da_queda(visto_em, mesma_porta=False, agora=None):
+    """
+    O motivo_da_queda no registro dos processos (o checkup mostra) e no banco (ultima_queda, que
+    o estado e o painel mostram). Nada aqui segura a volta do celular. Devolve o motivo, ou None.
+    """
+    agora = agora or datetime.now(fuso_horario)
+    try:
+        motivo, detalhe = motivo_da_queda(visto_em, mesma_porta, agora)
+    except Exception as e:
+        motivo, detalhe = f"não lido (erro {type(e).__name__})", ""
+    registro_processos.registrar("shopee_video", PROCESSO_DA_QUEDA, motivo, detalhe, ok=None, agora=agora)
+    _gravar(ultima_queda={"motivo": motivo, "voltou_em": agora.strftime("%Y-%m-%d %H:%M:%S")})
+    return motivo
 
 
 def _estado_do_adb(resultado):
@@ -363,8 +454,9 @@ def descrever_estado():
     A ligação com o celular guardado em uma linha, para o android.yml (estado), só com
     estados e números (o log do Actions é público: nunca o endereço, a porta nem o nome):
     se está na rede privada, se a porta guardada está aberta, o estado do adb nela,
-    quantas portas abertas o celular tem e o prazo do pareamento (com o celular
-    conectado). Só lê: não conecta nem desconecta nada.
+    quantas portas abertas o celular tem, o prazo do pareamento (com o celular
+    conectado) e o motivo da última queda (ultima_queda). Só lê: não conecta nem
+    desconecta nada.
     """
     dados = ler()
     if not dados.get("pareado_em") or not dados.get("ip"):
@@ -378,9 +470,12 @@ def descrever_estado():
     alvo = endereco()
     estado = _estado_do_adb(av._rodar("adb", "-s", alvo, "get-state", timeout=10)) if alvo else "sem porta guardada"
     prazo = ler_prazo_da_autorizacao() if estado == "device" else None
+    queda = dados.get("ultima_queda") or {}
     return (f"na rede privada: sim | porta guardada: {'aberta' if dados.get('porta') in abertas else 'fechada'} | "
             f"adb: {estado} | portas abertas no celular: {len(abertas)} | "
-            f"prazo do pareamento: {descrever_prazo(prazo)}")
+            f"prazo do pareamento: {descrever_prazo(prazo)}"
+            + (f" | última queda: {queda['motivo']} (voltou em {queda['voltou_em'][8:10]}/{queda['voltou_em'][5:7]} "
+               f"{queda['voltou_em'][11:16]})" if queda.get("motivo") and queda.get("voltou_em") else ""))
 
 
 def ocupado():

@@ -2293,8 +2293,13 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     suspensao = (f"\n\n⛔ A conta de Shopee Vídeo está suspensa pela Shopee até "
                  f"{robo.quando_acaba(robo.suspenso_ate(config))}: ele começa sozinho depois disso."
                  if robo.suspensa(config) else "")
+    # Por que o celular tinha saído, lido nele agora na volta (celular_robo.motivo_da_queda).
+    queda = celular_robo.ler().get("ultima_queda") or {}
+    agora_menos = (datetime.now(fuso_horario) - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    motivo_da_queda = (f"\n\n📵 Por que o celular tinha saído: {html_escape(queda['motivo'])}."
+                       if queda.get("motivo") and (queda.get("voltou_em") or "") >= agora_menos else "")
     await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
-                         f"assistente fica em espera.{suspensao}", parse_mode="HTML")
+                         f"assistente fica em espera.{motivo_da_queda}{suspensao}", parse_mode="HTML")
     await mostrar_robo(message, state)
 
 
