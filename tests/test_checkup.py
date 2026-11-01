@@ -405,6 +405,27 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     assert r["janela_desde"] == f"{dia} 10:00:00"
 
 
+def test_preparo_pedido_no_botao_nao_e_sobreposicao():
+    # 31/10, 20:32: o rascunho pedido no Preparar 1 Agora dentro do Horário das Interações entrou
+    # como sobreposição, como se o robô tivesse preparado sozinho antes do feed. O pedido no
+    # botão vale a qualquer hora: o preparo que começa logo depois dele aparece à parte.
+    import robo_shopee_video as robo
+    import registro_processos
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_interacoes_inicio": 9,
+                                         "robo_interacoes_fim": 11})
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DO_BOTAO, "pedido", ok=None, agora=em("09:20"))
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:31"))                # o pedido no botão
+    robo.registrar_tentativa("rascunho", "pulado", agora=em("10:15"))               # do plano, antes do feed
+    r = checkup.sobreposicoes(AGORA)
+    assert [hora for hora, _o in r["pedidos_no_botao"]] == ["09:31"]
+    assert [hora for hora, _o in r["preparo_na_janela"]] == ["10:15"]
+
+
 def test_pontos_de_atencao():
     erros = [{"origem": "bot_mestre.py", "lugar": "bot_mestre.py:10", "texto": "x", "tipo": "ValueError",
               "qtd": 1, "ultimo": "10:00", "novo": True},

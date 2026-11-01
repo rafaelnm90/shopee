@@ -1261,6 +1261,18 @@ def _titulo_vazio_e_depois(monkeypatch, respostas):
     monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
 
 
+def test_preparar_1_agora_fica_no_registro(monkeypatch, avisos):
+    # O rascunho pedido no botão vale a qualquer hora; o registro guarda o pedido, para o
+    # checkup não o contar como preparo do plano no Horário das Interações (31/10, 20:32).
+    from conftest import consultar
+    # Os outros passos do rascunho anotam com o relógio de verdade: o registro de 22/10 não sai.
+    monkeypatch.setattr(robo.registro_processos, "DIAS_DO_REGISTRO", 3650)
+    _fonte(monkeypatch)
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert consultar("SELECT momento, resultado FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_BOTAO) == ("2026-10-22 23:59:00", "pedido")
+
+
 def test_titulo_vazio_da_ia_tenta_de_novo_e_anota_o_motivo(monkeypatch, avisos):
     # 24/10/2026 (Preparar 1 Agora, 12:48): a IA conferiu o produto, mas voltou vazia no
     # título em todos os modelos, e o robô desistiu na hora. A resposta vazia do Google muda
