@@ -398,8 +398,15 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      visualizações. **O robô (P110):** mede a faixa laranja no print dentro do quadro do vídeo
      (`edicao_video.faixa_laranja`), compara com a do desenho (`faixa_esperada`, a capa do tamanho
      do quadro) e ajusta: dois dedos em volta do meio da faixa pela razão das alturas e, com o
-     tamanho certo, arrasta pelo que falta no lugar, até 5 vezes; só então o ✓. Falta ver se a
-     capa fica no rascunho reaberto para postar: o registro do post diz se a faixa chegou à grade.
+     tamanho certo, arrasta pelo que falta no lugar, até 5 vezes; só então o ✓.
+  9. **o rascunho salvo não guarda a figurinha da capa** (01/11/2026): o post das 14:55, de um
+     rascunho em que a figurinha ficou, foi à grade do Perfil com o 1º quadro do vídeo, e
+     continuava assim 2 horas depois (a grade vista pelo explorar, passo `caso`). Na tela final
+     do rascunho reaberto, a miniatura da capa é o `@iv_video_preview` (~173,456, com o
+     Selecionar Capa por cima, embaixo dela): o robô mede a faixa nela e, sem a faixa, põe a
+     figurinha de novo antes do Postar (`capa_de_novo_no_post`, com a capa guardada no servidor).
+     Na grade, o selo **Fixado** é laranja: a faixa conta só quando vai de um lado ao outro do
+     quadro (`faixa_da_capa`).
 
   **Teste completo (18/10/2026)**, da tela final em diante:
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →

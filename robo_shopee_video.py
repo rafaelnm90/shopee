@@ -3376,6 +3376,18 @@ MINUTOS_PARA_A_CAPA = 22
 CHAVE_FIGURINHA = "shopee_video_figurinha"
 FOLGA_DA_ENTRADA = 0.1
 GESTOS_DA_RECEITA = 8
+# O rascunho guardado e reaberto para postar volta com a capa de sempre: o app não guarda nele a
+# figurinha da capa (o post das 14:55 de 01/11 foi à grade com o 1º quadro do vídeo, sem a faixa,
+# e continuava assim 2 horas depois). A capa com a frase do rascunho fica no servidor
+# ({id}_figurinha.png), e no post a miniatura da capa da tela final (PREVIA_DA_CAPA, em cima do
+# Selecionar Capa) diz se ela ainda está lá; sem a faixa, a figurinha vai de novo antes do Postar,
+# sem começar outra tentativa depois de MINUTOS_DA_CAPA_NO_POST. É a capa que o Rafael aprovou
+# (P110): DECISOES.md, Shopee Vídeo.
+PREVIA_DA_CAPA = "iv_video_preview"
+MINUTOS_DA_CAPA_NO_POST = 8
+# A faixa da capa com a frase vai de um lado ao outro da capa: o laranja mais estreito que isto da
+# largura da miniatura é outra coisa (o selo Fixado da grade, um produto laranja na foto).
+LARGURA_DA_FAIXA_NA_CAPA = 0.6
 
 
 def quadro_da_capa(xml):
@@ -3721,6 +3733,71 @@ def por_a_capa(d, capa, ao_falhar=None, prazo=None):
     return ok
 
 
+def faixa_da_capa(imagem, caixa):
+    """
+    A faixa laranja da capa com a frase na caixa (x1, y1, x2, y2) da imagem do PIL, a miniatura
+    da capa da tela final ou o quadro da grade: (cima, baixo, esquerda, direita), ou None. Só a
+    que vai de um lado ao outro da caixa (LARGURA_DA_FAIXA_NA_CAPA).
+    """
+    faixa = edicao_video.faixa_laranja(imagem, caixa)
+    if faixa and faixa[3] - faixa[2] >= (caixa[2] - caixa[0]) * LARGURA_DA_FAIXA_NA_CAPA:
+        return faixa
+    return None
+
+
+def arquivo_da_figurinha(ident):
+    """A capa com a frase (PNG) que foi pela figurinha no rascunho: a do post, se ela se perder."""
+    return os.path.join(PASTA_RASCUNHOS, f"{ident}_figurinha.png")
+
+
+def guardar_a_figurinha(ident, capa):
+    """Guarda a capa com a frase do rascunho para o post. Sem ela, o post vai como o rascunho voltar."""
+    try:
+        os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
+        with open(arquivo_da_figurinha(ident), "wb") as arquivo:
+            arquivo.write(capa)
+    except OSError as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A capa com a frase não ficou guardada para o post: {type(e).__name__}")
+
+
+def faixa_na_previa(d):
+    """
+    A miniatura da capa na tela final (PREVIA_DA_CAPA) tem a faixa laranja? True ou False;
+    None sem a miniatura na tela.
+    """
+    previa = next((el for el in ps.elementos(tela(d)) if el["id"] == PREVIA_DA_CAPA), None)
+    if not previa:
+        return None
+    return faixa_da_capa(d.screenshot(), previa["caixa"]) is not None
+
+
+def capa_de_novo_no_post(d, rascunho, agora=None):
+    """
+    No rascunho reaberto para postar, com a capa pela figurinha no preparo (a capa que o Rafael
+    aprovou): confere a miniatura da capa e, sem a faixa, põe a figurinha de novo pela capa
+    guardada. O registro diz o que a miniatura mostrou e se a capa voltou; a capa que não volta
+    guarda o caso com a tela dela, e o post vai com a capa de sempre.
+    """
+    caminho = arquivo_da_figurinha(rascunho["id"])
+    if not rascunho.get("chamada") or not os.path.exists(caminho):
+        return
+    previa = faixa_na_previa(d)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, {
+        True: "no rascunho reaberto com a faixa", False: "no rascunho reaberto sem a faixa",
+        None: "no rascunho reaberto sem a miniatura da capa"}[previa], ok=True if previa else None)
+    if previa:
+        return
+    with open(caminho, "rb") as arquivo:
+        capa = arquivo.read()
+    ok, motivo = capa_pela_figurinha(
+        d, capa, lambda motivo: _guardar_caso(d, "postar", "capa de fora", motivo, video_do_rascunho(rascunho),
+                                              rascunho["id"], agora),
+        time.monotonic() + MINUTOS_DA_CAPA_NO_POST * 60)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "posta de novo no post" if ok else "de fora no post",
+                                 motivo, ok=ok or None)
+    fechar_a_edicao_da_legenda(d, tela(d))
+
+
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     """
     O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim);
@@ -3848,6 +3925,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
             d, figurinha["capa"], lambda motivo: _guardar_caso(d, "capa", "de fora", motivo, video, ident, agora),
             inicio + MINUTOS_PARA_A_CAPA * 60):
         atualizar(ident, chamada="1")
+        guardar_a_figurinha(ident, figurinha["capa"])
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
         ordem = [produtos[i] for i in no_post]
@@ -4200,8 +4278,8 @@ def nome_na_galeria(ident):
 
 
 # O vídeo, o print, as fotos de capa (P75) e as dos recusados de cada rascunho: {id}.mp4, {id}.png,
-# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg.
-ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado)_\d+\.(?:jpg|png|webp)|\.(?:mp4|png))$")
+# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg; e a capa com a frase que foi pela figurinha, {id}_figurinha.png.
+ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado)_\d+\.(?:jpg|png|webp)|_figurinha\.png|\.(?:mp4|png))$")
 
 
 # --- Os rascunhos no app ---
@@ -4281,6 +4359,7 @@ def publicar(d, rascunho, agora=None):
     if ate:
         raise Suspensa(ate)
     abrir_rascunho(d, rascunho)
+    capa_de_novo_no_post(d, rascunho, agora)
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rascunho.get("rotulo_ia"))), do_video=False)
     _conferir(ps.postar(d, video_do_rascunho(rascunho)), do_video=False)
     pausa(15)
@@ -4392,7 +4471,7 @@ def marcar_o_post(d, ident, caixa):
             if marca:
                 atualizar(ident, marca=marca)
                 if (pegar(ident) or {}).get("chamada"):
-                    faixa = edicao_video.faixa_laranja(imagem, caixa)
+                    faixa = faixa_da_capa(imagem, caixa)
                     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
                                                  "no post com a faixa" if faixa else "no post sem a faixa", ok=bool(faixa))
                 return marca

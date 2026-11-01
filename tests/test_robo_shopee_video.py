@@ -5493,3 +5493,107 @@ def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
     assert robo.marcar_o_post(grade(CAPA_DA_FIGURINHA), outro, caixa)
     linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
     assert [r[2] for r in linhas] == ["no post com a faixa", "no post sem a faixa"]
+
+
+class TelaFinalReaberta:
+    """A tela final do rascunho reaberto para postar: a miniatura da capa em cima do Selecionar Capa."""
+    CAIXA = (78, 286, 268, 626)
+
+    def __init__(self, capa_png=None):
+        from PIL import Image
+        self.imagem = Image.new("RGB", (1080, 2400), (250, 250, 250))
+        if capa_png:
+            x1, y1, x2, y2 = self.CAIXA
+            capa = Image.open(io.BytesIO(capa_png)).convert("RGB").resize((x2 - x1, y2 - y1))
+            self.imagem.paste(capa, (x1, y1))
+        self.com_previa = capa_png is not None
+
+    def dump_hierarchy(self):
+        nos = [_no(ident="et_caption", caixa=(400, 300, 1040, 520)),
+               _no("Selecionar Capa", "tv_select_cover", (78, 575, 268, 620))]
+        if self.com_previa:
+            nos.append(_no(ident=robo.PREVIA_DA_CAPA, caixa=self.CAIXA, clicavel=False))
+        return _xml(*nos)
+
+    def screenshot(self, caminho=None):
+        return self.imagem
+
+    def click(self, x, y):
+        pass
+
+
+def _capa_no_post(monkeypatch, tela, chamada="1", guardada=True, volta=(True, "a faixa do tamanho do desenho")):
+    ident = _rascunho("aprovado", postar_em="2026-11-01 14:55:00", chamada=chamada)
+    if guardada:
+        robo.guardar_a_figurinha(ident, CAPA_DA_FIGURINHA)
+    pedidas = []
+
+    def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
+        pedidas.append(capa)
+        if not volta[0] and ao_falhar:
+            ao_falhar(volta[1])
+        return volta
+
+    casos = []
+    monkeypatch.setattr(robo, "capa_pela_figurinha", capa_pela_figurinha)
+    monkeypatch.setattr(robo, "_guardar_caso", lambda *a, **k: casos.append(a[1:3]))
+    robo.capa_de_novo_no_post(tela, robo.pegar(ident), momento("2026-11-01 14:55"))
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    return pedidas, [(r[2], r[3]) for r in linhas], casos
+
+
+def test_post_poe_a_capa_de_novo_quando_o_rascunho_reaberto_volta_sem_a_faixa(monkeypatch):
+    # O app não guarda a figurinha da capa no rascunho: o post das 14:55 de 01/11 foi à grade com o
+    # 1º quadro do vídeo. A capa que o Rafael aprovou (P110) vai de novo antes do Postar.
+    sem_a_faixa = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
+    pedidas, linhas, casos = _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa))
+    assert pedidas == [CAPA_DA_FIGURINHA] and casos == []
+    assert linhas == [("no rascunho reaberto sem a faixa", ""),
+                      ("posta de novo no post", "a faixa do tamanho do desenho")]
+
+
+def test_post_com_a_faixa_no_rascunho_reaberto_nao_mexe_na_capa(monkeypatch):
+    pedidas, linhas, _ = _capa_no_post(monkeypatch, TelaFinalReaberta(CAPA_DA_FIGURINHA))
+    assert pedidas == [] and linhas == [("no rascunho reaberto com a faixa", "")]
+
+
+def test_post_sem_a_miniatura_da_capa_poe_a_capa_de_novo(monkeypatch):
+    pedidas, linhas, _ = _capa_no_post(monkeypatch, TelaFinalReaberta())
+    assert pedidas == [CAPA_DA_FIGURINHA]
+    assert [r for r, _ in linhas] == ["no rascunho reaberto sem a miniatura da capa", "posta de novo no post"]
+
+
+def test_capa_que_nao_volta_no_post_guarda_o_caso_e_segue(monkeypatch):
+    sem_a_faixa = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
+    pedidas, linhas, casos = _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa),
+                                           volta=(False, "a tela da capa não abriu"))
+    assert pedidas == [CAPA_DA_FIGURINHA] and casos == [("postar", "capa de fora")]
+    assert linhas[-1] == ("de fora no post", "a tela da capa não abriu")
+
+
+def test_post_sem_a_capa_pela_figurinha_no_rascunho_nao_mexe_na_capa(monkeypatch):
+    # O rascunho que saiu com a capa de sempre vai assim (foi o que o Rafael aprovou); sem o
+    # arquivo da capa, também (nada para pôr de novo).
+    sem_a_faixa = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
+    assert _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa), chamada="")[:2] == ([], [])
+    assert _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa), guardada=False)[:2] == ([], [])
+
+
+def test_capa_com_a_frase_guardada_sai_na_faxina_com_o_rascunho():
+    robo.guardar_a_figurinha(7, CAPA_DA_FIGURINHA)
+    caminho = robo.arquivo_da_figurinha(7)
+    assert open(caminho, "rb").read() == CAPA_DA_FIGURINHA
+    assert robo.ARQUIVO_NO_SERVIDOR.match(os.path.basename(caminho)).group(1) == "7"
+    assert not robo.ARQUIVO_NO_SERVIDOR.match("7_figurinha.jpg")
+
+
+def test_laranja_estreito_nao_e_a_faixa_da_capa():
+    # O selo Fixado da grade (laranja, no canto) e um produto laranja na foto não são a faixa,
+    # que vai de um lado ao outro da capa.
+    from PIL import Image, ImageDraw
+    imagem = Image.new("RGB", (358, 476), (240, 240, 240))
+    ImageDraw.Draw(imagem).rectangle((12, 20, 110, 60), fill=robo.edicao_video.LARANJA_DA_SHOPEE)
+    caixa = (0, 0, 358, 476)
+    assert robo.edicao_video.faixa_laranja(imagem, caixa) and robo.faixa_da_capa(imagem, caixa) is None
+    ImageDraw.Draw(imagem).rectangle((0, 300, 357, 360), fill=robo.edicao_video.LARANJA_DA_SHOPEE)
+    assert robo.faixa_da_capa(imagem, caixa)[:2] == (300, 361)
