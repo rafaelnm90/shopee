@@ -2466,6 +2466,15 @@ class AppDoVerProdutos(AppDeMentira):
             self.atual = "removido" if self.removido else "player"
         return resposta
 
+    def screenshot(self, caminho=None):
+        if caminho:
+            return super().screenshot(caminho)
+        # A página do produto: a foto no alto (de uma cor por produto) e a linha do preço embaixo.
+        from PIL import Image
+        cor = {"pdp:" + PRODUTO_A: "blue", "pdp:" + PRODUTO_B: "pink"}.get(self.atual, "white")
+        self.prints_da_pagina = getattr(self, "prints_da_pagina", []) + [self.atual]
+        return Image.new("RGB", (1080, 2400), cor)
+
     def click(self, x, y):
         tocados = [el for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])]
         textos = {el["texto"] for el in tocados} | {"@" + el["id"] for el in tocados if el["id"]}
@@ -2505,7 +2514,7 @@ class AppDoVerProdutos(AppDeMentira):
         self.atual = {"ver_produtos": "player", "player": "inicio"}.get(self.atual, "ver_produtos")
 
 
-def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B)):
+def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B), outra_cor=()):
     _fonte(monkeypatch)
     inserir("UPDATE fila_autorais SET legenda = ?", f"Garrafa 🧴\n{LINK_DE_VIDEO}")
 
@@ -2515,9 +2524,13 @@ def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B)):
     async def produtos_do_link(link):
         return [], link       # link de vídeo: a API não diz os produtos
 
-    async def analisar(arquivo, prompt):
+    async def analisar(arquivo, prompt, imagens=None):
+        # Os produtos da criadora a IA confere pela foto da página de cada um (01/11), em JPEG.
+        assert imagens is None or imagens[0][0].startswith(b"\xff\xd8")
         confere = any(nome in prompt for nome in confirma)
-        return '{"confere": %s, "motivo": "a IA viu no vídeo"}' % ("true" if confere else "false")
+        cor = any(nome in prompt for nome in outra_cor)
+        return '{"confere": %s, "outra_cor": %s, "motivo": "a IA viu no vídeo"}' % (
+            "true" if confere else "false", "true" if cor else "false")
 
     async def buscar(termo, limite=10, sort_type=2):
         # A API acha o 1º produto pelo nome; o 2º, não (o rascunho diz que falta o link dele).
@@ -2553,6 +2566,62 @@ def test_link_de_video_curte_e_anexa_todos_os_produtos_que_a_ia_confirma(monkeyp
     # rascunho; o que a API não acha pelo nome fica sem.
     assert rascunho["links_dos_produtos"] == ["https://s.shopee.com.br/curto-11", ""]
 
+
+
+def test_ver_produtos_de_outra_cor_entra_e_a_foto_dele_vai_na_miniatura(monkeypatch, avisos):
+    # Pedido do Rafael (01/11): num post de Ver Produtos, um dos produtos da criadora era o mesmo
+    # puff em outra cor, e a IA, que conferia só pelo nome, deixou passar sem ninguém saber. Agora
+    # ela confere cada produto pela foto da página dele no app: o mesmo modelo em outra cor entra,
+    # e a foto dele vai na miniatura que troca, para aparecer no vídeo; outro produto fica de fora.
+    import io
+    from PIL import Image
+    _fonte_de_video(monkeypatch, outra_cor=(PRODUTO_A,))
+    edicao = {}
+
+    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None):
+        edicao.update(nomes=list(nomes), outras=list(outras))
+        robo.shutil.copyfile(video["arquivo"], copia)
+        return ""
+
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar)
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    # A IA viu a página de cada produto.
+    assert app.prints_da_pagina == ["pdp:" + PRODUTO_A, "pdp:" + PRODUTO_B]
+    # O de outra cor (o A, 1º da lista da criadora) vai depois do da mesma cor do vídeo: o 1º
+    # anexado dá a foto do começo do vídeo.
+    assert app.anexados == [PRODUTO_B, PRODUTO_A] and edicao["nomes"] == [PRODUTO_B, PRODUTO_A]
+    # A foto da página do A (a cor dele) vai para a miniatura.
+    assert len(edicao["outras"]) == 1
+    assert Image.open(io.BytesIO(edicao["outras"][0])).convert("RGB").getpixel((10, 10))[2] > 200
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_CRIADOR, "2000-01-01 00:00:00")
+    assert sorted(r[2] for r in registro) == ["mesmo produto", "outra cor - a foto vai na miniatura"]
+
+
+def test_ver_produtos_de_outro_produto_fica_de_fora(monkeypatch, avisos):
+    # O produto da criadora que a IA não confirma pela foto da página (outro produto) fica de fora.
+    _fonte_de_video(monkeypatch, confirma=(PRODUTO_A,))
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.anexados == [PRODUTO_A]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_CRIADOR, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mesmo produto", "de fora - outro produto"]
+
+
+def test_ver_produtos_sem_a_foto_da_pagina_fica_de_fora(monkeypatch, avisos):
+    # Sem a foto da página (o print não veio), o produto fica de fora: nada entra só pelo nome.
+    class SemPrint(AppDoVerProdutos):
+        def screenshot(self, caminho=None):
+            if caminho is None and self.atual == "pdp:" + PRODUTO_B:
+                raise OSError("o print não veio")
+            return super().screenshot(caminho)
+
+    _fonte_de_video(monkeypatch)
+    app = SemPrint()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.anexados == [PRODUTO_A]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_CRIADOR, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mesmo produto", "de fora - sem a foto da página"]
 
 
 def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypatch):

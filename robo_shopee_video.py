@@ -3706,11 +3706,13 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # principal: o produto do link (ou o da troca); produtos: os do rascunho de link de
     # produto na ordem do post, com o link de cada um. No Ver Produtos, os dois ficam None.
     principal = produtos = None
+    # No Ver Produtos, os de outra cor (nome, foto da página): a foto deles vai na miniatura.
+    variacoes = []
     if video.get("de_video"):
         celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
                f"confere cada um.\nVídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
-        nomes = _produtos_do_video(d, video, vistos, curtidos)
+        nomes = _produtos_do_video(d, video, vistos, curtidos, variacoes)
     else:
         nome = ps.nome_do_produto(video)
         if not nome:
@@ -3777,8 +3779,12 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
     # Com produtos a mais (o mesmo item de outras lojas), a miniatura troca entre as fotos de capa
-    # diferentes dos produtos do post (P103).
+    # diferentes dos produtos do post (P103). No Ver Produtos, entre a foto do 1º e as dos de outra
+    # cor (a foto da página de cada um): eles aparecem no vídeo. Pedido do Rafael (01/11):
+    # DECISOES.md, Shopee Vídeo.
     outras = [foto for foto in (foto_do_produto_do_post(video, p) for p in (produtos or [])[1:]) if foto]
+    if video.get("de_video"):
+        outras = [foto for nome, foto in variacoes if nome in nomes[1:]]
     figurinha = {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
                                   outras=outras, figurinha=figurinha)
@@ -4051,16 +4057,21 @@ def _esperar_a_pagina_do_produto(d, voltas=4, a_mais=False):
     return True
 
 
-def _produtos_do_video(d, video, vistos, curtidos=None):
+PROCESSO_DO_CRIADOR = "ver produtos: conferência pela foto"
+
+
+def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
     """
     Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos (pelo
     "Ver Produtos (N)" ou, com um produto só, pela barra dele), cada produto que o criador vinculou (nunca as recomendações de "Você Também Pode Gostar"):
-    lê o nome na página dele, a IA confere o vídeo com esse nome VEZES_DA_IA vezes, e o
-    confirmado é curtido. Devolve os nomes confirmados; nenhum ou vídeo removido: o vídeo
-    fica de lado. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    lê o nome na página dele, a IA compara a foto da página com o vídeo VEZES_DA_IA vezes, e o
+    confirmado é curtido. O mesmo modelo em outra cor ou estampa entra também, e variacoes
+    (lista) recebe (nome, foto) dele: a foto vai na miniatura que troca. Devolve os nomes
+    confirmados, os da mesma cor primeiro (o 1º dá a foto da edição); nenhum ou vídeo removido:
+    o vídeo fica de lado. Decisões do Rafael (23/10; 01/11, a outra cor): DECISOES.md, Shopee Vídeo.
     """
     quantos = _abrir_ver_produtos(d, video)
-    confirmados, de_ferias = [], 0
+    confirmados, de_ferias, de_outra_cor = [], 0, []
     for i in range(min(quantos, MAXIMO_PRODUTOS_DO_VIDEO)):
         xml = tela(d)
         pontos = ps.produtos_vinculados(xml)
@@ -4079,20 +4090,33 @@ def _produtos_do_video(d, video, vistos, curtidos=None):
                                          ok=None)
             de_ferias += 1
         elif nome and nome not in confirmados:
+            # A foto da página é o anúncio exato que a criadora vinculou: a IA vê o item e a cor,
+            # que o nome muitas vezes não diz. Sem ela, o produto fica de fora.
+            foto = ps.foto_da_pagina_do_produto(d, xml)
             deste = []
-            ok, _ = ps.ia_confere_produto(dict(video, produto=nome), deste, avisar=False)
+            ok, outra_cor, _ = ps.ia_confere_do_criador(video, nome, foto, deste) if foto else (False, False, "")
+            registro_processos.registrar(
+                REGISTRO, PROCESSO_DO_CRIADOR,
+                "de fora - sem a foto da página" if not foto else "de fora - outro produto" if not ok
+                else "outra cor - a foto vai na miniatura" if outra_cor else "mesmo produto",
+                ok=True if ok else None)
             if ok:
                 _conferir_curtida(ps.curtir_na_pagina(d, xml))
                 if curtidos is not None:
                     curtidos.append((i, nome))
                 confirmados.append(nome)
                 vistos.extend(deste)
+                if outra_cor:
+                    de_outra_cor.append(nome)
+                    if variacoes is not None:
+                        variacoes.append((nome, foto))
         d.press("back")
         pausa(4)
     if not confirmados:
         raise Parada(MOTIVO_DE_FERIAS if de_ferias else "a IA não confirmou nenhum produto do Ver Produtos",
                      do_video=True)
-    return confirmados
+    # Os da mesma cor do vídeo primeiro: o 1º anexado dá a foto do começo e da miniatura (P39).
+    return [n for n in confirmados if n not in de_outra_cor] + [n for n in confirmados if n in de_outra_cor]
 
 
 def _abrir_ver_produtos(d, video):
