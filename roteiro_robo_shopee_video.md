@@ -277,13 +277,16 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     cada um, como o do link: o Favoritar da página de afiliado não é usado) e anexados do que
     paga mais para o que paga menos. A tela final é conferida produto a produto, rolando a
     fileira devagar (uns 40% da largura por vez, sem embalo) até o fim e voltando ao começo.
-  - **Falta:** o "Ver Mais (N)" do Ver Produtos (P66), quando a fonte trouxer um vídeo com
-    ele, e os espaços livres dos vídeos de vários produtos (P57). Na gravação do Rafael de
-    01/11/2026 (Live e Vídeo → aba Vídeos), o vídeo de 2 produtos mostrava "Ver Produtos (2)"
-    na própria barra de baixo, junto do desconto; o toque nela abriu os cupons da loja, os 2
-    cartões e o "Você Também Pode Gostar" logo abaixo, sem o "Ver Mais": ele só aparece quando
-    o vídeo tem mais produtos do que a lista mostra de cara. Nas lives, a sacolinha com número
+  - **O "Ver Mais (N)" do Ver Produtos** (gravação do Rafael de 01/11/2026, num vídeo dele com
+    "Ver Produtos (6)"): a lista mostra 2 cartões de cara e, logo abaixo, "Ver Mais (N)" com os
+    outros N; o toque abre os outros na mesma lista (sem tela nova), e depois do último aparece
+    "Esconder", antes do "Você Também Pode Gostar". No vídeo da fonte explorado em 23/10/2026
+    também eram 2 cartões e o Ver Mais logo abaixo. Nas gravações dele de 01/11/2026 de vídeos
+    com 1 e 2 produtos (Live e Vídeo → aba Vídeos), o "Ver Produtos (N)" fica na própria barra
+    de baixo, junto do desconto, e a lista não tem o Ver Mais. Nas lives, a sacolinha com número
     e o cartão do alto são o carrinho da live, outra tela, que o robô não usa.
+  - **Falta:** pôr no robô o Ver Mais (P66: tocar nele e ler os cartões até o "Esconder",
+    rolando) e os espaços livres dos vídeos de vários produtos (P57), depois da medição de 05/11.
 
 ## Onde paramos
 
