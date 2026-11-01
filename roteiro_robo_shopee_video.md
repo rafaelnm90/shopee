@@ -407,6 +407,12 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      figurinha de novo antes do Postar (`capa_de_novo_no_post`, com a capa guardada no servidor).
      Na grade, o selo **Fixado** é laranja: a faixa conta só quando vai de um lado ao outro do
      quadro (`faixa_da_capa`).
+  10. **com a moldura laranja** (P115, 01/11/2026): a faixa e a borda de baixo da moldura formam
+     um retângulo laranja só (com a faixa, os cantos de baixo da moldura ficam retos), e as bordas
+     finas da moldura não contam como faixa (`ALTURA_MINIMA_DA_FAIXA`, 2% da altura da caixa; a
+     figurinha recém-posta fica em uns 3%). A faixa entra mais estreita que antes (na largura da
+     moldura): a receita guardada de antes não serve, e a primeira figurinha que der certo guarda a
+     nova.
 
   **Teste completo (18/10/2026)**, da tela final em diante:
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →

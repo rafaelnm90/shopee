@@ -207,6 +207,23 @@ FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da f
 MARGEM_DA_FAIXA = 12
 LETRAS_DA_CHAMADA = (72, 44)                    # a maior e a menor numa linha
 LETRAS_EM_DUAS_LINHAS = (56, 36)                # quando não cabe numa linha: a faixa cresce para cima
+# A moldura em volta da foto do começo do vídeo (que o app usa como capa na grade do perfil, com a
+# faixa da chamada ou sem ela) e da miniatura, com os cantos arredondados. Pedido do Rafael (vídeo
+# das 15:35 de 01/11), no jeito que ele escolheu (P115 e P117): DECISOES.md, Shopee Vídeo. As
+# camadas vão de fora para dentro, (cor, grossura em px na foto do começo); na miniatura, cada uma
+# tem a metade da grossura (ESCALA_NA_MINIATURA), dentro do lugar de sempre dela.
+CAMADAS_DA_MOLDURA = ((LARANJA_DA_SHOPEE, 14),)
+GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
+RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto, dentro da moldura
+ESCALA_NA_MINIATURA = 0.5
+# Com a moldura, a foto do começo fica menor que a capa sem ela: o app corta os lados do vídeo
+# aberto (VISIVEL_NO_APP), e a moldura fica inteira dentro do que ele mostra, com esta folga de
+# cada lado. A foto fica no meio da área da foto da capa (FOTO_DA_CAPA), no maior quadrado que cabe.
+FOLGA_DA_MOLDURA = 19
+LADO_DA_FOTO = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * (FOLGA_DA_MOLDURA + GROSSURA_DA_MOLDURA)
+MEIO_DA_FOTO = ((FOTO_DA_CAPA[0] + FOTO_DA_CAPA[2]) // 2, (FOTO_DA_CAPA[1] + FOTO_DA_CAPA[3]) // 2)
+FOTO_COM_MOLDURA = (MEIO_DA_FOTO[0] - LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] - LADO_DA_FOTO // 2,
+                    MEIO_DA_FOTO[0] + LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] + LADO_DA_FOTO // 2)
 
 
 def capa_ligada():
@@ -218,16 +235,15 @@ def capa_ligada():
 PENALIDADE_DA_QUEBRA = 8
 
 
-def _quebra_da_chamada(texto, desenho, fonte_ttf):
+def _quebra_da_chamada(texto, desenho, fonte_ttf, largura=LADO_DA_FOTO - 2 * MARGEM_DA_FAIXA):
     """
     (fonte, linhas) da chamada na faixa: numa linha só, na maior letra de LETRAS_DA_CHAMADA em
-    que ela cabe na largura que o app mostra do vídeo aberto (a faixa fina do exemplo que o
-    Rafael escolheu, P107); quando não cabe, em duas, na maior letra de LETRAS_EM_DUAS_LINHAS,
-    equilibradas e, se der, sem a 1ª terminar numa palavra de ligação. None quando não cabe
-    nem assim.
+    que ela cabe na largura da faixa (a da foto, dentro da moldura, com a margem: a faixa fina do
+    exemplo que o Rafael escolheu, P107); quando não cabe, em duas, na maior letra de
+    LETRAS_EM_DUAS_LINHAS, equilibradas e, se der, sem a 1ª terminar numa palavra de ligação. None
+    quando não cabe nem assim.
     """
     from PIL import ImageFont
-    largura = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * MARGEM_DA_FAIXA
     maior, menor = LETRAS_DA_CHAMADA
     for tamanho in range(maior, menor - 1, -2):
         fonte = ImageFont.truetype(fonte_ttf, tamanho)
@@ -251,25 +267,78 @@ def _quebra_da_chamada(texto, desenho, fonte_ttf):
     return (melhor[1], melhor[2]) if melhor else None
 
 
-def _foto_na_capa(foto):
+def com_moldura(imagem, escala=1.0, cantos_de_baixo=True):
     """
-    (a capa do PIL, 720x1280, cima, pe): a foto do anúncio (bytes) do tamanho da capa sem texto
-    (FOTO_DA_CAPA), no fundo preto, e onde ela começa e termina em y. None com a foto que não abre.
+    A imagem do PIL com a moldura em volta (CAMADAS_DA_MOLDURA, cada grossura vezes a escala) e
+    os cantos arredondados: RGBA, maior que ela duas vezes a grossura, transparente fora dos cantos.
+    Com cantos_de_baixo=False, os dois de baixo ficam retos: a faixa da chamada, no pé da foto,
+    vai de um lado ao outro da moldura como um retângulo, e a medida dela no print (faixa_laranja)
+    não depende do arredondado.
     """
+    from PIL import Image, ImageDraw
+    camadas = [(cor, max(1, round(grossura * escala))) for cor, grossura in CAMADAS_DA_MOLDURA]
+    total = sum(grossura for _cor, grossura in camadas)
+    raio = max(2, round(RAIO_DA_FOTO * escala))
+
+    def arredondado(desenho, caixa, raio_da_caixa, cor):
+        desenho.rounded_rectangle(caixa, raio_da_caixa, fill=cor)
+        if not cantos_de_baixo:
+            x1, y1, x2, y2 = caixa
+            desenho.rectangle((x1, max(y1, y2 - raio_da_caixa), x2, y2), fill=cor)
+
+    largura, altura = imagem.size
+    saida = Image.new("RGBA", (largura + 2 * total, altura + 2 * total), (0, 0, 0, 0))
+    desenho = ImageDraw.Draw(saida)
+    fora = total
+    for cor, grossura in camadas:
+        arredondado(desenho, (total - fora, total - fora, total + largura + fora - 1, total + altura + fora - 1),
+                    raio + fora, cor)
+        fora -= grossura
+    mascara = Image.new("L", imagem.size, 0)
+    arredondado(ImageDraw.Draw(mascara), (0, 0, largura - 1, altura - 1), raio, 255)
+    saida.paste(imagem.convert("RGB"), (total, total), mascara)
+    return saida
+
+
+def _foto_que_cabe(foto, lado):
+    """A foto (bytes) no PIL, em RGB, no maior tamanho que cabe num quadrado de lado px, sem esticar; None se não abre."""
     import io
 
     from PIL import Image
     try:
-        imagem = Image.open(io.BytesIO(foto)).convert("RGB")
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
     except Exception:
         return None
+    escala = min(lado / imagem.width, lado / imagem.height)
+    return imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
+
+
+def _capa_com_a_foto(imagem, cantos_de_baixo=True):
+    """A capa (PIL, 720x1280): a foto (PIL, do tamanho de LADO_DA_FOTO) com a moldura, no meio da área da foto da capa, no fundo preto."""
+    from PIL import Image
     capa = Image.new("RGB", TELA, "black")
-    x1, y1, x2, y2 = FOTO_DA_CAPA
-    escala = min((x2 - x1) / imagem.width, (y2 - y1) / imagem.height)
-    imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
-    cima = y1 + (y2 - y1 - imagem.height) // 2
-    capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, cima))
-    return capa, cima, cima + imagem.height
+    emoldurada = com_moldura(imagem, cantos_de_baixo=cantos_de_baixo)
+    capa.paste(emoldurada, (MEIO_DA_FOTO[0] - emoldurada.width // 2, MEIO_DA_FOTO[1] - emoldurada.height // 2),
+               emoldurada)
+    return capa
+
+
+def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA):
+    """
+    A foto (bytes) da miniatura com a moldura (ESCALA_NA_MINIATURA da grossura da foto do
+    começo), num quadrado de largura px com o fundo transparente (PNG, bytes): a moldura fica
+    dentro do lugar de sempre da miniatura. None com a foto que não abre.
+    """
+    from PIL import Image
+    escala = ESCALA_NA_MINIATURA * largura / LARGURA_DA_MINIATURA
+    total = sum(max(1, round(grossura * escala)) for _cor, grossura in CAMADAS_DA_MOLDURA)
+    imagem = _foto_que_cabe(foto, max(1, largura - 2 * total))
+    if not imagem:
+        return None
+    emoldurada = com_moldura(imagem, escala)
+    quadro = Image.new("RGBA", (largura, largura), (0, 0, 0, 0))
+    quadro.paste(emoldurada, ((largura - emoldurada.width) // 2, (largura - emoldurada.height) // 2), emoldurada)
+    return _png(quadro)
 
 
 def _png(imagem):
@@ -281,13 +350,13 @@ def _png(imagem):
 
 def capa_sem_chamada(foto):
     """
-    A abertura do vídeo quando a frase vai na capa pela figurinha (P110): a foto do anúncio
-    (bytes) no lugar e do tamanho da capa com chamada, sem a faixa (PNG, bytes, 720x1280). A
-    figurinha com o miolo da capa cai em cima da mesma foto; sem a figurinha, ela é a capa de
-    sempre. None com a foto que não abre.
+    A abertura do vídeo: a foto do anúncio (bytes) com a moldura, no lugar e do tamanho da capa
+    com chamada, sem a faixa (PNG, bytes, 720x1280). Quando a frase vai na capa pela figurinha
+    (P110), a figurinha com o miolo da capa cai em cima da mesma foto; sem a figurinha, ela é a
+    capa de sempre. None com a foto que não abre.
     """
-    montada = _foto_na_capa(foto)
-    return _png(montada[0]) if montada else None
+    imagem = _foto_que_cabe(foto, LADO_DA_FOTO)
+    return _png(_capa_com_a_foto(imagem)) if imagem else None
 
 
 def capa_com_chamada(foto, chamada):
@@ -302,15 +371,15 @@ def capa_com_chamada(foto, chamada):
     chamada = " ".join((chamada or "").split())
     if not chamada:
         return None
-    montada = _foto_na_capa(foto)
-    if not montada:
+    imagem = _foto_que_cabe(foto, LADO_DA_FOTO)
+    if not imagem:
         return None
-    capa, _cima, pe = montada
-    largura, _altura = TELA
+    largura, pe = imagem.size
 
-    desenho = ImageDraw.Draw(capa)
+    # A faixa vai no pé da foto, antes da moldura: os cantos de baixo dela ficam arredondados como os da foto.
+    desenho = ImageDraw.Draw(imagem)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-    quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf)
+    quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf, largura - 2 * MARGEM_DA_FAIXA)
     if not quebra:
         return None
     fonte, linhas = quebra
@@ -318,11 +387,10 @@ def capa_com_chamada(foto, chamada):
     alto = max(FAIXA_DA_CHAMADA, altura_da_linha * len(linhas) + 2 * FOLGA_DA_FAIXA)
     desenho.rectangle((0, pe - alto, largura - 1, pe - 1), fill=LARANJA_DA_SHOPEE)
     meio = pe - alto / 2
-    centro = sum(VISIVEL_NO_APP) / 2
     for i, linha in enumerate(linhas):
-        desenho.text((centro, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
+        desenho.text((largura / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
                      fill="white", anchor="mm")
-    return _png(capa)
+    return _png(_capa_com_a_foto(imagem, cantos_de_baixo=False))
 
 
 # A faixa laranja da capa com chamada num print (a tela da capa do app, o quadro da grade do
@@ -345,6 +413,10 @@ LARANJA_COM_LETRAS = 0.1
 LARGURA_MINIMA_DA_FAIXA = 0.15
 PONTAS_DA_FAIXA = 4                             # em px: quanto as pontas variam de uma linha para a outra
 LINHAS_CHEIAS_DA_FAIXA = 2
+# A borda de cima e a de baixo da moldura laranja (P115) também são linhas laranja cheias, mas
+# finas: a faixa da chamada tem pelo menos esta fração da altura da caixa (a figurinha recém-posta
+# na tela da capa, a menor, fica em uns 3%; a borda da moldura, em uns 1%).
+ALTURA_MINIMA_DA_FAIXA = 0.02
 BRANCO_DAS_LETRAS = (255, 255, 255)
 
 
@@ -403,7 +475,8 @@ def faixa_laranja(imagem, caixa=None):
                  if faixa else None)
     if atual is not None:
         blocos.append(atual)
-    blocos = [b for b in blocos if b["cheias"] >= LINHAS_CHEIAS_DA_FAIXA]
+    blocos = [b for b in blocos if b["cheias"] >= LINHAS_CHEIAS_DA_FAIXA
+              and b["baixo"] - b["cima"] >= ALTURA_MINIMA_DA_FAIXA * laranja.shape[0]]
     if not blocos:
         return None
     melhor = max(blocos, key=lambda b: b["baixo"] - b["cima"])
@@ -459,7 +532,14 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
         capa = capa_com_avisos(foto)
         if not capa:
             return "a capa com os avisos da bebida alcoólica não saiu"
+    # A foto do começo e a miniatura vão com a moldura (P115): a foto que não abre segue como
+    # veio, e o ffmpeg diz o motivo.
+    if not capa:
+        capa = capa_sem_chamada(foto)
     largura = largura_da_miniatura(miniatura)
+    if largura:
+        foto = miniatura_com_moldura(foto, largura) or foto
+        outras_fotos = [miniatura_com_moldura(outra, largura) or outra for outra in outras_fotos]
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
                                        SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica,
                                        outras=outras_fotos)

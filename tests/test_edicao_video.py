@@ -143,7 +143,9 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
             tela = imagem.convert("RGB")
         assert tela.size == (720, 1280)
         cx, cy = edicao_video.CENTRO_DA_SETA
-        recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
+        # Na foto do começo, só o pedaço dentro da moldura (P115): fora dela, o fundo é preto.
+        de = edicao_video.FOTO_COM_MOLDURA[0] + 4 if segundo < edicao_video.SEGUNDOS_DA_FOTO else cx - 90
+        recorte = [tela.getpixel((x, y)) for x in range(de, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
         vermelhos = [p for p in recorte if p[0] > 150 and p[1] < 70 and p[2] < 70]
         escuros = [p for p in recorte if max(p) < 90]
         return len(vermelhos) / len(recorte), escuros
@@ -218,9 +220,10 @@ def test_capa_da_bebida_alcoolica_tem_a_foto_e_os_tres_avisos(monkeypatch, tmp_p
     ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
     assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
     comandos.clear()
+    # Sem os avisos, a abertura é a foto com a moldura (P115), também uma imagem montada.
     assert edicao_video.editar(str(tmp_path / "v.mp4"), _foto_jpg(), str(destino)) == ""
     ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
-    assert ffmpeg[ffmpeg.index("-i") + 1].endswith("foto.jpg")
+    assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
 
 
 def test_edicao_de_verdade_da_bebida_alcoolica_abre_com_os_avisos(tmp_path):
@@ -1256,35 +1259,62 @@ def _pretos(imagem, caixa, passo=4):
     return all(max(imagem.getpixel((x, y))) < 20 for x in range(x1, x2, passo) for y in range(y1, y2, passo))
 
 
-def test_capa_com_chamada_tem_a_foto_inteira_e_a_frase_numa_faixa_laranja():
-    # Escolha do Rafael (P107): a foto do mesmo tamanho da capa sem texto e a frase em letras
-    # brancas numa faixa laranja por cima do pé da foto, logo acima do número de visualizações.
+def test_capa_com_chamada_tem_a_foto_com_a_moldura_e_a_frase_numa_faixa_laranja():
+    # Escolha do Rafael (P107): a frase em letras brancas numa faixa laranja por cima do pé da
+    # foto, logo acima do número de visualizações. Com a moldura (P115), a foto fica um pouco
+    # menor, e a moldura laranja fica inteira dentro do que o app mostra do vídeo aberto.
     capa = _capa("Organize sua cozinha")
     assert capa.size == edicao_video.TELA
-    # A foto quadrada ocupa a largura toda, de y 280 a 1000, como no começo do vídeo sem a chamada.
-    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
-    assert (x2 - x1, y2 - y1) == (720, 720) and (y1 + y2) // 2 == edicao_video.TELA[1] // 2
-    for ponto in [(2, y1 + 2), (717, y1 + 2), (360, (y1 + y2) // 2), (2, 850), (717, 850)]:
-        assert _cor_de(capa, ponto, (200, 120, 40))
-    assert _pretos(capa, (0, 0, 720, y1)) and _pretos(capa, (0, y2, 720, 1280))
+    x1, y1, x2, y2 = edicao_video.FOTO_COM_MOLDURA
+    grossura = edicao_video.GROSSURA_DA_MOLDURA
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    assert esquerda < x1 - grossura and x2 + grossura < direita and (y1 + y2) // 2 == edicao_video.TELA[1] // 2
+    # A foto no meio, a moldura laranja em volta e o preto fora dela.
+    for ponto in [(x1 + 40, y1 + 40), (x2 - 40, y1 + 40), (360, (y1 + y2) // 2)]:
+        assert _cor_de(capa, ponto, (200, 120, 40)), ponto
+    for ponto in [(360, y1 - grossura // 2), (x1 - grossura // 2, (y1 + y2) // 2), (x2 + grossura // 2, (y1 + y2) // 2)]:
+        assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
+    assert _pretos(capa, (0, 0, 720, y1 - grossura)) and _pretos(capa, (0, y2 + grossura, 720, 1280))
+    assert _pretos(capa, (0, y1, x1 - grossura, y2)) and _pretos(capa, (x2 + grossura, y1, 720, y2))
     # A faixa laranja no pé da foto, de um lado ao outro, com as letras brancas só dentro dela.
-    faixa = (0, y2 - edicao_video.FAIXA_DA_CHAMADA, 720, y2)
-    assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE) for x in (3, 716) for y in (faixa[1] + 2, y2 - 2))
+    faixa = (x1, y2 - edicao_video.FAIXA_DA_CHAMADA, x2, y2)
+    assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE)
+               for x in (x1 + 3, x2 - 4) for y in (faixa[1] + 2, y2 - 2))
     assert _cor_de(capa, (360, faixa[1] - 3), (200, 120, 40))
     assert _claros(capa, faixa) > 50
     assert _claros(capa, (0, 0, 720, faixa[1])) == 0 and _claros(capa, (0, y2, 720, 1280)) == 0
+    # Com a faixa, os cantos de baixo da moldura ficam retos: a faixa é um retângulo.
+    assert _cor_de(capa, (x1 - grossura + 1, y2 + grossura - 2), edicao_video.LARANJA_DA_SHOPEE)
     # Pedido do Rafael: os números da grade ficam livres. O número de visualizações e a sacolinha
     # da Shopee ficam no preto, e tudo cabe no que a grade mostra da capa.
     assert _pretos(capa, edicao_video.NUMERO_DA_GRADE) and _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
     cima, baixo = edicao_video.VISIVEL_NA_GRADE
-    assert cima <= y1 and y2 <= edicao_video.NUMERO_DA_GRADE[1] < baixo
+    assert cima <= y1 - grossura and y2 + grossura <= edicao_video.NUMERO_DA_GRADE[1] < baixo
+
+
+def test_capa_sem_chamada_tem_a_moldura_com_os_cantos_arredondados():
+    # A foto do começo do vídeo, sem a frase (P115): a moldura laranja em volta, os quatro cantos
+    # arredondados, e nenhuma faixa (a borda fina da moldura não conta como faixa).
+    import io
+
+    from PIL import Image
+    capa = Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg()))).convert("RGB")
+    x1, y1, x2, y2 = edicao_video.FOTO_COM_MOLDURA
+    grossura = edicao_video.GROSSURA_DA_MOLDURA
+    for ponto in [(360, y1 - grossura // 2), (360, y2 + grossura // 2)]:
+        assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
+    for canto in [(x1 - grossura + 1, y1 - grossura + 1), (x2 + grossura - 2, y2 + grossura - 2)]:
+        assert max(capa.getpixel(canto)) < 20, canto
+    assert _cor_de(capa, (360, y2 - 3), (200, 120, 40))
+    assert edicao_video.faixa_laranja(capa) is None
 
 
 def test_frase_da_capa_fica_dentro_do_que_o_app_mostra_do_video_aberto():
     # Vídeo do Rafael (31/10, 08:38): com o vídeo aberto, o app corta os lados do quadro, e o
     # "C" e o "l" de "Caimento impecável" ficavam cortados nas pontas da faixa.
-    _, _, _, y2 = edicao_video.FOTO_DA_CAPA
-    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    # Com a moldura (P115), a frase fica dentro da foto, que fica dentro do que o app mostra.
+    esquerda, _, direita, y2 = edicao_video.FOTO_COM_MOLDURA
+    assert edicao_video.VISIVEL_NO_APP[0] < esquerda and direita < edicao_video.VISIVEL_NO_APP[1]
     folga = edicao_video.MARGEM_DA_FAIXA // 2
     for frase in ("Caimento impecável", "Organize sua cozinha", "Acaba com a bagunça da cozinha"):
         capa = _capa(frase)
@@ -1308,7 +1338,7 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     for curta in ("Organize sua cozinha", "Mochila impermeável", "Limpeza sem esforço", "Gelado o dia todo"):
         assert len(curta) <= edicao_video.MAXIMO_DA_CAPA
         fonte, linhas = edicao_video._quebra_da_chamada(curta, desenho, fonte_ttf)
-        assert linhas == [curta] and fonte.size >= 50
+        assert linhas == [curta] and fonte.size >= edicao_video.LETRAS_DA_CHAMADA[1]
     # A vantagem comprida (a IA não escreveu a curta) vai em duas linhas equilibradas, sem a 1ª
     # terminar numa palavra de ligação, e a faixa cresce para cima, sem passar do pé da foto.
     assert edicao_video._quebra_da_chamada("Acaba com a bagunça da cozinha", desenho, fonte_ttf)[1] == [
@@ -1317,9 +1347,10 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     fonte, linhas = edicao_video._quebra_da_chamada(longa, desenho, fonte_ttf)
     assert len(linhas) == 2 and fonte.size >= edicao_video.LETRAS_EM_DUAS_LINHAS[1]
     capa = _capa(longa)
-    _, _, _, y2 = edicao_video.FOTO_DA_CAPA
-    assert _cor_de(capa, (3, y2 - edicao_video.FAIXA_DA_CHAMADA - 10), edicao_video.LARANJA_DA_SHOPEE)
-    assert _cor_de(capa, (3, y2 - 2), edicao_video.LARANJA_DA_SHOPEE) and _pretos(capa, (0, y2, 720, 1280))
+    x1, _, _, y2 = edicao_video.FOTO_COM_MOLDURA
+    assert _cor_de(capa, (x1 + 3, y2 - edicao_video.FAIXA_DA_CHAMADA - 3), edicao_video.LARANJA_DA_SHOPEE)
+    assert _cor_de(capa, (x1 + 3, y2 - 2), edicao_video.LARANJA_DA_SHOPEE)
+    assert _pretos(capa, (0, y2 + edicao_video.GROSSURA_DA_MOLDURA, 720, 1280))
     assert _pretos(capa, edicao_video.NUMERO_DA_GRADE)
     # Sem a frase ou com a foto que não abre, não há capa com chamada (vai a capa de sempre).
     assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
@@ -1344,9 +1375,10 @@ def test_miolo_da_capa_para_a_figurinha_tem_a_foto_e_a_faixa_inteiras_em_2_por_3
     cima, baixo = edicao_video.RECORTE_DA_FIGURINHA
     assert list(miolo.getdata()) == list(capa.crop((0, cima, 720, baixo)).getdata())
     # A foto e a faixa laranja ficam inteiras no miolo; fora dele, a capa só tem preto.
-    _, y1, _, y2 = edicao_video.FOTO_DA_CAPA
-    assert cima < y1 and y2 < baixo
-    assert _cor_de(miolo, (3, y2 - cima - 2), edicao_video.LARANJA_DA_SHOPEE)
+    x1, y1, _, y2 = edicao_video.FOTO_COM_MOLDURA
+    grossura = edicao_video.GROSSURA_DA_MOLDURA
+    assert cima < y1 - grossura and y2 + grossura < baixo
+    assert _cor_de(miolo, (x1 + 3, y2 - cima - 2), edicao_video.LARANJA_DA_SHOPEE)
     assert _pretos(capa, (0, 0, 720, cima)) and _pretos(capa, (0, baixo, 720, 1280))
 
 
@@ -1436,15 +1468,18 @@ def test_faixa_laranja_acha_a_faixa_da_capa_no_print_e_nao_acha_sem_ela():
     from PIL import Image
     capa = _capa("Organize sua cozinha")
     cima, baixo, esquerda, direita = edicao_video.faixa_laranja(capa)
-    assert (esquerda, direita) == (0, 720) and baixo == edicao_video.FOTO_DA_CAPA[3]
-    assert baixo - cima == edicao_video.FAIXA_DA_CHAMADA
+    x1, _, x2, y2 = edicao_video.FOTO_COM_MOLDURA
+    grossura = edicao_video.GROSSURA_DA_MOLDURA
+    # Com a moldura (P115), a faixa e a borda de baixo dela formam um retângulo laranja só.
+    assert (esquerda, direita) == (x1 - grossura, x2 + grossura) and baixo == y2 + grossura
+    assert baixo - cima == edicao_video.FAIXA_DA_CHAMADA + grossura
     tela = Image.new("RGB", (1080, 2400), (30, 30, 30))
     escala = 957 / 720
     tela.paste(capa.resize((957, round(1280 * escala))), (61, 267))
     medida = edicao_video.faixa_laranja(tela, (61, 267, 1018, 1969))
     assert medida is not None
     assert abs(medida[0] - (267 + cima * escala)) <= 2 and abs(medida[1] - (267 + baixo * escala)) <= 2
-    assert abs(medida[2] - 61) <= 2 and abs(medida[3] - 1018) <= 2
+    assert abs(medida[2] - (61 + esquerda * escala)) <= 2 and abs(medida[3] - (61 + direita * escala)) <= 2
     # A foto sem a faixa (a capa de sempre) não tem faixa nenhuma.
     assert edicao_video.faixa_laranja(Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg())))) is None
 
@@ -1578,6 +1613,41 @@ def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):
             for ponto, azul in zip((edicao_video.CENTRO_DA_MINIATURA, dentro_do_canto, ponta_de_baixo), azuis):
                 r, g, b = imagem.convert("RGB").getpixel(ponto)
                 assert (b > r + 60) == azul, (miniatura, ponto)
+
+
+def test_miniatura_e_foto_do_comeco_vao_com_a_moldura(monkeypatch, tmp_path):
+    # Pedido do Rafael (vídeo das 15:35 de 01/11, P115): a moldura laranja com os cantos
+    # arredondados em volta da miniatura, dentro do lugar de sempre dela, e da foto do começo.
+    import io
+
+    from PIL import Image
+    pedidos = []
+
+    def com_foto_e_miniatura(video, foto, destino, segundos, largura, centro, *args, outras=()):
+        pedidos.append((foto, largura, centro, args[4], list(outras)))
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura", com_foto_e_miniatura)
+    destino = str(tmp_path / "r.mp4")
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, outras_fotos=[_foto_jpg()]) == ""
+    foto, largura, centro, capa, outras = pedidos[-1]
+    assert (largura, centro) == (edicao_video.LARGURA_DA_MINIATURA, edicao_video.CENTRO_DA_MINIATURA)
+    for miniatura in [foto] + outras:
+        imagem = Image.open(io.BytesIO(miniatura))
+        assert imagem.mode == "RGBA" and imagem.size == (largura, largura)
+        # Os cantos transparentes, a moldura laranja na borda e a foto no meio.
+        assert imagem.getpixel((0, 0))[3] == 0 and imagem.getpixel((largura - 1, largura - 1))[3] == 0
+        assert _cor_de(imagem.convert("RGB"), (largura // 2, 2), edicao_video.LARANJA_DA_SHOPEE)
+        assert _cor_de(imagem.convert("RGB"), (largura // 2, largura // 2), (200, 120, 40))
+    # A foto do começo é a capa sem a frase, com a moldura.
+    assert capa == edicao_video.capa_sem_chamada(_foto_jpg())
+    # A miniatura menor (P97) leva a moldura do tamanho dela; sem a miniatura (P81), a foto vai
+    # como veio; a foto que não abre também (o ffmpeg diz o motivo).
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, miniatura=120) == ""
+    assert Image.open(io.BytesIO(pedidos[-1][0])).size == (120, 120)
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, miniatura=False) == ""
+    assert pedidos[-1][0] == _foto_jpg()
+    assert edicao_video.editar("v.mp4", b"nao abre", destino) == ""
+    assert pedidos[-1][0] == b"nao abre" and pedidos[-1][3] is None
 
 
 def test_fotos_que_cabem_com_pelo_menos_3_segundos_cada():
