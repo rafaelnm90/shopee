@@ -549,7 +549,7 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True):
+                           lugar=None, miniatura=True, legendas=()):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -1887,3 +1887,148 @@ def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
     assert edicao_video.miniatura_no_video({"canto_ocupado": True}) == 0
     assert edicao_video.miniatura_no_video({"canto_ocupado": False}) == edicao_video.LARGURA_DA_MINIATURA
     assert edicao_video.miniatura_no_video({}) == edicao_video.LARGURA_DA_MINIATURA
+
+
+# --- As legendas da fala (escolha do Rafael, 01/11, P118) ---
+
+def _medidas(imagem):
+    """(largura, altura) do PNG pelo cabeçalho."""
+    return int.from_bytes(imagem[16:20], "big"), int.from_bytes(imagem[20:24], "big")
+
+
+def test_a_seta_tem_o_tamanho_que_a_legenda_usa():
+    from PIL import Image
+    with Image.open(edicao_video.SETA) as seta:
+        assert seta.size == edicao_video.TAMANHO_DA_SETA
+
+
+def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela():
+    # O pé da legenda na altura do pé da seta (logo abaixo vem o cartão do produto), em letra
+    # pequena, sem cobrir a seta e dentro do que o app mostra.
+    letreiros = edicao_video.letreiros_da_fala([(1.0, 3.0, "Olha que lindo esse vestido")], 10.0)
+    assert len(letreiros) == 1
+    imagem, inicio, fim, x, y = letreiros[0]
+    largura, altura = _medidas(imagem)
+    pe_da_seta = edicao_video.CENTRO_DA_SETA[1] + edicao_video.TAMANHO_DA_SETA[1] // 2
+    direita_da_seta = edicao_video.CENTRO_DA_SETA[0] + edicao_video.TAMANHO_DA_SETA[0] // 2
+    assert (inicio, fim) == (1.0, 3.0) and y + altura == edicao_video.PE_DA_LEGENDA == pe_da_seta
+    assert edicao_video.PE_DA_LEGENDA <= edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
+    assert x > direita_da_seta and x + largura <= edicao_video.VISIVEL_NO_APP[1]
+    # Uma linha, em letra pequena (bem menor que a dos textos da tela).
+    assert altura < edicao_video.LETRA_DOS_TEXTOS[0] * 2
+
+
+def test_trecho_que_nao_cabe_em_duas_linhas_e_dividido_com_o_tempo_repartido():
+    texto = ("Esse aqui é o melhor organizador que eu já comprei na Shopee, cabe tudo dentro e ainda "
+             "fica bonito na bancada da cozinha")
+    letreiros = edicao_video.letreiros_da_fala([(2.0, 8.0, texto)], 20.0)
+    assert len(letreiros) >= 2
+    assert letreiros[0][1] == 2.0 and letreiros[-1][2] == 8.0
+    for (_, _, fim, _, _), (_, inicio, _, _, _) in zip(letreiros, letreiros[1:]):
+        assert fim == inicio
+    for imagem, _, _, x, y in letreiros:
+        largura, altura = _medidas(imagem)
+        assert y + altura == edicao_video.PE_DA_LEGENDA and x + largura <= edicao_video.DIREITA_DA_LEGENDA
+
+
+def test_legendas_que_se_encostam_cortam_e_a_curta_demais_sai():
+    letreiros = edicao_video.letreiros_da_fala(
+        [(0.0, 3.0, "Primeira fala"), (2.5, 2.7, "rápida"), (2.7, 6.0, "Segunda fala"), (9.5, 14.0, "Fim")], 11.0)
+    # A primeira acaba quando a seguinte começa; a de 0,2 s sai; a última fica dentro do vídeo.
+    assert [(inicio, fim) for _, inicio, fim, _, _ in letreiros] == [(0.0, 2.5), (2.7, 6.0), (9.5, 11.0)]
+
+
+def test_a_resposta_da_ia_vira_as_legendas_so_com_os_trechos_certos():
+    textos = edicao_video._nome_lugar_e_falas({
+        "legendas": [{"inicio": 3, "fim": 4.5, "texto": "e não amassa"},
+                     {"inicio": 0.5, "fim": 2, "texto": "Olha só esse vestido 😍"},
+                     {"inicio": 5, "fim": 4, "texto": "ao contrário"},
+                     {"inicio": "x", "fim": 6, "texto": "sem número"},
+                     {"inicio": 6, "fim": 7, "texto": "Straße"}, "quebrado"],
+        "legenda_no_video": False})
+    assert textos["legendas"] == [(0.5, 2.0, "Olha só esse vestido"), (3.0, 4.5, "e não amassa")]
+    assert textos["legenda_no_video"] is False
+    assert "legendas" not in edicao_video._nome_lugar_e_falas({"legendas": "nenhuma"})
+
+
+def test_sem_fala_ou_com_a_fala_ja_escrita_o_video_vai_sem_as_legendas():
+    fala = [(0.5, 2.0, "Olha só esse vestido")]
+    assert edicao_video.legendas_da_fala({"legendas": fala}) == (fala, "")
+    assert edicao_video.legendas_da_fala({"legendas": []}) == ([], edicao_video.SEM_FALA)
+    assert edicao_video.legendas_da_fala({"legendas": fala, "legenda_no_video": True}) == (
+        [], edicao_video.LEGENDA_JA_NO_VIDEO)
+    assert edicao_video.legendas_da_fala({}) == ([], edicao_video.SEM_AS_LEGENDAS_DA_IA)
+
+
+def test_os_dois_pedidos_a_ia_trazem_as_legendas_da_fala(monkeypatch):
+    import api_gemini
+    pedidos = []
+
+    async def analisar(video, prompt, imagens=None):
+        pedidos.append(prompt)
+        return ('{"nome": "Vestido", "vantagem": "Tecido leve", "lugar": "alto", "legenda_no_video": false, '
+                '"legendas": [{"inicio": 0.5, "fim": 2.0, "texto": "Olha só esse vestido"}]}')
+
+    async def sem_revisao(prompt, imagens=None):
+        return None
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", sem_revisao)
+    textos = edicao_video.textos_da_tela("v.mp4", "Vestido Marca X")
+    assert textos["legendas"] == [(0.5, 2.0, "Olha só esse vestido")] and textos["legenda_no_video"] is False
+    assert edicao_video.textos_das_versoes("v.mp4", "Vestido Marca X")["legendas"] == textos["legendas"]
+    # Só a voz de gente falando em português: sem fala, música, canto ou outra língua, nenhuma.
+    for pedido in pedidos:
+        assert '"legendas"' in pedido and '"legenda_no_video"' in pedido and "não música nem canto" in pedido
+
+
+def test_o_que_vai_ao_ar_leva_as_legendas_da_fala_e_o_registro_conta(monkeypatch, tmp_path):
+    import registro_processos as rp
+    montados, editados = _versoes_de_mentira(monkeypatch)
+    fala = [(0.5, 2.0, "Olha só esse vestido"), (3.0, 4.5, "o tecido é bem leve")]
+    _textos_da_tela(monkeypatch, {"nome": "Vestido", "vantagem": "Tecido leve", "chamada": "Toque aqui embaixo",
+                                  "lugar": "alto", "legendas": fala, "legenda_no_video": False})
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vestido") == (
+        "", edicao_video.COM_LEGENDAS + edicao_video.COM_AS_LEGENDAS_DA_FALA, "")
+    # Os 3 textos da tela e as 2 legendas por cima do vídeo inteiro, e depois o Editor 1.
+    assert montados == [([(0.0, 12.0, 1.0)], 5)] and editados[-1][1] == "rascunho.mp4"
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("postas", "2 trecho(s)")]
+
+    # Sem lugar para os textos (P47), as legendas da fala vão do mesmo jeito.
+    montados.clear()
+    _textos_da_tela(monkeypatch, {"nome": "Vestido", "lugar": edicao_video.SEM_LUGAR, "legendas": fala})
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vestido")[1] == (
+        edicao_video.SEM_LEGENDAS_NA_TELA + edicao_video.COM_AS_LEGENDAS_DA_FALA)
+    assert montados == [([(0.0, 12.0, 1.0)], 2)]
+
+    # O vídeo que já tem a fala escrita na tela vai sem elas, e o registro diz por quê.
+    montados.clear()
+    _textos_da_tela(monkeypatch, {"nome": "Vestido", "lugar": edicao_video.SEM_LUGAR, "legendas": fala,
+                                  "legenda_no_video": True})
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vestido")[1] == edicao_video.SEM_LEGENDAS_NA_TELA
+    assert montados == []
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
+    assert (registro[-1][2], registro[-1][3]) == ("sem as legendas", edicao_video.LEGENDA_JA_NO_VIDEO)
+
+
+def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeypatch, tmp_path):
+    video = str(tmp_path / "v1.mp4")
+    open(video, "wb").close()
+    _fontes_de_mentira(monkeypatch, {"viral": [("viral:1", video, "https://s.shopee.com.br/1", "")]},
+                       fonte_do_robo="viral")
+    monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Vestido Marca X", "preco": 59.9})
+    fala = [(0.5, 2.0, "Olha só esse vestido")]
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+        "nome": "Vestido", "vantagem": "Tecido leve", "lugar": "alto", "legendas": fala, "falas": [[0.5, 2.0]]})
+    recebidas = []
+
+    def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
+                           lugar=None, miniatura=True, legendas=()):
+        recebidas.append(list(legendas))
+        return "", {"versoes": []}
+
+    monkeypatch.setattr(edicao_video, "editar_2_e_versoes", editar_2_e_versoes)
+    edicao_video.exemplo_editor_2("exemplo.mp4")
+    assert recebidas == [fala]
