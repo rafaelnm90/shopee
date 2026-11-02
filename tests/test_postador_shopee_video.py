@@ -2280,7 +2280,7 @@ def test_foto_capa_poe_na_galeria_a_capa_com_a_frase_da_ia(monkeypatch):
     assert pedidos == [("teste.mp4", "Produto")] and na_galeria == [b"miolo:\x89PNG" + "Leve e prático".encode()]
     monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {})
     assert ps.fazer_passo(Aparelho(), "foto", "capa") == (
-        False, "a IA não escreveu a frase da capa nem a vantagem do produto")
+        False, "a IA não escreveu a frase da capa, o nome nem a vantagem do produto")
     monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {})
     assert not ps.fazer_passo(Aparelho(), "foto", "capa")[0]
     assert len(na_galeria) == 1
