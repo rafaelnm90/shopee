@@ -388,6 +388,7 @@ SEM_META = {
     ("shopee_video", "outra cor: "), ("shopee_video", "tirar produto no post"),
     ("shopee_video", "preparar 1 agora"), ("shopee_video", "celular: motivo da queda"),
     ("shopee_video", "horários perdidos na volta"), ("shopee_video", "celular no fim da rodada"),
+    ("shopee_video", "horário sem rascunho"),
 }
 
 
