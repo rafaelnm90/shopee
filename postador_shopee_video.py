@@ -1408,6 +1408,10 @@ def descurtir(d, video):
     """
     ok, resultado, tela = abrir_pagina_completa(d, video)
     if not ok:
+        # O que não descurtiu fica no registro, como o resto do descurtir (vídeo do Rafael das 20:17
+        # de 02/11: 3 curtidas tinham ficado para trás, sem rastro).
+        registro_processos.registrar("shopee_video", "descurtir no fim do rascunho", "a página do produto não abriu",
+                                     ok=False)
         return False, resultado
     return descurtir_na_pagina(d, tela)
 
@@ -1416,6 +1420,8 @@ def descurtir_na_pagina(d, tela):
     """Descurte o produto da página que está aberta (2 toques no máximo, conferindo cada um)."""
     lista = elementos(tela)
     if not tem_coracao(lista):
+        registro_processos.registrar("shopee_video", "descurtir no fim do rascunho", "o coração não está na página",
+                                     ok=False)
         return False, "o coração não está na página do produto: nada descurtido"
     if not curtido(lista):
         return True, "o produto já não estava curtido"

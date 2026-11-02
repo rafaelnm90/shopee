@@ -317,6 +317,18 @@ def test_curtido_que_nao_descurte_segue_e_o_que_nao_volta_a_curtir_para(monkeypa
     assert len(aparelho.toques) == 4 and aparelho.completa == TELA_PRODUTO
 
 
+def test_descurtir_que_nao_acha_a_pagina_ou_o_coracao_fica_no_registro(monkeypatch):
+    # Vídeo do Rafael das 20:17 de 02/11: curtidas ficaram para trás no fim do rascunho sem rastro
+    # no registro (a página do produto que não abriu, a página sem o coração).
+    import registro_processos as rp
+    monkeypatch.setattr(ps, "abrir_pagina_completa", lambda d, video: (False, "a página não abriu", None))
+    assert ps.descurtir(Aparelho(tela=TELA_PRODUTO), {"link": "x"}) == (False, "a página não abriu")
+    sem_coracao = '<?xml version="1.0"?><hierarchy rotation="0"></hierarchy>'
+    assert not ps.descurtir_na_pagina(Aparelho(tela=sem_coracao), sem_coracao)[0]
+    linhas = {(l[2], l[3]) for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "descurtir no fim do rascunho"}
+    assert linhas == {("a página do produto não abriu", ""), ("o coração não está na página", "")}
+
+
 def test_curtir_deixa_no_registro_se_o_produto_ja_estava_curtido():
     # O checkup liga o curtir ao "nome não achado" do anexar.
     import registro_processos as rp
