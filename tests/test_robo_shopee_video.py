@@ -4232,8 +4232,9 @@ def busca_pela_foto(monkeypatch):
             raise estado["cartoes"]
         return estado["cartoes"], estado["motivo"]
 
-    def iguais(video, nome, anuncios, capa=None, recusas=None):
+    def iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None):
         estado["fotos_da_ia"] = [n for n, _ in anuncios]
+        estado["precos"], estado["preco_do_post"] = list(precos), preco_do_post
         estado["capa"] = capa
         if recusas is not None and "recusas" in estado:
             recusas.update(estado["recusas"])
@@ -4273,6 +4274,9 @@ def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_qu
     # A IA vê os 3 de uma vez, do que paga mais (R$ 6,24) para o que paga menos (R$ 4,40).
     assert busca_pela_foto["fotos_da_ia"] == ["Garrafa Térmica Inox Loja 1", "Garrafa Térmica Inox Loja 2",
                                               "Garrafa Térmica Inox Loja 3"]
+    # O preço de cada um e o do post vão junto à IA: a imitação com a foto da marca costuma
+    # custar muito menos (rascunho de 02/11 recusado pelo Rafael).
+    assert busca_pela_foto["precos"] == [52.0, 50.0, 55.0] and busca_pela_foto["preco_do_post"] == 50.0
     assert [p["link"] for p in mais] == ["https://s.shopee.com.br/curto1", "https://s.shopee.com.br/curto3"]
     assert mais[0]["endereco"] == "https://shopee.com.br/product/9/1" and not mais[0].get("do_video")
     # A busca parte da foto de capa do anúncio do post, e a IA confere cada um com ela (P74);

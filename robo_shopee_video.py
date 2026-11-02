@@ -2973,8 +2973,12 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
             anotar("nenhum - sem tempo na rodada", contagem)
             return []
         recusas = {}
+        # O preço vai junto ao nome de cada foto: a imitação com a foto da marca costuma custar
+        # muito menos que o produto do post (ps.IMITACAO).
         posicoes, motivo_da_ia = ps.ia_confere_iguais(video, principal["nome"],
-                                                      [(c["nome"], f) for c, f in fotos], capa=capa, recusas=recusas)
+                                                      [(c["nome"], f) for c, f in fotos], capa=capa, recusas=recusas,
+                                                      precos=[c.get("preco") for c, _f in fotos],
+                                                      preco_do_post=original.get("preco"))
         marcar("IA")
         # A foto de cada um vai junto: o álbum das capas do rascunho (P75).
         confirmados = [dict(fotos[i][0], foto=fotos[i][1]) for i in posicoes][:ESPACOS_DO_VIDEO - 1]
