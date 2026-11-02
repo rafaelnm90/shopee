@@ -172,6 +172,32 @@ def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatc
     assert "o Motorola desconectou" in sv.texto_robo(sv.ler_config())
 
 
+def test_limpeza_das_4h_com_o_robo_pausado_fica_no_registro(bm, monkeypatch, relogio):
+    # Checkup de 01/11: "descurtir tudo (4h): 0 de 1", sem dizer que o celular estava fora desde
+    # 22:05 da véspera (o robô pausado sozinho nem roda). O registro guarda o porquê, uma vez por dia.
+    relogio("04:10")
+    sv = _painel(bm)
+
+    async def rodar_robo(*argumentos):
+        raise AssertionError("o robô pausado não roda")
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+
+    def anotados():
+        return consultar("SELECT COUNT(*), MIN(resultado), MAX(ok) FROM registro_processos "
+                         "WHERE processo = 'descurtir tudo (4h)'")
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado")
+    rodar(sv.verificar_robo())
+    rodar(sv.verificar_robo())
+    assert anotados() == (1, "celular fora (robô pausado)", None)
+    # Pausado pelo Rafael (no outro dia), o motivo é a pausa.
+    sv.robo.gravar_estado(descurtir_sem_celular="")
+    sv.alterar_config(robo_pausa_motivo="")
+    rodar(sv.verificar_robo())
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = 'descurtir tudo (4h)' "
+                     "ORDER BY rowid DESC") == ("robô pausado",)
+
+
 def test_pausa_sem_o_celular_guarda_os_horarios_e_a_do_rafael_pula(bm, monkeypatch):
     # 28/10: o celular caiu às 15:05 e, na volta, nenhum rascunho saiu pelos horários da tarde:
     # o painel pulava os horários em qualquer pausa. Na pausa sozinha, sem o celular, eles ficam,

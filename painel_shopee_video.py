@@ -211,8 +211,11 @@ async def verificar_robo():
         # Pausado pelo Rafael, os horários de rascunho que passam são pulados, como no
         # assistente. Pausado sozinho, sem o celular, eles ficam: na volta contam como um só.
         # Escolha do Rafael (P16): DECISOES.md, Shopee Vídeo.
-        if config.get("robo_pausa_motivo") != robo.MOTIVO_DA_DESCONEXAO:
+        sem_celular = config.get("robo_pausa_motivo") == robo.MOTIVO_DA_DESCONEXAO
+        if not sem_celular:
             robo.consumir_horarios(config, pular=True)
+        # Pausado, a limpeza das 4h não roda: o registro diz o porquê ao checkup.
+        robo.anotar_limpeza_sem_celular(resultado="celular fora (robô pausado)" if sem_celular else "robô pausado")
         return
     if robo.suspensa(config):
         # Na suspensão os horários de rascunho também são pulados, mas a rodada segue: o robô
