@@ -251,9 +251,13 @@ um produto que não aparece no vídeo, não confere. Na dúvida, não confere.
 Compare os detalhes do produto que se veem no vídeo e na foto, não o fundo nem a arrumação da foto: a marca ou o \
 logotipo, o painel e os controles, e o formato e o desenho do corpo.
 Responda só com um JSON: {{"confere": true ou false, "outra_cor": true ou false, "motivo": "uma frase curta"}}"""
-# Na página do produto (HalfPdpActivity), a foto do anúncio fica entre a barra de cima da página
-# (os botões buttonActionBar...) e a linha do preço, a do coração (buttonItemLike). O recorte
-# para um pouco acima dela; mais baixo que ALTURA_MINIMA_DA_FOTO, vai o print inteiro.
+# Na página do produto (HalfPdpActivity), a foto do anúncio fica no quadro dela (imageProduct, ou
+# o player viewPDPVideoPlayer quando o 1º item do anúncio é um vídeo), abaixo da barra de cima da
+# página (os botões buttonActionBar..., por cima da foto). Embaixo do quadro vêm as "N Variações
+# Disponíveis", o contador da oferta e a linha do preço, a do coração (buttonItemLike), que ficam
+# de fora (Motorola, 02/11/2026). Sem o quadro, o recorte para um pouco acima da linha do preço;
+# mais baixo que ALTURA_MINIMA_DA_FOTO, vai o print inteiro.
+QUADRO_DA_FOTO = ("imageProduct", "viewPDPVideoPlayer")
 FOLGA_DA_FOTO_DA_PAGINA = 20
 ALTURA_MINIMA_DA_FOTO = 300
 LINHA_DO_PRECO = ("buttonItemLike", "buttonItemLiked", "labelSoldCount")
@@ -930,20 +934,23 @@ def _pelo_primeiro_com_a_ia(d, video, rolagens, anexados):
 
 def foto_da_pagina_do_produto(d, xml):
     """
-    A foto do produto na página dele no app (JPEG, bytes): o recorte entre a barra de cima e a
-    linha do preço, ou o print inteiro quando a página não mostra onde ela fica. É o anúncio exato
-    que a criadora vinculou ao vídeo, para a IA conferir o item e a cor, e a foto que vai na
-    miniatura quando ele é de outra cor. None quando o print não vem.
+    A foto do produto na página dele no app (JPEG, bytes): o recorte do quadro da foto abaixo da
+    barra de cima (sem o texto das variações nem o contador da oferta, que vêm embaixo dele), ou,
+    sem o quadro, até a linha do preço, ou o print inteiro quando a página não mostra onde ela
+    fica. É o anúncio exato que a criadora vinculou ao vídeo, para a IA conferir o item e a cor, e
+    a foto que vai na miniatura quando ele é de outra cor. None quando o print não vem.
     """
     lista = elementos(xml)
+    quadro = [el["caixa"][3] for el in lista if (el["id"] or "") in QUADRO_DA_FOTO]
     preco = [el["caixa"][1] for el in lista if (el["id"] or "") in LINHA_DO_PRECO]
+    fim_da_foto = min(quadro) if quadro else min(preco) - FOLGA_DA_FOTO_DA_PAGINA if preco else None
     barra = [el["caixa"][3] for el in lista if (el["id"] or "").startswith("buttonActionBar")
-             and (not preco or el["caixa"][3] < min(preco))]
+             and (fim_da_foto is None or el["caixa"][3] < fim_da_foto)]
     try:
         imagem = d.screenshot()
         largura, altura = imagem.size
         cima = max(barra, default=0)
-        baixo = min(preco) - FOLGA_DA_FOTO_DA_PAGINA if preco else altura
+        baixo = altura if fim_da_foto is None else fim_da_foto
         caixa = (0, cima, largura, baixo) if baixo - cima >= ALTURA_MINIMA_DA_FOTO else (0, 0, largura, altura)
         saida = io.BytesIO()
         imagem.crop(caixa).convert("RGB").save(saida, format="JPEG", quality=88)
