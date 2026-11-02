@@ -660,7 +660,7 @@ def test_volume_do_som_por_janela(tmp_path):
 
 def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
     # Escolha do Rafael (P46, 27/10): a caixa grande cobria o produto; agora uns 7% da tela, e
-    # no alto ela cabe à esquerda da miniatura (que começa em x 486).
+    # no alto ela cabe à esquerda da miniatura, com folga.
     import io
 
     from PIL import Image
@@ -671,7 +671,8 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
                                                              linhas_maximas=linhas))) as imagem:
                 assert imagem.width * imagem.height <= 0.08 * 720 * 1280, (texto, lugar)
                 if lugar == "alto":
-                    assert x + imagem.width < 486 - 10 and topo + imagem.height < 280
+                    comeco_da_miniatura = edicao_video.CANTO_DA_MINIATURA[0] - edicao_video.LARGURA_DA_MINIATURA
+                    assert x + imagem.width < comeco_da_miniatura - 10 and topo + imagem.height < 280
                 if lugar in ("esquerda", "direita"):
                     # Nos lados (P47): estreita, longe do meio da tela, acima da seta e dos
                     # botões do app à direita.
@@ -1897,7 +1898,7 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     # A IA errando um pouco para fora da miniatura (até uns 66% da largura) ainda conta, pela folga.
     assert edicao_video.miniatura_no_video({"por_cima": [(30.0, 66.5, 11.0, 14.0)]}) == 0
     # Longe dela (no alto à esquerda, ou logo abaixo), a miniatura fica inteira.
-    for longe in ((5.0, 50.0, 5.0, 12.0), (20.0, 80.0, 27.0, 31.0)):
+    for longe in ((5.0, 50.0, 5.0, 12.0), (20.0, 80.0, 29.0, 33.0)):
         assert edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [longe]}) == (
             edicao_video.LARGURA_DA_MINIATURA)
     # Resposta em fração, com os lados trocados, ou sem os quatro números.
@@ -1922,14 +1923,15 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     assert como.endswith(edicao_video.SEM_A_MINIATURA) and miniaturas == [0]
 
 
-def test_a_miniatura_fica_um_pouco_menor_abaixo_da_barra_de_busca_e_longe_da_borda():
+def test_a_miniatura_fica_do_tamanho_de_sempre_abaixo_da_barra_de_busca_e_longe_da_borda():
     # Vídeo do Rafael das 22:01 de 01/11 (P120): a miniatura ficava grudada no canto de cima à
-    # direita, embaixo do ícone da barra de busca do app. Ela fica uns 15% menor, com a ponta de
-    # cima abaixo da barra de busca e a da direita um pouco para dentro da borda que o app mostra.
+    # direita, embaixo do ícone da barra de busca do app. A ponta de cima fica abaixo da barra de
+    # busca e a da direita um pouco para dentro da borda que o app mostra. Print dele das 01:29 de
+    # 02/11 (P121): uns 15% menor (152 px), ela ficou pequena demais; fica do tamanho de sempre.
     largura = edicao_video.LARGURA_DA_MINIATURA
     canto_x, canto_y = edicao_video.CANTO_DA_MINIATURA
     largura_da_tela, altura = edicao_video.TELA
-    assert 0.82 <= largura / 180 <= 0.88 and largura % 2 == 0
+    assert largura == 180 == largura_da_tela // 4
     assert canto_y >= edicao_video.FIM_DA_BARRA_DE_BUSCA + 5
     assert edicao_video.VISIVEL_NO_APP[1] - canto_x >= 12
     # Os textos do Editor 2 não passam por ela: o do alto fica ao lado, o do meio logo abaixo.
@@ -1956,7 +1958,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     # dele. A miniatura diminui, no mesmo canto, só o necessário para ficar acima da coisa do
     # criador sem encostar (a folga); menor que 2/3 do tamanho de sempre, fica de fora.
     editar_de_verdade = edicao_video.editar
-    assert edicao_video.CANTO_DA_MINIATURA == (657, 150) and edicao_video.MENOR_MINIATURA == 101
+    assert edicao_video.CANTO_DA_MINIATURA == (657, 150) and edicao_video.MENOR_MINIATURA == 120
     assert edicao_video.centro_da_miniatura(edicao_video.LARGURA_DA_MINIATURA) == edicao_video.CENTRO_DA_MINIATURA
     balao = (55.0, 95.0, 24.5, 30.0)
     largura = edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [balao]})
@@ -1968,10 +1970,10 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     # A IA viu o balão no canto (canto_ocupado) e disse onde: vale a conta do lugar.
     assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [balao]}) == 132
     # Com 2/3 do tamanho ainda vai; menor que isso, fica de fora.
-    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 22.1, 30.0)]}) == 102
-    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 21.9, 30.0)]}) == 0
+    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 23.5, 30.0)]}) == 120
+    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 23.4, 30.0)]}) == 0
     # Com várias, a mais alta decide.
-    assert edicao_video.miniatura_no_video({"por_cima": [balao, (40.0, 80.0, 23.0, 28.0)]}) == 114
+    assert edicao_video.miniatura_no_video({"por_cima": [balao, (40.0, 80.0, 24.0, 28.0)]}) == 126
     # O canto ocupado sem nenhuma coisa no canto dizendo onde: fica de fora, como na P81.
     assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [(5.0, 40.0, 2.0, 8.0)]}) == 0
     # O que vai ao ar leva a miniatura menor, e o registro diz.
@@ -1991,7 +1993,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura",
                         lambda video, foto, destino, segundos, miniatura, centro, *resto, **opcoes: pedidos.append(
                             (miniatura, centro)) or "")
-    for pedida, esperada in ((True, (152, (581, 226))), (132, (132, (591, 216))), (False, (0, (657, 150)))):
+    for pedida, esperada in ((True, (180, (567, 240))), (132, (132, (591, 216))), (False, (0, (657, 150)))):
         assert editar_de_verdade("v.mp4", b"foto", str(tmp_path / "r.mp4"), miniatura=pedida) == ""
         assert pedidos.pop() == esperada
 
