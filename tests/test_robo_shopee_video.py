@@ -5058,8 +5058,11 @@ class CelularDaCapa:
     """
 
     def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False, parado=1.0,
-                 letras_grossas=False, teimosas=0, fundo=None, jpeg=None):
+                 letras_grossas=False, teimosas=0, fundo=None, jpeg=None, so_na_figurinha=False):
         self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
+        # so_na_figurinha: os dois dedos e o arrastar só mexem na figurinha quando começam em
+        # cima dela (como no Motorola em 01/11: os dedos longe dela não a mudaram).
+        self.so_na_figurinha = so_na_figurinha
         # fundo: o 1º quadro do vídeo (PNG, bytes), que a tela da capa mostra embaixo da
         # figurinha; jpeg: a qualidade do print, como o do celular (o uiautomator2 manda em JPEG).
         self.fundo, self.jpeg = fundo, jpeg
@@ -5150,14 +5153,21 @@ class CelularDaCapa:
                 f = celular.figurinha
                 if 1 / celular.parado < ate / de < celular.parado or celular.entradas <= celular.teimosas:
                     return
+                if celular.so_na_figurinha and not celular._em_cima(meio_x, meio_y):
+                    return
                 nova = min(celular.maxima, f["escala"] * (ate / de) ** celular.ganho)
                 razao = nova / f["escala"]
                 f.update(escala=nova, x=meio_x + (f["x"] - meio_x) * razao, y=meio_y + (f["y"] - meio_y) * razao)
         return Gesto()
 
+    def _em_cima(self, x, y):
+        """O ponto está em cima da figurinha (o miolo da capa, 720x1080, na escala dela)?"""
+        f = self.figurinha
+        return abs(x - f["x"]) <= 360 * f["escala"] and abs(y - f["y"]) <= 540 * f["escala"]
+
     def drag(self, x1, y1, x2, y2, duracao=0):
         self.arrastos.append((x1, y1, x2, y2))
-        if self.figurinha:
+        if self.figurinha and (not self.so_na_figurinha or self._em_cima(x1, y1)):
             self.figurinha["x"] += x2 - x1
             self.figurinha["y"] += y2 - y1
 
@@ -5249,6 +5259,57 @@ def test_capa_pela_figurinha_em_cima_da_moldura_do_video_no_print_do_celular(mon
     saida = io.BytesIO()
     fundo.save(saida, format="PNG")
     celular = CelularDaCapa(fundo=saida.getvalue(), jpeg=80)
+    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
+    assert ok and motivo.startswith("a faixa do tamanho do desenho"), motivo
+    assert celular.atual == "final" and _no_desenho(celular)
+
+
+def _fundo_com_etiqueta():
+    """
+    O 1º quadro do vídeo (PNG, bytes) com uma etiqueta laranja de loja, com letras brancas, no
+    alto à esquerda da foto do anúncio, fora de onde a figurinha entra: 66 linhas no print, mais
+    que a faixa da figurinha recém-posta.
+    """
+    from PIL import Image, ImageDraw
+    fundo = Image.open(io.BytesIO(robo.edicao_video.capa_sem_chamada(_foto_do_anuncio()))).convert("RGB")
+    desenho = ImageDraw.Draw(fundo)
+    desenho.rectangle((20, 330, 220, 380), fill=robo.edicao_video.LARANJA_DA_SHOPEE)
+    for x in range(40, 200, 30):
+        desenho.rectangle((x, 345, x + 6, 365), fill="white")
+    saida = io.BytesIO()
+    fundo.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def test_a_faixa_e_medida_so_onde_a_figurinha_mudou_o_print():
+    # 22:44 de 01/11: no quadro todo, a medida achava a etiqueta laranja da foto do anúncio (no
+    # 1º quadro do vídeo, embaixo da figurinha), maior que a faixa da figurinha recém-posta.
+    celular = CelularDaCapa(fundo=_fundo_com_etiqueta(), jpeg=80)
+    celular.atual = "capa"
+    antes = celular.screenshot()
+    celular.figurinha = {"escala": celular.entrada, "x": 540, "y": 1118}
+    depois = celular.screenshot()
+    lado, alto = 360 * celular.entrada, 540 * celular.entrada
+    cima, baixo, esquerda, direita = robo.edicao_video.faixa_laranja(depois, QUADRO_DA_CAPA)
+    assert direita < 540 - lado
+    caixa = robo.caixa_da_figurinha(depois, antes, QUADRO_DA_CAPA)
+    folga = robo.FOLGA_DA_CAIXA
+    assert abs(caixa[0] - (540 - lado - folga)) <= 3 and abs(caixa[2] - (540 + lado + folga)) <= 3
+    assert abs(caixa[1] - (1118 - alto - folga)) <= 3 and abs(caixa[3] - (1118 + alto + folga)) <= 3
+    cima, baixo, esquerda, direita = robo.edicao_video.faixa_laranja(depois, caixa)
+    assert 540 - lado <= esquerda < direita <= 540 + lado and 1118 < cima < baixo <= 1118 + alto
+    # Sem o print de antes (ou de outro tamanho), a medida vale no quadro todo, como antes.
+    assert robo.caixa_da_figurinha(depois, None, QUADRO_DA_CAPA) == QUADRO_DA_CAPA
+    assert robo.caixa_da_figurinha(depois, antes.resize((540, 1200)), QUADRO_DA_CAPA) == QUADRO_DA_CAPA
+    assert robo.caixa_da_figurinha(depois, depois, QUADRO_DA_CAPA) == QUADRO_DA_CAPA
+
+
+def test_capa_pela_figurinha_com_laranja_na_foto_embaixo_dela(monkeypatch):
+    # 22:44 de 01/11: os dois dedos foram feitos na etiqueta laranja da foto do anúncio, longe da
+    # figurinha, e nada mudou; as 3 tentativas saíram sem a capa com a frase. Com a faixa medida
+    # só na figurinha, ela fica do tamanho do desenho.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularDaCapa(fundo=_fundo_com_etiqueta(), jpeg=80, so_na_figurinha=True)
     ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
     assert ok and motivo.startswith("a faixa do tamanho do desenho"), motivo
     assert celular.atual == "final" and _no_desenho(celular)
@@ -5386,9 +5447,9 @@ def test_capa_de_fora_ensina_a_proxima_pelo_ganho_dos_dedos(monkeypatch):
     vistos = []
     real = robo.ajustar_a_figurinha
 
-    def ajustar(d, capa, quadro, receita=None, aprendida=None):
+    def ajustar(d, capa, quadro, receita=None, aprendida=None, fundo=None):
         vistos.append(dict(receita or {}))
-        return real(d, capa, quadro, receita, aprendida)
+        return real(d, capa, quadro, receita, aprendida, fundo)
 
     monkeypatch.setattr(robo, "ajustar_a_figurinha", ajustar)
     ok, motivo = robo.capa_pela_figurinha(CelularDaCapa(ganho=0.63), CAPA_DA_FIGURINHA)
