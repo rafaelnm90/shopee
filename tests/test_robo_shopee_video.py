@@ -759,7 +759,9 @@ class ComAvisos(AppDeMentira):
     def clear_toast(self):
         self.toast = None
 
+    @property
     def last_toast(self):
+        # Como no uiautomator2: uma propriedade, não uma função.
         return self.toast
 
     def click(self, x, y):
@@ -4664,7 +4666,9 @@ class AppQueAvisaNoFeito(AppQueReabreALegenda):
     def clear_toast(self):
         self.ultimo_aviso = None
 
+    @property
     def last_toast(self):
+        # Como no uiautomator2: uma propriedade, não uma função.
         return self.ultimo_aviso
 
     def click(self, x, y):
@@ -4692,6 +4696,33 @@ def test_produto_que_nao_fica_no_feito_diz_o_aviso_do_app(monkeypatch, avisos):
     app = AppQueAvisaNoFeito(perdidos=1, aviso=None)
     _anexar_no_app(app)
     assert _registro_do_anexar()[-2][1].endswith("; sem aviso do app")
+
+
+def test_aviso_do_app_le_o_toast_como_o_uiautomator2_da(monkeypatch):
+    # No uiautomator2 (3.7.0, requirements.txt) o last_toast é uma propriedade: chamado como
+    # função, dava erro, e o robô nunca lia o aviso do app (o produto que não fica depois do Feito,
+    # o Realçar). O caso de 02/11, 15:26, saiu sem dizer se o app avisou alguma coisa.
+    import uiautomator2
+    assert any(isinstance(vars(classe).get("last_toast"), property) for classe in type.mro(uiautomator2.Device))
+
+    class Celular:
+        last_toast = "Produto 1 adicionado"
+
+    assert robo.aviso_do_app(Celular()) == (True, "Produto # adicionado")
+    # Pelo histórico do caso (casos_robo), que passa tudo para o celular.
+    assert robo.aviso_do_app(robo.casos_robo.com_historico(Celular())) == (True, "Produto # adicionado")
+
+    class SemAviso:
+        last_toast = None
+
+    assert robo.aviso_do_app(SemAviso()) == (True, "")
+
+    class Quebrado:
+        @property
+        def last_toast(self):
+            raise RuntimeError("sem o serviço do uiautomator2")
+
+    assert robo.aviso_do_app(Quebrado()) == (False, "")
 
 
 class ListaQueDemoraAVoltar:

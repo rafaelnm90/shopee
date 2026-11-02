@@ -3478,10 +3478,11 @@ def limpar_aviso_do_app(d):
 def aviso_do_app(d):
     """
     O último aviso curto (toast) que o app mostrou, pelo uiautomator2: (lido, texto, sem os
-    números). Sem conseguir ler, (False, ""); lido e sem aviso, (True, "").
+    números). Sem conseguir ler, (False, ""); lido e sem aviso, (True, ""). No uiautomator2 o
+    last_toast é uma propriedade, não uma função (chamada, dava erro, e o robô nunca lia o aviso).
     """
     try:
-        texto = d.last_toast()
+        texto = d.last_toast
     except Exception:
         return False, ""
     return True, re.sub(r"\d+", "#", str(texto or "")).strip()[:100]
