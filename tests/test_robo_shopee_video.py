@@ -1849,7 +1849,8 @@ def test_recusado_e_apagado_com_a_confirmacao_e_o_aviso_de_sair(monkeypatch, avi
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho recusado apagado"
     # Abre para conferir, sai pelo aviso (o rascunho continua salvo) e apaga pela lista.
     assert "@buttonDefaultPositive" in app.toques
-    assert app.toques[-3:] == [(185, 600), "Excluir (1)", "Confirmar"]
+    # Depois de apagar, o fim da rodada deixa o app no Eu, sem vídeo tocando.
+    assert app.toques[-4:] == [(185, 600), "Excluir (1)", "Confirmar", "Eu"]
     assert "@btn_post" not in app.toques and robo.pegar(ident)["estado"] == "apagado"
 
 
@@ -4021,6 +4022,41 @@ def test_postado_vai_ao_canal_com_o_link_do_post(monkeypatch, avisos, caminho_do
     app.legenda, app.com_produto = TITULO, True
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
     assert levados == [(ident, LINK_DO_POST)]
+
+
+def test_depois_do_post_o_video_nao_fica_rodando_no_celular(monkeypatch, avisos, caminho_do_rascunho):
+    # Vídeo do Rafael das 16:31 de 02/11: o vídeo postado às 15:59 ainda rodava no Motorola meia
+    # hora depois (o link do post é copiado com o vídeo aberto), e cada volta pode contar como uma
+    # visualização a mais. No fim da rodada, o app fica no Eu, sem vídeo tocando.
+    import registro_processos as rp
+    _aprovado(monkeypatch)
+    # O link do post deixa o vídeo aberto, como no Motorola.
+    monkeypatch.setitem(TELAS, "player", [_no("Adicionar um comentário...", caixa=(200, 2300, 900, 2360))])
+    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: setattr(d, "atual", "player") or LINK_DO_POST)
+    app = AppComVoltar()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
+    assert app.atual == "eu" and app.toques[-1] == "Eu" and app.teclas[-1] == "back"
+    registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", robo.PROCESSO_DO_FIM_DA_RODADA,
+                                                            "2000-01-01 00:00:00")]
+    assert registro == [("no Eu", "")]
+
+
+def test_fim_da_rodada_nao_toca_na_verificacao_e_nao_muda_o_resultado(monkeypatch):
+    import registro_processos as rp
+
+    def verificacao(d, ate, vezes=15):
+        raise robo.Verificacao()
+
+    monkeypatch.setattr(robo, "voltar", verificacao)
+    monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: pytest.fail("tocou na Verificação"))
+    robo.deixar_sem_video(object())
+    # O que falha só fica no registro: a rodada segue com o resultado dela.
+    monkeypatch.setattr(robo, "voltar", lambda d, ate, vezes=15: (_ for _ in ()).throw(robo.Parada("x")))
+    robo.deixar_sem_video(object())
+    registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", robo.PROCESSO_DO_FIM_DA_RODADA,
+                                                            "2000-01-01 00:00:00")]
+    assert registro == [("parado na Verificação", ""), ("não voltou ao Eu", "Parada")]
 
 
 def test_pedido_ao_canal_leva_a_copia_do_video_e_o_link_do_produto_com_a_etiqueta_do_canal(monkeypatch, avisos,

@@ -5874,14 +5874,43 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             # checkup o separa do preparo do plano, que ali espera os comentários do feed.
             registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "pedido", ok=None, agora=agora)
         # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
-        d = d or casos_robo.com_historico(ps.conectar(celular=True))
+        d = casos_robo.com_historico(d or ps.conectar(celular=True))
         try:
             resultado = _agir(d, acao, ident, preparar, config, agora, pedido=saude and na_hora)
             if acao != "saude" and saude_pedida_pela_notificacao(agora):
                 _ler_saude_junto(d, agora)
             return resultado
         finally:
+            # Só a rodada que tocou no celular pode ter deixado um vídeo aberto.
+            if d.acoes:
+                deixar_sem_video(d, agora)
             faxina_dos_arquivos(d)
+
+
+# Vídeo deixado aberto no celular do robô roda em laço, e cada volta pode contar como uma
+# visualização a mais: no vídeo do Rafael das 16:31 de 02/11, o vídeo que o robô postou às 15:59
+# ainda rodava no Motorola meia hora depois (o link do post é copiado com o vídeo aberto), e o feed
+# fica no vídeo do outro criador. No fim de cada rodada que mexeu no celular, o robô volta à barra
+# de baixo do app e abre o Eu, onde nenhum vídeo toca. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_FIM_DA_RODADA = "celular no fim da rodada"
+
+
+def deixar_sem_video(d, agora=None):
+    """
+    No fim da rodada, o app no Eu (a barra de baixo, sem vídeo tocando). Na Verificação não toca
+    em nada; o que falha fica no registro e no log, e nunca muda o resultado da rodada.
+    """
+    try:
+        voltar(d, "Eu")
+        tocar(d, "Eu", 3)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIM_DA_RODADA, "no Eu", ok=True, agora=agora)
+    except Verificacao:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIM_DA_RODADA, "parado na Verificação", ok=None,
+                                     agora=agora)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O celular não voltou ao Eu no fim da rodada: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIM_DA_RODADA, "não voltou ao Eu", type(e).__name__,
+                                     ok=False, agora=agora)
 
 
 def _agir(d, acao, ident, preparar, config, agora, pedido=False):
