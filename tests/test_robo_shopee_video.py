@@ -284,6 +284,32 @@ def test_na_janela_o_postar_volta_quando_as_interacoes_do_dia_acabam(monkeypatch
     assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("postar", aprovado)
 
 
+def test_perto_do_horario_das_interacoes_o_rascunho_espera(monkeypatch):
+    # 01/11: um rascunho começado perto das 20h foi até 20:08, dentro do Horário das Interações
+    # (20h-21h) e antes dos comentários do feed; o preparo fica fora dele (P22 a P24).
+    config = _com_interacoes()
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-25 11:45")))
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: True)
+    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 0)
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-25", "horarios": ["11:30"], "feitos": 0})
+    # A janela começa às 12h: às 11:45, com o feed do dia por fazer, o horário espera.
+    assert robo.perto_das_interacoes(config, momento("2026-10-25 11:45"))
+    assert robo.o_que_fazer(config, momento("2026-10-25 11:45")) is None
+    assert robo.estado_do_dia(config, momento("2026-10-25 11:45"))["feitos"] == 0
+    # Mais longe que MINUTOS_ANTES_DAS_INTERACOES, prepara.
+    assert not robo.perto_das_interacoes(config, momento("2026-10-25 11:35"))
+    assert not robo.perto_das_interacoes(config, momento("2026-10-25 12:30"))
+    # Com as interações do dia feitas (P26), o perto não segura mais.
+    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 3)
+    assert not robo.perto_das_interacoes(config, momento("2026-10-25 11:45"))
+    assert robo.o_que_fazer(config, momento("2026-10-25 11:45")) == ("rascunho", None)
+    # Sem a janela escolhida, nada muda.
+    sem = {**config, "robo_interacoes_inicio": None, "robo_interacoes_fim": None}
+    assert not robo.perto_das_interacoes(sem, momento("2026-10-25 11:45"))
+
+
 def test_janela_das_interacoes_fora_do_horario_do_robo_tambem_roda():
     config = _com_interacoes(inicio=22, fim=24)
     assert robo.no_horario(config, momento("2026-10-25 22:30"))

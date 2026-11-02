@@ -296,6 +296,23 @@ def na_hora_das_interacoes(config, agora=None):
     return bool(janela) and janela[0] <= agora_br(agora).hour < janela[1]
 
 
+# Um rascunho leva até uns 20 min (o registro "tempo do rascunho"): perto do começo do Horário
+# das Interações, o robô não começa outro, para o preparo não entrar nele (01/11: um rascunho
+# começado perto das 20h foi até 20:08, antes dos comentários do feed). O horário do plano espera
+# as interações do dia acabarem (P26) ou o fim da janela.
+MINUTOS_ANTES_DAS_INTERACOES = 20
+
+
+def perto_das_interacoes(config, agora=None):
+    """O Horário das Interações começa em até MINUTOS_ANTES_DAS_INTERACOES, com as interações do dia por fazer?"""
+    janela = janela_das_interacoes(config)
+    if not janela or interacoes_do_dia_feitas(agora):
+        return False
+    momento = agora_br(agora)
+    falta = momento.replace(hour=janela[0] % 24, minute=0, second=0, microsecond=0) - momento
+    return timedelta(0) < falta <= timedelta(minutes=MINUTOS_ANTES_DAS_INTERACOES)
+
+
 def trechos_de_postar(config):
     """
     Os trechos do dia, em minutos (início, fim), em que o robô prepara e posta: o Horário
@@ -1160,7 +1177,8 @@ def o_que_fazer(config, agora=None):
         return None
     if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
-    if postar and (consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
+    if postar and not perto_das_interacoes(config, agora) and (
+            consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
         return "rascunho", None
     if respostas_pendentes(agora):
         return "responder", None
