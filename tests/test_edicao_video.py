@@ -2332,8 +2332,20 @@ def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela():
     assert (inicio, fim) == (1.0, 3.0) and y + altura == edicao_video.PE_DA_LEGENDA == pe_da_seta
     assert edicao_video.PE_DA_LEGENDA <= edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
     assert x > direita_da_seta and x + largura <= edicao_video.VISIVEL_NO_APP[1]
-    # Uma linha, em letra pequena (bem menor que a dos textos da tela).
-    assert altura < edicao_video.LETRA_DOS_TEXTOS[0] * 2
+    # Pedido do Rafael (02/11): a legenda para antes da coluna dos ícones do app à direita (o perfil,
+    # o coração e os comentários), que começa em x 586 no celular dele.
+    assert edicao_video.COLUNA_DOS_ICONES == 586
+    assert x + largura <= edicao_video.DIREITA_DA_LEGENDA < edicao_video.COLUNA_DOS_ICONES
+    longas = edicao_video.letreiros_da_fala(
+        [(1.0, 6.0, "Fechamento prático, zíper frontal e punhos com zíper, variedade de tamanhos disponível")], 10.0)
+    assert longas
+    for imagem, _inicio, _fim, x, _y in longas:
+        assert x + _medidas(imagem)[0] <= edicao_video.DIREITA_DA_LEGENDA
+    # Até 2 linhas (LINHAS_DA_LEGENDA), em letra pequena: a frase curta vai numa linha só, bem menor
+    # que a dos textos da tela.
+    assert altura < edicao_video.LETRA_DOS_TEXTOS[0] * 2 * edicao_video.LINHAS_DA_LEGENDA
+    curta = edicao_video.letreiros_da_fala([(1.0, 3.0, "Olha que lindo")], 10.0)[0][0]
+    assert _medidas(curta)[1] < edicao_video.LETRA_DOS_TEXTOS[0] * 2
 
 
 def test_trecho_que_nao_cabe_em_duas_linhas_e_dividido_com_o_tempo_repartido():
