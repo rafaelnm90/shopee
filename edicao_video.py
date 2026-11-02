@@ -200,16 +200,19 @@ def capa_com_avisos(foto):
 # pé da foto, uma faixa laranja da Shopee com a frase da capa em letras brancas (a frase curta
 # que a IA escreve para ela, P106; sem marca, sem preço e sem promoção, regras 9, 13 e 14).
 # Tudo dentro do que a grade do perfil mostra da capa (o corte do meio, medido no print do
-# Rafael de 29/10: de y 196 a 1116 da tela de 720x1280) e longe do que a grade põe por cima: o
-# número de visualizações, embaixo à esquerda (NUMERO_DA_GRADE), fica logo abaixo da faixa, no
-# preto, e a sacolinha da Shopee, em cima à direita (SACOLINHA_DA_GRADE), logo acima da foto;
-# o selo "Fixado" dos vídeos fixados no perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no
-# Motorola em 29/10), pega só a ponta de cima da foto, como na capa sem texto: pedido do
-# Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
+# Rafael de 29/10: de y 196 a 1116 da tela de 720x1280; na largura, a grade mostra o quadro em
+# 3:4, os 690 px do meio, de x 15 a 705, e o que fica na borda da tela some: vídeo do Rafael de
+# 02/11, 12:36) e longe do que a grade põe por cima: o número de visualizações, embaixo à
+# esquerda (NUMERO_DA_GRADE), fica logo abaixo da faixa, no preto, e a sacolinha da Shopee, em
+# cima à direita (SACOLINHA_DA_GRADE), logo acima da foto; o selo "Fixado" dos vídeos fixados no
+# perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10), fica logo acima da
+# moldura: pedido do Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
 # shopee_video): ele vê o exemplo no privado e liga no painel. A bebida alcoólica fica com a
 # capa dos avisos. Escolhas do Rafael (29/10, P76; 30/10, P107): DECISOES.md, Shopee Vídeo.
 CHAVE_DA_CAPA = "capa_com_chamada"
 VISIVEL_NA_GRADE = (196, 1116)                  # de cima a baixo, em y
+LARGURA_NA_GRADE = (VISIVEL_NA_GRADE[1] - VISIVEL_NA_GRADE[0]) * 3 // 4
+LADOS_NA_GRADE = ((TELA[0] - LARGURA_NA_GRADE) // 2, (TELA[0] + LARGURA_NA_GRADE) // 2)   # em x
 NUMERO_DA_GRADE = (52, 1005, 228, 1055)         # x1, y1, x2, y2
 SACOLINHA_DA_GRADE = (587, 210, 667, 278)
 FIXADO_DA_GRADE = (36, 200, 252, 305)
@@ -230,24 +233,30 @@ FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da f
 MARGEM_DA_FAIXA = 12
 LETRAS_DA_CHAMADA = (72, 44)                    # a maior e a menor numa linha
 LETRAS_EM_DUAS_LINHAS = (56, 36)                # quando não cabe numa linha: a faixa cresce para cima
-# A moldura laranja, com os cantos arredondados, em volta da foto da capa com a frase (a que a
-# grade do perfil mostra), na foto toda, e da miniatura (pedidos do Rafael, P115, P117 e P119:
-# DECISOES.md, Shopee Vídeo). A foto do começo do vídeo, sem a frase, vai sem moldura (P119). As
+# A moldura laranja em volta da foto da capa com a frase (a que a grade do perfil mostra), na
+# foto toda, e da miniatura (pedidos do Rafael, P115, P117 e P119: DECISOES.md, Shopee Vídeo). Na
+# miniatura, os cantos são arredondados; na capa, retos, e a moldura fica inteira dentro do que a
+# grade mostra (LADOS_NA_GRADE), com MARGEM_NA_GRADE de preto de cada lado: pedido do Rafael
+# (vídeo de 02/11, 12:36). A foto do começo do vídeo, sem a frase, vai sem moldura (P119). As
 # camadas vão de fora para dentro, (cor, grossura em px na capa); na miniatura, cada uma tem a
 # metade da grossura (ESCALA_NA_MINIATURA), dentro do lugar dela.
 CAMADAS_DA_MOLDURA = ((LARANJA_DA_SHOPEE, 14),)
 GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
-RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto, dentro da moldura
+RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto da miniatura, dentro da moldura
 ESCALA_NA_MINIATURA = 0.5
-# Na capa com a frase, a foto e a moldura ocupam juntas o lugar da foto da capa sem texto
-# (FOTO_DA_CAPA): a foto fica a grossura da moldura menor de cada lado.
-LADO_DA_FOTO = FOTO_DA_CAPA[2] - FOTO_DA_CAPA[0] - 2 * GROSSURA_DA_MOLDURA
+MARGEM_NA_GRADE = 10
+# Na capa com a frase, a foto e a moldura ficam no meio do lugar da foto da capa sem texto
+# (FOTO_DA_CAPA), num quadrado da largura que a grade mostra, menos a margem de cada lado.
+LADO_DA_MOLDURA = LARGURA_NA_GRADE - 2 * MARGEM_NA_GRADE
+LADO_DA_FOTO = LADO_DA_MOLDURA - 2 * GROSSURA_DA_MOLDURA
 MEIO_DA_FOTO = ((FOTO_DA_CAPA[0] + FOTO_DA_CAPA[2]) // 2, (FOTO_DA_CAPA[1] + FOTO_DA_CAPA[3]) // 2)
 # As letras da frase ficam dentro do que o app mostra do vídeo aberto (no modo assistente, a capa
 # vai no começo do vídeo), com a margem da faixa de cada lado.
 LETRAS_DA_FAIXA = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * MARGEM_DA_FAIXA
 FOTO_COM_MOLDURA = (MEIO_DA_FOTO[0] - LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] - LADO_DA_FOTO // 2,
                     MEIO_DA_FOTO[0] + LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] + LADO_DA_FOTO // 2)
+MOLDURA_DA_CAPA = (FOTO_COM_MOLDURA[0] - GROSSURA_DA_MOLDURA, FOTO_COM_MOLDURA[1] - GROSSURA_DA_MOLDURA,
+                   FOTO_COM_MOLDURA[2] + GROSSURA_DA_MOLDURA, FOTO_COM_MOLDURA[3] + GROSSURA_DA_MOLDURA)
 
 
 def capa_ligada():
@@ -291,35 +300,35 @@ def _quebra_da_chamada(texto, desenho, fonte_ttf, largura=LETRAS_DA_FAIXA):
     return (melhor[1], melhor[2]) if melhor else None
 
 
-def com_moldura(imagem, escala=1.0, cantos_de_baixo=True):
+def com_moldura(imagem, escala=1.0, arredondada=True):
     """
-    A imagem do PIL com a moldura em volta (CAMADAS_DA_MOLDURA, cada grossura vezes a escala) e
-    os cantos arredondados: RGBA, maior que ela duas vezes a grossura, transparente fora dos cantos.
-    Com cantos_de_baixo=False, os dois de baixo ficam retos: a faixa da chamada, no pé da foto,
-    vai de um lado ao outro da moldura como um retângulo, e a medida dela no print (faixa_laranja)
-    não depende do arredondado.
+    A imagem do PIL com a moldura em volta (CAMADAS_DA_MOLDURA, cada grossura vezes a escala):
+    RGBA, maior que ela duas vezes a grossura. Arredondada (a miniatura), os cantos da foto e da
+    moldura são arredondados, com o transparente fora deles; sem o arredondado (a capa com a frase,
+    pedido do Rafael de 02/11), os cantos ficam retos, e a faixa da chamada, no pé da foto, vai de
+    um lado ao outro da moldura como um retângulo (a medida dela no print, faixa_laranja).
     """
     from PIL import Image, ImageDraw
     camadas = [(cor, max(1, round(grossura * escala))) for cor, grossura in CAMADAS_DA_MOLDURA]
     total = sum(grossura for _cor, grossura in camadas)
     raio = max(2, round(RAIO_DA_FOTO * escala))
 
-    def arredondado(desenho, caixa, raio_da_caixa, cor):
-        desenho.rounded_rectangle(caixa, raio_da_caixa, fill=cor)
-        if not cantos_de_baixo:
-            x1, y1, x2, y2 = caixa
-            desenho.rectangle((x1, max(y1, y2 - raio_da_caixa), x2, y2), fill=cor)
+    def retangulo(desenho, caixa, raio_da_caixa, cor):
+        if arredondada:
+            desenho.rounded_rectangle(caixa, raio_da_caixa, fill=cor)
+        else:
+            desenho.rectangle(caixa, fill=cor)
 
     largura, altura = imagem.size
     saida = Image.new("RGBA", (largura + 2 * total, altura + 2 * total), (0, 0, 0, 0))
     desenho = ImageDraw.Draw(saida)
     fora = total
     for cor, grossura in camadas:
-        arredondado(desenho, (total - fora, total - fora, total + largura + fora - 1, total + altura + fora - 1),
-                    raio + fora, cor)
+        retangulo(desenho, (total - fora, total - fora, total + largura + fora - 1, total + altura + fora - 1),
+                  raio + fora, cor)
         fora -= grossura
     mascara = Image.new("L", imagem.size, 0)
-    arredondado(ImageDraw.Draw(mascara), (0, 0, largura - 1, altura - 1), raio, 255)
+    retangulo(ImageDraw.Draw(mascara), (0, 0, largura - 1, altura - 1), raio, 255)
     saida.paste(imagem.convert("RGB"), (total, total), mascara)
     return saida
 
@@ -337,11 +346,14 @@ def _foto_que_cabe(foto, lado):
     return imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
 
 
-def _capa_com_a_foto(imagem, cantos_de_baixo=True):
-    """A capa (PIL, 720x1280): a foto (PIL, do tamanho de LADO_DA_FOTO) com a moldura, no meio da área da foto da capa, no fundo preto."""
+def _capa_com_a_foto(imagem):
+    """
+    A capa (PIL, 720x1280): a foto (PIL, do tamanho de LADO_DA_FOTO) com a moldura de cantos retos,
+    no meio da área da foto da capa (MOLDURA_DA_CAPA), no fundo preto.
+    """
     from PIL import Image
     capa = Image.new("RGB", TELA, "black")
-    emoldurada = com_moldura(imagem, cantos_de_baixo=cantos_de_baixo)
+    emoldurada = com_moldura(imagem, arredondada=False)
     capa.paste(emoldurada, (MEIO_DA_FOTO[0] - emoldurada.width // 2, MEIO_DA_FOTO[1] - emoldurada.height // 2),
                emoldurada)
     return capa
@@ -413,10 +425,10 @@ def foto_em_tela_cheia(foto):
 
 def capa_com_chamada(foto, chamada):
     """
-    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) e a moldura laranja em
-    volta dela toda no lugar da foto da capa sem texto (P119), no fundo preto, e a chamada em
-    letras brancas numa faixa laranja por cima do pé da foto, logo acima do número de
-    visualizações. None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem
+    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) e a moldura laranja de
+    cantos retos em volta dela toda (P119), no meio do lugar da foto da capa sem texto e inteira
+    dentro do que a grade mostra (MOLDURA_DA_CAPA), no fundo preto, e a chamada em letras brancas
+    numa faixa laranja por cima do pé da foto, logo acima do número de visualizações. None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem
     na menor letra.
     """
     import matplotlib
@@ -429,7 +441,7 @@ def capa_com_chamada(foto, chamada):
         return None
     largura, pe = imagem.size
 
-    # A faixa vai no pé da foto, antes da moldura: os cantos de baixo dela ficam arredondados como os da foto.
+    # A faixa vai no pé da foto, antes da moldura, de um lado ao outro dela.
     desenho = ImageDraw.Draw(imagem)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
     quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf, min(largura - 2 * MARGEM_DA_FAIXA, LETRAS_DA_FAIXA))
@@ -443,7 +455,7 @@ def capa_com_chamada(foto, chamada):
     for i, linha in enumerate(linhas):
         desenho.text((largura / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
                      fill="white", anchor="mm")
-    return _png(_capa_com_a_foto(imagem, cantos_de_baixo=False))
+    return _png(_capa_com_a_foto(imagem))
 
 
 # A faixa laranja da capa com chamada num print (a tela da capa do app, o quadro da grade do
@@ -594,8 +606,8 @@ def _capa_da_vez(foto, vantagem):
 
 
 def recorte_da_grade(capa):
-    """O pedaço da capa (PNG, bytes) que a grade do perfil mostra (VISIVEL_NA_GRADE), em PNG: o exemplo do painel."""
-    return _faixa_da_capa(capa, VISIVEL_NA_GRADE)
+    """O pedaço da capa (PNG, bytes) que a grade do perfil mostra (VISIVEL_NA_GRADE e LADOS_NA_GRADE), em PNG: o exemplo do painel."""
+    return _faixa_da_capa(capa, VISIVEL_NA_GRADE, LADOS_NA_GRADE)
 
 
 def recorte_da_figurinha(capa):
@@ -607,15 +619,16 @@ def recorte_da_figurinha(capa):
     return _faixa_da_capa(capa, RECORTE_DA_FIGURINHA)
 
 
-def _faixa_da_capa(capa, faixa):
-    """A faixa da capa (PNG, bytes) de y cima a baixo, na largura toda, em PNG."""
+def _faixa_da_capa(capa, faixa, lados=None):
+    """A faixa da capa (PNG, bytes) de y cima a baixo, entre os lados (em x; sem eles, na largura toda), em PNG."""
     import io
 
     from PIL import Image
     with Image.open(io.BytesIO(capa)) as imagem:
         cima, baixo = faixa
+        esquerda, direita = lados or (0, imagem.width)
         saida = io.BytesIO()
-        imagem.crop((0, cima, imagem.width, baixo)).save(saida, format="PNG")
+        imagem.crop((esquerda, cima, direita, baixo)).save(saida, format="PNG")
     return saida.getvalue()
 
 
