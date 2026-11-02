@@ -846,6 +846,29 @@ MAXIMO_DA_CHAMADA = 32
 # vantagem. Escolhas do Rafael (30/10 e 02/11): DECISOES.md, Shopee Vídeo.
 MAXIMO_DA_CAPA = 20
 PROCESSO_DA_FRASE_DA_CAPA = "edição do vídeo: frase da capa"
+# A frase segue a P122 com de 2 a 4 palavras, até MAXIMO_DA_CAPA caracteres (com os espaços,
+# como a IA conta) e começando pelo que é o produto: a 1ª palavra dela, sem artigo nem número na
+# frente, tem o mesmo começo de uma das palavras do nome genérico que a IA deu ("Travessas" e
+# "Travessa", "Sapatinho" e "Sapato"); sem o nome, não há com o que conferir. A que não segue
+# volta à IA uma vez, só a frase, com o que estava errado; ainda errada, vai a vantagem (P122).
+# No print da grade de 02/11 (16:06), a capa "Remove bolinhas de tecido" era a vantagem: a
+# frase da IA passou do tamanho. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+PALAVRAS_DA_CAPA = (2, 4)
+COMECO_IGUAL = 3                    # letras do começo, pelo menos, iguais às de uma palavra do nome
+SEM_FRASE = "sem frase"
+LONGA_DEMAIS = f"mais de {MAXIMO_DA_CAPA} letras"
+FORA_DAS_PALAVRAS = f"fora de {PALAVRAS_DA_CAPA[0]} a {PALAVRAS_DA_CAPA[1]} palavras"
+SEM_O_PRODUTO = "sem dizer o que é o produto"
+LETRA_FORA = "letra fora do português"
+PROMPT_DA_FRASE_DA_CAPA = (
+    "Escreva a frase da capa de um vídeo de produto da Shopee: uma frase curta que começa pelo que é o "
+    "produto e traz a vantagem que o vídeo mostra, para quem vê só a capa saber o que é e querer ver, de "
+    "{minimo} a {maximo_de_palavras} palavras e até {maximo} caracteres contando os espaços (ex.: \"Calça que "
+    "modela\", \"Travessas 3 tamanhos\", \"Copo sempre gelado\").\n"
+    "O produto: {nome}\nA vantagem que o vídeo mostra: {vantagem}\n"
+    "A frase de antes não serviu: {porque}.\n"
+    "Nada de nome, logo ou slogan de marca; sem preço, desconto, promoção, emoji ou hashtag. Escreva com a "
+    "ortografia e a acentuação certas do português do Brasil. Responda só com a frase, sem aspas.")
 
 # A IA escreve o nome, a vantagem e a chamada vendo o vídeo, com as regras da Shopee Vídeo
 # que mais pegam texto na tela (regras 7, 13 e 14 das diretrizes): sem marca, sem prometer o
@@ -1448,23 +1471,141 @@ def por_que_a_miniatura(textos):
 
 
 def _vantagem_e_chamada(dados, textos):
-    """
-    Põe em textos a vantagem, a chamada e a frase da capa da resposta da IA, só as que vieram
-    certas. A frase da capa maior que MAXIMO_DA_CAPA fica de fora sem ser cortada (cortada,
-    perderia o sentido): a capa vai com a vantagem.
-    """
-    for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA), ("capa", MAXIMO_DA_CAPA)):
-        bruto = str(dados.get(chave) or "")
-        if chave == "capa" and len(_so_letras(bruto, 10 ** 6)) > maximo:
-            continue
-        limpo = _texto_certo(bruto, maximo)
+    """Põe em textos a vantagem e a chamada da resposta da IA, só as que vieram certas."""
+    for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA)):
+        limpo = _texto_certo(str(dados.get(chave) or ""), maximo)
         if limpo:
             textos[chave] = limpo
     return textos
 
 
+def _sem_acento(texto):
+    """As palavras do texto em minúsculas e sem acento, só as letras e os números."""
+    import re
+    import unicodedata
+    simples = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode().lower()
+    return re.findall(r"[a-z0-9]+", simples)
+
+
+def _mesmo_comeco(palavra, outra):
+    """As duas palavras começam igual, pelo menos COMECO_IGUAL letras e todas menos uma da menor."""
+    comum = len(os.path.commonprefix([palavra, outra]))
+    return comum >= COMECO_IGUAL and comum >= min(len(palavra), len(outra)) - 1
+
+
+def comeca_pelo_produto(frase, nome):
+    """
+    A frase começa pelo que é o produto (P122)? A 1ª palavra dela, sem artigo nem número na
+    frente, tem o mesmo começo de uma palavra do nome (_mesmo_comeco). Sem o nome, sim.
+    """
+    do_nome = [p for p in _sem_acento(nome) if len(p) >= COMECO_IGUAL and p not in PALAVRAS_DE_LIGACAO]
+    if not do_nome:
+        return True
+    primeira = next((p for p in _sem_acento(frase) if p not in PALAVRAS_DE_LIGACAO and not p.isdigit()), "")
+    return any(_mesmo_comeco(primeira, palavra) for palavra in do_nome)
+
+
+def por_que_a_frase_nao_serve(frase, nome):
+    """O porquê fixo da frase da capa (já limpa) não seguir a P122; "" quando ela segue."""
+    if not frase:
+        return SEM_FRASE
+    if len(frase) > MAXIMO_DA_CAPA:
+        return LONGA_DEMAIS
+    if not PALAVRAS_DA_CAPA[0] <= len(frase.split()) <= PALAVRAS_DA_CAPA[1]:
+        return FORA_DAS_PALAVRAS
+    if not comeca_pelo_produto(frase, nome):
+        return SEM_O_PRODUTO
+    return ""
+
+
+def _frase_que_serve(bruto, nome):
+    """
+    (frase, porquê) da frase da capa que veio da IA: a frase limpa e "" quando ela segue a P122;
+    senão, o porquê fixo. Com letra que não existe no português, a IA corrige uma vez
+    (_texto_certo); a frase maior que o limite não é cortada (cortada, perderia o sentido).
+    """
+    frase = _so_letras(bruto, 10 ** 6)
+    porque = por_que_a_frase_nao_serve(frase, nome)
+    if porque:
+        return frase, porque
+    certa = _texto_certo(frase, MAXIMO_DA_CAPA)
+    if not certa:
+        return frase, LETRA_FORA
+    return certa, por_que_a_frase_nao_serve(certa, nome)
+
+
+def _explicacao_para_a_ia(frase, porque):
+    """O que estava errado na frase de antes, para o pedido de novo à IA."""
+    if porque == LONGA_DEMAIS:
+        return f"\"{frase}\" tem {len(frase)} caracteres, mais que {MAXIMO_DA_CAPA}"
+    if porque == FORA_DAS_PALAVRAS:
+        return f"\"{frase}\" tem {len(frase.split())} palavra(s)"
+    if porque == SEM_O_PRODUTO:
+        return f"\"{frase}\" não começa pelo que é o produto"
+    if porque == LETRA_FORA:
+        return f"\"{frase}\" tem letra que não existe no português"
+    return "a frase não veio"
+
+
+def _pedir_a_frase_de_novo(textos, frase, porque):
+    """A frase da capa que a IA reescreveu, numa chamada só de texto; "" sem resposta."""
+    import asyncio
+
+    import api_gemini
+    pedido = PROMPT_DA_FRASE_DA_CAPA.format(
+        minimo=PALAVRAS_DA_CAPA[0], maximo_de_palavras=PALAVRAS_DA_CAPA[1], maximo=MAXIMO_DA_CAPA,
+        nome=textos.get("nome") or "o do vídeo", vantagem=textos.get("vantagem") or "a que o vídeo mostra",
+        porque=_explicacao_para_a_ia(frase, porque))
+    try:
+        resposta = asyncio.run(api_gemini.gerar_texto_gemini(pedido))
+    except Exception:
+        resposta = ""
+    linhas = [linha.strip() for linha in str(resposta or "").splitlines() if linha.strip()]
+    return linhas[0].strip("\"'“”").rstrip(".") if linhas else ""
+
+
+def _com_a_frase_da_capa(bruto, textos):
+    """
+    Põe em textos["capa"] a frase da capa (P122) que a IA escreveu, quando ela segue a regra
+    (por_que_a_frase_nao_serve). A que não segue volta à IA uma vez, só a frase, com o que estava
+    errado, e textos["capa_de_novo"] guarda o porquê da 1ª. Sem nenhuma certa, textos["sem_a_capa"]
+    guarda o porquê da 2ª, e a capa vai com a vantagem (frase_da_capa). Muda textos e o devolve.
+    """
+    nome = textos.get("nome", "")
+    frase, porque = _frase_que_serve(bruto, nome)
+    if not porque:
+        textos["capa"] = frase
+        return textos
+    textos["capa_de_novo"] = porque
+    # Sem o nome nem a vantagem, a IA não teria de onde tirar a frase: sem pedir de novo.
+    pedida = _pedir_a_frase_de_novo(textos, frase, porque) if nome or textos.get("vantagem") else ""
+    nova, porque_da_nova = _frase_que_serve(pedida, nome)
+    if porque_da_nova:
+        textos["sem_a_capa"] = porque_da_nova
+    else:
+        textos["capa"] = nova
+    return textos
+
+
+def registro_da_frase(textos, frase):
+    """
+    (resultado, detalhe, ok) da frase da capa para o registro: "curta", "curta na 2ª vez" (com o
+    porquê da 1ª) ou "a vantagem (sem a curta)" (com o porquê das duas), e as letras da frase.
+    """
+    letras = f"{len(frase)} letras"
+    primeira = textos.get("capa_de_novo", "")
+    if textos.get("capa"):
+        if primeira:
+            return "curta na 2ª vez", f"a 1ª: {primeira}; {letras}", True
+        return "curta", letras, True
+    if primeira:
+        return ("a vantagem (sem a curta)", f"a 1ª: {primeira}; a 2ª: {textos.get('sem_a_capa', SEM_FRASE)}; {letras}",
+                None)
+    return "a vantagem (sem a curta)", letras, None
+
+
 def frase_da_capa(textos):
-    """A frase da capa com chamada: a curta que a IA escreveu para ela (P106) ou, sem ela, a vantagem."""
+    """A frase da capa com chamada: a curta da IA (P122) ou, sem ela nem na 2ª vez, a vantagem."""
     return textos.get("capa") or textos.get("vantagem", "")
 
 
@@ -1472,11 +1613,15 @@ def textos_da_tela(video, nome):
     """
     {"nome", "vantagem", "capa", "chamada", "lugar", "texto_no_video", "parte_com_texto",
     "canto_ocupado", "por_cima"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem
-    resposta.
+    resposta. Com a frase da capa pedida de novo, "capa_de_novo" (e, sem ela, "sem_a_capa") diz
+    por quê (_com_a_frase_da_capa).
     """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
-    return _revisar_ortografia(_vantagem_e_chamada(
-        dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados))))
+    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados)))
+    # Só este pedido traz a frase da capa; sem resposta da IA, não há o que pedir de novo.
+    if dados:
+        textos = _com_a_frase_da_capa(str(dados.get("capa") or ""), textos)
+    return _revisar_ortografia(textos)
 
 
 def _falas(bruto):
@@ -1799,10 +1944,10 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     frase = frase_da_capa(textos)
     capa = _capa_da_vez(foto, frase) if capa_ligada() and not avisos else None
     if capa_ligada() and not avisos and frase:
-        # Quantas capas saem com a frase curta (P106) e quantas com a vantagem, por falta dela.
-        registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA,
-                                     "curta" if textos.get("capa") else "a vantagem (sem a curta)",
-                                     f"{len(frase)} letras", ok=True if textos.get("capa") else None)
+        # Quantas capas saem com a frase curta (P122), quantas só na 2ª vez e quantas com a
+        # vantagem, por falta dela, e por quê.
+        resultado, detalhe, ok = registro_da_frase(textos, frase)
+        registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA, resultado, detalhe, ok=ok)
     abertura = capa
     if capa and figurinha is not None:
         abertura = capa_sem_chamada(foto)

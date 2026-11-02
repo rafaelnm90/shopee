@@ -1104,13 +1104,13 @@ def test_textos_da_tela_pede_so_o_do_video_completo(monkeypatch):
     async def analisar(video, prompt, imagens=None):
         pedidos.append(prompt)
         return ('{"nome": "Copo Térmico", "vantagem": "Mantém gelado 🧊", "lugar": "meio", '
-                '"textos_do_video": [{"inicio": 0, "fim": 9}]}')
+                '"capa": "Copo sempre gelado", "textos_do_video": [{"inicio": 0, "fim": 9}]}')
 
     monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 10.0)
     textos = edicao_video.textos_da_tela("v.mp4", "Copo Marca X")
     assert textos == {"nome": "Copo Térmico", "vantagem": "Mantém gelado", "lugar": "meio", "texto_no_video": True,
-                      "parte_com_texto": 0.9}
+                      "parte_com_texto": 0.9, "capa": "Copo sempre gelado"}
     assert "Copo Marca X" in pedidos[0] and "versoes" not in pedidos[0] and "textos_do_video" in pedidos[0]
     # O vídeo com texto próprio na tela fica sem lugar para as nossas legendas (P52).
     assert edicao_video.lugar_dos_textos(textos) == edicao_video.SEM_LUGAR
@@ -1127,7 +1127,7 @@ def test_texto_da_ia_com_letra_fora_do_portugues_e_corrigido_ou_sai(monkeypatch)
 
     async def analisar(video, prompt, imagens=None):
         return ('{"nome": "Meia-Calça Térmica", "vantagem": "Por dentro tem pelüia bem macia", '
-                '"chamada": "Confira aqui embaixo"}')
+                '"chamada": "Confira aqui embaixo", "capa": "Meia-calça quentinha"}')
 
     async def corrigir(prompt, imagens=None):
         if prompt.startswith("Revise a ortografia"):
@@ -1171,6 +1171,7 @@ def test_revisao_pega_o_erro_so_com_letras_do_portugues(monkeypatch):
 
     async def analisar(video, prompt, imagens=None):
         return ('{"nome": "Garrafa Termica", "vantagem": "Mantem gelado o dia todo", "chamada": "Veja aqui embaixo", '
+                '"capa": "Garrafa bem gelada", '
                 '"versoes": [{"vantagem": "Gelada por horas", "inicio": 1, "fim": 3, "chamada": "Toque no produtu"}]}')
 
     async def revisar(prompt, imagens=None):
@@ -1822,13 +1823,14 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
 
 
 def test_frase_curta_da_capa_vem_da_ia_e_a_longa_fica_de_fora_sem_ser_cortada(monkeypatch):
-    # Escolha do Rafael (30/10, P106): a IA escreve a vantagem em 2 a 4 palavras, até 20 letras,
-    # só para a capa, que sai em letra grande; a maior que isso não é cortada (perderia o
-    # sentido) e a capa vai com a vantagem.
+    # Escolhas do Rafael (30/10, P106, e 02/11, P122): a IA escreve só para a capa uma frase de 2
+    # a 4 palavras, até 20 letras, que sai em letra grande; a maior que isso não é cortada
+    # (perderia o sentido) e, sem a certa nem na 2ª vez (aqui a IA não responde), a capa vai com
+    # a vantagem.
     import api_gemini
     respostas = iter([
-        '{"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "capa": "Estimula o bebê"}',
-        '{"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "capa": "Estimula o desenvolvimento"}'])
+        '{"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "capa": "Cubo que estimula"}',
+        '{"nome": "Cubo", "vantagem": "Estimula o desenvolvimento do bebê", "capa": "Cubo que estimula o bebê"}'])
 
     async def analisar(video, prompt, imagens=None):
         return next(respostas)
@@ -1837,10 +1839,104 @@ def test_frase_curta_da_capa_vem_da_ia_e_a_longa_fica_de_fora_sem_ser_cortada(mo
     monkeypatch.setattr(edicao_video, "_revisar_ortografia", lambda textos: textos)
     assert '"capa"' in edicao_video.PROMPT_DOS_TEXTOS and "até 20 caracteres" in edicao_video.PROMPT_DOS_TEXTOS
     curta = edicao_video.textos_da_tela("v.mp4", "Cubo")
-    assert curta["capa"] == "Estimula o bebê" and edicao_video.frase_da_capa(curta) == "Estimula o bebê"
+    assert curta["capa"] == "Cubo que estimula" and edicao_video.frase_da_capa(curta) == "Cubo que estimula"
+    assert "capa_de_novo" not in curta
     longa = edicao_video.textos_da_tela("v.mp4", "Cubo")
     assert "capa" not in longa and edicao_video.frase_da_capa(longa) == "Estimula o desenvolvimento do bebê"
+    assert (longa["capa_de_novo"], longa["sem_a_capa"]) == (edicao_video.LONGA_DEMAIS, edicao_video.SEM_FRASE)
     assert edicao_video.MAXIMOS_DOS_TEXTOS["capa"] == edicao_video.MAXIMO_DA_CAPA == 20
+
+
+def _ia_dos_textos(monkeypatch, resposta_do_video, frases_de_novo):
+    """
+    A IA de mentira que vê o vídeo (resposta_do_video, o JSON) e a das chamadas só de texto: o
+    pedido da frase da capa de novo responde, em ordem, com frases_de_novo; os outros (a
+    revisão, a ortografia) ficam sem resposta. Devolve os pedidos da frase de novo.
+    """
+    import api_gemini
+    pedidos, frases = [], iter(frases_de_novo)
+
+    async def analisar(video, prompt, imagens=None):
+        return resposta_do_video
+
+    async def texto(prompt, imagens=None):
+        if prompt.startswith("Escreva a frase da capa"):
+            pedidos.append(prompt)
+            return next(frases, None)
+        return None
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", texto)
+    return pedidos
+
+
+def test_frase_da_capa_longa_demais_volta_a_ia_uma_vez_com_o_tamanho(monkeypatch):
+    # No print da grade de 02/11 (16:06), a capa "Remove bolinhas de tecido" não dizia o que era o
+    # produto (P122): a frase da IA passou de 20 letras e a capa foi com a vantagem. Agora a frase
+    # que não segue a regra volta à IA uma vez, só ela, dizendo o que estava errado.
+    import json
+    pedidos = _ia_dos_textos(monkeypatch, json.dumps({
+        "nome": "Removedor de Bolinhas", "vantagem": "Remove bolinhas de tecido",
+        "capa": "Removedor de bolinhas"}), ['"Removedor sem fio."'])
+    textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
+    assert textos["capa"] == "Removedor sem fio" and edicao_video.frase_da_capa(textos) == "Removedor sem fio"
+    assert textos["capa_de_novo"] == edicao_video.LONGA_DEMAIS and "sem_a_capa" not in textos
+    assert len(pedidos) == 1
+    # O pedido diz o produto, a vantagem e o tamanho da de antes.
+    for pedaco in ("Removedor de Bolinhas", "Remove bolinhas de tecido", "tem 21 caracteres, mais que 20",
+                   "começa pelo que é o produto", "até 20 caracteres"):
+        assert pedaco in pedidos[0], pedaco
+    assert edicao_video.registro_da_frase(textos, textos["capa"]) == (
+        "curta na 2ª vez", "a 1ª: mais de 20 letras; 17 letras", True)
+
+
+def test_frase_da_capa_sem_dizer_o_que_e_o_produto_volta_a_ia(monkeypatch):
+    # A P122: a frase começa pelo que é o produto. "Melhor visibilidade", numa viseira de carro,
+    # só trazia a vantagem: volta à IA, que reescreve começando pelo produto.
+    import json
+    pedidos = _ia_dos_textos(monkeypatch, json.dumps({
+        "nome": "Viseira para Carro", "vantagem": "Melhor visibilidade", "capa": "Melhor visibilidade"}),
+        ["Viseira contra o sol"])
+    textos = edicao_video.textos_da_tela("v.mp4", "Viseira")
+    assert textos["capa"] == "Viseira contra o sol" and textos["capa_de_novo"] == edicao_video.SEM_O_PRODUTO
+    assert '"Melhor visibilidade" não começa pelo que é o produto' in pedidos[0]
+
+
+def test_sem_a_frase_certa_nem_na_2a_vez_a_capa_vai_com_a_vantagem_e_o_registro_diz_por_que(monkeypatch):
+    import json
+    _ia_dos_textos(monkeypatch, json.dumps({
+        "nome": "Removedor de Bolinhas", "vantagem": "Remove bolinhas de tecido", "capa": "Removedor de bolinhas"}),
+        ["Removedor de bolinhas elétrico"])
+    textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
+    assert "capa" not in textos and edicao_video.frase_da_capa(textos) == "Remove bolinhas de tecido"
+    assert edicao_video.registro_da_frase(textos, edicao_video.frase_da_capa(textos)) == (
+        "a vantagem (sem a curta)", "a 1ª: mais de 20 letras; a 2ª: mais de 20 letras; 25 letras", None)
+    # Sem a frase da IA nenhuma vez (a IA de texto sem resposta).
+    _ia_dos_textos(monkeypatch, json.dumps({"nome": "Removedor de Bolinhas", "vantagem": "Remove bolinhas"}), [])
+    textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
+    assert (textos["capa_de_novo"], textos["sem_a_capa"]) == (edicao_video.SEM_FRASE, edicao_video.SEM_FRASE)
+    # Sem o nome nem a vantagem, a IA não teria de onde tirar a frase: não pede de novo.
+    pedidos = _ia_dos_textos(monkeypatch, json.dumps({"lugar": "meio"}), ["Removedor sem fio"])
+    textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
+    assert pedidos == [] and "capa" not in textos and edicao_video.frase_da_capa(textos) == ""
+
+
+def test_frase_da_capa_comeca_pelo_que_e_o_produto():
+    # A 1ª palavra (sem artigo nem número na frente) tem o mesmo começo de uma palavra do nome:
+    # o plural, o diminutivo e o acento não atrapalham.
+    for frase, nome in (("Travessas 3 tamanhos", "Travessa de Vidro"), ("Sapatinho macio", "Sapato Infantil"),
+                        ("Mesinha dobrável", "Mesa Portátil"), ("A calça que modela", "Calça Jeans Feminina"),
+                        ("3 travessas de vidro", "Travessas"), ("Tênis bem leve", "Tenis Casual"),
+                        ("Copo sempre gelado", "Kit Copo Térmico"), ("Calça que modela", "")):
+        assert edicao_video.comeca_pelo_produto(frase, nome), (frase, nome)
+    for frase, nome in (("Melhor visibilidade", "Viseira para Carro"), ("Conforto e estilo", "Tênis Infantil"),
+                        ("Bolsa de praia", "Bolinhas de Gel"), ("Caimento impecável", "Calça Jeans")):
+        assert not edicao_video.comeca_pelo_produto(frase, nome), (frase, nome)
+    # De 2 a 4 palavras, até 20 letras.
+    assert edicao_video.por_que_a_frase_nao_serve("Removedor", "Removedor") == edicao_video.FORA_DAS_PALAVRAS
+    assert edicao_video.por_que_a_frase_nao_serve("Calça que modela bem demais", "Calça") == edicao_video.LONGA_DEMAIS
+    assert edicao_video.por_que_a_frase_nao_serve("", "Calça") == edicao_video.SEM_FRASE
+    assert edicao_video.por_que_a_frase_nao_serve("Calça que modela", "Calça Jeans") == ""
 
 
 def test_frase_da_capa_diz_o_que_e_o_produto_e_a_vantagem():
