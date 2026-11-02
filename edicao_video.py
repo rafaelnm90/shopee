@@ -47,8 +47,9 @@ MINIMO_POR_FOTO = 3
 # alto à direita, fora do ícone da barra de busca do app e longe do canto da tela (pedido do
 # Rafael, 01/11, P120: DECISOES.md, Shopee Vídeo): a ponta de cima à direita logo abaixo da barra
 # de busca (FIM_DA_BARRA_DE_BUSCA) e um pouco para dentro da borda que o app mostra
-# (VISIVEL_NO_APP), o que o tests/test_edicao_video.py confere.
-LARGURA_DA_MINIATURA = 152
+# (VISIVEL_NO_APP), o que o tests/test_edicao_video.py confere. O tamanho é o de sempre, 25% da
+# largura do vídeo (escolha do Rafael, 02/11, P121: DECISOES.md, Shopee Vídeo).
+LARGURA_DA_MINIATURA = 180
 # O canto de cima à direita da miniatura fica sempre no mesmo lugar: menor, ela encolhe para
 # dentro dele. Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
 CANTO_DA_MINIATURA = (657, 150)
@@ -706,14 +707,14 @@ MINIMO_DO_REMONTADO = 8
 # Rafael, P71: a caixa do alto encostava na borda e ficava embaixo da busca). Os lugares, em
 # (x, topo, largura máxima das linhas, quantas linhas; a caixa tem mais 56 px de margem) no
 # vídeo de 720x1280; x None = centralizado, x negativo = encostado na direita, a -x px da borda:
-# - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 505 a 657);
-# - "meio": logo abaixo da miniatura (que vai até y 302), centralizado;
+# - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 477 a 657);
+# - "meio": logo abaixo da miniatura (que vai até y 330), centralizado;
 # - "esquerda" e "direita": nos lados, numa caixa estreita de até 3 linhas, no meio da
 #   altura: acima da seta (que começa em y 726) e da coluna de botões do app à direita.
 # Nenhum lugar livre do rosto e do produto (SEM_LUGAR), o vídeo vai sem os textos (escolha
 # do Rafael, P47: no vídeo do conjunto, o alto cobriu o rosto da modelo e o meio cobriria o
 # conjunto).
-LUGARES_DOS_TEXTOS = {"alto": (68, 150, 340, 2), "meio": (None, 320, 480, 2),
+LUGARES_DOS_TEXTOS = {"alto": (68, 150, 340, 2), "meio": (None, 340, 480, 2),
                       "esquerda": (64, 400, 170, 3), "direita": (-64, 400, 170, 3)}
 LUGAR_PADRAO = "alto"
 SEM_LUGAR = "nenhum"
@@ -760,7 +761,7 @@ _LUGAR_NO_PROMPT = (
     "Diga onde os textos podem ficar sem cobrir o produto, o rosto de alguém nem as fotos, quadros ou textos "
     "que o próprio vídeo pôs por cima da imagem, na maior parte do vídeo: "
     "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 12% e 22% da altura e até uns 65% da largura), "
-    "\"meio\" (centralizado, entre uns 25% e 34% da altura), \"esquerda\" (perto da borda esquerda, até "
+    "\"meio\" (centralizado, entre uns 27% e 36% da altura), \"esquerda\" (perto da borda esquerda, até "
     "uns 40% da largura, entre uns 31% e 45% da altura) ou \"direita\" (o mesmo, perto da borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem alguma dessas coisas.\n"
 )
@@ -785,7 +786,7 @@ _TEXTO_NO_VIDEO_NO_PROMPT = (
 # tinha dito que o canto estava livre. Com o lugar dito, a coisa do criador logo abaixo do
 # canto faz a miniatura diminuir em vez de sair (escolha do Rafael, 29/10, P97).
 _CANTO_NO_PROMPT = (
-    "Diga também se o canto de cima à direita do vídeo (de uns 65% a 95% da largura e de uns 9% a 26% da altura) "
+    "Diga também se o canto de cima à direita do vídeo (de uns 62% a 95% da largura e de uns 9% a 29% da altura) "
     "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, em "
     "qualquer momento (não contam marca d'água, logo nem nome do perfil): \"canto_ocupado\", true ou false.\n"
     "Diga também onde ficam, em qualquer momento do vídeo, as legendas, títulos, frases, fotos, quadros e "
@@ -1198,7 +1199,7 @@ MENOR_MINIATURA = LARGURA_DA_MINIATURA * 2 // 3
 # O canto que a IA olha para dizer se está ocupado (_CANTO_NO_PROMPT), em % do vídeo: da
 # esquerda à direita e de cima a baixo, o lugar da miniatura com a folga (ela fica logo abaixo da
 # barra de busca, P120).
-CANTO_OLHADO_PELA_IA = (65, 95, 9, 26)
+CANTO_OLHADO_PELA_IA = (62, 95, 9, 29)
 
 
 def _cruza_a_miniatura(caixa, largura=LARGURA_DA_MINIATURA):
