@@ -1026,12 +1026,14 @@ def test_textos_da_tela_pede_so_o_do_video_completo(monkeypatch):
     async def analisar(video, prompt, imagens=None):
         pedidos.append(prompt)
         return ('{"nome": "Copo Térmico", "vantagem": "Mantém gelado 🧊", "lugar": "meio", '
-                '"texto_no_video": true}')
+                '"textos_do_video": [{"inicio": 0, "fim": 9}]}')
 
     monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 10.0)
     textos = edicao_video.textos_da_tela("v.mp4", "Copo Marca X")
-    assert textos == {"nome": "Copo Térmico", "vantagem": "Mantém gelado", "lugar": "meio", "texto_no_video": True}
-    assert "Copo Marca X" in pedidos[0] and "versoes" not in pedidos[0] and "texto_no_video" in pedidos[0]
+    assert textos == {"nome": "Copo Térmico", "vantagem": "Mantém gelado", "lugar": "meio", "texto_no_video": True,
+                      "parte_com_texto": 0.9}
+    assert "Copo Marca X" in pedidos[0] and "versoes" not in pedidos[0] and "textos_do_video" in pedidos[0]
     # O vídeo com texto próprio na tela fica sem lugar para as nossas legendas (P52).
     assert edicao_video.lugar_dos_textos(textos) == edicao_video.SEM_LUGAR
     assert edicao_video.lugar_dos_textos({"lugar": "meio", "texto_no_video": False}) == "meio"
@@ -2004,13 +2006,89 @@ def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
     # e as legendas entram onde não os cobrem; a IA também diz se o canto da miniatura está livre.
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
         assert "nem o texto dentro das fotos e quadros do produto que o vídeo pôs por cima" in prompt
-        assert "sem cobrir o produto, o rosto de alguém nem as fotos, quadros ou textos" in prompt
+        assert "sem cobrir, em nenhum momento, as fotos, quadros ou textos" in prompt
         assert "\"canto_ocupado\"" in prompt and "não contam marca d'água, logo nem nome do perfil" in prompt
     assert edicao_video._nome_lugar_e_falas({"canto_ocupado": True, "texto_no_video": "sim"}) == {
         "canto_ocupado": True}
     assert edicao_video.miniatura_no_video({"canto_ocupado": True}) == 0
     assert edicao_video.miniatura_no_video({"canto_ocupado": False}) == edicao_video.LARGURA_DA_MINIATURA
     assert edicao_video.miniatura_no_video({}) == edicao_video.LARGURA_DA_MINIATURA
+
+
+def test_texto_do_criador_so_no_fim_nao_tira_os_nossos_textos(monkeypatch):
+    # Rascunho dos fones de 02/11 (vídeo do Rafael das 09:21): as duas frases do criador só
+    # apareciam nos últimos 5 s de 26, e a IA disse que o vídeo tinha texto próprio na maior
+    # parte do tempo; o rascunho foi sem os nossos textos. A P52 vale para mais da metade do
+    # tempo: a IA diz os trechos, e a conta é feita aqui.
+    import api_gemini
+    respostas, duracoes = [], []
+
+    async def analisar(video, prompt, imagens=None):
+        return respostas.pop(0)
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: duracoes.append(video) or 26.4)
+    respostas.append('{"nome": "Fone", "lugar": "alto", "textos_do_video": [{"inicio": 20.5, "fim": 23.0}, '
+                     '{"inicio": 23.0, "fim": 26.0}]}')
+    textos = edicao_video.textos_da_tela("v.mp4", "Fone Marca X")
+    assert textos["texto_no_video"] is False and textos["parte_com_texto"] == 0.21
+    assert edicao_video.lugar_dos_textos(textos) == "alto"
+    # Na maior parte do tempo, continua sem os nossos (o que se cruza conta uma vez).
+    respostas.append('{"nome": "Fone", "lugar": "alto", "textos_do_video": [{"inicio": 0, "fim": 10}, '
+                     '{"inicio": 5, "fim": 20}, {"inicio": 6, "fim": 8}]}')
+    textos = edicao_video.textos_da_tela("v.mp4", "Fone Marca X")
+    assert textos["texto_no_video"] is True and textos["parte_com_texto"] == 0.76
+    assert edicao_video.lugar_dos_textos(textos) == edicao_video.SEM_LUGAR
+    # As versões do exemplo seguem a mesma conta.
+    respostas.append('{"nome": "Fone", "lugar": "meio", "textos_do_video": [{"inicio": 24, "fim": 99}]}')
+    assert edicao_video.textos_das_versoes("v.mp4", "Fone Marca X")["texto_no_video"] is False
+    # Sem nenhum trecho, a duração nem é lida, e o vídeo leva os nossos textos.
+    duracoes.clear()
+    respostas.append('{"nome": "Fone", "lugar": "alto", "textos_do_video": []}')
+    assert "texto_no_video" not in edicao_video.textos_da_tela("v.mp4", "Fone Marca X") and duracoes == []
+    # Os trechos: o que passa do fim do vídeo é cortado, e o que veio errado fica de fora.
+    assert edicao_video._trechos_com_texto([{"inicio": 3, "fim": 1}, {"inicio": "x", "fim": 2}, "texto",
+                                            {"inicio": -1, "fim": 2}, {"inicio": 2, "fim": 4.5}]) == [(2.0, 4.5)]
+    assert edicao_video._trechos_com_texto(None) is None
+    assert edicao_video.parte_com_texto_proprio([(8.0, 30.0)], 10.0) == 0.2
+    assert edicao_video.parte_com_texto_proprio([(1.0, 2.0)], 0.0) is None
+
+
+def test_o_que_foi_filmado_nao_conta_como_coisa_do_criador():
+    # Rascunho dos fones de 02/11: a IA contou o nome escrito na capa de uma revista em cima da
+    # mesa como texto do criador no canto da nossa miniatura (P81), e a miniatura saiu. Só conta
+    # o que o criador acrescentou por cima na edição; o lugar dos nossos textos não cobre o que
+    # ele pôs por cima em nenhum momento (P52 e P82).
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        texto = prompt.format(nome="Fone")
+        assert edicao_video._O_QUE_FOI_FILMADO_NAO_CONTA in texto
+        assert "uma revista ou a tela de um celular" in texto and "nunca contam" in texto
+        assert "as coisas filmadas também não" in texto and "nome do perfil nem as coisas filmadas" in texto
+        assert "sem cobrir, em nenhum momento, as fotos, quadros ou textos" in texto
+        assert '"textos_do_video": []' in texto and '"texto_no_video"' not in texto
+
+
+def test_o_registro_diz_por_que_a_miniatura_ficou_menor_ou_de_fora(monkeypatch, tmp_path):
+    # O registro dizia só "sem a nossa miniatura": separa o canto ocupado sem dizer onde (P81)
+    # da coisa do criador no alto que passa por ela (P97), e o texto próprio diz a parte do tempo.
+    import registro_processos as rp
+    _versoes_de_mentira(monkeypatch)
+    destino = str(tmp_path / "rascunho.mp4")
+    base = {"nome": "Fone", "vantagem": "Encaixe firme", "chamada": "Toque aqui embaixo", "lugar": "alto"}
+    _textos_da_tela(monkeypatch, dict(base, canto_ocupado=True))
+    assert edicao_video.SEM_A_MINIATURA in edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone")[1]
+    _textos_da_tela(monkeypatch, dict(base, canto_ocupado=True, por_cima=[(55.0, 95.0, 25.0, 30.0)]))
+    assert edicao_video.COM_A_MINIATURA_MENOR in edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone")[1]
+    # Com o canto livre, a miniatura vai inteira, e nada é anotado.
+    _textos_da_tela(monkeypatch, dict(base, canto_ocupado=False))
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone")
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_CANTO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [
+        ("de fora", edicao_video.CANTO_SEM_DIZER_ONDE), ("menor", "a coisa do criador no alto começa a 25% da altura")]
+    # O texto próprio na maior parte do tempo diz quanto, no detalhe do registro da edição.
+    _textos_da_tela(monkeypatch, dict(base, texto_no_video=True, parte_com_texto=0.76))
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone") == (
+        "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.TEXTO_JA_NO_VIDEO + " (76% do tempo)")
 
 
 # --- As legendas da fala (escolha do Rafael, 01/11, P118) ---
