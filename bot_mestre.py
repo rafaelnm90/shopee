@@ -10254,11 +10254,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
         return
 
-    # Shopee Vídeo: o ajuste cancelado volta à tela de onde saiu (robô, assistente ou celular).
+    # Shopee Vídeo: o ajuste cancelado volta à tela de onde saiu (robô, assistente, celular ou
+    # o rascunho do Tirar Produto).
     if estado_atual and estado_atual.startswith("ShopeeVideoFluxo:"):
         await state.clear()
         await message.answer("Ação cancelada. Nada foi alterado.")
-        await painel_shopee_video.voltar_depois_de_cancelar(message, state, estado_atual)
+        await painel_shopee_video.voltar_depois_de_cancelar(message, state, estado_atual, data)
         return
 
     # Acessos do Servidor: edição cancelada volta ao painel, sem gravar nada.

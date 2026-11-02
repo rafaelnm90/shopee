@@ -2060,6 +2060,103 @@ def test_juntar_vistas_nao_conta_duas_vezes():
     assert ps._juntar_vistas([]) == []
 
 
+class FileiraComX(Fileira):
+    """
+    A fileira com o cartão de cada produto: o nome e o X (iv_close) no canto de cima, à direita. O
+    2º cartão fica cortado na beira da tela, com o X fora dela; rolando, o último chega ao começo.
+    O X tira o produto (com pergunta=True, antes abre a janela de confirmar; com tira=False, nada
+    muda).
+    """
+
+    def __init__(self, produtos, pergunta=False, tira=True):
+        super().__init__(produtos)
+        self.pergunta, self.tira, self.aberta = pergunta, tira, None
+
+    def dump_hierarchy(self):
+        if self.aberta is not None:
+            return TELA_FINAL.replace("PRODUTOS", (
+                '<node text="Deseja remover este produto?" class="android.widget.TextView" '
+                'bounds="[100,1500][980,1560]" />'
+                '<node text="Remover" class="android.widget.Button" clickable="true" bounds="[600,1600][900,1680]" />'))
+        cartoes = "".join(
+            f'<node class="android.view.ViewGroup" bounds="[{100 + 800 * i},805][{780 + 800 * i},1020]">'
+            f'<node text="{nome}" resource-id="com.shopee.br:id/tv_product_title" class="android.widget.TextView" '
+            f'bounds="[{130 + 800 * i},820][{700 + 800 * i},875]" />'
+            f'<node resource-id="com.shopee.br:id/iv_close" class="android.widget.ImageView" clickable="true" '
+            f'bounds="[{720 + 800 * i},810][{770 + 800 * i},860]" /></node>'
+            for i, nome in enumerate(self.produtos[self.inicio:self.inicio + 2]))
+        return TELA_FINAL.replace("PRODUTOS", '<node class="androidx.recyclerview.widget.RecyclerView" '
+                                  'resource-id="com.shopee.br:id/rv_product" bounds="[0,800][1080,1030]">'
+                                  + cartoes + "</node>")
+
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        self.rolagens.append(("fim" if x2 < x1 else "começo", duracao))
+        self.inicio = min(self.inicio + 1, len(self.produtos) - 1) if x2 < x1 else max(self.inicio - 1, 0)
+
+    def click(self, x, y):
+        super().click(x, y)
+        if self.aberta is not None:
+            if 600 <= x <= 900 and 1600 <= y <= 1680:
+                self.produtos.pop(self.aberta)
+            self.aberta = None
+        elif 720 <= x <= 770 and 810 <= y <= 860 and self.tira:
+            if self.pergunta:
+                self.aberta = self.inicio
+            else:
+                self.produtos.pop(self.inicio)
+
+
+def test_tirar_da_fileira_toca_so_no_x_do_cartao_do_produto(monkeypatch):
+    # Escolha do Rafael (02/11, P123): na hora de postar, o robô tira os produtos que ele marcou
+    # pelo X de cada um. O cartão é achado pelo nome exato; cortado na beira, o X fica fora da
+    # tela, e o robô rola a fileira até o X aparecer.
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    nomes = GATINHO[:3]
+    aparelho = FileiraComX(nomes)
+    ok, detalhe = ps.tirar_da_fileira(aparelho, nomes, 1)
+    assert ok and detalhe == "o 2º produto saiu da fileira"
+    assert aparelho.produtos == [nomes[0], nomes[2]] and aparelho.inicio == 0
+    # O 1º e o último também; com a janela de confirmar, o Remover dela.
+    aparelho = FileiraComX(nomes, pergunta=True)
+    assert ps.tirar_da_fileira(aparelho, nomes, 2) == (True, "o 3º produto saiu da fileira (com a confirmação)")
+    assert aparelho.produtos == nomes[:2]
+    aparelho = FileiraComX(nomes)
+    assert ps.tirar_da_fileira(aparelho, nomes, 0)[0] and aparelho.produtos == nomes[1:]
+
+
+def test_tirar_da_fileira_para_sem_tocar_quando_nao_da_certeza(monkeypatch):
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    nomes = GATINHO[:3]
+    # Dois cartões com o mesmo nome: não dá para saber qual X tocar.
+    repetidos = [nomes[0], nomes[1], nomes[1]]
+    aparelho = FileiraComX(repetidos)
+    ok, motivo = ps.tirar_da_fileira(aparelho, repetidos, 2)
+    assert not ok and "mesmo nome" in motivo and aparelho.toques == [] and aparelho.produtos == repetidos
+    # A fileira que não é a do rascunho: nada tocado.
+    aparelho = FileiraComX(nomes[:2] + [FIBRA])
+    ok, motivo = ps.tirar_da_fileira(aparelho, nomes, 1)
+    assert not ok and motivo == "a fileira não tem os produtos do rascunho, na ordem do anexar" and aparelho.toques == []
+    aparelho = FileiraComX(nomes[:2])
+    ok, motivo = ps.tirar_da_fileira(aparelho, nomes, 1)
+    assert not ok and motivo == "a fileira mostra 2 produto(s), e o rascunho tem 3" and aparelho.toques == []
+    # O X que não tira: o robô diz, e não posta (o robo_shopee_video para).
+    aparelho = FileiraComX(nomes, tira=False)
+    ok, motivo = ps.tirar_da_fileira(aparelho, nomes, 1)
+    assert not ok and "a fileira ficou com 3 produto(s), e não com os 2 que ficam" in motivo
+    # Sem o X no cartão (a fileira de só nomes): não acha, e não toca em nada.
+    aparelho = Fileira(nomes)
+    ok, motivo = ps.tirar_da_fileira(aparelho, nomes, 0)
+    assert not ok and motivo == "não achei o X do produto na fileira" and aparelho.toques == []
+
+
+def test_cartoes_da_fileira_pegam_o_x_de_dentro_do_cartao():
+    aparelho = FileiraComX(GATINHO[:3])
+    [(primeiro, x1), (segundo, x2)] = ps.cartoes_da_fileira(aparelho.dump_hierarchy())
+    # O X do 2º cartão está fora da fileira (cortado na beira): não serve.
+    assert (primeiro, x1, segundo, x2) == (GATINHO[0], (720, 810, 770, 860), GATINHO[1], None)
+    assert ps.cartoes_da_fileira(_tela_final(VESTIDO)) == [] and ps.cartoes_da_fileira("<quebrado") == []
+
+
 class AparelhoQueArrasta(Aparelho):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

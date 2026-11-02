@@ -167,7 +167,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     **"Adicionar Mais"** (`tv_add_more`), que abre a mesma lista (o anexado aparece como
     "Adicionado"; cada item mostra a taxa de comissão); Adicionar → "Editar nome do produto" →
     Feito, e a tela final mostra os produtos lado a lado (`rv_product`, um `tv_product_title`
-    e um X `iv_close` cada). Sem legenda escrita, o voltar da tela final vai direto à edição,
+    e um X `iv_close` cada). O X tira o produto do post: o robô toca nele na hora de postar, no
+    produto que o Rafael marcou no Tirar Produto ➖ (P123); falta ver se ele abre uma janela de
+    confirmar (o robô confirma só a que fala em remover o produto). Sem legenda escrita, o voltar da tela final vai direto à edição,
     sem o aviso de sair.
   - **o produto que não fica depois do Feito** (30/10/2026 às 06:17; 31/10/2026 às 09:15 e
     09:35): com a legenda já escrita (em foco e com o texto marcado pela cópia), o Feito às vezes

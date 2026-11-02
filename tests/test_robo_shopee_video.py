@@ -5903,3 +5903,101 @@ def test_laranja_estreito_nao_e_a_faixa_da_capa():
     assert robo.edicao_video.faixa_laranja(imagem, caixa) and robo.faixa_da_capa(imagem, caixa) is None
     ImageDraw.Draw(imagem).rectangle((0, 300, 357, 360), fill=robo.edicao_video.LARANJA_DA_SHOPEE)
     assert robo.faixa_da_capa(imagem, caixa)[:2] == (300, 361)
+
+
+# --- Tirar produto no post (P123) ---
+
+LINKS_DOS_CUBOS = {"B": "https://s.shopee.com.br/cubo-b", "C": "https://s.shopee.com.br/cubo-c"}
+
+
+def _com_tres_produtos(estado="aprovado", **campos):
+    """Um rascunho de link com o produto do vídeo e 2 produtos a mais."""
+    ident = _rascunho(estado, postar_em="2026-10-22 12:00:00")
+    robo.atualizar(ident, produtos=["Cubo A", "Cubo B", "Cubo C"],
+                   mais_produtos=[{"nome": f"Cubo {letra}", "link": link, "endereco": ""}
+                                  for letra, link in LINKS_DOS_CUBOS.items()],
+                   itens=[{"item": str(n), "a_mais": n > 1} for n in (1, 2, 3)], **campos)
+    return ident
+
+
+def _post_com_os_passos(monkeypatch, tirar_da_fileira=None):
+    """O publicar com o celular de mentira: cada passo anotado, e a tela final que sempre confere."""
+    passos, levados = [], []
+    monkeypatch.setattr(robo, "ler_suspensao", lambda d, agora=None: None)
+    monkeypatch.setattr(robo, "abrir_rascunho", lambda d, rascunho: passos.append("abrir"))
+    monkeypatch.setattr(robo.ps, "tirar_da_fileira", tirar_da_fileira or (
+        lambda d, nomes, indice: passos.append(("tirar", list(nomes), indice)) or (True, "saiu")))
+    monkeypatch.setattr(robo.ps, "conferir_tela_final",
+                        lambda d, video: passos.append(("conferir", video["produtos"])) or (True, "confere"))
+    monkeypatch.setattr(robo, "capa_de_novo_no_post", lambda d, rascunho, agora=None: passos.append("capa"))
+    monkeypatch.setattr(robo.ps, "ajustar_rotulo_de_ia", lambda d, ligado: (True, "rótulo"))
+    monkeypatch.setattr(robo.ps, "postar", lambda d, video: passos.append(("postar", video["produtos"])) or (True, "ok"))
+    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: LINK_DO_POST)
+    monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: levados.append(rascunho))
+    return passos, levados
+
+
+def test_post_tira_os_produtos_marcados_e_guarda_so_os_que_ficaram(monkeypatch, avisos):
+    # Escolha do Rafael (02/11, P123): ele marca os produtos que saem do post e aprova; na hora de
+    # postar, o robô os tira da tela final pelo X, do último para o primeiro (tirar um não muda a
+    # posição dos de antes), confere a tela final só com os que ficam e posta. O Canal Afiliados e
+    # a medição das vendas recebem só os que ficaram.
+    ident = _com_tres_produtos(tirar=[1, 2], outra_cor=[3], outras_capas=[2],
+                               capas=["/x/9_capa_1.jpg", "/x/9_capa_3.jpg"])
+    passos, levados = _post_com_os_passos(monkeypatch)
+    assert robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 12:00")) == "rascunho aprovado postado"
+    assert passos == ["abrir", ("tirar", ["Cubo A", "Cubo B", "Cubo C"], 1), ("tirar", ["Cubo A", "Cubo C"], 0),
+                      ("conferir", ["Cubo C"]), "capa", ("postar", ["Cubo C"])]
+    postado = robo.pegar(ident)
+    assert (postado["estado"], postado["produtos"], postado["link"], postado["mais_produtos"]) == (
+        "postado", ["Cubo C"], LINKS_DOS_CUBOS["C"], [])
+    assert postado["itens"] == [{"item": "3", "a_mais": True}] and postado["capas"] == ["/x/9_capa_3.jpg"]
+    assert (postado["outra_cor"], postado["outras_capas"], postado["tirar"]) == ([1], [], [])
+    assert [(r["produtos"], r["link"]) for r in levados] == [(["Cubo C"], LINKS_DOS_CUBOS["C"])]
+    assert avisos[0].startswith("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou, sem os produtos que "
+                                "você marcou para sair (2 de 3).")
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DE_TIRAR) == ("tirados", "2 de 3 produtos", 1)
+
+
+def test_post_sem_marca_vai_com_todos_os_produtos(monkeypatch, avisos):
+    ident = _com_tres_produtos()
+    passos, levados = _post_com_os_passos(monkeypatch)
+    robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 12:00"))
+    assert passos == ["abrir", "capa", ("postar", ["Cubo A", "Cubo B", "Cubo C"])]
+    assert robo.pegar(ident)["produtos"] == ["Cubo A", "Cubo B", "Cubo C"] and levados[0]["link"] == LINK
+    assert avisos[0].startswith("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou.\n\n")
+
+
+def test_produto_marcado_que_nao_sai_para_o_post_sem_postar(monkeypatch, avisos):
+    # Nunca vai ao ar com um produto que o Rafael mandou tirar: para sem tocar em mais nada, e o
+    # aprovado tenta de novo (P99), com o app sem salvar e com todos os produtos de novo.
+    ident = _com_tres_produtos(tirar=[2])
+    passos, _ = _post_com_os_passos(monkeypatch, lambda d, nomes, indice: (False, "não achei o X do produto na fileira"))
+    with pytest.raises(robo.Parada) as parou:
+        robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 12:00"))
+    assert parou.value.motivo == ("não consegui tirar o 2º produto, que você marcou para sair do post: não achei o X "
+                                  "do produto na fileira") and not parou.value.do_video
+    assert passos == ["abrir"] and robo.pegar(ident)["estado"] == "aprovado"
+    assert robo.pegar(ident)["produtos"] == ["Cubo A", "Cubo B", "Cubo C"] and robo.pegar(ident)["tirar"] == [2]
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DE_TIRAR) == ("de fora", 0)
+
+
+def test_com_os_que_ficam_no_ver_produtos_e_quando_nao_da_para_tirar():
+    # No Ver Produtos, o link do rascunho é o do vídeo original e cada produto tem o seu.
+    ident = _rascunho()
+    robo.atualizar(ident, produtos=["A", "B", "C"], links_dos_produtos=["https://a", "", "https://c"], outra_cor=[2],
+                   tirar=[1])
+    filtrado = robo.com_os_que_ficam(robo.pegar(ident))
+    assert (filtrado["produtos"], filtrado["links_dos_produtos"], filtrado["link"]) == (
+        ["B", "C"], ["", "https://c"], LINK)
+    assert filtrado["outra_cor"] == [1] and filtrado["tirar"] == []
+    # Sem marca, com todas (o painel não deixa) ou com um produto só: o mesmo rascunho.
+    for tirar, produtos in (([], ["A", "B", "C"]), ([1, 2, 3], ["A", "B", "C"]), ([1], ["A"])):
+        robo.atualizar(ident, tirar=tirar, produtos=produtos, links_dos_produtos=[""] * len(produtos))
+        rascunho = robo.pegar(ident)
+        assert robo.com_os_que_ficam(rascunho) is rascunho
+    # O rascunho de link sem um link por produto não deixa tirar (não dá para saber qual sai).
+    assert not robo.pode_tirar({"produtos": ["A", "B"], "mais_produtos": []})
+    assert robo.pode_tirar({"produtos": ["A", "B"], "mais_produtos": [{"link": "b"}]})
