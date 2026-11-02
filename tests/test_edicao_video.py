@@ -2153,6 +2153,33 @@ def test_trecho_que_nao_cabe_em_duas_linhas_e_dividido_com_o_tempo_repartido():
         assert y + altura == edicao_video.PE_DA_LEGENDA and x + largura <= edicao_video.DIREITA_DA_LEGENDA
 
 
+def test_fala_longa_vira_varias_legendas_sem_perder_nenhuma_palavra():
+    # Pedido do Rafael (02/11, vídeo das 12:28): a legenda da fala é exatamente o que foi dito. Na
+    # jaqueta, com o limite de 50 letras por trecho no pedido, a IA encurtou "Couro ecológico premium,
+    # fabricada em couro de alta qualidade" e pulou a frase do revestimento. A frase longa vem inteira
+    # e é dividida aqui, em legendas de até 2 linhas, com o tempo repartido e todas as palavras.
+    texto = ("Couro ecológico premium, fabricada em couro de alta qualidade, resistente e sustentável. "
+             "Revestimento interno em poliéster ou veludo para melhor aquecimento.")
+    pedacos = edicao_video.pedacos_da_legenda(30.0, 38.0, texto)
+    assert len(pedacos) >= 3 and " ".join(p[2] for p in pedacos) == texto
+    assert pedacos[0][0] == 30.0 and pedacos[-1][1] == 38.0
+    for (_, fim, _, _), (inicio, _, _, _) in zip(pedacos, pedacos[1:]):
+        assert fim == inicio
+    for inicio, fim, parte, imagem in pedacos:
+        assert imagem and fim > inicio
+    # O corte fica perto do meio, de preferência depois de uma vírgula ou de um ponto.
+    assert edicao_video._ponto_de_corte("Couro ecológico premium, fabricada em couro".split()) == 3
+    assert edicao_video._ponto_de_corte("um dois três quatro".split()) == 2
+
+
+def test_o_pedido_da_ia_quer_a_fala_inteira_palavra_por_palavra():
+    pedido = edicao_video.PROMPT_DOS_TEXTOS.format(nome="Jaqueta")
+    for exigido in ("palavra por palavra", "sem resumir", "sem pular nenhuma frase", "Siga o áudio, não a imagem"):
+        assert exigido in pedido
+    # Sem limite de tamanho por trecho: com ele, a IA encurtava a fala.
+    assert "trechos curtos" not in pedido and "caracteres, como [" not in pedido
+
+
 def test_legendas_que_se_encostam_cortam_e_a_curta_demais_sai():
     letreiros = edicao_video.letreiros_da_fala(
         [(0.0, 3.0, "Primeira fala"), (2.5, 2.7, "rápida"), (2.7, 6.0, "Segunda fala"), (9.5, 14.0, "Fim")], 11.0)
@@ -2216,7 +2243,8 @@ def test_o_que_vai_ao_ar_leva_as_legendas_da_fala_e_o_registro_conta(monkeypatch
     # Os 3 textos da tela e as 2 legendas por cima do vídeo inteiro, e depois o Editor 1.
     assert montados == [([(0.0, 12.0, 1.0)], 5)] and editados[-1][1] == "rascunho.mp4"
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
-    assert [(r[2], r[3]) for r in registro] == [("postas", "2 trecho(s)")]
+    # Com as palavras e os segundos de fala: o checkup vê se a IA resume a fala (pedido do Rafael, 02/11).
+    assert [(r[2], r[3]) for r in registro] == [("postas", "2 trecho(s), 9 palavra(s) em 3 s de fala")]
 
     # Sem lugar para os textos (P47), as legendas da fala vão do mesmo jeito.
     montados.clear()
