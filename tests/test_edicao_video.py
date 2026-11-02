@@ -1645,20 +1645,20 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     # Desligada (o padrão), a capa é a de antes.
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == edicao_video.COM_LEGENDAS
     assert capas == [None]
-    # Ligada no painel, a vantagem da IA vai na capa, e o registro diz.
+    # Ligada no painel, sem a frase curta da IA vai o nome do produto (P131), e o registro diz.
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
     # O 1º quadro vai com a capa da grade, e o resto da abertura com a do vídeo aberto (P129).
-    assert capas[-1] == (edicao_video.capa_com_chamada(_foto_jpg(), "Leve e resistente"),
-                         edicao_video.capa_com_chamada(_foto_jpg(), "Leve e resistente", no_video=True))
+    assert capas[-1] == (edicao_video.capa_com_chamada(_foto_jpg(), "Bolsa de Palha"),
+                         edicao_video.capa_com_chamada(_foto_jpg(), "Bolsa de Palha", no_video=True))
     assert all(capa[:8] == b"\x89PNG\r\n\x1a\n" for capa in capas[-1])
     # A bebida alcoólica fica com a capa dos avisos (P43).
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Vinho", avisos=True)[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS)
     assert capas[-1] is None
-    # Sem a vantagem da IA, a capa de antes também.
-    _textos_da_tela(monkeypatch, {"nome": "Bolsa"})
+    # Sem a frase, o nome e a vantagem da IA, a capa de antes também.
+    _textos_da_tela(monkeypatch, {"lugar": "alto"})
     edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")
     assert capas[-1] is None
     # A capa que não sai (a letra que não abre, por exemplo) não segura o vídeo: vai a capa de antes.
@@ -1798,7 +1798,8 @@ def test_faixa_laranja_da_figurinha_pequena_em_cima_da_moldura_do_video_no_print
 
 def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     # Escolha do Rafael (30/10, P100): ligada, a chamada vai na capa de todos os vídeos (antes,
-    # P77, alternava um sim e outro não); o vídeo sem a vantagem da IA vai com a capa de sempre.
+    # P77, alternava um sim e outro não); o vídeo sem a frase, o nome e a vantagem da IA vai com a
+    # capa de sempre.
     _versoes_de_mentira(monkeypatch)
     capas = []
 
@@ -1810,7 +1811,7 @@ def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
     destino = str(tmp_path / "r.mp4")
     com_vantagem = {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"}
-    for textos in (com_vantagem, com_vantagem, {"nome": "Bolsa"}, com_vantagem, com_vantagem):
+    for textos in (com_vantagem, com_vantagem, {"lugar": "alto"}, com_vantagem, com_vantagem):
         _textos_da_tela(monkeypatch, textos)
         edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")
     assert capas == [True, True, False, True, True]
@@ -1821,7 +1822,7 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     monkeypatch.setattr(edicao_video.os.path, "exists", lambda caminho: True)
     monkeypatch.setattr(edicao_video.ps, "foto_do_produto", lambda video: _foto_jpg())
     monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Copo Térmico", "preco": 30.0})
-    _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas"})
+    _textos_da_tela(monkeypatch, {"vantagem": "Gelado por 12 horas"})
     nome, motivo, exemplo = edicao_video.exemplo_capa()
     assert (nome, motivo, exemplo["chamada"]) == ("Copo Térmico", "", "Gelado por 12 horas")
     assert exemplo["capa"][:4] == b"\x89PNG" and exemplo["grade"][:4] == b"\x89PNG"
@@ -1831,10 +1832,12 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     # Com a frase curta da IA para a capa (P106), é ela que vai.
     _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas", "capa": "Gelado 12 horas"})
     assert edicao_video.exemplo_capa()[2]["chamada"] == "Gelado 12 horas"
-    # Sem a vantagem da IA, o exemplo diz por quê.
-    _textos_da_tela(monkeypatch, {"nome": "Copo Térmico"})
+    # Sem a curta, o nome do produto (P131); sem a frase, o nome e a vantagem da IA, o exemplo diz por quê.
+    _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas"})
+    assert edicao_video.exemplo_capa()[2]["chamada"] == "Copo Térmico"
+    _textos_da_tela(monkeypatch, {"lugar": "meio"})
     assert edicao_video.exemplo_capa()[:2] == (
-        None, "a IA não escreveu a frase da capa nem a vantagem do produto deste vídeo")
+        None, "a IA não escreveu a frase da capa, o nome nem a vantagem do produto deste vídeo")
 
 
 def test_frase_curta_da_capa_vem_da_ia_e_a_longa_fica_de_fora_sem_ser_cortada(monkeypatch):
@@ -1857,7 +1860,8 @@ def test_frase_curta_da_capa_vem_da_ia_e_a_longa_fica_de_fora_sem_ser_cortada(mo
     assert curta["capa"] == "Cubo que estimula" and edicao_video.frase_da_capa(curta) == "Cubo que estimula"
     assert "capa_de_novo" not in curta
     longa = edicao_video.textos_da_tela("v.mp4", "Cubo")
-    assert "capa" not in longa and edicao_video.frase_da_capa(longa) == "Estimula o desenvolvimento do bebê"
+    # Sem a curta nem na 2ª vez, o nome do produto (P131).
+    assert "capa" not in longa and edicao_video.frase_da_capa(longa) == "Cubo"
     assert (longa["capa_de_novo"], longa["sem_a_capa"]) == (edicao_video.LONGA_DEMAIS, edicao_video.SEM_FRASE)
     assert edicao_video.MAXIMOS_DOS_TEXTOS["capa"] == edicao_video.MAXIMO_DA_CAPA == 20
 
@@ -1917,15 +1921,31 @@ def test_frase_da_capa_sem_dizer_o_que_e_o_produto_volta_a_ia(monkeypatch):
     assert '"Melhor visibilidade" não começa pelo que é o produto' in pedidos[0]
 
 
-def test_sem_a_frase_certa_nem_na_2a_vez_a_capa_vai_com_a_vantagem_e_o_registro_diz_por_que(monkeypatch):
+def test_sem_a_frase_certa_nem_na_2a_vez_a_capa_vai_com_o_nome_e_o_registro_diz_por_que(monkeypatch):
     import json
     _ia_dos_textos(monkeypatch, json.dumps({
         "nome": "Removedor de Bolinhas", "vantagem": "Remove bolinhas de tecido", "capa": "Removedor de bolinhas"}),
         ["Removedor de bolinhas elétrico"])
     textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
-    assert "capa" not in textos and edicao_video.frase_da_capa(textos) == "Remove bolinhas de tecido"
+    # Escolha do Rafael (02/11, P131 1): sem a frase certa nem na 2ª vez, o nome do produto, que diz o
+    # que ele é; sem o nome, a vantagem.
+    assert "capa" not in textos and edicao_video.frase_da_capa(textos) == "Removedor de Bolinhas"
     assert edicao_video.registro_da_frase(textos, edicao_video.frase_da_capa(textos)) == (
-        "a vantagem (sem a curta)", "a 1ª: mais de 20 letras; a 2ª: mais de 20 letras; 25 letras", None)
+        "o nome (sem a curta)", "a 1ª: mais de 20 letras; a 2ª: mais de 20 letras; 21 letras", None)
+    sem_nome = {"vantagem": "Remove bolinhas de tecido", "capa_de_novo": edicao_video.SEM_FRASE,
+                "sem_a_capa": edicao_video.SEM_FRASE}
+    assert edicao_video.frase_da_capa(sem_nome) == "Remove bolinhas de tecido"
+    assert edicao_video.registro_da_frase(sem_nome, edicao_video.frase_da_capa(sem_nome)) == (
+        "a vantagem (sem a curta nem o nome)", "a 1ª: sem frase; a 2ª: sem frase; 25 letras", None)
+    # O nome que não cabe numa linha vai em duas, em letra grande.
+    import os
+
+    import matplotlib
+    from PIL import Image, ImageDraw
+    desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    fonte, linhas = edicao_video._quebra_da_chamada("Removedor de Bolinhas Elétrico", desenho, fonte_ttf)
+    assert 1 <= len(linhas) <= 2 and fonte.size >= edicao_video.LETRAS_DA_CHAMADA[1]
     # Sem a frase da IA nenhuma vez (a IA de texto sem resposta).
     _ia_dos_textos(monkeypatch, json.dumps({"nome": "Removedor de Bolinhas", "vantagem": "Remove bolinhas"}), [])
     textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
@@ -1974,7 +1994,7 @@ def test_frase_da_capa_diz_o_que_e_o_produto_e_a_vantagem():
         assert linhas == [exemplo] and fonte.size >= edicao_video.LETRAS_DA_CHAMADA[1]
 
 
-def test_capa_vai_com_a_frase_curta_e_sem_ela_com_a_vantagem(monkeypatch, tmp_path):
+def test_capa_vai_com_a_frase_curta_e_sem_ela_com_o_nome(monkeypatch, tmp_path):
     import registro_processos as rp
     _versoes_de_mentira(monkeypatch)
     frases = []
@@ -1990,10 +2010,11 @@ def test_capa_vai_com_a_frase_curta_e_sem_ela_com_a_vantagem(monkeypatch, tmp_pa
     edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Cubo")
     _textos_da_tela(monkeypatch, longa)
     edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Cubo")
-    assert frases == ["Estimula o bebê", "Estimula o desenvolvimento do bebê"]
+    # Sem a curta, o nome do produto (P131).
+    assert frases == ["Estimula o bebê", "Cubo"]
     registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", edicao_video.PROCESSO_DA_FRASE_DA_CAPA,
                                                             "2000-01-01 00:00:00")]
-    assert registro == [("curta", "15 letras"), ("a vantagem (sem a curta)", "34 letras")]
+    assert registro == [("curta", "15 letras"), ("o nome (sem a curta)", "4 letras")]
 
 
 def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):

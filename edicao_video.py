@@ -851,15 +851,15 @@ MAXIMO_DA_VANTAGEM = 36
 MAXIMO_DA_CHAMADA = 32
 # A frase da capa com chamada: o que é o produto e a vantagem em poucas palavras, que cabe em
 # letra grande numa linha da capa (a frase longa encolhia a letra até ficar difícil de ler na
-# grade do perfil, P106; só a vantagem não dizia o que é o produto, P122). Sem ela, vai a
-# vantagem. Escolhas do Rafael (30/10 e 02/11): DECISOES.md, Shopee Vídeo.
+# grade do perfil, P106; só a vantagem não dizia o que é o produto, P122). Sem ela, vai o nome
+# do produto (P131). Escolhas do Rafael (30/10 e 02/11): DECISOES.md, Shopee Vídeo.
 MAXIMO_DA_CAPA = 20
 PROCESSO_DA_FRASE_DA_CAPA = "edição do vídeo: frase da capa"
 # A frase segue a P122 com de 2 a 4 palavras, até MAXIMO_DA_CAPA caracteres (com os espaços,
 # como a IA conta) e começando pelo que é o produto: a 1ª palavra dela, sem artigo nem número na
 # frente, tem o mesmo começo de uma das palavras do nome genérico que a IA deu ("Travessas" e
 # "Travessa", "Sapatinho" e "Sapato"); sem o nome, não há com o que conferir. A que não segue
-# volta à IA uma vez, só a frase, com o que estava errado; ainda errada, vai a vantagem (P122).
+# volta à IA uma vez, só a frase, com o que estava errado; ainda errada, vai o nome do produto (P131).
 # No print da grade de 02/11 (16:06), a capa "Remove bolinhas de tecido" era a vantagem: a
 # frase da IA passou do tamanho. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
 PALAVRAS_DA_CAPA = (2, 4)
@@ -1599,7 +1599,8 @@ def _com_a_frase_da_capa(bruto, textos):
 def registro_da_frase(textos, frase):
     """
     (resultado, detalhe, ok) da frase da capa para o registro: "curta", "curta na 2ª vez" (com o
-    porquê da 1ª) ou "a vantagem (sem a curta)" (com o porquê das duas), e as letras da frase.
+    porquê da 1ª), "o nome (sem a curta)" ou "a vantagem (sem a curta nem o nome)" (com o porquê
+    das duas), e as letras da frase.
     """
     letras = f"{len(frase)} letras"
     primeira = textos.get("capa_de_novo", "")
@@ -1607,15 +1608,19 @@ def registro_da_frase(textos, frase):
         if primeira:
             return "curta na 2ª vez", f"a 1ª: {primeira}; {letras}", True
         return "curta", letras, True
+    resultado = "o nome (sem a curta)" if textos.get("nome") else "a vantagem (sem a curta nem o nome)"
     if primeira:
-        return ("a vantagem (sem a curta)", f"a 1ª: {primeira}; a 2ª: {textos.get('sem_a_capa', SEM_FRASE)}; {letras}",
-                None)
-    return "a vantagem (sem a curta)", letras, None
+        return resultado, f"a 1ª: {primeira}; a 2ª: {textos.get('sem_a_capa', SEM_FRASE)}; {letras}", None
+    return resultado, letras, None
 
 
 def frase_da_capa(textos):
-    """A frase da capa com chamada: a curta da IA (P122) ou, sem ela nem na 2ª vez, a vantagem."""
-    return textos.get("capa") or textos.get("vantagem", "")
+    """
+    A frase da capa com chamada: a curta da IA (P122); sem ela nem na 2ª vez, o nome genérico do
+    produto, que diz o que ele é (o que não cabe numa linha vai em duas); sem o nome, a vantagem.
+    Escolha do Rafael (02/11, P131): DECISOES.md, Shopee Vídeo.
+    """
+    return textos.get("capa") or textos.get("nome") or textos.get("vantagem", "")
 
 
 def textos_da_tela(video, nome):
@@ -1947,14 +1952,14 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), ""
     musica = _caminho(musicas_de_fundo(video)[0])
     textos = textos_da_tela(video, produto) if produto else {}
-    # Sem a frase da capa nem a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a
+    # Sem a frase da capa, o nome e a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a
     # dos avisos. A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre
     # com a capa dos avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
     frase = frase_da_capa(textos)
     capa = _capa_da_vez(foto, frase) if capa_ligada() and not avisos else None
     if capa_ligada() and not avisos and frase:
-        # Quantas capas saem com a frase curta (P122), quantas só na 2ª vez e quantas com a
-        # vantagem, por falta dela, e por quê.
+        # Quantas capas saem com a frase curta (P122), quantas só na 2ª vez e quantas com o
+        # nome (P131) ou a vantagem, por falta dela, e por quê.
         resultado, detalhe, ok = registro_da_frase(textos, frase)
         registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA, resultado, detalhe, ok=ok)
     abertura = capa
@@ -2401,7 +2406,7 @@ def exemplo_capa():
         textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
         frase = frase_da_capa(textos)
         if not frase:
-            return "a IA não escreveu a frase da capa nem a vantagem do produto deste vídeo", None
+            return "a IA não escreveu a frase da capa, o nome nem a vantagem do produto deste vídeo", None
         capa = capa_com_chamada(foto, frase)
         if not capa:
             return "a capa com a chamada não saiu", None

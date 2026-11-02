@@ -2065,7 +2065,7 @@ def capa_na_galeria(d, video):
         return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
     frase = edicao_video.frase_da_capa(edicao_video.textos_da_tela(video["arquivo"], anuncio.get("nome") or ""))
     if not frase:
-        return False, "a IA não escreveu a frase da capa nem a vantagem do produto"
+        return False, "a IA não escreveu a frase da capa, o nome nem a vantagem do produto"
     capa = edicao_video.capa_com_chamada(anuncio["foto"], frase)
     if not capa:
         return False, "a capa com a chamada não saiu"
