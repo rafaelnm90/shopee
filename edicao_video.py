@@ -2,7 +2,7 @@
 """
 A edição dos vídeos da Shopee Vídeo como o Rafael faz à mão no LumaFusion: a foto do
 anúncio do produto nos primeiros segundos e, no vídeo inteiro, uma miniatura dela no canto
-de cima à direita e a seta dele, no laranja da Shopee, embaixo à esquerda (a montagem fica no
+de cima à direita e as setinhas laranja em cascata embaixo à esquerda (a montagem fica no
 videos.com_foto_e_miniatura, com o resto do tratamento de vídeo).
 
 Vale para os vídeos de todas as fontes do robô (FONTES_COM_EDICAO): o Rafael confirmou que
@@ -56,17 +56,15 @@ LARGURA_DA_MINIATURA = 180
 CANTO_DA_MINIATURA = (657, 150)
 CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
                        CANTO_DA_MINIATURA[1] + LARGURA_DA_MINIATURA // 2)
-# A seta é a do Rafael (o arquivo Seta_da_Shopee que ele usa no LumaFusion), com o fundo
-# preto tirado: só o pedaço com a seta, já no tamanho dele (62,9%, posição X -23), perto do
-# canto de baixo à esquerda, inteira logo acima do cartão do produto que o app mostra e
-# apontando para ele (escolha do Rafael, P71: na posição do LumaFusion, o cartão tampava a
-# ponta). Ela começa logo depois da foto, já se desenhando quando o vídeo começa, e pulsa: o
-# arquivo guarda a entrada e um pulso (quadros 72 a 101, 1,2 s), que se repete até o fim do
-# vídeo. Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo. Vai no laranja da Shopee, com um
-# contorno branco e uma sombra leve, para destacar no fundo claro e no escuro (escolha do
-# Rafael, 02/11, P127): o seta_laranja.apng sai do arquivo dele pelo .claude/scripts/gerar_seta.py,
-# com MARGEM_DA_SETA px transparentes de cada lado para o contorno e a sombra.
-SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "seta_laranja.apng")
+# As setinhas em cascata (escolha do Rafael, 02/11, P130: no lugar da seta do arquivo dele, a do
+# LumaFusion, que ele pediu em 25/10): três setinhas para baixo, uma embaixo da outra, no laranja
+# da Shopee, com um contorno branco e uma sombra leve (P127), acendendo de cima para baixo, uma
+# volta por segundo, perto do canto de baixo à esquerda, logo acima do cartão do produto que o app
+# mostra e apontando para ele (inteiras acima do cartão, P71). Elas começam logo depois da foto e
+# vão até o fim do vídeo: o arquivo guarda uma volta, que se repete (PULSO_DA_SETA). O
+# setas_em_cascata.apng sai do .claude/scripts/gerar_seta.py, com MARGEM_DA_SETA px transparentes
+# de cada lado para o contorno e a sombra. DECISOES.md, Shopee Vídeo.
+SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "setas_em_cascata.apng")
 MARGEM_DA_SETA = 10
 CENTRO_DA_SETA = (142, 796)
 # O que o app da Shopee mostra do vídeo de 720x1280 num celular de tela 20:9, medido no
@@ -89,7 +87,7 @@ CARTAO_DO_PRODUTO = (68, 911, 550, 1096)        # x1, y1, x2, y2 no vídeo de 72
 FOLGA_DO_CARTAO = 8                             # entre o cartão e a moldura
 GROSSURA_DA_MOLDURA_DO_CARTAO = 7               # a da moldura da miniatura
 RAIO_DO_CARTAO = 17                             # o arredondado dos cantos do cartão
-PULSO_DA_SETA = (72, 30)
+PULSO_DA_SETA = (0, 25)                         # a volta inteira da cascata, em laço
 # As legendas da fala: o que as pessoas falam no vídeo, escrito pela IA vendo o vídeo e posto por
 # nós na edição (não o Captions do app: assim o Rafael vê a legenda no rascunho antes de aprovar).
 # O pé da legenda fica na altura do pé da seta, porque logo abaixo vem o cartão do produto que o app
