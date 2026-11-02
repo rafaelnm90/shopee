@@ -205,8 +205,8 @@ def capa_com_avisos(foto):
 # 02/11, 12:36) e longe do que a grade põe por cima: o número de visualizações, embaixo à
 # esquerda (NUMERO_DA_GRADE), fica logo abaixo da faixa, no preto, e a sacolinha da Shopee, em
 # cima à direita (SACOLINHA_DA_GRADE), logo acima da foto; o selo "Fixado" dos vídeos fixados no
-# perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10), fica logo acima da
-# moldura: pedido do Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
+# perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10), pega só a ponta de
+# cima da moldura: pedido do Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
 # shopee_video): ele vê o exemplo no privado e liga no painel. A bebida alcoólica fica com a
 # capa dos avisos. Escolhas do Rafael (29/10, P76; 30/10, P107): DECISOES.md, Shopee Vídeo.
 CHAVE_DA_CAPA = "capa_com_chamada"
@@ -235,19 +235,21 @@ LETRAS_DA_CHAMADA = (72, 44)                    # a maior e a menor numa linha
 LETRAS_EM_DUAS_LINHAS = (56, 36)                # quando não cabe numa linha: a faixa cresce para cima
 # A moldura laranja em volta da foto da capa com a frase (a que a grade do perfil mostra), na
 # foto toda, e da miniatura (pedidos do Rafael, P115, P117 e P119: DECISOES.md, Shopee Vídeo). Na
-# miniatura, os cantos são arredondados; na capa, retos, e a moldura fica inteira dentro do que a
-# grade mostra (LADOS_NA_GRADE), com MARGEM_NA_GRADE de preto de cada lado: pedido do Rafael
-# (vídeo de 02/11, 12:36). A foto do começo do vídeo, sem a frase, vai sem moldura (P119). As
+# miniatura, os cantos são arredondados; na capa, retos, e as laterais da moldura ficam à mostra,
+# encostadas nos lados do que a grade mostra (LADOS_NA_GRADE), sem preto entre elas e a borda do
+# quadro da grade: a moldura passa SOBRA_DA_MOLDURA de cada lado do corte, que a medida pode errar
+# por uns pontos, para não sobrar fresta preta. Pedidos do Rafael (vídeos de 02/11, 12:36 e
+# 13:18). A foto do começo do vídeo, sem a frase, vai sem moldura (P119). As
 # camadas vão de fora para dentro, (cor, grossura em px na capa); na miniatura, cada uma tem a
 # metade da grossura (ESCALA_NA_MINIATURA), dentro do lugar dela.
 CAMADAS_DA_MOLDURA = ((LARANJA_DA_SHOPEE, 14),)
 GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
 RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto da miniatura, dentro da moldura
 ESCALA_NA_MINIATURA = 0.5
-MARGEM_NA_GRADE = 10
+SOBRA_DA_MOLDURA = 3
 # Na capa com a frase, a foto e a moldura ficam no meio do lugar da foto da capa sem texto
-# (FOTO_DA_CAPA), num quadrado da largura que a grade mostra, menos a margem de cada lado.
-LADO_DA_MOLDURA = LARGURA_NA_GRADE - 2 * MARGEM_NA_GRADE
+# (FOTO_DA_CAPA), num quadrado da largura que a grade mostra, mais a sobra de cada lado.
+LADO_DA_MOLDURA = LARGURA_NA_GRADE + 2 * SOBRA_DA_MOLDURA
 LADO_DA_FOTO = LADO_DA_MOLDURA - 2 * GROSSURA_DA_MOLDURA
 MEIO_DA_FOTO = ((FOTO_DA_CAPA[0] + FOTO_DA_CAPA[2]) // 2, (FOTO_DA_CAPA[1] + FOTO_DA_CAPA[3]) // 2)
 # As letras da frase ficam dentro do que o app mostra do vídeo aberto (no modo assistente, a capa

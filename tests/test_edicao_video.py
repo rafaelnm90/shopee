@@ -1266,18 +1266,21 @@ def test_capa_com_chamada_tem_a_foto_grande_com_a_moldura_em_volta_e_a_frase_num
     # Escolha do Rafael (P107): a frase em letras brancas numa faixa laranja por cima do pé da
     # foto, logo acima do número de visualizações. A moldura laranja vai em volta da foto toda
     # (vídeo das 22:01 de 01/11, P119), com os cantos retos e inteira dentro do que a grade do
-    # perfil mostra (vídeo das 12:36 de 02/11: nas pontas da capa, as laterais dela sumiam).
+    # perfil mostra (vídeo das 12:36 de 02/11: nas pontas da capa, as laterais dela sumiam), sem
+    # preto entre ela e a borda do quadro da grade (vídeo das 13:18 de 02/11).
     capa = _capa("Organize sua cozinha")
     assert capa.size == edicao_video.TELA
     x1, y1, x2, y2 = edicao_video.FOTO_COM_MOLDURA
     grossura = edicao_video.GROSSURA_DA_MOLDURA
     assert (x1 - grossura, y1 - grossura, x2 + grossura, y2 + grossura) == edicao_video.MOLDURA_DA_CAPA
-    # A grade mostra o quadro em 3:4: na largura, de x 15 a 705; a moldura fica dentro, com a margem de preto.
+    # A grade mostra o quadro em 3:4: na largura, de x 15 a 705. A moldura passa uns pontos do
+    # corte de cada lado (a medida pode errar um pouco), e quase toda a grossura dela fica à mostra.
     esquerda, direita = edicao_video.LADOS_NA_GRADE
     cima, baixo = edicao_video.VISIVEL_NA_GRADE
     assert (esquerda, direita) == (15, 705) and (direita - esquerda) * 4 == (baixo - cima) * 3
-    margem = edicao_video.MARGEM_NA_GRADE
-    assert (x1 - grossura, x2 + grossura) == (esquerda + margem, direita - margem)
+    sobra = edicao_video.SOBRA_DA_MOLDURA
+    assert (x1 - grossura, x2 + grossura) == (esquerda - sobra, direita + sobra)
+    assert 0 < sobra <= grossura // 4
     # A foto no meio, a moldura laranja em volta e o preto em cima, embaixo e dos lados.
     for ponto in [(x1 + 40, y1 + 40), (x2 - 40, y1 + 40), (360, (y1 + y2) // 2)]:
         assert _cor_de(capa, ponto, (200, 120, 40)), ponto
@@ -1422,7 +1425,7 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
     assert edicao_video.capa_com_chamada(b"nao e imagem", "Leve") is None
     # O exemplo do painel mostra também o pedaço que a grade do perfil mostra, com o corte dos
-    # lados, e nele a moldura inteira.
+    # lados: a moldura encosta nas bordas, sem preto dos lados (vídeo das 13:18 de 02/11).
     capa_png = edicao_video.capa_com_chamada(_foto_jpg(), "Leve")
     recorte = Image.open(io.BytesIO(edicao_video.recorte_da_grade(capa_png))).convert("RGB")
     cima, baixo = edicao_video.VISIVEL_NA_GRADE
@@ -1430,10 +1433,12 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     assert recorte.size == (edicao_video.LARGURA_NA_GRADE, baixo - cima)
     capa = Image.open(io.BytesIO(capa_png)).convert("RGB")
     assert recorte.tobytes() == capa.crop((esquerda, cima, direita, baixo)).tobytes()
-    x1, y1, x2, y2 = edicao_video.MOLDURA_DA_CAPA
-    meio = (y1 + y2) // 2 - cima
-    assert _cor_de(recorte, (x1 - esquerda, meio), edicao_video.LARANJA_DA_SHOPEE)
-    assert _cor_de(recorte, (x2 - 1 - esquerda, meio), edicao_video.LARANJA_DA_SHOPEE)
+    _x1, y1, _x2, y2 = edicao_video.MOLDURA_DA_CAPA
+    for y in range(y1 - cima + 20, y2 - cima - 20, 40):
+        assert _cor_de(recorte, (0, y), edicao_video.LARANJA_DA_SHOPEE), y
+        assert _cor_de(recorte, (recorte.width - 1, y), edicao_video.LARANJA_DA_SHOPEE), y
+    visivel = edicao_video.GROSSURA_DA_MOLDURA - edicao_video.SOBRA_DA_MOLDURA
+    assert _cor_de(recorte, (visivel - 2, (y1 + y2) // 2 - cima), edicao_video.LARANJA_DA_SHOPEE)
 
 
 def test_miolo_da_capa_para_a_figurinha_tem_a_foto_e_a_faixa_inteiras_em_2_por_3():
