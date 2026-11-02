@@ -119,13 +119,19 @@ def apis_no_script(codigo):
     return {achado for achado in CAMINHO_DE_API.findall(codigo or "")}
 
 
+# Os pedaços do caminho que aparecem no log: só os fixos da Shopee, em letras minúsculas
+# ligadas por hífen (share-video, universal-link). O resto (o código do link curto, o do vídeo,
+# qualquer id) vira "…": o log do Actions é público.
+PEDACO_FIXO = re.compile(r"^[a-z]+(?:-[a-z]+)+$")
+
+
 def forma_do_endereco(url):
     """
-    host e caminho com os pedaços longos (ids) trocados por …, sem a consulta; no
-    universal-link, também a forma do destino que vem no parâmetro redir.
+    host e caminho com os pedaços que não são fixos da Shopee (códigos e ids) trocados por …,
+    sem a consulta; no universal-link, também a forma do destino que vem no parâmetro redir.
     """
     partes = urllib.parse.urlparse(str(url))
-    pedacos = ["…" if len(p) > 12 else p for p in partes.path.split("/")]
+    pedacos = [p if not p or PEDACO_FIXO.match(p) else "…" for p in partes.path.split("/")]
     forma = f"{partes.netloc}{'/'.join(pedacos)}"
     redir = urllib.parse.parse_qs(partes.query).get("redir", [""])[0]
     return f"{forma} (redir: {forma_do_endereco(urllib.parse.unquote(redir))})" if redir else forma
