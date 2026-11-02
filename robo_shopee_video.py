@@ -4948,10 +4948,11 @@ TENTATIVAS_DA_MARCA, PAUSA_DA_MARCA = 3, 4
 QUADRO_INTEIRO = 0.9
 PROCESSO_DAS_VISUALIZACOES = "visualizações na grade do perfil"
 # O 1º quadro do vídeo vai com a capa da grade, e o resto da abertura com a do vídeo aberto
-# (P129): na grade do post, a moldura nos dois lados diz que o app usou o 1º quadro; o preto
-# dos lados, que pegou outro quadro da abertura (aí a grade mostra a do vídeo aberto).
-LADOS_DA_CAPA = {True: "o 1º quadro na grade (a moldura nos lados)",
-                 False: "outro quadro na grade (preto dos lados)"}
+# (P129): na grade do post, a faixa laranja da frase de um lado ao outro do quadro diz que o app
+# usou o 1º quadro; a faixa só no meio, que pegou outro quadro da abertura (aí a grade mostra a
+# do vídeo aberto, mais estreita).
+LADOS_DA_CAPA = {True: "o 1º quadro na grade (a faixa de lado a lado)",
+                 False: "outro quadro na grade (a faixa só no meio)"}
 
 
 def marcar_o_post(d, ident, caixa):
@@ -4971,7 +4972,7 @@ def marcar_o_post(d, ident, caixa):
                 atualizar(ident, marca=marca)
                 if (pegar(ident) or {}).get("chamada"):
                     faixa = faixa_da_capa(imagem, caixa)
-                    lados = edicao_video.moldura_nos_lados(imagem, caixa) if faixa else None
+                    lados = edicao_video.faixa_nos_lados(imagem, caixa) if faixa else None
                     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
                                                  "no post com a faixa" if faixa else "no post sem a faixa",
                                                  LADOS_DA_CAPA.get(lados, ""), ok=bool(faixa))
