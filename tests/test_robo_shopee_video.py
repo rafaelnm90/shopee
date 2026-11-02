@@ -1455,6 +1455,56 @@ def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horari
     assert robo.proximo_video(robo.ler_config())["id"] in {primeiro, segundo, terceiro, "a1", "a2", "a3", "a4"}
 
 
+def test_print_do_rascunho_manda_o_print_e_a_capa_do_mais_novo(monkeypatch, avisos, tmp_path):
+    # Pedido do Rafael (02/11, depois da capa até a beirada): o print do próximo rascunho, para
+    # conferir a capa sem abrir Rascunhos do Robô 📝; vai também o 1º quadro do vídeo, a capa que
+    # vai para a grade. Não mexe no celular.
+    import os
+    os.makedirs(robo.PASTA_RASCUNHOS, exist_ok=True)
+    assert robo.print_do_rascunho() == "nenhum rascunho esperando a aprovação"
+    for numero, hora in ((1, "17:20"), (2, "18:35")):
+        ident = robo.criar(f"video:{numero}", momento(f"2026-11-02 {hora}"))
+        imagem = tmp_path / f"print_{numero}.png"
+        imagem.write_bytes(b"\x89PNG")
+        robo.atualizar(ident, estado="rascunho", print=str(imagem), arquivo=str(tmp_path / f"video_{numero}.mp4"))
+    quadros = []
+
+    def primeiro_quadro(arquivo):
+        quadros.append(os.path.basename(arquivo))
+        destino = os.path.join(robo.PASTA_RASCUNHOS, "capa_para_conferir.png")
+        open(destino, "wb").write(b"\x89PNG")
+        return destino
+
+    monkeypatch.setattr(robo, "_primeiro_quadro", primeiro_quadro)
+    assert robo.print_do_rascunho("2026-11-02 17:40") == "rascunho das 18:35: 2 foto(s) mandada(s)"
+    assert quadros == ["video_2.mp4"]
+    legendas = [aviso[1] for aviso in avisos if isinstance(aviso, tuple) and aviso[0] == "foto"]
+    assert "Rascunho das 18:35: o print da tela final" in legendas[0] and "1º quadro do vídeo" in legendas[1]
+    # O PNG do quadro não fica no servidor.
+    assert not os.path.exists(os.path.join(robo.PASTA_RASCUNHOS, "capa_para_conferir.png"))
+    # Nenhum feito depois do horário pedido.
+    assert robo.print_do_rascunho("2026-11-02 19:00") == "nenhum rascunho esperando a aprovação feito desde 19:00"
+    # Pelo comando do avisar.yml: "AAAA-MM-DDTHH:MM", e o resultado sai na tela.
+    assert robo.main(["--print-do-rascunho", "2026-11-02T17:40"]) == 0
+
+
+def test_primeiro_quadro_do_video_do_rascunho(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    os.makedirs(robo.PASTA_RASCUNHOS, exist_ok=True)
+    assert robo._primeiro_quadro(str(tmp_path / "nao_existe.mp4")) is None and robo._primeiro_quadro("") is None
+    if not shutil.which("ffmpeg"):
+        return
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xee4d2d:size=72x128:rate=10:duration=1",
+                    str(video)], check=True)
+    quadro = robo._primeiro_quadro(str(video))
+    from PIL import Image
+    with Image.open(quadro) as imagem:
+        assert imagem.size == (72, 128)
+
+
 def test_horario_sem_rascunho_volta_mais_tarde_no_mesmo_dia_uma_vez(monkeypatch, avisos):
     # Escolha do Rafael (02/11, P132 1): o horário cujos 3 vídeos não passaram volta mais tarde no
     # mesmo dia, no maior vão livre, a pelo menos 30 min de agora e dos outros horários, fora do

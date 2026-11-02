@@ -16,6 +16,7 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --treino      # o treino na hora (botão Testar Caminho 🧭)
     python3 robo_shopee_video.py --preparar    # um rascunho na hora (botão Preparar 1 Agora ⚡)
     python3 robo_shopee_video.py --saude       # a Saúde do Vídeo na hora (botão Gerar Apelação ⚖️)
+    python3 robo_shopee_video.py --print-do-rascunho [AAAA-MM-DDTHH:MM]   # o print do rascunho mais novo no privado
 
 Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
 0. às 4h, descurte tudo em Meus favoritos (Criadores & Afiliados), uma vez por dia (P25);
@@ -57,6 +58,7 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
@@ -6193,8 +6195,51 @@ def _resposta(preparar, resultado):
     return resultado
 
 
+def _primeiro_quadro(arquivo):
+    """O 1º quadro do vídeo (a capa que o app usa na grade) num PNG ao lado dos rascunhos; None quando não sai."""
+    if not arquivo or not os.path.exists(arquivo):
+        return None
+    destino = os.path.join(PASTA_RASCUNHOS, "capa_para_conferir.png")
+    try:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", arquivo, "-frames:v", "1", destino],
+                       capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return destino if os.path.exists(destino) else None
+
+
+def print_do_rascunho(desde=None):
+    """
+    Manda no privado do Rafael o print da tela final do rascunho mais novo esperando a aprovação,
+    feito desde `desde` ("AAAA-MM-DD HH:MM"), e o 1º quadro do vídeo dele, a capa que vai para a
+    grade: para conferir a capa sem abrir Rascunhos do Robô 📝 (pedido do Rafael, 02/11). Não mexe
+    no celular. Devolve o que aconteceu numa frase só com o horário (vai no log do avisar.yml).
+    """
+    rascunhos = [r for r in listar("rascunho") if not desde or (r["criado_em"] or "") >= desde]
+    if not rascunhos:
+        return "nenhum rascunho esperando a aprovação" + (f" feito desde {desde[11:16]}" if desde else "")
+    rascunho = rascunhos[-1]
+    hora = (rascunho["criado_em"] or "")[11:16]
+    fotos = 0
+    if rascunho["print"] and os.path.exists(rascunho["print"]):
+        fotos += bool(avisar_foto(rascunho["print"], f"🖼️ Rascunho das {hora}: o print da tela final, com a capa como o "
+                                                     "app mostra. Ele espera a sua aprovação em Rascunhos do Robô 📝."))
+    quadro = _primeiro_quadro(rascunho["arquivo"])
+    if quadro:
+        try:
+            fotos += bool(avisar_foto(quadro, f"🖼️ Rascunho das {hora}: o 1º quadro do vídeo, a capa que vai para a "
+                                              "grade do perfil."))
+        finally:
+            os.remove(quadro)
+    return f"rascunho das {hora}: {fotos} foto(s) mandada(s)"
+
+
 def main(argumentos):
     logging.basicConfig(level=os.getenv("NIVEL_LOG", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
+    if "--print-do-rascunho" in argumentos:
+        resto = argumentos[argumentos.index("--print-do-rascunho") + 1:]
+        print(print_do_rascunho(resto[0].replace("T", " ") if resto and resto[0].strip() else None))
+        return 0
     treino, preparar, saude = "--treino" in argumentos, "--preparar" in argumentos, "--saude" in argumentos
     if not treino and not preparar and not saude and "--rodada" not in argumentos:
         print(__doc__)
