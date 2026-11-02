@@ -5499,7 +5499,26 @@ def _foto_do_anuncio():
     return saida.getvalue()
 
 
-CAPA_DA_FIGURINHA = robo.edicao_video.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor")
+def _capa_dos_rascunhos_de_antes(foto, frase):
+    """
+    A capa com a frase guardada para a figurinha nos rascunhos de antes da P125 (PNG, bytes), no
+    desenho daquela época: a foto menor no meio, com a moldura laranja de cantos retos em volta e
+    as laterais até a beirada do vídeo, e a faixa da frase no pé da foto. Só esses rascunhos vão
+    pela figurinha, com a capa guardada no servidor; a capa de hoje é outra (vídeo do Rafael das
+    20:14 de 02/11).
+    """
+    from PIL import Image, ImageDraw
+    ev = robo.edicao_video
+    hoje = Image.open(io.BytesIO(ev.capa_com_chamada(foto, frase))).convert("RGB")
+    capa = Image.new("RGB", ev.TELA, "black")
+    ImageDraw.Draw(capa).rectangle((0, 292, 719, 987), fill=ev.LARANJA_DA_SHOPEE)
+    capa.paste(hoje.crop(ev.FOTO_DA_CAPA).resize((668, 668)), (26, 306))
+    saida = io.BytesIO()
+    capa.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+CAPA_DA_FIGURINHA = _capa_dos_rascunhos_de_antes(_foto_do_anuncio(), "Alivia a dor")
 QUADRO_DA_CAPA = (61, 267, 1018, 1969)
 ESCALA_DO_DESENHO = (QUADRO_DA_CAPA[2] - QUADRO_DA_CAPA[0]) / 720
 
@@ -6068,10 +6087,10 @@ def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
     assert [r[2] for r in linhas] == ["no post com a faixa", "no post sem a faixa"]
 
 
-def test_post_diz_se_a_grade_usou_o_1o_quadro_com_a_moldura_nos_lados():
+def test_post_diz_se_a_grade_usou_o_1o_quadro_com_a_faixa_de_lado_a_lado():
     # Escolha do Rafael (02/11, P129): o 1º quadro do vídeo vai com a capa da grade e o resto da
-    # abertura com a do vídeo aberto. No post, o registro diz qual a grade mostrou: a moldura nos
-    # lados (o 1º quadro) ou o preto dos lados (outro quadro da abertura).
+    # abertura com a do vídeo aberto. No post, o registro diz qual a grade mostrou: a faixa de lado
+    # a lado (o 1º quadro) ou a faixa só no meio (outro quadro da abertura).
     from PIL import Image
     caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
     ev = robo.edicao_video
