@@ -64,7 +64,17 @@ def test_link_curto_e_forma_do_universal_link_com_o_redir():
     universal = ("https://shopee.com.br/universal-link?redir=https%3A%2F%2Fsv.shopee.com.br%2Fshare-video%2F"
                  "XCA3abcdefghijk%3D%3D&fromShareLink=1")
     forma = ib.forma_do_endereco(universal)
-    assert forma == "shopee.com.br/… (redir: sv.shopee.com.br/share-video/…)"
+    assert forma == "shopee.com.br/universal-link (redir: sv.shopee.com.br/share-video/…)"
+
+
+def test_o_codigo_do_link_curto_nunca_sai_no_log():
+    # Conferência semanal de 02/11: o "chegou em" mostrou o código do link curto do último vídeo
+    # pedido ao Baixador (8 letras e números passavam pela regra dos pedaços longos). Só os
+    # pedaços fixos da Shopee ficam; o código, de qualquer tamanho, vira "…".
+    assert ib.forma_do_endereco("https://br.shp.ee/9ezo2f5w") == "br.shp.ee/…"
+    assert ib.forma_do_endereco("https://br.shp.ee/abcdefgh") == "br.shp.ee/…"
+    assert ib.forma_do_endereco("https://shopee.com.br/product/123/456") == "shopee.com.br/…/…/…"
+    assert ib.forma_do_endereco("https://sv.shopee.com.br/share-video/") == "sv.shopee.com.br/share-video/"
 
 
 def test_ultimo_usa_o_link_guardado_no_banco_sem_imprimir(monkeypatch, capsys):
