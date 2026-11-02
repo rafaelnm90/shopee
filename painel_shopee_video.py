@@ -1661,6 +1661,10 @@ SEM_O_LINK_DO_PRODUTO = "🔗 (a API não achou o link deste: ele está no Ver P
 # Rafael confere a foto diferente antes de aprovar. Escolha dele (30/10, P102): DECISOES.md,
 # Shopee Vídeo.
 OUTRA_FOTO_NO_TEXTO = " ⚠️ outra foto de capa"
+# A marca do mesmo modelo em outra cor ou estampa: ele só vai no post com a foto dele na miniatura
+# que troca, e o Rafael confere antes de aprovar. Pedidos dele (01/11 e 02/11): DECISOES.md,
+# Shopee Vídeo.
+OUTRA_COR_NO_TEXTO = " 🎨 outra cor (a foto vai na miniatura)"
 
 
 def numeros_por_extenso(posicoes):
@@ -1689,9 +1693,11 @@ def linhas_dos_produtos(rascunho):
         links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
         if len(links) != len(nomes):
             return ("\n".join(f"• {html_escape(nome)}" for nome in nomes) or "• ?") + "\n" + linhas_dos_links(rascunho)
-    # O produto com outra foto de capa que a do anúncio do post vem marcado (P102).
-    outras = set(rascunho.get("outras_capas") or [])
-    return "".join(f"• {html_escape(nome)}{OUTRA_FOTO_NO_TEXTO if n in outras else ''}\n"
+    # O produto com outra foto de capa que a do anúncio do post vem marcado (P102), e o de outra
+    # cor também.
+    outras, de_outra_cor = set(rascunho.get("outras_capas") or []), set(rascunho.get("outra_cor") or [])
+    return "".join(f"• {html_escape(nome)}{OUTRA_FOTO_NO_TEXTO if n in outras else ''}"
+                   f"{OUTRA_COR_NO_TEXTO if n in de_outra_cor else ''}\n"
                    + (f"🔗 {html_escape(link)}" if link else SEM_O_LINK_DO_PRODUTO) + "\n"
                    for n, (nome, link) in enumerate(zip(nomes, links), 1)) + fim
 
@@ -1718,10 +1724,15 @@ LIMITE_DO_ALBUM = 10
 def legenda_do_album(rascunho, posicao, fotos):
     """
     A legenda do álbum das fotos de capa (P75): o mesmo item e o mesmo modelo basta, e os produtos
-    com outra foto de capa que a do anúncio do post vêm ditos, para o Rafael conferir (P102).
+    com outra foto de capa que a do anúncio do post vêm ditos, para o Rafael conferir (P102), como
+    os do mesmo modelo em outra cor, que vão com a foto na miniatura que troca.
     """
     outras = sorted(rascunho.get("outras_capas") or [])
     aviso = f"\n⚠️ Com outra foto de capa que a do anúncio do post: {numeros_por_extenso(outras)}." if outras else ""
+    de_outra_cor = sorted(rascunho.get("outra_cor") or [])
+    if de_outra_cor:
+        aviso += (f"\n🎨 O mesmo modelo em outra cor (a foto vai na miniatura que troca): "
+                  f"{numeros_por_extenso(de_outra_cor)}.")
     return (f"🛍️ Rascunho {posicao}: as fotos de capa dos {fotos} produtos, na ordem do post. Confira que são o "
             "mesmo item e o mesmo modelo." + aviso)
 

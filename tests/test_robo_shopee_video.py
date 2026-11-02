@@ -2656,14 +2656,7 @@ def test_ver_produtos_de_outra_cor_entra_e_a_foto_dele_vai_na_miniatura(monkeypa
     import io
     from PIL import Image
     _fonte_de_video(monkeypatch, outra_cor=(PRODUTO_A,))
-    edicao = {}
-
-    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None):
-        edicao.update(nomes=list(nomes), outras=list(outras))
-        robo.shutil.copyfile(video["arquivo"], copia)
-        return ""
-
-    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar)
+    edicao = _copia_com_a_miniatura(monkeypatch)
     app = AppDoVerProdutos()
     assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     # A IA viu a página de cada produto.
@@ -2676,6 +2669,39 @@ def test_ver_produtos_de_outra_cor_entra_e_a_foto_dele_vai_na_miniatura(monkeypa
     assert Image.open(io.BytesIO(edicao["outras"][0])).convert("RGB").getpixel((10, 10))[2] > 200
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_CRIADOR, "2000-01-01 00:00:00")
     assert sorted(r[2] for r in registro) == ["mesmo produto", "outra cor - a foto vai na miniatura"]
+    # A foto dele está na miniatura do vídeo: ele vai no post, marcado para o Rafael conferir.
+    assert robo.pegar(1)["outra_cor"] == [2]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_OUTRA_COR, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("no post", "a foto na miniatura")]
+
+
+def _copia_com_a_miniatura(monkeypatch, com_miniatura=True):
+    """A edição de mentira: guarda os nomes e as outras fotos e diz as fotos da miniatura que troca."""
+    edicao = {}
+
+    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None):
+        edicao.update(nomes=list(nomes), outras=list(outras))
+        if com_miniatura and miniatura is not None:
+            miniatura["fotos"] = [b"\xff\xd8primeira"] + list(outras)
+        robo.shutil.copyfile(video["arquivo"], copia)
+        return ""
+
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar)
+    return edicao
+
+
+def test_ver_produtos_de_outra_cor_sem_a_nossa_miniatura_fica_de_fora(monkeypatch, avisos):
+    # O de outra cor só vai com a foto na miniatura que troca, que o mostra no vídeo (pedido do
+    # Rafael de 01/11: "desde que pelo menos entre na miniatura"). Sem a nossa miniatura (o canto
+    # do criador, P81), ele sai antes de anexar, e o anexar procura o outro abaixo dele, que
+    # continua curtido no alto da lista até o descurtir do fim.
+    _fonte_de_video(monkeypatch, outra_cor=(PRODUTO_A,))
+    _copia_com_a_miniatura(monkeypatch, com_miniatura=False)
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.anexados == [PRODUTO_B] and robo.pegar(1)["outra_cor"] == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_OUTRA_COR, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("de fora", "sem a nossa miniatura")]
 
 
 def test_ver_produtos_de_outro_produto_fica_de_fora(monkeypatch, avisos):
@@ -4232,9 +4258,11 @@ def busca_pela_foto(monkeypatch):
             raise estado["cartoes"]
         return estado["cartoes"], estado["motivo"]
 
-    def iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None):
+    def iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None, outra_cor=None):
         estado["fotos_da_ia"] = [n for n, _ in anuncios]
         estado["precos"], estado["preco_do_post"] = list(precos), preco_do_post
+        if outra_cor is not None:
+            outra_cor.update(estado.get("outra_cor", ()))
         estado["capa"] = capa
         if recusas is not None and "recusas" in estado:
             recusas.update(estado["recusas"])
@@ -4285,6 +4313,40 @@ def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_qu
     assert mais[0]["foto"] == b"\xff\xd8anuncio"
     assert vistos == ["Produtos a mais (2 de 3): a mesma garrafa"]
     assert _registro_dos_espacos() == ["achados"]
+
+
+def test_espacos_livres_marcam_o_mesmo_modelo_em_outra_cor(busca_pela_foto):
+    # Pedido do Rafael (02/11, vídeo das 10:01): o mesmo modelo em outra cor entra nos produtos a
+    # mais, marcado: ele só vai no post com a foto dele na miniatura que troca.
+    busca_pela_foto["outra_cor"] = {2}
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [],
+                               robo.time.monotonic() + 600)
+    assert [(p["nome"], p["outra_cor"]) for p in mais] == [("Garrafa Térmica Inox Loja 1", False),
+                                                           ("Garrafa Térmica Inox Loja 3", True)]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
+    assert registro[-1][3].startswith("2 a mais (1 de outra cor); ")
+
+
+def test_post_poe_a_mesma_cor_primeiro_e_o_de_outra_cor_so_com_a_foto_na_miniatura():
+    # O 1º do post dá a foto do começo e da miniatura, na cor do vídeo; o de outra cor vai depois,
+    # mesmo pagando mais por venda, e só com a foto dele na miniatura que troca: sem a nossa
+    # miniatura, ou sem tempo para a foto dele, ele sai antes de anexar (pedidos do Rafael de
+    # 01/11 e 02/11).
+    principal = dict(PRINCIPAL, foto=b"principal")
+    igual = dict(PRINCIPAL, nome="Igual", do_video=False, valor=4.0, outra_cor=False, foto=b"igual")
+    outra = dict(PRINCIPAL, nome="Outra cor", do_video=False, valor=9.0, outra_cor=True, foto=b"outra")
+    ordem = robo.ordem_do_post(principal, [outra, igual])
+    assert [p["nome"] for p in ordem] == [PRINCIPAL["nome"], "Igual", "Outra cor"]
+    itens = [(p, p.get("foto"), p.get("outra_cor")) for p in ordem]
+    assert robo.com_a_foto_na_miniatura(itens, [b"principal", b"outra"]) == ordem
+    assert robo.com_a_foto_na_miniatura(itens, []) == ordem[:2]
+    assert robo.com_a_foto_na_miniatura(itens, [b"principal"]) == ordem[:2]
+    # O 1º nunca sai, nem marcado.
+    assert robo.com_a_foto_na_miniatura([(outra, b"outra", True)], []) == [outra]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_OUTRA_COR, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("no post", "a foto na miniatura"), ("de fora", "sem a nossa miniatura"),
+                                                ("de fora", "a foto não coube na miniatura")]
 
 
 def test_espacos_livres_guardam_as_fotos_dos_que_a_ia_recusou(busca_pela_foto, monkeypatch, tmp_path):

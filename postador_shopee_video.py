@@ -217,21 +217,25 @@ cor, só um acessório dele, ou um vídeo em que o produto da imagem não aparec
 Responda só com um JSON: {"confere": true ou false, "motivo": "uma frase curta"}"""
 # Os produtos a mais (P59): as fotos dos anúncios achados pela busca pela foto, de uma vez,
 # com o vídeo e a capa do anúncio do post. A mesma régua da foto do anúncio: o mesmo item, da
-# mesma cor e estampa (P19), da mesma marca e modelo (P67); a foto de capa pode ser outra
-# (P102). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+# mesma marca e modelo (P67); a foto de capa pode ser outra (P102). O mesmo modelo em outra cor
+# ou estampa volta à parte, como variação (outra_cor): ele só vai no post com a foto dele na
+# miniatura que troca, como no Ver Produtos (pedido do Rafael, 02/11, no vídeo do fone de
+# outra cor que a IA recusou). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
 PROMPT_ITENS_IGUAIS = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 O produto do vídeo é "{nome}". Junto com o vídeo vão, primeiro, a foto de capa do anúncio do post (o produto do \
 vídeo) e, depois, as fotos de anúncios de outras lojas, cada uma logo depois do número, do nome e do preço do \
 anúncio.
 A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro, compare com cada foto e diga quais anúncios são o mesmo produto do vídeo: o mesmo item, \
-da mesma marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} Outro produto do mesmo tipo, de outra \
-marca, com outro formato ou modelo, {outra_medida}, {outra_versao}, o mesmo produto em outra cor ou estampa, \
-outra quantidade no kit, só um acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo \
-produto. Na dúvida, não é. {detalhes} {imitacao}
+da mesma marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} O mesmo item, da mesma marca e modelo, só \
+que em outra cor ou estampa, é uma variação: ponha o número dele em "outra_cor", e não em "iguais". Outro \
+produto do mesmo tipo, de outra marca, com outro formato ou modelo, {outra_medida}, {outra_versao}, outra \
+quantidade no kit, só um acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo produto \
+nem variação. Na dúvida, não é. {detalhes} {imitacao}
 Responda só com um JSON, nesta ordem: {{"produto_do_video": "a marca, o painel e o desenho do produto do vídeo", \
 "diferencas": "para cada anúncio, o número e o que o produto dele tem de diferente do produto do vídeo", \
-"iguais": [os números dos anúncios que são o mesmo produto], "motivo": "uma frase curta"}}"""
+"iguais": [os números dos anúncios que são o mesmo produto, da mesma cor], "outra_cor": [os números dos \
+anúncios do mesmo produto em outra cor ou estampa], "motivo": "uma frase curta"}}"""
 # Os produtos que a criadora vinculou ao vídeo (Ver Produtos): a IA vê a foto da página de cada
 # um no app. O mesmo modelo em outra cor ou estampa entra como variação, e a foto dele vai na
 # miniatura que troca (P103); outro produto fica de fora. Pedido do Rafael (01/11, depois de um
@@ -1027,7 +1031,8 @@ def _com_o_preco(rotulo, preco):
     return f"{rotulo} ({reais})" if reais else rotulo
 
 
-def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None):
+def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None,
+                      outra_cor=None):
     """
     Quais anúncios de outras lojas são o mesmo item do vídeo (os produtos a mais, P59): a foto
     de capa pode ser outra (P102). anuncios = [(nome, foto em bytes)], capa = os bytes da capa
@@ -1039,7 +1044,9 @@ def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None, precos=(),
     ordem, o que a IA disse da última vez), ou ([], o motivo fixo) quando falta o que
     conferir ou ela não responde.
     recusas (dict) recebe quantos ficaram de fora ("outro produto"), só para o registro
-    (pedido do Rafael de 30/10, o que dificulta achar a causa vira registro).
+    (pedido do Rafael de 30/10, o que dificulta achar a causa vira registro). outra_cor (set)
+    recebe as posições confirmadas que são o mesmo produto em outra cor ou estampa: a IA as
+    deu como variação em alguma das vezes (pedido do Rafael de 02/11).
     """
     if not (video or {}).get("arquivo") or not anuncios:
         return [], "sem o vídeo ou sem anúncio para conferir"
@@ -1052,25 +1059,35 @@ def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None, precos=(),
     prompt = PROMPT_ITENS_IGUAIS.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA,
                                         outra_medida=OUTRA_MEDIDA, outra_versao=OUTRA_VERSAO,
                                         detalhes=DETALHES_QUE_SE_VEEM, imitacao=IMITACAO)
-    confirmados, motivo = set(range(1, len(anuncios) + 1)), ""
+    confirmados, de_outra_cor, motivo = set(range(1, len(anuncios) + 1)), set(), ""
     for vez in range(1, VEZES_DA_IA + 1):
         resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, imagens=imagens))
         dados = _json_da_ia(resposta)
         if not isinstance(dados, dict) or not isinstance(dados.get("iguais"), list):
             return [], f"a IA não respondeu à conferência dos produtos a mais ({vez}ª vez)"
-        iguais = set()
-        for numero in dados["iguais"]:
-            try:
-                iguais.add(int(numero))
-            except (TypeError, ValueError):
-                continue
-        confirmados &= iguais
+        iguais, variacoes = _numeros(dados["iguais"]), _numeros(dados.get("outra_cor"))
+        # O dado como variação em alguma das vezes fica como variação: só vai com a foto na miniatura.
+        confirmados &= iguais | variacoes
+        de_outra_cor |= variacoes
         motivo = str(dados.get("motivo") or "").strip()
         if not confirmados:
             break
     if recusas is not None:
         recusas["outro produto"] = len(anuncios) - len(confirmados)
+    if outra_cor is not None:
+        outra_cor.update(numero - 1 for numero in confirmados & de_outra_cor)
     return sorted(numero - 1 for numero in confirmados), motivo
+
+
+def _numeros(lista):
+    """Os números inteiros de uma lista da resposta da IA; o que não é número fica de fora."""
+    numeros = set()
+    for numero in lista if isinstance(lista, list) else []:
+        try:
+            numeros.add(int(numero))
+        except (TypeError, ValueError):
+            continue
+    return numeros
 
 
 def _json_da_ia(resposta):

@@ -684,7 +684,7 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas", "recusadas")
+           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -702,8 +702,10 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # do post: o álbum e o texto do rascunho as marcam (P102).
 # recusadas: os arquivos das fotos de capa dos anúncios que a IA recusou nos produtos a mais: o
 # Rafael os vê num álbum à parte, para conferir a IA (pedido dele de 01/11, provisório).
+# outra_cor: as posições (1, 2, ...) dos produtos do post que são o mesmo modelo em outra cor ou
+# estampa, com a foto na miniatura que troca: o texto e o álbum do rascunho os marcam (02/11).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
-                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas")
+                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor")
 
 
 def _criar_tabela(con):
@@ -732,6 +734,7 @@ def _linha_para_dict(linha):
     rascunho["links_dos_produtos"] = json.loads(rascunho["links_dos_produtos"] or "[]")
     rascunho["outras_capas"] = json.loads(rascunho["outras_capas"] or "[]")
     rascunho["recusadas"] = json.loads(rascunho["recusadas"] or "[]")
+    rascunho["outra_cor"] = json.loads(rascunho["outra_cor"] or "[]")
     return rascunho
 
 
@@ -755,7 +758,7 @@ def pegar(ident):
 
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
-                   "recusadas"):
+                   "recusadas", "outra_cor"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2972,16 +2975,18 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
         if time.monotonic() > prazo:
             anotar("nenhum - sem tempo na rodada", contagem)
             return []
-        recusas = {}
+        recusas, de_outra_cor = {}, set()
         # O preço vai junto ao nome de cada foto: a imitação com a foto da marca costuma custar
         # muito menos que o produto do post (ps.IMITACAO).
         posicoes, motivo_da_ia = ps.ia_confere_iguais(video, principal["nome"],
                                                       [(c["nome"], f) for c, f in fotos], capa=capa, recusas=recusas,
                                                       precos=[c.get("preco") for c, _f in fotos],
-                                                      preco_do_post=original.get("preco"))
+                                                      preco_do_post=original.get("preco"), outra_cor=de_outra_cor)
         marcar("IA")
-        # A foto de cada um vai junto: o álbum das capas do rascunho (P75).
-        confirmados = [dict(fotos[i][0], foto=fotos[i][1]) for i in posicoes][:ESPACOS_DO_VIDEO - 1]
+        # A foto de cada um vai junto: o álbum das capas do rascunho (P75) e, no de outra cor (o
+        # mesmo modelo em outra cor ou estampa), a miniatura que troca, sem a qual ele não vai.
+        confirmados = [dict(fotos[i][0], foto=fotos[i][1], outra_cor=i in de_outra_cor)
+                       for i in posicoes][:ESPACOS_DO_VIDEO - 1]
         # Os que a IA conferiu e recusou (só quando ela respondeu): o álbum dos recusados, para o
         # Rafael conferir se ela está acertando. Pedido dele (01/11): DECISOES.md, Shopee Vídeo.
         if recusados is not None and "outro produto" in recusas:
@@ -3001,7 +3006,9 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
             registro_processos.registrar(REGISTRO, PROCESSO_DAS_RECUSAS_DA_IA, "de fora pela IA",
                                          f"outro produto {recusas.get('outro produto', 0)} (de {len(fotos)} na IA)")
         if mais:
-            anotar("achados", f"{len(mais)} a mais; {contagem}", ok=True)
+            variacoes = sum(1 for produto in mais if produto.get("outra_cor"))
+            anotar("achados", f"{len(mais)} a mais" + (f" ({variacoes} de outra cor)" if variacoes else "")
+                   + f"; {contagem}", ok=True)
         else:
             anotar("nenhum - a IA não confirmou nenhum" if not posicoes else "nenhum - sem o link curto", contagem)
         return mais
@@ -3017,14 +3024,28 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
         return []
 
 
+def ordem_do_post(principal, mais):
+    """
+    Os produtos do rascunho de link de produto na ordem do post: os da mesma cor do vídeo (o
+    do link e os a mais iguais), do que paga mais por venda para o que paga menos (P59), e
+    depois os de outra cor, do mesmo jeito. O 1º dá a foto do começo e da miniatura, que tem de
+    ser a da cor do vídeo; o de outra cor só vai com a foto dele na miniatura que troca, como
+    no Ver Produtos. Pedidos do Rafael (01/11 e 02/11): DECISOES.md, Shopee Vídeo.
+    """
+    mesma_cor = [principal] + [produto for produto in mais if not produto.get("outra_cor")]
+    outra_cor = [produto for produto in mais if produto.get("outra_cor")]
+    return (sorted(mesma_cor, key=lambda produto: -produto["valor"])
+            + sorted(outra_cor, key=lambda produto: -produto["valor"]))
+
+
 def _curtir_os_produtos(d, video, produtos, curtidos):
     """
-    Curte cada produto do rascunho de link de produto pela página dele, do que paga menos para
-    o que paga mais: o curtido por último fica no alto de Minhas Curtidas, e o anexar pega do
-    alto para baixo, na ordem de quem paga mais (P59). O produto do vídeo que não curte para o
-    rascunho, como sempre; o produto a mais que não curte (loja de férias, coração que não
-    pega) só fica de fora. Devolve os curtidos, do que paga mais para o que paga menos;
-    curtidos recebe (link, nome) de cada um, para o descurtir do fim.
+    Curte cada produto do rascunho de link de produto pela página dele, de trás para a frente
+    na ordem do post (ordem_do_post): o curtido por último fica no alto de Minhas Curtidas, e o
+    anexar pega do alto para baixo, na ordem do post (P59). O produto do vídeo que não curte
+    para o rascunho, como sempre; o produto a mais que não curte (loja de férias, coração que
+    não pega) só fica de fora. Devolve os curtidos, na ordem do post; curtidos recebe (link,
+    nome) de cada um, para o descurtir do fim.
     """
     feitos = []
     for produto in reversed(produtos):
@@ -3275,14 +3296,15 @@ MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU = ("o produto anexado pelo Adicionar não ficou
                                     "nem na 2ª vez")
 
 
-def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
+def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
     """
     Anexa os produtos curtidos, na ordem de nomes (o 1º pelo Adicionar produto, os outros
     pelo Adicionar Mais). O produto a mais (a posição está em a_mais, P59) que não anexa, ou
     que chega depois do prazo (time.monotonic), só fica de fora; o do vídeo que não anexa
     para o rascunho. Devolve (os nomes como a lista os mostrou, as posições anexadas). Os
     curtidos ficam no alto da lista: cada um é procurado entre os que ainda não foram
-    anexados. Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado
+    anexados, e mais os curtidos_de_fora (o de outra cor que saiu antes de anexar continua
+    curtido no alto). Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado
     rolando a lista inteira (P27). O 1º anexado é conferido na tela final depois do Feito e,
     sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
     """
@@ -3295,7 +3317,8 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None):
             continue
         primeiro = not anexados
         for vez in range(1, (VEZES_DO_PRIMEIRO_PRODUTO if primeiro else 1) + 1):
-            if not _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados), limpa, i in a_mais):
+            if not _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados) + curtidos_de_fora, limpa,
+                              i in a_mais):
                 break
             if not primeiro or primeiro_na_tela_final(d, vez):
                 no_post.append(i)
@@ -4042,7 +4065,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # DECISOES.md, Shopee Vídeo.
         celular.append(True)
         mais = espacos_livres(d, video, principal, original, vistos, prazo, inicio, recusados)
-        produtos = _curtir_os_produtos(d, video, sorted([principal] + mais, key=lambda p: -p["valor"]), curtidos)
+        produtos = _curtir_os_produtos(d, video, ordem_do_post(principal, mais), curtidos)
         video["link"] = produtos[0]["link"]
         nomes = [p["nome"] for p in produtos]
         atualizar(ident, conferencia=json.dumps(vistos, ensure_ascii=False))
@@ -4056,9 +4079,23 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     outras = [foto for foto in (foto_do_produto_do_post(video, p) for p in (produtos or [])[1:]) if foto]
     if video.get("de_video"):
         outras = [foto for nome, foto in variacoes if nome in nomes[1:]]
-    figurinha = {}
+    figurinha, miniatura = {}, {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
-                                  outras=outras, figurinha=figurinha)
+                                  outras=outras, figurinha=figurinha, miniatura=miniatura)
+    # O de outra cor só vai com a foto dele na miniatura que troca: sem ela (sem a nossa
+    # miniatura, ou sem tempo para a foto dele), sai antes de anexar. Ele já foi curtido e fica no
+    # alto de Minhas Curtidas até o descurtir do fim: o anexar procura os outros abaixo dele.
+    # Pedidos do Rafael (01/11 e 02/11): DECISOES.md, Shopee Vídeo.
+    antes = len(nomes)
+    de_outra_cor = dict(variacoes)
+    if produtos:
+        produtos = com_a_foto_na_miniatura([(p, p.get("foto"), p.get("outra_cor")) for p in produtos],
+                                           miniatura.get("fotos", []))
+        nomes = [p["nome"] for p in produtos]
+    elif de_outra_cor:
+        nomes = com_a_foto_na_miniatura([(n, de_outra_cor.get(n), n in de_outra_cor) for n in nomes],
+                                        miniatura.get("fotos", []))
+    curtidos_de_fora = antes - len(nomes)
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
@@ -4081,7 +4118,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # lista inteira; o topo continua conferido. Escolha do Rafael (P27): DECISOES.md, Shopee Vídeo.
     a_mais = {i for i, produto in enumerate(produtos or []) if not produto.get("do_video")}
     anexados, no_post = anexar_os_produtos(d, video, nomes, a_mais, lista_limpa(),
-                                           inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60)
+                                           inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60, curtidos_de_fora)
     # A legenda vai depois dos produtos: em foco nas idas à lista de Minhas Curtidas, o 1º
     # produto às vezes não fica (VEZES_DO_PRIMEIRO_PRODUTO).
     escrever_a_legenda(d, textos["titulo"])
@@ -4099,9 +4136,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         outras = com_outra_foto_de_capa(video, ordem, foto_do_anuncio(original.get("imagem"))) if capas else []
         atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
                   itens=_itens(ordem), capas=capas, outras_capas=outras,
-                  recusadas=guardar_recusados(ident, recusados))
+                  recusadas=guardar_recusados(ident, recusados),
+                  outra_cor=[n for n, produto in enumerate(ordem, 1) if produto.get("outra_cor")])
     else:
-        atualizar(ident, produtos=anexados, links_dos_produtos=links_do_ver_produtos(anexados))
+        atualizar(ident, produtos=anexados, links_dos_produtos=links_do_ver_produtos(anexados),
+                  outra_cor=[n for n, i in enumerate(no_post, 1) if nomes[i] in de_outra_cor])
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rotulo_ia)))
 
@@ -4113,9 +4152,12 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     atualizar(ident, estado="rascunho", print=print_tela)
     esperando = len(esperando_aprovacao())
     a_mais_no_post = sum(1 for i in no_post if i in a_mais)
+    em_outra_cor = sum(1 for i in no_post if i in a_mais and (produtos or [])[i].get("outra_cor"))
+    de_outras_lojas = (f"{a_mais_no_post} de outras lojas: {a_mais_no_post - em_outra_cor} iguais e {em_outra_cor} "
+                       "em outra cor, com a foto na miniatura" if em_outra_cor
+                       else f"{a_mais_no_post} iguais de outras lojas")
     avisar("📝 Robô da Shopee Vídeo: rascunho novo salvo no celular"
-           + (f", com {len(anexados)} produtos (o do vídeo e {a_mais_no_post} iguais de outras lojas)"
-              if a_mais_no_post else "")
+           + (f", com {len(anexados)} produtos (o do vídeo e {de_outras_lojas})" if a_mais_no_post else "")
            + f". {esperando} esperando a sua aprovação em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
 
 
@@ -4126,7 +4168,7 @@ MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à S
 MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
 
 
-def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
@@ -4141,7 +4183,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     dos outros produtos do post, na ordem, no rascunho com produtos a mais (o mesmo item): com
     elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103). Com a capa com
     chamada ligada, figurinha (dict) recebe em "capa" a capa com a frase, que vai pelo Selecionar
-    Capa (P110), e o vídeo abre com a foto sem ela.
+    Capa (P110), e o vídeo abre com a foto sem ela. miniatura (dict) recebe em "fotos" as fotos
+    da miniatura que troca no vídeo, a do 1º e as outras, e nada sem a nossa miniatura: o de
+    outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -4164,6 +4208,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
                                  motivo or detalhe, ok=not motivo and not so_com_o_editor_1)
     if motivo:
         raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))
+    if miniatura is not None and anuncio.get("foto") and edicao_video.SEM_A_MINIATURA not in como:
+        miniatura["fotos"] = [anuncio["foto"]] + list(trocam)
     return como
 
 
@@ -4201,6 +4247,39 @@ def fotos_da_miniatura(video, foto, outras):
     registro_processos.registrar(REGISTRO, PROCESSO_DA_MINIATURA, resultado, detalhe,
                                  ok=True if resultado == "alternada" else None)
     return diferentes[1:cabem]
+
+
+# O de outra cor (o mesmo modelo em outra cor ou estampa) só vai no post com a foto dele na
+# miniatura que troca: é ela que o mostra no vídeo, e sem isso a Shopee pode dar o produto como
+# irrelevante. Sem a nossa miniatura (o canto do criador, P81, ou a edição desligada) ou sem tempo
+# para a foto dele na troca (P103), ele sai antes de anexar. Vale nos produtos a mais e no Ver
+# Produtos. Pedidos do Rafael (01/11 e 02/11): DECISOES.md, Shopee Vídeo.
+PROCESSO_DA_OUTRA_COR = "outra cor: foto na miniatura"
+
+
+def na_miniatura(foto, fotos_da_miniatura):
+    """A foto (bytes) aparece na miniatura que troca: ela mesma ou uma igual (mesma_foto)."""
+    return bool(foto) and any(foto == ja or mesma_foto(foto, ja) is True for ja in fotos_da_miniatura)
+
+
+def com_a_foto_na_miniatura(itens, fotos_da_miniatura):
+    """
+    Os itens que vão ao post, na ordem: itens = [(item, foto, de_outra_cor)] na ordem do post e
+    fotos_da_miniatura, as fotos da miniatura que troca no vídeo ([] sem a nossa miniatura). O
+    1º e os da mesma cor ficam sempre; o de outra cor, só com a foto aparecendo na miniatura. O
+    registro anota cada um de outra cor.
+    """
+    ficam = []
+    for posicao, (item, foto, de_outra_cor) in enumerate(itens):
+        if not de_outra_cor or posicao == 0:
+            ficam.append(item)
+        elif na_miniatura(foto, fotos_da_miniatura):
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_OUTRA_COR, "no post", "a foto na miniatura", ok=True)
+            ficam.append(item)
+        else:
+            motivo = "sem a nossa miniatura" if not fotos_da_miniatura else "a foto não coube na miniatura"
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_OUTRA_COR, "de fora", motivo)
+    return ficam
 
 
 def _oferta_parecida(nome):
