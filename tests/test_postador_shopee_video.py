@@ -1362,6 +1362,12 @@ def test_pagina_do_produto_e_video_removido():
     removido = ('<hierarchy><node text="Este vídeo foi removido pelo criador" class="android.widget.TextView" '
                 'bounds="[200,1240][880,1280]"/></hierarchy>')
     assert ps.video_removido(removido) and not ps.video_removido(VER_PRODUTOS)
+    # O aviso da Shopee para o vídeo que ainda não foi liberado (Motorola, 02/11/2026).
+    em_analise = ('<hierarchy><node text="Vídeo em Análise" class="android.widget.TextView" bounds="[377,1146][704,1199]"/>'
+                  '<node text="Video em análise: em breve estará disponível ao público." class="android.widget.TextView" '
+                  'bounds="[173,1215][908,1321]"/></hierarchy>')
+    assert ps.video_em_analise(em_analise) and not ps.video_removido(em_analise)
+    assert not ps.video_em_analise(VER_PRODUTOS) and not ps.video_em_analise(removido)
 
 
 def test_nome_lido_no_celular_vale_sem_a_api_e_os_produtos_do_video_vao_juntos(monkeypatch):

@@ -1888,6 +1888,15 @@ def video_removido(xml):
     return any(_normal(el["texto"]).startswith("este vídeo foi removido") for el in elementos(xml))
 
 
+def video_em_analise(xml):
+    """
+    O link abriu o aviso de vídeo em análise ("Vídeo em Análise" e "em breve estará disponível
+    ao público"; Motorola, 02/11/2026)? O vídeo existe, mas a Shopee ainda não o liberou: a
+    tela não tem o player nem o Ver Produtos.
+    """
+    return any(_normal(el["texto"]).startswith(("vídeo em análise", "video em análise")) for el in elementos(xml))
+
+
 def _texto_de_nome(texto):
     """
     Texto que pode ser o nome do produto num cartão (não preço, desconto, nota nem botão).

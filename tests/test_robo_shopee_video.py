@@ -2556,7 +2556,8 @@ class AppDoVerProdutos(AppDeMentira):
         self.ja_curtidos = set()
         # player: "normal"; "lento" (o Ver Produtos só aparece na segunda olhada); "um_produto"
         # (um produto só: o cartão e a barra com o nome dele, sem o Ver Produtos); "so_cartao"
-        # (o cartão, sem a barra); "vazio"; "sem_player" (outra tela).
+        # (o cartão, sem a barra); "vazio"; "sem_player" (outra tela); "em_analise" (o aviso de
+        # vídeo em análise da Shopee, Motorola, 02/11/2026).
         self.player, self.olhadas_no_player = player, 0
 
     def _nos(self):
@@ -2567,6 +2568,11 @@ class AppDoVerProdutos(AppDeMentira):
             self.olhadas_no_player += 1
             if self.player == "sem_player":
                 return [_no("Para você", caixa=(640, 140, 830, 195), clicavel=False)]
+            if self.player == "em_analise":
+                return [_no("Pesquisar", caixa=(242, 143, 909, 238)),
+                        _no("Vídeo em Análise", caixa=(377, 1146, 704, 1199), clicavel=False),
+                        _no("Video em análise: em breve estará disponível ao público.", caixa=(173, 1215, 908, 1321),
+                            clicavel=False)]
             nos = [_no(ident=robo.PLAYER_DO_VIDEO, caixa=(0, 0, 1080, 2260), clicavel=False)]
             if self.player in ("um_produto", "so_cartao"):
                 nos.append(_cartao(PRODUTO_A, 1600))
@@ -2954,6 +2960,23 @@ def test_link_de_video_sem_ver_produtos_diz_o_que_a_tela_mostrou(monkeypatch, av
     assert pulado["motivo"] == motivo and robo.passo_do_motivo(motivo) == "Ver Produtos"
     import investigar_robo
     assert motivo in investigar_robo.textos_fixos()
+
+
+def test_link_de_video_em_analise_diz_que_o_video_esta_em_analise(monkeypatch, avisos):
+    # Preparar 1 Agora das 18:16 e das 18:33 de 02/11: o link abriu o aviso "Vídeo em Análise" da
+    # Shopee, e o motivo dizia que o link não abriu o vídeo no app. O robô não espera o Ver Produtos
+    # que não vem: uma olhada só, mais a do caso guardado.
+    _fonte_de_video(monkeypatch)
+    app = AppDoVerProdutos(player="em_analise")
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-11-02 18:16"))
+    assert robo.MOTIVO_EM_ANALISE in resultado and "não abriu o vídeo" not in resultado
+    assert app.olhadas_no_player == 2
+    pulado = robo.listar("pulado")[0]
+    assert pulado["motivo"] == robo.MOTIVO_EM_ANALISE and pulado["id_video"] == "a1"
+    assert robo.passo_do_motivo(robo.MOTIVO_EM_ANALISE) == "vídeo em análise"
+    assert any(robo.MOTIVO_EM_ANALISE in aviso for aviso in avisos)
+    import investigar_robo
+    assert robo.MOTIVO_EM_ANALISE in investigar_robo.textos_fixos()
 
 
 def test_link_de_video_removido_fica_de_lado(monkeypatch, avisos):

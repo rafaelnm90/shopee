@@ -148,10 +148,12 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     abre o player do vídeo (`HomeActivity_`, aba Live e Vídeo) com **"Ver Produtos (N)"** e, ao
     lado, um cartão com **"Comprar com cupom"** (proibido, como todo texto que começa com
     "comprar" ou "compre"). Vídeo apagado: a página "… do Vídeo" com **"Este vídeo foi
-    removido"**. O toque em Ver Produtos abre por cima (`ReactTransparentActivity_`) os cupons
-    da loja, os **cartões dos produtos que o criador vinculou** (nome, preço, avaliação e o
-    Comprar com cupom), **"Ver Mais (N)"** e **"Você Também Pode Gostar"** (recomendações da
-    Shopee, que não são do vídeo). O toque no nome abre a página do produto
+    removido"**. Vídeo que a Shopee ainda não liberou (02/11/2026, `ReactActivity_`): só a
+    busca no alto e **"Vídeo em Análise"** ("em breve estará disponível ao público"), sem o
+    player nem o Ver Produtos (`video_em_analise`). O toque em Ver Produtos abre por cima
+    (`ReactTransparentActivity_`) os cupons da loja, os **cartões dos produtos que o criador
+    vinculou** (nome, preço, avaliação e o Comprar com cupom), **"Ver Mais (N)"** e **"Você
+    Também Pode Gostar"** (recomendações da Shopee, que não são do vídeo). O toque no nome abre a página do produto
     (`HalfPdpActivity`), com o coração (`buttonItemLike`/`buttonItemLiked`) e o nome no id
     **`labelProductPageProductName`**; o voltar volta à lista. O selo da loja (Full, Oficial,
     Indicado) antes do nome é uma imagem dentro do texto e chega como um **"0" colado na 1ª
