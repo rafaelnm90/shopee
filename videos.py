@@ -158,7 +158,7 @@ SAIDA_DA_MUSICA = 1.5
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
-                             outras=(), troca=0.0):
+                             outras=(), troca=0.0, capa_do_resto=None):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -173,12 +173,14 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     entrando e saindo devagar; o som do vídeo não entra. Com as `outras` (caminhos de outras
     fotos do produto, na ordem), a miniatura troca entre a `foto` e cada uma delas, uma volta
     só, `troca` segundos cada, no mesmo lugar: a `foto` primeiro, e a última fica até o fim.
+    Com a `capa_do_resto` (o caminho de outra imagem), a `capa` fica só no 1º quadro, o que o app
+    usa como capa na grade do perfil, e a `capa_do_resto` no resto da abertura (P129).
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
     # Escolha do Rafael (29/10, P72): DECISOES.md, Shopee Vídeo.
-    filtro = f"[0:v]{tela}[foto];[1:v]{tela}[corpo];"
+    filtro = f"[0:v]{tela}[{'primeiro' if capa_do_resto else 'foto'}];[1:v]{tela}[corpo];"
     if miniatura:
         lugar = f"x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1"
         if outras:
@@ -228,6 +230,12 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     if miniatura:
         for outra in outras:
             entradas += ["-loop", "1", "-i", outra]
+    if capa_do_resto:
+        # Entra por último, para os números das outras entradas não mudarem; do 2º quadro em diante
+        # ela cobre a capa do 1º (as duas têm o fundo preto inteiro, sem transparência).
+        indice = entradas.count("-i")
+        entradas += ["-loop", "1", "-t", str(segundos), "-i", capa_do_resto]
+        filtro += f";[{indice}:v]{tela}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
             + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", destino])
 
@@ -237,7 +245,8 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
-    uma imagem), ela abre o vídeo no lugar da foto. Com a `musica` (caminho de um arquivo de
+    uma imagem, ou o par (a do 1º quadro, a do resto da abertura), P129), ela abre o vídeo no
+    lugar da foto. Com a `musica` (caminho de um arquivo de
     áudio), ela é o som do vídeo inteiro. Com as `outras` (bytes de outras fotos do produto, na
     ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
     igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Devolve "" quando
@@ -252,13 +261,21 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
             arquivo.write(foto)
         if not imagem_abre(caminho_da_foto):
             return "a foto do anúncio não é uma imagem que abre"
-        caminho_da_capa = None
+        caminho_da_capa = caminho_do_resto = None
         if capa:
+            capa, resto = capa if isinstance(capa, (tuple, list)) else (capa, None)
             caminho_da_capa = os.path.join(pasta, "capa.png")
             with open(caminho_da_capa, "wb") as arquivo:
                 arquivo.write(capa)
             if not imagem_abre(caminho_da_capa):
                 return "a capa não é uma imagem que abre"
+            if resto:
+                # A do resto da abertura que não abre fica de fora: a do 1º quadro vai na abertura toda.
+                caminho_do_resto = os.path.join(pasta, "capa_do_resto.png")
+                with open(caminho_do_resto, "wb") as arquivo:
+                    arquivo.write(resto)
+                if not imagem_abre(caminho_do_resto):
+                    caminho_do_resto = None
         caminhos_das_outras = []
         for n, outra in enumerate((outras or ()) if miniatura else ()):
             caminho = os.path.join(pasta, f"outra_{n}.jpg")
@@ -274,7 +291,7 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
                                            musica if total > segundos else None, total,
-                                           caminhos_das_outras if troca else (), troca)
+                                           caminhos_das_outras if troca else (), troca, caminho_do_resto)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:
