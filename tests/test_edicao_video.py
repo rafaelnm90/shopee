@@ -54,8 +54,8 @@ def test_vale_em_todas_as_fontes_so_depois_de_ligar():
 
 
 def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, tmp_path):
-    # Vídeo do Rafael (25/10): a miniatura com 25% da largura no canto de cima à direita
-    # (posição X 60 e Y -80 no LumaFusion) e a seta dele embaixo à esquerda, até o fim.
+    # Vídeo do Rafael (25/10): a miniatura no alto à direita (P120: um pouco menor e logo abaixo
+    # da barra de busca) e a seta dele embaixo à esquerda, até o fim.
     comandos = _programas(monkeypatch)
     pasta = tmp_path / "rascunhos"
     pasta.mkdir()
@@ -66,8 +66,9 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
     assert "720:1280" in filtro
-    assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and "scale=180:-2" in filtro
-    assert "overlay=x=576-w/2:y=128-h/2:shortest=1" in filtro
+    largura, (mx, my) = edicao_video.LARGURA_DA_MINIATURA, edicao_video.CENTRO_DA_MINIATURA
+    assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and f"scale={largura}:-2" in filtro
+    assert f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1" in filtro
     # A seta entra só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e o pulso do fim
     # do arquivo (quadros 72 a 101) se repete até o fim.
     assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro
@@ -85,7 +86,7 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert edicao_video.editar("video.mp4", b"foto", destino, miniatura=False) == ""
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
-    assert "[corpo]null[comfoto]" in filtro and "[mini]" not in filtro and "scale=180:-2" not in filtro
+    assert "[corpo]null[comfoto]" in filtro and "[mini]" not in filtro and f"scale={largura}:-2" not in filtro
     assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
     assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
@@ -143,9 +144,7 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
             tela = imagem.convert("RGB")
         assert tela.size == (720, 1280)
         cx, cy = edicao_video.CENTRO_DA_SETA
-        # Na foto do começo, só o pedaço dentro da moldura (P115): fora dela, o fundo é preto.
-        de = edicao_video.FOTO_COM_MOLDURA[0] + 4 if segundo < edicao_video.SEGUNDOS_DA_FOTO else cx - 90
-        recorte = [tela.getpixel((x, y)) for x in range(de, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
+        recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
         vermelhos = [p for p in recorte if p[0] > 150 and p[1] < 70 and p[2] < 70]
         escuros = [p for p in recorte if max(p) < 90]
         return len(vermelhos) / len(recorte), escuros
@@ -220,7 +219,8 @@ def test_capa_da_bebida_alcoolica_tem_a_foto_e_os_tres_avisos(monkeypatch, tmp_p
     ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
     assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
     comandos.clear()
-    # Sem os avisos, a abertura é a foto com a moldura (P115), também uma imagem montada.
+    # Sem os avisos, a abertura é a foto do anúncio em tela cheia, montada à parte: a foto que vai
+    # ao ffmpeg é a da miniatura, com a moldura (P115), e a do começo vai sem ela (P119).
     assert edicao_video.editar(str(tmp_path / "v.mp4"), _foto_jpg(), str(destino)) == ""
     ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
     assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
@@ -588,10 +588,10 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
     # a miniatura menor, como o vídeo que vai ao ar.
     monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
         "nome": "Mercadinho", "vantagem": "Brincar de vender", "versoes": versoes, "falas": [], "lugar": "alto",
-        "canto_ocupado": True, "por_cima": [(55.0, 95.0, 18.0, 24.0)]})
+        "canto_ocupado": True, "por_cima": [(55.0, 95.0, 24.5, 30.0)]})
     for exemplo in (edicao_video.exemplo_editor_1, edicao_video.exemplo_editor_2):
         _, _, resumo = exemplo("exemplo.mp4")
-        assert pedidos[-1][-1] == 162 and resumo["miniatura"] == 162
+        assert pedidos[-1][-1] == 132 and resumo["miniatura"] == 132
 
 
 def test_onde_alguem_fala_o_ritmo_nao_corta_nao_acelera_nem_poe_camera_lenta():
@@ -1259,23 +1259,23 @@ def _pretos(imagem, caixa, passo=4):
     return all(max(imagem.getpixel((x, y))) < 20 for x in range(x1, x2, passo) for y in range(y1, y2, passo))
 
 
-def test_capa_com_chamada_tem_a_foto_com_a_moldura_e_a_frase_numa_faixa_laranja():
+def test_capa_com_chamada_tem_a_foto_grande_com_a_moldura_em_volta_e_a_frase_numa_faixa_laranja():
     # Escolha do Rafael (P107): a frase em letras brancas numa faixa laranja por cima do pé da
-    # foto, logo acima do número de visualizações. Com a moldura (P115), a foto fica um pouco
-    # menor, e a moldura laranja fica inteira dentro do que o app mostra do vídeo aberto.
+    # foto, logo acima do número de visualizações. A foto fica do tamanho da capa sem texto, e a
+    # moldura laranja vai em volta dela toda, sem diminuí-la (vídeo das 22:01 de 01/11, P119).
     capa = _capa("Organize sua cozinha")
     assert capa.size == edicao_video.TELA
     x1, y1, x2, y2 = edicao_video.FOTO_COM_MOLDURA
     grossura = edicao_video.GROSSURA_DA_MOLDURA
-    esquerda, direita = edicao_video.VISIVEL_NO_APP
-    assert esquerda < x1 - grossura and x2 + grossura < direita and (y1 + y2) // 2 == edicao_video.TELA[1] // 2
-    # A foto no meio, a moldura laranja em volta e o preto fora dela.
+    assert (x1 - grossura, y1 - grossura, x2 + grossura, y2 + grossura) == edicao_video.FOTO_DA_CAPA
+    # A foto no meio, a moldura laranja em volta (de um lado ao outro da capa) e o preto em cima e embaixo.
     for ponto in [(x1 + 40, y1 + 40), (x2 - 40, y1 + 40), (360, (y1 + y2) // 2)]:
         assert _cor_de(capa, ponto, (200, 120, 40)), ponto
     for ponto in [(360, y1 - grossura // 2), (x1 - grossura // 2, (y1 + y2) // 2), (x2 + grossura // 2, (y1 + y2) // 2)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
     assert _pretos(capa, (0, 0, 720, y1 - grossura)) and _pretos(capa, (0, y2 + grossura, 720, 1280))
-    assert _pretos(capa, (0, y1, x1 - grossura, y2)) and _pretos(capa, (x2 + grossura, y1, 720, y2))
+    # Os cantos de cima da moldura são arredondados: fora deles, preto.
+    assert max(capa.getpixel((x1 - grossura + 1, y1 - grossura + 1))) < 20
     # A faixa laranja no pé da foto, de um lado ao outro, com as letras brancas só dentro dela.
     faixa = (x1, y2 - edicao_video.FAIXA_DA_CHAMADA, x2, y2)
     assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE)
@@ -1292,29 +1292,79 @@ def test_capa_com_chamada_tem_a_foto_com_a_moldura_e_a_frase_numa_faixa_laranja(
     assert cima <= y1 - grossura and y2 + grossura <= edicao_video.NUMERO_DA_GRADE[1] < baixo
 
 
-def test_capa_sem_chamada_tem_a_moldura_com_os_cantos_arredondados():
-    # A foto do começo do vídeo, sem a frase (P115): a moldura laranja em volta, os quatro cantos
-    # arredondados, e nenhuma faixa (a borda fina da moldura não conta como faixa).
+def test_foto_do_comeco_do_video_fica_como_antes_grande_e_sem_moldura():
+    # Vídeo do Rafael das 22:01 de 01/11 (P119): a foto do começo menor, com a moldura, não ficou
+    # legal; ela volta a ser como antes: do tamanho da capa sem texto, sem moldura e sem faixa.
     import io
 
     from PIL import Image
     capa = Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg()))).convert("RGB")
-    x1, y1, x2, y2 = edicao_video.FOTO_COM_MOLDURA
-    grossura = edicao_video.GROSSURA_DA_MOLDURA
-    for ponto in [(360, y1 - grossura // 2), (360, y2 + grossura // 2)]:
-        assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
-    for canto in [(x1 - grossura + 1, y1 - grossura + 1), (x2 + grossura - 2, y2 + grossura - 2)]:
-        assert max(capa.getpixel(canto)) < 20, canto
-    assert _cor_de(capa, (360, y2 - 3), (200, 120, 40))
+    assert capa.size == edicao_video.TELA
+    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
+    # A foto vai de um lado ao outro e até as pontas, sem o laranja da moldura nem os cantos pretos.
+    for ponto in [(x1 + 1, y1 + 1), (x2 - 2, y1 + 1), (x1 + 1, y2 - 2), (x2 - 2, y2 - 2), (x1 + 3, 640), (360, y2 - 3)]:
+        assert _cor_de(capa, ponto, (200, 120, 40)), ponto
+    assert _pretos(capa, (0, 0, 720, y1)) and _pretos(capa, (0, y2, 720, 1280))
     assert edicao_video.faixa_laranja(capa) is None
+    assert edicao_video.capa_sem_chamada(b"nao e imagem") is None
+
+
+def test_foto_em_tela_cheia_como_o_ffmpeg_punha_antes_da_moldura():
+    # Vídeo do Rafael das 22:01 de 01/11 (P119): sem a capa, a foto do começo é a do anúncio no
+    # maior tamanho que cabe na tela, no meio, no fundo preto (o FILTRO_720P), também a que não é
+    # quadrada, e sem a moldura laranja da miniatura.
+    import io
+
+    from PIL import Image
+
+    def foto(largura, altura):
+        saida = io.BytesIO()
+        Image.new("RGB", (largura, altura), (200, 120, 40)).save(saida, "JPEG")
+        return saida.getvalue()
+
+    quadrada = Image.open(io.BytesIO(edicao_video.foto_em_tela_cheia(foto(200, 200)))).convert("RGB")
+    assert quadrada.size == edicao_video.TELA
+    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
+    for ponto in [(x1 + 1, y1 + 1), (x2 - 2, y1 + 1), (x1 + 1, y2 - 2), (x2 - 2, y2 - 2), (x1 + 3, 640)]:
+        assert _cor_de(quadrada, ponto, (200, 120, 40)), ponto
+    assert _pretos(quadrada, (0, 0, 720, y1)) and _pretos(quadrada, (0, y2, 720, 1280))
+    # A de pé (3:4) vai de um lado ao outro e mais alta, como o ffmpeg a punha.
+    de_pe = Image.open(io.BytesIO(edicao_video.foto_em_tela_cheia(foto(600, 800)))).convert("RGB")
+    assert _cor_de(de_pe, (2, 170), (200, 120, 40)) and _cor_de(de_pe, (717, 1109), (200, 120, 40))
+    assert _pretos(de_pe, (0, 0, 720, 158)) and _pretos(de_pe, (0, 1122, 720, 1280))
+    assert edicao_video.foto_em_tela_cheia(b"nao e imagem") is None
+
+
+def test_edicao_de_verdade_abre_com_a_foto_sem_a_moldura_da_miniatura(tmp_path):
+    # Com o ffmpeg de verdade: a foto que vai ao ffmpeg é a da miniatura, com a moldura (P115),
+    # mas os 2 primeiros segundos mostram a foto do anúncio grande, sem a moldura (P119).
+    if not shutil.which("ffmpeg"):
+        return
+    from PIL import Image
+    video, foto = tmp_path / "v.mp4", tmp_path / "foto.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=4",
+                    str(video)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
+                    "-frames:v", "1", str(foto)], check=True)
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), foto.read_bytes(), str(destino)) == ""
+    quadro = tmp_path / "quadro.ppm"
+    subprocess.run(["ffmpeg", "-v", "error", "-ss", "1", "-i", str(destino), "-frames:v", "1", str(quadro)], check=True)
+    with Image.open(quadro) as imagem:
+        tela = imagem.convert("RGB")
+    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
+    # As pontas e as bordas da foto são da foto: nada do laranja da moldura nem dos cantos dela.
+    for ponto in [(x1 + 4, y1 + 4), (x2 - 5, y1 + 4), (x1 + 4, y2 - 5), (x2 - 5, y2 - 5), (x1 + 4, 640), (360, y1 + 4)]:
+        assert max(abs(a - b) for a, b in zip(tela.getpixel(ponto), (48, 96, 160))) < 24, ponto
+    assert _pretos(tela, (0, 0, 720, y1 - 4)) and _pretos(tela, (0, y2 + 4, 720, 1280))
 
 
 def test_frase_da_capa_fica_dentro_do_que_o_app_mostra_do_video_aberto():
     # Vídeo do Rafael (31/10, 08:38): com o vídeo aberto, o app corta os lados do quadro, e o
-    # "C" e o "l" de "Caimento impecável" ficavam cortados nas pontas da faixa.
-    # Com a moldura (P115), a frase fica dentro da foto, que fica dentro do que o app mostra.
-    esquerda, _, direita, y2 = edicao_video.FOTO_COM_MOLDURA
-    assert edicao_video.VISIVEL_NO_APP[0] < esquerda and direita < edicao_video.VISIVEL_NO_APP[1]
+    # "C" e o "l" de "Caimento impecável" ficavam cortados nas pontas da faixa. A moldura em volta
+    # da foto grande (P119) fica nas pontas da capa, mas as letras ficam dentro do que o app mostra.
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    y2 = edicao_video.FOTO_COM_MOLDURA[3]
     folga = edicao_video.MARGEM_DA_FAIXA // 2
     for frase in ("Caimento impecável", "Organize sua cozinha", "Acaba com a bagunça da cozinha"):
         capa = _capa(frase)
@@ -1421,8 +1471,8 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
 
 def test_rascunho_do_robo_abre_com_a_foto_e_a_capa_com_a_frase_vai_para_a_figurinha(monkeypatch, tmp_path):
     # Escolha do Rafael (31/10, P110): a capa com a frase vai pelo Selecionar Capa do app, por
-    # último; o vídeo abre com a foto no mesmo lugar, sem a frase. O modo assistente (sem a
-    # figurinha) continua com a frase dentro do vídeo.
+    # último; o vídeo abre com a foto no mesmo lugar, sem a frase e sem a moldura (P119). O modo
+    # assistente (sem a figurinha) continua com a frase dentro do vídeo.
     import io
 
     from PIL import Image
@@ -1444,11 +1494,14 @@ def test_rascunho_do_robo_abre_com_a_foto_e_a_capa_com_a_frase_vai_para_a_figuri
     abertura = Image.open(io.BytesIO(aberturas[-1])).convert("RGB")
     capa = Image.open(io.BytesIO(figurinha["capa"])).convert("RGB")
     assert figurinha["capa"] == edicao_video.capa_com_chamada(_foto_jpg(), "Leve e forte")
-    # A abertura não tem a faixa; a capa tem, e fora da faixa as duas são a mesma imagem.
-    assert edicao_video.faixa_laranja(abertura) is None
-    cima, baixo, _, _ = edicao_video.faixa_laranja(capa)
-    assert abertura.crop((0, 0, 720, cima)).tobytes() == capa.crop((0, 0, 720, cima)).tobytes()
-    assert abertura.crop((0, baixo, 720, 1280)).tobytes() == capa.crop((0, baixo, 720, 1280)).tobytes()
+    # A abertura é a foto grande, sem a faixa e sem a moldura (P119); a capa tem as duas, no
+    # mesmo lugar da foto da abertura.
+    assert aberturas[-1] == edicao_video.capa_sem_chamada(_foto_jpg())
+    assert edicao_video.faixa_laranja(abertura) is None and edicao_video.faixa_laranja(capa)
+    x1, y1, _, y2 = edicao_video.FOTO_DA_CAPA
+    meio = (y1 + y2) // 2
+    assert _cor_de(capa, (x1 + 3, meio), edicao_video.LARANJA_DA_SHOPEE)
+    assert _cor_de(abertura, (x1 + 3, meio), (200, 120, 40))
     # Sem a figurinha (o modo assistente), a frase vai no vídeo, como antes.
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
@@ -1512,10 +1565,14 @@ def test_faixa_laranja_da_figurinha_pequena_em_cima_da_moldura_do_video_no_print
     # moldura esticavam as pontas dela, e no print do celular (JPEG, qualidade 80) as letras
     # pequenas cortavam a faixa em dois pedaços baixos demais: a medida não achava a faixa, e as
     # 3 tentativas da capa pela figurinha saíram sem ela.
-    from PIL import Image
+    from PIL import Image, ImageDraw
     quadro, meio = (61, 267, 1018, 1969), (540, 1118)
     capa = edicao_video.capa_com_chamada(_foto_jpg(), "Madeira maciça")
+    # O 1º quadro do vídeo daquela noite: a foto com a moldura laranja por dentro, dos lados.
     fundo = Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg()))).convert("RGB")
+    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
+    ImageDraw.Draw(fundo).rounded_rectangle((x1 + 40, y1 + 40, x2 - 41, y2 - 41), edicao_video.RAIO_DA_FOTO,
+                                            outline=edicao_video.LARANJA_DA_SHOPEE, width=14)
     miolo = Image.open(io.BytesIO(edicao_video.recorte_da_figurinha(capa))).convert("RGB")
     cima, baixo, esquerda, direita = edicao_video.faixa_laranja(Image.open(io.BytesIO(capa)))
     alto_do_miolo = edicao_video.RECORTE_DA_FIGURINHA[0]
@@ -1630,9 +1687,10 @@ def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):
     from PIL import Image
     # Escolha do Rafael (29/10, P97): a miniatura menor fica no mesmo canto de cima à direita;
     # a ponta de baixo à esquerda da de sempre volta a mostrar o próprio vídeo.
-    dentro_do_canto, ponta_de_baixo = (640, 60), (500, 205)
+    (cx, cy), lado = edicao_video.CANTO_DA_MINIATURA, edicao_video.LARGURA_DA_MINIATURA
+    dentro_do_canto, ponta_de_baixo = (cx - 26, cy + 22), (cx - lado + 14, cy + lado - 13)
     for miniatura, azuis in ((True, (True, True, True)), (False, (False, False, False)),
-                             (124, (True, True, False))):
+                             (lado * 3 // 4 // 2 * 2, (True, True, False))):
         destino = tmp_path / f"editado_{miniatura}.mp4"
         assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), miniatura=miniatura) == ""
         quadro = tmp_path / f"quadro_{miniatura}.ppm"
@@ -1644,9 +1702,10 @@ def test_sem_a_miniatura_o_canto_mostra_o_proprio_video(tmp_path):
                 assert (b > r + 60) == azul, (miniatura, ponto)
 
 
-def test_miniatura_e_foto_do_comeco_vao_com_a_moldura(monkeypatch, tmp_path):
+def test_miniatura_vai_com_a_moldura_e_a_foto_do_comeco_como_antes(monkeypatch, tmp_path):
     # Pedido do Rafael (vídeo das 15:35 de 01/11, P115): a moldura laranja com os cantos
-    # arredondados em volta da miniatura, dentro do lugar de sempre dela, e da foto do começo.
+    # arredondados em volta da miniatura, dentro do lugar de sempre dela. A foto do começo volta a
+    # ser como antes, sem a moldura (vídeo das 22:01 de 01/11, P119).
     import io
 
     from PIL import Image
@@ -1667,8 +1726,9 @@ def test_miniatura_e_foto_do_comeco_vao_com_a_moldura(monkeypatch, tmp_path):
         assert imagem.getpixel((0, 0))[3] == 0 and imagem.getpixel((largura - 1, largura - 1))[3] == 0
         assert _cor_de(imagem.convert("RGB"), (largura // 2, 2), edicao_video.LARANJA_DA_SHOPEE)
         assert _cor_de(imagem.convert("RGB"), (largura // 2, largura // 2), (200, 120, 40))
-    # A foto do começo é a capa sem a frase, com a moldura.
-    assert capa == edicao_video.capa_sem_chamada(_foto_jpg())
+    # Sem a capa, a foto do começo vai como antes: a do anúncio, em tela cheia no fundo preto,
+    # sem a moldura da miniatura (P119).
+    assert capa == edicao_video.foto_em_tela_cheia(_foto_jpg())
     # A miniatura menor (P97) leva a moldura do tamanho dela; sem a miniatura (P81), a foto vai
     # como veio; a foto que não abre também (o ffmpeg diz o motivo).
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, miniatura=120) == ""
@@ -1677,6 +1737,9 @@ def test_miniatura_e_foto_do_comeco_vao_com_a_moldura(monkeypatch, tmp_path):
     assert pedidos[-1][0] == _foto_jpg()
     assert edicao_video.editar("v.mp4", b"nao abre", destino) == ""
     assert pedidos[-1][0] == b"nao abre" and pedidos[-1][3] is None
+    # Com a capa (a da frase, a dos avisos), ela abre o vídeo como veio.
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, capa=b"capa") == ""
+    assert pedidos[-1][3] == b"capa"
 
 
 def test_fotos_que_cabem_com_pelo_menos_3_segundos_cada():
@@ -1702,10 +1765,12 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
     assert len(entradas) == 7 and entradas[3] == edicao_video.SETA
     assert entradas[5].endswith("outra_0.jpg") and entradas[6].endswith("outra_1.jpg")
-    quadrado = ("scale=180:180:force_original_aspect_ratio=decrease,format=rgba,"
-                "pad=180:180:(ow-iw)/2:(oh-ih)/2:color=black@0")
+    lado = edicao_video.LARGURA_DA_MINIATURA
+    quadrado = (f"scale={lado}:{lado}:force_original_aspect_ratio=decrease,format=rgba,"
+                f"pad={lado}:{lado}:(ow-iw)/2:(oh-ih)/2:color=black@0")
     assert all(f"[{entrada}:v]{quadrado}[mini{n}]" in filtro for n, entrada in enumerate((2, 5, 6)))
-    lugar = "overlay=x=576-w/2:y=128-h/2:shortest=1"
+    mx, my = edicao_video.CENTRO_DA_MINIATURA
+    lugar = f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1"
     assert f"[corpo][mini0]{lugar}:enable='lt(t,3.000)'[mini0_no_corpo]" in filtro
     assert f"[mini0_no_corpo][mini1]{lugar}:enable='gte(t,3.000)*lt(t,6.000)'[mini1_no_corpo]" in filtro
     assert f"[mini1_no_corpo][mini2]{lugar}:enable='gte(t,6.000)'[comfoto]" in filtro
@@ -1726,7 +1791,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda caminho: 0.0)
     assert edicao_video.editar("video.mp4", b"foto", destino, outras_fotos=[b"bola"]) == ""
     ffmpeg = comandos[-1]
-    assert "[2:v]scale=180:-2[mini]" in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 5
+    assert f"[2:v]scale={lado}:-2[mini]" in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 5
     # No que vai ao ar, o registro diz; sem a nossa miniatura, não.
     _versoes_de_mentira(monkeypatch)
     pedidas = []
@@ -1829,10 +1894,10 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     textos = edicao_video._nome_lugar_e_falas({"canto_ocupado": False, "por_cima_no_alto": [legenda]})
     assert textos == {"canto_ocupado": False, "por_cima": [(29.0, 69.0, 11.0, 14.0)]}
     assert edicao_video.miniatura_no_video(textos) == 0
-    # A IA errando um pouco para fora da miniatura (até 65% da largura) ainda conta, pela folga.
-    assert edicao_video.miniatura_no_video({"por_cima": [(30.0, 65.0, 11.0, 14.0)]}) == 0
+    # A IA errando um pouco para fora da miniatura (até uns 66% da largura) ainda conta, pela folga.
+    assert edicao_video.miniatura_no_video({"por_cima": [(30.0, 66.5, 11.0, 14.0)]}) == 0
     # Longe dela (no alto à esquerda, ou logo abaixo), a miniatura fica inteira.
-    for longe in ((5.0, 50.0, 5.0, 12.0), (20.0, 80.0, 21.0, 25.0)):
+    for longe in ((5.0, 50.0, 5.0, 12.0), (20.0, 80.0, 27.0, 31.0)):
         assert edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [longe]}) == (
             edicao_video.LARGURA_DA_MINIATURA)
     # Resposta em fração, com os lados trocados, ou sem os quatro números.
@@ -1857,28 +1922,56 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     assert como.endswith(edicao_video.SEM_A_MINIATURA) and miniaturas == [0]
 
 
+def test_a_miniatura_fica_um_pouco_menor_abaixo_da_barra_de_busca_e_longe_da_borda():
+    # Vídeo do Rafael das 22:01 de 01/11 (P120): a miniatura ficava grudada no canto de cima à
+    # direita, embaixo do ícone da barra de busca do app. Ela fica uns 15% menor, com a ponta de
+    # cima abaixo da barra de busca e a da direita um pouco para dentro da borda que o app mostra.
+    largura = edicao_video.LARGURA_DA_MINIATURA
+    canto_x, canto_y = edicao_video.CANTO_DA_MINIATURA
+    largura_da_tela, altura = edicao_video.TELA
+    assert 0.82 <= largura / 180 <= 0.88 and largura % 2 == 0
+    assert canto_y >= edicao_video.FIM_DA_BARRA_DE_BUSCA + 5
+    assert edicao_video.VISIVEL_NO_APP[1] - canto_x >= 12
+    # Os textos do Editor 2 não passam por ela: o do alto fica ao lado, o do meio logo abaixo.
+    x, _topo, largura_maxima, _linhas = edicao_video.LUGARES_DOS_TEXTOS["alto"]
+    assert x + largura_maxima + 56 < canto_x - largura
+    topo_do_meio = edicao_video.LUGARES_DOS_TEXTOS["meio"][1]
+    assert topo_do_meio >= canto_y + largura + 10
+    # O pedido à IA diz o lugar do meio onde ele fica, logo abaixo da miniatura.
+    assert f"\"meio\" (centralizado, entre uns {round(topo_do_meio * 100 / altura)}% e" in edicao_video.PROMPT_DOS_TEXTOS
+    # A IA olha o lugar onde ela fica, com a folga (P81), e o pedido diz o mesmo lugar.
+    comeco, fim, desde, ate = edicao_video.CANTO_OLHADO_PELA_IA
+    folga = edicao_video.FOLGA_DA_MINIATURA
+    assert comeco * largura_da_tela / 100 <= canto_x - largura - folga and canto_x <= fim * largura_da_tela / 100
+    assert desde * altura / 100 <= canto_y - folga and canto_y + largura + folga <= ate * altura / 100
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        assert f"de uns {comeco}% a {fim}% da largura e de uns {desde}% a {ate}% da altura" in prompt
+    # O que o criador pôs bem no alto, acima dela, não a tira mais do vídeo.
+    assert edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [(70.0, 95.0, 1.0, 7.0)]}) == largura
+
+
 def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, tmp_path):
     # Escolha do Rafael (29/10, P97): no rascunho das 23:09, o balão de resposta da criadora
     # ficava logo abaixo do canto da nossa miniatura, e a folga a tirou, mas ela caberia acima
     # dele. A miniatura diminui, no mesmo canto, só o necessário para ficar acima da coisa do
     # criador sem encostar (a folga); menor que 2/3 do tamanho de sempre, fica de fora.
     editar_de_verdade = edicao_video.editar
-    assert edicao_video.CANTO_DA_MINIATURA == (666, 38) and edicao_video.MENOR_MINIATURA == 120
+    assert edicao_video.CANTO_DA_MINIATURA == (657, 150) and edicao_video.MENOR_MINIATURA == 101
     assert edicao_video.centro_da_miniatura(edicao_video.LARGURA_DA_MINIATURA) == edicao_video.CENTRO_DA_MINIATURA
-    balao = (55.0, 95.0, 18.0, 24.0)
+    balao = (55.0, 95.0, 24.5, 30.0)
     largura = edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [balao]})
-    assert largura == 162 and not edicao_video._cruza_a_miniatura(balao, largura)
+    assert largura == 132 and not edicao_video._cruza_a_miniatura(balao, largura)
     x, y = edicao_video.centro_da_miniatura(largura)
     assert (x + largura // 2, y - largura // 2) == edicao_video.CANTO_DA_MINIATURA
     # Sem encostar: a base da miniatura fica a folga acima do topo do balão.
     assert y + largura // 2 + edicao_video.FOLGA_DA_MINIATURA <= balao[2] * edicao_video.TELA[1] / 100
     # A IA viu o balão no canto (canto_ocupado) e disse onde: vale a conta do lugar.
-    assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [balao]}) == 162
+    assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [balao]}) == 132
     # Com 2/3 do tamanho ainda vai; menor que isso, fica de fora.
-    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 14.7, 24.0)]}) == 120
-    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 14.0, 24.0)]}) == 0
+    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 22.1, 30.0)]}) == 102
+    assert edicao_video.miniatura_no_video({"por_cima": [(55.0, 95.0, 21.9, 30.0)]}) == 0
     # Com várias, a mais alta decide.
-    assert edicao_video.miniatura_no_video({"por_cima": [balao, (40.0, 80.0, 16.0, 20.0)]}) == 136
+    assert edicao_video.miniatura_no_video({"por_cima": [balao, (40.0, 80.0, 23.0, 28.0)]}) == 114
     # O canto ocupado sem nenhuma coisa no canto dizendo onde: fica de fora, como na P81.
     assert edicao_video.miniatura_no_video({"canto_ocupado": True, "por_cima": [(5.0, 40.0, 2.0, 8.0)]}) == 0
     # O que vai ao ar leva a miniatura menor, e o registro diz.
@@ -1892,13 +1985,13 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     _textos_da_tela(monkeypatch, {"nome": "Mercadinho", "vantagem": "Brincar de vender", "lugar": "alto",
                                   "canto_ocupado": True, "por_cima": [balao]})
     como = edicao_video.editar_para_postar("v.mp4", b"foto", str(tmp_path / "r.mp4"), "Mercadinho")[1]
-    assert como.endswith(edicao_video.COM_A_MINIATURA_MENOR) and miniaturas == [162]
+    assert como.endswith(edicao_video.COM_A_MINIATURA_MENOR) and miniaturas == [132]
     # A edição recebe a largura e o centro no mesmo canto.
     pedidos = []
     monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura",
                         lambda video, foto, destino, segundos, miniatura, centro, *resto, **opcoes: pedidos.append(
                             (miniatura, centro)) or "")
-    for pedida, esperada in ((True, (180, (576, 128))), (162, (162, (585, 119))), (False, (0, (666, 38)))):
+    for pedida, esperada in ((True, (152, (581, 226))), (132, (132, (591, 216))), (False, (0, (657, 150)))):
         assert editar_de_verdade("v.mp4", b"foto", str(tmp_path / "r.mp4"), miniatura=pedida) == ""
         assert pedidos.pop() == esperada
 

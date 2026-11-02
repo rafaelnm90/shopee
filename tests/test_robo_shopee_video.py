@@ -5240,8 +5240,15 @@ def test_capa_pela_figurinha_em_cima_da_moldura_do_video_no_print_do_celular(mon
     # letras borradas do print em JPEG do celular faziam a medida não achar a faixa, e as 3
     # tentativas saíram sem a capa com a frase.
     monkeypatch.setattr(robo, "pausa", lambda s: None)
-    fundo = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
-    celular = CelularDaCapa(fundo=fundo, jpeg=80)
+    from PIL import Image, ImageDraw
+    # O 1º quadro do vídeo daquela noite: a foto com a moldura laranja por dentro, dos lados.
+    fundo = Image.open(io.BytesIO(robo.edicao_video.capa_sem_chamada(_foto_do_anuncio()))).convert("RGB")
+    x1, y1, x2, y2 = robo.edicao_video.FOTO_DA_CAPA
+    ImageDraw.Draw(fundo).rounded_rectangle((x1 + 40, y1 + 40, x2 - 41, y2 - 41), robo.edicao_video.RAIO_DA_FOTO,
+                                            outline=robo.edicao_video.LARANJA_DA_SHOPEE, width=14)
+    saida = io.BytesIO()
+    fundo.save(saida, format="PNG")
+    celular = CelularDaCapa(fundo=saida.getvalue(), jpeg=80)
     ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
     assert ok and motivo.startswith("a faixa do tamanho do desenho"), motivo
     assert celular.atual == "final" and _no_desenho(celular)

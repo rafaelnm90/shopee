@@ -1330,9 +1330,10 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     assert "📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela." in sv.legenda_das_versoes(
         "Copo", resumo, 1, 2)
     # Escolhas do Rafael (29/10, P81 e P97): o original diz quando a miniatura ficou de fora ou menor.
+    sempre = sv.edicao_video.LARGURA_DA_MINIATURA
     for miniatura, frase in ((0, "🖼️ Sem a nossa miniatura (neste vídeo e nas versões)"),
-                             (124, "🖼️ Miniatura menor (69% do tamanho de sempre, neste vídeo e nas versões)"),
-                             (180, None), (True, None)):
+                             (sempre * 3 // 4, "🖼️ Miniatura menor (75% do tamanho de sempre, neste vídeo e nas versões)"),
+                             (sempre, None), (True, None)):
         resumo.update(miniatura=miniatura)
         legenda = sv.legenda_das_versoes("Copo", resumo, 0, 2)
         assert (frase in legenda) if frase else "🖼️" not in legenda
