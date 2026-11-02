@@ -265,11 +265,12 @@ def descurtir_pendente(agora=None):
     return bool(estado.get("descurtir_continuar")) or not (estado.get("descurtir_em") or "").startswith(hoje)
 
 
-def anotar_limpeza_sem_celular(agora=None):
+def anotar_limpeza_sem_celular(agora=None, resultado="celular fora na suspensão"):
     """
     Na suspensão, com o celular fora da tomada, a limpeza das 4h não roda (pedido do
-    Rafael: DECISOES.md, Shopee Vídeo). Fica no registro uma vez por dia, para o checkup
-    mostrar o porquê em vez de cobrar a limpeza que faltou.
+    Rafael: DECISOES.md, Shopee Vídeo); com o robô pausado (por ele, ou sozinho sem o
+    celular), também não. Fica no registro uma vez por dia, com o porquê (resultado), para
+    o checkup mostrar o motivo em vez de cobrar a limpeza que faltou.
     """
     if not na_hora_do_descurtir(agora) or not descurtir_pendente(agora):
         return
@@ -277,7 +278,7 @@ def anotar_limpeza_sem_celular(agora=None):
     if ler_estado().get("descurtir_sem_celular") == hoje:
         return
     gravar_estado(descurtir_sem_celular=hoje)
-    registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "celular fora na suspensão", ok=None, agora=agora)
+    registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", resultado, ok=None, agora=agora)
 
 
 # O Horário das Interações (responder os comentários dos vídeos do Rafael e comentar e
