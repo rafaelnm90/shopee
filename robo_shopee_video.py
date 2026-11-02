@@ -226,6 +226,19 @@ class Suspensa(Exception):
         self.ate = ate
 
 
+class AdiarPost(Exception):
+    """
+    O post do aprovado fica para a rodada seguinte: a capa com a frase (a figurinha dos rascunhos
+    de antes da P125) não voltou no rascunho reaberto (P124). Não é uma Parada: não gasta tentativa
+    do post. vez: o adiamento desta rodada (1, 2, ...).
+    """
+
+    def __init__(self, vez):
+        super().__init__(f"a capa com a frase não voltou no rascunho reaberto: post adiado ({vez} de "
+                         f"{ADIAMENTOS_DA_CAPA})")
+        self.vez = vez
+
+
 # --- Configuração e plano do dia ---
 
 def ler_config():
@@ -684,7 +697,7 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar")
+           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -706,8 +719,11 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # estampa, com a foto na miniatura que troca: o texto e o álbum do rascunho os marcam (02/11).
 # tirar: as posições (1, 2, ...) dos produtos que o Rafael marcou para sair do post (P123): o robô
 # os tira da tela final na hora de postar, e o rascunho postado fica só com os que ficaram.
+# adiamentos: quantas vezes o post do aprovado ficou para a rodada seguinte porque a capa com a
+# frase (a figurinha) não voltou no rascunho reaberto (P124); zera ao aprovar.
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
-                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar")
+                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
+                 "adiamentos")
 
 
 def _criar_tabela(con):
@@ -873,7 +889,7 @@ PASSOS = (
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
             "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
-            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "descurtido": "💔"}
+            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "descurtido": "💔", "adiado": "⏳"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
                    "responder": "Resposta a comentário", "feed": "Feed (Para você)",
@@ -1128,7 +1144,8 @@ def postou_ha_pouco(agora=None):
 def aprovar(ident, agora=None):
     """O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora."""
     quando = proxima_postagem(ler_config(), agora)
-    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0")
+    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0",
+              adiamentos="0")
     return quando
 
 
@@ -3525,14 +3542,14 @@ def escrever_a_legenda(d, titulo):
     tocar(d, "@tv_right", 3)
 
 
-# --- A capa com a frase pela figurinha (P110, 31/10/2026) ---
-# O vídeo abre com a foto do produto, sem a frase, e a capa com a frase entra por cima pelo
-# Selecionar Capa da tela final, por último (depois do título e dos produtos: o vídeo precisa
-# terminar de processar): a figurinha com foto é o miolo da capa (edicao_video.recorte_da_figurinha),
-# e o robô a deixa do tamanho do desenho (a faixa logo acima do número de visualizações da
-# grade, P76 e P107), medindo a faixa laranja no print e ajustando com dois dedos (no teste de
-# 31/10, os dois dedos de 200 a 900 px a deixaram um terço maior que o desenho). Não ficando
-# certa, descarta e segue com a capa de sempre. Mapa no roteiro; escolha do Rafael (P110):
+# --- A capa com a frase pela figurinha (P110, 31/10/2026; só nos rascunhos de antes da P125) ---
+# Desde a P125 (02/11), a capa com a frase abre o vídeo (o app usa o 1º quadro como capa da grade)
+# e nenhum rascunho novo leva a figurinha. Os feitos antes abrem com a foto do produto, sem a
+# frase, e a capa com a frase entrou por cima pelo Selecionar Capa da tela final: a figurinha com
+# foto é o miolo da capa (edicao_video.recorte_da_figurinha), que o robô deixa do tamanho do
+# desenho (a faixa logo acima do número de visualizações da grade, P76 e P107), medindo a faixa
+# laranja no print e ajustando com dois dedos. O app não a guarda no rascunho salvo, e no post o
+# robô a põe de novo (capa_de_novo_no_post). Mapa no roteiro; escolhas do Rafael (P110 e P125):
 # DECISOES.md, Shopee Vídeo.
 PROCESSO_DA_CAPA = "capa pela figurinha"
 PROCESSO_DO_BOTAO = "preparar 1 agora"
@@ -3556,8 +3573,8 @@ GANHO_DOS_DEDOS = (0.3, 1.5)                    # o menor e o maior ganho que o 
 REDUCAO_SEM_EFEITO = 0.6
 SEM_EFEITO_DOS_DEDOS = 0.02
 # A figurinha que não fica certa não é descartada de cara: o robô sai da capa sem salvar e põe a
-# figurinha de novo, até TENTATIVAS_DA_FIGURINHA vezes no rascunho, enquanto o rascunho tem tempo
-# (nenhuma tentativa nova depois de MINUTOS_PARA_A_CAPA do começo dele; a rodada tem 30 min). E a
+# figurinha de novo, até TENTATIVAS_DA_FIGURINHA vezes, enquanto há tempo (nenhuma tentativa nova
+# depois do prazo de quem a pede). E a
 # figurinha entra sempre do mesmo tamanho e no mesmo lugar: os gestos da última que deu certo (a
 # receita, na chave CHAVE_FIGURINHA) são refeitos de uma vez no começo da próxima, que só confere
 # pela medida e ajusta o que faltar. A receita só serve no mesmo quadro e com a figurinha
@@ -3565,7 +3582,6 @@ SEM_EFEITO_DOS_DEDOS = 0.02
 # tentativas seguintes do rascunho, e a nova que der certo toma o lugar dela (até
 # GESTOS_DA_RECEITA gestos). Pedido do Rafael (01/11/2026): DECISOES.md, Shopee Vídeo.
 TENTATIVAS_DA_FIGURINHA = 3
-MINUTOS_PARA_A_CAPA = 22
 CHAVE_FIGURINHA = "shopee_video_figurinha"
 FOLGA_DA_ENTRADA = 0.1
 GESTOS_DA_RECEITA = 8
@@ -3586,9 +3602,14 @@ FOLGA_DA_CAIXA = 8
 # ({id}_figurinha.png), e no post a miniatura da capa da tela final (PREVIA_DA_CAPA, em cima do
 # Selecionar Capa) diz se ela ainda está lá; sem a faixa, a figurinha vai de novo antes do Postar,
 # sem começar outra tentativa depois de MINUTOS_DA_CAPA_NO_POST. É a capa que o Rafael aprovou
-# (P110): DECISOES.md, Shopee Vídeo.
+# (P110): DECISOES.md, Shopee Vídeo. A que não volta adia o post para a rodada seguinte, até
+# ADIAMENTOS_DA_CAPA vezes (o post a ESPERA_DO_ADIAMENTO dali, para a próxima rodada pegar), sem
+# gastar tentativa do post (P99); só depois o post vai com a capa de sempre. Escolha do Rafael
+# (02/11, P124): DECISOES.md, Shopee Vídeo.
 PREVIA_DA_CAPA = "iv_video_preview"
 MINUTOS_DA_CAPA_NO_POST = 8
+ADIAMENTOS_DA_CAPA = 3
+ESPERA_DO_ADIAMENTO = timedelta(minutes=10)
 # A faixa da capa com a frase vai de um lado ao outro da capa: o laranja mais estreito que isto da
 # largura da miniatura é outra coisa (o selo Fixado da grade, um produto laranja na foto).
 LARGURA_DA_FAIXA_NA_CAPA = 0.6
@@ -3976,18 +3997,6 @@ def _figurinha_na_capa(d, capa, receita=None, aprendida=None):
     return True, motivo
 
 
-def por_a_capa(d, capa, ao_falhar=None, prazo=None):
-    """
-    A capa pela figurinha no rascunho, com o registro: posta, ou de fora com o motivo (a capa de
-    sempre; ao_falhar guarda o caso com a tela da capa). Depois, a edição da legenda que reabriu
-    por cima da tela final na volta da capa é fechada. True quando a capa com a frase ficou.
-    """
-    ok, motivo = capa_pela_figurinha(d, capa, ao_falhar, prazo)
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "posta" if ok else "de fora", motivo, ok=ok or None)
-    fechar_a_edicao_da_legenda(d, tela(d))
-    return ok
-
-
 def faixa_da_capa(imagem, caixa):
     """
     A faixa laranja da capa com a frase na caixa (x1, y1, x2, y2) da imagem do PIL, a miniatura
@@ -4001,18 +4010,8 @@ def faixa_da_capa(imagem, caixa):
 
 
 def arquivo_da_figurinha(ident):
-    """A capa com a frase (PNG) que foi pela figurinha no rascunho: a do post, se ela se perder."""
+    """A capa com a frase (PNG) que foi pela figurinha no rascunho de antes da P125: a do post."""
     return os.path.join(PASTA_RASCUNHOS, f"{ident}_figurinha.png")
-
-
-def guardar_a_figurinha(ident, capa):
-    """Guarda a capa com a frase do rascunho para o post. Sem ela, o post vai como o rascunho voltar."""
-    try:
-        os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
-        with open(arquivo_da_figurinha(ident), "wb") as arquivo:
-            arquivo.write(capa)
-    except OSError as e:
-        logger.warning(f"⚠️ [Robô Shopee Vídeo] A capa com a frase não ficou guardada para o post: {type(e).__name__}")
 
 
 def faixa_na_previa(d):
@@ -4029,19 +4028,21 @@ def faixa_na_previa(d):
 def capa_de_novo_no_post(d, rascunho, agora=None):
     """
     No rascunho reaberto para postar, com a capa pela figurinha no preparo (a capa que o Rafael
-    aprovou): confere a miniatura da capa e, sem a faixa, põe a figurinha de novo pela capa
-    guardada. O registro diz o que a miniatura mostrou e se a capa voltou; a capa que não volta
-    guarda o caso com a tela dela, e o post vai com a capa de sempre.
+    aprovou, nos rascunhos de antes da P125): confere a miniatura da capa e, sem a faixa, põe a
+    figurinha de novo pela capa guardada. O registro diz o que a miniatura mostrou e se a capa
+    voltou; a capa que não volta guarda o caso com a tela dela. Devolve True com a capa com a
+    frase na tela, False quando ela não voltou e None no rascunho sem a figurinha (a frase no
+    vídeo, P125, ou a capa de sempre).
     """
     caminho = arquivo_da_figurinha(rascunho["id"])
     if not rascunho.get("chamada") or not os.path.exists(caminho):
-        return
+        return None
     previa = faixa_na_previa(d)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, {
         True: "no rascunho reaberto com a faixa", False: "no rascunho reaberto sem a faixa",
         None: "no rascunho reaberto sem a miniatura da capa"}[previa], ok=True if previa else None)
     if previa:
-        return
+        return True
     with open(caminho, "rb") as arquivo:
         capa = arquivo.read()
     ok, motivo = capa_pela_figurinha(
@@ -4051,6 +4052,25 @@ def capa_de_novo_no_post(d, rascunho, agora=None):
     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "posta de novo no post" if ok else "de fora no post",
                                  motivo, ok=ok or None)
     fechar_a_edicao_da_legenda(d, tela(d))
+    return ok
+
+
+def adiar_sem_a_capa(rascunho, agora=None):
+    """
+    A capa com a frase não voltou no rascunho reaberto: o post fica para a rodada seguinte
+    (AdiarPost), até ADIAMENTOS_DA_CAPA vezes; depois disso, segue com a capa de sempre. O
+    adiamento não gasta tentativa do post (P99). Escolha do Rafael (02/11, P124): DECISOES.md,
+    Shopee Vídeo.
+    """
+    feitos = int(rascunho.get("adiamentos") or 0)
+    if feitos >= ADIAMENTOS_DA_CAPA:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "no post com a capa de sempre",
+                                     f"depois de {feitos} adiamento(s)", ok=None)
+        return
+    atualizar(rascunho["id"], adiamentos=str(feitos + 1), postar_em=_momento(agora_br(agora) + ESPERA_DO_ADIAMENTO))
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "post adiado",
+                                 f"{feitos + 1} de {ADIAMENTOS_DA_CAPA}", ok=None)
+    raise AdiarPost(feitos + 1)
 
 
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
@@ -4146,9 +4166,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     outras = [foto for foto in (foto_do_produto_do_post(video, p) for p in (produtos or [])[1:]) if foto]
     if video.get("de_video"):
         outras = [foto for nome, foto in variacoes if nome in nomes[1:]]
-    figurinha, miniatura = {}, {}
+    # A capa com a frase abre o vídeo, e o app usa o 1º quadro como capa da grade: a frase vai ao
+    # ar sem a figurinha do Selecionar Capa. Escolha do Rafael (02/11, P125): DECISOES.md, Shopee Vídeo.
+    miniatura = {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
-                                  outras=outras, figurinha=figurinha, miniatura=miniatura)
+                                  outras=outras, miniatura=miniatura)
     # O de outra cor só vai com a foto dele na miniatura que troca: sem ela (sem a nossa
     # miniatura, ou sem tempo para a foto dele), sai antes de anexar. Ele já foi curtido e fica no
     # alto de Minhas Curtidas até o descurtir do fim: o anexar procura os outros abaixo dele.
@@ -4189,12 +4211,6 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # A legenda vai depois dos produtos: em foco nas idas à lista de Minhas Curtidas, o 1º
     # produto às vezes não fica (VEZES_DO_PRIMEIRO_PRODUTO).
     escrever_a_legenda(d, textos["titulo"])
-    # A capa com a frase por último, pela figurinha (P110); sem ela, a capa de sempre.
-    if figurinha.get("capa") and por_a_capa(
-            d, figurinha["capa"], lambda motivo: _guardar_caso(d, "capa", "de fora", motivo, video, ident, agora),
-            inicio + MINUTOS_PARA_A_CAPA * 60):
-        atualizar(ident, chamada="1")
-        guardar_a_figurinha(ident, figurinha["capa"])
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     if produtos:
         ordem = [produtos[i] for i in no_post]
@@ -4235,7 +4251,7 @@ MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à S
 MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
 
 
-def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
@@ -4249,10 +4265,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     saiu (o jeito de edicao_video.editar_para_postar; "" sem a edição). outras: as fotos de capa
     dos outros produtos do post, na ordem, no rascunho com produtos a mais (o mesmo item): com
     elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103). Com a capa com
-    chamada ligada, figurinha (dict) recebe em "capa" a capa com a frase, que vai pelo Selecionar
-    Capa (P110), e o vídeo abre com a foto sem ela. miniatura (dict) recebe em "fotos" as fotos
-    da miniatura que troca no vídeo, a do 1º e as outras, e nada sem a nossa miniatura: o de
-    outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura).
+    chamada ligada, o vídeo abre com a capa com a frase (P125). miniatura (dict) recebe em
+    "fotos" as fotos da miniatura que troca no vídeo, a do 1º e as outras, e nada sem a nossa
+    miniatura: o de outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -4268,7 +4283,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
                                                             anuncio.get("nome", ""), avisos=alcool,
-                                                            outras_fotos=trocam, figurinha=figurinha)
+                                                            outras_fotos=trocam)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -4692,13 +4707,15 @@ def publicar(d, rascunho, agora=None):
     if ate:
         raise Suspensa(ate)
     # O rascunho reaberto tem todos os produtos: o app só guarda o rascunho pelo Salvar, e a
-    # volta da tela final do post que não saiu descarta o que o robô mudou nela.
+    # volta da tela final do post que não saiu descarta o que o robô mudou nela. A capa vem antes
+    # de tirar os produtos: o post adiado sem ela (P124) não perde esse trabalho.
     abrir_rascunho(d, rascunho)
+    if capa_de_novo_no_post(d, rascunho, agora) is False:
+        adiar_sem_a_capa(rascunho, agora)
     no_post = com_os_que_ficam(rascunho)
     if no_post is not rascunho:
         tirar_os_marcados(d, rascunho)
         _conferir(ps.conferir_tela_final(d, video_do_rascunho(no_post)), do_video=False)
-    capa_de_novo_no_post(d, rascunho, agora)
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rascunho.get("rotulo_ia"))), do_video=False)
     _conferir(ps.postar(d, video_do_rascunho(no_post)), do_video=False)
     pausa(15)
@@ -5930,6 +5947,13 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         # A punição que levou à suspensão ganha o texto do recurso na mesma rodada.
         _ler_saude_junto(d, agora)
         return resultado
+    except AdiarPost as e:
+        registrar_tentativa(acao, "adiado", str(e), produto, agora)
+        avisar(f"⏳ Robô da Shopee Vídeo: a capa com a frase não voltou no rascunho aprovado (o app pode estar "
+               f"lento). Não postei agora: tento de novo na próxima rodada, daqui a uns 15 min (adiamento {e.vez} "
+               f"de {ADIAMENTOS_DA_CAPA}). Se depois do {ADIAMENTOS_DA_CAPA}º ela ainda não voltar, o post vai com a "
+               "capa de sempre.")
+        return _resposta(preparar, f"{acao}: adiado ({e})")
     except Verificacao:
         logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
         if acao != "rascunho":

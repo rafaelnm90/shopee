@@ -880,21 +880,22 @@ def _linha_da_medicao(medicao):
 
 
 def texto_capa(config, medicao):
-    """A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 31/10, P110): DECISOES.md, Shopee Vídeo."""
+    """
+    A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125): DECISOES.md,
+    Shopee Vídeo.
+    """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
         "A capa é o que aparece na grade do seu perfil. Com a capa com chamada, a foto do anúncio fica do mesmo "
         "tamanho da capa sem texto, e o robô escreve por cima do pé dela, numa faixa laranja da Shopee, em letras "
-        "brancas e grandes, a vantagem que o vídeo mostra em poucas palavras (a frase que a IA escreve vendo o "
-        "vídeo), sem marca, sem preço e sem desconto: as diretrizes da Shopee punem promessa que o vídeo não mostra "
-        "e desconto falso, e o preço muda.\n\n"
+        "brancas e grandes, o que é o produto e a vantagem que o vídeo mostra, em poucas palavras (a frase que a "
+        "IA escreve vendo o vídeo), sem marca, sem preço e sem desconto: as diretrizes da Shopee punem promessa "
+        "que o vídeo não mostra e desconto falso, e o preço muda.\n\n"
         "<b>Os números ficam livres</b>: a faixa acaba logo acima do número de visualizações, embaixo à esquerda, "
         "e a foto começa logo abaixo da sacolinha da Shopee. Tudo cabe no pedaço da capa que a grade mostra.\n\n"
-        "<b>Como ela entra</b>: nos rascunhos do robô, pelo Selecionar Capa do app, por último (depois do título e "
-        "dos produtos), como uma figurinha com foto que o robô deixa do tamanho do desenho e confere pelo print; o "
-        f"vídeo abre com a foto do anúncio nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, sem a frase. Se a "
-        "figurinha não ficar certa, o robô a descarta e o rascunho vai com a capa de sempre (a foto, sem a frase). "
-        "No modo assistente, a frase vai no próprio vídeo: a capa é o primeiro quadro.\n\n"
+        f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, no lugar "
+        "da foto do anúncio, nos rascunhos do robô e no modo assistente: o app usa o primeiro quadro do vídeo como "
+        "capa da grade, e todo post sai com a frase, mesmo com o app lento.\n\n"
         "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Ligada, ela "
         "vai em todos os vídeos. Na bebida alcoólica, a capa continua a dos três avisos, e o vídeo sem a vantagem da "
         "IA vai com a capa de sempre.\n\n"
