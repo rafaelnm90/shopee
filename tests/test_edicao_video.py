@@ -86,7 +86,10 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert edicao_video.editar("video.mp4", b"foto", destino, miniatura=False) == ""
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
-    assert "[corpo]null[comfoto]" in filtro and "[mini]" not in filtro and f"scale={largura}:-2" not in filtro
+    assert "[corpo]null[semmoldura]" in filtro and "[mini]" not in filtro and f"scale={largura}:-2" not in filtro
+    # A moldura do cartão (P128) entra por último, por cima do corpo do vídeo, e sai em [comfoto].
+    assert ffmpeg[[i for i, parte in enumerate(ffmpeg) if parte == "-i"][-1] + 1].endswith("moldura.png")
+    assert "[5:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1[comfoto]" in filtro
     assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
     assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
@@ -135,6 +138,45 @@ def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
     assert os.path.getsize(edicao_video.SETA) < 1024 * 1024
 
 
+def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
+    # Escolha do Rafael (02/11, P128, em teste): a moldura laranja em volta do cartão do produto que
+    # o app mostra embaixo, no lugar em que ele aparece no celular dele, abaixo da seta e da legenda
+    # da fala, acima da linha do Ver Produtos e dentro do que o app mostra do vídeo aberto.
+    import io
+
+    from PIL import Image, ImageSequence
+    imagem = Image.open(io.BytesIO(edicao_video.moldura_do_cartao()))
+    assert imagem.mode == "RGBA" and imagem.size == edicao_video.TELA
+    x1, y1, x2, y2 = edicao_video.CARTAO_DO_PRODUTO
+    folga, grossura = edicao_video.FOLGA_DO_CARTAO, edicao_video.GROSSURA_DA_MOLDURA_DO_CARTAO
+    meio_x, meio_y = (x1 + x2) // 2, (y1 + y2) // 2
+    laranja = edicao_video.LARANJA_DA_SHOPEE
+    # Laranja na moldura, nos quatro lados; transparente no cartão, na folga e fora dela.
+    for ponto in ((x1 - folga - grossura // 2, meio_y), (x2 + folga + grossura // 2, meio_y),
+                  (meio_x, y1 - folga - grossura // 2), (meio_x, y2 + folga + grossura // 2)):
+        pixel = imagem.getpixel(ponto)
+        assert pixel[3] > 200 and sum(abs(a - b) for a, b in zip(pixel[:3], laranja)) < 30, ponto
+    for ponto in ((meio_x, meio_y), (x1 - folga // 2, meio_y), (meio_x, y1 - folga - grossura - 3), (10, 10)):
+        assert imagem.getpixel(ponto)[3] == 0, ponto
+    caixa = imagem.getchannel("A").getbbox()
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    assert esquerda <= caixa[0] and caixa[2] <= direita
+    # Abaixo da seta (no maior pulso) e da legenda da fala; acima da linha do Ver Produtos (y 1122).
+    with Image.open(edicao_video.SETA) as seta:
+        pe_da_seta = max(q.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()[3]
+                         for q in ImageSequence.Iterator(seta) if q.convert("RGBA").getchannel("A").getbbox())
+        topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - seta.size[1] // 2
+    assert topo_da_seta + pe_da_seta < caixa[1] and edicao_video.PE_DA_LEGENDA < caixa[1] and caixa[3] <= 1115
+    # Desligada, nada vai.
+    monkeypatch.setattr(edicao_video, "MOLDURA_DO_CARTAO", False)
+    edicao_video.moldura_do_cartao.cache_clear()
+    try:
+        assert edicao_video.moldura_do_cartao() is None
+    finally:
+        monkeypatch.setattr(edicao_video, "MOLDURA_DO_CARTAO", True)
+        edicao_video.moldura_do_cartao.cache_clear()
+
+
 def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
     # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o laranja aparece e o resto
     # do recorte dela continua claro (sem o quadrado preto), também depois do fim do arquivo.
@@ -166,6 +208,19 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
 
     # Na foto (os 2 primeiros segundos), nada de seta; ela começa a se desenhar com o vídeo.
     assert onde_fica_a_seta(1.9) == (0, [])
+    # A moldura do cartão do produto (P128) também só entra no vídeo, depois da abertura.
+    def na_moldura(segundo):
+        quadro = tmp_path / f"moldura_{segundo}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
+                        str(quadro)], check=True)
+        with Image.open(quadro) as imagem:
+            tela = imagem.convert("RGB")
+        x1, y1, _x2, y2 = edicao_video.CARTAO_DO_PRODUTO
+        x = x1 - edicao_video.FOLGA_DO_CARTAO - edicao_video.GROSSURA_DA_MOLDURA_DO_CARTAO // 2
+        return [tela.getpixel((x, y)) for y in range(y1 + 20, y2 - 20, 10)]
+    laranja = edicao_video.LARANJA_DA_SHOPEE
+    assert not [p for p in na_moldura(1.0) if sum(abs(a - b) for a, b in zip(p, laranja)) < 70]
+    assert all(sum(abs(a - b) for a, b in zip(p, laranja)) < 70 for p in na_moldura(3.5))
     laranja, escuros = onde_fica_a_seta(2.6)
     assert laranja > 0 and not escuros
     # 7,5 s: depois do fim do arquivo da seta, já no pulso repetido.
@@ -1859,15 +1914,18 @@ def test_miniatura_vai_com_a_moldura_e_a_foto_do_comeco_como_antes(monkeypatch, 
     import io
 
     from PIL import Image
-    pedidos = []
+    pedidos, molduras = [], []
 
-    def com_foto_e_miniatura(video, foto, destino, segundos, largura, centro, *args, outras=()):
+    def com_foto_e_miniatura(video, foto, destino, segundos, largura, centro, *args, outras=(), **opcoes):
         pedidos.append((foto, largura, centro, args[4], list(outras)))
+        molduras.append(opcoes.get("moldura"))
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura", com_foto_e_miniatura)
     destino = str(tmp_path / "r.mp4")
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, outras_fotos=[_foto_jpg()]) == ""
     foto, largura, centro, capa, outras = pedidos[-1]
+    # A moldura do cartão do produto vai junto (P128).
+    assert molduras[-1] == edicao_video.moldura_do_cartao() and molduras[-1][:8] == b"\x89PNG\r\n\x1a\n"
     assert (largura, centro) == (edicao_video.LARGURA_DA_MINIATURA, edicao_video.CENTRO_DA_MINIATURA)
     for miniatura in [foto] + outras:
         imagem = Image.open(io.BytesIO(miniatura))
@@ -1913,7 +1971,8 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
     entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
-    assert len(entradas) == 7 and entradas[3] == edicao_video.SETA
+    # A moldura do cartão do produto (P128) entra por último: as outras entradas não mudam de número.
+    assert len(entradas) == 8 and entradas[3] == edicao_video.SETA and entradas[7].endswith("moldura.png")
     assert entradas[5].endswith("outra_0.jpg") and entradas[6].endswith("outra_1.jpg")
     lado = edicao_video.LARGURA_DA_MINIATURA
     quadrado = (f"scale={lado}:{lado}:force_original_aspect_ratio=decrease,format=rgba,"
@@ -1923,7 +1982,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     lugar = f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1"
     assert f"[corpo][mini0]{lugar}:enable='lt(t,3.000)'[mini0_no_corpo]" in filtro
     assert f"[mini0_no_corpo][mini1]{lugar}:enable='gte(t,3.000)*lt(t,6.000)'[mini1_no_corpo]" in filtro
-    assert f"[mini1_no_corpo][mini2]{lugar}:enable='gte(t,6.000)'[comfoto]" in filtro
+    assert f"[mini1_no_corpo][mini2]{lugar}:enable='gte(t,6.000)'[semmoldura]" in filtro
     assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
     # A foto que não abre fica de fora, e as que sobram dividem o vídeo igual.
     monkeypatch.setattr(edicao_video.videos, "imagem_abre", lambda caminho: not caminho.endswith("outra_0.jpg"))
@@ -1931,17 +1990,17 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
     entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
-    assert len(entradas) == 6 and entradas[5].endswith("outra_1.jpg")
-    assert "enable='lt(t,4.500)'" in filtro and "enable='gte(t,4.500)'[comfoto]" in filtro
+    assert len(entradas) == 7 and entradas[5].endswith("outra_1.jpg")
+    assert "enable='lt(t,4.500)'" in filtro and "enable='gte(t,4.500)'[semmoldura]" in filtro
     # Sem a nossa miniatura (P81), nada troca, e as outras fotos nem entram; sem a duração do
     # vídeo, a miniatura fica uma só.
     assert edicao_video.editar("video.mp4", b"foto", destino, miniatura=False, outras_fotos=[b"bola"]) == ""
     ffmpeg = comandos[-1]
-    assert "mini0" not in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 5
+    assert "mini0" not in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 6
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda caminho: 0.0)
     assert edicao_video.editar("video.mp4", b"foto", destino, outras_fotos=[b"bola"]) == ""
     ffmpeg = comandos[-1]
-    assert f"[2:v]scale={lado}:-2[mini]" in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 5
+    assert f"[2:v]scale={lado}:-2[mini]" in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 6
     # No que vai ao ar, o registro diz; sem a nossa miniatura, não.
     _versoes_de_mentira(monkeypatch)
     pedidas = []
