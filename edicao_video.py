@@ -754,26 +754,40 @@ _FALAS_NO_PROMPT = (
     "Diga também onde alguém fala no vídeo (voz de gente, não música): \"falas\", a lista dos trechos em "
     "segundos desde o começo do vídeo, como [[início, fim], ...]; [] se ninguém fala.\n"
 )
-# O lugar também não cobre as fotos, quadros e textos que o criador pôs por cima do vídeo,
-# agora que eles não tiram as nossas legendas (escolha do Rafael, 29/10, P82: DECISOES.md,
-# Shopee Vídeo).
+# O que o criador pôs por cima do vídeo é só o que ele acrescentou na edição, nunca o que foi
+# filmado: no rascunho dos fones de 02/11, a IA contou como coisa do criador no canto da nossa
+# miniatura o nome escrito na capa de uma revista em cima da mesa, e a miniatura saiu (P81).
+_O_QUE_FOI_FILMADO_NAO_CONTA = (
+    "Nas perguntas abaixo sobre o que o próprio vídeo pôs por cima da imagem, só conta o que foi acrescentado "
+    "por cima na edição do vídeo (legenda, título, frase, figurinha, foto ou quadro); as coisas filmadas, que "
+    "fazem parte da cena, como o produto, a embalagem, uma caixa, um livro, uma revista ou a tela de um celular, "
+    "e o que está escrito nelas, nunca contam.\n"
+)
+# O lugar não cobre as fotos, quadros e textos que o criador pôs por cima do vídeo em nenhum
+# momento, mesmo os que ficam pouco na tela: eles não tiram as nossas legendas (escolha do
+# Rafael, 29/10, P82), nem o texto dele que fica só em parte do tempo (P52). DECISOES.md,
+# Shopee Vídeo.
 _LUGAR_NO_PROMPT = (
-    "Diga onde os textos podem ficar sem cobrir o produto, o rosto de alguém nem as fotos, quadros ou textos "
-    "que o próprio vídeo pôs por cima da imagem, na maior parte do vídeo: "
+    "Diga onde os textos podem ficar sem cobrir o produto nem o rosto de alguém, na maior parte do vídeo, e sem "
+    "cobrir, em nenhum momento, as fotos, quadros ou textos que o próprio vídeo pôs por cima da imagem: "
     "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 12% e 22% da altura e até uns 65% da largura), "
     "\"meio\" (centralizado, entre uns 27% e 36% da altura), \"esquerda\" (perto da borda esquerda, até "
     "uns 40% da largura, entre uns 31% e 45% da altura) ou \"direita\" (o mesmo, perto da borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem alguma dessas coisas.\n"
 )
-# Vídeo que já tem texto próprio na tela vai sem as nossas legendas, que cobririam o dele
-# (escolha do Rafael, P52). O texto dentro das fotos e quadros do produto que o criador pôs
-# por cima (as cores, a quantidade) não conta: é a miniatura dele, como a nossa (escolha do
-# Rafael, 29/10, P82). DECISOES.md, Shopee Vídeo.
+# Vídeo que já tem texto próprio na tela na maior parte do tempo vai sem as nossas legendas
+# (escolha do Rafael, P52). A IA diz os trechos em que o texto do criador aparece, e a conta do
+# tempo é feita aqui (parte_com_texto_proprio): no rascunho dos fones de 02/11, ela tinha dito
+# que o texto ficava na maior parte do tempo, e as duas frases do criador só apareciam nos
+# últimos 5 s de 26. O texto dentro das fotos e quadros do produto que o criador pôs por cima
+# (as cores, a quantidade) não conta: é a miniatura dele, como a nossa (escolha do Rafael,
+# 29/10, P82). DECISOES.md, Shopee Vídeo.
 _TEXTO_NO_VIDEO_NO_PROMPT = (
-    "Diga também se o próprio vídeo já tem texto escrito na tela, como legenda, título ou frase por cima da "
-    "imagem, na maior parte do tempo (não contam marca d'água, nome do perfil, o que está escrito no "
-    "produto ou na embalagem, nem o texto dentro das fotos e quadros do produto que o vídeo pôs por cima, "
-    "como as cores ou a quantidade): \"texto_no_video\", true ou false.\n"
+    "Diga também em que trechos o próprio vídeo mostra texto escrito por cima da imagem, como legenda, título ou "
+    "frase (não contam marca d'água, nome do perfil, o que está escrito no produto ou na embalagem, nem o texto "
+    "dentro das fotos e quadros do produto que o vídeo pôs por cima, como as cores ou a quantidade): "
+    "\"textos_do_video\", a lista dos trechos em que algum desses textos está na tela, cada um com o começo e o "
+    "fim em segundos desde o começo do vídeo, como [{{\"inicio\": 0.0, \"fim\": 3.0}}]; [] se não há nenhum.\n"
 )
 # A nossa miniatura só entra quando o canto de cima à direita, onde ela fica, está livre do
 # que o criador pôs por cima do vídeo: foto, quadro, texto ou figura (no vídeo da cortina de
@@ -788,11 +802,13 @@ _TEXTO_NO_VIDEO_NO_PROMPT = (
 _CANTO_NO_PROMPT = (
     "Diga também se o canto de cima à direita do vídeo (de uns 62% a 95% da largura e de uns 9% a 29% da altura) "
     "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, em "
-    "qualquer momento (não contam marca d'água, logo nem nome do perfil): \"canto_ocupado\", true ou false.\n"
+    "qualquer momento (não contam marca d'água, logo nem nome do perfil; as coisas filmadas também não): "
+    "\"canto_ocupado\", true ou false.\n"
     "Diga também onde ficam, em qualquer momento do vídeo, as legendas, títulos, frases, fotos, quadros e "
     "figuras que o próprio vídeo pôs por cima da imagem no alto da tela, até uns 30% da altura (sem marca "
-    "d'água, logo nem nome do perfil): \"por_cima_no_alto\", a lista com a parte da tela que cada um ocupa, em "
-    "porcentagem da largura e da altura do vídeo, contando da borda esquerda e da borda de cima, como "
+    "d'água, logo, nome do perfil nem as coisas filmadas): \"por_cima_no_alto\", a lista com a parte da tela "
+    "que cada um ocupa, em porcentagem da largura e da altura do vídeo, contando da borda esquerda e da borda "
+    "de cima, como "
     "[{{\"esquerda\": 30, \"direita\": 70, \"topo\": 14, \"base\": 19}}]; [] se não há nenhum.\n"
 )
 # As legendas da fala (P118): só a voz de gente falando em português, como foi dita; sem fala, só
@@ -806,8 +822,8 @@ _LEGENDAS_NO_PROMPT = (
     "canto, ou se a fala não é em português. Diga também se o próprio vídeo já mostra o que as pessoas falam "
     "escrito na tela (legenda da fala): \"legenda_no_video\", true ou false.\n"
 )
-_FALAS_E_LUGAR_NO_PROMPT = (_FALAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT
-                            + _LEGENDAS_NO_PROMPT)
+_FALAS_E_LUGAR_NO_PROMPT = (_FALAS_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT
+                            + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT)
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
@@ -817,9 +833,10 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
-    + _REGRAS_NO_PROMPT + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
+    + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
-    "\"lugar\": \"alto\", \"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": [], "
+    "\"lugar\": \"alto\", \"textos_do_video\": [], \"canto_ocupado\": false, \"por_cima_no_alto\": [], "
     "\"legendas\": [], \"legenda_no_video\": false}}"
 )
 
@@ -1135,10 +1152,12 @@ def _resposta_da_ia(video, prompt):
     return dados if isinstance(dados, dict) else {}
 
 
-def _nome_lugar_e_falas(dados):
+def _nome_lugar_e_falas(dados, duracao=0.0):
     """
-    O nome, o lugar, as falas, se o vídeo já tem texto e se o canto da nossa miniatura tem
-    coisa do criador, da resposta da IA, só os que vieram certos.
+    O nome, o lugar, as falas, se o vídeo já tem texto próprio na tela na maior parte do tempo
+    (pelos trechos que a IA deu e a duracao do vídeo, em segundos; com a parte do tempo em
+    "parte_com_texto") e se o canto da nossa miniatura tem coisa do criador, da resposta da IA,
+    só os que vieram certos.
     """
     textos = {}
     nome = _texto_certo(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
@@ -1146,9 +1165,13 @@ def _nome_lugar_e_falas(dados):
         textos["nome"] = nome
     if dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
         textos["lugar"] = dados["lugar"]
-    for chave in ("texto_no_video", "canto_ocupado"):
-        if isinstance(dados.get(chave), bool):
-            textos[chave] = dados[chave]
+    if isinstance(dados.get("canto_ocupado"), bool):
+        textos["canto_ocupado"] = dados["canto_ocupado"]
+    trechos = _trechos_com_texto(dados.get("textos_do_video"))
+    parte = parte_com_texto_proprio(trechos, duracao) if trechos is not None else None
+    if parte is not None:
+        textos["texto_no_video"] = parte > PARTE_COM_TEXTO_PROPRIO
+        textos["parte_com_texto"] = round(parte, 2)
     por_cima = _por_cima_no_alto(dados.get("por_cima_no_alto"))
     if por_cima:
         textos["por_cima"] = por_cima
@@ -1166,6 +1189,51 @@ def _nome_lugar_e_falas(dados):
 def lugar_dos_textos(textos):
     """O lugar das nossas legendas pela resposta da IA: nenhum quando o vídeo já tem texto na tela (P52)."""
     return SEM_LUGAR if textos.get("texto_no_video") else textos.get("lugar")
+
+
+# "Na maior parte do tempo" (P52): o texto próprio do vídeo na tela em mais da metade dele.
+PARTE_COM_TEXTO_PROPRIO = 0.5
+
+
+def _trechos_com_texto(bruto):
+    """
+    Os trechos em que o vídeo mostra texto próprio na tela, como a IA deu ([(início, fim)], em
+    segundos), só os certos; None quando a lista não veio.
+    """
+    if not isinstance(bruto, list):
+        return None
+    trechos = []
+    for trecho in bruto:
+        if not isinstance(trecho, dict):
+            continue
+        try:
+            inicio, fim = float(trecho.get("inicio")), float(trecho.get("fim"))
+        except (TypeError, ValueError):
+            continue
+        if fim > inicio >= 0:
+            trechos.append((inicio, fim))
+    return trechos
+
+
+def parte_com_texto_proprio(trechos, duracao):
+    """
+    A parte do vídeo (de 0 a 1) com texto próprio na tela: os trechos somados, o que se cruza
+    contando uma vez e só dentro da duração do vídeo (em segundos). None sem a duração.
+    """
+    if not duracao or duracao <= 0:
+        return None
+    total, ate = 0.0, 0.0
+    for inicio, fim in sorted(trechos):
+        inicio, fim = max(inicio, ate), min(fim, duracao)
+        if fim > inicio:
+            total += fim - inicio
+            ate = fim
+    return total / duracao
+
+
+def _duracao_para_os_trechos(video, dados):
+    """A duração do vídeo, lida só quando a IA deu trechos com texto próprio (0 sem eles)."""
+    return videos.duracao(video) if dados.get("textos_do_video") else 0.0
 
 
 def _por_cima_no_alto(lista):
@@ -1240,6 +1308,26 @@ def miniatura_no_video(textos):
     return largura if largura >= MENOR_MINIATURA else 0
 
 
+# Por que a nossa miniatura não vai inteira num vídeo: o canto ocupado sem a IA dizer onde (P81)
+# ou a coisa do criador no alto que passa por ela (P97). O registro separa os dois, para o
+# checkup mostrar qual tira a miniatura dos rascunhos.
+PROCESSO_DO_CANTO = "edição do vídeo: canto da miniatura"
+CANTO_SEM_DIZER_ONDE = "o canto ocupado, sem dizer onde"
+
+
+def por_que_a_miniatura(textos):
+    """
+    O porquê fixo da miniatura menor ou de fora neste vídeo, pela resposta da IA: o canto
+    ocupado sem dizer onde, ou a altura (em % do vídeo) em que começa a coisa mais alta do
+    criador que passa por ela; "" quando nada a tira.
+    """
+    caixas = list(textos.get("por_cima", ()))
+    if textos.get("canto_ocupado") and not any(map(_no_canto_olhado, caixas)):
+        return CANTO_SEM_DIZER_ONDE
+    topos = [caixa[2] for caixa in caixas if _cruza_a_miniatura(caixa)]
+    return f"a coisa do criador no alto começa a {min(topos):.0f}% da altura" if topos else ""
+
+
 def _vantagem_e_chamada(dados, textos):
     """
     Põe em textos a vantagem, a chamada e a frase da capa da resposta da IA, só as que vieram
@@ -1263,11 +1351,13 @@ def frase_da_capa(textos):
 
 def textos_da_tela(video, nome):
     """
-    {"nome", "vantagem", "capa", "chamada", "lugar", "texto_no_video", "canto_ocupado",
-    "por_cima"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem resposta.
+    {"nome", "vantagem", "capa", "chamada", "lugar", "texto_no_video", "parte_com_texto",
+    "canto_ocupado", "por_cima"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem
+    resposta.
     """
     dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
-    return _revisar_ortografia(_vantagem_e_chamada(dados, _nome_lugar_e_falas(dados)))
+    return _revisar_ortografia(_vantagem_e_chamada(
+        dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados))))
 
 
 def _falas(bruto):
@@ -1574,6 +1664,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
     miniatura = miniatura_no_video(textos)
+    if miniatura < LARGURA_DA_MINIATURA:
+        registro_processos.registrar("shopee_video", PROCESSO_DO_CANTO, "menor" if miniatura else "de fora",
+                                     por_que_a_miniatura(textos))
     avisado = ((COM_OS_AVISOS if avisos else "") + chamada + (COM_MUSICA if musica else "")
                + (SEM_A_MINIATURA if not miniatura
                   else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
@@ -1595,7 +1688,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         detalhe = ""
         if textos.get("texto_no_video"):
-            detalhe = TEXTO_JA_NO_VIDEO
+            # Com a parte do tempo em que o texto do criador fica na tela (P52: mais da metade).
+            detalhe = TEXTO_JA_NO_VIDEO + (f" ({textos['parte_com_texto']:.0%} do tempo)"
+                                           if "parte_com_texto" in textos else "")
         elif resumo.get("lugar") == SEM_LUGAR:
             detalhe = SEM_LUGAR_LIVRE
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
@@ -1733,7 +1828,7 @@ PROMPT_DAS_VERSOES = (
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
-    "\"texto_no_video\": false, \"canto_ocupado\": false, \"por_cima_no_alto\": [], \"legendas\": [], "
+    "\"textos_do_video\": [], \"canto_ocupado\": false, \"por_cima_no_alto\": [], \"legendas\": [], "
     "\"legenda_no_video\": false}}"
 )
 
@@ -1745,7 +1840,7 @@ def textos_das_versoes(video, nome):
     certo; {} quando ela não respondeu.
     """
     dados = _resposta_da_ia(video, PROMPT_DAS_VERSOES.format(nome=nome))
-    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados))
+    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados)))
     versoes = []
     for bruta in dados.get("versoes") if isinstance(dados.get("versoes"), list) else []:
         if not isinstance(bruta, dict):
