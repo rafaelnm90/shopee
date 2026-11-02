@@ -2527,6 +2527,66 @@ def test_legendas_que_se_encostam_cortam_e_a_curta_demais_sai():
     assert [(inicio, fim) for _, inicio, fim, _, _ in letreiros] == [(0.0, 2.5), (2.7, 6.0), (9.5, 11.0)]
 
 
+# As palavras de um vídeo no áudio (o reconhecimento de voz, em segundos) e as legendas da IA com o tempo
+# dela adiantado, como no vídeo do Rafael das 19:29 de 02/11 (até 2 s antes da fala).
+AUDIO_DO_VESTIDO = [(1.0, 1.3, "Olha"), (1.3, 1.5, "só"), (1.5, 1.8, "esse"), (1.8, 2.4, "vestido,"),
+                    (4.0, 4.2, "não"), (4.2, 4.8, "amassa"), (4.8, 5.0, "e"), (5.0, 5.6, "seca"), (5.6, 5.9, "rápido.")]
+FALA_DO_VESTIDO = [(0.5, 2.0, "Olha só esse vestido,"), (2.0, 4.0, "não amassa e seca rapidinho.")]
+
+
+def test_as_legendas_da_fala_seguem_o_tempo_do_audio():
+    no_tempo, achadas, total = edicao_video.legendas_no_tempo_da_fala(FALA_DO_VESTIDO, AUDIO_DO_VESTIDO)
+    # A palavra que o áudio não reconheceu ("rapidinho") fica depois da última achada.
+    assert (achadas, total) == (8, 9)
+    assert [(inicio, fim, texto) for inicio, fim, texto, _tempos in no_tempo] == [
+        (1.0, 2.7, "Olha só esse vestido,"), (4.0, 6.2, "não amassa e seca rapidinho.")]
+    assert no_tempo[1][3] == [(4.0, 4.2), (4.2, 4.8), (4.8, 5.0), (5.0, 5.6), (5.6, 5.9)]
+    # Na tela: cada uma na hora da fala dela, a 1ª até um pouco depois da última palavra.
+    letreiros = edicao_video.letreiros_da_fala(no_tempo, 10.0)
+    assert [(inicio, fim) for _, inicio, fim, _, _ in letreiros] == [(1.0, 2.7), (4.0, 6.2)]
+    # Com menos da metade das palavras da IA no áudio, o tempo fica o da IA.
+    assert edicao_video.legendas_no_tempo_da_fala(FALA_DO_VESTIDO, [(0.0, 0.5, "outra"), (0.5, 1.0, "coisa")])[0] is None
+    assert edicao_video.legendas_no_tempo_da_fala(FALA_DO_VESTIDO, [])[0] is None
+
+
+def test_palavra_com_hifen_e_sem_acento_acha_a_do_audio():
+    no_tempo, achadas, total = edicao_video.legendas_no_tempo_da_fala(
+        [(0.0, 1.0, "Kit mesa posta de café")], [(2.0, 2.3, "kit"), (2.3, 2.6, "mesa"), (2.6, 3.0, "-posta"),
+                                                 (3.0, 3.1, "de"), (3.1, 3.6, "cafe")])
+    assert (achadas, total) == (5, 5) and no_tempo[0][:2] == (2.0, 3.9)
+
+
+def test_palavras_que_faltam_ficam_entre_as_vizinhas():
+    tempos = [None, (1.0, 1.5), None, None, (3.0, 3.5), None]
+    edicao_video._preencher_os_tempos(tempos)
+    assert tempos == [(0.7, 1.0), (1.0, 1.5), (1.5, 2.25), (2.25, 3.0), (3.0, 3.5), (3.5, 3.8)]
+
+
+def test_a_legenda_longa_divide_quando_a_palavra_e_dita():
+    palavras = [f"palavra{n}" for n in range(24)]
+    tempos = [(1.0 + n * 0.5, 1.4 + n * 0.5) for n in range(24)]
+    pedacos = edicao_video.pedacos_da_legenda(1.0, 13.4, " ".join(palavras), tempos)
+    assert len(pedacos) > 1 and " ".join(texto for _i, _f, texto, _im in pedacos) == " ".join(palavras)
+    for inicio, _fim, texto, _imagem in pedacos[1:]:
+        assert inicio == tempos[palavras.index(texto.split()[0])][0]
+
+
+def test_sem_o_reconhecimento_de_voz_as_legendas_ficam_com_o_tempo_da_ia(monkeypatch, tmp_path):
+    video = str(tmp_path / "v.mp4")
+    open(video, "wb").write(b"video")
+    # O reconhecimento de mentira do conftest não abre (os testes não baixam o modelo).
+    assert edicao_video.legendas_no_tempo(video, FALA_DO_VESTIDO) == (
+        FALA_DO_VESTIDO, edicao_video.PELO_TEMPO_DA_IA, edicao_video.SEM_O_RECONHECIMENTO)
+    monkeypatch.setattr(edicao_video.videos, "palavras_faladas", lambda caminho: AUDIO_DO_VESTIDO)
+    legendas, resultado, detalhe = edicao_video.legendas_no_tempo(video, FALA_DO_VESTIDO)
+    assert (resultado, detalhe) == (edicao_video.PELO_AUDIO, "8 de 9 palavras no áudio")
+    assert legendas[0][:2] == (1.0, 2.7)
+    monkeypatch.setattr(edicao_video.videos, "palavras_faladas", lambda caminho: [(0.0, 0.5, "outra")])
+    assert edicao_video.legendas_no_tempo(video, FALA_DO_VESTIDO) == (
+        FALA_DO_VESTIDO, edicao_video.PELO_TEMPO_DA_IA, f"{edicao_video.FALA_NAO_BATEU} (0 de 9 palavras no áudio)")
+    assert edicao_video.legendas_no_tempo(video, []) == ([], "", "")
+
+
 def test_a_resposta_da_ia_vira_as_legendas_so_com_os_trechos_certos():
     textos = edicao_video._nome_lugar_e_falas({
         "legendas": [{"inicio": 3, "fim": 4.5, "texto": "e não amassa"},
@@ -2585,6 +2645,9 @@ def test_o_que_vai_ao_ar_leva_as_legendas_da_fala_e_o_registro_conta(monkeypatch
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
     # Com as palavras e os segundos de fala: o checkup vê se a IA resume a fala (pedido do Rafael, 02/11).
     assert [(r[2], r[3]) for r in registro] == [("postas", "2 trecho(s), 9 palavra(s) em 3 s de fala")]
+    # Sem o reconhecimento de voz (o de mentira do conftest), o tempo é o da IA, e o registro diz por quê.
+    tempo = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_TEMPO_DAS_LEGENDAS, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in tempo] == [(edicao_video.PELO_TEMPO_DA_IA, edicao_video.SEM_O_RECONHECIMENTO)]
 
     # Sem lugar para os textos (P47), as legendas da fala vão do mesmo jeito.
     montados.clear()
@@ -2622,3 +2685,10 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
     monkeypatch.setattr(edicao_video, "editar_2_e_versoes", editar_2_e_versoes)
     edicao_video.exemplo_editor_2("exemplo.mp4")
     assert recebidas == [fala]
+    # Com o reconhecimento de voz, o exemplo também leva as legendas no tempo do áudio.
+    recebidas.clear()
+    monkeypatch.setattr(edicao_video.videos, "palavras_faladas",
+                        lambda caminho: [(1.5, 1.8, "Olha"), (1.8, 2.0, "só"), (2.0, 2.3, "esse"), (2.3, 2.9, "vestido")])
+    inserir("DELETE FROM configuracoes")
+    edicao_video.exemplo_editor_2("exemplo.mp4")
+    assert [legenda[:3] for legenda in recebidas[0]] == [(1.5, 3.2, "Olha só esse vestido")]
