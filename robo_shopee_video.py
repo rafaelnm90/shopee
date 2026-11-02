@@ -931,6 +931,7 @@ PASSOS = (
     ("Centro do criador", "achar a Saúde no Centro do criador"),
     ("Rótulo de IA", "rótulo de IA"),
     ("Saúde do Vídeo não abriu", "abrir a Saúde do Vídeo"),
+    ("em análise na Shopee", "vídeo em análise"),
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
@@ -4630,6 +4631,11 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
     return [n for n in confirmados if n not in de_outra_cor] + [n for n in confirmados if n in de_outra_cor]
 
 
+# O link de vídeo que abre o aviso "Vídeo em Análise" da Shopee: o vídeo do criador ainda não
+# foi liberado ao público, e a tela não tem o Ver Produtos (Motorola, 02/11/2026).
+MOTIVO_EM_ANALISE = "o vídeo do link está em análise na Shopee (ainda não é público)"
+
+
 def _abrir_ver_produtos(d, video):
     """
     Abre o vídeo do link e a lista do Ver Produtos (pelo "Ver Produtos (N)" ou, com um
@@ -4639,11 +4645,13 @@ def _abrir_ver_produtos(d, video):
     ps.abrir_link(d, video["link"])
     pausa(12)
     xml = tela(d)
-    if not ps.video_removido(xml) and not tem(xml, "Ver Produtos"):
+    if not ps.video_removido(xml) and not ps.video_em_analise(xml) and not tem(xml, "Ver Produtos"):
         pausa(ESPERA_DO_VER_PRODUTOS)
         xml = tela(d)
     if ps.video_removido(xml):
         raise Parada("o vídeo do link foi removido", do_video=True)
+    if ps.video_em_analise(xml):
+        raise Parada(MOTIVO_EM_ANALISE, do_video=True)
     if tem(xml, "Ver Produtos"):
         tocar(d, "Ver Produtos", 6)
     else:
