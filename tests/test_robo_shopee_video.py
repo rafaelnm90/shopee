@@ -2979,6 +2979,118 @@ def test_link_de_video_em_analise_diz_que_o_video_esta_em_analise(monkeypatch, a
     assert robo.MOTIVO_EM_ANALISE in investigar_robo.textos_fixos()
 
 
+class AppDeVariosVideos(AppDoVerProdutos):
+    """O AppDoVerProdutos em que cada link aberto mostra o player do modo seguinte da lista."""
+
+    def __init__(self, modos):
+        super().__init__()
+        self.modos = list(modos)
+
+    def shell(self, partes):
+        if "android.intent.action.VIEW" in partes and self.modos:
+            self.player = self.modos.pop(0)
+        return super().shell(partes)
+
+
+def _mais_videos_de_video(*idents):
+    """Mais vídeos de link de vídeo na fonte (os Autorais), cada um mais velho que o anterior."""
+    for i, ident in enumerate(idents, start=1):
+        with open(f"archive/{ident}.mp4", "wb") as f:
+            f.write(b"video")
+        inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", ident, f"archive/{ident}.mp4",
+                f"Garrafa 🧴\n{LINK_DE_VIDEO}", f"2026-10-21 0{9 - i}:00:00")
+
+
+def test_preparar_1_agora_passa_sozinho_ao_proximo_video(monkeypatch, avisos):
+    # Escolha do Rafael (02/11, P133): às 18:16, 18:25 e 18:33 foram 3 toques e nenhum rascunho, um
+    # vídeo por toque. O vídeo com problema próprio fica de lado, com o aviso, e o mesmo toque passa
+    # ao próximo vídeo.
+    _fonte_de_video(monkeypatch)
+    _mais_videos_de_video("a2")
+    app = AppDeVariosVideos(["em_analise", "normal"])
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-11-02 18:16")) == "rascunho salvo"
+    assert [p["id_video"] for p in robo.listar("pulado")] == ["a1"]
+    assert robo.esperando_aprovacao()[0]["id_video"] == "a2"
+    de_lado = [a for a in avisos if isinstance(a, str) and "Vou para o próximo vídeo" in a]
+    assert len(de_lado) == 1 and "o vídeo 1 de 3" in de_lado[0] and robo.MOTIVO_EM_ANALISE in de_lado[0]
+    assert not any(isinstance(a, str) and "não preparei" in a for a in avisos)
+
+
+def test_preparar_1_agora_desiste_depois_de_3_videos(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch)
+    _mais_videos_de_video("a2", "a3", "a4")
+    app = AppDeVariosVideos(["em_analise", "em_analise", "em_analise", "normal"])
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-11-02 18:16"))
+    assert "o vídeo 3 de 3 também ficou de lado" in resultado and robo.MOTIVO_EM_ANALISE in resultado
+    assert sorted(p["id_video"] for p in robo.listar("pulado")) == ["a1", "a2", "a3"]
+    assert not robo.esperando_aprovacao()
+    assert sum(1 for a in avisos if isinstance(a, str) and "Vou para o próximo vídeo" in a) == 2
+    assert any(isinstance(a, str) and "não preparei o rascunho que você pediu" in a and "3 de 3" in a for a in avisos)
+
+
+def test_preparar_1_agora_para_tudo_no_que_nao_e_do_video(monkeypatch, avisos):
+    # O que não é do próprio vídeo (o celular, o app) para o pedido na hora, como antes.
+    vezes = []
+
+    def preparar(d, config, agora=None):
+        vezes.append(1)
+        raise robo.Parada("o app não abriu a galeria")
+
+    monkeypatch.setattr(robo, "preparar_rascunho", preparar)
+    with pytest.raises(robo.Parada):
+        robo.preparar_o_pedido(None, {})
+    assert len(vezes) == 1 and not avisos
+
+
+def test_preparar_1_agora_so_passa_ao_proximo_com_tempo_na_rodada(monkeypatch, avisos):
+    # O painel interrompe a rodada em 30 min, e um rascunho leva até uns 25: o vídeo que fica de
+    # lado depois de 5 min não ganha o próximo nesta rodada, e o aviso diz para tocar de novo.
+    relogio = iter([0, robo.MAXIMO_DA_RODADA - robo.MINUTOS_DE_UM_RASCUNHO * 60 + 1])
+    monkeypatch.setattr(robo.time, "monotonic", lambda: next(relogio))
+    vezes = []
+
+    def preparar(d, config, agora=None):
+        vezes.append(1)
+        raise robo.Parada(robo.MOTIVO_EM_ANALISE, do_video=True)
+
+    monkeypatch.setattr(robo, "preparar_rascunho", preparar)
+    with pytest.raises(robo.Parada) as erro:
+        robo.preparar_o_pedido(None, {})
+    assert len(vezes) == 1 and "toque de novo em Preparar 1 Agora" in erro.value.motivo
+    assert "o vídeo 1 de 3 ficou de lado" in erro.value.motivo and not avisos
+
+
+def test_preparar_1_agora_sem_outro_video_na_fonte_diz_o_motivo_do_que_ficou_de_lado(monkeypatch, avisos):
+    # Com um vídeo só na fonte, o motivo dele vai na resposta (e não "nenhum vídeo da fonte").
+    _fonte_de_video(monkeypatch)
+    resultado = robo.rodada(preparar=True, d=AppDoVerProdutos(player="em_analise"), agora=momento("2026-11-02 18:16"))
+    assert robo.MOTIVO_EM_ANALISE in resultado and "a fonte não tem outro vídeo para tentar" in resultado
+    assert not any(isinstance(a, str) and "Vou para o próximo vídeo" in a for a in avisos)
+
+
+def test_video_em_analise_fica_de_lado_so_no_dia(monkeypatch, avisos):
+    # Escolha do Rafael (02/11, P134): o vídeo em análise na Shopee (o criador acabou de postar) não
+    # fica de lado para sempre, como o removido: no dia seguinte volta a ser candidato.
+    _fonte_de_video(monkeypatch)
+    config = robo.ler_config()
+    robo.rodada(preparar=True, d=AppDeVariosVideos(["em_analise"] * 3), agora=momento("2026-11-02 18:16"))
+    assert robo.listar("pulado")[0]["motivo"] == robo.MOTIVO_EM_ANALISE
+    assert "a1" in robo.ids_usados(momento("2026-11-02 23:59"))
+    assert robo.proximo_video(config, agora=momento("2026-11-02 23:59")) is None
+    assert "a1" not in robo.ids_usados(momento("2026-11-03 00:01"))
+    assert robo.proximo_video(config, agora=momento("2026-11-03 00:01"))["id"] == "a1"
+    # Já liberado, vira rascunho no dia seguinte.
+    assert robo.rodada(preparar=True, d=AppDoVerProdutos(), agora=momento("2026-11-03 10:00")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["id_video"] == "a1"
+    assert "a1" in robo.ids_usados(momento("2026-11-04 10:00"))
+
+
+def test_video_removido_continua_de_lado_para_sempre(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch)
+    robo.rodada(preparar=True, d=AppDoVerProdutos(removido=True), agora=momento("2026-11-02 18:16"))
+    assert "a1" in robo.ids_usados(momento("2026-11-10 10:00"))
+
+
 def test_link_de_video_removido_fica_de_lado(monkeypatch, avisos):
     _fonte_de_video(monkeypatch)
     resultado = robo.rodada(preparar=True, d=AppDoVerProdutos(removido=True), agora=momento("2026-10-22 23:59"))

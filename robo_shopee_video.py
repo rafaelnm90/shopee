@@ -874,11 +874,19 @@ def apagar_registro(ident):
         con.execute("DELETE FROM shopee_video_rascunhos WHERE id = ?", (ident,))
 
 
-def ids_usados():
-    """Os vídeos que o robô já usou ou pulou: não voltam."""
+def ids_usados(agora=None):
+    """
+    Os vídeos que o robô já usou ou pulou: não voltam. O que estava em análise na Shopee
+    (MOTIVO_EM_ANALISE: o criador acabou de postar e ela ainda não liberou) fica de lado só no
+    dia: a partir do dia seguinte volta a ser candidato e, já liberado, pode virar rascunho.
+    Escolha do Rafael (02/11, P134): DECISOES.md, Shopee Vídeo.
+    """
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
     with db.conexao() as con:
         _criar_tabela(con)
-        return {linha[0] for linha in con.execute("SELECT id_video FROM shopee_video_rascunhos")}
+        linhas = con.execute("SELECT id_video, estado, motivo, criado_em FROM shopee_video_rascunhos").fetchall()
+    return {id_video for id_video, estado, motivo, criado_em in linhas
+            if not (estado == "pulado" and motivo == MOTIVO_EM_ANALISE and (criado_em or "") < hoje)}
 
 
 # --- Histórico das tentativas (tabela shopee_video_tentativas) ---
@@ -2151,16 +2159,16 @@ def avisar_video(caminho, legenda):
 
 # --- Preparar um rascunho ---
 
-def proximo_video(config, evitar=()):
+def proximo_video(config, evitar=(), agora=None):
     """
-    O vídeo da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou,
-    com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário), fora os de
-    evitar (os que esgotaram as tentativas hoje) e o arquivo que o robô já levou ao Canal
-    Afiliados, que volta pelo Viral (o loop; pedido do Rafael, 30/10:
+    O vídeo da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou
+    (ids_usados), com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário),
+    fora os de evitar (os que esgotaram as tentativas hoje) e o arquivo que o robô já levou ao
+    Canal Afiliados, que volta pelo Viral (o loop; pedido do Rafael, 30/10:
     DECISOES.md, Shopee Vídeo). Sem nenhum, None.
     """
     fonte = config.get("fonte", assistente.FONTE_PADRAO)
-    usados = ids_usados() | set(evitar)
+    usados = ids_usados(agora) | set(evitar)
     with db.conexao() as con:
         assistente._criar_tabela(con)
         mandados = {linha[0] for linha in con.execute("SELECT id_unico FROM shopee_video_enviados")}
@@ -2175,6 +2183,47 @@ def proximo_video(config, evitar=()):
     return None
 
 
+# O Preparar 1 Agora ⚡ que cai num vídeo com problema próprio (em análise na Shopee, a foto do
+# produto que a busca não acha, a IA que não confirma o produto) passa sozinho ao próximo vídeo,
+# até VIDEOS_DO_PEDIDO, como os horários do plano, com o aviso de cada um que fica de lado. O
+# próximo só começa com tempo para um rascunho inteiro na rodada: o painel a interrompe em
+# MAXIMO_DA_RODADA, e um rascunho leva até MINUTOS_DE_UM_RASCUNHO (os prazos dele, de
+# MINUTOS_PARA_ANEXAR_OS_A_MAIS, mais o fim). Escolha do Rafael (02/11, P133): DECISOES.md,
+# Shopee Vídeo.
+VIDEOS_DO_PEDIDO = VIDEOS_POR_HORARIO
+MINUTOS_DE_UM_RASCUNHO = 25
+
+
+def preparar_o_pedido(d, config, agora=None):
+    """
+    O rascunho do Preparar 1 Agora: preparar_rascunho com o próximo vídeo a cada Parada do
+    próprio vídeo, até VIDEOS_DO_PEDIDO vídeos, enquanto cabe outro rascunho na rodada e a fonte
+    tem outro vídeo. O que não é do vídeo (o celular, a Verificação, a suspensão, o app) para
+    tudo, como antes; a Parada do último vídeo sobe com o motivo dele, dizendo qual vídeo era e
+    por que não houve outro, para a resposta no privado.
+    """
+    comeco = time.monotonic()
+    for vez in range(1, VIDEOS_DO_PEDIDO + 1):
+        try:
+            return preparar_rascunho(d, config, agora)
+        except Parada as e:
+            if not e.do_video:
+                raise
+            qual = f"o vídeo {vez} de {VIDEOS_DO_PEDIDO} {'também ' if vez > 1 else ''}ficou de lado: "
+            if vez == VIDEOS_DO_PEDIDO:
+                e.motivo = qual + e.motivo
+                raise
+            if time.monotonic() - comeco > MAXIMO_DA_RODADA - MINUTOS_DE_UM_RASCUNHO * 60:
+                e.motivo = (f"{qual}{e.motivo}; não há tempo para outro vídeo nesta rodada, toque de novo em "
+                            "Preparar 1 Agora ⚡")
+                raise
+            if not proximo_video(config, estado_do_dia(config, agora).get("evitar", []), agora):
+                e.motivo = f"{qual if vez > 1 else ''}{e.motivo}; a fonte não tem outro vídeo para tentar"
+                raise
+            avisar(f"⚠️ Robô da Shopee Vídeo: o vídeo {vez} de {VIDEOS_DO_PEDIDO} do rascunho que você pediu ficou "
+                   f"de lado ({e.motivo}). Vou para o próximo vídeo.")
+
+
 def preparar_rascunho(d, config, agora=None):
     """
     Um rascunho novo, do vídeo da fonte até Rascunhos, com todas as conferências. O vídeo
@@ -2186,7 +2235,7 @@ def preparar_rascunho(d, config, agora=None):
     """
     evitar = estado_do_dia(config, agora).get("evitar", [])
     for _ in range(VIDEOS_SEM_OFERTA_POR_RODADA):
-        video = proximo_video(config, evitar)
+        video = proximo_video(config, evitar, agora)
         if not video:
             resultado = "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
             registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
@@ -6054,7 +6103,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         if not preparar:
             _em_preparo(config, agora, True)
         try:
-            resultado = preparar_rascunho(d, config, agora)
+            resultado = preparar_o_pedido(d, config, agora) if preparar else preparar_rascunho(d, config, agora)
         finally:
             if not preparar:
                 _em_preparo(config, agora, False)
@@ -6188,9 +6237,10 @@ def _avisar_que_nao_saiu(acao, preparar, config, agora=None):
 def _repetir_depois(acao, preparar, config, agora=None, video=None, do_video=False):
     """
     Rascunho do plano que não deu certo volta na rodada seguinte (marcar_para_repetir: 3
-    tentativas por vídeo, até VIDEOS_POR_HORARIO vídeos). O Preparar 1 Agora não volta: o
-    Rafael vê o motivo e toca de novo. A Verificação da Shopee não passa por aqui: ela para
-    tudo. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    tentativas por vídeo, até VIDEOS_POR_HORARIO vídeos). O Preparar 1 Agora não volta numa
+    rodada seguinte: no mesmo toque ele já passou aos próximos vídeos (preparar_o_pedido, P133).
+    A Verificação da Shopee não passa por aqui: ela para tudo. Decisão do Rafael: DECISOES.md,
+    Shopee Vídeo.
     """
     if acao == "rascunho" and not preparar:
         marcar_para_repetir(config, agora, video, do_video)

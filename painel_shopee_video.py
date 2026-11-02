@@ -754,7 +754,8 @@ def texto_robo(config, agora=None, celular=None):
         f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um.\n"
         f"🗂️ <b>{BOTAO_FILA}</b>: a lista dos rascunhos esperando a sua aprovação e dos aprovados, com a hora "
         "prevista de cada post e, se algum passou da hora, por que ainda não saiu.\n"
-        f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
+        f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado); se o vídeo "
+        "tiver um problema próprio, ele passa sozinho ao próximo, até 3.\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
@@ -1573,7 +1574,8 @@ async def preparar_handler(message: types.Message, state: FSMContext):
         return
     logger.info("⚡ Shopee Vídeo: Preparar 1 Agora.")
     await message.answer("⚡ Preparando 1 rascunho agora no Motorola. Em uns 5 a 10 min ele chega em "
-                         f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se algo impedir, ele diz o quê.")
+                         f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se o vídeo tiver um problema próprio, ele passa "
+                         "sozinho ao próximo (até 3), e se algo impedir, ele diz o quê.")
     asyncio.create_task(rodar_robo("--preparar"))
 
 
