@@ -1655,6 +1655,26 @@ def test_frase_curta_da_capa_vem_da_ia_e_a_longa_fica_de_fora_sem_ser_cortada(mo
     assert edicao_video.MAXIMOS_DOS_TEXTOS["capa"] == edicao_video.MAXIMO_DA_CAPA == 20
 
 
+def test_frase_da_capa_diz_o_que_e_o_produto_e_a_vantagem():
+    # Escolha do Rafael (02/11, P122 1): no print da grade, a capa da calça só com a vantagem
+    # ("Caimento impecável") não dizia o que era o produto. A frase da capa começa pelo que é o
+    # produto e traz a vantagem, numa linha de letra grande, até 20 letras como antes.
+    import os
+
+    import matplotlib
+    from PIL import Image, ImageDraw
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS.format(nome="Calça"), edicao_video._CAPA_NO_PROMPT):
+        assert "começa pelo que é o produto e traz a vantagem que o vídeo mostra" in prompt
+        assert "a mesma vantagem em poucas palavras" not in prompt and "até 20 caracteres" in prompt
+    desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    # Os exemplos que a IA recebe cabem no limite e numa linha só, em letra grande.
+    for exemplo in ("Calça que modela", "Travessas 3 tamanhos", "Copo sempre gelado"):
+        assert f'"{exemplo}"' in edicao_video._CAPA_NO_PROMPT and len(exemplo) <= edicao_video.MAXIMO_DA_CAPA
+        fonte, linhas = edicao_video._quebra_da_chamada(exemplo, desenho, fonte_ttf)
+        assert linhas == [exemplo] and fonte.size >= edicao_video.LETRAS_DA_CHAMADA[1]
+
+
 def test_capa_vai_com_a_frase_curta_e_sem_ela_com_a_vantagem(monkeypatch, tmp_path):
     import registro_processos as rp
     _versoes_de_mentira(monkeypatch)

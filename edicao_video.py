@@ -727,9 +727,10 @@ FUNDO_DA_CHAMADA = (238, 77, 45, 230)  # o laranja da Shopee
 MAXIMO_DO_NOME = 28
 MAXIMO_DA_VANTAGEM = 36
 MAXIMO_DA_CHAMADA = 32
-# A frase da capa com chamada: a vantagem em poucas palavras, que cabe em letra grande na capa
-# (a frase longa encolhia a letra até ficar difícil de ler na grade do perfil). Sem ela, vai a
-# vantagem. Escolha do Rafael (30/10, P106): DECISOES.md, Shopee Vídeo.
+# A frase da capa com chamada: o que é o produto e a vantagem em poucas palavras, que cabe em
+# letra grande numa linha da capa (a frase longa encolhia a letra até ficar difícil de ler na
+# grade do perfil, P106; só a vantagem não dizia o que é o produto, P122). Sem ela, vai a
+# vantagem. Escolhas do Rafael (30/10 e 02/11): DECISOES.md, Shopee Vídeo.
 MAXIMO_DA_CAPA = 20
 PROCESSO_DA_FRASE_DA_CAPA = "edição do vídeo: frase da capa"
 
@@ -742,8 +743,10 @@ PROCESSO_DA_FRASE_DA_CAPA = "edição do vídeo: frase da capa"
 # Shopee Vídeo.
 _NOME_NO_PROMPT = ("- \"nome\": o nome genérico do produto, como o comprador procura (ex.: \"Copo Térmico\"), "
                    f"até {MAXIMO_DO_NOME} caracteres;\n")
-_CAPA_NO_PROMPT = ("- \"capa\": a mesma vantagem em poucas palavras, para a capa do vídeo, de 2 a 4 palavras e "
-                   f"até {MAXIMO_DA_CAPA} caracteres (ex.: \"Gelado o dia todo\");\n")
+_CAPA_NO_PROMPT = ("- \"capa\": para a capa do vídeo, uma frase curta que começa pelo que é o produto e traz a "
+                   "vantagem que o vídeo mostra, para quem vê só a capa saber o que é e querer ver, de 2 a 4 "
+                   f"palavras e até {MAXIMO_DA_CAPA} caracteres (ex.: \"Calça que modela\", \"Travessas 3 "
+                   "tamanhos\", \"Copo sempre gelado\");\n")
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
