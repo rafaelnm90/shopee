@@ -2133,3 +2133,23 @@ def test_foto_capa_poe_na_galeria_a_capa_com_a_frase_da_ia(monkeypatch):
     monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {})
     assert not ps.fazer_passo(Aparelho(), "foto", "capa")[0]
     assert len(na_galeria) == 1
+
+
+def test_pagina_inicial_pelo_link_e_a_pagina_presa_carregando(monkeypatch):
+    # Madrugada de 02/11: uma página do app ficou presa carregando (o esqueleto, sem texto) e o
+    # voltar não a tirava. O robô abre por cima a página inicial pelo link, e o passo do explorar
+    # confere no celular o que o link abre.
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    assert ps.separar_passos("abrir; pagina-inicial; tela") == [("abrir", ""), ("pagina-inicial", ""), ("tela", "")]
+    aparelho = Aparelho()
+    assert ps.fazer_passo(aparelho, "pagina-inicial", "") == (True, "página inicial aberta pelo link")
+    assert aparelho.comandos == [["am", "start", "-a", "android.intent.action.VIEW", "-d",
+                                  ps.LINK_DA_PAGINA_INICIAL, "-p", ps.PACOTE]]
+    # O esqueleto: os nós do app sem texto nem descrição. Uma tela de verdade, com textos, não é.
+    vazio = '<node text="" content-desc="" package="com.shopee.br" class="android.view.ViewGroup" bounds="[0,0][9,9]"/>'
+    esqueleto = "<hierarchy>" + vazio * ps.NOS_DO_ESQUELETO + "</hierarchy>"
+    assert ps.pagina_carregando(esqueleto)
+    assert not ps.pagina_carregando("<hierarchy>" + vazio * (ps.NOS_DO_ESQUELETO - 1) + "</hierarchy>")
+    assert not ps.pagina_carregando(esqueleto.replace('text=""', 'text="Eu"', 1))
+    assert not ps.pagina_carregando(esqueleto.replace('content-desc=""', 'content-desc="Voltar"', 1))
+    assert not ps.pagina_carregando(TELA_EU) and not ps.pagina_carregando("")

@@ -314,6 +314,15 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     com `@aerr_close` (Fechar app) e `@aerr_wait` (Aguardar). Travada, a tela da Shopee
     (`HomeActivity_`) fica sem nenhum elemento e cada leitura demora cerca de 1 min. O
     robô toca em Aguardar 3 vezes e, se não voltar, em Fechar app e reabre (P15).
+  - página presa carregando (Motorola, madrugada de 02/11/2026, das 03:47 às 07:23): o
+    esqueleto (barras cinzas e o ícone da sacola, `ReactActivity_`, nenhum texto nem
+    descrição nos nós do app) ficou na frente depois do link de um produto, e o voltar não
+    o tirava; abrir um link no app ainda funcionava por cima dele. O robô abre a página
+    inicial pelo link (`LINK_DA_PAGINA_INICIAL`) depois de 3 voltar sem sair dele, uma vez,
+    sem fechar o app (P15). O passo `pagina-inicial` do explorar confere o que o link abre.
+    Na mesma madrugada, a curtida não aparecia em Minhas Curtidas, o produto anexado não
+    ficava depois do Feito e a figurinha não voltava para a capa: o app ou a Shopee
+    estavam lentos (em 18/10, o mesmo esqueleto às 04:27 era uma Verificação pendente).
   - loja de férias (24/10/2026): a página do produto mostra "Esse vendedor está de
     férias." por alguns segundos, embaixo, por cima do Compre Agora. O produto curtido
     entra em Meus Favoritos, mas não aparece no Adicionar Produto do vídeo. O robô lê o

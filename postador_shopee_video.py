@@ -1801,6 +1801,30 @@ def abrir_link(d, link):
     return tipo_de_link(asyncio.run(link_para_converter(link)))
 
 
+# A página inicial da Shopee pelo link, aberta no app como o abrir_link: o robô a abre por cima
+# da página que ficou presa carregando, que o voltar não tira (pagina_carregando). O app não é
+# fechado (P15: DECISOES.md, Shopee Vídeo).
+LINK_DA_PAGINA_INICIAL = "https://shopee.com.br/"
+# A página presa carregando é o esqueleto (as barras cinzas e o ícone da sacola no lugar do
+# conteúdo): pelo menos este tanto de nós do app, nenhum com texto ou descrição.
+NOS_DO_ESQUELETO = 20
+
+
+def abrir_pagina_inicial(d):
+    """Abre no app da Shopee a página inicial pelo link, por cima da página em que ele estiver."""
+    d.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", LINK_DA_PAGINA_INICIAL, "-p", PACOTE])
+
+
+def pagina_carregando(xml):
+    """
+    A página do app presa carregando: o esqueleto, sem nenhum texto nem descrição nos nós do
+    app (NOS_DO_ESQUELETO ou mais). Ela não sai com o voltar.
+    """
+    nos = [no for no in re.findall(r"<node [^>]*>", xml or "") if f'package="{PACOTE}"' in no]
+    return len(nos) >= NOS_DO_ESQUELETO and not any(re.search(r'\s(?:text|content-desc)="[^"]+"', no)
+                                                     for no in nos)
+
+
 def por_na_galeria(d, arquivo, nome=NOME_NA_GALERIA):
     """Copia o vídeo para a câmera do Android e avisa a galeria. True se ele apareceu nela."""
     destino = f"{GALERIA}/{nome}"
@@ -2133,7 +2157,7 @@ def link_copiado(d):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "aumentar", "esperar",
-                  "escrever",
+                  "escrever", "pagina-inicial",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
                   "postar", "print", "copiado", "legenda", "colar", "caso", "tela"}
     passos = []
@@ -2157,6 +2181,10 @@ def fazer_passo(d, nome, argumento):
     if nome == "fechar":
         d.app_stop(PACOTE)
         return True, "app fechado"
+    if nome == "pagina-inicial":
+        abrir_pagina_inicial(d)
+        time.sleep(SEGUNDOS_DA_PAGINA)
+        return True, "página inicial aberta pelo link"
     if nome == "tocar":
         if eh_alvo_proibido(argumento):
             return False, RECUSA
