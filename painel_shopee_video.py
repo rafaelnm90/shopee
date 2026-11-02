@@ -758,7 +758,7 @@ def texto_robo(config, agora=None, celular=None):
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
-        "canto, a seta vermelha e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
+        "canto, a seta laranja e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
@@ -814,7 +814,8 @@ def texto_edicao(config):
         "✂️ <b>Edição dos Vídeos</b>\n"
         f"<b>Editor 1 sem legendas</b>: o robô edita o vídeo como você faz no LumaFusion: a foto do anúncio do "
         f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
-        "no canto de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à "
+        "no canto de cima à direita e a sua seta (a do arquivo Seta da Shopee, sem o fundo, no laranja da Shopee e "
+        "com um contorno branco) embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
         "(a foto do produto, um quadro ou um texto), a nossa miniatura fica de fora; se a coisa dele fica logo "
         "abaixo do canto, ela diminui (até 2/3 do tamanho) para ficar acima dela.\n\n"
@@ -1139,7 +1140,8 @@ async def ligar_capa_handler(message: types.Message, state: FSMContext):
 
 def legenda_do_exemplo_da_capa(nome, chamada):
     return (f"🏷️ <b>Exemplo da capa com chamada</b> (não foi postado): {html_escape(nome)}.\n"
-            "1ª foto: a capa inteira, como abre o vídeo. 2ª foto: o pedaço que a grade do seu perfil mostra.\n"
+            "1ª foto: a capa inteira, no 1º quadro do vídeo, que a grade usa. 2ª foto: o pedaço que a grade do "
+            "seu perfil mostra. 3ª foto: o que aparece com o vídeo aberto, no resto dos 2 primeiros segundos.\n"
             f"✍️ Chamada (a vantagem que a IA viu no vídeo, em poucas palavras): “{html_escape(chamada)}”\n"
             "🔢 O número de visualizações fica no preto, logo abaixo da faixa laranja, e a sacolinha da Shopee, "
             "logo acima da foto: nenhum deles cobre a chamada.\n"
@@ -1168,14 +1170,17 @@ async def exemplo_capa_handler(message: types.Message, state: FSMContext):
             return
         with tempfile.TemporaryDirectory() as pasta:
             caminhos = []
-            for parte in ("capa", "grade"):
+            # A do vídeo aberto (P129) vai por último, quando saiu.
+            for parte in ("capa", "grade", "video"):
+                if not exemplo.get(parte):
+                    continue
                 caminhos.append(os.path.join(pasta, f"{parte}.png"))
                 with open(caminhos[-1], "wb") as arquivo:
                     arquivo.write(exemplo[parte])
             await message.answer_media_group([
                 InputMediaPhoto(media=FSInputFile(caminhos[0]), parse_mode="HTML",
-                                caption=legenda_do_exemplo_da_capa(nome, exemplo["chamada"])),
-                InputMediaPhoto(media=FSInputFile(caminhos[1]))])
+                                caption=legenda_do_exemplo_da_capa(nome, exemplo["chamada"]))]
+                + [InputMediaPhoto(media=FSInputFile(caminho)) for caminho in caminhos[1:]])
     await state.set_state(ShopeeVideoFluxo.menu_robo)
 
 

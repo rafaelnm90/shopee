@@ -5753,6 +5753,33 @@ def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
     assert [r[2] for r in linhas] == ["no post com a faixa", "no post sem a faixa"]
 
 
+def test_post_diz_se_a_grade_usou_o_1o_quadro_com_a_moldura_nos_lados():
+    # Escolha do Rafael (02/11, P129): o 1º quadro do vídeo vai com a capa da grade e o resto da
+    # abertura com a do vídeo aberto. No post, o registro diz qual a grade mostrou: a moldura nos
+    # lados (o 1º quadro) ou o preto dos lados (outro quadro da abertura).
+    from PIL import Image
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    ev = robo.edicao_video
+
+    def grade(capa_png):
+        tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        esquerda, direita = ev.LADOS_NA_GRADE
+        cima, baixo = ev.VISIVEL_NA_GRADE
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((esquerda, cima, direita, baixo))
+        tela.paste(capa.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
+        return type("Celular", (), {"screenshot": lambda self, caminho=None: tela})()
+
+    da_grade = ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor")
+    do_video = ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor", no_video=True)
+    um = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1")
+    assert robo.marcar_o_post(grade(da_grade), um, caixa)
+    outro = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
+    assert robo.marcar_o_post(grade(do_video), outro, caixa)
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
+                                              ("no post com a faixa", robo.LADOS_DA_CAPA[False])]
+
+
 class TelaFinalReaberta:
     """A tela final do rascunho reaberto para postar: a miniatura da capa em cima do Selecionar Capa."""
     CAIXA = (78, 286, 268, 626)

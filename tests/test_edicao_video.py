@@ -92,27 +92,41 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
 
 
 def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
-    # Pedido do Rafael (25/10): a seta do arquivo dele, sem o fundo preto.
+    # Pedido do Rafael (25/10): a seta do arquivo dele, sem o fundo preto. Escolha dele (02/11,
+    # P127): a mesma seta no laranja da Shopee, com um contorno branco e uma sombra leve.
     from PIL import Image
-    with Image.open(edicao_video.SETA) as arquivo:
+    pasta = os.path.dirname(edicao_video.SETA)
+    margem = edicao_video.MARGEM_DA_SETA
+    with Image.open(edicao_video.SETA) as arquivo, Image.open(os.path.join(pasta, "seta_da_shopee.apng")) as dele:
         assert arquivo.format == "PNG" and arquivo.mode == "RGBA"
         inicio, quadros = edicao_video.PULSO_DA_SETA
-        assert arquivo.n_frames == inicio + quadros and arquivo.info.get("duration") == 40   # 25 por segundo
+        assert arquivo.n_frames == dele.n_frames == inicio + quadros and arquivo.info.get("duration") == 40
+        assert arquivo.size == (dele.size[0] + 2 * margem, dele.size[1] + 2 * margem)
         arquivo.seek(0)
         primeiro = arquivo.copy()
         arquivo.seek(inicio + quadros // 2)
         pulso = arquivo.copy()
+        dele.seek(inicio + quadros // 2)
+        pulso_dele = dele.convert("RGBA")
     # O primeiro quadro já é o começo do desenho (a seta aparece logo depois da foto, sem
-    # espera); no pulso ela é vermelha, num fundo todo transparente.
+    # espera); no pulso ela é laranja, com o contorno branco, num fundo quase todo transparente.
     largura, altura = pulso.size
     pixels = [pulso.getpixel((x, y)) for x in range(largura) for y in range(altura)]
     comeco = [primeiro.getpixel((x, y))[3] for x in range(largura) for y in range(altura)]
-    assert 0 < sum(1 for a in comeco if a) < len(pixels) * 0.02
-    vermelhos = [p for p in pixels if p[3] == 255 and p[0] > 180 and p[1] < 40 and p[2] < 40]
+    assert 0 < sum(1 for a in comeco if a) < len(pixels) * 0.05
+    laranja = edicao_video.LARANJA_DA_SHOPEE
+    laranjas = [p for p in pixels if p[3] == 255 and sum(abs(a - b) for a, b in zip(p, laranja)) < 30]
+    brancos = [p for p in pixels if p[3] == 255 and min(p[:3]) > 240]
     transparentes = [p for p in pixels if p[3] == 0]
-    assert len(vermelhos) > len(pixels) * 0.1 and len(transparentes) > len(pixels) * 0.4
-    # Nada escuro e opaco: o preto do fundo saiu, e a borda não fica com contorno escuro.
-    assert not [p for p in pixels if p[3] > 60 and max(p[:3]) < 120]
+    assert len(laranjas) > len(pixels) * 0.08 and len(brancos) > len(pixels) * 0.02
+    assert len(transparentes) > len(pixels) * 0.3
+    # A mesma seta do arquivo dele: onde a dele é cheia, a nossa é laranja.
+    cheios = [(x, y) for x in range(pulso_dele.width) for y in range(pulso_dele.height)
+              if pulso_dele.getpixel((x, y))[3] == 255]
+    assert cheios and all(sum(abs(a - b) for a, b in zip(pulso.getpixel((x + margem, y + margem)), laranja)) < 30
+                          for x, y in cheios)
+    # A sombra é escura e meio transparente; nada escuro e opaco (o preto do fundo do arquivo saiu).
+    assert not [p for p in pixels if p[3] > 200 and max(p[:3]) < 120]
     # O canto de baixo à direita tem a ponta; os cantos de cima e o de baixo à esquerda ficam vazios.
     assert any(pulso.getpixel((x, y))[3] == 255 for x in range(largura * 2 // 3, largura)
                for y in range(altura // 2, altura))
@@ -122,7 +136,7 @@ def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
 
 
 def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
-    # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o vermelho aparece e o resto
+    # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o laranja aparece e o resto
     # do recorte dela continua claro (sem o quadrado preto), também depois do fim do arquivo.
     if not shutil.which("ffmpeg"):
         assert edicao_video.editar(str(tmp_path / "nao_existe.mp4"), b"foto", str(tmp_path / "r.mp4")) != ""
@@ -145,17 +159,18 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
         assert tela.size == (720, 1280)
         cx, cy = edicao_video.CENTRO_DA_SETA
         recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
-        vermelhos = [p for p in recorte if p[0] > 150 and p[1] < 70 and p[2] < 70]
+        laranja = edicao_video.LARANJA_DA_SHOPEE
+        laranjas = [p for p in recorte if sum(abs(a - b) for a, b in zip(p, laranja)) < 70]
         escuros = [p for p in recorte if max(p) < 90]
-        return len(vermelhos) / len(recorte), escuros
+        return len(laranjas) / len(recorte), escuros
 
     # Na foto (os 2 primeiros segundos), nada de seta; ela começa a se desenhar com o vídeo.
     assert onde_fica_a_seta(1.9) == (0, [])
-    vermelho, escuros = onde_fica_a_seta(2.6)
-    assert vermelho > 0 and not escuros
+    laranja, escuros = onde_fica_a_seta(2.6)
+    assert laranja > 0 and not escuros
     # 7,5 s: depois do fim do arquivo da seta, já no pulso repetido.
-    vermelho, escuros = onde_fica_a_seta(7.5)
-    assert vermelho > 0.05 and not escuros
+    laranja, escuros = onde_fica_a_seta(7.5)
+    assert laranja > 0.05 and not escuros
 
 
 
@@ -1393,6 +1408,83 @@ def test_frase_da_capa_fica_dentro_do_que_o_app_mostra_do_video_aberto():
         assert _claros(capa, (direita - folga, cima, 720, y2), passo=1) == 0, frase
 
 
+def test_capa_do_video_aberto_tem_a_moldura_encostada_nos_lados_do_que_o_app_mostra():
+    # Escolha do Rafael (02/11, P129): no vídeo aberto, que corta mais dos lados que a grade, o
+    # resto da abertura vai com a moldura encostada nos lados do que o app mostra, sem preto.
+    import io
+
+    from PIL import Image
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha",
+                                                               no_video=True))).convert("RGB")
+    assert capa.size == edicao_video.TELA
+    x1, y1, x2, y2 = edicao_video.MOLDURA_DA_CAPA_NO_VIDEO
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    sobra = edicao_video.SOBRA_DA_MOLDURA
+    assert (x1, x2) == (esquerda - sobra, direita + sobra) and (x2 - x1) == (y2 - y1)
+    meio = (y1 + y2) // 2
+    for x in (esquerda, direita - 1):
+        assert _cor_de(capa, (x, meio), edicao_video.LARANJA_DA_SHOPEE), x
+    assert _pretos(capa, (0, y1, x1, y2)) and _pretos(capa, (x2, y1, 720, y2))
+    # O que o app mostra do vídeo aberto: a moldura nas duas bordas, sem preto dos lados.
+    recorte = Image.open(io.BytesIO(edicao_video.recorte_do_video_aberto(
+        edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", no_video=True)))).convert("RGB")
+    assert recorte.size == (direita - esquerda, 1280)
+    assert _cor_de(recorte, (0, meio), edicao_video.LARANJA_DA_SHOPEE)
+    assert _cor_de(recorte, (recorte.width - 1, meio), edicao_video.LARANJA_DA_SHOPEE)
+    # A faixa e a frase ficam no pé da foto, dentro do que o app mostra.
+    assert _claros(capa, (0, 0, esquerda + 6, 1280)) == 0 and _claros(capa, (direita - 6, 0, 720, 1280)) == 0
+
+
+def test_moldura_nos_lados_diz_qual_capa_a_grade_mostrou():
+    # No post, a grade mostra o 1º quadro (a capa da grade, a moldura nos lados) ou outro quadro da
+    # abertura (a do vídeo aberto, preto dos lados); sem a moldura, não dá para dizer.
+    import io
+
+    from PIL import Image
+    caixa = (100, 300, 454, 772)
+
+    def grade(capa_png):
+        tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        esquerda, direita = edicao_video.LADOS_NA_GRADE
+        cima, baixo = edicao_video.VISIVEL_NA_GRADE
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((esquerda, cima, direita, baixo))
+        tela.paste(capa.resize((caixa[2] - caixa[0], caixa[3] - caixa[1])), caixa[:2])
+        return tela
+
+    assert edicao_video.moldura_nos_lados(grade(edicao_video.capa_com_chamada(_foto_jpg(), "Leve")), caixa) is True
+    assert edicao_video.moldura_nos_lados(
+        grade(edicao_video.capa_com_chamada(_foto_jpg(), "Leve", no_video=True)), caixa) is False
+    assert edicao_video.moldura_nos_lados(grade(edicao_video.capa_sem_chamada(_foto_jpg())), caixa) is None
+    assert edicao_video.moldura_nos_lados(grade(edicao_video.capa_sem_chamada(_foto_jpg())), (0, 0, 20, 20)) is None
+
+
+def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path):
+    # Com o ffmpeg de verdade (P129): o 1º quadro, que o app usa como capa da grade, tem a moldura
+    # encostada nos lados da grade; do 2º em diante, a do vídeo aberto (preto onde a outra é laranja).
+    from PIL import Image
+    if not shutil.which("ffmpeg"):
+        return
+    video, foto = tmp_path / "v.mp4", _foto_jpg()
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x808080:size=360x640:rate=30:duration=3",
+                    str(video)], check=True)
+    capas = (edicao_video.capa_com_chamada(foto, "Leve"), edicao_video.capa_com_chamada(foto, "Leve", no_video=True))
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), foto, str(destino), capa=capas) == ""
+
+    def quadro(numero):
+        saida = tmp_path / f"q{numero}.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(destino), "-vf", f"select=eq(n\\,{numero})",
+                        "-frames:v", "1", str(saida)], check=True)
+        with Image.open(saida) as imagem:
+            return imagem.convert("RGB")
+
+    x1, y1, _x2, y2 = edicao_video.MOLDURA_DA_CAPA
+    ponto = (x1 + edicao_video.GROSSURA_DA_MOLDURA // 2, (y1 + y2) // 2)
+    assert _cor_de(quadro(0), ponto, edicao_video.LARANJA_DA_SHOPEE)
+    for numero in (1, 30, 58):
+        assert max(quadro(numero).getpixel(ponto)) < 40, numero
+
+
 def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa():
     import io
     import os
@@ -1480,7 +1572,10 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
-    assert capas[-1][:8] == b"\x89PNG\r\n\x1a\n"
+    # O 1º quadro vai com a capa da grade, e o resto da abertura com a do vídeo aberto (P129).
+    assert capas[-1] == (edicao_video.capa_com_chamada(_foto_jpg(), "Leve e resistente"),
+                         edicao_video.capa_com_chamada(_foto_jpg(), "Leve e resistente", no_video=True))
+    assert all(capa[:8] == b"\x89PNG\r\n\x1a\n" for capa in capas[-1])
     # A bebida alcoólica fica com a capa dos avisos (P43).
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Vinho", avisos=True)[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_OS_AVISOS)
@@ -1492,7 +1587,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     # A capa que não sai (a letra que não abre, por exemplo) não segura o vídeo: vai a capa de antes.
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
 
-    def quebrada(foto, chamada):
+    def quebrada(foto, chamada, no_video=False):
         raise OSError("sem a letra")
     monkeypatch.setattr(edicao_video, "capa_com_chamada", quebrada)
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == edicao_video.COM_LEGENDAS
@@ -1535,7 +1630,7 @@ def test_rascunho_do_robo_abre_com_a_foto_e_a_capa_com_a_frase_vai_para_a_figuri
     # Sem a figurinha (o modo assistente), a frase vai no vídeo, como antes.
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Bolsa")[1] == (
         edicao_video.COM_LEGENDAS + edicao_video.COM_A_CHAMADA)
-    assert aberturas[-1] == figurinha["capa"]
+    assert aberturas[-1] == (figurinha["capa"], edicao_video.capa_com_chamada(_foto_jpg(), "Leve e forte", no_video=True))
     # Desligada, nada vai para a figurinha.
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: False})
     figurinha = {}
@@ -1651,6 +1746,9 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     nome, motivo, exemplo = edicao_video.exemplo_capa()
     assert (nome, motivo, exemplo["chamada"]) == ("Copo Térmico", "", "Gelado por 12 horas")
     assert exemplo["capa"][:4] == b"\x89PNG" and exemplo["grade"][:4] == b"\x89PNG"
+    # E o que o app mostra do vídeo aberto no resto da abertura (P129).
+    assert exemplo["video"] == edicao_video.recorte_do_video_aberto(
+        edicao_video.capa_com_chamada(_foto_jpg(), "Gelado por 12 horas", no_video=True))
     # Com a frase curta da IA para a capa (P106), é ela que vai.
     _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas", "capa": "Gelado 12 horas"})
     assert edicao_video.exemplo_capa()[2]["chamada"] == "Gelado 12 horas"
@@ -1706,7 +1804,9 @@ def test_capa_vai_com_a_frase_curta_e_sem_ela_com_a_vantagem(monkeypatch, tmp_pa
     import registro_processos as rp
     _versoes_de_mentira(monkeypatch)
     frases = []
-    monkeypatch.setattr(edicao_video, "_capa_da_vez", lambda foto, frase: frases.append(frase) or b"\x89PNG")
+    # A capa do vídeo aberto (P129) usa a mesma frase: conta só a da grade.
+    monkeypatch.setattr(edicao_video, "_capa_da_vez",
+                        lambda foto, frase, no_video=False: (None if no_video else frases.append(frase)) or b"\x89PNG")
     monkeypatch.setattr(edicao_video, "editar", lambda *a, **k: "")
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
@@ -2158,8 +2258,10 @@ def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela():
     assert len(letreiros) == 1
     imagem, inicio, fim, x, y = letreiros[0]
     largura, altura = _medidas(imagem)
-    pe_da_seta = edicao_video.CENTRO_DA_SETA[1] + edicao_video.TAMANHO_DA_SETA[1] // 2
-    direita_da_seta = edicao_video.CENTRO_DA_SETA[0] + edicao_video.TAMANHO_DA_SETA[0] // 2
+    # O pé e o lado da seta sem a margem transparente do arquivo (onde ficam o contorno e a sombra).
+    margem = edicao_video.MARGEM_DA_SETA
+    pe_da_seta = edicao_video.CENTRO_DA_SETA[1] + edicao_video.TAMANHO_DA_SETA[1] // 2 - margem
+    direita_da_seta = edicao_video.CENTRO_DA_SETA[0] + edicao_video.TAMANHO_DA_SETA[0] // 2 - margem
     assert (inicio, fim) == (1.0, 3.0) and y + altura == edicao_video.PE_DA_LEGENDA == pe_da_seta
     assert edicao_video.PE_DA_LEGENDA <= edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
     assert x > direita_da_seta and x + largura <= edicao_video.VISIVEL_NO_APP[1]

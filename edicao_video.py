@@ -2,7 +2,7 @@
 """
 A edição dos vídeos da Shopee Vídeo como o Rafael faz à mão no LumaFusion: a foto do
 anúncio do produto nos primeiros segundos e, no vídeo inteiro, uma miniatura dela no canto
-de cima à direita e a seta vermelha dele embaixo à esquerda (a montagem fica no
+de cima à direita e a seta dele, no laranja da Shopee, embaixo à esquerda (a montagem fica no
 videos.com_foto_e_miniatura, com o resto do tratamento de vídeo).
 
 Vale para os vídeos de todas as fontes do robô (FONTES_COM_EDICAO): o Rafael confirmou que
@@ -61,8 +61,12 @@ CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
 # apontando para ele (escolha do Rafael, P71: na posição do LumaFusion, o cartão tampava a
 # ponta). Ela começa logo depois da foto, já se desenhando quando o vídeo começa, e pulsa: o
 # arquivo guarda a entrada e um pulso (quadros 72 a 101, 1,2 s), que se repete até o fim do
-# vídeo. Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
-SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "seta_da_shopee.apng")
+# vídeo. Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo. Vai no laranja da Shopee, com um
+# contorno branco e uma sombra leve, para destacar no fundo claro e no escuro (escolha do
+# Rafael, 02/11, P127): o seta_laranja.apng sai do arquivo dele pelo .claude/scripts/gerar_seta.py,
+# com MARGEM_DA_SETA px transparentes de cada lado para o contorno e a sombra.
+SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "seta_laranja.apng")
+MARGEM_DA_SETA = 10
 CENTRO_DA_SETA = (142, 796)
 # O que o app da Shopee mostra do vídeo de 720x1280 num celular de tela 20:9, medido no
 # celular do Rafael (vídeo de 28/10, P71): ele enche a tela e corta uns 47 px de cada lado
@@ -79,9 +83,10 @@ PULSO_DA_SETA = (72, 30)
 # mostra; ela vai à direita da seta, sem cobri-la, até perto da borda que o app corta, em letra
 # pequena, branca com contorno preto. O vídeo sem fala (só música ou canto) e o que já tem a fala
 # escrita na tela vão sem ela. Escolha do Rafael (01/11, P118): DECISOES.md, Shopee Vídeo.
-TAMANHO_DA_SETA = (182, 140)        # o arquivo da seta (o tests/test_edicao_video.py confere)
-PE_DA_LEGENDA = CENTRO_DA_SETA[1] + TAMANHO_DA_SETA[1] // 2
-ESQUERDA_DA_LEGENDA = CENTRO_DA_SETA[0] + TAMANHO_DA_SETA[0] // 2 + 12
+TAMANHO_DA_SETA = (202, 160)        # o arquivo da seta, com a margem (o tests/test_edicao_video.py confere)
+# O pé e o lado da seta são os do pedaço com ela, sem a margem do contorno e da sombra.
+PE_DA_LEGENDA = CENTRO_DA_SETA[1] + TAMANHO_DA_SETA[1] // 2 - MARGEM_DA_SETA
+ESQUERDA_DA_LEGENDA = CENTRO_DA_SETA[0] + TAMANHO_DA_SETA[0] // 2 - MARGEM_DA_SETA + 12
 DIREITA_DA_LEGENDA = VISIVEL_NO_APP[1] - 12
 LETRA_DA_LEGENDA = (26, 22)         # a maior e a menor
 LINHAS_DA_LEGENDA = 2
@@ -259,6 +264,14 @@ FOTO_COM_MOLDURA = (MEIO_DA_FOTO[0] - LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] - LADO_
                     MEIO_DA_FOTO[0] + LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] + LADO_DA_FOTO // 2)
 MOLDURA_DA_CAPA = (FOTO_COM_MOLDURA[0] - GROSSURA_DA_MOLDURA, FOTO_COM_MOLDURA[1] - GROSSURA_DA_MOLDURA,
                    FOTO_COM_MOLDURA[2] + GROSSURA_DA_MOLDURA, FOTO_COM_MOLDURA[3] + GROSSURA_DA_MOLDURA)
+# O 1º quadro do vídeo, que o app usa como capa da grade, vai com a capa acima; o resto da
+# abertura (os 2 primeiros segundos), com a moldura encostada nos lados do que o app mostra do
+# vídeo aberto, que corta mais dos lados (VISIVEL_NO_APP): ali a foto fica menor. Escolha do
+# Rafael (02/11, P129): DECISOES.md, Shopee Vídeo.
+LADO_DA_MOLDURA_NO_VIDEO = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] + 2 * SOBRA_DA_MOLDURA
+LADO_DA_FOTO_NO_VIDEO = LADO_DA_MOLDURA_NO_VIDEO - 2 * GROSSURA_DA_MOLDURA
+MOLDURA_DA_CAPA_NO_VIDEO = (MEIO_DA_FOTO[0] - LADO_DA_MOLDURA_NO_VIDEO // 2, MEIO_DA_FOTO[1] - LADO_DA_MOLDURA_NO_VIDEO // 2,
+                            MEIO_DA_FOTO[0] + LADO_DA_MOLDURA_NO_VIDEO // 2, MEIO_DA_FOTO[1] + LADO_DA_MOLDURA_NO_VIDEO // 2)
 
 
 def capa_ligada():
@@ -425,20 +438,22 @@ def foto_em_tela_cheia(foto):
     return _png(tela)
 
 
-def capa_com_chamada(foto, chamada):
+def capa_com_chamada(foto, chamada, no_video=False):
     """
     A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) e a moldura laranja de
     cantos retos em volta dela toda (P119), no meio do lugar da foto da capa sem texto e inteira
     dentro do que a grade mostra (MOLDURA_DA_CAPA), no fundo preto, e a chamada em letras brancas
-    numa faixa laranja por cima do pé da foto, logo acima do número de visualizações. None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem
-    na menor letra.
+    numa faixa laranja por cima do pé da foto, logo acima do número de visualizações. Com
+    no_video=True, a do resto da abertura: a moldura encostada nos lados do vídeo aberto
+    (MOLDURA_DA_CAPA_NO_VIDEO, P129). None sem a chamada, com a foto que não abre ou com a
+    chamada que não cabe nem na menor letra.
     """
     import matplotlib
     from PIL import ImageDraw
     chamada = " ".join((chamada or "").split())
     if not chamada:
         return None
-    imagem = _foto_que_cabe(foto, LADO_DA_FOTO)
+    imagem = _foto_que_cabe(foto, LADO_DA_FOTO_NO_VIDEO if no_video else LADO_DA_FOTO)
     if not imagem:
         return None
     largura, pe = imagem.size
@@ -599,12 +614,50 @@ def faixa_laranja(imagem, caixa=None):
     return (y1 + melhor["cima"], y1 + melhor["baixo"], x1 + melhor["esquerda"], x1 + melhor["direita"] + 1)
 
 
-def _capa_da_vez(foto, vantagem):
+def _capa_da_vez(foto, vantagem, no_video=False):
     """A capa com chamada do vídeo que vai ao ar, ou None (a capa de sempre) quando ela não sai: o vídeo não para por ela."""
     try:
-        return capa_com_chamada(foto, vantagem)
+        return capa_com_chamada(foto, vantagem, no_video)
     except Exception:
         return None
+
+
+def recorte_do_video_aberto(capa):
+    """O pedaço da capa (PNG, bytes) que o app mostra com o vídeo aberto (VISIVEL_NO_APP, na altura toda), em PNG: o exemplo do painel."""
+    return _faixa_da_capa(capa, (0, TELA[1]), VISIVEL_NO_APP)
+
+
+# Na grade do perfil, a capa do post é o 1º quadro do vídeo quando as laterais da moldura
+# aparecem nos dois lados do quadro (P129); com preto dos lados, a grade pegou outro quadro da
+# abertura (o do vídeo aberto). Olha uma tira fina de cada lado, perto da borda do quadro, no
+# meio da altura da moldura.
+TIRA_DOS_LADOS = 0.008                          # da largura do quadro, a partir de cada borda
+PARTE_DOS_LADOS = 0.8                           # dos pontos da tira, para dizer que é laranja ou preto
+
+
+def moldura_nos_lados(imagem, caixa):
+    """
+    No print da grade (PIL), com o quadro da capa do post em caixa (x1, y1, x2, y2): True quando
+    as laterais laranja da moldura aparecem nos dois lados (o 1º quadro do vídeo), False quando os
+    dois lados são pretos (outro quadro da abertura) e None quando não dá para dizer.
+    """
+    x1, y1, x2, y2 = caixa
+    largura, altura = x2 - x1, y2 - y1
+    if largura < 50 or altura < 50:
+        return None
+    cima, baixo = VISIVEL_NA_GRADE
+    topo = (MOLDURA_DA_CAPA[1] - cima) / (baixo - cima)
+    pe = (MOLDURA_DA_CAPA[3] - cima) / (baixo - cima)
+    alturas = [y1 + round(altura * (topo + (pe - topo) * (0.2 + 0.6 * n / 9))) for n in range(10)]
+    imagem = imagem.convert("RGB")
+    lados = []
+    for x in (x1 + round(largura * TIRA_DOS_LADOS), x2 - 1 - round(largura * TIRA_DOS_LADOS)):
+        pontos = [imagem.getpixel((x, y)) for y in alturas]
+        laranjas = sum(1 for p in pontos if sum(abs(a - b) for a, b in zip(p, LARANJA_DA_SHOPEE)) <= TOLERANCIA_DO_LARANJA)
+        pretos = sum(1 for p in pontos if max(p) < 50)
+        lados.append(True if laranjas >= PARTE_DOS_LADOS * len(pontos)
+                     else False if pretos >= PARTE_DOS_LADOS * len(pontos) else None)
+    return lados[0] if lados[0] == lados[1] else None
 
 
 def recorte_da_grade(capa):
@@ -638,7 +691,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
-    sem eles, a capa (bytes de uma imagem, como a capa com chamada), quando vem. Com a musica
+    sem eles, a capa (bytes de uma imagem, como a capa com chamada; ou o par (a do 1º quadro,
+    a do resto da abertura), P129), quando vem. Com a musica
     (caminho), ela é o som do vídeo inteiro (o vídeo sem som, P55). Com miniatura=False (ou 0),
     o vídeo vai sem a nossa miniatura (o canto dela tem coisa do criador, P81); com uma largura
     menor (miniatura_no_video), ela vai desse tamanho, no mesmo canto (P97). Com as outras_fotos
@@ -1711,6 +1765,13 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     if capa and figurinha is not None:
         abertura = capa_sem_chamada(foto)
         figurinha["capa"] = capa
+    elif capa:
+        # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
+        # abertura, com a moldura encostada nos lados do vídeo aberto (P129). Sem esta, a da
+        # grade fica na abertura toda.
+        no_video = _capa_da_vez(foto, frase, no_video=True)
+        if no_video:
+            abertura = (capa, no_video)
     chamada = (COM_A_CHAMADA_PARA_A_FIGURINHA if figurinha is not None else COM_A_CHAMADA) if capa else ""
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
@@ -2135,9 +2196,9 @@ def exemplo_capa():
     """
     O exemplo da capa com chamada (P76), com o próximo vídeo que o robô pegaria: a frase curta
     que a IA escreve vendo o vídeo (P106; sem ela, a vantagem), na capa. Tem a lista própria dos
-    já mostrados. Devolve (nome do produto, "", {"capa", "grade", "chamada"}) quando deu certo
-    (as duas imagens em PNG: a capa inteira e o pedaço que a grade do perfil mostra), ou (None,
-    motivo, None).
+    já mostrados. Devolve (nome do produto, "", {"capa", "grade", "video", "chamada"}) quando deu
+    certo (as imagens em PNG: a capa inteira do 1º quadro, o pedaço que a grade do perfil mostra e
+    o que o app mostra do vídeo aberto no resto da abertura, P129), ou (None, motivo, None).
     """
     def editar_um(arquivo, link, foto):
         produto = _produto_do_link(link)
@@ -2148,6 +2209,10 @@ def exemplo_capa():
         capa = capa_com_chamada(foto, frase)
         if not capa:
             return "a capa com a chamada não saiu", None
-        return "", {"capa": capa, "grade": recorte_da_grade(capa), "chamada": frase}
+        exemplo = {"capa": capa, "grade": recorte_da_grade(capa), "chamada": frase}
+        no_video = capa_com_chamada(foto, frase, no_video=True)
+        if no_video:
+            exemplo["video"] = recorte_do_video_aberto(no_video)
+        return "", exemplo
 
     return _exemplo("ids_capa", editar_um)

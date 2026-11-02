@@ -453,6 +453,14 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     assert "O número de visualizações fica no preto, logo abaixo da faixa laranja" in legenda
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      "edição do vídeo: exemplo da capa") == ("mandado",)
+    # Com a capa do vídeo aberto (P129), ela vai como 3ª foto.
+    monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
+        "Copo Térmico", "", {"capa": b"capa", "grade": b"grade", "video": b"video", "chamada": "Gelado"}))
+    msg = MsgComMidia(Msg, sv.BOTAO_EXEMPLO_DA_CAPA)
+    rodar(sv.exemplo_capa_handler(msg, est))
+    tipo, caminhos, legenda = msg.midias[-1]
+    assert [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png", "video.png"]
+    assert "3ª foto: o que aparece com o vídeo aberto" in legenda
     # Sem o exemplo, o motivo.
     monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
         None, "a IA não escreveu a vantagem do produto deste vídeo", None))
