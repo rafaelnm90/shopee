@@ -144,27 +144,32 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     edição da legenda aberta; sem a cópia, para. Na tela final, o Ctrl+A abre a edição do texto e
     tira o Postar e o Rascunhos da tela (o voltar fecha): ao reabrir um rascunho, o robô só lê pela
     acessibilidade e aceita ".." no lugar do emoji.
-  - **link de vídeo, o Ver Produtos** (23/10/2026, explorar com `video:link-de-video`): o link
-    abre o player do vídeo (`HomeActivity_`, aba Live e Vídeo) com **"Ver Produtos (N)"** e, ao
-    lado, um cartão com **"Comprar com cupom"** (proibido, como todo texto que começa com
-    "comprar" ou "compre"). Vídeo apagado: a página "… do Vídeo" com **"Este vídeo foi
-    removido"**. Vídeo que a Shopee ainda não liberou (02/11/2026, `ReactActivity_`): só a
-    busca no alto e **"Vídeo em Análise"** ("em breve estará disponível ao público"), sem o
-    player nem o Ver Produtos (`video_em_analise`). O toque em Ver Produtos abre por cima
-    (`ReactTransparentActivity_`) os cupons da loja, os **cartões dos produtos que o criador
-    vinculou** (nome, preço, avaliação e o Comprar com cupom), **"Ver Mais (N)"** e **"Você
-    Também Pode Gostar"** (recomendações da Shopee, que não são do vídeo). O toque no nome abre a página do produto
-    (`HalfPdpActivity`), com o coração (`buttonItemLike`/`buttonItemLiked`) e o nome no id
-    **`labelProductPageProductName`**; o voltar volta à lista. O selo da loja (Full, Oficial,
-    Indicado) antes do nome é uma imagem dentro do texto e chega como um **"0" colado na 1ª
-    palavra** ("0Tênis ...", 29/10/2026, na lista do Ver Produtos); o robô tira esse "0" ao ler
-    e comparar nomes (`sem_o_selo_colado`), também ao achar os nomes dos cartões da lista (sem
-    isso, o nome parecia um número e a lista ficava vazia), e a busca pela foto conta os
-    cartões que vieram assim ("N com o selo colado"). **Vídeo com um produto só**
-    (24/10/2026): o player não mostra o "Ver Produtos (N)"; no lugar dele, embaixo do cartão,
-    fica a **barra dos produtos** (descrição terminada em "video product icon") com o desconto
-    e o nome. O toque na barra abre a mesma lista, com "Ver Produtos (1)", o cartão do produto
-    do criador e o "Você Também Pode Gostar" logo abaixo (sem o "Ver Mais").
+  - **link de vídeo, o Ver Produtos** (23/10/2026, explorar com `video:link-de-video`): o
+    link abre o player do vídeo (`HomeActivity_`, aba Live e Vídeo) com **"Ver Produtos
+    (N)"** e, ao lado, um cartão com **"Comprar com cupom"** (proibido, como todo texto que
+    começa com "comprar" ou "compre"). Vídeo apagado: a página "… do Vídeo" com **"Este
+    vídeo foi removido"**. Vídeo que a Shopee ainda não liberou (02/11/2026,
+    `ReactActivity_`): só a busca no alto e **"Vídeo em Análise"** ("em breve estará
+    disponível ao público"), sem o player nem o Ver Produtos (`video_em_analise`). O toque
+    em Ver Produtos abre por cima (`ReactTransparentActivity_`) os cupons da loja, os
+    **cartões dos produtos que o criador vinculou** (nome, preço, avaliação e o Comprar com
+    cupom), **"Ver Mais (N)"** e **"Você Também Pode Gostar"** (recomendações da Shopee, que
+    não são do vídeo). O toque no nome abre a página do produto (`HalfPdpActivity`), com o
+    coração (`buttonItemLike`/`buttonItemLiked`) e o nome no id
+    **`labelProductPageProductName`**; o voltar volta à lista. A foto do anúncio fica no
+    quadro **`imageProduct`** (ou **`viewPDPVideoPlayer`**, quando o 1º item é um vídeo),
+    com os botões `buttonActionBar...` por cima, no alto; logo embaixo do quadro vêm "N
+    Variações Disponíveis" e o contador da oferta (02/11/2026): o recorte da foto da página
+    para no fim do quadro. O selo da loja (Full, Oficial, Indicado) antes do nome é uma
+    imagem dentro do texto e chega como um **"0" colado na 1ª palavra** ("0Tênis ...",
+    29/10/2026, na lista do Ver Produtos); o robô tira esse "0" ao ler e comparar nomes
+    (`sem_o_selo_colado`), também ao achar os nomes dos cartões da lista (sem isso, o nome
+    parecia um número e a lista ficava vazia), e a busca pela foto conta os cartões que
+    vieram assim ("N com o selo colado"). **Vídeo com um produto só** (24/10/2026): o player
+    não mostra o "Ver Produtos (N)"; no lugar dele, embaixo do cartão, fica a **barra dos
+    produtos** (descrição terminada em "video product icon") com o desconto e o nome. O
+    toque na barra abre a mesma lista, com "Ver Produtos (1)", o cartão do produto do
+    criador e o "Você Também Pode Gostar" logo abaixo (sem o "Ver Mais").
   - **mais de um produto na tela final** (23/10/2026): com um produto anexado, a tela mostra
     **"Adicionar Mais"** (`tv_add_more`), que abre a mesma lista (o anexado aparece como
     "Adicionado"; cada item mostra a taxa de comissão); Adicionar → "Editar nome do produto" →

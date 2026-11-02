@@ -1354,6 +1354,45 @@ def test_ver_produtos_toca_no_nome_dos_vinculados_e_nunca_nas_recomendacoes():
     assert all(not ps.proibido_no_ponto(VER_PRODUTOS, x, y) for x, y in ps.produtos_vinculados(VER_PRODUTOS))
 
 
+def test_foto_da_pagina_do_produto_e_so_o_quadro_da_foto():
+    # A página do produto no Motorola (02/11/2026): embaixo do quadro da foto vêm as "2 Variações
+    # Disponíveis" e o contador da oferta, que não são da foto e iam juntos para a IA e para a
+    # miniatura do produto de outra cor. O recorte vai da barra de cima (os botões por cima da foto)
+    # até o fim do quadro.
+    import io
+    from PIL import Image
+    pagina = ('<hierarchy>'
+              '<node resource-id="sectionProductImages" class="android.view.ViewGroup" bounds="[0,383][1080,1684]"/>'
+              '<node resource-id="viewPDPVideoPlayer" class="android.view.ViewGroup" bounds="[0,383][1080,1463]"/>'
+              '<node resource-id="imageProduct" class="android.widget.ImageView" bounds="[0,383][1080,1463]"/>'
+              '<node resource-id="buttonActionBarRight" class="android.view.ViewGroup" bounds="[597,404][1080,509]"/>'
+              '<node text="2 Variações Disponíveis" class="android.widget.TextView" bounds="[32,1484][294,1516]"/>'
+              '<node text="TERMINA EM " class="android.widget.TextView" bounds="[613,1703][786,1745]"/>'
+              '<node resource-id="labelSoldCount" text="186 Vendido(s)" class="android.widget.TextView" '
+              'bounds="[793,1819][991,1856]"/>'
+              '<node resource-id="buttonItemLike" class="android.widget.ImageView" bounds="[1007,1816][1049,1858]"/>'
+              '</hierarchy>')
+
+    class Celular:
+        def screenshot(self):
+            # A foto (azul) só entre o fim da barra de cima e o fim do quadro; o resto da página, vermelho.
+            imagem = Image.new("RGB", (1080, 2400), "red")
+            imagem.paste(Image.new("RGB", (1080, 1463 - 509), "blue"), (0, 509))
+            return imagem
+
+    def azul(ponto):
+        vermelho, verde, azul_ = ponto
+        return azul_ > 200 and vermelho < 60 and verde < 60
+
+    foto = Image.open(io.BytesIO(ps.foto_da_pagina_do_produto(Celular(), pagina)))
+    assert foto.size == (1080, 1463 - 509)
+    assert azul(foto.getpixel((540, 3))) and azul(foto.getpixel((540, foto.size[1] - 3)))
+    # Sem o quadro, como antes: até um pouco acima da linha do preço.
+    sem_quadro = pagina.replace("imageProduct", "outro").replace("viewPDPVideoPlayer", "outro")
+    foto = Image.open(io.BytesIO(ps.foto_da_pagina_do_produto(Celular(), sem_quadro)))
+    assert foto.size == (1080, 1816 - ps.FOLGA_DA_FOTO_DA_PAGINA - 509)
+
+
 def test_pagina_do_produto_e_video_removido():
     pagina = ('<hierarchy><node text="Copo Térmico 500 ml " resource-id="com.shopee.br:id/labelProductPageProductName" '
               'class="android.widget.TextView" bounds="[40,1850][1040,1900]"/></hierarchy>')
