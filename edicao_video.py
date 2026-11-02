@@ -26,6 +26,7 @@ Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao 
 modo assistente (assistente_shopee_video, no vídeo que vai ao privado do Rafael) e pelo
 painel da Shopee Vídeo (os exemplos).
 """
+import functools
 import math
 import os
 
@@ -76,6 +77,18 @@ CENTRO_DA_SETA = (142, 796)
 VISIVEL_NO_APP = (47, 673)
 FIM_DA_BARRA_DE_BUSCA = 140
 COMECO_DO_CARTAO_DO_PRODUTO = 870
+# A moldura laranja em volta do cartão do produto que o app mostra embaixo (o cartão é do app, por
+# cima do vídeo; a moldura vai no vídeo, por baixo dele), no lugar em que o cartão aparece no
+# celular do Rafael (medido no vídeo dele de 02/11, 12:36, com o nome em 2 linhas e uma linha de
+# estrelas ou de desconto), do fim da abertura até o fim do vídeo, como a seta. Em teste: o cartão
+# só aparece uns segundos depois do começo, pode ser fechado no X e muda de tamanho e de lugar com
+# o celular e o nome do produto; o Rafael confere em outros celulares e decide se fica (02/11,
+# P128: DECISOES.md, Shopee Vídeo). Para tirar, MOLDURA_DO_CARTAO = False.
+MOLDURA_DO_CARTAO = True
+CARTAO_DO_PRODUTO = (68, 911, 550, 1096)        # x1, y1, x2, y2 no vídeo de 720x1280
+FOLGA_DO_CARTAO = 8                             # entre o cartão e a moldura
+GROSSURA_DA_MOLDURA_DO_CARTAO = 7               # a da moldura da miniatura
+RAIO_DO_CARTAO = 17                             # o arredondado dos cantos do cartão
 PULSO_DA_SETA = (72, 30)
 # As legendas da fala: o que as pessoas falam no vídeo, escrito pela IA vendo o vídeo e posto por
 # nós na edição (não o Captions do app: assim o Rafael vê a legenda no rascunho antes de aprovar).
@@ -399,6 +412,34 @@ def _png(imagem):
     return saida.getvalue()
 
 
+@functools.lru_cache(maxsize=1)
+def moldura_do_cartao():
+    """
+    A moldura em volta do cartão do produto (PNG, bytes, 720x1280, transparente fora dela), ou
+    None com ela desligada (MOLDURA_DO_CARTAO). Os cantos são arredondados como os do cartão,
+    desenhados 4 vezes maiores e reduzidos, para a borda não ficar serrilhada.
+    """
+    if not MOLDURA_DO_CARTAO:
+        return None
+    from PIL import Image, ImageDraw
+    x1, y1, x2, y2 = CARTAO_DO_PRODUTO
+    fora = FOLGA_DO_CARTAO + GROSSURA_DA_MOLDURA_DO_CARTAO
+    caixa = (x1 - fora, y1 - fora, x2 + fora, y2 + fora)
+    vezes = 4
+    largura, altura = (caixa[2] - caixa[0]) * vezes, (caixa[3] - caixa[1]) * vezes
+    mascara = Image.new("L", (largura, altura), 0)
+    desenho = ImageDraw.Draw(mascara)
+    desenho.rounded_rectangle((0, 0, largura - 1, altura - 1), (RAIO_DO_CARTAO + fora) * vezes, fill=255)
+    dentro = GROSSURA_DA_MOLDURA_DO_CARTAO * vezes
+    desenho.rounded_rectangle((dentro, dentro, largura - 1 - dentro, altura - 1 - dentro),
+                              (RAIO_DO_CARTAO + FOLGA_DO_CARTAO) * vezes, fill=0)
+    anel = Image.new("RGBA", (caixa[2] - caixa[0], caixa[3] - caixa[1]), LARANJA_DA_SHOPEE + (255,))
+    anel.putalpha(mascara.resize(anel.size, Image.LANCZOS))
+    tela = Image.new("RGBA", TELA, (0, 0, 0, 0))
+    tela.paste(anel, caixa[:2])
+    return _png(tela)
+
+
 def capa_sem_chamada(foto):
     """
     A abertura do vídeo quando a frase vai na capa pela figurinha (P110): a foto do anúncio
@@ -714,7 +755,7 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
         outras_fotos = [miniatura_com_moldura(outra, largura) or outra for outra in outras_fotos]
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
                                        SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica,
-                                       outras=outras_fotos)
+                                       outras=outras_fotos, moldura=moldura_do_cartao())
 
 
 def largura_da_miniatura(miniatura):

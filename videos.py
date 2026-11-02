@@ -158,7 +158,7 @@ SAIDA_DA_MUSICA = 1.5
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
-                             outras=(), troca=0.0, capa_do_resto=None):
+                             outras=(), troca=0.0, capa_do_resto=None, moldura=None):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -174,13 +174,18 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     fotos do produto, na ordem), a miniatura troca entre a `foto` e cada uma delas, uma volta
     só, `troca` segundos cada, no mesmo lugar: a `foto` primeiro, e a última fica até o fim.
     Com a `capa_do_resto` (o caminho de outra imagem), a `capa` fica só no 1º quadro, o que o app
-    usa como capa na grade do perfil, e a `capa_do_resto` no resto da abertura (P129).
+    usa como capa na grade do perfil, e a `capa_do_resto` no resto da abertura (P129). Com a
+    `moldura` (o caminho de uma imagem do tamanho da tela, com o fundo transparente), ela vai por
+    cima do vídeo depois da abertura, até o fim, por baixo da seta (a do cartão do produto, P128).
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
     # Escolha do Rafael (29/10, P72): DECISOES.md, Shopee Vídeo.
     filtro = f"[0:v]{tela}[{'primeiro' if capa_do_resto else 'foto'}];[1:v]{tela}[corpo];"
+    # A miniatura entrega o corpo do vídeo em [comfoto]; com a moldura, em [semmoldura], e a
+    # moldura entra por cima dele, lá no fim, saindo em [comfoto].
+    fim = "semmoldura" if moldura else "comfoto"
     if miniatura:
         lugar = f"x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1"
         if outras:
@@ -194,16 +199,16 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
                 ultima = n == len(indices) - 1
                 janela = (f"lt(t,{troca:.3f})" if n == 0 else f"gte(t,{n * troca:.3f})" if ultima
                           else f"gte(t,{n * troca:.3f})*lt(t,{(n + 1) * troca:.3f})")
-                rotulo = "comfoto" if ultima else f"mini{n}_no_corpo"
+                rotulo = fim if ultima else f"mini{n}_no_corpo"
                 filtro += (f"[{indice}:v]scale={miniatura}:{miniatura}:force_original_aspect_ratio=decrease,"
                            f"format=rgba,pad={miniatura}:{miniatura}:(ow-iw)/2:(oh-ih)/2:color=black@0[mini{n}];"
                            f"[{anterior}][mini{n}]overlay={lugar}:enable='{janela}'[{rotulo}];")
                 anterior = rotulo
         else:
-            filtro += f"[2:v]scale={miniatura}:-2[mini];[corpo][mini]overlay={lugar}[comfoto];"
+            filtro += f"[2:v]scale={miniatura}:-2[mini];[corpo][mini]overlay={lugar}[{fim}];"
     else:
         # A entrada da foto em laço continua na lista (os números das outras não mudam), sem uso.
-        filtro += "[corpo]null[comfoto];"
+        filtro += f"[corpo]null[{fim}];"
     entradas = ["-loop", "1", "-t", str(segundos), "-i", capa or foto, "-i", video, "-loop", "1", "-i", foto]
     if seta:
         inicio, quadros = pulso_da_seta
@@ -236,12 +241,17 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-t", str(segundos), "-i", capa_do_resto]
         filtro += f";[{indice}:v]{tela}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
+    if moldura:
+        indice = entradas.count("-i")
+        entradas += ["-loop", "1", "-i", moldura]
+        filtro += f";[{indice}:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1[comfoto]"
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
             + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", destino])
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
-                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=()):
+                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=(),
+                         moldura=None):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
@@ -249,7 +259,9 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
     lugar da foto. Com a `musica` (caminho de um arquivo de
     áudio), ela é o som do vídeo inteiro. Com as `outras` (bytes de outras fotos do produto, na
     ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
-    igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Devolve "" quando
+    igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Com a `moldura`
+    (bytes de uma imagem do tamanho da tela, transparente fora dela), ela vai por cima do vídeo
+    depois da abertura; a que não abre fica de fora. Devolve "" quando
     deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
@@ -276,6 +288,13 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                     arquivo.write(resto)
                 if not imagem_abre(caminho_do_resto):
                     caminho_do_resto = None
+        caminho_da_moldura = None
+        if moldura:
+            caminho_da_moldura = os.path.join(pasta, "moldura.png")
+            with open(caminho_da_moldura, "wb") as arquivo:
+                arquivo.write(moldura)
+            if not imagem_abre(caminho_da_moldura):
+                caminho_da_moldura = None
         caminhos_das_outras = []
         for n, outra in enumerate((outras or ()) if miniatura else ()):
             caminho = os.path.join(pasta, f"outra_{n}.jpg")
@@ -291,7 +310,8 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
                                            musica if total > segundos else None, total,
-                                           caminhos_das_outras if troca else (), troca, caminho_do_resto)
+                                           caminhos_das_outras if troca else (), troca, caminho_do_resto,
+                                           caminho_da_moldura)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:
