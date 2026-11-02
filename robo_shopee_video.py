@@ -453,6 +453,70 @@ def recuperar_horarios(config, estado, perdidos, agora=None):
     return recuperados, perdidos - recuperados
 
 
+# O horário do plano que acaba sem rascunho (os VIDEOS_POR_HORARIO vídeos não passaram, ou não havia
+# vídeo na fonte) volta uma vez, mais tarde no mesmo dia: no meio do maior vão livre dos trechos de
+# postar (fora do Horário das Interações e da hora do descurtir), a pelo menos ESPACO_MINIMO de agora
+# e de cada um dos outros horários que faltam; sem um vão assim, fica de fora. O horário que já é a
+# volta de outro não volta de novo. Escolha do Rafael (02/11, P132): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_HORARIO_SEM_RASCUNHO = "horário sem rascunho"
+
+
+def _minuto_do_dia(hora):
+    """ "HH:MM" em minutos do dia."""
+    horas, minutos = hora.split(":")
+    return int(horas) * 60 + int(minutos)
+
+
+def vao_para_o_horario(config, estado, agora=None):
+    """
+    O "HH:MM" em que o horário sem rascunho volta: o meio do maior pedaço dos trechos de postar
+    que fica a pelo menos ESPACO_MINIMO de agora e de cada horário que falta; None sem pedaço.
+    """
+    momento = agora_br(agora)
+    hora = momento.strftime("%H:%M")
+    inicio = momento.hour * 60 + momento.minute + ESPACO_MINIMO
+    ocupados = [_minuto_do_dia(h) for h in estado["horarios"] if h > hora]
+    livres = []
+    for a, b in trechos_de_postar(config):
+        pedacos = [(max(a, inicio), b)]
+        for minuto in ocupados:
+            pedacos = [parte for x, y in pedacos
+                       for parte in ((x, min(y, minuto - ESPACO_MINIMO + 1)), (max(x, minuto + ESPACO_MINIMO), y))]
+        livres += [(x, y) for x, y in pedacos if y > x]
+    if not livres:
+        return None
+    x, y = max(livres, key=lambda pedaco: (pedaco[1] - pedaco[0], -pedaco[0]))
+    minuto = (x + y - 1) // 2
+    return f"{minuto // 60:02d}:{minuto % 60:02d}"
+
+
+def repor_o_horario(config, estado, agora=None):
+    """
+    O horário do plano acabou sem rascunho: ele sai dos que já passaram e volta no vão livre do
+    resto do dia (vao_para_o_horario), uma vez. Muda estado (os horários, os feitos e "repostos",
+    os horários que são a volta de outro) e devolve o "HH:MM" novo, ou "" quando ele não volta; o
+    registro diz qual.
+    """
+    if estado.get("reposto"):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_HORARIO_SEM_RASCUNHO, "de fora",
+                                     "já era a volta de outro horário", ok=None, agora=agora)
+        return ""
+    feitos = estado.get("feitos", 0)
+    novo = vao_para_o_horario(config, estado, agora) if feitos > 0 else None
+    if not novo:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_HORARIO_SEM_RASCUNHO, "de fora", "sem espaço no dia",
+                                     ok=None, agora=agora)
+        return ""
+    horarios = sorted(estado["horarios"])
+    # O deste horário é o último que a rodada já contou como feito.
+    del horarios[feitos - 1]
+    estado.update(horarios=sorted(horarios + [novo]), feitos=feitos - 1,
+                  repostos=estado.get("repostos", []) + [novo])
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_HORARIO_SEM_RASCUNHO, "volta mais tarde", f"às {novo}",
+                                 ok=None, agora=agora)
+    return novo
+
+
 def consumir_horarios(config, agora=None, pular=False):
     """
     Marca como feitos os horários que já passaram e diz se havia algum novo. Vários de uma
@@ -468,13 +532,20 @@ def consumir_horarios(config, agora=None, pular=False):
         return False
     novos = passados - estado["feitos"]
     de_fora = novos if pular else novos - 1
+    recuperados = 0
     if not pular and novos > 1:
         recuperados, de_fora = recuperar_horarios(config, estado, novos - 1, agora)
         passados -= recuperados
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_PERDIDOS, f"{recuperados} de {novos - 1} de volta ao plano",
                                      f"de fora por falta de espaço no dia: {de_fora}", ok=None, agora=agora)
+    # O horário que começa agora é a volta de um que acabou sem rascunho (P132)? Os horários
+    # espalhados de novo na volta do celular (recuperar_horarios) mudam de minuto: a marca sai.
+    repostos = [] if recuperados else estado.get("repostos", [])
+    atual = sorted(estado["horarios"])[passados - 1]
+    hora = agora_br(agora).strftime("%H:%M")
     estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, videos=1, repetir=False,
-                  sem_tentar=estado.get("sem_tentar", 0) + de_fora)
+                  sem_tentar=estado.get("sem_tentar", 0) + de_fora, reposto=not pular and atual in repostos,
+                  repostos=[h for h in repostos if h > hora], volta_do_horario="")
     db.salvar_config(CHAVE_DIA, estado)
     return True
 
@@ -485,8 +556,8 @@ def marcar_para_repetir(config, agora=None, video=None, do_video=False):
     rodada seguinte. Sem tentativa, ou com o problema no próprio vídeo (do_video: ele já
     ficou de lado), o horário passa a outro vídeo, com as tentativas de novo, até
     VIDEOS_POR_HORARIO; o vídeo que esgotou as tentativas fica de lado só hoje. Sem vídeo
-    na fonte não há outro para tentar: o horário acaba. Decisão do Rafael: DECISOES.md,
-    Shopee Vídeo.
+    na fonte não há outro para tentar: o horário acaba e volta mais tarde no mesmo dia, uma vez
+    (repor_o_horario, P132). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     estado = estado_do_dia(config, agora)
     if not do_video and estado.get("tentativas", 0) > 0:
@@ -498,7 +569,8 @@ def marcar_para_repetir(config, agora=None, video=None, do_video=False):
         # passa pelo repetir_o_que_falhou.
         estado.update(videos=estado.get("videos", 1) + 1, tentativas=TENTATIVAS_A_MAIS + 1, repetir=True)
     else:
-        estado["repetir"] = False
+        # O horário acabou sem rascunho: volta mais tarde no mesmo dia, uma vez (P132).
+        estado.update(repetir=False, volta_do_horario=repor_o_horario(config, estado, agora))
     db.salvar_config(CHAVE_DIA, estado)
 
 
@@ -1081,7 +1153,9 @@ def aviso_rascunho_nao_saiu(config, agora=None):
                    f"{TENTATIVAS_A_MAIS + 1} do {video}.")
     else:
         futuros = [h for h in estado.get("horarios", []) if h > agora_br(agora).strftime("%H:%M")]
-        proxima = (f"As tentativas deste horário acabaram. Próximo horário do plano: {futuros[0]}." if futuros
+        volta = estado.get("volta_do_horario")
+        proxima = (f"As tentativas deste horário acabaram: ele volta às {volta}, hoje mesmo." if volta
+                   else f"As tentativas deste horário acabaram. Próximo horário do plano: {futuros[0]}." if futuros
                    else "As tentativas deste horário acabaram, e hoje não há mais horários: amanhã tem plano novo.")
     return ("⏭️ Robô da Shopee Vídeo: o rascunho não saiu.\n\n"
             f"🛍️ Produto: {ultima.get('produto') or '—'}\n"

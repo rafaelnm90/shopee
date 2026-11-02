@@ -1455,6 +1455,69 @@ def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horari
     assert robo.proximo_video(robo.ler_config())["id"] in {primeiro, segundo, terceiro, "a1", "a2", "a3", "a4"}
 
 
+def test_horario_sem_rascunho_volta_mais_tarde_no_mesmo_dia_uma_vez(monkeypatch, avisos):
+    # Escolha do Rafael (02/11, P132 1): o horário cujos 3 vídeos não passaram volta mais tarde no
+    # mesmo dia, no maior vão livre, a pelo menos 30 min de agora e dos outros horários, fora do
+    # Horário das Interações; o que já é a volta de outro não volta de novo.
+    import registro_processos as rp
+    ativar(robo_limite_min=3, robo_limite_max=3, robo_inicio=0, robo_fim=24, robo_interacoes_inicio=20,
+           robo_interacoes_fim=21)
+    config = robo.ler_config()
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-22", "horarios": ["10:00", "14:00", "18:00"],
+                                            "feitos": 0})
+    assert robo.consumir_horarios(config, momento("2026-10-22 10:00"))
+    estado = robo.estado_do_dia(config, momento("2026-10-22 10:00"))
+    assert estado["feitos"] == 1 and not estado["reposto"]
+    # Os 3 vídeos do horário das 10:00 não passaram: o último pulado acaba o horário às 10:40.
+    robo.db.salvar_config(robo.CHAVE_DIA, dict(estado, videos=robo.VIDEOS_POR_HORARIO, tentativas=0))
+    robo.marcar_para_repetir(config, momento("2026-10-22 10:40"), video={"id": "a3"}, do_video=True)
+    estado = robo.estado_do_dia(config, momento("2026-10-22 10:40"))
+    # Os vãos livres: das 11:10 às 13:30, das 14:30 às 17:30 e das 18:30 às 19:59 (as interações das
+    # 20h às 21h ficam de fora) e das 21:00 às 23:58; o maior é o da tarde, e ele volta no meio dele.
+    assert estado["horarios"] == ["14:00", "16:00", "18:00"] and estado["feitos"] == 0
+    assert estado["repostos"] == ["16:00"] and estado["volta_do_horario"] == "16:00"
+    assert "ele volta às 16:00, hoje mesmo" in robo.aviso_rascunho_nao_saiu(config, momento("2026-10-22 10:40"))
+    # O dia segue com os mesmos horários: às 14:00 o de sempre, às 16:00 a volta.
+    assert not robo.consumir_horarios(config, momento("2026-10-22 13:59"))
+    assert robo.consumir_horarios(config, momento("2026-10-22 14:00"))
+    assert not robo.estado_do_dia(config, momento("2026-10-22 14:00"))["reposto"]
+    assert robo.consumir_horarios(config, momento("2026-10-22 16:00"))
+    estado = robo.estado_do_dia(config, momento("2026-10-22 16:00"))
+    assert estado["reposto"] and estado["repostos"] == []
+    # A volta que também acaba sem rascunho não volta de novo.
+    robo.db.salvar_config(robo.CHAVE_DIA, dict(estado, videos=robo.VIDEOS_POR_HORARIO, tentativas=0))
+    robo.marcar_para_repetir(config, momento("2026-10-22 16:30"), video=None)
+    estado = robo.estado_do_dia(config, momento("2026-10-22 16:30"))
+    assert estado["horarios"] == ["14:00", "16:00", "18:00"] and estado["feitos"] == 2
+    assert "Próximo horário do plano: 18:00" in robo.aviso_rascunho_nao_saiu(config, momento("2026-10-22 16:30"))
+    registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", robo.PROCESSO_DO_HORARIO_SEM_RASCUNHO,
+                                                            "2000-01-01 00:00:00")]
+    assert registro == [("volta mais tarde", "às 16:00"), ("de fora", "já era a volta de outro horário")]
+
+
+def test_horario_sem_rascunho_sem_vao_no_dia_fica_de_fora(monkeypatch, avisos):
+    import registro_processos as rp
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=22)
+    config = robo.ler_config()
+    # Às 21:40, até o fim do Horário do Robô (22h) não cabem 30 min de agora: o horário fica de fora.
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-22", "horarios": ["10:00", "21:35"], "feitos": 2,
+                                            "videos": robo.VIDEOS_POR_HORARIO, "tentativas": 0})
+    robo.marcar_para_repetir(config, momento("2026-10-22 21:40"), video=None)
+    estado = robo.estado_do_dia(config, momento("2026-10-22 21:40"))
+    assert estado["horarios"] == ["10:00", "21:35"] and estado["feitos"] == 2 and not estado["volta_do_horario"]
+    assert "hoje não há mais horários" in robo.aviso_rascunho_nao_saiu(config, momento("2026-10-22 21:40"))
+    registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", robo.PROCESSO_DO_HORARIO_SEM_RASCUNHO,
+                                                            "2000-01-01 00:00:00")]
+    assert registro == [("de fora", "sem espaço no dia")]
+    # O vão fica a pelo menos 30 min de cada horário que falta, também perto dele.
+    estado = {"data": "2026-10-22", "horarios": ["10:00", "12:00", "13:00"], "feitos": 1}
+    # Das 13:30 às 22:00, o maior vão: no meio dele.
+    assert robo.vao_para_o_horario(config, estado, momento("2026-10-22 11:00")) == "17:44"
+    # Até as 12h, só cabe às 11:30, a 30 min de agora e das 12:00; às 11:40, nem isso.
+    assert robo.vao_para_o_horario({**config, "robo_fim": 12}, estado, momento("2026-10-22 11:00")) == "11:30"
+    assert robo.vao_para_o_horario({**config, "robo_fim": 12}, estado, momento("2026-10-22 11:40")) is None
+
+
 def test_rascunho_do_plano_que_nao_saiu_avisa_onde_parou_e_quando_tenta_de_novo(monkeypatch, avisos):
     # Escolha do Rafael (23/10): o "começando um rascunho" sempre tem um fim no privado.
     _fonte(monkeypatch, confere=False)
