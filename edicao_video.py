@@ -86,8 +86,10 @@ DIREITA_DA_LEGENDA = VISIVEL_NO_APP[1] - 12
 LETRA_DA_LEGENDA = (26, 22)         # a maior e a menor
 LINHAS_DA_LEGENDA = 2
 CONTORNO_DA_LEGENDA = 3
-# Cada trecho que a IA escreve; o que não cabe em LINHAS_DA_LEGENDA linhas é dividido em dois.
-MAXIMO_DA_LEGENDA = 50
+# A IA escreve a fala inteira, palavra por palavra, um trecho por frase dita e sem limite de tamanho
+# (com um limite, ela resume e pula frases); o trecho que não cabe em LINHAS_DA_LEGENDA linhas é
+# dividido aqui, com o tempo repartido pelo tamanho de cada parte. Pedido do Rafael (02/11):
+# DECISOES.md, Shopee Vídeo.
 # Um trecho mais curto que isto passa rápido demais para ler e sai.
 MINIMO_NA_TELA = 0.4
 PROCESSO_DAS_LEGENDAS = "edição do vídeo: legendas da fala"
@@ -818,10 +820,13 @@ _CANTO_NO_PROMPT = (
 # música ou canto, ou com a fala em outra língua, nenhuma.
 _LEGENDAS_NO_PROMPT = (
     "Escreva também as legendas do que as pessoas falam no vídeo (voz de gente falando, não música nem canto), "
-    "como foi dito, em português do Brasil, com a ortografia e a acentuação certas: \"legendas\", a lista dos "
-    "trechos na ordem, cada um com o começo e o fim em segundos desde o começo do vídeo e o texto falado, "
-    f"em trechos curtos de até {MAXIMO_DA_LEGENDA} caracteres, "
-    "como [{{\"inicio\": 0.0, \"fim\": 2.0, \"texto\": \"...\"}}]; [] se ninguém fala, se só tem música ou "
+    "em português do Brasil, com a ortografia e a acentuação certas: \"legendas\", a lista dos trechos na ordem, "
+    "cada um com o começo e o fim em segundos desde o começo do vídeo e o texto falado. O texto é exatamente o "
+    "que foi dito, palavra por palavra, do começo ao fim da fala: sem resumir, sem encurtar, sem trocar palavras "
+    "e sem pular nenhuma frase. Siga o áudio, não a imagem: cada frase dita entra uma vez, na ordem e no tempo "
+    "em que foi dita, mesmo quando a imagem se repete. Um trecho por frase (ou pedaço de frase) dita de uma vez, "
+    "do tamanho que for: as longas são divididas na tela. Como "
+    "[{{\"inicio\": 0.0, \"fim\": 2.0, \"texto\": \"...\"}}]; [] se ninguém fala, se só tem música ou "
     "canto, ou se a fala não é em português. Diga também se o próprio vídeo já mostra o que as pessoas falam "
     "escrito na tela (legenda da fala): \"legenda_no_video\", true ou false.\n"
 )
@@ -1470,17 +1475,43 @@ def legenda_da_fala(texto):
     return saida.getvalue()
 
 
-def _trechos_que_cabem(inicio, fim, texto):
-    """[(início, fim, imagem)] do trecho: o que não cabe numa legenda é dividido ao meio pelas palavras,
-    com o tempo repartido pelo tamanho de cada metade."""
+# Ao dividir um trecho em dois, o corte depois de uma vírgula ou de um ponto vale esta parte do tamanho
+# do trecho a mais perto do meio: a legenda fica com a frase inteira quando dá.
+PREFERENCIA_DA_PONTUACAO = 0.25
+
+
+def _ponto_de_corte(palavras):
+    """Onde dividir as palavras em duas partes: perto do meio (em letras), de preferência depois de uma pontuação."""
+    total = len(" ".join(palavras))
+    melhor, nota_melhor = len(palavras) // 2, None
+    for i in range(1, len(palavras)):
+        nota = abs(total - 2 * len(" ".join(palavras[:i]))) / total
+        if palavras[i - 1][-1:] in ",;:.!?":
+            nota -= PREFERENCIA_DA_PONTUACAO
+        if nota_melhor is None or nota < nota_melhor:
+            melhor, nota_melhor = i, nota
+    return melhor
+
+
+def pedacos_da_legenda(inicio, fim, texto):
+    """
+    [(início, fim, texto, imagem)] do trecho: o que não cabe numa legenda (LINHAS_DA_LEGENDA linhas) é
+    dividido em dois pelas palavras (_ponto_de_corte), com o tempo repartido pelo tamanho de cada parte,
+    até caber; nenhuma palavra fica de fora (só a palavra sozinha que nem a menor letra cabe).
+    """
     imagem = legenda_da_fala(texto)
     palavras = texto.split()
     if imagem or len(palavras) < 2:
-        return [(inicio, fim, imagem)] if imagem else []
-    meio = len(palavras) // 2
+        return [(inicio, fim, texto, imagem)] if imagem else []
+    meio = _ponto_de_corte(palavras)
     primeira, segunda = " ".join(palavras[:meio]), " ".join(palavras[meio:])
     corte = inicio + (fim - inicio) * len(primeira) / (len(primeira) + len(segunda))
-    return _trechos_que_cabem(inicio, corte, primeira) + _trechos_que_cabem(corte, fim, segunda)
+    return pedacos_da_legenda(inicio, corte, primeira) + pedacos_da_legenda(corte, fim, segunda)
+
+
+def _trechos_que_cabem(inicio, fim, texto):
+    """[(início, fim, imagem)] do trecho, já dividido em legendas que cabem (pedacos_da_legenda)."""
+    return [(comeco, final, imagem) for comeco, final, _texto, imagem in pedacos_da_legenda(inicio, fim, texto)]
 
 
 def letreiros_da_fala(legendas, duracao):
@@ -1687,9 +1718,13 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
     if not motivo_2:
         postas = resumo.get("legendas", 0)
+        # Com as palavras e os segundos de fala, o checkup vê se a IA resume a fala (poucas palavras
+        # por segundo): a legenda é a fala inteira (pedido do Rafael, 02/11).
+        palavras = sum(len(texto.split()) for _inicio, _fim, texto in legendas)
+        segundos = sum(max(0.0, fim - inicio) for inicio, fim, _texto in legendas)
         registro_processos.registrar("shopee_video", PROCESSO_DAS_LEGENDAS, "postas" if postas else "sem as legendas",
-                                     f"{postas} trecho(s)" if postas else sem_legendas or "nenhum trecho cabe",
-                                     ok=True if postas else None)
+                                     f"{postas} trecho(s), {palavras} palavra(s) em {segundos:.0f} s de fala"
+                                     if postas else sem_legendas or "nenhum trecho cabe", ok=True if postas else None)
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         detalhe = ""
         if textos.get("texto_no_video"):
