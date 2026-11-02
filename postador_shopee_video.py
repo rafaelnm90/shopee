@@ -1731,6 +1731,149 @@ def conferir_tela_final(d, video):
                    f"{len(nomes)} do vídeo: nada salvo (aviso no privado)")
 
 
+# --- Tirar um produto da tela final (P123) ---
+# Cada produto da fileira da tela final é um cartão (um filho da rv_product) com o nome
+# (tv_product_title) e um X (iv_close) que o tira do post. O robô só toca no X de dentro do
+# cartão do produto certo, achado pelo texto exato da tela. A janela que o X pode abrir para
+# confirmar ainda não foi vista: só um destes botões, e só com "produto" na tela, a confirma.
+X_DO_PRODUTO = "iv_close"
+CONFIRMAR_TIRAR = ("Remover", "Excluir", "Confirmar", "Sim", "OK")
+PERGUNTA_DE_TIRAR = ("remov", "exclu", "retir", "tirar", "apag")
+
+
+def _nos_com_id(no, ident):
+    return [filho for filho in no.iter("node") if filho.get("resource-id", "").split(":id/")[-1] == ident]
+
+
+def _cartoes(no):
+    """Os pedaços da árvore com o nome de um produto só (os cartões), descendo pelos que têm mais de um."""
+    cartoes = []
+    for filho in no.findall("node"):
+        titulos = [t for t in _nos_com_id(filho, "tv_product_title")
+                   if _limites(t) and t.get("visible-to-user", "true") == "true"]
+        if len(titulos) == 1:
+            cartoes.append((filho, titulos[0]))
+        elif titulos:
+            cartoes += _cartoes(filho)
+    return cartoes
+
+
+def cartoes_da_fileira(xml):
+    """
+    Os cartões que a fileira dos produtos da tela final mostra agora, da esquerda para a direita:
+    [(nome, caixa do X)], com o X de dentro do cartão do nome, ou None quando a tela não o mostra
+    (o cartão cortado na beira da fileira). O X de fora do cartão não conta: não dá para saber
+    de quem é.
+    """
+    try:
+        raiz = ET.fromstring(xml)
+    except ET.ParseError:
+        return []
+    fileira = next((no for no in raiz.iter("node")
+                    if no.get("resource-id", "").split(":id/")[-1] == FILEIRA_DOS_PRODUTOS), None)
+    if fileira is None or not _limites(fileira):
+        return []
+    x1, _, x2, _ = _limites(fileira)
+    cartoes = []
+    for cartao, titulo in _cartoes(fileira):
+        caixa = next((_limites(no) for no in _nos_com_id(cartao, X_DO_PRODUTO)
+                      if _limites(no) and no.get("visible-to-user", "true") == "true"), None)
+        if caixa and not x1 <= (caixa[0] + caixa[2]) // 2 <= x2:
+            caixa = None
+        cartoes.append((_limites(titulo)[0], titulo.get("text", ""), caixa))
+    return [(nome, caixa) for _, nome, caixa in sorted(cartoes, key=lambda cartao: cartao[0])]
+
+
+def fileira_no_comeco(d):
+    """Arrasta a fileira dos produtos para a direita, depressa, até ela parar no 1º produto."""
+    xml = d.dump_hierarchy()
+    fileira = next((el for el in elementos(xml) if el["id"] == FILEIRA_DOS_PRODUTOS), None)
+    if not fileira:
+        return
+    x1, y1, x2, y2 = fileira["caixa"]
+    meio, vista = (y1 + y2) // 2, produtos_na_fileira(xml)
+    for _ in range(ROLAGENS_DA_FILEIRA):
+        d.swipe(x1 + (x2 - x1) * 15 // 100, meio, x1 + (x2 - x1) * 85 // 100, meio, 0.3)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO / 2)
+        agora = produtos_na_fileira(d.dump_hierarchy())
+        if agora == vista:
+            return
+        vista = agora
+
+
+def _x_do_cartao(d, nome):
+    """
+    A caixa do X do cartão com esse nome exato: olha a fileira do começo e, sem o X dele na tela,
+    rola devagar (como a conferência) até ele aparecer ou a fileira parar. None se não achou.
+    """
+    fileira_no_comeco(d)
+    xml = d.dump_hierarchy()
+    fileira = next((el for el in elementos(xml) if el["id"] == FILEIRA_DOS_PRODUTOS), None)
+    for _ in range(ROLAGENS_DA_FILEIRA + 1):
+        cartoes = cartoes_da_fileira(xml)
+        caixa = next((caixa for texto, caixa in cartoes if texto == nome and caixa), None)
+        if caixa or not fileira:
+            return caixa
+        x1, y1, x2, y2 = fileira["caixa"]
+        de, ate = (x1 + (x2 - x1) * pct // 100 for pct in ARRASTO_DA_FILEIRA)
+        d.swipe(de, (y1 + y2) // 2, ate, (y1 + y2) // 2, SEGUNDOS_DO_ARRASTO)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO / 2)
+        depois = d.dump_hierarchy()
+        if cartoes_da_fileira(depois) == cartoes:
+            return None
+        xml = depois
+    return None
+
+
+def _confirmar_se_perguntar(d):
+    """
+    A janela que o X abriu, se abriu: só com a pergunta de tirar o produto na tela (um texto com
+    "produto" e uma PERGUNTA_DE_TIRAR, fora os nomes) e um dos CONFIRMAR_TIRAR. Diz se tocou.
+    """
+    lista = elementos(d.dump_hierarchy())
+    if not any("produto" in _normal(el["texto"]) and any(p in _normal(el["texto"]) for p in PERGUNTA_DE_TIRAR)
+               for el in lista if el["id"] != "tv_product_title"):
+        return False
+    botao = next((el for el in lista if el["clicavel"] and el["texto"] in CONFIRMAR_TIRAR), None)
+    if not botao:
+        return False
+    d.click(*_centro(botao))
+    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    return True
+
+
+def tirar_da_fileira(d, nomes, indice):
+    """
+    Tira da tela final o produto da posição indice (0 = o 1º) pelo X do cartão dele. nomes: os
+    produtos que a fileira tem agora, na ordem do anexar. A fileira é lida do começo ao fim e
+    tem de ser a dos nomes; o cartão é achado pelo texto exato da tela, que não pode se repetir
+    (dois iguais: não dá para saber qual X tocar). Depois do X (e da confirmação, se a janela
+    perguntar), a fileira tem de ser a mesma sem ele. Devolve (True, detalhe) ou (False, motivo),
+    em texto fixo: o nome não sai daqui.
+    """
+    fileira_no_comeco(d)
+    textos = _juntar_vistas(vistas_da_fileira(d))
+    if len(textos) != len(nomes):
+        return False, f"a fileira mostra {len(textos)} produto(s), e o rascunho tem {len(nomes)}"
+    if not _mesmos_em_ordem(textos, nomes):
+        return False, "a fileira não tem os produtos do rascunho, na ordem do anexar"
+    alvo = textos[indice]
+    if textos.count(alvo) > 1:
+        return False, "dois produtos com o mesmo nome na fileira: não dá para saber qual X tocar"
+    caixa = _x_do_cartao(d, alvo)
+    if not caixa:
+        return False, "não achei o X do produto na fileira"
+    d.click((caixa[0] + caixa[2]) // 2, (caixa[1] + caixa[3]) // 2)
+    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    confirmou = _confirmar_se_perguntar(d)
+    fileira_no_comeco(d)
+    depois = _juntar_vistas(vistas_da_fileira(d))
+    if depois != textos[:indice] + textos[indice + 1:]:
+        return False, (f"toquei no X do produto{' e confirmei' if confirmou else ''}, mas a fileira ficou com "
+                       f"{len(depois)} produto(s), e não com os {len(textos) - 1} que ficam")
+    return True, f"o {indice + 1}º produto saiu da fileira{' (com a confirmação)' if confirmou else ''}"
+
+
 # --- Link de vídeo: o Ver Produtos (mapeado no Motorola em 23/10/2026) ---
 # O link abre o player do vídeo (Live e Vídeo) com "Ver Produtos (N)"; o toque abre, por
 # cima, a lista com os produtos que o criador vinculou ao vídeo e, depois de "Ver Mais" e

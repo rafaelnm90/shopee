@@ -367,6 +367,7 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_confirmacao_pausa_robo = State()
     rascunho = State()
     aguardando_confirmacao_recusa = State()
+    aguardando_produtos_a_tirar = State()
     celular = State()
     aguardando_escolha_celular = State()
     aguardando_pareamento = State()
@@ -555,6 +556,11 @@ BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
 BOTAO_ANTERIOR = "Rascunho Anterior ⏮️"
+# Tirar Produto ➖ (P123): o Rafael marca os produtos que saem do post, e o robô os tira no
+# celular na hora de postar. Cada produto vira um botão "Produto N", com o ➖ quando marcado.
+BOTAO_TIRAR = "Tirar Produto ➖"
+BOTAO_PRONTO_TIRAR = "Pronto ✅"
+MARCA_DE_TIRAR = " ➖"
 # Os botões de pausar e retomar de cada robô trocam conforme o estado (pausado mostra
 # Retomar). Os antigos "Pausar Robô"/"Retomar Robô" ainda podem estar no teclado do
 # Rafael e valem para o assistente.
@@ -984,14 +990,20 @@ ESTADOS_DO_ROBO = ("aguardando_tipo_faixa_robo", "aguardando_faixa_robo", "aguar
                    "aguardando_confirmacao_janela_robo", "aguardando_janela_interacoes",
                    "aguardando_confirmacao_janela_interacoes", "aguardando_confirmacao_pausa_robo", "menu_robo",
                    "rascunho", "aguardando_confirmacao_recusa")
+# Do Tirar Produto ➖, o Cancelar ❌ volta ao rascunho, sem mudar as marcas.
+ESTADOS_DO_RASCUNHO = ("aguardando_produtos_a_tirar",)
 ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
                          "aguardando_confirmacao_janela", "aguardando_confirmacao_pausa", "menu_assistente")
 ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_pareamento", "aguardando_porta")
 
 
-async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, estado_anterior):
+async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, estado_anterior, dados=None):
     nome = (estado_anterior or "").split(":")[-1]
-    if nome in ESTADOS_DO_ROBO:
+    ident = (dados or {}).get("rascunho_id")
+    rascunho = robo.pegar(ident) if ident else None
+    if nome in ESTADOS_DO_RASCUNHO and rascunho and rascunho["estado"] == "rascunho":
+        await mostrar_texto_do_rascunho(message, state, rascunho)
+    elif nome in ESTADOS_DO_ROBO or nome in ESTADOS_DO_RASCUNHO:
         await mostrar_robo(message, state)
     elif nome in ESTADOS_DO_ASSISTENTE:
         await mostrar_assistente(message, state)
@@ -1600,15 +1612,17 @@ async def treino_handler(message: types.Message, state: FSMContext):
 
 # --- Rascunhos do robô: aprovar um por um ---
 
-def teclado_rascunho(anterior=False, proximo=False):
+def teclado_rascunho(anterior=False, proximo=False, tirar=False):
     """
     O teclado de um rascunho: o Rascunho Anterior só quando há um antes dele e o Próximo
     Rascunho só quando há um depois; com um rascunho só, nenhum dos dois (o Próximo não dá a
-    volta). Pedido do Rafael (30/10): DECISOES.md, Shopee Vídeo.
+    volta). Pedido do Rafael (30/10): DECISOES.md, Shopee Vídeo. O Tirar Produto ➖ só no
+    rascunho com 2 produtos ou mais (P123).
     """
     navegar = ([KeyboardButton(text=BOTAO_ANTERIOR)] if anterior else []) + \
               ([KeyboardButton(text=BOTAO_PROXIMO)] if proximo else [])
     return montar_teclado([[KeyboardButton(text=BOTAO_APROVAR), KeyboardButton(text=BOTAO_RECUSAR)]]
+                          + ([[KeyboardButton(text=BOTAO_TIRAR)]] if tirar else [])
                           + ([navegar] if navegar else []) + [[KeyboardButton(text=BOTAO_VOLTAR)]])
 
 
@@ -1665,6 +1679,8 @@ OUTRA_FOTO_NO_TEXTO = " ⚠️ outra foto de capa"
 # que troca, e o Rafael confere antes de aprovar. Pedidos dele (01/11 e 02/11): DECISOES.md,
 # Shopee Vídeo.
 OUTRA_COR_NO_TEXTO = " 🎨 outra cor (a foto vai na miniatura)"
+# A marca do produto que o Rafael marcou no Tirar Produto ➖ (P123): o robô o tira na hora de postar.
+TIRAR_NO_TEXTO = " ➖ sai do post"
 
 
 def numeros_por_extenso(posicoes):
@@ -1693,11 +1709,12 @@ def linhas_dos_produtos(rascunho):
         links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
         if len(links) != len(nomes):
             return ("\n".join(f"• {html_escape(nome)}" for nome in nomes) or "• ?") + "\n" + linhas_dos_links(rascunho)
-    # O produto com outra foto de capa que a do anúncio do post vem marcado (P102), e o de outra
-    # cor também.
+    # O produto com outra foto de capa que a do anúncio do post vem marcado (P102), o de outra
+    # cor também, e o que o Rafael marcou para sair do post (P123).
     outras, de_outra_cor = set(rascunho.get("outras_capas") or []), set(rascunho.get("outra_cor") or [])
+    tirar = set(rascunho.get("tirar") or [])
     return "".join(f"• {html_escape(nome)}{OUTRA_FOTO_NO_TEXTO if n in outras else ''}"
-                   f"{OUTRA_COR_NO_TEXTO if n in de_outra_cor else ''}\n"
+                   f"{OUTRA_COR_NO_TEXTO if n in de_outra_cor else ''}{TIRAR_NO_TEXTO if n in tirar else ''}\n"
                    + (f"🔗 {html_escape(link)}" if link else SEM_O_LINK_DO_PRODUTO) + "\n"
                    for n, (nome, link) in enumerate(zip(nomes, links), 1)) + fim
 
@@ -1714,7 +1731,9 @@ def texto_rascunho(rascunho, posicao, total):
             f"{linhas_da_conferencia(rascunho.get('conferencia'))}{linha_do_rotulo_de_ia(rascunho.get('rotulo_ia'))}"
             f"{aviso}"
             f"<b>{BOTAO_APROVAR}</b>: o robô posta, um de cada vez, dentro do Horário do Robô.\n"
-            f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta.")
+            f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta."
+            + (f"\n<b>{BOTAO_TIRAR}</b>: marque os produtos que saem do post; o robô os tira no celular na hora "
+               "de postar." if robo.pode_tirar(rascunho) else ""))
 
 
 # O Telegram manda até 10 fotos num álbum; o post tem até 6 produtos.
@@ -1806,7 +1825,25 @@ async def mostrar_rascunho(message, state, depois_de=None, antes_de=None):
             for n, foto in enumerate(recusadas)])
     await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
                          disable_web_page_preview=True,
-                         reply_markup=teclado_rascunho(posicao > 1, posicao < len(pendentes)))
+                         reply_markup=teclado_rascunho(posicao > 1, posicao < len(pendentes), robo.pode_tirar(rascunho)))
+
+
+async def mostrar_texto_do_rascunho(message, state, rascunho):
+    """
+    Só o texto do rascunho, com o teclado dele, sem mandar de novo o vídeo, o print e os álbuns:
+    a volta do Tirar Produto ➖, com as marcas de quem sai do post.
+    """
+    pendentes = robo.esperando_aprovacao()
+    ids = [r["id"] for r in pendentes]
+    if rascunho["id"] not in ids:
+        await mostrar_rascunho(message, state)
+        return
+    posicao = ids.index(rascunho["id"]) + 1
+    await state.set_state(ShopeeVideoFluxo.rascunho)
+    await state.update_data(rascunho_id=rascunho["id"])
+    await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
+                         disable_web_page_preview=True,
+                         reply_markup=teclado_rascunho(posicao > 1, posicao < len(pendentes), robo.pode_tirar(rascunho)))
 
 
 @router.message(F.text == BOTAO_RASCUNHOS, StateFilter("*"))
@@ -1835,8 +1872,11 @@ async def aprovar_handler(message: types.Message, state: FSMContext):
         return
     quando = robo.aprovar(rascunho["id"])
     logger.info("✅ Shopee Vídeo: rascunho aprovado.")
+    tirar = sorted(rascunho.get("tirar") or []) if robo.pode_tirar(rascunho) else []
+    sem_eles = (f" Na hora de postar, ele tira {numeros_por_extenso(tirar)} "
+                f"{'produtos' if len(tirar) > 1 else 'produto'}, como você marcou." if tirar else "")
     await message.answer(f"✅ Aprovado. O robô posta por volta de <b>{_data_curta(quando)}</b> e manda aqui o "
-                         "link do post e o comentário.", parse_mode="HTML")
+                         f"link do post e o comentário.{sem_eles}", parse_mode="HTML")
     await mostrar_rascunho(message, state, depois_de=rascunho["id"])
 
 
@@ -1858,7 +1898,7 @@ async def proximo_handler(message: types.Message, state: FSMContext):
     # O botão de um teclado antigo no último rascunho: só avisa, sem mandar o mesmo de novo.
     if ident in ids and ids.index(ident) == len(ids) - 1:
         await message.answer("📝 Este é o último rascunho: não há próximo.",
-                             reply_markup=teclado_rascunho(len(ids) > 1, False))
+                             reply_markup=teclado_rascunho(len(ids) > 1, False, robo.pode_tirar(robo.pegar(ident))))
         return
     await mostrar_rascunho(message, state, depois_de=ident)
 
@@ -1870,9 +1910,86 @@ async def anterior_handler(message: types.Message, state: FSMContext):
     ids = [r["id"] for r in robo.esperando_aprovacao()]
     if ident in ids and ids.index(ident) == 0:
         await message.answer("📝 Este é o primeiro rascunho: não há anterior.",
-                             reply_markup=teclado_rascunho(False, len(ids) > 1))
+                             reply_markup=teclado_rascunho(False, len(ids) > 1, robo.pode_tirar(robo.pegar(ident))))
         return
     await mostrar_rascunho(message, state, antes_de=ident)
+
+
+# --- Tirar Produto ➖ (P123): marcar os produtos que saem do post ---
+
+def texto_tirar(rascunho, marcados):
+    """A tela do Tirar Produto ➖: os produtos numerados, na ordem do post, com o ➖ nos que saem."""
+    linhas = "\n".join(f"{n}. {html_escape(nome)}{TIRAR_NO_TEXTO if n in marcados else ''}"
+                       for n, nome in enumerate(rascunho["produtos"], 1))
+    return ("➖ <b>Tirar produto do post</b>\n\n"
+            "Toque no número de cada produto que sai do post; tocando de novo, ele volta. Pelo menos 1 fica.\n\n"
+            f"{linhas}\n\n"
+            f"<b>{BOTAO_PRONTO_TIRAR}</b>: guarda a escolha e volta ao rascunho, para você aprovar. Na hora de "
+            "postar, o robô tira os marcados no celular e confere a tela final antes do Postar. O vídeo fica "
+            "como está, e o Canal Afiliados recebe só os links que ficam.")
+
+
+def teclado_tirar(total, marcados):
+    """Um botão por produto (Produto N, com o ➖ quando marcado), 3 por linha, e o Pronto ao lado do Cancelar."""
+    botoes = [KeyboardButton(text=f"Produto {n}{MARCA_DE_TIRAR if n in marcados else ''}")
+              for n in range(1, total + 1)]
+    return montar_teclado([botoes[i:i + 3] for i in range(0, len(botoes), 3)]
+                          + [[KeyboardButton(text=BOTAO_PRONTO_TIRAR), KeyboardButton(text="Cancelar ❌")]])
+
+
+@router.message(F.text == BOTAO_TIRAR, StateFilter("*"))
+async def pedir_produtos_a_tirar(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    rascunho = await _rascunho_da_vez(message, state)
+    if not rascunho:
+        return
+    if not robo.pode_tirar(rascunho):
+        await message.answer("🛍️ Este rascunho tem um produto só, e ele fica no post.")
+        return
+    marcados = sorted(rascunho.get("tirar") or [])
+    await state.set_state(ShopeeVideoFluxo.aguardando_produtos_a_tirar)
+    await state.update_data(tirar=marcados)
+    await message.answer(texto_tirar(rascunho, marcados), parse_mode="HTML",
+                         reply_markup=teclado_tirar(len(rascunho["produtos"]), marcados))
+
+
+@router.message(ShopeeVideoFluxo.aguardando_produtos_a_tirar, F.text == BOTAO_PRONTO_TIRAR)
+async def salvar_produtos_a_tirar(message: types.Message, state: FSMContext):
+    rascunho = await _rascunho_da_vez(message, state)
+    if not rascunho:
+        return
+    marcados = sorted((await state.get_data()).get("tirar") or [])
+    robo.atualizar(rascunho["id"], tirar=marcados)
+    logger.info(f"➖ Shopee Vídeo: {len(marcados)} produto(s) marcado(s) para sair do post.")
+    await message.answer(f"➖ Guardado: {numeros_por_extenso(marcados)} "
+                         f"{'saem' if len(marcados) > 1 else 'sai'} do post na hora de postar." if marcados else
+                         "➖ Guardado: nenhum produto sai do post.")
+    await mostrar_texto_do_rascunho(message, state, robo.pegar(rascunho["id"]))
+
+
+@router.message(ShopeeVideoFluxo.aguardando_produtos_a_tirar)
+async def marcar_produto_a_tirar(message: types.Message, state: FSMContext):
+    rascunho = await _rascunho_da_vez(message, state)
+    if not rascunho:
+        return
+    total = len(rascunho["produtos"])
+    marcados = set((await state.get_data()).get("tirar") or [])
+    achado = re.fullmatch(r"Produto (\d+)(?:" + re.escape(MARCA_DE_TIRAR) + ")?", (message.text or "").strip())
+    numero = int(achado.group(1)) if achado else 0
+    if not 1 <= numero <= total:
+        await message.answer(f"Toque no número de um produto, em {BOTAO_PRONTO_TIRAR} ou em Cancelar ❌.",
+                             reply_markup=teclado_tirar(total, marcados))
+        return
+    if numero in marcados:
+        marcados.discard(numero)
+    elif len(marcados) + 1 >= total:
+        await message.answer("🛍️ Pelo menos 1 produto fica no post: desmarque outro antes de marcar este.",
+                             reply_markup=teclado_tirar(total, marcados))
+        return
+    else:
+        marcados.add(numero)
+    await state.update_data(tirar=sorted(marcados))
+    await message.answer(texto_tirar(rascunho, marcados), parse_mode="HTML", reply_markup=teclado_tirar(total, marcados))
 
 
 # --- Celular do robô ---

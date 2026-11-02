@@ -684,7 +684,7 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor")
+           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -704,8 +704,10 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # Rafael os vê num álbum à parte, para conferir a IA (pedido dele de 01/11, provisório).
 # outra_cor: as posições (1, 2, ...) dos produtos do post que são o mesmo modelo em outra cor ou
 # estampa, com a foto na miniatura que troca: o texto e o álbum do rascunho os marcam (02/11).
+# tirar: as posições (1, 2, ...) dos produtos que o Rafael marcou para sair do post (P123): o robô
+# os tira da tela final na hora de postar, e o rascunho postado fica só com os que ficaram.
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
-                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor")
+                 "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar")
 
 
 def _criar_tabela(con):
@@ -735,6 +737,7 @@ def _linha_para_dict(linha):
     rascunho["outras_capas"] = json.loads(rascunho["outras_capas"] or "[]")
     rascunho["recusadas"] = json.loads(rascunho["recusadas"] or "[]")
     rascunho["outra_cor"] = json.loads(rascunho["outra_cor"] or "[]")
+    rascunho["tirar"] = json.loads(rascunho["tirar"] or "[]")
     return rascunho
 
 
@@ -758,7 +761,7 @@ def pegar(ident):
 
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
-                   "recusadas", "outra_cor"):
+                   "recusadas", "outra_cor", "tirar"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -1962,6 +1965,70 @@ def video_do_rascunho(rascunho):
     """O vídeo no formato que as conferências do explorar usam, com os produtos que o rascunho anexou."""
     return {"id": rascunho["id_video"], "arquivo": rascunho["arquivo"], "link": rascunho["link"],
             "nome": (rascunho["produtos"] or [""])[0], "produtos": rascunho["produtos"] or []}
+
+
+# --- Tirar produto no post (P123) ---
+# Em Rascunhos do Robô, o Rafael marca os produtos que saem do post (Tirar Produto ➖) e aprova; na
+# hora de postar, o robô os tira da tela final pelo X de cada um, confere a tela final e posta. O
+# Canal Afiliados e a medição das vendas recebem só os que ficaram, e sempre fica pelo menos 1.
+# Escolha do Rafael (02/11, P123): DECISOES.md, Shopee Vídeo.
+PROCESSO_DE_TIRAR = "tirar produto no post"
+
+
+def pode_tirar(rascunho):
+    """
+    O rascunho deixa tirar produto? Com 2 produtos ou mais, cada um com o seu link: no vídeo de
+    link, o do link e os produtos a mais; no Ver Produtos, um link por produto.
+    """
+    nomes = rascunho.get("produtos") or []
+    if len(nomes) < 2:
+        return False
+    if rascunho.get("links_dos_produtos"):
+        return len(rascunho["links_dos_produtos"]) == len(nomes)
+    return len(rascunho.get("mais_produtos") or []) + 1 == len(nomes)
+
+
+def _posicao_da_capa(caminho):
+    """A posição do produto (1, 2, ...) pelo nome do arquivo da foto de capa ({ident}_capa_{n}); None se não diz."""
+    achado = re.search(r"_capa_(\d+)\.", os.path.basename(caminho or ""))
+    return int(achado.group(1)) if achado else None
+
+
+def com_os_que_ficam(rascunho):
+    """
+    O rascunho só com os produtos que ficam no post, sem os que o Rafael marcou para tirar: os
+    nomes, o link (o do 1º que fica, no vídeo de link), os produtos a mais, os links do Ver
+    Produtos, os itens da medição, as fotos de capa e as marcas, renumeradas. A conferência da
+    tela final no post, o Canal Afiliados e a medição das vendas saem daqui. Sem marca (ou com
+    todas, o que o painel não deixa), o mesmo rascunho.
+    """
+    nomes = list(rascunho.get("produtos") or [])
+    tirar = {n for n in rascunho.get("tirar") or [] if 1 <= n <= len(nomes)}
+    ficam = [n for n in range(1, len(nomes) + 1) if n not in tirar]
+    if not tirar or not ficam or not pode_tirar(rascunho):
+        return rascunho
+    nova = {antiga: posicao for posicao, antiga in enumerate(ficam, 1)}
+
+    def por_posicao(lista):
+        return [lista[n - 1] for n in ficam] if len(lista) == len(nomes) else list(lista)
+
+    filtrado = dict(rascunho, tirar=[], produtos=por_posicao(nomes), itens=por_posicao(rascunho.get("itens") or []),
+                    capas=[c for c in rascunho.get("capas") or [] if _posicao_da_capa(c) not in tirar],
+                    outras_capas=[nova[n] for n in rascunho.get("outras_capas") or [] if n in nova],
+                    outra_cor=[nova[n] for n in rascunho.get("outra_cor") or [] if n in nova])
+    if rascunho.get("links_dos_produtos"):
+        # Ver Produtos: o link do rascunho é o do vídeo original; cada produto tem o seu.
+        filtrado["links_dos_produtos"] = por_posicao(rascunho["links_dos_produtos"])
+    else:
+        produtos = por_posicao([{"link": rascunho["link"]}] + list(rascunho.get("mais_produtos") or []))
+        filtrado.update(link=produtos[0]["link"], mais_produtos=produtos[1:])
+    return filtrado
+
+
+def campos_que_ficam(filtrado):
+    """O que o rascunho postado guarda depois de tirar os produtos marcados (com_os_que_ficam)."""
+    return {campo: filtrado[campo] for campo in ("produtos", "link", "mais_produtos", "itens", "capas", "outras_capas",
+                                                 "outra_cor", "links_dos_produtos", "tirar") if campo in filtrado}
 
 
 def avisar(texto):
@@ -4568,6 +4635,26 @@ def _forma_do_titulo(titulo):
             f"{sum(ord(c) > 0xFFFF for c in titulo)} emoji(s) de fora do plano básico")
 
 
+def tirar_os_marcados(d, rascunho):
+    """
+    No rascunho reaberto para postar, tira da tela final os produtos que o Rafael marcou para
+    sair do post (P123), do último para o primeiro (tirar um não muda a posição dos de antes
+    dele), pelo X de cada um. O que não sai para o post sem tocar em mais nada: o aprovado tenta
+    de novo (P99), e o app, sem salvar, volta a ter todos. Devolve quantos tirou.
+    """
+    marcados = sorted({n for n in rascunho.get("tirar") or [] if 1 <= n <= len(rascunho["produtos"])}, reverse=True)
+    nomes = list(rascunho["produtos"])
+    for posicao in marcados:
+        ok, motivo = ps.tirar_da_fileira(d, nomes, posicao - 1)
+        if not ok:
+            registro_processos.registrar(REGISTRO, PROCESSO_DE_TIRAR, "de fora", motivo, ok=False)
+            raise Parada(f"não consegui tirar o {posicao}º produto, que você marcou para sair do post: {motivo}")
+        nomes.pop(posicao - 1)
+    registro_processos.registrar(REGISTRO, PROCESSO_DE_TIRAR, "tirados",
+                                 f"{len(marcados)} de {len(rascunho['produtos'])} produtos", ok=True)
+    return len(marcados)
+
+
 def abrir_rascunho(d, rascunho):
     """
     Abre o rascunho e chega à tela final; confere que a legenda é o título dele e que o
@@ -4597,26 +4684,38 @@ def publicar(d, rascunho, agora=None):
     """
     Posta o rascunho aprovado e manda no privado o link do post e o comentário. Antes,
     olha nas Notificações se a conta está suspensa: não se sabe o que o Postar faz com a
-    conta suspensa, e o robô não marca como postado o que não foi ao ar.
+    conta suspensa, e o robô não marca como postado o que não foi ao ar. Os produtos que o
+    Rafael marcou para sair do post saem antes de tudo (P123), e a tela final é conferida
+    só com os que ficam.
     """
     ate = ler_suspensao(d, agora)
     if ate:
         raise Suspensa(ate)
+    # O rascunho reaberto tem todos os produtos: o app só guarda o rascunho pelo Salvar, e a
+    # volta da tela final do post que não saiu descarta o que o robô mudou nela.
     abrir_rascunho(d, rascunho)
+    no_post = com_os_que_ficam(rascunho)
+    if no_post is not rascunho:
+        tirar_os_marcados(d, rascunho)
+        _conferir(ps.conferir_tela_final(d, video_do_rascunho(no_post)), do_video=False)
     capa_de_novo_no_post(d, rascunho, agora)
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rascunho.get("rotulo_ia"))), do_video=False)
-    _conferir(ps.postar(d, video_do_rascunho(rascunho)), do_video=False)
+    _conferir(ps.postar(d, video_do_rascunho(no_post)), do_video=False)
     pausa(15)
-    atualizar(rascunho["id"], estado="postado", postado_em=_momento(agora))
+    atualizar(rascunho["id"], estado="postado", postado_em=_momento(agora),
+              **(campos_que_ficam(no_post) if no_post is not rascunho else {}))
     link = link_do_post(d, ident=rascunho["id"])
     if link:
         atualizar(rascunho["id"], link_post=link)
-    avisar("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou.\n\n"
-           + (f"🔗 {link}" if link else "O link do post está no seu Perfil em Shopee Vídeo."))
+    sairam = len(rascunho["produtos"]) - len(no_post["produtos"])
+    avisar("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou"
+           + (f", sem {'os produtos' if sairam > 1 else 'o produto'} que você marcou para sair "
+              f"({sairam} de {len(rascunho['produtos'])})" if sairam else "")
+           + ".\n\n" + (f"🔗 {link}" if link else "O link do post está no seu Perfil em Shopee Vídeo."))
     if rascunho["comentario"]:
         avisar(ps.AVISO_COMENTARIO)
         avisar(rascunho["comentario"])
-    levar_ao_canal(rascunho, link)
+    levar_ao_canal(no_post, link)
     return "rascunho aprovado postado"
 
 

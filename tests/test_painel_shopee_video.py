@@ -677,6 +677,85 @@ def test_aprovar_rascunho_ja_resolvido_mostra_o_proximo(bm, Msg, Est):
     assert sv.robo.pegar(ident)["estado"] == "recusado" and "já foi resolvido" in msg.saidas[0]
 
 
+def _rascunho_com_tres(sv):
+    ident = _rascunho(sv)
+    sv.robo.atualizar(ident, produtos=["Cubo A", "Cubo B", "Cubo C"],
+                      mais_produtos=[{"nome": "Cubo B", "link": "https://s.shopee.com.br/b", "endereco": ""},
+                                     {"nome": "Cubo C", "link": "https://s.shopee.com.br/c", "endereco": ""}])
+    return ident
+
+
+def test_tirar_produto_marca_os_que_saem_do_post_e_pelo_menos_1_fica(bm, Msg, Est):
+    # Escolha do Rafael (02/11, P123): em vez de recusar o rascunho inteiro por um produto, ele
+    # marca os que saem do post e aprova; o robô os tira no celular na hora de postar. Sempre fica
+    # pelo menos 1, e as marcas só são guardadas no Pronto.
+    sv, est = _painel(bm), Est()
+    ident = _rascunho_com_tres(sv)
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert _botoes(msg.teclados[-1]) == [sv.BOTAO_APROVAR, sv.BOTAO_RECUSAR, sv.BOTAO_TIRAR, sv.BOTAO_VOLTAR]
+    assert "<b>Tirar Produto ➖</b>: marque os produtos que saem do post" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, sv.BOTAO_TIRAR)
+    rodar(sv.pedir_produtos_a_tirar(msg, est))
+    assert est.estado == sv.ShopeeVideoFluxo.aguardando_produtos_a_tirar
+    assert "1. Cubo A\n2. Cubo B\n3. Cubo C\n" in msg.saidas[-1]
+    assert _botoes(msg.teclados[-1]) == ["Produto 1", "Produto 2", "Produto 3", "Pronto ✅", "Cancelar ❌"]
+    for texto in ("Produto 2", "Produto 1"):
+        msg = MsgComMidia(Msg, texto)
+        rodar(sv.marcar_produto_a_tirar(msg, est))
+    assert "1. Cubo A ➖ sai do post\n2. Cubo B ➖ sai do post\n3. Cubo C\n" in msg.saidas[-1]
+    assert _botoes(msg.teclados[-1])[:3] == ["Produto 1 ➖", "Produto 2 ➖", "Produto 3"]
+    # O último que fica não sai; tocando de novo num marcado, ele volta.
+    msg = MsgComMidia(Msg, "Produto 3")
+    rodar(sv.marcar_produto_a_tirar(msg, est))
+    assert "Pelo menos 1 produto fica no post" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, "Produto 1 ➖")
+    rodar(sv.marcar_produto_a_tirar(msg, est))
+    assert _botoes(msg.teclados[-1])[:3] == ["Produto 1", "Produto 2 ➖", "Produto 3"]
+    msg = MsgComMidia(Msg, "Produto 9")
+    rodar(sv.marcar_produto_a_tirar(msg, est))
+    assert msg.saidas[-1].startswith("Toque no número de um produto")
+    assert sv.robo.pegar(ident)["tirar"] == []
+    msg = MsgComMidia(Msg, "Pronto ✅")
+    rodar(sv.salvar_produtos_a_tirar(msg, est))
+    assert sv.robo.pegar(ident)["tirar"] == [2]
+    assert msg.saidas[0] == "➖ Guardado: o 2º sai do post na hora de postar."
+    # Volta ao rascunho só com o texto (sem mandar o vídeo de novo), com a marca.
+    assert "• Cubo B ➖ sai do post\n🔗 https://s.shopee.com.br/b" in msg.saidas[-1] and msg.midias == []
+    assert est.estado == sv.ShopeeVideoFluxo.rascunho
+    msg = MsgComMidia(Msg, "Aprovar Rascunho ✅")
+    rodar(sv.aprovar_handler(msg, est))
+    assert "Na hora de postar, ele tira o 2º produto, como você marcou." in msg.saidas[0]
+    assert sv.robo.pegar(ident)["estado"] == "aprovado" and sv.robo.pegar(ident)["tirar"] == [2]
+
+
+def test_tirar_produto_so_com_dois_produtos_ou_mais(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    _rascunho(sv)
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert sv.BOTAO_TIRAR not in _botoes(msg.teclados[-1]) and "Tirar Produto" not in msg.saidas[-1]
+    msg = MsgComMidia(Msg, sv.BOTAO_TIRAR)
+    rodar(sv.pedir_produtos_a_tirar(msg, est))
+    assert msg.saidas == ["🛍️ Este rascunho tem um produto só, e ele fica no post."]
+    assert est.estado == sv.ShopeeVideoFluxo.rascunho
+
+
+def test_cancelar_o_tirar_produto_volta_ao_rascunho_sem_mudar_nada(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    ident = _rascunho_com_tres(sv)
+    sv.robo.atualizar(ident, tirar=[3])
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    rodar(sv.pedir_produtos_a_tirar(MsgComMidia(Msg, sv.BOTAO_TIRAR), est))
+    rodar(sv.marcar_produto_a_tirar(MsgComMidia(Msg, "Produto 1"), est))
+    msg = MsgComMidia(Msg, "Cancelar ❌")
+    rodar(bm.cancelar_fluxo_global(msg, est))
+    assert sv.robo.pegar(ident)["tirar"] == [3]
+    assert "cancelada" in msg.saidas[0] and "• Cubo C ➖ sai do post" in msg.saidas[-1]
+    assert "• Cubo A\n" in msg.saidas[-1] and msg.midias == []
+    assert est.estado == sv.ShopeeVideoFluxo.rascunho and sv.BOTAO_TIRAR in _botoes(msg.teclados[-1])
+
+
 def test_robo_roda_a_cada_15_min_so_ativo_e_no_horario(bm, monkeypatch):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     sv = _painel(bm)
