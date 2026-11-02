@@ -423,6 +423,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      junta os pedaços da mesma faixa (`_juntar_os_pedacos`). A faixa entra da largura da figurinha
      toda, como antes da moldura da P115: a receita guardada com a faixa mais estreita dela não
      serve (`receita_serve`), e a primeira figurinha que der certo guarda a nova.
+  11. **o laranja da foto embaixo da figurinha** (01/11/2026, 22:44): o 1º quadro do vídeo é a
+     foto do anúncio, e uma etiqueta laranja da loja nela tinha mais linhas que a faixa da
+     figurinha recém-posta: a medida pegou a etiqueta, os dois dedos foram feitos nela, longe da
+     figurinha, e o app não mudou nada. O robô guarda o print da tela da capa antes de pôr a
+     figurinha e mede a faixa só onde o print mudou depois (`caixa_da_figurinha`).
 
   **Teste completo (18/10/2026)**, da tela final em diante:
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →

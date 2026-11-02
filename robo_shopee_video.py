@@ -3390,6 +3390,17 @@ MINUTOS_PARA_A_CAPA = 22
 CHAVE_FIGURINHA = "shopee_video_figurinha"
 FOLGA_DA_ENTRADA = 0.1
 GESTOS_DA_RECEITA = 8
+# A faixa é medida só onde está a figurinha: o 1º quadro do vídeo, embaixo dela, é a foto do
+# anúncio, que pode ter laranja (a etiqueta de uma loja) maior que a faixa da figurinha recém-posta
+# (22:44 de 01/11: os dois dedos foram feitos na etiqueta, longe da figurinha, e nada mudou). O
+# robô guarda o print da tela da capa antes de pôr a figurinha, e o que mudou depois é ela
+# (caixa_da_figurinha): pontos com uma cor que mudou mais que MUDANCA_NO_PRINT, nas linhas e
+# colunas com pelo menos PONTOS_MUDADOS deles, no maior trecho seguido (buracos de até
+# BURACO_NA_FIGURINHA), com FOLGA_DA_CAIXA em volta.
+MUDANCA_NO_PRINT = 48
+PONTOS_MUDADOS = 6
+BURACO_NA_FIGURINHA = 60
+FOLGA_DA_CAIXA = 8
 # O rascunho guardado e reaberto para postar volta com a capa de sempre: o app não guarda nele a
 # figurinha da capa (o post das 14:55 de 01/11 foi à grade com o 1º quadro do vídeo, sem a faixa,
 # e continuava assim 2 horas depois). A capa com a frase do rascunho fica no servidor
@@ -3435,7 +3446,54 @@ def faixa_esperada(capa, quadro):
     return (y1 + cima * escala, y1 + baixo * escala, x1 + esquerda * escala, x1 + direita * escala)
 
 
-def ajustar_a_figurinha(d, capa, quadro, receita=None, aprendida=None):
+def _maior_trecho(indices, pesos, buraco):
+    """
+    Dos índices em ordem (com o peso de cada um), o trecho seguido de mais peso, aceitando
+    buracos de até buraco índices: (primeiro, último). None sem índices.
+    """
+    melhor, peso_melhor, inicio, anterior, soma = None, -1, None, None, 0
+    for indice, peso in zip(indices, pesos):
+        if anterior is not None and indice - anterior > buraco + 1:
+            if soma > peso_melhor:
+                melhor, peso_melhor = (inicio, anterior), soma
+            inicio, soma = None, 0
+        inicio = indice if inicio is None else inicio
+        soma, anterior = soma + peso, indice
+    if inicio is not None and soma > peso_melhor:
+        melhor = (inicio, anterior)
+    return melhor
+
+
+def caixa_da_figurinha(imagem, fundo, quadro):
+    """
+    Onde está a figurinha no print da tela da capa (PIL): o que mudou desde o print da mesma tela
+    antes dela (fundo, PIL), dentro do quadro do vídeo, com FOLGA_DA_CAIXA em volta: (x1, y1, x2,
+    y2). O quadro inteiro sem o fundo, com o fundo de outro tamanho ou sem nada mudado.
+    """
+    import numpy
+    if fundo is None or fundo.size != imagem.size:
+        return quadro
+    x1, y1, x2, y2 = quadro
+    agora = numpy.asarray(imagem.convert("RGB").crop(quadro), dtype=numpy.int16)
+    antes = numpy.asarray(fundo.convert("RGB").crop(quadro), dtype=numpy.int16)
+    mudou = numpy.abs(agora - antes).max(axis=2) > MUDANCA_NO_PRINT
+    por_linha = mudou.sum(axis=1)
+    linhas = numpy.flatnonzero(por_linha >= PONTOS_MUDADOS)
+    trecho = _maior_trecho(linhas, por_linha[linhas], BURACO_NA_FIGURINHA)
+    if not trecho:
+        return quadro
+    cima, baixo = trecho
+    por_coluna = mudou[cima:baixo + 1].sum(axis=0)
+    colunas = numpy.flatnonzero(por_coluna >= PONTOS_MUDADOS)
+    trecho = _maior_trecho(colunas, por_coluna[colunas], BURACO_NA_FIGURINHA)
+    if not trecho:
+        return quadro
+    esquerda, direita = trecho
+    return (max(x1, x1 + int(esquerda) - FOLGA_DA_CAIXA), max(y1, y1 + int(cima) - FOLGA_DA_CAIXA),
+            min(x2, x1 + int(direita) + 1 + FOLGA_DA_CAIXA), min(y2, y1 + int(baixo) + 1 + FOLGA_DA_CAIXA))
+
+
+def ajustar_a_figurinha(d, capa, quadro, receita=None, aprendida=None, fundo=None):
     """
     Deixa a figurinha do tamanho e no lugar do desenho: mede a faixa laranja no print, aumenta ou
     diminui com dois dedos em volta do meio dela (pelo ganho aprendido com os gestos de antes,
@@ -3443,7 +3501,8 @@ def ajustar_a_figurinha(d, capa, quadro, receita=None, aprendida=None):
     Com a receita da última que deu certo ({"quadro", "entrada", "gestos", "ganho"}) servindo
     (receita_serve), o 1º ajuste refaz os gestos dela de uma vez, e o ganho começa do dela.
     aprendida recebe a receita desta (o quadro, a largura e o alto da faixa ao entrar, os gestos
-    feitos e o ganho). (ok, o que dizer no registro, só números)
+    feitos e o ganho). Com o fundo (o print da tela da capa antes da figurinha, PIL), a faixa é
+    medida só na figurinha (caixa_da_figurinha). (ok, o que dizer no registro, só números)
     """
     esperada = faixa_esperada(capa, quadro)
     if not esperada:
@@ -3453,7 +3512,8 @@ def ajustar_a_figurinha(d, capa, quadro, receita=None, aprendida=None):
     medidas, ganho, gesto, gestos, refeitos, entrada = [], receita.get("ganho") or 1.0, None, [], 0, None
     aprendida = {} if aprendida is None else aprendida
     for ajuste in range(AJUSTES_DA_FIGURINHA + 1):
-        medida = edicao_video.faixa_laranja(d.screenshot(), quadro)
+        imagem = d.screenshot()
+        medida = edicao_video.faixa_laranja(imagem, caixa_da_figurinha(imagem, fundo, quadro))
         if not medida:
             return False, _com_as_medidas(f"a faixa laranja não apareceu na capa ({ajuste} ajuste(s))",
                                           medidas, esperada)
@@ -3705,6 +3765,8 @@ def _figurinha_na_capa(d, capa, receita=None, aprendida=None):
     tocar(d, "@tv_select_cover", 6)
     if not esperar_na_tela(d, "@fl_add_sticker", ESPERA_A_MAIS_NO_CAMINHO):
         return False, "a tela da capa não abriu"
+    # A tela da capa sem a figurinha: o que mudar no print depois é ela (caixa_da_figurinha).
+    fundo = d.screenshot()
     tocar(d, "@fl_add_sticker", 4)
     aba = aba_da_foto(tela(d))
     if not aba:
@@ -3726,7 +3788,7 @@ def _figurinha_na_capa(d, capa, receita=None, aprendida=None):
     quadro = quadro_da_capa(xml) if xml else None
     if not quadro:
         return False, "a figurinha não voltou para a capa"
-    ok, motivo = ajustar_a_figurinha(d, capa, quadro, receita, aprendida)
+    ok, motivo = ajustar_a_figurinha(d, capa, quadro, receita, aprendida, fundo)
     if not ok:
         return False, motivo
     tocar(d, "@save_btn", 5)
