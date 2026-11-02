@@ -3153,46 +3153,94 @@ def foto_do_produto_do_post(video, produto):
     return produto.get("foto")
 
 
-# A parte da foto que entra na marca da comparação, em fração da largura e da altura: sem a
-# borda, onde a loja põe selo, moldura ou texto.
+# A parte da foto que entra na comparação, em fração da largura e da altura: sem a borda, onde a
+# loja põe selo, moldura ou texto.
 MIOLO_DA_FOTO = (0.1, 0.9)
-# A marca do miolo é do desenho, em preto e branco: o mesmo modelo em outra cor, fotografado
-# igual, dava a mesma marca e ficava de fora da miniatura que troca, contra a regra do Rafael
-# (01/11: toda variação entra na miniatura). A mesma foto tem também as mesmas cores: o miolo é
-# dividido numa grade de GRADE_DA_COR x GRADE_DA_COR, e a cor média de cada pedaço pode variar até
-# COR_PARECIDA (a soma das diferenças das três cores, de 0 a 765). A compressão e um ajuste de luz
-# da loja ficam abaixo disso.
+# A mesma foto tem as mesmas cores: o miolo é dividido numa grade de GRADE_DA_COR x GRADE_DA_COR, e
+# a cor média de cada pedaço pode variar até COR_PARECIDA (a soma das diferenças das três cores, de
+# 0 a 765); a compressão e um ajuste de luz da loja ficam abaixo disso. O mesmo modelo em outra cor,
+# fotografado igual, muda muitos pedaços e é outra foto: ele entra na miniatura que troca, como o
+# Rafael pediu (01/11: toda variação entra na miniatura).
 GRADE_DA_COR = 8
 COR_PARECIDA = 80
+# A mesma foto em duas lojas nem sempre vem igual pixel a pixel: no vídeo do Rafael de 02/11 (a
+# viseira), a foto do 3º link era a do 1º descida uns 9% por uma faixa com o nome da loja no alto, e
+# a miniatura a mostrou duas vezes. A comparação procura o melhor encaixe do miolo de uma foto na
+# outra, com um pouco de zoom e de deslocamento (ESCALAS_DO_ENCAIXE, DESLOCAMENTOS_DO_ENCAIXE, em
+# fração do miolo), com as duas reduzidas a LADO_DA_COMPARACAO; no melhor encaixe, a diferença média
+# fica até DIFERENCA_PARECIDA (de 0 a 255), e até PEDACOS_DIFERENTES pedaços da grade podem passar
+# de COR_PARECIDA (o texto ou o selo que a loja pôs por cima). Pedido dele: DECISOES.md, Shopee Vídeo.
+LADO_DA_COMPARACAO = 48
+ESCALAS_DO_ENCAIXE = (0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15)
+DESLOCAMENTOS_DO_ENCAIXE = (-0.12, -0.09, -0.06, -0.03, 0.0, 0.03, 0.06, 0.09, 0.12)
+DIFERENCA_PARECIDA = 14
+PEDACOS_DIFERENTES = 4
+# Miolo quase de uma cor só (o desvio abaixo disto): não há desenho para comparar.
+FOTO_SEM_DESENHO = 6
+
+
+def _encaixes(imagem, lado):
+    """
+    Os recortes do miolo da imagem (do PIL) com um pouco de zoom e de deslocamento, reduzidos a
+    lado x lado, como matrizes de cor (numpy): os candidatos ao melhor encaixe.
+    """
+    import numpy
+    from PIL import Image
+    largura, altura = imagem.size
+    # Reduzida antes, para os recortes saírem rápido: o miolo com umas 4 vezes o lado final.
+    fator = min(1.0, 4 * lado / max(1.0, largura * (MIOLO_DA_FOTO[1] - MIOLO_DA_FOTO[0])))
+    if fator < 1.0:
+        imagem = imagem.resize((max(1, int(largura * fator)), max(1, int(altura * fator))), Image.BOX)
+        largura, altura = imagem.size
+    de, ate = MIOLO_DA_FOTO
+    meio_x, meio_y = largura / 2, altura / 2
+    miolo_x, miolo_y = largura * (ate - de), altura * (ate - de)
+    for escala in ESCALAS_DO_ENCAIXE:
+        corte_x, corte_y = miolo_x * escala, miolo_y * escala
+        for desloca_x in DESLOCAMENTOS_DO_ENCAIXE:
+            for desloca_y in DESLOCAMENTOS_DO_ENCAIXE:
+                x1 = meio_x + desloca_x * miolo_x - corte_x / 2
+                y1 = meio_y + desloca_y * miolo_y - corte_y / 2
+                if x1 < 0 or y1 < 0 or x1 + corte_x > largura or y1 + corte_y > altura:
+                    continue
+                caixa = (x1, y1, x1 + corte_x, y1 + corte_y)
+                yield numpy.asarray(imagem.resize((lado, lado), Image.BOX, box=caixa), dtype=numpy.float32)
 
 
 def mesma_foto(foto, outra):
     """
-    Se as duas fotos (bytes) são a mesma imagem: o mesmo desenho, pela marca do miolo (o dHash da
-    medição da capa, visualizacoes_shopee_video), e as mesmas cores (GRADE_DA_COR). O selo, a
-    moldura ou o texto que a loja põe na borda não contam. None quando alguma não abre ou não tem
-    desenho para a marca.
+    Se as duas fotos (bytes) são a mesma imagem: no melhor encaixe do miolo de uma na outra (com
+    um pouco de zoom e de deslocamento, a loja que amplia ou corta a foto), as mesmas cores, com
+    uns poucos pedaços diferentes (o texto ou o selo da loja). O selo, a moldura ou o texto que a
+    loja põe na borda não contam. None quando alguma não abre ou não tem desenho para comparar.
     """
-    from PIL import Image
-    marcas, cores = [], []
+    import numpy
+    from PIL import Image, ImageStat
+    imagens = []
     for dados in (foto, outra):
         try:
-            imagem = Image.open(io.BytesIO(dados or b"")).convert("RGB")
+            imagens.append(Image.open(io.BytesIO(dados or b"")).convert("RGB"))
         except Exception:
             return None
-        largura, altura = imagem.size
-        de, ate = MIOLO_DA_FOTO
-        miolo = (int(largura * de), int(altura * de), int(largura * ate), int(altura * ate))
-        marca = visualizacoes.marca_da_capa(imagem, miolo)
-        if not marca:
-            return None
-        marcas.append(marca)
-        cores.append(imagem.crop(miolo).resize((GRADE_DA_COR, GRADE_DA_COR), Image.BOX).tobytes())
-    if visualizacoes.diferenca(*marcas) > visualizacoes.MARCA_PARECIDA:
+    um, outro = imagens
+    largura, altura = um.size
+    de, ate = MIOLO_DA_FOTO
+    miolo = um.crop((int(largura * de), int(altura * de), int(largura * ate), int(altura * ate)))
+    if min(miolo.size) < GRADE_DA_COR or ImageStat.Stat(miolo.convert("L")).stddev[0] < FOTO_SEM_DESENHO:
+        return None
+    lado = LADO_DA_COMPARACAO
+    base = numpy.asarray(miolo.resize((lado, lado), Image.BOX), dtype=numpy.float32)
+    melhor = min(((float(numpy.abs(base - candidato).mean()), candidato) for candidato in _encaixes(outro, lado)),
+                 key=lambda par: par[0], default=None)
+    if melhor is None:
+        return None
+    media, encaixe = melhor
+    if media > DIFERENCA_PARECIDA:
         return False
-    um, outro = cores
-    return all(sum(abs(a - b) for a, b in zip(um[i:i + 3], outro[i:i + 3])) <= COR_PARECIDA
-               for i in range(0, len(um), 3))
+    passo = lado // GRADE_DA_COR
+    grade = lambda matriz: matriz.reshape(GRADE_DA_COR, passo, GRADE_DA_COR, passo, 3).mean(axis=(1, 3))
+    diferentes = int((numpy.abs(grade(base) - grade(encaixe)).sum(axis=2) > COR_PARECIDA).sum())
+    return diferentes <= PEDACOS_DIFERENTES
 
 
 def com_outra_foto_de_capa(video, produtos, capa):

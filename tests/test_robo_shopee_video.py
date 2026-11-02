@@ -4898,6 +4898,44 @@ def test_mesma_foto_olha_tambem_a_cor():
     assert robo.mesma_foto(cinza, _puff((128, 128, 128), luz=8)) is True
 
 
+def _viseira(lente=(235, 160, 20), descida=0, faixa=False):
+    """
+    A foto de uma viseira num carro (a do vídeo do Rafael de 02/11), recortada de uma cena maior:
+    com descida, a loja desceu a foto esses px e pôs no alto uma faixa com o nome dela.
+    """
+    from PIL import Image, ImageDraw
+    cena = Image.new("RGB", (700, 760), (55, 55, 62))
+    desenho = ImageDraw.Draw(cena)
+    for x in range(0, 700, 46):
+        desenho.rectangle((x, 470, x + 26, 760), fill=(205, 205, 215))
+    desenho.rectangle((170, 120, 300, 230), fill=(215, 215, 220))
+    desenho.polygon(((180, 230), (600, 200), (620, 400), (210, 430)), fill=lente)
+    desenho.ellipse((60, 260, 190, 380), fill=(225, 175, 145))
+    imagem = cena.crop((50, 80 - descida, 650, 680 - descida))
+    if faixa:
+        ImageDraw.Draw(imagem).rectangle((0, 0, 599, descida), fill=(250, 250, 250))
+        for x in range(10, 200, 22):
+            ImageDraw.Draw(imagem).rectangle((x, 12, x + 14, 30), fill=(20, 120, 90))
+    saida = io.BytesIO()
+    imagem.save(saida, format="JPEG", quality=85)
+    return saida.getvalue()
+
+
+def test_mesma_foto_de_outra_loja_descida_e_com_o_nome_da_loja_conta_uma_vez(monkeypatch):
+    # Vídeo do Rafael de 02/11 (a viseira): a foto do 3º link era a do 1º descida uns 9% por uma
+    # faixa com o nome da loja no alto, e a miniatura que troca a mostrou duas vezes. Ele pediu que
+    # essas pequenas diferenças de edição contem como a mesma foto: o tempo fica só com as fotos
+    # diferentes (P116). O mesmo modelo em outra cor continua outra foto.
+    original, da_loja = _viseira(), _viseira(descida=54, faixa=True)
+    assert robo.mesma_foto(original, da_loja) is True and robo.mesma_foto(da_loja, original) is True
+    assert robo.mesma_foto(original, _viseira(lente=(40, 90, 200), descida=54, faixa=True)) is False
+    assert robo.mesma_foto(original, _viseira(lente=(40, 90, 200))) is False
+    # Na miniatura que troca, a da loja não ganha tempo: a do 1º e a outra cor dividem o vídeo.
+    monkeypatch.setattr(robo.videos, "duracao", lambda caminho: 24.0)
+    azul = _viseira(lente=(40, 90, 200))
+    assert robo.fotos_da_miniatura({"arquivo": "v.mp4"}, original, [da_loja, azul]) == [azul]
+
+
 def test_miniatura_troca_para_o_mesmo_modelo_em_outra_cor(monkeypatch):
     rosa = _puff((240, 110, 170))
     monkeypatch.setattr(robo.videos, "duracao", lambda caminho: 30.0)
