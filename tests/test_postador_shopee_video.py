@@ -1872,6 +1872,30 @@ def test_marca_painel_e_desenho_diferentes_sao_outro_produto_e_a_ia_descreve_ant
         assert json_pedido.index('"produto_do_video"') < json_pedido.index('"diferencas"') < json_pedido.index(decisao)
 
 
+def test_produtos_a_mais_aceitam_o_mesmo_modelo_em_outra_cor_como_variacao(monkeypatch):
+    # Pedido do Rafael (02/11, vídeo das 10:01): o fone da marca em outra cor, que a IA recusou por
+    # ser outra cor, devia ter entrado, com a foto dele na miniatura que troca, como no Ver
+    # Produtos. A IA devolve o mesmo modelo em outra cor à parte ("outra_cor"); o que ela deu como
+    # variação em alguma das vezes fica como variação.
+    pedidos, respostas = [], ['{"iguais": [1], "outra_cor": [3], "motivo": "o 3 é branco"}',
+                              '{"iguais": [1, 3], "outra_cor": ["x"], "motivo": "o 1 e o 3"}']
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(prompt)
+        return respostas.pop(0)
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    anuncios = [(f"Fone {letra}", b"\xff\xd8" + letra.encode()) for letra in "ABC"]
+    de_outra_cor, recusas = set(), {}
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Fone", anuncios, capa=b"\xff\xd8capa", recusas=recusas,
+                                outra_cor=de_outra_cor) == ([0, 2], "o 1 e o 3")
+    assert de_outra_cor == {2} and recusas == {"outro produto": 1}
+    prompt = " ".join(pedidos[0].split())
+    assert 'é uma variação: ponha o número dele em "outra_cor", e não em "iguais"' in prompt
+    assert '"outra_cor": [os números dos anúncios do mesmo produto em outra cor ou estampa]' in prompt
+    assert "o mesmo produto em outra cor ou estampa, outra quantidade" not in prompt
+
+
 def test_imitacao_com_a_foto_da_marca_nao_e_o_mesmo_produto_na_troca_e_nos_produtos_a_mais(monkeypatch):
     # Rascunho de 02/11 (o vídeo de uns fones de marca): a IA deu como o mesmo item um anúncio a
     # mais com a foto da marca e só o número do modelo no nome ("Pro 2"), e o Rafael recusou o

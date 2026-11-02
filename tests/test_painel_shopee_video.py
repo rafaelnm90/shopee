@@ -580,6 +580,14 @@ def test_album_e_texto_do_rascunho_marcam_os_produtos_com_outra_foto_de_capa(bm,
     msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
     rodar(sv.rascunhos_handler(msg, est))
     assert "outra foto" not in msg.midias[2][2] and "outra foto" not in msg.saidas[-1]
+    # O mesmo modelo em outra cor (pedido do Rafael de 02/11) vem marcado no álbum e no texto: a
+    # foto dele vai na miniatura que troca.
+    sv.robo.atualizar(ident, outra_cor=[3])
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert "🎨 O mesmo modelo em outra cor (a foto vai na miniatura que troca): o 3º." in msg.midias[2][2]
+    assert "• Cubo C 🎨 outra cor (a foto vai na miniatura)\n🔗 https://s.shopee.com.br/c" in msg.saidas[-1]
+    assert "• Cubo B\n🔗" in msg.saidas[-1]
 
 
 def test_rascunhos_um_por_um_com_video_print_titulo_e_link(bm, Msg, Est):
