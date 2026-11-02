@@ -273,7 +273,9 @@ def na_hora_do_descurtir(agora=None):
 def descurtir_pendente(agora=None):
     """
     Falta descurtir tudo hoje? Uma vez por dia, e de novo na rodada seguinte (na mesma
-    hora) quando a anterior parou depois de VOLTAS_DO_DESCURTIR voltas.
+    hora) quando a anterior parou depois de VOLTAS_DO_DESCURTIR voltas ou parou no meio (a
+    tela que não abriu, o app travado, um erro: _agir). A Verificação da Shopee para tudo, sem
+    tentar de novo.
     """
     estado = ler_estado()
     hoje = agora_br(agora).strftime("%Y-%m-%d")
@@ -6147,6 +6149,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         if acao == "saude" and pedido:
             avisar(f"⚠️ Robô da Shopee Vídeo: não consegui ler a Saúde do Vídeo ({e.motivo}). Toque de novo em "
                    "Gerar Apelação ⚖️ daqui a pouco.")
+        _limpeza_de_novo(acao)
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None), e.do_video)
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: parado ({e.motivo})")
@@ -6159,9 +6162,21 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
         if acao == "postar":
             _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})")
+        _limpeza_de_novo(acao)
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
+
+
+def _limpeza_de_novo(acao):
+    """
+    A limpeza das 4h que parou no meio (a tela que não abriu, o app travado, um erro) tenta de
+    novo na rodada seguinte, ainda na hora dela, como a que passou das voltas: sem isso, ela só
+    voltava no dia seguinte, e as curtidas acumulavam em Meus favoritos (vídeo do Rafael das 20:17
+    de 02/11: DECISOES.md, Shopee Vídeo).
+    """
+    if acao == "descurtir":
+        gravar_estado(descurtir_continuar=True)
 
 
 # O aprovado que não sai na hora de postar (a tela que não carregou, o app travado) continua

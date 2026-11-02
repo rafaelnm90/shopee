@@ -4227,6 +4227,39 @@ def test_descurtir_das_4h_que_para_no_meio_deixa_a_lista_suja(monkeypatch, aviso
     assert not robo.lista_limpa()
 
 
+def test_limpeza_das_4h_que_para_no_meio_tenta_de_novo_na_mesma_hora(monkeypatch, avisos):
+    # Vídeo do Rafael das 20:17 de 02/11: a limpeza das 4h parou às 04:14 (o app travado numa
+    # página carregando) e só voltaria no dia seguinte, e as curtidas acumularam em Meus
+    # favoritos. A que para no meio tenta de novo na rodada seguinte, ainda na hora dela.
+    class LikeQueNaoPega(AppDosFavoritos):
+        def click(self, x, y):
+            if self.atual == "favoritos" and 600 <= x <= 750 and 2290 <= y <= 2356:
+                return
+            return super().click(x, y)
+
+    ativar(robo_inicio=8, robo_fim=22)
+    config = {**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22}
+    robo.rodada(d=LikeQueNaoPega(favoritos=3), agora=momento("2026-10-25 04:05"))
+    assert robo.o_que_fazer(config, momento("2026-10-25 04:20")) == ("descurtir", None)
+    app = AppDosFavoritos(favoritos=3)
+    robo.rodada(d=app, agora=momento("2026-10-25 04:20"))
+    assert app.favoritos == [] and robo.lista_limpa()
+    assert robo.o_que_fazer(config, momento("2026-10-25 04:35")) is None
+    # O erro que ninguém previu também tenta de novo na mesma hora.
+    monkeypatch.setattr(robo, "descurtir_tudo", lambda d, agora=None: 1 / 0)
+    robo.rodada(d=AppDosFavoritos(favoritos=3), agora=momento("2026-10-26 04:05"))
+    assert robo.o_que_fazer(config, momento("2026-10-26 04:20")) == ("descurtir", None)
+    # Na Verificação da Shopee, o robô para tudo e não tenta de novo.
+    robo.gravar_estado(descurtir_continuar=False)
+
+    def verificacao(d, agora=None):
+        raise robo.Verificacao()
+    monkeypatch.setattr(robo, "descurtir_tudo", verificacao)
+    monkeypatch.setattr(robo.av, "abrir_tela", lambda **kwargs: None)
+    robo.rodada(d=AppDosFavoritos(favoritos=3), agora=momento("2026-10-27 04:05"))
+    assert robo.o_que_fazer(config, momento("2026-10-27 04:20")) is None
+
+
 def test_rascunho_que_nao_sai_deixa_o_caso_completo_para_o_checkup(monkeypatch, avisos):
     # Pedido do Rafael (25/10): depois de um erro, o Claude vê tudo o que o robô viu (o
     # motivo, o título, o produto, a tela), cifrado; depois de resolvido, é apagado.
