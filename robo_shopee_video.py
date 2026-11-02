@@ -1494,13 +1494,23 @@ def fora_da_shopee(xml):
     return bool(outros) and ps.PACOTE not in pacotes
 
 
+# A página do app presa carregando (ps.pagina_carregando) não sai com o voltar e segurava o
+# celular por horas: cada rodada parava em "não consegui voltar até Eu". Abrir um link no app
+# ainda funciona por cima dela. Depois deste tanto de voltar sem sair dela, o robô abre a página
+# inicial pelo link, uma vez, sem fechar o app (P15: DECISOES.md, Shopee Vídeo).
+VOLTAS_NA_PAGINA_CARREGANDO = 3
+ESPERA_DA_PAGINA_INICIAL = 8
+
+
 def voltar(d, ate, vezes=15):
     """
     Aperta voltar, confirmando os avisos de sair, até a tela ter um elemento com o texto
     exato. Nunca fecha o app à força (fechar e reabrir em seguida chama a Verificação),
     fora o aviso do Android de app que não responde (tela). Fora da Shopee, não aperta
-    voltar: traz a Shopee de volta para a frente.
+    voltar: traz a Shopee de volta para a frente. Na página presa carregando, abre a
+    página inicial pelo link (VOLTAS_NA_PAGINA_CARREGANDO).
     """
+    carregando, abriu_o_inicio = 0, False
     for _ in range(vezes):
         xml = tela(d, seguir=True)
         if tem_exato(xml, ate) and not tem(xml, "@et_caption"):
@@ -1525,9 +1535,17 @@ def voltar(d, ate, vezes=15):
                                          f"{BOTAO_DO_ERRO_DO_APP} tocado", ok=None)
             tocar(d, BOTAO_DO_ERRO_DO_APP, 5)
             continue
+        carregando = carregando + 1 if ps.pagina_carregando(xml) else 0
+        if carregando > VOLTAS_NA_PAGINA_CARREGANDO and not abriu_o_inicio:
+            abriu_o_inicio = True
+            registro_processos.registrar(REGISTRO, "voltar no app", "página presa carregando",
+                                         "a página inicial aberta pelo link", ok=None)
+            ps.abrir_pagina_inicial(d)
+            pausa(ESPERA_DA_PAGINA_INICIAL)
+            continue
         d.press("back")
         pausa(3)
-    onde = onde_ficou(d)
+    onde = onde_ficou(d) + (", a página presa carregando" if carregando else "")
     registro_processos.registrar(REGISTRO, "voltar no app", f"não chegou ao {ate}", onde, ok=False)
     raise Parada(f"não consegui voltar até {ate} ({onde})")
 

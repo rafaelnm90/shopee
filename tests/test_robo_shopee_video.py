@@ -1999,6 +1999,60 @@ def test_voltar_que_nao_chega_anota_a_tela_em_que_ficou_sem_o_texto_dela():
         "não chegou ao Eu", onde, 0)
 
 
+# A página do app presa carregando (Motorola, madrugada de 02/11): o esqueleto, sem texto
+# nenhum, que o voltar não tira.
+ESQUELETO = _xml(*(_no_do_app(robo.ps.PACOTE, "", (0, 300 + 40 * i, 1080, 330 + 40 * i)) for i in range(25)))
+
+
+class CelularComPaginaCarregando:
+    """O app preso na página carregando; o link da página inicial a tira (ou não, com o_link_tira=False)."""
+
+    info = {"screenOn": True}
+
+    def __init__(self, o_link_tira=True):
+        self.o_link_tira, self.teclas, self.comandos, self.no_inicio = o_link_tira, [], [], False
+
+    def dump_hierarchy(self):
+        return _xml(_no_do_app(robo.ps.PACOTE, "Eu", (860, 2250, 1080, 2400))) if self.no_inicio else ESQUELETO
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+    def shell(self, comando):
+        self.comandos.append(comando)
+        self.no_inicio = self.o_link_tira
+
+    def app_current(self):
+        return {"package": robo.ps.PACOTE, "activity": "com.shopee.app.react.ReactActivity_"}
+
+
+def test_voltar_na_pagina_presa_carregando_abre_a_pagina_inicial_pelo_link(monkeypatch):
+    # Madrugada de 02/11 (04:02, 04:14, 05:25 e 07:03): uma página do app ficou presa carregando,
+    # o voltar não a tirava e cada rodada parava em "não consegui voltar até Eu". Abrir um link
+    # no app funcionava por cima dela: depois de alguns voltar, o robô abre a página inicial pelo
+    # link, sem fechar o app (P15).
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    assert robo.ps.pagina_carregando(ESQUELETO)
+    celular = CelularComPaginaCarregando()
+    robo.voltar(celular, "Eu")
+    assert celular.no_inicio and celular.teclas == ["back"] * robo.VOLTAS_NA_PAGINA_CARREGANDO
+    assert celular.comandos == [["am", "start", "-a", "android.intent.action.VIEW", "-d",
+                                 robo.ps.LINK_DA_PAGINA_INICIAL, "-p", robo.ps.PACOTE]]
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'voltar no app'") == (
+        "página presa carregando", "a página inicial aberta pelo link", None)
+
+
+def test_voltar_que_nem_o_link_tira_da_pagina_carregando_para_e_diz_onde(monkeypatch):
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularComPaginaCarregando(o_link_tira=False)
+    with pytest.raises(robo.Parada) as parada:
+        robo.voltar(celular, "Eu", vezes=8)
+    # O link vai uma vez só; depois, o voltar segue até desistir.
+    assert len(celular.comandos) == 1 and celular.teclas == ["back"] * 7
+    onde = (f"app {robo.ps.PACOTE}, tela ReactActivity_, tela do celular ligada, a página presa carregando")
+    assert str(parada.value) == f"não consegui voltar até Eu ({onde})"
+
+
 class CelularComErroDoApp:
     """
     O app da Shopee no aviso de erro (Motorola, 31/10, 15:48 e 15:59): "Ops! Algo deu errado.
