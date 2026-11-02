@@ -43,15 +43,17 @@ SEGUNDOS_DA_FOTO = 2
 # post, uma volta só, com o vídeo dividido igual entre elas e pelo menos este tanto de segundos
 # para cada: as que não cabem ficam de fora. Escolha do Rafael (30/10, P103): DECISOES.md, Shopee Vídeo.
 MINIMO_POR_FOTO = 3
-# A miniatura e a seta onde o Rafael as põe no LumaFusion (vídeo de 25/10), no vídeo de
-# 720x1280. A miniatura: 25% da largura, com o centro a 80% da largura e 10% da altura
-# (posição X 60 e Y -80 no LumaFusion), do começo do vídeo até o fim.
-LARGURA_DA_MINIATURA = 180
-CENTRO_DA_MINIATURA = (576, 128)
-# O canto de cima à direita da miniatura (x 666, y 38) fica sempre no mesmo lugar: menor, ela
-# encolhe para dentro dele. Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
-CANTO_DA_MINIATURA = (CENTRO_DA_MINIATURA[0] + LARGURA_DA_MINIATURA // 2,
-                      CENTRO_DA_MINIATURA[1] - LARGURA_DA_MINIATURA // 2)
+# A miniatura e a seta no vídeo de 720x1280, do começo do vídeo até o fim. A miniatura fica no
+# alto à direita, fora do ícone da barra de busca do app e longe do canto da tela (pedido do
+# Rafael, 01/11, P120: DECISOES.md, Shopee Vídeo): a ponta de cima à direita logo abaixo da barra
+# de busca (FIM_DA_BARRA_DE_BUSCA) e um pouco para dentro da borda que o app mostra
+# (VISIVEL_NO_APP), o que o tests/test_edicao_video.py confere.
+LARGURA_DA_MINIATURA = 152
+# O canto de cima à direita da miniatura fica sempre no mesmo lugar: menor, ela encolhe para
+# dentro dele. Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
+CANTO_DA_MINIATURA = (657, 150)
+CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
+                       CANTO_DA_MINIATURA[1] + LARGURA_DA_MINIATURA // 2)
 # A seta é a do Rafael (o arquivo Seta_da_Shopee que ele usa no LumaFusion), com o fundo
 # preto tirado: só o pedaço com a seta, já no tamanho dele (62,9%, posição X -23), perto do
 # canto de baixo à esquerda, inteira logo acima do cartão do produto que o app mostra e
@@ -225,21 +227,22 @@ FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da f
 MARGEM_DA_FAIXA = 12
 LETRAS_DA_CHAMADA = (72, 44)                    # a maior e a menor numa linha
 LETRAS_EM_DUAS_LINHAS = (56, 36)                # quando não cabe numa linha: a faixa cresce para cima
-# A moldura em volta da foto do começo do vídeo (que o app usa como capa na grade do perfil, com a
-# faixa da chamada ou sem ela) e da miniatura, com os cantos arredondados. Pedido do Rafael (vídeo
-# das 15:35 de 01/11), no jeito que ele escolheu (P115 e P117): DECISOES.md, Shopee Vídeo. As
-# camadas vão de fora para dentro, (cor, grossura em px na foto do começo); na miniatura, cada uma
-# tem a metade da grossura (ESCALA_NA_MINIATURA), dentro do lugar de sempre dela.
+# A moldura laranja, com os cantos arredondados, em volta da foto da capa com a frase (a que a
+# grade do perfil mostra), na foto toda, e da miniatura (pedidos do Rafael, P115, P117 e P119:
+# DECISOES.md, Shopee Vídeo). A foto do começo do vídeo, sem a frase, vai sem moldura (P119). As
+# camadas vão de fora para dentro, (cor, grossura em px na capa); na miniatura, cada uma tem a
+# metade da grossura (ESCALA_NA_MINIATURA), dentro do lugar dela.
 CAMADAS_DA_MOLDURA = ((LARANJA_DA_SHOPEE, 14),)
 GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
 RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto, dentro da moldura
 ESCALA_NA_MINIATURA = 0.5
-# Com a moldura, a foto do começo fica menor que a capa sem ela: o app corta os lados do vídeo
-# aberto (VISIVEL_NO_APP), e a moldura fica inteira dentro do que ele mostra, com esta folga de
-# cada lado. A foto fica no meio da área da foto da capa (FOTO_DA_CAPA), no maior quadrado que cabe.
-FOLGA_DA_MOLDURA = 19
-LADO_DA_FOTO = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * (FOLGA_DA_MOLDURA + GROSSURA_DA_MOLDURA)
+# Na capa com a frase, a foto e a moldura ocupam juntas o lugar da foto da capa sem texto
+# (FOTO_DA_CAPA): a foto fica a grossura da moldura menor de cada lado.
+LADO_DA_FOTO = FOTO_DA_CAPA[2] - FOTO_DA_CAPA[0] - 2 * GROSSURA_DA_MOLDURA
 MEIO_DA_FOTO = ((FOTO_DA_CAPA[0] + FOTO_DA_CAPA[2]) // 2, (FOTO_DA_CAPA[1] + FOTO_DA_CAPA[3]) // 2)
+# As letras da frase ficam dentro do que o app mostra do vídeo aberto (no modo assistente, a capa
+# vai no começo do vídeo), com a margem da faixa de cada lado.
+LETRAS_DA_FAIXA = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * MARGEM_DA_FAIXA
 FOTO_COM_MOLDURA = (MEIO_DA_FOTO[0] - LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] - LADO_DA_FOTO // 2,
                     MEIO_DA_FOTO[0] + LADO_DA_FOTO // 2, MEIO_DA_FOTO[1] + LADO_DA_FOTO // 2)
 
@@ -253,11 +256,11 @@ def capa_ligada():
 PENALIDADE_DA_QUEBRA = 8
 
 
-def _quebra_da_chamada(texto, desenho, fonte_ttf, largura=LADO_DA_FOTO - 2 * MARGEM_DA_FAIXA):
+def _quebra_da_chamada(texto, desenho, fonte_ttf, largura=LETRAS_DA_FAIXA):
     """
     (fonte, linhas) da chamada na faixa: numa linha só, na maior letra de LETRAS_DA_CHAMADA em
-    que ela cabe na largura da faixa (a da foto, dentro da moldura, com a margem: a faixa fina do
-    exemplo que o Rafael escolheu, P107); quando não cabe, em duas, na maior letra de
+    que ela cabe na largura das letras (dentro da faixa e do que o app mostra, com a margem: a
+    faixa fina do exemplo que o Rafael escolheu, P107); quando não cabe, em duas, na maior letra de
     LETRAS_EM_DUAS_LINHAS, equilibradas e, se der, sem a 1ª terminar numa palavra de ligação. None
     quando não cabe nem assim.
     """
@@ -368,21 +371,50 @@ def _png(imagem):
 
 def capa_sem_chamada(foto):
     """
-    A abertura do vídeo: a foto do anúncio (bytes) com a moldura, no lugar e do tamanho da capa
-    com chamada, sem a faixa (PNG, bytes, 720x1280). Quando a frase vai na capa pela figurinha
-    (P110), a figurinha com o miolo da capa cai em cima da mesma foto; sem a figurinha, ela é a
-    capa de sempre. None com a foto que não abre.
+    A abertura do vídeo quando a frase vai na capa pela figurinha (P110): a foto do anúncio
+    (bytes) do tamanho da capa sem texto (FOTO_DA_CAPA), no fundo preto, sem moldura e sem a faixa
+    (PNG, bytes, 720x1280; escolha do Rafael, P119). A figurinha com o miolo da capa cobre o que a
+    grade mostra; sem a figurinha, ela é a capa de sempre. None com a foto que não abre.
     """
-    imagem = _foto_que_cabe(foto, LADO_DA_FOTO)
-    return _png(_capa_com_a_foto(imagem)) if imagem else None
+    from PIL import Image
+    x1, y1, x2, y2 = FOTO_DA_CAPA
+    imagem = _foto_que_cabe(foto, min(x2 - x1, y2 - y1))
+    if not imagem:
+        return None
+    capa = Image.new("RGB", TELA, "black")
+    capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, y1 + (y2 - y1 - imagem.height) // 2))
+    return _png(capa)
+
+
+def foto_em_tela_cheia(foto):
+    """
+    A abertura do vídeo sem capa (PNG, bytes, 720x1280): a foto do anúncio (bytes) no maior
+    tamanho que cabe na tela, no meio, no fundo preto, sem moldura, como o FILTRO_720P do
+    videos.py faz com a foto (escolha do Rafael, P119). Ela vai montada à parte porque o ffmpeg
+    recebe a foto da miniatura já com a moldura (P115). None com a foto que não abre.
+    """
+    import io
+
+    from PIL import Image
+    try:
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
+    except Exception:
+        return None
+    largura, altura = TELA
+    escala = min(largura / imagem.width, altura / imagem.height)
+    imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
+    tela = Image.new("RGB", TELA, "black")
+    tela.paste(imagem, ((largura - imagem.width) // 2, (altura - imagem.height) // 2))
+    return _png(tela)
 
 
 def capa_com_chamada(foto, chamada):
     """
-    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) do tamanho da capa
-    sem texto, no fundo preto, e a chamada em letras brancas numa faixa laranja por cima do pé
-    da foto, logo acima do número de visualizações. None sem a chamada, com a foto que não abre
-    ou com a chamada que não cabe nem na menor letra.
+    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) e a moldura laranja em
+    volta dela toda no lugar da foto da capa sem texto (P119), no fundo preto, e a chamada em
+    letras brancas numa faixa laranja por cima do pé da foto, logo acima do número de
+    visualizações. None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem
+    na menor letra.
     """
     import matplotlib
     from PIL import ImageDraw
@@ -397,7 +429,7 @@ def capa_com_chamada(foto, chamada):
     # A faixa vai no pé da foto, antes da moldura: os cantos de baixo dela ficam arredondados como os da foto.
     desenho = ImageDraw.Draw(imagem)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-    quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf, largura - 2 * MARGEM_DA_FAIXA)
+    quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf, min(largura - 2 * MARGEM_DA_FAIXA, LETRAS_DA_FAIXA))
     if not quebra:
         return None
     fonte, linhas = quebra
@@ -599,10 +631,11 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
         capa = capa_com_avisos(foto)
         if not capa:
             return "a capa com os avisos da bebida alcoólica não saiu"
-    # A foto do começo e a miniatura vão com a moldura (P115): a foto que não abre segue como
-    # veio, e o ffmpeg diz o motivo.
+    # A miniatura vai com a moldura (P115); a foto do começo, sem a capa, vai em tela cheia no
+    # fundo preto, sem a moldura (P119). A foto que não abre segue como veio, e o ffmpeg diz o
+    # motivo.
     if not capa:
-        capa = capa_sem_chamada(foto)
+        capa = foto_em_tela_cheia(foto)
     largura = largura_da_miniatura(miniatura)
     if largura:
         foto = miniatura_com_moldura(foto, largura) or foto
@@ -673,14 +706,14 @@ MINIMO_DO_REMONTADO = 8
 # Rafael, P71: a caixa do alto encostava na borda e ficava embaixo da busca). Os lugares, em
 # (x, topo, largura máxima das linhas, quantas linhas; a caixa tem mais 56 px de margem) no
 # vídeo de 720x1280; x None = centralizado, x negativo = encostado na direita, a -x px da borda:
-# - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 486 a 666);
-# - "meio": logo abaixo da miniatura (que vai até uns 250 px), centralizado;
+# - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 505 a 657);
+# - "meio": logo abaixo da miniatura (que vai até y 302), centralizado;
 # - "esquerda" e "direita": nos lados, numa caixa estreita de até 3 linhas, no meio da
 #   altura: acima da seta (que começa em y 726) e da coluna de botões do app à direita.
 # Nenhum lugar livre do rosto e do produto (SEM_LUGAR), o vídeo vai sem os textos (escolha
 # do Rafael, P47: no vídeo do conjunto, o alto cobriu o rosto da modelo e o meio cobriria o
 # conjunto).
-LUGARES_DOS_TEXTOS = {"alto": (68, 150, 340, 2), "meio": (None, 280, 480, 2),
+LUGARES_DOS_TEXTOS = {"alto": (68, 150, 340, 2), "meio": (None, 320, 480, 2),
                       "esquerda": (64, 400, 170, 3), "direita": (-64, 400, 170, 3)}
 LUGAR_PADRAO = "alto"
 SEM_LUGAR = "nenhum"
@@ -727,7 +760,7 @@ _LUGAR_NO_PROMPT = (
     "Diga onde os textos podem ficar sem cobrir o produto, o rosto de alguém nem as fotos, quadros ou textos "
     "que o próprio vídeo pôs por cima da imagem, na maior parte do vídeo: "
     "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 12% e 22% da altura e até uns 65% da largura), "
-    "\"meio\" (centralizado, entre uns 22% e 33% da altura), \"esquerda\" (perto da borda esquerda, até "
+    "\"meio\" (centralizado, entre uns 25% e 34% da altura), \"esquerda\" (perto da borda esquerda, até "
     "uns 40% da largura, entre uns 31% e 45% da altura) ou \"direita\" (o mesmo, perto da borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem alguma dessas coisas.\n"
 )
@@ -752,7 +785,7 @@ _TEXTO_NO_VIDEO_NO_PROMPT = (
 # tinha dito que o canto estava livre. Com o lugar dito, a coisa do criador logo abaixo do
 # canto faz a miniatura diminuir em vez de sair (escolha do Rafael, 29/10, P97).
 _CANTO_NO_PROMPT = (
-    "Diga também se o canto de cima à direita do vídeo (de uns 65% a 95% da largura e até uns 20% da altura) "
+    "Diga também se o canto de cima à direita do vídeo (de uns 65% a 95% da largura e de uns 9% a 26% da altura) "
     "tem, em qualquer parte, foto, quadro, texto ou figura que o próprio vídeo pôs por cima da imagem, em "
     "qualquer momento (não contam marca d'água, logo nem nome do perfil): \"canto_ocupado\", true ou false.\n"
     "Diga também onde ficam, em qualquer momento do vídeo, as legendas, títulos, frases, fotos, quadros e "
@@ -1163,8 +1196,9 @@ FOLGA_DA_MINIATURA = 30
 # 2/3 do tamanho de sempre, fica de fora. Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
 MENOR_MINIATURA = LARGURA_DA_MINIATURA * 2 // 3
 # O canto que a IA olha para dizer se está ocupado (_CANTO_NO_PROMPT), em % do vídeo: da
-# esquerda à direita e até a altura.
-CANTO_OLHADO_PELA_IA = (65, 95, 20)
+# esquerda à direita e de cima a baixo, o lugar da miniatura com a folga (ela fica logo abaixo da
+# barra de busca, P120).
+CANTO_OLHADO_PELA_IA = (65, 95, 9, 26)
 
 
 def _cruza_a_miniatura(caixa, largura=LARGURA_DA_MINIATURA):
@@ -1179,9 +1213,9 @@ def _cruza_a_miniatura(caixa, largura=LARGURA_DA_MINIATURA):
 
 def _no_canto_olhado(caixa):
     """A caixa (em % do vídeo) entra no canto que a IA olha para o canto_ocupado?"""
-    esquerda, direita, topo, _base = caixa
-    comeco, fim, ate = CANTO_OLHADO_PELA_IA
-    return esquerda < fim and direita > comeco and topo < ate
+    esquerda, direita, topo, base = caixa
+    comeco, fim, desde, ate = CANTO_OLHADO_PELA_IA
+    return esquerda < fim and direita > comeco and topo < ate and base > desde
 
 
 def miniatura_no_video(textos):
