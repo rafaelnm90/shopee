@@ -1610,6 +1610,7 @@ SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
 COM_A_CHAMADA = ", com a chamada na capa"
 # A frase vai na capa pela figurinha do Selecionar Capa (P110): o vídeo abre com a foto, sem ela.
+# Desde a P125 (02/11) o robô não pede mais a figurinha: a capa com a frase abre o vídeo.
 COM_A_CHAMADA_PARA_A_FIGURINHA = ", com a chamada para a figurinha da capa"
 COM_MUSICA = ", com música de fundo"
 SEM_A_MINIATURA = ", sem a nossa miniatura"
@@ -1639,10 +1640,11 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     de todos os vídeos (P100), e o jeito leva COM_A_CHAMADA. Com as outras_fotos (bytes das
     outras fotos diferentes dos produtos do post, as que cabem: fotos_que_cabem), a miniatura
     troca entre a foto e cada uma delas (P103), e o jeito leva COM_A_MINIATURA_ALTERNADA.
-    Com figurinha (um dict, o rascunho do robô), a capa com a frase fica em figurinha["capa"]
-    para o Selecionar Capa do app, e o vídeo abre com a foto no mesmo lugar, sem a frase
-    (capa_sem_chamada); o jeito leva COM_A_CHAMADA_PARA_A_FIGURINHA. Escolha do Rafael (31/10,
-    P110): DECISOES.md, Shopee Vídeo.
+    Com figurinha (um dict), a capa com a frase fica em figurinha["capa"] para o Selecionar Capa
+    do app, e o vídeo abre com a foto no mesmo lugar, sem a frase (capa_sem_chamada); o jeito
+    leva COM_A_CHAMADA_PARA_A_FIGURINHA (P110). Desde a P125 (02/11), o rascunho do robô vai sem
+    ela, como o modo assistente: a capa com a frase abre o vídeo. Escolhas do Rafael:
+    DECISOES.md, Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
