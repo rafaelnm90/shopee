@@ -1872,6 +1872,36 @@ def test_marca_painel_e_desenho_diferentes_sao_outro_produto_e_a_ia_descreve_ant
         assert json_pedido.index('"produto_do_video"') < json_pedido.index('"diferencas"') < json_pedido.index(decisao)
 
 
+def test_imitacao_com_a_foto_da_marca_nao_e_o_mesmo_produto_na_troca_e_nos_produtos_a_mais(monkeypatch):
+    # Rascunho de 02/11 (o vídeo de uns fones de marca): a IA deu como o mesmo item um anúncio a
+    # mais com a foto da marca e só o número do modelo no nome ("Pro 2"), e o Rafael recusou o
+    # rascunho. Com a marca no produto do vídeo, o nome do anúncio tem de trazer o nome da marca, e
+    # o preço vai junto ao nome de cada foto dos produtos a mais (a imitação custa muito menos).
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append((prompt, imagens))
+        return '{"iguais": [], "confere": false, "motivo": "imitação com a foto da marca"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Fone Bluetooth Esportivo")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\xff\xd8outra")
+    anuncios = [("Pro 2 Fone Bluetooth Esportivo", b"\xff\xd8a"), ("Fone Marca X Pro 2", b"\xff\xd8b")]
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Fone Marca X Pro 2", anuncios, capa=b"\xff\xd8capa",
+                                precos=[89.9], preco_do_post=1299.9)[0] == []
+    ok, _motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=b"\xff\xd8capa")
+    assert not ok and len(pedidos) == 2
+    for prompt, _imagens in pedidos:
+        assert ps.IMITACAO in " ".join(prompt.split())
+        assert "o nome dele traz o nome da marca" in prompt and "\"Pro 2\") não basta" in prompt
+    # O preço vai junto ao nome de cada foto, quando há (o 2º anúncio veio sem preço).
+    assert [rotulo for _foto, _tipo, rotulo in pedidos[0][1]] == [
+        ps.ROTULO_DA_CAPA + " (R$ 1.299,90)", "Anúncio 1: Pro 2 Fone Bluetooth Esportivo (R$ 89,90)",
+        "Anúncio 2: Fone Marca X Pro 2"]
+    assert "do nome e do preço do anúncio" in pedidos[0][0]
+    assert ps.em_reais(None) == ps.em_reais(0) == ps.em_reais("x") == "" and ps.em_reais(12) == "R$ 12,00"
+
+
 def test_troca_de_loja_confere_o_mesmo_produto_mesmo_com_outra_foto_de_capa(monkeypatch):
     # Escolha do Rafael (30/10, P102): o anúncio de outra loja entra no lugar do produto do link
     # sendo o mesmo produto, mesmo com outra foto de capa; a capa do post vai junto como o

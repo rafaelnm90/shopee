@@ -183,6 +183,16 @@ DETALHES_QUE_SE_VEEM = ("Compare os detalhes do produto que se veem no vídeo e 
                         "botões giratórios, e onde ficam), o formato e o desenho do corpo (alças, tampas, janelas, "
                         "pés, cantos) e as cores. Basta um desses diferente para não ser o mesmo produto, mesmo que o "
                         "nome do anúncio pareça o mesmo.")
+# Loja que vende imitação usa a foto da marca: num rascunho de 02/11 (o vídeo de uns fones de
+# marca), a IA deu como o mesmo item um anúncio a mais com a foto da marca e só o número do
+# modelo no nome, e o Rafael recusou o rascunho. Com a marca no produto do vídeo, o nome do
+# anúncio tem de trazer o nome da marca, e o preço vai junto ao nome dos produtos a mais (o da
+# marca muito mais barato é imitação). Pedido dele: DECISOES.md, Shopee Vídeo.
+IMITACAO = ("Loja que vende imitação usa a foto da marca: quando o produto do vídeo é de uma marca (o logotipo ou "
+            "o nome dela aparece no vídeo, na capa do post ou no nome do produto do vídeo), o anúncio de outra loja "
+            "só é o mesmo produto se o nome dele traz o nome da marca; o número ou o nome genérico do modelo (como "
+            "\"Pro 2\") não basta. Com a foto da marca e o nome sem ela, ou por muito menos que o preço do anúncio "
+            "do post (quando o preço vai junto ao nome), é imitação: não é o mesmo produto.")
 PROMPT_PRODUTO_COM_CAPA = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 Junto com o vídeo vão duas imagens, cada uma logo depois do seu nome: a foto de capa do anúncio do post (o produto \
 do vídeo) e a foto do anúncio de outra loja que vai ser anexado: "{nome}".
@@ -190,7 +200,7 @@ A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro e diga se ele mostra o mesmo produto do anúncio de outra loja: o mesmo item, da mesma \
 marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} Outro produto do mesmo tipo com outro formato ou \
 modelo, {outra_medida}, {outra_versao}, o mesmo produto em outra cor ou estampa, só um acessório dele, ou um \
-vídeo em que o produto não aparece, não confere. Na dúvida, não. {detalhes}
+vídeo em que o produto não aparece, não confere. Na dúvida, não. {detalhes} {imitacao}
 Responda só com um JSON, nesta ordem: {{"produto_do_video": "a marca, o painel e o desenho do produto do vídeo", \
 "diferencas": "o que o produto do anúncio de outra loja tem de diferente, ou nada", "confere": true ou false, \
 "motivo": "uma frase curta"}}"""
@@ -211,13 +221,14 @@ Responda só com um JSON: {"confere": true ou false, "motivo": "uma frase curta"
 # (P102). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
 PROMPT_ITENS_IGUAIS = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 O produto do vídeo é "{nome}". Junto com o vídeo vão, primeiro, a foto de capa do anúncio do post (o produto do \
-vídeo) e, depois, as fotos de anúncios de outras lojas, cada uma logo depois do número e do nome do anúncio.
+vídeo) e, depois, as fotos de anúncios de outras lojas, cada uma logo depois do número, do nome e do preço do \
+anúncio.
 A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro, compare com cada foto e diga quais anúncios são o mesmo produto do vídeo: o mesmo item, \
 da mesma marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} Outro produto do mesmo tipo, de outra \
 marca, com outro formato ou modelo, {outra_medida}, {outra_versao}, o mesmo produto em outra cor ou estampa, \
 outra quantidade no kit, só um acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo \
-produto. Na dúvida, não é. {detalhes}
+produto. Na dúvida, não é. {detalhes} {imitacao}
 Responda só com um JSON, nesta ordem: {{"produto_do_video": "a marca, o painel e o desenho do produto do vídeo", \
 "diferencas": "para cada anúncio, o número e o que o produto dele tem de diferente do produto do vídeo", \
 "iguais": [os números dos anúncios que são o mesmo produto], "motivo": "uma frase curta"}}"""
@@ -999,11 +1010,30 @@ def tipo_da_foto(dados):
     return {"png": "image/png", "webp": "image/webp"}.get(extensao_da_foto(dados or b""), "image/jpeg")
 
 
-def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None):
+def em_reais(preco):
+    """O preço no jeito brasileiro (R$ 1.299,90), para a IA; "" sem um preço maior que zero."""
+    try:
+        valor = float(preco)
+    except (TypeError, ValueError):
+        return ""
+    if not valor > 0:
+        return ""
+    return "R$ " + f"{valor:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def _com_o_preco(rotulo, preco):
+    """O rótulo da foto com o preço do anúncio entre parênteses, quando há (a regra da IMITACAO)."""
+    reais = em_reais(preco)
+    return f"{rotulo} ({reais})" if reais else rotulo
+
+
+def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None):
     """
     Quais anúncios de outras lojas são o mesmo item do vídeo (os produtos a mais, P59): a foto
     de capa pode ser outra (P102). anuncios = [(nome, foto em bytes)], capa = os bytes da capa
     do anúncio do post, que vai junto como o produto do post (a busca pela foto parte dela).
+    precos (na ordem dos anuncios) e preco_do_post vão junto ao nome de cada foto: a imitação
+    com a foto da marca costuma custar muito menos (IMITACAO).
     A IA vê o vídeo com a capa e todas as fotos de uma vez, cada uma depois do seu nome,
     VEZES_DA_IA vezes; fica só o confirmado em todas. Devolve (as posições confirmadas, em
     ordem, o que a IA disse da última vez), ou ([], o motivo fixo) quando falta o que
@@ -1015,11 +1045,13 @@ def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None):
         return [], "sem o vídeo ou sem anúncio para conferir"
     if not capa:
         return [], "sem a foto de capa do anúncio do post"
-    imagens = [(capa, tipo_da_foto(capa), ROTULO_DA_CAPA)] + [
-        (foto, tipo_da_foto(foto), f"Anúncio {i}: {nome_do_anuncio}") for i, (nome_do_anuncio, foto) in enumerate(anuncios, 1)]
+    precos = list(precos or ()) + [None] * len(anuncios)
+    imagens = [(capa, tipo_da_foto(capa), _com_o_preco(ROTULO_DA_CAPA, preco_do_post))] + [
+        (foto, tipo_da_foto(foto), _com_o_preco(f"Anúncio {i}: {nome_do_anuncio}", precos[i - 1]))
+        for i, (nome_do_anuncio, foto) in enumerate(anuncios, 1)]
     prompt = PROMPT_ITENS_IGUAIS.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA,
                                         outra_medida=OUTRA_MEDIDA, outra_versao=OUTRA_VERSAO,
-                                        detalhes=DETALHES_QUE_SE_VEEM)
+                                        detalhes=DETALHES_QUE_SE_VEEM, imitacao=IMITACAO)
     confirmados, motivo = set(range(1, len(anuncios) + 1)), ""
     for vez in range(1, VEZES_DA_IA + 1):
         resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, imagens=imagens))
@@ -1184,7 +1216,7 @@ def _confere_com_a_capa(video, nome, foto, capa, vistos):
     imagens = [(capa, tipo_da_foto(capa), ROTULO_DA_CAPA), (foto, tipo_da_foto(foto), f"Anúncio de outra loja: {nome}")]
     prompt = PROMPT_PRODUTO_COM_CAPA.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA,
                                              outra_medida=OUTRA_MEDIDA, outra_versao=OUTRA_VERSAO,
-                                             detalhes=DETALHES_QUE_SE_VEEM)
+                                             detalhes=DETALHES_QUE_SE_VEEM, imitacao=IMITACAO)
     for vez in range(1, VEZES_DA_IA + 1):
         dados = _json_da_ia(asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, imagens=imagens)))
         if not isinstance(dados, dict):
