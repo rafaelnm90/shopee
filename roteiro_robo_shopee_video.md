@@ -379,10 +379,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   6. **Rascunhos** salva (barra de progresso "carregando, aguarde") e volta para a aba
      Live e Vídeo, sem pedir confirmação.
 
-  **Selecionar Capa (mapeado no Motorola em 30/10/2026, à noite, num vídeo de teste):** desde a
-  P125 (02/11/2026), a capa com a frase abre o próprio vídeo e o robô não usa mais a figurinha nos
-  rascunhos novos; ela só volta no post dos rascunhos feitos antes (passo 9), e a que não volta
-  adia o post para a rodada seguinte, até 3 vezes (P124).
+  **Selecionar Capa (mapeado no Motorola em 30/10/2026, à noite, num vídeo de teste):**
   1. na tela final, **Selecionar Capa** (`@tv_select_cover`, ~173,597) abre **Selecione sua
      capa** (`SSZMediaCoverEditActivity`): a capa no meio (`@player_container`, de 0,267 a
      1080,1969; o quadro do vídeo vai de 61,267 a 1018,1969), a fileira de quadros embaixo
