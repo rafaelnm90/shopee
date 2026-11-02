@@ -69,9 +69,9 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     largura, (mx, my) = edicao_video.LARGURA_DA_MINIATURA, edicao_video.CENTRO_DA_MINIATURA
     assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and f"scale={largura}:-2" in filtro
     assert f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1" in filtro
-    # A seta entra só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e o pulso do fim
-    # do arquivo (quadros 72 a 101) se repete até o fim.
-    assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro
+    # As setinhas entram só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e a volta da
+    # cascata (os 25 quadros do arquivo, P130) se repete até o fim.
+    assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro
     cx, cy = edicao_video.CENTRO_DA_SETA
     assert f"[comfoto][seta]overlay=x={cx}-w/2:y={cy}-h/2:shortest=1,format=yuv420p[editado]" in filtro
     assert "[foto][editado]concat=n=2:v=1:a=0[v]" in filtro
@@ -91,50 +91,58 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert ffmpeg[[i for i, parte in enumerate(ffmpeg) if parte == "-i"][-1] + 1].endswith("moldura.png")
     assert "[5:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1[comfoto]" in filtro
     assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
-    assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
 
-def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
-    # Pedido do Rafael (25/10): a seta do arquivo dele, sem o fundo preto. Escolha dele (02/11,
-    # P127): a mesma seta no laranja da Shopee, com um contorno branco e uma sombra leve.
+def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
+    # Escolha do Rafael (02/11, P130): três setinhas para baixo, uma embaixo da outra, no laranja da
+    # Shopee com o contorno branco e a sombra leve (P127), acendendo de cima para baixo, uma volta
+    # por segundo, num fundo transparente.
     from PIL import Image
-    pasta = os.path.dirname(edicao_video.SETA)
-    margem = edicao_video.MARGEM_DA_SETA
-    with Image.open(edicao_video.SETA) as arquivo, Image.open(os.path.join(pasta, "seta_da_shopee.apng")) as dele:
-        assert arquivo.format == "PNG" and arquivo.mode == "RGBA"
+    with Image.open(edicao_video.SETA) as arquivo:
+        assert arquivo.format == "PNG" and arquivo.mode == "RGBA" and arquivo.size == edicao_video.TAMANHO_DA_SETA
         inicio, quadros = edicao_video.PULSO_DA_SETA
-        assert arquivo.n_frames == dele.n_frames == inicio + quadros and arquivo.info.get("duration") == 40
-        assert arquivo.size == (dele.size[0] + 2 * margem, dele.size[1] + 2 * margem)
-        arquivo.seek(0)
-        primeiro = arquivo.copy()
-        arquivo.seek(inicio + quadros // 2)
-        pulso = arquivo.copy()
-        dele.seek(inicio + quadros // 2)
-        pulso_dele = dele.convert("RGBA")
-    # O primeiro quadro já é o começo do desenho (a seta aparece logo depois da foto, sem
-    # espera); no pulso ela é laranja, com o contorno branco, num fundo quase todo transparente.
-    largura, altura = pulso.size
-    pixels = [pulso.getpixel((x, y)) for x in range(largura) for y in range(altura)]
-    comeco = [primeiro.getpixel((x, y))[3] for x in range(largura) for y in range(altura)]
-    assert 0 < sum(1 for a in comeco if a) < len(pixels) * 0.05
+        assert (inicio, quadros) == (0, arquivo.n_frames) and arquivo.info.get("duration") == 40   # 25 por segundo
+        assert quadros == 25
+        vistos = []
+        for n in range(arquivo.n_frames):
+            arquivo.seek(n)
+            vistos.append(arquivo.convert("RGBA").copy())
     laranja = edicao_video.LARANJA_DA_SHOPEE
-    laranjas = [p for p in pixels if p[3] == 255 and sum(abs(a - b) for a, b in zip(p, laranja)) < 30]
-    brancos = [p for p in pixels if p[3] == 255 and min(p[:3]) > 240]
-    transparentes = [p for p in pixels if p[3] == 0]
-    assert len(laranjas) > len(pixels) * 0.08 and len(brancos) > len(pixels) * 0.02
-    assert len(transparentes) > len(pixels) * 0.3
-    # A mesma seta do arquivo dele: onde a dele é cheia, a nossa é laranja.
-    cheios = [(x, y) for x in range(pulso_dele.width) for y in range(pulso_dele.height)
-              if pulso_dele.getpixel((x, y))[3] == 255]
-    assert cheios and all(sum(abs(a - b) for a, b in zip(pulso.getpixel((x + margem, y + margem)), laranja)) < 30
-                          for x, y in cheios)
-    # A sombra é escura e meio transparente; nada escuro e opaco (o preto do fundo do arquivo saiu).
+    largura, altura = vistos[0].size
+
+    def pontas(quadro):
+        """
+        Na coluna do meio, onde ficam as pontas das três setinhas: a força do laranja (a soma da
+        opacidade) de cada trecho seguido com laranja, de cima para baixo.
+        """
+        trechos, soma = [], 0
+        for y in range(altura):
+            r, g, b, a = quadro.getpixel((largura // 2, y))
+            if a > 30 and sum(abs(c - d) for c, d in zip((r, g, b), laranja)) < 30:
+                soma += a
+            elif soma:
+                trechos.append(soma)
+                soma = 0
+        return trechos + ([soma] if soma else [])
+
+    # Três setinhas separadas, em todos os quadros, e sempre uma bem acesa (na passagem de uma para
+    # a de baixo, as duas ficam pela metade do caminho, mais da metade da força).
+    for quadro in vistos:
+        assert len(pontas(quadro)) == 3
+        assert max(quadro.getpixel((x, y))[3] for x in range(largura) for y in range(altura)
+                   if sum(abs(c - d) for c, d in zip(quadro.getpixel((x, y))[:3], laranja)) < 30) > 150
+    # Cada uma acende na sua vez: a de cima, depois a do meio, depois a de baixo.
+    for quadro, acesa in ((vistos[3], 0), (vistos[11], 1), (vistos[20], 2)):
+        forcas = pontas(quadro)
+        assert forcas.index(max(forcas)) == acesa
+    # O contorno branco em volta e o fundo transparente; nada escuro e opaco.
+    pixels = [vistos[0].getpixel((x, y)) for x in range(largura) for y in range(altura)]
+    assert [p for p in pixels if p[3] == 255 and min(p[:3]) > 240]
+    assert len([p for p in pixels if p[3] == 0]) > len(pixels) * 0.5
     assert not [p for p in pixels if p[3] > 200 and max(p[:3]) < 120]
-    # O canto de baixo à direita tem a ponta; os cantos de cima e o de baixo à esquerda ficam vazios.
-    assert any(pulso.getpixel((x, y))[3] == 255 for x in range(largura * 2 // 3, largura)
-               for y in range(altura // 2, altura))
-    for cantos in ((0, 0), (largura - 10, 0), (0, altura - 10)):
-        assert all(pulso.getpixel((cantos[0] + x, cantos[1] + y))[3] == 0 for x in range(10) for y in range(10))
+    for canto in ((0, 0), (largura - 10, 0), (0, altura - 10), (largura - 10, altura - 10)):
+        assert all(vistos[0].getpixel((canto[0] + x, canto[1] + y))[3] == 0 for x in range(10) for y in range(10))
     assert os.path.getsize(edicao_video.SETA) < 1024 * 1024
 
 
@@ -223,9 +231,9 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
     assert all(sum(abs(a - b) for a, b in zip(p, laranja)) < 70 for p in na_moldura(3.5))
     laranja, escuros = onde_fica_a_seta(2.6)
     assert laranja > 0 and not escuros
-    # 7,5 s: depois do fim do arquivo da seta, já no pulso repetido.
+    # 7,5 s: depois do fim do arquivo, já na volta repetida da cascata (uma setinha acesa por inteiro).
     laranja, escuros = onde_fica_a_seta(7.5)
-    assert laranja > 0.05 and not escuros
+    assert laranja > 0.02 and not escuros
 
 
 
@@ -1983,7 +1991,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     assert f"[corpo][mini0]{lugar}:enable='lt(t,3.000)'[mini0_no_corpo]" in filtro
     assert f"[mini0_no_corpo][mini1]{lugar}:enable='gte(t,3.000)*lt(t,6.000)'[mini1_no_corpo]" in filtro
     assert f"[mini1_no_corpo][mini2]{lugar}:enable='gte(t,6.000)'[semmoldura]" in filtro
-    assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
     # A foto que não abre fica de fora, e as que sobram dividem o vídeo igual.
     monkeypatch.setattr(edicao_video.videos, "imagem_abre", lambda caminho: not caminho.endswith("outra_0.jpg"))
     assert edicao_video.editar("video.mp4", b"foto", destino, outras_fotos=[b"nao abre", b"triangulo"]) == ""
