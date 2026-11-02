@@ -91,14 +91,17 @@ PULSO_DA_SETA = (0, 25)                         # a volta inteira da cascata, em
 # As legendas da fala: o que as pessoas falam no vídeo, escrito pela IA vendo o vídeo e posto por
 # nós na edição (não o Captions do app: assim o Rafael vê a legenda no rascunho antes de aprovar).
 # O pé da legenda fica na altura do pé da seta, porque logo abaixo vem o cartão do produto que o app
-# mostra; ela vai à direita da seta, sem cobri-la, até perto da borda que o app corta, em letra
+# mostra; ela vai à direita da seta, sem cobri-la, até antes da coluna dos ícones do app à direita
+# (o perfil, o coração e os comentários, que começam em COLUNA_DOS_ICONES, medido no celular do
+# Rafael no vídeo de 02/11, 12:36: pedido dele, a legenda passava por cima dos ícones), em letra
 # pequena, branca com contorno preto. O vídeo sem fala (só música ou canto) e o que já tem a fala
 # escrita na tela vão sem ela. Escolha do Rafael (01/11, P118): DECISOES.md, Shopee Vídeo.
 TAMANHO_DA_SETA = (202, 160)        # o arquivo da seta, com a margem (o tests/test_edicao_video.py confere)
 # O pé e o lado da seta são os do pedaço com ela, sem a margem do contorno e da sombra.
 PE_DA_LEGENDA = CENTRO_DA_SETA[1] + TAMANHO_DA_SETA[1] // 2 - MARGEM_DA_SETA
 ESQUERDA_DA_LEGENDA = CENTRO_DA_SETA[0] + TAMANHO_DA_SETA[0] // 2 - MARGEM_DA_SETA + 12
-DIREITA_DA_LEGENDA = VISIVEL_NO_APP[1] - 12
+COLUNA_DOS_ICONES = 586
+DIREITA_DA_LEGENDA = COLUNA_DOS_ICONES - 12
 LETRA_DA_LEGENDA = (26, 22)         # a maior e a menor
 LINHAS_DA_LEGENDA = 2
 CONTORNO_DA_LEGENDA = 3
