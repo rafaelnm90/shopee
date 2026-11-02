@@ -1366,7 +1366,20 @@ def test_capa_com_chamada_tem_a_foto_grande_com_a_moldura_em_volta_e_a_frase_num
     for ponto in [(360, y1 - grossura // 2), (x1 - grossura // 2, (y1 + y2) // 2), (x2 + grossura // 2, (y1 + y2) // 2)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
     assert _pretos(capa, (0, 0, 720, y1 - grossura)) and _pretos(capa, (0, y2 + grossura, 720, 1280))
-    assert _pretos(capa, (0, y1, x1 - grossura, y2)) and _pretos(capa, (x2 + grossura, y1, 720, y2))
+    # Dos lados, o laranja vai até a beirada do vídeo, na altura da moldura: a tela da capa do app
+    # (a miniatura da tela final, no print do rascunho) mostra o vídeo de lado a lado, e ficava uma
+    # fresta preta entre a moldura e a beirada (print do Rafael de 02/11, 17:11).
+    for caixa in ((0, y1 - grossura, x1 - grossura, y2 + grossura), (x2 + grossura, y1 - grossura, 720, y2 + grossura)):
+        assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE)
+                   for x in range(caixa[0], caixa[2], 2) for y in range(caixa[1], caixa[3], 16)), caixa
+    # A do resto da abertura (o vídeo aberto, P129) continua com o preto dos lados.
+    import io
+
+    from PIL import Image
+    no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha",
+                                                                    no_video=True))).convert("RGB")
+    vx1, vy1, vx2, vy2 = edicao_video.MOLDURA_DA_CAPA_NO_VIDEO
+    assert _pretos(no_video, (0, vy1, vx1, vy2)) and _pretos(no_video, (vx2, vy1, 720, vy2))
     # Os cantos da moldura são retos: até a ponta de fora, laranja.
     for ponto in [(x1 - grossura, y1 - grossura), (x2 + grossura - 1, y1 - grossura),
                   (x1 - grossura, y2 + grossura - 1), (x2 + grossura - 1, y2 + grossura - 1)]:
@@ -1712,8 +1725,10 @@ def test_faixa_laranja_acha_a_faixa_da_capa_no_print_e_nao_acha_sem_ela():
     cima, baixo, esquerda, direita = edicao_video.faixa_laranja(capa)
     x1, _, x2, y2 = edicao_video.FOTO_COM_MOLDURA
     grossura = edicao_video.GROSSURA_DA_MOLDURA
-    # Com a moldura (P115), a faixa e a borda de baixo dela formam um retângulo laranja só.
-    assert (esquerda, direita) == (x1 - grossura, x2 + grossura) and baixo == y2 + grossura
+    # Com a moldura (P115), a faixa e a borda de baixo dela formam um retângulo laranja só, que
+    # vai de uma beirada à outra da capa (as laterais da moldura vão até a beirada).
+    assert (esquerda, direita) == (0, edicao_video.TELA[0]) and baixo == y2 + grossura
+    assert x1 - grossura > esquerda and x2 + grossura < direita
     assert baixo - cima == edicao_video.FAIXA_DA_CHAMADA + grossura
     tela = Image.new("RGB", (1080, 2400), (30, 30, 30))
     escala = 957 / 720

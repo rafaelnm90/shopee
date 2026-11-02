@@ -375,16 +375,25 @@ def _foto_que_cabe(foto, lado):
     return imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
 
 
-def _capa_com_a_foto(imagem):
+def _capa_com_a_foto(imagem, ate_a_beirada=False):
     """
     A capa (PIL, 720x1280): a foto (PIL, do tamanho de LADO_DA_FOTO) com a moldura de cantos retos,
-    no meio da área da foto da capa (MOLDURA_DA_CAPA), no fundo preto.
+    no meio da área da foto da capa (MOLDURA_DA_CAPA), no fundo preto. Com ate_a_beirada=True (a
+    capa da grade), as laterais da moldura vão até a beirada do vídeo, na altura dela.
     """
-    from PIL import Image
+    from PIL import Image, ImageDraw
     capa = Image.new("RGB", TELA, "black")
     emoldurada = com_moldura(imagem, arredondada=False)
-    capa.paste(emoldurada, (MEIO_DA_FOTO[0] - emoldurada.width // 2, MEIO_DA_FOTO[1] - emoldurada.height // 2),
-               emoldurada)
+    x, y = MEIO_DA_FOTO[0] - emoldurada.width // 2, MEIO_DA_FOTO[1] - emoldurada.height // 2
+    if ate_a_beirada:
+        # A tela da capa do app (a miniatura da tela final, no print do rascunho) mostra o vídeo de
+        # lado a lado, mais que a grade, e ficava uma fresta preta entre a moldura e a beirada
+        # (print do Rafael de 02/11, 17:11): o laranja vai até a beirada, e a grade fica igual.
+        desenho = ImageDraw.Draw(capa)
+        cor, baixo = CAMADAS_DA_MOLDURA[0][0], y + emoldurada.height - 1
+        desenho.rectangle((0, y, x - 1, baixo), fill=cor)
+        desenho.rectangle((x + emoldurada.width, y, TELA[0] - 1, baixo), fill=cor)
+    capa.paste(emoldurada, (x, y), emoldurada)
     return capa
 
 
@@ -514,7 +523,7 @@ def capa_com_chamada(foto, chamada, no_video=False):
     for i, linha in enumerate(linhas):
         desenho.text((largura / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
                      fill="white", anchor="mm")
-    return _png(_capa_com_a_foto(imagem))
+    return _png(_capa_com_a_foto(imagem, ate_a_beirada=not no_video))
 
 
 # A faixa laranja da capa com chamada num print (a tela da capa do app, o quadro da grade do
