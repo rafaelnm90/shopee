@@ -1695,6 +1695,107 @@ def legendas_da_fala(textos):
     return list(textos["legendas"]), ""
 
 
+# O tempo das legendas da fala vem do som do vídeo (videos.palavras_faladas), palavra por palavra: a IA
+# escreve o texto (P118), e cada palavra dela fica no tempo da mesma palavra no áudio; a que o áudio não
+# reconheceu fica entre as vizinhas. No vídeo do Rafael das 19:29 de 02/11, o tempo que a IA estima
+# vendo o vídeo adiantava as legendas até 2 s da fala. Com menos de PARTE_ACHADA_NO_AUDIO das palavras
+# da IA achadas no áudio, ou sem o reconhecimento de voz, as legendas ficam com o tempo da IA, e o
+# registro diz por quê. Cada legenda fica na tela até DEPOIS_DA_FALA depois da última palavra dela, ou
+# até a seguinte começar. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+PARTE_ACHADA_NO_AUDIO = 0.5
+DEPOIS_DA_FALA = 0.3
+SEGUNDOS_POR_PALAVRA = 0.3       # a palavra da IA antes da 1ª ou depois da última achada no áudio
+PROCESSO_DO_TEMPO_DAS_LEGENDAS = "edição do vídeo: tempo das legendas"
+PELO_AUDIO = "pelo áudio"
+PELO_TEMPO_DA_IA = "pelo tempo da IA"
+SEM_O_RECONHECIMENTO = "sem o reconhecimento de voz"
+FALA_NAO_BATEU = "a fala do áudio não bateu com a da IA"
+
+
+def _pedacos_da_palavra(palavra):
+    """A palavra sem acento, em minúsculas e só com letras e números, em pedaços pelo hífen ("mesa-posta": mesa, posta)."""
+    import unicodedata
+    simples = unicodedata.normalize("NFKD", palavra.casefold()).encode("ascii", "ignore").decode()
+    return [p for p in ("".join(c for c in parte if c.isalnum()) for parte in simples.split("-")) if p]
+
+
+def _preencher_os_tempos(tempos):
+    """
+    Dá tempo às palavras que o áudio não reconheceu (None em tempos, [(início, fim)] na ordem): entre as
+    vizinhas achadas, repartido igual; antes da 1ª e depois da última, SEGUNDOS_POR_PALAVRA cada uma.
+    """
+    n = 0
+    while n < len(tempos):
+        if tempos[n] is not None:
+            n += 1
+            continue
+        fim_da_falta = n
+        while fim_da_falta < len(tempos) and tempos[fim_da_falta] is None:
+            fim_da_falta += 1
+        quantas = fim_da_falta - n
+        antes = tempos[n - 1][1] if n else None
+        depois = tempos[fim_da_falta][0] if fim_da_falta < len(tempos) else None
+        if antes is None:
+            antes = max(0.0, depois - quantas * SEGUNDOS_POR_PALAVRA)
+        if depois is None or depois < antes:
+            depois = antes + quantas * SEGUNDOS_POR_PALAVRA
+        passo = (depois - antes) / quantas
+        for j in range(quantas):
+            tempos[n + j] = (antes + j * passo, antes + (j + 1) * passo)
+        n = fim_da_falta
+
+
+def legendas_no_tempo_da_fala(legendas, palavras):
+    """
+    (legendas no tempo do áudio, palavras da IA achadas, palavras da IA): as legendas da IA ([(início,
+    fim, texto)]) no tempo das palavras do áudio ([(início, fim, palavra)], do reconhecimento de voz),
+    como [(início, fim, texto, tempos)], com tempos = [(início, fim)] de cada palavra do texto, para a
+    legenda longa ser dividida no tempo certo (pedacos_da_legenda). As legendas vêm None quando o áudio
+    não acha PARTE_ACHADA_NO_AUDIO das palavras da IA.
+    """
+    import difflib
+    da_ia = [(i, palavra) for i, (_inicio, _fim, texto) in enumerate(legendas) for palavra in texto.split()]
+    pedacos_da_ia = [(k, pedaco) for k, (_i, palavra) in enumerate(da_ia) for pedaco in _pedacos_da_palavra(palavra)]
+    pedacos_do_audio = [(inicio, fim, pedaco) for inicio, fim, palavra in palavras or ()
+                        for pedaco in _pedacos_da_palavra(palavra)]
+    comparacao = difflib.SequenceMatcher(None, [pedaco for _k, pedaco in pedacos_da_ia],
+                                         [pedaco for *_tempo, pedaco in pedacos_do_audio], autojunk=False)
+    tempos = [None] * len(da_ia)
+    for bloco in comparacao.get_matching_blocks():
+        for n in range(bloco.size):
+            k = pedacos_da_ia[bloco.a + n][0]
+            inicio, fim, _pedaco = pedacos_do_audio[bloco.b + n]
+            tempos[k] = (inicio, fim) if tempos[k] is None else (min(tempos[k][0], inicio), max(tempos[k][1], fim))
+    achadas = sum(1 for tempo in tempos if tempo is not None)
+    if not da_ia or achadas < PARTE_ACHADA_NO_AUDIO * len(da_ia):
+        return None, achadas, len(da_ia)
+    _preencher_os_tempos(tempos)
+    no_tempo, k = [], 0
+    for _inicio, _fim, texto in legendas:
+        deste = tempos[k:k + len(texto.split())]
+        k += len(deste)
+        if deste:
+            no_tempo.append((round(deste[0][0], 2), round(deste[-1][1] + DEPOIS_DA_FALA, 2), texto,
+                             [(round(a, 2), round(b, 2)) for a, b in deste]))
+    return sorted(no_tempo, key=lambda legenda: legenda[:2]), achadas, len(da_ia)
+
+
+def legendas_no_tempo(video, legendas):
+    """
+    (legendas, resultado, detalhe): as legendas da IA no tempo do áudio do vídeo (legendas_no_tempo_da_fala),
+    ou como vieram, com o tempo da IA, e o porquê fixo, para o registro. Sem legendas, (legendas, "", "").
+    """
+    if not legendas:
+        return legendas, "", ""
+    palavras = videos.palavras_faladas(video)
+    if palavras is None:
+        return legendas, PELO_TEMPO_DA_IA, SEM_O_RECONHECIMENTO
+    no_tempo, achadas, total = legendas_no_tempo_da_fala(legendas, palavras)
+    if no_tempo is None:
+        return legendas, PELO_TEMPO_DA_IA, f"{FALA_NAO_BATEU} ({achadas} de {total} palavras no áudio)"
+    return no_tempo, PELO_AUDIO, f"{achadas} de {total} palavras no áudio"
+
+
 def _linhas_da_legenda(texto, fonte, rascunho):
     """As linhas do texto quebradas na largura da legenda (só no espaço comum)."""
     limite = DIREITA_DA_LEGENDA - ESQUERDA_DA_LEGENDA - 2 * CONTORNO_DA_LEGENDA
@@ -1763,11 +1864,13 @@ def _ponto_de_corte(palavras):
     return melhor
 
 
-def pedacos_da_legenda(inicio, fim, texto):
+def pedacos_da_legenda(inicio, fim, texto, tempos=None):
     """
     [(início, fim, texto, imagem)] do trecho: o que não cabe numa legenda (LINHAS_DA_LEGENDA linhas) é
-    dividido em dois pelas palavras (_ponto_de_corte), com o tempo repartido pelo tamanho de cada parte,
-    até caber; nenhuma palavra fica de fora (só a palavra sozinha que nem a menor letra cabe).
+    dividido em dois pelas palavras (_ponto_de_corte), até caber; nenhuma palavra fica de fora (só a
+    palavra sozinha que nem a menor letra cabe). Com os tempos de cada palavra no áudio ([(início, fim)],
+    legendas_no_tempo_da_fala), a 2ª parte começa quando a 1ª palavra dela é dita; sem eles, o tempo é
+    repartido pelo tamanho de cada parte.
     """
     imagem = legenda_da_fala(texto)
     palavras = texto.split()
@@ -1775,13 +1878,17 @@ def pedacos_da_legenda(inicio, fim, texto):
         return [(inicio, fim, texto, imagem)] if imagem else []
     meio = _ponto_de_corte(palavras)
     primeira, segunda = " ".join(palavras[:meio]), " ".join(palavras[meio:])
+    if tempos and len(tempos) == len(palavras):
+        corte = min(max(tempos[meio][0], inicio), fim)
+        return (pedacos_da_legenda(inicio, corte, primeira, tempos[:meio])
+                + pedacos_da_legenda(corte, fim, segunda, tempos[meio:]))
     corte = inicio + (fim - inicio) * len(primeira) / (len(primeira) + len(segunda))
     return pedacos_da_legenda(inicio, corte, primeira) + pedacos_da_legenda(corte, fim, segunda)
 
 
-def _trechos_que_cabem(inicio, fim, texto):
+def _trechos_que_cabem(inicio, fim, texto, tempos=None):
     """[(início, fim, imagem)] do trecho, já dividido em legendas que cabem (pedacos_da_legenda)."""
-    return [(comeco, final, imagem) for comeco, final, _texto, imagem in pedacos_da_legenda(inicio, fim, texto)]
+    return [(comeco, final, imagem) for comeco, final, _texto, imagem in pedacos_da_legenda(inicio, fim, texto, tempos)]
 
 
 def letreiros_da_fala(legendas, duracao):
@@ -1789,10 +1896,12 @@ def letreiros_da_fala(legendas, duracao):
     [(imagem, início, fim, x, y)]: as legendas da fala no vídeo, cada uma até a seguinte começar,
     dentro da duração do vídeo; o trecho curto demais para ler (MINIMO_NA_TELA) sai. O pé de cada uma
     fica em PE_DA_LEGENDA, e ela vai centralizada entre ESQUERDA_DA_LEGENDA e DIREITA_DA_LEGENDA.
+    legendas: [(início, fim, texto)], ou com os tempos de cada palavra no áudio no 4º lugar
+    (legendas_no_tempo_da_fala).
     """
     pedacos = []
-    for inicio, fim, texto in sorted(legendas):
-        pedacos += _trechos_que_cabem(max(0.0, inicio), min(duracao, fim), texto)
+    for inicio, fim, texto, *tempos in sorted(legendas, key=lambda legenda: legenda[:2]):
+        pedacos += _trechos_que_cabem(max(0.0, inicio), min(duracao, fim), texto, tempos[0] if tempos else None)
     letreiros = []
     for i, (inicio, fim, imagem) in enumerate(pedacos):
         if i + 1 < len(pedacos):
@@ -1984,8 +2093,13 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                + (SEM_A_MINIATURA if not miniatura
                   else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
                + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else ""))
-    # As legendas da fala (P118): só o que alguém fala, num vídeo que ainda não a tem escrita na tela.
+    # As legendas da fala (P118): só o que alguém fala, num vídeo que ainda não a tem escrita na tela,
+    # no tempo do áudio, palavra por palavra.
     legendas, sem_legendas = legendas_da_fala(textos) if produto else ([], SEM_AS_LEGENDAS_DA_IA)
+    legendas, tempo_das_legendas, detalhe_do_tempo = legendas_no_tempo(video, legendas)
+    if tempo_das_legendas:
+        registro_processos.registrar("shopee_video", PROCESSO_DO_TEMPO_DAS_LEGENDAS, tempo_das_legendas,
+                                     detalhe_do_tempo, ok=tempo_das_legendas == PELO_AUDIO)
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
@@ -1997,8 +2111,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         postas = resumo.get("legendas", 0)
         # Com as palavras e os segundos de fala, o checkup vê se a IA resume a fala (poucas palavras
         # por segundo): a legenda é a fala inteira (pedido do Rafael, 02/11).
-        palavras = sum(len(texto.split()) for _inicio, _fim, texto in legendas)
-        segundos = sum(max(0.0, fim - inicio) for inicio, fim, _texto in legendas)
+        palavras = sum(len(texto.split()) for _inicio, _fim, texto, *_tempos in legendas)
+        segundos = sum(max(0.0, fim - inicio) for inicio, fim, *_resto in legendas)
         registro_processos.registrar("shopee_video", PROCESSO_DAS_LEGENDAS, "postas" if postas else "sem as legendas",
                                      f"{postas} trecho(s), {palavras} palavra(s) em {segundos:.0f} s de fala"
                                      if postas else sem_legendas or "nenhum trecho cabe", ok=True if postas else None)
@@ -2390,7 +2504,7 @@ def exemplo_editor_2(destino):
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
         textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), miniatura_no_video(textos),
-        legendas_da_fala(textos)[0]))
+        legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0]))
 
 
 def exemplo_capa():

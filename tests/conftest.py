@@ -149,6 +149,23 @@ def celular_na_pasta_do_teste(tmp_path, monkeypatch):
     monkeypatch.setattr(pedidos_do_canal, "PASTA", str(tmp_path / "canal"))
 
 
+@pytest.fixture(autouse=True)
+def sem_reconhecimento_de_voz(monkeypatch):
+    """
+    Os testes rodam sem rede: o reconhecimento de voz (faster-whisper) nunca baixa o modelo. O de
+    mentira falha ao abrir, e as legendas ficam com o tempo da IA; o teste que quer as palavras do
+    áudio põe o seu no lugar (sys.modules["faster_whisper"]).
+    """
+    import sys
+    import types
+
+    class SemModelo:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("os testes não baixam o modelo de voz")
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=SemModelo))
+
+
 @pytest.fixture
 def bm(monkeypatch):
     """bot_mestre com banco novo, agendador novo e sem esperas (asyncio.sleep instantâneo)."""

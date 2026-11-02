@@ -407,6 +407,35 @@ def mudo(caminho, timeout=120):
     return bool(volumes) and max(volumes) <= VOLUME_DO_MUDO
 
 
+# O tempo de cada palavra falada no vídeo vem do reconhecimento de voz (faster-whisper, em CPU), pelo
+# próprio som: as legendas da fala seguem o áudio, não o tempo que a IA estima vendo o vídeo (no vídeo
+# do Rafael das 19:29 de 02/11, o tempo da IA adiantou as legendas até 2 s da fala). O modelo vem do
+# huggingface.co na primeira vez e fica no cache do servidor.
+MODELO_DA_FALA = "small"
+
+
+def palavras_faladas(caminho):
+    """
+    [(início, fim, palavra)] da fala em português do vídeo, em segundos desde o começo dele, na ordem;
+    [] sem fala. None quando não dá para ouvir (sem o reconhecimento de voz instalado, sem o modelo,
+    vídeo que não abre): quem chama fica com o tempo que tinha.
+    """
+    if not os.path.exists(caminho):
+        return None
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        return None
+    try:
+        modelo = WhisperModel(MODELO_DA_FALA, device="cpu", compute_type="int8")
+        trechos, _info = modelo.transcribe(caminho, language="pt", vad_filter=True, word_timestamps=True)
+        return [(float(palavra.start), float(palavra.end), palavra.word.strip())
+                for trecho in trechos for palavra in (trecho.words or []) if palavra.word.strip()]
+    except Exception as e:
+        logger.warning(f"⚠️ [Vídeos] O reconhecimento de voz não ouviu o vídeo: {type(e).__name__}")
+        return None
+
+
 # Na emenda de dois trechos, o som entra e sai em 30 ms, sem estalo.
 EMENDA_DO_SOM = 0.03
 

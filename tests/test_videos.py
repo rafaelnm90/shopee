@@ -157,3 +157,37 @@ def test_video_mudo_sem_trilha_ou_em_silencio(tmp_path):
                               "-map", "0:v", "-map", "1:a")) is True
     assert videos.mudo(gravar("apito.mp4", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
                               "-map", "0:v", "-map", "1:a")) is False
+
+
+def test_palavras_faladas_pelo_reconhecimento_de_voz(monkeypatch, tmp_path):
+    # O tempo de cada palavra vem do som do vídeo (o faster-whisper, em CPU), para as legendas da fala.
+    import sys
+    import types
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"video")
+    pedidos = []
+
+    class Modelo:
+        def __init__(self, nome, device, compute_type):
+            pedidos.append((nome, device, compute_type))
+
+        def transcribe(self, caminho, language, vad_filter, word_timestamps):
+            pedidos.append((language, vad_filter, word_timestamps))
+            palavra = lambda inicio, fim, texto: types.SimpleNamespace(start=inicio, end=fim, word=texto)
+            return iter([types.SimpleNamespace(words=[palavra(1.0, 1.3, " Olha"), palavra(1.3, 1.5, " só")]),
+                         types.SimpleNamespace(words=[palavra(1.5, 1.6, " "), palavra(2.0, 2.6, " vestido.")])]), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=Modelo))
+    assert videos.palavras_faladas(str(video)) == [(1.0, 1.3, "Olha"), (1.3, 1.5, "só"), (2.0, 2.6, "vestido.")]
+    assert pedidos == [(videos.MODELO_DA_FALA, "cpu", "int8"), ("pt", True, True)]
+    # O vídeo que não existe, o reconhecimento que não abre e a biblioteca que falta: None.
+    assert videos.palavras_faladas(str(tmp_path / "outro.mp4")) is None
+
+    class SemModelo:
+        def __init__(self, *args, **kwargs):
+            raise OSError("sem o modelo")
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=SemModelo))
+    assert videos.palavras_faladas(str(video)) is None
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    assert videos.palavras_faladas(str(video)) is None
