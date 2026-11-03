@@ -448,6 +448,15 @@ def test_preparo_pedido_no_botao_nao_e_sobreposicao():
     r = checkup.sobreposicoes(AGORA)
     assert [hora for hora, _o in r["pedidos_no_botao"]] == ["09:31"]
     assert [hora for hora, _o in r["preparo_na_janela"]] == ["10:15"]
+    # O post pedido no Postar Agora 🚀 (P138) também vale a qualquer hora.
+    assert checkup.PROCESSO_DO_POSTAR_AGORA == robo.PROCESSO_DO_POSTAR_AGORA
+    assert checkup.classificado("shopee_video", robo.PROCESSO_DO_POSTAR_AGORA)
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DO_POSTAR_AGORA, "pedido", ok=None,
+                                 agora=em("10:40"))
+    robo.registrar_tentativa("postar", "postado", agora=em("10:44"))
+    r = checkup.sobreposicoes(AGORA)
+    assert [hora for hora, _o in r["pedidos_no_botao"]] == ["09:31", "10:44"]
+    assert [hora for hora, _o in r["preparo_na_janela"]] == ["10:15"]
 
 
 def test_pontos_de_atencao():

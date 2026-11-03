@@ -16,6 +16,7 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --treino      # o treino na hora (botão Testar Caminho 🧭)
     python3 robo_shopee_video.py --preparar    # um rascunho na hora (botão Preparar 1 Agora ⚡)
     python3 robo_shopee_video.py --saude       # a Saúde do Vídeo na hora (botão Gerar Apelação ⚖️)
+    python3 robo_shopee_video.py --postar ID   # o aprovado na hora (botão Postar Agora 🚀, P138)
     python3 robo_shopee_video.py --print-do-rascunho [AAAA-MM-DDTHH:MM]   # o print do rascunho mais novo no privado
 
 Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
@@ -6160,17 +6161,19 @@ def pausar_por_desconexao(motivo):
            f"Para voltar ao automático: {como}")
 
 
-def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
+def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar=None):
     """
     Uma rodada. treino=True é o botão Testar Caminho 🧭, preparar=True o Preparar 1
-    Agora ⚡ e saude=True o Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee
-    Vídeo 🩺): rodam na hora, mesmo pausado ou fora do horário (o Rafael pediu agora), e o
-    rascunho do Preparar 1 Agora é a mais do plano do dia. Com a conta suspensa, a única
-    coisa que o robô faz no celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo
-    botão). Devolve o que aconteceu, numa frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    Agora ⚡, saude=True o Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee
+    Vídeo 🩺) e postar=ID o Postar Agora 🚀 (Rascunhos do Robô 📝, P138): rodam na hora,
+    mesmo pausado ou fora do horário (o Rafael pediu agora), e o rascunho do Preparar 1
+    Agora é a mais do plano do dia. Com a conta suspensa, a única coisa que o robô faz no
+    celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo botão). Devolve o que
+    aconteceu, numa frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     config = ler_config()
-    na_hora = treino or preparar or saude
+    pedido_de_post = postar is not None
+    na_hora = treino or preparar or saude or pedido_de_post
     if not na_hora:
         if config["robo_pausado"]:
             # Pausa do Rafael: os horários que passam nela são pulados. Pausa sozinha, por
@@ -6189,7 +6192,9 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             return "fora do Horário do Robô"
     elif suspensa(config, agora) and not saude:
         ate = quando_acaba(suspenso_ate(config))
-        avisar(f"⛔ Robô da Shopee Vídeo: não {'preparei o rascunho' if preparar else 'testei o caminho'}. A conta "
+        feito = ("preparei o rascunho" if preparar else "postei o rascunho que você pediu" if pedido_de_post
+                 else "testei o caminho")
+        avisar(f"⛔ Robô da Shopee Vídeo: não {feito}. A conta "
                f"de Shopee Vídeo está suspensa pela Shopee até {ate}, e até lá o Postar vídeo não abre: o "
                "robô não prepara, não posta e não testa o caminho (o resto continua).")
         return f"conta suspensa até {ate}"
@@ -6197,7 +6202,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
         if av.tela_aberta():
             if not na_hora:
                 anotar_rodada_sem_limpeza("a tela do celular aberta no privado", agora)
-            return _resposta(preparar, "a tela do celular está aberta no privado do Rafael")
+            return _resposta(preparar, "a tela do celular está aberta no privado do Rafael", pedido_de_post)
         if not celular_robo.conectado():
             ok, motivo = celular_robo.reconectar_sozinho()
             if not ok and not na_hora and suspensa(config, agora):
@@ -6210,7 +6215,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
                 if not na_hora:
                     pausar_por_desconexao(motivo)
                 registrar_tentativa("rodada", "parou", f"celular desconectado ({motivo})", agora=agora)
-                return _resposta(preparar, f"celular desconectado ({motivo})")
+                return _resposta(preparar, f"celular desconectado ({motivo})", pedido_de_post)
         # De hora em hora, o prazo do pareamento no Motorola: sem a opção que o desliga, o
         # Android corta o pareamento em 7 dias, e o alertas.py avisa o Rafael antes.
         # Pedido do Rafael: DECISOES.md, Shopee Vídeo.
@@ -6222,7 +6227,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
         if not livre:
             if not na_hora:
                 anotar_rodada_sem_limpeza("o celular com o explorar", agora)
-            return _resposta(preparar, "o explorar está tocando no celular")
+            return _resposta(preparar, "o explorar está tocando no celular", pedido_de_post)
         # Dentro da trava, nenhum preparo está rodando: o "preparando" antigo é de uma rodada morta.
         soltar_preparos_interrompidos(agora)
         if treino:
@@ -6231,6 +6236,13 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             acao, ident = "rascunho", None
         elif saude:
             acao, ident = "saude", None
+        elif pedido_de_post:
+            # O Postar Agora 🚀 vale a qualquer hora e sem esperar os 30 min do último post (P138).
+            rascunho = pegar(postar)
+            if not rascunho or rascunho["estado"] != "aprovado":
+                return _resposta(False, "ele não está mais aprovado esperando a hora de ir ao ar", True)
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_POSTAR_AGORA, "pedido", ok=None, agora=agora)
+            acao, ident = "postar", rascunho["id"]
         else:
             acao, ident = o_que_fazer(config, agora) or (None, None)
         if not acao:
@@ -6242,7 +6254,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
         # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
         d = casos_robo.com_historico(d or ps.conectar(celular=True))
         try:
-            resultado = _agir(d, acao, ident, preparar, config, agora, pedido=saude and na_hora)
+            resultado = _agir(d, acao, ident, preparar, config, agora, pedido=(saude or pedido_de_post) and na_hora)
             if acao != "saude" and saude_pedida_pela_notificacao(agora):
                 _ler_saude_junto(d, agora)
             return resultado
@@ -6369,7 +6381,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         if acao != "rascunho" and not e.caso_guardado:
             _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
         if acao == "postar":
-            _nao_saiu_o_post(ident, e.motivo)
+            _nao_saiu_o_post(ident, e.motivo, pedido)
         elif acao == "apagar":
             # Não insiste: o Rafael decide de novo pelo botão.
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
@@ -6392,7 +6404,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             _guardar_caso(d, acao, "erro", f"erro inesperado ({type(e).__name__})", ident=ident, agora=agora)
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
         if acao == "postar":
-            _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})")
+            _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})", pedido)
         _limpeza_de_novo(acao)
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)
@@ -6417,8 +6429,23 @@ def _limpeza_de_novo(acao):
 TENTATIVAS_DE_POSTAR = 3
 
 
-def _nao_saiu_o_post(ident, motivo):
-    """Conta a vez em que o aprovado não saiu e avisa: tenta de novo, ou volta para o Rafael na última."""
+# O Postar Agora 🚀 (Rascunhos do Robô 📝): o aprovado vai ao ar na hora, a qualquer hora e sem
+# esperar os 30 min do último post; o que não sai continua aprovado, sem gastar nenhuma das
+# TENTATIVAS_DE_POSTAR das rodadas. Escolha do Rafael (03/11, P138): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_POSTAR_AGORA = "postar agora"
+
+
+def _nao_saiu_o_post(ident, motivo, pedido=False):
+    """
+    Conta a vez em que o aprovado não saiu e avisa: tenta de novo, ou volta para o Rafael na última.
+    O pedido no Postar Agora 🚀 não conta: o aprovado fica como estava.
+    """
+    if pedido:
+        atualizar(ident, motivo=motivo)
+        avisar(f"⚠️ Robô da Shopee Vídeo: não consegui postar agora o rascunho que você pediu ({motivo}). Não "
+               "toquei em mais nada. Ele continua aprovado: vai ao ar na hora marcada, ou toque de novo em "
+               "Postar Agora 🚀.")
+        return
     falhas = int((pegar(ident) or {}).get("falhas_ao_postar") or 0) + 1
     if falhas < TENTATIVAS_DE_POSTAR:
         atualizar(ident, falhas_ao_postar=str(falhas), motivo=motivo)
@@ -6493,10 +6520,16 @@ def _repetir_depois(acao, preparar, config, agora=None, video=None, do_video=Fal
         marcar_para_repetir(config, agora, video, do_video)
 
 
-def _resposta(preparar, resultado):
-    """No Preparar 1 Agora o Rafael espera a resposta: o que impediu o rascunho vai também no privado."""
+def _resposta(preparar, resultado, postar=False):
+    """
+    No Preparar 1 Agora e no Postar Agora 🚀 o Rafael espera a resposta: o que impediu vai
+    também no privado.
+    """
     if preparar:
         avisar(f"⚠️ Robô da Shopee Vídeo: não preparei o rascunho que você pediu ({resultado}).")
+    elif postar:
+        avisar(f"⚠️ Robô da Shopee Vídeo: não postei agora o rascunho que você pediu ({resultado}). Se ele "
+               "continua aprovado, vai ao ar na hora marcada, ou toque de novo em Postar Agora 🚀.")
     return resultado
 
 
@@ -6546,10 +6579,17 @@ def main(argumentos):
         print(print_do_rascunho(resto[0].replace("T", " ") if resto and resto[0].strip() else None))
         return 0
     treino, preparar, saude = "--treino" in argumentos, "--preparar" in argumentos, "--saude" in argumentos
-    if not treino and not preparar and not saude and "--rodada" not in argumentos:
+    postar = None
+    if "--postar" in argumentos:
+        resto = argumentos[argumentos.index("--postar") + 1:]
+        if not resto or not resto[0].isdigit():
+            print(__doc__)
+            return 2
+        postar = int(resto[0])
+    if not treino and not preparar and not saude and postar is None and "--rodada" not in argumentos:
         print(__doc__)
         return 2
-    resultado = rodada(treino=treino, preparar=preparar, saude=saude)
+    resultado = rodada(treino=treino, preparar=preparar, saude=saude, postar=postar)
     logger.info(f"🤖 [Robô Shopee Vídeo] {resultado}.")
     # O resultado fica no banco com o texto mascarado (sem nome de produto), para o
     # diagnóstico do servidor, que é público, mostrar como foi a última rodada.
