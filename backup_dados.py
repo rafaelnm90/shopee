@@ -16,8 +16,23 @@ No modo WAL, o retrato já inclui o que ainda está no -wal.
 Para restaurar: parar os robôs, extrair o pacote na pasta do projeto e subir de
 novo. Banco e .env bastam para as contas do pool (a sessão delas fica cifrada no
 banco); os *.session são as contas principais dos userbots.
+
+Cópia fora do servidor, pedido do Rafael (P146 1): DECISOES.md, Monitor, deploy e servidor.
+O pacote fica no mesmo servidor e se perderia junto com ele. Depois de
+cada backup, o bot_mestre manda o pacote cifrado (cifrar_copia) no privado do
+Rafael; lá fica só a mais nova. A senha da cópia (CHAVE_DA_COPIA) é própria: o
+servidor a cria na primeira vez, o bot a manda uma vez ao Rafael, que a guarda fora
+do Telegram, e ela nunca vai para o banco, o log ou o git. Para restaurar num
+servidor novo: baixar o arquivo do privado, parar os robôs e rodar
+
+    python3 backup_dados.py abrir ARQUIVO PASTA_DO_PROJETO
+
+que pede a senha (ou a lê da variável BACKUP_CHAVE, ou do arquivo da senha, se o
+servidor ainda o tem).
 """
+import getpass
 import glob
+import io
 import os
 import shutil
 import sys
@@ -26,13 +41,24 @@ import tempfile
 import time
 from datetime import datetime
 
+from cryptography.fernet import Fernet
+
 import db
+import registro_privado
 
 PASTA_PROJETO = os.path.dirname(os.path.abspath(__file__))
 DESTINO = os.path.expanduser("~/backups")
 MANTER = 7
 PREFIXO = "shopee_backup_"
 MONTAGEM = ".montando_"
+
+# A cópia fora do servidor: a senha, o estado no banco (só ids, datas e tamanhos) e o
+# limite do Telegram para arquivo mandado por bot (50 MB; a cifra cresce o pacote em 1/3).
+CHAVE_DA_COPIA = os.path.expanduser("~/.config/backup_fora.chave")
+VARIAVEL_DA_CHAVE = "BACKUP_CHAVE"
+CHAVE_STATUS = "backup_fora_do_servidor"
+SUFIXO_CIFRADO = ".cifrado"
+LIMITE_DA_COPIA = 49 * 1024 * 1024
 
 
 def _arquivos(pasta):
@@ -43,10 +69,16 @@ def _arquivos(pasta):
 
 
 def _limpar_sobras(destino):
-    """Pastas de montagem largadas por um backup interrompido (robô morto no meio)."""
+    """
+    Pastas de montagem largadas por um backup interrompido (robô morto no meio) e a cópia
+    cifrada que ficou para trás (o bot apaga a dele depois de mandar).
+    """
     for sobra in glob.glob(os.path.join(destino, f"{MONTAGEM}*")):
         if time.time() - os.path.getmtime(sobra) > 3600:
             shutil.rmtree(sobra, ignore_errors=True)
+    for sobra in glob.glob(os.path.join(destino, f"{PREFIXO}*{SUFIXO_CIFRADO}")):
+        if time.time() - os.path.getmtime(sobra) > 3600:
+            os.remove(sobra)
 
 
 def fazer_backup(pasta=None, destino=None, manter=MANTER):
@@ -96,7 +128,58 @@ def ultimo_backup(destino=None):
     return caminho, idade_h, os.path.getsize(caminho)
 
 
+def chave_da_copia():
+    """A senha da cópia fora do servidor, criada na primeira vez (só o dono lê o arquivo)."""
+    return registro_privado.chave(CHAVE_DA_COPIA)
+
+
+def cifrar_copia(pacote, valor_chave=None):
+    """
+    O pacote cifrado com a senha da cópia, ao lado dele (pacote + .cifrado, só o dono lê).
+    Devolve o caminho; quem manda apaga depois do envio.
+    """
+    with open(pacote, "rb") as arquivo:
+        cifrado = Fernet(valor_chave or chave_da_copia()).encrypt(arquivo.read())
+    caminho = pacote + SUFIXO_CIFRADO
+    descritor = os.open(caminho, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descritor, "wb") as arquivo:
+        arquivo.write(cifrado)
+    return caminho
+
+
+def abrir_copia(arquivo_cifrado, pasta, valor_chave):
+    """
+    Restaura a cópia: decifra e extrai os arquivos em `pasta` (a do projeto, com os robôs
+    parados). Senha errada = InvalidToken, sem tocar na pasta. Devolve os nomes extraídos.
+    """
+    with open(arquivo_cifrado, "rb") as arquivo:
+        pacote = Fernet(valor_chave.strip()).decrypt(arquivo.read().strip())
+    os.makedirs(pasta, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(pacote), mode="r:gz") as tar:
+        nomes = sorted(tar.getnames())
+        tar.extractall(pasta, filter="data")
+    return nomes
+
+
+def _senha_para_abrir():
+    """A senha para abrir a cópia: a variável BACKUP_CHAVE, o arquivo do servidor ou digitada."""
+    if os.environ.get(VARIAVEL_DA_CHAVE):
+        return os.environ[VARIAVEL_DA_CHAVE]
+    if os.path.isfile(CHAVE_DA_COPIA):
+        with open(CHAVE_DA_COPIA, "rb") as arquivo:
+            return arquivo.read().decode("ascii")
+    return getpass.getpass("Senha da cópia do backup: ")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "abrir":
+        try:
+            extraidos = abrir_copia(sys.argv[2], sys.argv[3], _senha_para_abrir())
+        except Exception as e:
+            print(f"❌ A cópia não abriu: {type(e).__name__} (senha errada ou arquivo incompleto)")
+            sys.exit(1)
+        print(f"✅ {len(extraidos)} arquivo(s) em {sys.argv[3]}: {', '.join(extraidos)}")
+        sys.exit(0)
     try:
         caminho, tamanho, removidos = fazer_backup()
     except Exception as e:

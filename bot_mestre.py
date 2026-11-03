@@ -67,6 +67,7 @@ import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
 import robo_shopee_video  # a suspensão da conta de Shopee Vídeo, que pausa o Canal Afiliados sozinho
 import painel_acessos  # Acessos do Servidor: Tailscale e Oracle (Opções do Servidor)
 import painel_admins  # Administradores dos grupos e canais (Opções do Servidor)
+import registro_privado  # a receita da chave, também a da senha da cópia do backup
 import painel_ia  # IA: o link da conversa com o Claude (Opções do Servidor)
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
@@ -17523,6 +17524,129 @@ async def backup_diario():
                                              "Detalhes no /status.", parse_mode="HTML")
         except Exception:
             pass
+        return
+    await mandar_copia_fora(caminho)
+
+# --- Cópia do backup fora do servidor ---
+# O backup fica no mesmo servidor e se perderia junto com ele (disco, conta da Oracle).
+# Depois de cada backup, o pacote vai cifrado no privado do Rafael, onde fica só a mais
+# nova; a senha é própria, vai uma vez, e ele a guarda fora do Telegram. Pedido do Rafael
+# (P146 1): DECISOES.md, Monitor, deploy e servidor.
+PROCESSO_DA_COPIA = "cópia do backup fora do servidor"
+
+def texto_da_senha_da_copia(valor):
+    """A mensagem com a senha da cópia, mandada uma vez por senha."""
+    return ("🔐 <b>Senha da cópia do backup</b>\n\n"
+            "Todo dia, depois do backup das 03:40, eu mando aqui uma cópia cifrada do banco, dos logins "
+            "das contas e das chaves dos robôs (fica só a mais nova). Se o servidor se perder, é com ela "
+            "que tudo volta. Sem esta senha, a cópia não abre:\n\n"
+            f"<code>{valor}</code>\n\n"
+            "Guarde a senha <b>fora do Telegram</b> (no Google Drive, num bloco de notas ou anotada no papel) "
+            "e toque em <b>Guardei a senha ✅</b>: eu apago esta mensagem. Não mande a senha para ninguém, "
+            "nem no chat do Claude.")
+
+async def mandar_senha_da_copia():
+    """Manda a senha da cópia ao Rafael, uma vez por senha (o servidor gera outra se a perder)."""
+    valor = backup_dados.chave_da_copia()
+    marca = registro_privado.id_da_chave(valor)
+    if (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("avisado_chave") == marca:
+        return
+    teclado = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Guardei a senha ✅", callback_data="backup_senha_guardada")]])
+    mensagem = await bot.send_message(ADMIN_ID, texto_da_senha_da_copia(valor.decode("ascii")),
+                                      parse_mode="HTML", reply_markup=teclado)
+    db.atualizar_config(backup_dados.CHAVE_STATUS,
+                        lambda s: s.update(avisado_chave=marca, mensagem_da_chave=mensagem.message_id))
+    logger.info("🔐 [Backup] Senha da cópia fora do servidor enviada ao admin.")
+
+async def mandar_copia_fora(pacote):
+    """
+    Manda o pacote cifrado no privado (sem som) e apaga a cópia de antes: fica só a mais
+    nova. A nova sai antes de a velha sumir, para nunca ficar sem nenhuma. A de mais de
+    48 h o Telegram não deixa o bot apagar: fica lá.
+    """
+    cifrado = None
+    try:
+        await mandar_senha_da_copia()
+        cifrado = await asyncio.to_thread(backup_dados.cifrar_copia, pacote)
+        tamanho = os.path.getsize(cifrado)
+        if tamanho > backup_dados.LIMITE_DA_COPIA:
+            registro_processos.registrar("bot_mestre", PROCESSO_DA_COPIA, "grande demais",
+                                         f"{tamanho / 1024 / 1024:.0f} MB", ok=False)
+            await bot.send_message(ADMIN_ID, "💾 <b>A cópia do backup não foi para o seu privado</b>\n"
+                                             "O pacote passou do limite do Telegram (49 MB). O backup do "
+                                             "servidor está feito; avise o Claude.", parse_mode="HTML")
+            return
+        quando = datetime.now(fuso_horario)
+        mensagem = await bot.send_document(
+            ADMIN_ID, FSInputFile(cifrado, filename=f"backup_{quando:%Y-%m-%d_%H%M}.cifrado"),
+            caption=(f"💾 <b>Cópia do backup de {quando:%d/%m} às {quando:%H:%M}</b>, cifrada "
+                     f"({tamanho / 1024 / 1024:.1f} MB). Fica só a mais nova aqui; abre com a senha que "
+                     "você guardou."),
+            parse_mode="HTML", disable_notification=True)
+        anterior = (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("mensagem")
+        db.atualizar_config(backup_dados.CHAVE_STATUS, lambda s: s.update(
+            mensagem=mensagem.message_id, enviada_em=quando.strftime("%Y-%m-%d %H:%M:%S"), tamanho=tamanho))
+        if anterior and anterior != mensagem.message_id:
+            try:
+                await bot.delete_message(ADMIN_ID, anterior)
+            except Exception:
+                pass
+        registro_processos.registrar("bot_mestre", PROCESSO_DA_COPIA, "enviada",
+                                     f"{tamanho / 1024 / 1024:.1f} MB", ok=True)
+        logger.info(f"💾 [Backup] Cópia cifrada no privado do admin ({tamanho / 1024 / 1024:.1f} MB).")
+    except Exception as e:
+        logger.error(f"❌ [Backup] A cópia fora do servidor falhou ({type(e).__name__})")
+        registro_processos.registrar("bot_mestre", PROCESSO_DA_COPIA, "falhou", type(e).__name__, ok=False)
+        registrar_erro_json(f"mandar_copia_fora: {type(e).__name__}", origem="backup_dados.py")
+        try:
+            await bot.send_message(ADMIN_ID, "💾 <b>A cópia do backup não foi para o seu privado</b>\n"
+                                             f"<code>{type(e).__name__}</code>. O backup do servidor está "
+                                             "feito; tento de novo no próximo.", parse_mode="HTML")
+        except Exception:
+            pass
+    finally:
+        if cifrado:
+            try:
+                os.remove(cifrado)
+            except OSError:
+                pass
+
+def linha_da_copia_fora(agora=None):
+    """A linha do /status com a idade da última cópia do backup no privado."""
+    enviada = (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("enviada_em") or ""
+    try:
+        quando = datetime.strptime(enviada, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+    except ValueError:
+        return "⚠️ Cópia do backup no seu privado: ainda não saiu"
+    horas = ((agora or datetime.now(fuso_horario)) - quando).total_seconds() / 3600
+    icone = "🔐" if horas <= IDADE_MAXIMA_BACKUP_H else "⚠️"
+    return f"{icone} Cópia do backup no seu privado: há {horas:.0f} h"
+
+@dp.callback_query(F.data == "backup_senha_guardada", StateFilter("*"))
+async def senha_da_copia_guardada(callback: types.CallbackQuery):
+    """Guardei a senha ✅: apaga a mensagem da senha (ela fica só com o Rafael e no servidor)."""
+    if callback.from_user.id != ADMIN_ID: return
+    db.atualizar_config(backup_dados.CHAVE_STATUS, lambda s: s.update(
+        mensagem_da_chave=None, senha_guardada_em=datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")))
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.answer("🔐 Mensagem apagada. A senha fica só com você (e no servidor, para cifrar as cópias).",
+                          show_alert=True)
+
+def agendar_copia_atrasada():
+    """Na subida: sem cópia fora do servidor nas últimas 24 h e com backup = manda a dele em 5 min."""
+    enviada = (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("enviada_em") or ""
+    if enviada >= (datetime.now(fuso_horario) - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"):
+        return
+    ultimo = backup_dados.ultimo_backup()
+    if ultimo is None or ultimo[1] > 24:
+        return  # o backup atrasado (agendar_backup_atrasado) já manda a cópia depois dele
+    scheduler.add_job(mandar_copia_fora, 'date', run_date=datetime.now(fuso_horario) + timedelta(minutes=5),
+                      args=[ultimo[0]], id='copia_do_backup_atrasada', replace_existing=True)
+    logger.info("💾 [Backup] Sem cópia fora do servidor nas últimas 24 h: uma sai em 5 min.")
 
 def agendar_backup_atrasado():
     """Na subida: último backup com mais de 24 h (ou nenhum) = um backup daqui a 5 min."""
@@ -17822,6 +17946,7 @@ def montar_status():
             linhas.append(f"{icone} Último backup: há {ultimo[1]:.0f} h ({ultimo[2] / 1024 / 1024:.1f} MB)")
         else:
             linhas.append("⚠️ Nenhum backup em ~/backups")
+        linhas.append(linha_da_copia_fora())
     except Exception:
         pass
 
@@ -17910,6 +18035,7 @@ async def main():
     scheduler.add_job(backup_diario, 'cron', hour=3, minute=40, timezone=FUSO_STR,
                       id='backup_diario', replace_existing=True)
     agendar_backup_atrasado()
+    agendar_copia_atrasada()
 
     # Contas dos Autorais: avisa no privado quando uma conta para ou volta na função dela
     scheduler.add_job(verificar_saude_contas, 'interval', minutes=2, id='saude_contas_loop', replace_existing=True)
