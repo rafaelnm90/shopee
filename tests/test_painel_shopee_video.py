@@ -54,7 +54,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
         "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Fila de Rascunhos 🗂️", "Preparar 1 Agora ⚡",
-        "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
+        "Postar Agora 🚀", "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
         "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Horário das Interações 💬", "Produtos a Mais 🛍️",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
@@ -708,9 +708,9 @@ def test_anterior_e_proximo_so_quando_ha_e_nenhum_com_um_rascunho_so(bm, Msg, Es
     assert msg.midias == [] and msg.saidas == ["📝 Este é o primeiro rascunho: não há anterior."]
 
 
-def test_aprovados_aparecem_depois_dos_que_esperam_com_o_postar_agora(bm, Msg, Est, monkeypatch):
-    # Escolha do Rafael (03/11, P138, print das 23:45 de 02/11): o post do aprovado que deu problema
-    # sai na hora pelo Postar Agora 🚀, em Rascunhos do Robô 📝, depois dos que esperam a aprovação.
+def test_postar_agora_no_robo_automatico_posta_o_aprovado_mais_antigo(bm, Msg, Est, monkeypatch):
+    # Escolha do Rafael (03/11, P138 2, print das 23:45 de 02/11): um botão só, Postar Agora 🚀, em
+    # Robô Automático 🤖, ao lado do Preparar 1 Agora ⚡: posta na hora o aprovado mais antigo da fila.
     sv, est = _painel(bm), Est()
     rodadas = []
 
@@ -719,34 +719,30 @@ def test_aprovados_aparecem_depois_dos_que_esperam_com_o_postar_agora(bm, Msg, E
 
     monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
     monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
-    esperando = _rascunho(sv, "Esperando #a")
-    aprovado = _rascunho(sv, "Aprovado #b", "2026-10-22 09:00:00")
-    sv.robo.atualizar(aprovado, estado="aprovado", postar_em="2026-10-22 23:13:00")
-    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
-    rodar(sv.rascunhos_handler(msg, est))
-    assert "Esperando #a" in msg.saidas[-1] and "Rascunho 1 de 2" in msg.saidas[-1]
-    assert _botoes(msg.teclados[-1])[:2] == [sv.BOTAO_APROVAR, sv.BOTAO_RECUSAR]
-    msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
-    rodar(sv.proximo_handler(msg, est))
-    assert "Aprovado #b" in msg.saidas[-1] and "✅ <b>Aprovado</b>: vai ao ar por volta de" in msg.saidas[-1]
-    assert _botoes(msg.teclados[-1]) == [sv.BOTAO_POSTAR_AGORA, sv.BOTAO_ANTERIOR, sv.BOTAO_VOLTAR]
-    # O toque posta aquele rascunho na hora.
-    msg = MsgComMidia(Msg, sv.BOTAO_POSTAR_AGORA)
+    linhas = [[botao.text for botao in linha] for linha in sv.teclado_robo(sv.ler_config()).keyboard]
+    assert [sv.BOTAO_PREPARAR, sv.BOTAO_POSTAR_AGORA] in linhas
+    assert sv.BOTAO_POSTAR_AGORA in sv.texto_robo(sv.ler_config())
+    # Sem aprovado, só avisa.
+    msg = Msg(sv.BOTAO_POSTAR_AGORA)
+    rodar(sv.postar_agora_handler(msg, est))
+    assert rodadas == [] and "Nenhum rascunho aprovado" in msg.saidas[-1]
+    depois = _rascunho(sv, "Depois #b")
+    sv.robo.atualizar(depois, estado="aprovado", postar_em="2026-10-22 23:40:00")
+    antes = _rascunho(sv, "Antes #a", "2026-10-22 11:00:00")
+    sv.robo.atualizar(antes, estado="aprovado", postar_em="2026-10-22 23:13:00")
+    _rascunho(sv, "Esperando #c")
+    msg = Msg(sv.BOTAO_POSTAR_AGORA)
     rodar(sv.postar_agora_handler(msg, est))
     rodar(asyncio.sleep(0))
-    assert rodadas == [("--postar", str(aprovado))] and "Postando agora" in msg.saidas[-1]
+    assert rodadas == [("--postar", str(antes))] and "Postando agora" in msg.saidas[-1]
+    assert "Antes" in msg.saidas[-1] and "22/10 às 23:13" in msg.saidas[-1]
     # Com o robô no celular, não manda outra rodada.
     monkeypatch.setattr(sv, "robo_ocupado", lambda: True)
-    msg = MsgComMidia(Msg, sv.BOTAO_POSTAR_AGORA)
-    rodar(sv.postar_agora_handler(msg, Est(dados={"rascunho_id": aprovado})))
+    msg = Msg(sv.BOTAO_POSTAR_AGORA)
+    rodar(sv.postar_agora_handler(msg, est))
     assert len(rodadas) == 1 and "no meio de uma rodada" in msg.saidas[-1]
-    # O que já foi ao ar (ou voltou a esperar a aprovação) não é postado pelo botão.
-    monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
-    sv.robo.atualizar(aprovado, estado="postado")
-    msg = MsgComMidia(Msg, sv.BOTAO_POSTAR_AGORA)
-    rodar(sv.postar_agora_handler(msg, Est(dados={"rascunho_id": aprovado})))
-    assert len(rodadas) == 1 and "não está mais esperando a hora de ir ao ar" in msg.saidas[0]
-    assert esperando in [r["id"] for r in sv.rascunhos_da_tela()]
+    # Os aprovados não aparecem em Rascunhos do Robô 📝: lá ficam só os que esperam a aprovação.
+    assert [r["id"] for r in sv.robo.esperando_aprovacao()] == [r["id"] for r in sv.robo.listar("rascunho")]
 
 
 def test_aprovar_rascunho_ja_resolvido_mostra_o_proximo(bm, Msg, Est):

@@ -6165,7 +6165,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
     """
     Uma rodada. treino=True é o botão Testar Caminho 🧭, preparar=True o Preparar 1
     Agora ⚡, saude=True o Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee
-    Vídeo 🩺) e postar=ID o Postar Agora 🚀 (Rascunhos do Robô 📝, P138): rodam na hora,
+    Vídeo 🩺) e postar=ID o Postar Agora 🚀 (Robô Automático 🤖, P138): rodam na hora,
     mesmo pausado ou fora do horário (o Rafael pediu agora), e o rascunho do Preparar 1
     Agora é a mais do plano do dia. Com a conta suspensa, a única coisa que o robô faz no
     celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo botão). Devolve o que
@@ -6429,9 +6429,9 @@ def _limpeza_de_novo(acao):
 TENTATIVAS_DE_POSTAR = 3
 
 
-# O Postar Agora 🚀 (Rascunhos do Robô 📝): o aprovado vai ao ar na hora, a qualquer hora e sem
-# esperar os 30 min do último post; o que não sai continua aprovado, sem gastar nenhuma das
-# TENTATIVAS_DE_POSTAR das rodadas. Escolha do Rafael (03/11, P138): DECISOES.md, Shopee Vídeo.
+# O Postar Agora 🚀 (Robô Automático 🤖): o aprovado mais antigo da fila vai ao ar na hora, a
+# qualquer hora e sem esperar os 30 min do último post; o que não sai continua aprovado, sem gastar
+# nenhuma das TENTATIVAS_DE_POSTAR das rodadas. Escolha do Rafael (03/11, P138 2): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_POSTAR_AGORA = "postar agora"
 
 
