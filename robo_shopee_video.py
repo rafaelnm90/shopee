@@ -3424,7 +3424,12 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
         # A foto de cada um vai junto: o álbum das capas do rascunho (P75) e, no de outra cor (o
         # mesmo modelo em outra cor ou estampa), a miniatura que troca, sem a qual ele não vai.
         confirmados = [dict(fotos[i][0], foto=fotos[i][1], outra_cor=i in de_outra_cor)
-                       for i in posicoes][:ESPACOS_DO_VIDEO - 1]
+                       for i in posicoes if OUTRA_COR_NOS_PRODUTOS or i not in de_outra_cor][:ESPACOS_DO_VIDEO - 1]
+        # O mesmo modelo em outra cor fica de fora (P142 1), e o registro conta quantos.
+        fora_pela_cor = 0 if OUTRA_COR_NOS_PRODUTOS else sum(1 for i in posicoes if i in de_outra_cor)
+        if fora_pela_cor:
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_OUTRA_COR, "de fora",
+                                         f"{fora_pela_cor} - {MOTIVO_DA_OUTRA_COR_DESLIGADA}")
         # Os que a IA conferiu e recusou (só quando ela respondeu): o álbum dos recusados, para o
         # Rafael conferir se ela está acertando. Pedido dele (01/11): DECISOES.md, Shopee Vídeo.
         if recusados is not None and "outro produto" in recusas:
@@ -4694,6 +4699,13 @@ def fotos_da_miniatura(video, foto, outras):
 # para a foto dele na troca (P103), ele sai antes de anexar. Vale nos produtos a mais e no Ver
 # Produtos. Pedidos do Rafael (01/11 e 02/11): DECISOES.md, Shopee Vídeo.
 PROCESSO_DA_OUTRA_COR = "outra cor: foto na miniatura"
+# O mesmo modelo em outra cor, nos produtos a mais e no Ver Produtos: desligado. Um post com o
+# produto do vídeo e 2 do mesmo modelo em outra cor foi punido como Produto Irrelevante (a página
+# da Política de Relevância de Produto diz que outra cor deixa o produto "fraco", mas a punição
+# veio). Volta a True só quando a Shopee liberar outra cor por escrito. Escolha do Rafael (03/11,
+# P142 1): DECISOES.md, Shopee Vídeo.
+OUTRA_COR_NOS_PRODUTOS = False
+MOTIVO_DA_OUTRA_COR_DESLIGADA = "outra cor desligada (P142)"
 
 
 def na_miniatura(foto, fotos_da_miniatura):
@@ -4886,12 +4898,15 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
             foto = ps.foto_da_pagina_do_produto(d, xml)
             deste = []
             ok, outra_cor, _ = ps.ia_confere_do_criador(video, nome, foto, deste) if foto else (False, False, "")
+            # O mesmo modelo em outra cor fica de fora, como outro produto (P142 1).
+            fora_pela_cor = ok and outra_cor and not OUTRA_COR_NOS_PRODUTOS
             registro_processos.registrar(
                 REGISTRO, PROCESSO_DO_CRIADOR,
                 "de fora - sem a foto da página" if not foto else "de fora - outro produto" if not ok
+                else "de fora - outra cor" if fora_pela_cor
                 else "outra cor - a foto vai na miniatura" if outra_cor else "mesmo produto",
-                ok=True if ok else None)
-            if ok:
+                ok=True if ok and not fora_pela_cor else None)
+            if ok and not fora_pela_cor:
                 _conferir_curtida(ps.curtir_na_pagina(d, xml))
                 if curtidos is not None:
                     curtidos.append((i, nome))

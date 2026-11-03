@@ -2862,6 +2862,8 @@ def test_ver_produtos_de_outra_cor_entra_e_a_foto_dele_vai_na_miniatura(monkeypa
     # e a foto dele vai na miniatura que troca, para aparecer no vídeo; outro produto fica de fora.
     import io
     from PIL import Image
+    # A outra cor está desligada desde a P142 1 (03/11): o caminho fica testado para quando voltar.
+    monkeypatch.setattr(robo, "OUTRA_COR_NOS_PRODUTOS", True)
     _fonte_de_video(monkeypatch, outra_cor=(PRODUTO_A,))
     edicao = _copia_com_a_miniatura(monkeypatch)
     app = AppDoVerProdutos()
@@ -2903,6 +2905,7 @@ def test_ver_produtos_de_outra_cor_sem_a_nossa_miniatura_fica_de_fora(monkeypatc
     # Rafael de 01/11: "desde que pelo menos entre na miniatura"). Sem a nossa miniatura (o canto
     # do criador, P81), ele sai antes de anexar, e o anexar procura o outro abaixo dele, que
     # continua curtido no alto da lista até o descurtir do fim.
+    monkeypatch.setattr(robo, "OUTRA_COR_NOS_PRODUTOS", True)
     _fonte_de_video(monkeypatch, outra_cor=(PRODUTO_A,))
     _copia_com_a_miniatura(monkeypatch, com_miniatura=False)
     app = AppDoVerProdutos()
@@ -2910,6 +2913,21 @@ def test_ver_produtos_de_outra_cor_sem_a_nossa_miniatura_fica_de_fora(monkeypatc
     assert app.anexados == [PRODUTO_B] and robo.pegar(1)["outra_cor"] == []
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_OUTRA_COR, "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in registro] == [("de fora", "sem a nossa miniatura")]
+
+
+def test_ver_produtos_de_outra_cor_fica_de_fora(monkeypatch, avisos):
+    # Vídeo do Rafael das 07:20 de 03/11: um post com o produto do vídeo e 2 do mesmo modelo em
+    # outra cor foi punido como Produto Irrelevante. Escolha dele (P142 1): nunca outra cor, no Ver
+    # Produtos e nos produtos a mais; o produto da criadora em outra cor fica de fora, sem curtir.
+    assert robo.OUTRA_COR_NOS_PRODUTOS is False
+    _fonte_de_video(monkeypatch, outra_cor=(PRODUTO_A,))
+    edicao = _copia_com_a_miniatura(monkeypatch)
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.anexados == [PRODUTO_B] and edicao["nomes"] == [PRODUTO_B] and edicao["outras"] == []
+    assert robo.pegar(1)["outra_cor"] == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_CRIADOR, "2000-01-01 00:00:00")
+    assert sorted(r[2] for r in registro) == ["de fora - outra cor", "mesmo produto"]
 
 
 def test_ver_produtos_de_outro_produto_fica_de_fora(monkeypatch, avisos):
@@ -4873,9 +4891,11 @@ def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_qu
     assert _registro_dos_espacos() == ["achados"]
 
 
-def test_espacos_livres_marcam_o_mesmo_modelo_em_outra_cor(busca_pela_foto):
+def test_espacos_livres_marcam_o_mesmo_modelo_em_outra_cor(busca_pela_foto, monkeypatch):
     # Pedido do Rafael (02/11, vídeo das 10:01): o mesmo modelo em outra cor entra nos produtos a
-    # mais, marcado: ele só vai no post com a foto dele na miniatura que troca.
+    # mais, marcado: ele só vai no post com a foto dele na miniatura que troca. Desligado desde a
+    # P142 1 (03/11): o caminho fica testado para quando voltar.
+    monkeypatch.setattr(robo, "OUTRA_COR_NOS_PRODUTOS", True)
     busca_pela_foto["outra_cor"] = {2}
     original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
     mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [],
@@ -4884,6 +4904,20 @@ def test_espacos_livres_marcam_o_mesmo_modelo_em_outra_cor(busca_pela_foto):
                                                            ("Garrafa Térmica Inox Loja 3", True)]
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
     assert registro[-1][3].startswith("2 a mais (1 de outra cor); ")
+
+
+def test_espacos_livres_deixam_de_fora_o_mesmo_modelo_em_outra_cor(busca_pela_foto):
+    # Escolha do Rafael (03/11, P142 1, depois da punição de Produto Irrelevante do vídeo das 07:20):
+    # nunca outra cor nos produtos a mais; o registro conta quantos ficaram de fora por isso.
+    busca_pela_foto["outra_cor"] = {2}
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [],
+                               robo.time.monotonic() + 600)
+    assert [(p["nome"], p["outra_cor"]) for p in mais] == [("Garrafa Térmica Inox Loja 1", False)]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_OUTRA_COR, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("de fora", "1 - " + robo.MOTIVO_DA_OUTRA_COR_DESLIGADA)]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
+    assert registro[-1][3].startswith("1 a mais; ")
 
 
 def test_post_poe_a_mesma_cor_primeiro_e_o_de_outra_cor_so_com_a_foto_na_miniatura():
