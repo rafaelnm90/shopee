@@ -133,7 +133,9 @@ def degrau_dos_pontos(pontos):
 def faixa_pelos_pontos(piso, topo, pontos):
     """
     A faixa de posts por dia pelos pontos: (piso, topo, teto). Até 3 pontos, a do painel, sem teto
-    (None); acima, a parte dela que o degrau diz (arredondada para cima, pelo menos 1), com o teto.
+    (None); acima, a parte dela que o degrau diz (arredondada para cima, pelo menos 1), e o que passa
+    do teto vira o teto: a faixa vai do mínimo até o teto, e o sorteio do dia corre nela inteira
+    (pedido do Rafael, 03/11: "sempre pensando na faixa"). Mínimo acima do teto, só o teto.
     """
     degrau = degrau_dos_pontos(pontos)
     if not degrau:
@@ -141,23 +143,24 @@ def faixa_pelos_pontos(piso, topo, pontos):
     _a_partir, parte, teto = degrau
     if parte:
         piso, topo = (max(1, math.ceil(n * parte)) if n else n for n in (piso, topo))
+    if teto:
+        piso, topo = (min(n, teto) if n else n for n in (piso, topo))
     return piso, topo, teto
 
 
 def quantos_pelos_pontos(semente, dia, piso, topo, pontos):
-    """Quantos posts o dia faz: o sorteio de sempre na faixa pelos pontos, até o teto do degrau."""
+    """Quantos posts o dia faz: o sorteio de sempre, na faixa pelos pontos (já limitada pelo teto)."""
     from motor_filas import sortear_teto_do_dia
     piso, topo, teto = faixa_pelos_pontos(piso, topo, pontos)
     if teto == 0:
         return 0
-    quantos = sortear_teto_do_dia(semente, dia, piso, topo)
-    return quantos if teto is None else min(quantos, teto)
+    return sortear_teto_do_dia(semente, dia, piso, topo)
 
 
-def rotulo_dos_pontos(pontos, agora=None):
+def rotulo_dos_pontos(pontos, agora=None, piso=None, topo=None):
     """
-    A linha dos painéis com o porquê da faixa menor ("" de 0 a 3 pontos): os pontos, o degrau e
-    quando eles zeram.
+    A linha dos painéis com o porquê da faixa menor ("" de 0 a 3 pontos): os pontos, o degrau, a
+    faixa que fica com a faixa do painel (piso e topo, quando vêm) e quando os pontos zeram.
     """
     degrau = degrau_dos_pontos(pontos)
     if not degrau:
@@ -167,8 +170,12 @@ def rotulo_dos_pontos(pontos, agora=None):
         return (f"⛔ Pelos pontos de penalidade (<b>{pontos}</b>): nenhum post até os pontos baixarem "
                 f"(recurso aceito) ou zerarem em <b>{zeram}</b>")
     parte = f"{NOMES_DAS_PARTES[degrau[1]]}, " if degrau[1] else ""
-    return (f"⚠️ Pelos pontos de penalidade (<b>{pontos}</b>): {parte}até <b>{degrau[2]} por dia</b>, só com o "
-            f"produto do vídeo, até os pontos baixarem (recurso aceito) ou zerarem em <b>{zeram}</b>")
+    fica = ""
+    if piso:
+        de, ate, _teto = faixa_pelos_pontos(piso, topo, pontos)
+        fica = f" (fica <b>{de} a {ate}</b>)" if ate and ate > de else f" (fica <b>{de}</b>)"
+    return (f"⚠️ Pelos pontos de penalidade (<b>{pontos}</b>): {parte}até <b>{degrau[2]} por dia</b>{fica}, só "
+            f"com o produto do vídeo, até os pontos baixarem (recurso aceito) ou zerarem em <b>{zeram}</b>")
 
 
 def aviso_acima_do_teto(feitos, teto, pontos, oque="rascunhos"):

@@ -170,13 +170,17 @@ def test_escada_dos_posts_pelos_pontos_da_tabela_oficial():
     assert ap.faixa_pelos_pontos(6, 10, 4) == ap.faixa_pelos_pontos(6, 10, 5) == (3, 5, 8)
     assert ap.faixa_pelos_pontos(6, 10, 6) == ap.faixa_pelos_pontos(6, 10, 8) == (2, 3, 6)
     # Com a faixa de 20, o degrau de 4 a 5 dá 8 (o teto), e o de 6 a 8 dá 5: o quarto dos 20, não a metade dos 8.
-    assert ap.faixa_pelos_pontos(20, 20, 4) == (10, 10, 8) and ap.faixa_pelos_pontos(20, 20, 6) == (5, 5, 6)
+    assert ap.faixa_pelos_pontos(20, 20, 4) == (8, 8, 8) and ap.faixa_pelos_pontos(20, 20, 6) == (5, 5, 6)
+    # "Sempre pensando na faixa" (03/11): a parte que passa do teto vai do mínimo até o teto, e o
+    # sorteio corre nela inteira (antes, o sorteio na metade cortado no teto dava quase sempre o teto).
+    assert ap.faixa_pelos_pontos(12, 20, 4) == (6, 8, 8) and ap.faixa_pelos_pontos(8, 12, 6) == (2, 3, 6)
     assert ap.faixa_pelos_pontos(1, 2, 7) == (1, 1, 6)
-    assert ap.faixa_pelos_pontos(6, 10, 9) == ap.faixa_pelos_pontos(6, 10, 11) == (6, 10, 2)
+    assert ap.faixa_pelos_pontos(6, 10, 9) == ap.faixa_pelos_pontos(6, 10, 11) == (2, 2, 2)
     assert ap.faixa_pelos_pontos(6, 10, 12)[2] == ap.faixa_pelos_pontos(6, 10, 15)[2] == 0
     dias = [f"2026-11-{dia:02d}" for dia in range(1, 31)]
     assert all(2 <= ap.quantos_pelos_pontos("x", dia, 6, 10, 7) <= 3 for dia in dias)
     assert all(ap.quantos_pelos_pontos("x", dia, 20, 20, 7) == 5 for dia in dias)
+    assert {ap.quantos_pelos_pontos("x", dia, 12, 20, 4) for dia in dias} == {6, 7, 8}
     assert all(ap.quantos_pelos_pontos("x", dia, 16, 20, 4) == 8 for dia in dias)
     assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 9) == 2 for dia in dias)
     assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 12) == 0 for dia in dias)
@@ -199,3 +203,5 @@ def test_pontos_zeram_no_comeco_de_cada_trimestre():
     assert ap.quando_zeram(novembro) == "01/01" and ap.quando_zeram(janeiro) == "01/04"
     assert "zerarem em <b>01/01</b>" in ap.rotulo_dos_pontos(7, novembro) and ap.rotulo_dos_pontos(3, novembro) == ""
     assert "nenhum post" in ap.rotulo_dos_pontos(12, novembro)
+    assert "até <b>6 por dia</b> (fica <b>2 a 3</b>)" in ap.rotulo_dos_pontos(7, novembro, 8, 12)
+    assert "até <b>2 por dia</b> (fica <b>2</b>)" in ap.rotulo_dos_pontos(9, novembro, 8, 12)
