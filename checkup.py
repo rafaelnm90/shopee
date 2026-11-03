@@ -794,7 +794,11 @@ def postagens_de_hoje(agora=None):
     hoje, limite = agora.strftime("%Y-%m-%d"), _momento(agora - ATRASO_TOLERADO)
     filas = {}
 
+    pausa = db.ler_config("pausa_programada", {}) or {}
     filas["Canal principal"] = {
+        # Com a pausa programada (à mão ou a da suspensão da Shopee Vídeo), os pendentes esperam a
+        # volta, que refaz as datas: o atraso e o dia sem post são o esperado.
+        "pausado": (pausa.get("data_retorno") or "sem data") if pausa.get("ativa") else None,
         "postados": _contar("SELECT COUNT(*) FROM fila_postagens WHERE status = 'CONCLUIDO' AND data_postagem = ?", hoje),
         "para_hoje": _contar("SELECT COUNT(*) FROM fila_postagens WHERE status = 'PENDENTE' AND data_alvo = ?", hoje),
         # '2000-01-01' é a marca de "postar já", não um dia atrasado.
@@ -1417,6 +1421,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             onde, _t, _n, qtd = erros_do_log[0]
             pontos.append(f"{servico}: {r['erros']} linha(s) de erro no log (mais comum: {onde}, {qtd}x)")
     for nome, f in filas.items():
+        if f.get("pausado"):
+            continue
         if f["atrasados"]:
             pontos.append(f"{nome}: {f['atrasados']} item(ns) atrasado(s) na fila")
         if (f["postados"] == 0 and (f["media"] or 0) >= MEDIA_PARA_COBRAR and agora.hour >= HORA_PARA_COBRAR):
@@ -1649,8 +1655,9 @@ def main():
     filas = postagens_de_hoje(agora)
     for nome, f in filas.items():
         media = "?" if f["media"] is None else f"{f['media']:.1f}"
+        pausa = f" | pausado até {f['pausado']} (a volta refaz as datas)" if f.get("pausado") else ""
         print(f"{nome}: postados {_num(f['postados'])} | ainda para hoje {_num(f['para_hoje'])} | "
-              f"atrasados {_num(f['atrasados'])} | média dos 7 dias anteriores {media}/dia")
+              f"atrasados {_num(f['atrasados'])} | média dos 7 dias anteriores {media}/dia{pausa}")
 
     print("\n== Robô da Shopee Vídeo")
     robo_sv = robo_da_shopee_video(agora)
