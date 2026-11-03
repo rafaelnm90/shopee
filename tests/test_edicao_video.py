@@ -2218,6 +2218,62 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     assert miniaturas == [0]
 
 
+def test_canto_so_com_o_que_foi_filmado_nao_tira_a_miniatura(monkeypatch, tmp_path):
+    # Vídeo do Rafael das 22:38 de 02/11 ("Pq não veio a miniatura?"): a IA contou como coisa do
+    # criador no alto a caixa do produto, filmada atrás do brinquedo, e a miniatura saiu (P81).
+    # Quando a resposta tira ou diminui a miniatura, uma pergunta só sobre o canto confere: só
+    # filmado, a miniatura fica do tamanho de sempre; com algo posto por cima, ou sem resposta,
+    # fica a 1ª.
+    import json
+
+    import api_gemini
+    primeira = {"nome": "Brinquedo Fofo", "vantagem": "Macio de apertar", "lugar": "alto", "canto_ocupado": True,
+                "por_cima_no_alto": [{"esquerda": 60, "direita": 100, "topo": 3, "base": 35}]}
+    pedidos = []
+
+    def com_o_canto(por_cima, resposta=primeira):
+        async def analisar(video, prompt, imagens=None):
+            canto = "Olhe só o canto de cima à direita" in prompt
+            pedidos.append("canto" if canto else "textos")
+            if canto:
+                return json.dumps({"o_que_ha_no_canto": "a caixa do produto", "por_cima_na_edicao": por_cima})
+            return json.dumps(resposta)
+        monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+
+    async def texto(prompt, imagens=None):
+        return None
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", texto)
+    com_o_canto(False)
+    textos = edicao_video.textos_da_tela("v.mp4", "Brinquedo")
+    assert pedidos == ["textos", "canto"]
+    assert edicao_video.miniatura_no_video(textos) == edicao_video.LARGURA_DA_MINIATURA
+    assert textos["canto_filmado"] == "a coisa do criador no alto começa a 3% da altura"
+    for por_cima in (True, None):
+        com_o_canto(por_cima)
+        textos = edicao_video.textos_da_tela("v.mp4", "Brinquedo")
+        assert edicao_video.miniatura_no_video(textos) == 0 and "canto_filmado" not in textos
+    # Com o canto livre na 1ª resposta, não há o que conferir: uma chamada só.
+    pedidos.clear()
+    com_o_canto(False, dict(primeira, canto_ocupado=False, por_cima_no_alto=[]))
+    edicao_video.textos_da_tela("v.mp4", "Brinquedo")
+    assert pedidos == ["textos"]
+    # No que vai ao ar, o registro diz que a miniatura ficou e o que a 1ª resposta dizia.
+    _versoes_de_mentira(monkeypatch)
+    miniaturas = []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+        miniaturas.append(miniatura)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    _textos_da_tela(monkeypatch, {"nome": "Brinquedo Fofo", "lugar": "alto", "canto_ocupado": False,
+                                  "canto_filmado": "a coisa do criador no alto começa a 3% da altura"})
+    edicao_video.editar_para_postar("v.mp4", b"foto", str(tmp_path / "r.mp4"), "Brinquedo")
+    assert miniaturas == [edicao_video.LARGURA_DA_MINIATURA]
+    linhas = [(l[2], l[3]) for l in edicao_video.registro_processos.contagem("2000-01-01 00:00:00")
+              if l[1] == edicao_video.PROCESSO_DO_CANTO]
+    assert linhas == [(edicao_video.CANTO_FILMADO, "a 1ª resposta: a coisa do criador no alto começa a 3% da altura")]
+
+
 def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, tmp_path):
     # Print do Rafael (29/10): num rascunho, a legenda do criador, centralizada logo abaixo da
     # barra de busca, passava por baixo da ponta da nossa miniatura, e a IA tinha dito que o

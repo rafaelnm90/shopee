@@ -1450,6 +1450,42 @@ def por_que_a_miniatura(textos):
     return f"a coisa do criador no alto começa a {min(topos):.0f}% da altura" if topos else ""
 
 
+# A IA às vezes conta como coisa do criador o que foi filmado no canto da miniatura (uma revista em
+# cima da mesa no rascunho dos fones de 02/11; no vídeo do Rafael das 22:38 de 02/11, a caixa do
+# produto atrás do brinquedo, com as letras impressas), e a miniatura saía sem precisar (P81).
+# Quando a resposta tira ou diminui a miniatura, uma pergunta só sobre o canto confere se o que está
+# lá foi posto por cima na edição: só filmado, a miniatura fica do tamanho de sempre; sem
+# resposta, vale a 1ª. Pedido do Rafael ("Pq não veio a miniatura?"): DECISOES.md, Shopee Vídeo.
+PROMPT_DO_CANTO = (
+    "Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.\n"
+    "Olhe só o canto de cima à direita do vídeo (de uns 55% a 100% da largura e do topo até uns 35% da altura), "
+    "do começo ao fim. Diga se, em algum momento, há nesse canto algo que o próprio vídeo pôs por cima da imagem "
+    "na edição: legenda, título, frase, figurinha, foto, quadro ou seta, que fica parado na tela enquanto a cena "
+    "se mexe atrás. As coisas filmadas, que fazem parte da cena e se mexem com ela, nunca contam: o produto, a "
+    "embalagem, uma caixa, um livro, uma revista, uma tela, um cartaz, e o que está escrito ou desenhado nelas. "
+    "Marca d'água, logo e nome do perfil também não contam.\n"
+    "Responda só com um JSON, nesta ordem: {\"o_que_ha_no_canto\": \"o que se vê ali\", "
+    "\"por_cima_na_edicao\": true ou false}"
+)
+CANTO_FILMADO = "mantida - no canto, só o que foi filmado"
+
+
+def _conferir_o_canto(video, textos):
+    """
+    Confere, numa pergunta só sobre o canto, a resposta da IA que tira ou diminui a nossa
+    miniatura (miniatura_no_video): com o canto só filmado, o canto fica livre e saem as coisas que
+    passavam pela miniatura; com algo posto por cima, ou sem resposta, fica a 1ª. textos["canto_filmado"]
+    guarda o porquê da 1ª, para o registro. Muda textos e o devolve.
+    """
+    if miniatura_no_video(textos) >= LARGURA_DA_MINIATURA:
+        return textos
+    if _resposta_da_ia(video, PROMPT_DO_CANTO).get("por_cima_na_edicao") is False:
+        textos["canto_filmado"] = por_que_a_miniatura(textos)
+        textos["canto_ocupado"] = False
+        textos["por_cima"] = [caixa for caixa in textos.get("por_cima", ()) if not _cruza_a_miniatura(caixa)]
+    return textos
+
+
 def _vantagem_e_chamada(dados, textos):
     """Põe em textos a vantagem e a chamada da resposta da IA, só as que vieram certas."""
     for chave, maximo in (("vantagem", MAXIMO_DA_VANTAGEM), ("chamada", MAXIMO_DA_CHAMADA)):
@@ -1605,7 +1641,7 @@ def textos_da_tela(video, nome):
     textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados)))
     # Só este pedido traz a frase da capa; sem resposta da IA, não há o que pedir de novo.
     if dados:
-        textos = _com_a_frase_da_capa(str(dados.get("capa") or ""), textos)
+        textos = _conferir_o_canto(video, _com_a_frase_da_capa(str(dados.get("capa") or ""), textos))
     return _revisar_ortografia(textos)
 
 
@@ -2057,6 +2093,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
     miniatura = miniatura_no_video(textos)
+    if textos.get("canto_filmado"):
+        registro_processos.registrar("shopee_video", PROCESSO_DO_CANTO, CANTO_FILMADO,
+                                     f"a 1ª resposta: {textos['canto_filmado']}", ok=True)
     if miniatura < LARGURA_DA_MINIATURA:
         registro_processos.registrar("shopee_video", PROCESSO_DO_CANTO, "menor" if miniatura else "de fora",
                                      por_que_a_miniatura(textos))
