@@ -4525,7 +4525,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # ar sem a figurinha do Selecionar Capa. Escolha do Rafael (02/11, P125): DECISOES.md, Shopee Vídeo.
     miniatura = {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
-                                  outras=outras, miniatura=miniatura)
+                                  outras=outras, miniatura=miniatura, rotulo_de_ia=bool(rotulo_ia))
     # O de outra cor só vai com a foto dele na miniatura que troca: sem ela (sem a nossa
     # miniatura, ou sem tempo para a foto dele), sai antes de anexar. Ele já foi curtido e fica no
     # alto de Minhas Curtidas até o descurtir do fim: o anexar procura os outros abaixo dele.
@@ -4606,7 +4606,7 @@ MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à S
 MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
 
 
-def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
@@ -4622,7 +4622,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103). Com a capa com
     chamada ligada, o vídeo abre com a capa com a frase (P125). miniatura (dict) recebe em
     "fotos" as fotos da miniatura que troca no vídeo, a do 1º e as outras, e nada sem a nossa
-    miniatura: o de outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura).
+    miniatura: o de outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura). Com
+    rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a
+    legenda da fala sobem com o cartão do app, que sobe com a linha do rótulo (03/11).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -4638,7 +4640,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
                                                             anuncio.get("nome", ""), avisos=alcool,
-                                                            outras_fotos=trocam)
+                                                            outras_fotos=trocam, rotulo_de_ia=rotulo_de_ia)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,

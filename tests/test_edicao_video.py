@@ -191,6 +191,66 @@ def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
         edicao_video.moldura_do_cartao.cache_clear()
 
 
+def test_com_o_rotulo_de_ia_a_moldura_as_setinhas_e_a_legenda_sobem_com_o_cartao(monkeypatch, tmp_path):
+    # Print e vídeo do Rafael de 03/11 (07:08 e 07:10): com o Rótulo de IA, o app põe embaixo a linha
+    # "Identificado como conteúdo gerado por IA" e o cartão do produto sobe uns 40 px no vídeo; a
+    # moldura ficava no lugar de sempre, embaixo do cartão ("ele tem que subir a moldura nesses
+    # casos"). Ela sobe junto, com as setinhas e a legenda da fala, no mesmo lugar em relação ao cartão.
+    import io
+
+    from PIL import Image
+    subida = edicao_video.SUBIDA_COM_O_ROTULO_DE_IA
+    assert 30 <= subida <= 50
+    de_sempre = Image.open(io.BytesIO(edicao_video.moldura_do_cartao())).getchannel("A").getbbox()
+    com_rotulo = Image.open(io.BytesIO(edicao_video.moldura_do_cartao(True))).getchannel("A").getbbox()
+    assert com_rotulo == (de_sempre[0], de_sempre[1] - subida, de_sempre[2], de_sempre[3] - subida)
+    # A edição: as setinhas e a moldura sobem; sem o rótulo, ficam onde estavam.
+    pedidos = []
+
+    def com_foto_e_miniatura(video, foto, destino, segundos, largura, centro, seta, centro_seta, *args, **opcoes):
+        pedidos.append((centro_seta, opcoes.get("moldura")))
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura", com_foto_e_miniatura)
+    destino = str(tmp_path / "r.mp4")
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, rotulo_de_ia=True) == ""
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino) == ""
+    cx, cy = edicao_video.CENTRO_DA_SETA
+    assert pedidos == [((cx, cy - subida), edicao_video.moldura_do_cartao(True)),
+                       ((cx, cy), edicao_video.moldura_do_cartao())]
+    # A legenda da fala sobe o mesmo tanto.
+    legenda = [(1.0, 3.0, "Olha que lindo esse vestido")]
+    assert ([y for *_, y in edicao_video.letreiros_da_fala(legenda, 10.0, subida)]
+            == [y - subida for *_, y in edicao_video.letreiros_da_fala(legenda, 10.0)])
+    # O Editor 2 leva o rótulo até a legenda e a edição.
+    vistos = []
+
+    def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+        vistos.append([y for *_, y in letreiros][-1])
+        return ""
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
+        vistos.append(rotulo_de_ia)
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    edicao_video._editor_2_no_original("v.mp4", b"foto", destino, 10.0, "", "", "", "alto", legendas=legenda,
+                                       rotulo_de_ia=True)
+    assert vistos == [edicao_video.letreiros_da_fala(legenda, 10.0, subida)[-1][-1], True]
+    # E o vídeo que vai ao ar leva o rótulo ao Editor 2.
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa", "vantagem": "Leve", "falas": [], "lugar": "alto"})
+    repasses = []
+
+    def editar_2(*args, **opcoes):
+        repasses.append(args[13] if len(args) > 13 else opcoes.get("rotulo_de_ia"))
+        return "", {"textos": ["Bolsa"], "legendas": 0}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", rotulo_de_ia=True)
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")
+    assert repasses == [True, False]
+
+
 def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
     # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o vermelho aparece e o resto
     # do recorte dela continua claro (sem o quadrado preto), também depois do fim do arquivo.
@@ -830,7 +890,7 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
     monkeypatch.setattr(edicao_video, "editar",
                         lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True,
-                               outras_fotos=(): "")
+                               outras_fotos=(), rotulo_de_ia=False: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -965,7 +1025,8 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         montados.append((list(trechos), len(letreiros)))
         return ""
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -1122,7 +1183,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     avisos = []
 
     def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True,
-               outras_fotos=()):
+               outras_fotos=(), rotulo_de_ia=False):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1669,7 +1730,8 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
     capas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         capas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1716,7 +1778,8 @@ def test_rascunho_do_robo_abre_com_a_foto_e_a_capa_com_a_frase_vai_para_a_figuri
                                   "lugar": "alto"})
     aberturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         aberturas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1834,7 +1897,8 @@ def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     _versoes_de_mentira(monkeypatch)
     capas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         capas.append(capa is not None)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2177,7 +2241,8 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     _versoes_de_mentira(monkeypatch)
     pedidas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         pedidas.append(list(outras_fotos))
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2235,7 +2300,8 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2305,7 +2371,8 @@ def test_canto_so_com_o_que_foi_filmado_nao_tira_a_miniatura(monkeypatch, tmp_pa
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2347,7 +2414,8 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2415,7 +2483,8 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     _versoes_de_mentira(monkeypatch)
     miniaturas = []
 
-    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
