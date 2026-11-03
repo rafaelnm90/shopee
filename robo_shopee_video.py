@@ -19,7 +19,8 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --print-do-rascunho [AAAA-MM-DDTHH:MM]   # o print do rascunho mais novo no privado
 
 Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
-0. às 4h, descurte tudo em Meus favoritos (Criadores & Afiliados), uma vez por dia (P25);
+0. às 4h, descurte tudo em Meus favoritos (Criadores & Afiliados), uma vez por dia (P25); a que
+   não termina na hora volta no mesmo dia, na 1ª rodada livre (P137);
 1. o treino da semana, na primeira rodada de segunda-feira: percorre o caminho até a tela
    final sem salvar nem postar e confere cada tela com o mapa (os CAMINHOs abaixo);
 2. apaga no app um rascunho que o Rafael recusou;
@@ -280,6 +281,31 @@ def descurtir_pendente(agora=None):
     estado = ler_estado()
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     return bool(estado.get("descurtir_continuar")) or not (estado.get("descurtir_em") or "").startswith(hoje)
+
+
+# A limpeza de hoje que não terminou na hora dela (o celular fora às 4h, o app travado nas 4
+# rodadas da hora, as voltas que acabaram) roda de novo no mesmo dia, na 1ª rodada livre: fora do
+# Horário das Interações e sem segurar um post (o_que_fazer), até LIMPEZAS_FORA_DA_HORA vezes por
+# dia. Escolha do Rafael (02/11, P137 1): DECISOES.md, Shopee Vídeo.
+LIMPEZAS_FORA_DA_HORA = 2
+FORA_DA_HORA = "fora da hora"
+
+
+def limpeza_fora_da_hora_pendente(agora=None):
+    """A limpeza de hoje não terminou na hora dela, já passou a hora, e ainda cabe uma vez fora dela?"""
+    momento = agora_br(agora)
+    if momento.hour <= HORA_DO_DESCURTIR or not descurtir_pendente(agora):
+        return False
+    fora = ler_estado().get("descurtir_fora") or {}
+    return fora.get("dia") != momento.strftime("%Y-%m-%d") or int(fora.get("vezes") or 0) < LIMPEZAS_FORA_DA_HORA
+
+
+def _contar_limpeza_fora_da_hora(agora=None):
+    """Mais uma limpeza fora da hora dela no dia (a conta de LIMPEZAS_FORA_DA_HORA)."""
+    dia = agora_br(agora).strftime("%Y-%m-%d")
+    fora = ler_estado().get("descurtir_fora") or {}
+    vezes = int(fora.get("vezes") or 0) + 1 if fora.get("dia") == dia else 1
+    gravar_estado(descurtir_fora={"dia": dia, "vezes": vezes})
 
 
 def anotar_limpeza_sem_celular(agora=None, resultado="celular fora na suspensão"):
@@ -1286,6 +1312,9 @@ def o_que_fazer(config, agora=None):
     logo = _momento(agora_br(agora) + ANTES_DO_POST)
     if postar and any(r["postar_em"] and agora_txt < r["postar_em"] <= logo for r in aprovados):
         return None
+    # A limpeza das 4h que não terminou volta no mesmo dia, fora do Horário das Interações (P137).
+    if not na_janela and limpeza_fora_da_hora_pendente(agora):
+        return "descurtir", None
     if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
     if postar and not perto_das_interacoes(config, agora) and (
@@ -2708,8 +2737,9 @@ def descurtir_tudo(d, agora=None):
     pagina = pagina_dos_favoritos(d)
     if pagina is None:
         raise Parada("Meus favoritos não abriu (nem produtos, nem o filtro da lista)")
+    fora = "" if na_hora_do_descurtir(agora) else FORA_DA_HORA
     if pagina == "vazia":
-        registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", ok=True)
+        registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", fora, ok=True)
         gravar_estado(favoritos_limpos=True)
         ir_ao_inicio(d)
         return "nada curtido em Meus favoritos"
@@ -2755,7 +2785,8 @@ def descurtir_tudo(d, agora=None):
     ir_ao_inicio(d)
     ficam = f"; {invalidos} inválido(s) ficam" if invalidos else ""
     registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "descurtido" if acabou else "continua depois",
-                                 f"{removidos} produto(s){ficam}", ok=True if acabou else None)
+                                 f"{removidos} produto(s){ficam}" + (f"; {fora}" if fora else ""),
+                                 ok=True if acabou else None)
     if not acabou:
         return f"{removidos} produto(s) descurtido(s) em Meus favoritos; o resto fica para a próxima rodada"
     return (f"{removidos} produto(s) descurtido(s) em Meus favoritos"
@@ -6078,6 +6109,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             return resultado
         if acao == "descurtir":
             # A lista só fica limpa se este descurtir chegar ao fim (P27).
+            if not na_hora_do_descurtir(agora):
+                _contar_limpeza_fora_da_hora(agora)
             gravar_estado(descurtir_em=_momento(agora), descurtir_continuar=False, favoritos_limpos=False)
             resultado = descurtir_tudo(d, agora)
             registrar_tentativa("descurtir", "descurtido", agora=agora)
