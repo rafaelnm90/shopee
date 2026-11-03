@@ -349,6 +349,7 @@ METAS = {
     ("bot_mestre", "financeiro: varredura dos pendentes"): (1, 1),
     ("bot_mestre", "conferência diária dos grupos"): (1, 1),
     ("bot_mestre", "backup diário"): (1, 1),
+    ("bot_mestre", "cópia do backup fora do servidor"): (1, 1),
     ("divulgacao", "registro dos administradores"): (1, 1),
     ("divulgacao", "faxina do Acervo Viral"): (4, 3),
     ("divulgacao", "faxina do tópico do Baixador"): (144, 100),
@@ -1395,6 +1396,16 @@ def baixador(linhas):
     return total
 
 
+def idade_da_copia_fora(agora=None):
+    """Há quanto tempo saiu a última cópia cifrada do backup no privado do Rafael (P146 1)."""
+    enviada = (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("enviada_em") or ""
+    try:
+        quando = datetime.strptime(enviada, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return "ainda não saiu"
+    return f"há {(_agora(agora).replace(tzinfo=None) - quando).total_seconds() / 3600:.1f} h"
+
+
 # --- Pontos de atenção ---
 
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
@@ -1747,7 +1758,8 @@ def main():
     baixados = baixador(linhas_baixador)
     print(" | ".join(f"{evento}: {qtd}" for evento, qtd in sorted(baixados.items())) or "nenhum evento")
     backup = backup_dados.ultimo_backup()
-    print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
+    print(("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
+          + f" | cópia no privado do Rafael: {idade_da_copia_fora(agora)}")
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
                                              rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes,

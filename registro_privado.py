@@ -36,26 +36,31 @@ LIMITE_HISTORICO = 200
 SEM_CONFERENCIA = "# Administradores dos grupos e canais do Rafael\n\nAinda sem conferência.\n"
 
 
-def chave():
-    """A chave do servidor, criada na primeira vez por quem chegar antes (bot ou workflow)."""
+def chave(caminho=None):
+    """
+    A chave do servidor, criada na primeira vez por quem chegar antes (bot ou workflow).
+    O backup_dados usa a mesma receita com outro arquivo, a senha da cópia do backup.
+    """
+    # Lido na hora (e não no padrão do parâmetro): os testes trocam o CHAVE_ARQUIVO.
+    caminho = caminho or CHAVE_ARQUIVO
     try:
-        with open(CHAVE_ARQUIVO, "rb") as arquivo:
+        with open(caminho, "rb") as arquivo:
             return arquivo.read().strip()
     except FileNotFoundError:
         pass
-    os.makedirs(os.path.dirname(CHAVE_ARQUIVO), mode=0o700, exist_ok=True)
-    provisoria = f"{CHAVE_ARQUIVO}.{os.getpid()}"
+    os.makedirs(os.path.dirname(caminho), mode=0o700, exist_ok=True)
+    provisoria = f"{caminho}.{os.getpid()}"
     descritor = os.open(provisoria, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descritor, "wb") as arquivo:
         arquivo.write(Fernet.generate_key())
     try:
         # O link só cria se ainda não existe: os dois robôs nunca ficam com chaves diferentes.
-        os.link(provisoria, CHAVE_ARQUIVO)
+        os.link(provisoria, caminho)
     except FileExistsError:
         pass
     finally:
         os.unlink(provisoria)
-    with open(CHAVE_ARQUIVO, "rb") as arquivo:
+    with open(caminho, "rb") as arquivo:
         return arquivo.read().strip()
 
 
