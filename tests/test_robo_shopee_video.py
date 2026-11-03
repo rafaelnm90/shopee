@@ -1977,6 +1977,46 @@ def test_rascunho_aberto_com_outro_titulo_nao_e_postado(monkeypatch, avisos, cam
     assert robo.pegar(ident)["falhas_ao_postar"] == "0"
 
 
+def test_postar_agora_posta_o_aprovado_na_hora_mesmo_pausado_e_fora_do_horario(monkeypatch, avisos,
+                                                                              caminho_do_rascunho):
+    # Escolha do Rafael (03/11, P138): o Postar Agora 🚀 posta o aprovado na hora, a qualquer hora e
+    # sem esperar os 30 min do último post.
+    ident = _aprovado(monkeypatch)
+    robo.atualizar(ident, postar_em="2026-10-23 09:00:00")
+    ativar(robo_inicio=8, robo_fim=22, robo_pausado=True)
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-22 23:30")))
+    robo.registrar_tentativa("postar", "postado", agora=momento("2026-10-22 23:20"))
+    app = AppComQuadros()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(postar=ident, d=app, agora=momento("2026-10-22 23:30")) == "rascunho aprovado postado"
+    assert app.toques.count("@btn_post") == 1 and robo.pegar(ident)["estado"] == "postado"
+    assert "postei o vídeo que você aprovou" in avisos[0]
+    pedidos = [linha[2] for linha in robo.registro_processos.sequencia(
+        "shopee_video", robo.PROCESSO_DO_POSTAR_AGORA, "2000-01-01 00:00:00")]
+    assert pedidos == ["pedido"]
+
+
+def test_postar_agora_que_nao_sai_nao_gasta_tentativa(monkeypatch, avisos, caminho_do_rascunho):
+    ident = _aprovado(monkeypatch)
+    app = AppComQuadros()
+    app.legenda, app.com_produto = "Outro título de outro rascunho qualquer #outro", True
+    assert "parado" in robo.rodada(postar=ident, d=app, agora=momento("2026-10-22 23:30"))
+    rascunho = robo.pegar(ident)
+    assert rascunho["estado"] == "aprovado" and int(rascunho["falhas_ao_postar"] or 0) == 0
+    assert "não consegui postar agora o rascunho que você pediu" in avisos[-1] and "Postar Agora 🚀" in avisos[-1]
+    # O que não está mais aprovado não vai ao ar pelo botão, e o Rafael fica sabendo.
+    robo.atualizar(ident, estado="postado")
+    assert "não está mais aprovado" in robo.rodada(postar=ident, d=Intocavel(), agora=momento("2026-10-22 23:40"))
+    assert "não postei agora o rascunho que você pediu" in avisos[-1]
+
+
+def test_main_do_postar_agora(monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(robo, "rodada", lambda **kw: pedidos.append(kw) or "ok")
+    assert robo.main(["--postar", "7"]) == 0 and pedidos[-1]["postar"] == 7
+    assert robo.main(["--postar"]) == 2 and robo.main(["--postar", "x"]) == 2 and len(pedidos) == 1
+
+
 def test_erro_inesperado_ao_postar_tambem_conta_nas_3_tentativas(monkeypatch, avisos, caminho_do_rascunho):
     ident = _aprovado(monkeypatch)
     monkeypatch.setattr(robo, "abrir_rascunho", lambda d, rascunho: (_ for _ in ()).throw(ConnectionError("caiu")))

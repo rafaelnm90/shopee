@@ -392,6 +392,7 @@ SEM_META = {
     ("shopee_video", "capa pela figurinha"), ("shopee_video", "efeitos na edição"),
     ("shopee_video", "outra cor: "), ("shopee_video", "tirar produto no post"),
     ("shopee_video", "preparar 1 agora"), ("shopee_video", "celular: motivo da queda"),
+    ("shopee_video", "postar agora"),
     ("shopee_video", "horários perdidos na volta"), ("shopee_video", "celular no fim da rodada"),
     ("shopee_video", "horário sem rascunho"), ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
 }
@@ -1122,8 +1123,10 @@ ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed",), ("rascunho", "postar")
 # Shopee Vídeo.
 ACOES_EM_QUALQUER_HORARIO = ("apagar",)
 # O rascunho que o Rafael pede no Preparar 1 Agora vale a qualquer hora: o preparo que começa
-# até PREPARO_DO_BOTAO depois do pedido (o registro "preparar 1 agora") não é sobreposição.
+# até PREPARO_DO_BOTAO depois do pedido (o registro "preparar 1 agora") não é sobreposição. O
+# post pedido no Postar Agora 🚀 (P138, o registro "postar agora") também vale a qualquer hora.
 PROCESSO_DO_BOTAO = "preparar 1 agora"
+PROCESSO_DO_POSTAR_AGORA = "postar agora"
 PREPARO_DO_BOTAO = timedelta(minutes=30)
 
 
@@ -1197,8 +1200,9 @@ def sobreposicoes(agora=None):
     # de então e não conta como sobreposição.
     janela_desde = config.get("robo_interacoes_desde") or ""
     fora_da_janela, preparo_na_janela, pedidos_no_botao = [], [], []
-    botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S") for m, _p, _r, _d, _o in registro_processos.sequencia(
-        "shopee_video", PROCESSO_DO_BOTAO, _momento(agora - timedelta(hours=24)))]
+    botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S") for processo in (PROCESSO_DO_BOTAO, PROCESSO_DO_POSTAR_AGORA)
+             for m, _p, _r, _d, _o in registro_processos.sequencia(
+                 "shopee_video", processo, _momento(agora - timedelta(hours=24)))]
 
     def pedido_no_botao(momento):
         quando = datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")
