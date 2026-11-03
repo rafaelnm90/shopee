@@ -264,10 +264,11 @@ ESCALA_NA_MINIATURA = 0.5
 # A capa com a frase (vídeo do Rafael das 20:14 de 02/11, no lugar da moldura em volta da foto e
 # das laterais laranja encostadas nos lados da grade): a foto inteira, no maior tamanho do lugar
 # da foto da capa sem texto (FOTO_DA_CAPA), sem moldura dos lados; um fio laranja (FIO_DA_CAPA)
-# por cima da beirada de cima dela (acima dela, ele passaria por baixo da sacolinha da grade, que
-# fica no preto) e, por cima do pé dela, a faixa laranja com a frase, sempre da altura de uma
-# linha (FAIXA_DA_CHAMADA): a frase que não cabe numa linha vai em duas, com a letra menor, e a
-# foto não perde mais nada. Na capa da grade (o 1º quadro do vídeo), a foto tem a largura do vídeo
+# por cima da beirada de cima dela e, logo abaixo do pé dela, a faixa laranja com a frase, sempre
+# da altura de uma linha (FAIXA_DA_CHAMADA), onde ficaria o pé da foto na capa sem texto: a foto
+# sobe a altura da faixa e nada dela fica coberto, e a sacolinha da grade fica por cima do canto
+# de cima dela (vídeo do Rafael das 23:58 de 02/11, P139 2). A frase que não cabe numa linha vai
+# em duas, com a letra menor. Na capa da grade (o 1º quadro do vídeo), a foto tem a largura do vídeo
 # e o fio e a faixa vão de uma beirada à outra (a tela final do app mostra o vídeo de lado a lado);
 # no resto da abertura (o vídeo aberto, que corta mais dos lados, VISIVEL_NO_APP, P129), a foto
 # tem a largura do que o app mostra, inteira nele, e o fio e a faixa vão de um lado ao outro dela.
@@ -457,11 +458,12 @@ def capa_com_chamada(foto, chamada, no_video=False):
     """
     A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) inteira, no maior tamanho
     do lugar da foto da capa sem texto (FOTO_DA_CAPA) e da largura da capa (lados_da_capa), no
-    fundo preto, com o fio laranja por cima da beirada de cima dela e a chamada em letras brancas
-    numa faixa laranja por cima do pé dela, sempre da mesma altura, de um lado ao outro, logo acima do número de
-    visualizações. Com no_video=True, a do resto da abertura: da largura do que o app mostra do
-    vídeo aberto (P129). None sem a chamada, com a foto que não abre ou com a chamada que não cabe
-    nem na menor letra.
+    fundo preto, com o fio laranja por cima da beirada de cima dela e, logo abaixo dela, a chamada
+    em letras brancas numa faixa laranja, sempre da mesma altura, de um lado ao outro, logo acima
+    do número de visualizações. A faixa fica onde ficaria o pé da foto na capa sem texto, e a foto
+    sobe a altura da faixa: nada dela fica coberto (P139 2). Com no_video=True, a do resto da
+    abertura: da largura do que o app mostra do vídeo aberto (P129). None sem a chamada, com a foto
+    que não abre ou com a chamada que não cabe nem na menor letra.
     """
     import matplotlib
     from PIL import Image, ImageDraw
@@ -474,9 +476,10 @@ def capa_com_chamada(foto, chamada, no_video=False):
     if not imagem:
         return None
     capa = Image.new("RGB", TELA, "black")
-    x, y = (TELA[0] - imagem.width) // 2, y1 + (y2 - y1 - imagem.height) // 2
+    # O pé da faixa é o pé da foto na capa sem texto; a foto fica inteira logo acima da faixa.
+    pe = y1 + (y2 - y1 - imagem.height) // 2 + imagem.height
+    x, y = (TELA[0] - imagem.width) // 2, pe - FAIXA_DA_CHAMADA - imagem.height
     capa.paste(imagem, (x, y))
-    pe = y + imagem.height
 
     desenho = ImageDraw.Draw(capa)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")

@@ -1343,7 +1343,8 @@ def _pretos(imagem, caixa, passo=4):
 def test_capa_com_chamada_tem_a_foto_inteira_e_maior_o_fio_em_cima_e_a_faixa_no_pe():
     # Vídeo do Rafael das 20:14 de 02/11: sem as laterais laranja, a foto inteira e maior (do
     # tamanho da capa sem texto), um fio laranja em cima dela e, no pé, a faixa laranja com a frase
-    # em letras brancas (P107), logo acima do número de visualizações.
+    # em letras brancas (P107), logo acima do número de visualizações. Vídeo das 23:58 (P139 2): a
+    # faixa cobria o pé da foto; a foto sobe a altura da faixa e fica inteira logo acima dela.
     import io
 
     from PIL import Image
@@ -1351,29 +1352,30 @@ def test_capa_com_chamada_tem_a_foto_inteira_e_maior_o_fio_em_cima_e_a_faixa_no_
     assert capa.size == edicao_video.TELA
     x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
     fio, faixa = edicao_video.FIO_DA_CAPA, edicao_video.FAIXA_DA_CHAMADA
+    topo, pe = y1 - faixa, y2 - faixa
     # A foto de um lado ao outro do vídeo, sem laranja nos lados.
-    for ponto in [(x1 + 1, y1 + fio + 2), (x2 - 2, y1 + fio + 2), (x1 + 1, 640), (x2 - 2, 640), (360, 640),
-                  (x1 + 1, y2 - faixa - 3), (x2 - 2, y2 - faixa - 3)]:
+    for ponto in [(x1 + 1, topo + fio + 2), (x2 - 2, topo + fio + 2), (x1 + 1, 640), (x2 - 2, 640), (360, 640),
+                  (x1 + 1, pe - 3), (x2 - 2, pe - 3)]:
         assert _cor_de(capa, ponto, (200, 120, 40)), ponto
-    # Fora o fio e a faixa, a foto é a mesma da capa sem texto: nada dela fica menor nem coberto.
+    # Fora o fio, a foto é a mesma da capa sem texto, só mais alta: nada dela fica menor nem coberto.
     sem_texto = Image.open(io.BytesIO(edicao_video.capa_sem_chamada(_foto_jpg()))).convert("RGB")
-    miolo = (0, y1 + fio, 720, y2 - faixa)
-    assert capa.crop(miolo).tobytes() == sem_texto.crop(miolo).tobytes()
+    assert capa.crop((0, topo + fio, 720, pe)).tobytes() == sem_texto.crop((0, y1 + fio, 720, y2)).tobytes()
     # O fio, por cima da beirada de cima da foto, de uma beirada à outra do vídeo; acima, o preto.
-    for ponto in [(0, y1), (360, y1 + fio - 1), (719, y1 + fio // 2)]:
+    for ponto in [(0, topo), (360, topo + fio - 1), (719, topo + fio // 2)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
-    assert _pretos(capa, (0, 0, 720, y1), passo=2) and _pretos(capa, (0, y2, 720, 1280), passo=2)
+    assert _pretos(capa, (0, 0, 720, topo), passo=2) and _pretos(capa, (0, y2, 720, 1280), passo=2)
     assert 0 < fio <= 10
     # A faixa no pé da foto, de uma beirada à outra, com as letras brancas só dentro dela.
     for ponto in [(0, y2 - faixa), (719, y2 - faixa), (3, y2 - 1), (716, y2 - 1)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
     assert _claros(capa, (0, y2 - faixa, 720, y2)) > 50
     assert _claros(capa, (0, 0, 720, y2 - faixa)) == 0 and _claros(capa, (0, y2, 720, 1280)) == 0
-    # Pedido do Rafael: os números da grade ficam livres. O número de visualizações e a sacolinha
-    # da Shopee ficam no preto, e tudo cabe no que a grade mostra da capa.
-    assert _pretos(capa, edicao_video.NUMERO_DA_GRADE) and _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
-    cima, baixo = edicao_video.VISIVEL_NA_GRADE
-    assert cima <= y1 and y2 <= edicao_video.NUMERO_DA_GRADE[1] < baixo
+    # Pedido do Rafael: o número de visualizações fica livre, no preto, logo abaixo da faixa. A foto
+    # sobe até acima da sacolinha da Shopee, que fica por cima do canto dela (P139 2).
+    assert _pretos(capa, edicao_video.NUMERO_DA_GRADE)
+    assert topo < edicao_video.SACOLINHA_DA_GRADE[1] and not _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
+    _cima, baixo = edicao_video.VISIVEL_NA_GRADE
+    assert y2 <= edicao_video.NUMERO_DA_GRADE[1] < baixo
 
 
 def test_foto_do_comeco_do_video_fica_como_antes_grande_e_sem_moldura():
@@ -1473,8 +1475,10 @@ def test_capa_do_video_aberto_tem_a_foto_inteira_de_um_lado_ao_outro_do_que_o_ap
     assert edicao_video.lados_da_capa(True) == (esquerda, direita) and edicao_video.lados_da_capa() == (0, 720)
     _x1, y1, _x2, y2 = edicao_video.FOTO_DA_CAPA
     lado = direita - esquerda
-    topo, pe = y1 + (y2 - y1 - lado) // 2, y1 + (y2 - y1 - lado) // 2 + lado
     fio, faixa = edicao_video.FIO_DA_CAPA, edicao_video.FAIXA_DA_CHAMADA
+    # A faixa onde ficaria o pé da foto na capa sem texto, e a foto inteira logo acima dela (P139 2).
+    pe = y1 + (y2 - y1 - lado) // 2 + lado
+    topo = pe - faixa - lado
     for x in (esquerda, direita - 1):
         assert _cor_de(capa, (x, 640), (200, 120, 40)), x
         assert _cor_de(capa, (x, topo + 1), edicao_video.LARANJA_DA_SHOPEE), x
@@ -1595,7 +1599,7 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     assert recorte.tobytes() == capa.crop((esquerda, cima_da_grade, direita, baixo)).tobytes()
     for x in (0, recorte.width - 1):
         assert _cor_de(recorte, (x, 640 - cima_da_grade), (200, 120, 40)), x
-        assert _cor_de(recorte, (x, y1 + 2 - cima_da_grade), edicao_video.LARANJA_DA_SHOPEE), x
+        assert _cor_de(recorte, (x, 2), (200, 120, 40)), x
         assert _cor_de(recorte, (x, y2 - 3 - cima_da_grade), edicao_video.LARANJA_DA_SHOPEE), x
 
 
@@ -1616,7 +1620,7 @@ def test_miolo_da_capa_para_a_figurinha_tem_a_foto_e_a_faixa_inteiras_em_2_por_3
     _x1, y1, _x2, y2 = edicao_video.FOTO_DA_CAPA
     assert cima < y1 and y2 < baixo
     assert _cor_de(miolo, (3, y2 - cima - 2), edicao_video.LARANJA_DA_SHOPEE)
-    assert _cor_de(miolo, (3, y1 - cima + 1), edicao_video.LARANJA_DA_SHOPEE)
+    assert _cor_de(miolo, (3, y1 - edicao_video.FAIXA_DA_CHAMADA - cima + 1), edicao_video.LARANJA_DA_SHOPEE)
     assert _pretos(capa, (0, 0, 720, cima)) and _pretos(capa, (0, baixo, 720, 1280))
 
 
