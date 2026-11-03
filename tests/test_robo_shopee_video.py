@@ -507,6 +507,29 @@ def test_com_o_explorar_no_celular_a_rodada_nao_toca(monkeypatch, avisos):
         assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
 
 
+def test_na_hora_do_descurtir_a_rodada_que_nao_chega_a_limpeza_fica_no_registro(monkeypatch, avisos):
+    # A limpeza das 4h que não roda tem de dizer por quê: a rodada da hora que não chega a ela
+    # (o explorar no celular, a tela aberta no privado) anota o porquê, como o robô pausado.
+    ativar(robo_inicio=8, robo_fim=22)
+
+    def sem_limpeza():
+        return [(linha[0][11:16], linha[2]) for linha in robo.registro_processos.sequencia(
+            "shopee_video", robo.PROCESSO_SEM_LIMPEZA, "2000-01-01 00:00:00")]
+    with robo.celular_robo.trava() as livre:
+        assert livre
+        assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 04:00")) == "o explorar está tocando no celular"
+        # Fora da hora do descurtir, nada.
+        assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: True)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("não devia olhar o celular"))
+    assert "tela do celular está aberta" in robo.rodada(agora=momento("2026-10-22 04:15"))
+    assert sem_limpeza() == [("04:00", "o celular com o explorar"), ("04:15", "a tela do celular aberta no privado")]
+    # Com a limpeza de hoje feita, a rodada da hora não anota nada.
+    robo.gravar_estado(descurtir_em="2026-10-22 04:20:00", descurtir_continuar=False)
+    assert "tela do celular está aberta" in robo.rodada(agora=momento("2026-10-22 04:30"))
+    assert len(sem_limpeza()) == 2
+
+
 # --- O caminho no app, com um app de mentira ---
 
 def _no(texto="", ident="", caixa=(0, 0, 10, 10), clicavel=True, filhos="", desc=""):

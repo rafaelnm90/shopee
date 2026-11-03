@@ -198,6 +198,35 @@ def test_limpeza_das_4h_com_o_robo_pausado_fica_no_registro(bm, monkeypatch, rel
                      "ORDER BY rowid DESC") == ("robô pausado",)
 
 
+def test_na_hora_do_descurtir_a_rodada_que_nao_sai_fica_no_registro(bm, monkeypatch, relogio):
+    # A limpeza das 4h que não roda tem de dizer por quê: a rodada que o painel não põe no
+    # celular nessa hora (a anterior ainda nele, outro processo com a trava) fica no registro.
+    relogio("04:10")
+    sv = _painel(bm)
+
+    async def rodar_robo(*argumentos):
+        raise AssertionError("com o celular ocupado, a rodada não sai")
+
+    class Trava:
+        def __init__(self, presa):
+            self.presa = presa
+
+        def locked(self):
+            return self.presa
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv, "robo_ocupado", lambda: True)
+    sv.alterar_config(robo_pausado=False, robo_inicio=8, robo_fim=22)
+    monkeypatch.setattr(sv, "_rodada", Trava(True))
+    rodar(sv.verificar_robo())
+    monkeypatch.setattr(sv, "_rodada", Trava(False))
+    rodar(sv.verificar_robo())
+    anotados = [linha[2] for linha in sv.robo.registro_processos.sequencia(
+        "shopee_video", sv.robo.PROCESSO_SEM_LIMPEZA, "2000-01-01 00:00:00")]
+    assert anotados == ["a rodada anterior ainda no celular",
+                        "o celular com outro processo (o explorar ou uma rodada de antes do reinício do bot)"]
+
+
 def test_pausa_sem_o_celular_guarda_os_horarios_e_a_do_rafael_pula(bm, monkeypatch):
     # 28/10: o celular caiu às 15:05 e, na volta, nenhum rascunho saiu pelos horários da tarde:
     # o painel pulava os horários em qualquer pausa. Na pausa sozinha, sem o celular, eles ficam,

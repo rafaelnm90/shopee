@@ -324,6 +324,19 @@ def anotar_limpeza_sem_celular(agora=None, resultado="celular fora na suspensão
     registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", resultado, ok=None, agora=agora)
 
 
+# A rodada da hora do descurtir que não chega à limpeza ainda por fazer (o celular com outra
+# rodada ou com o explorar, a tela do celular aberta no privado) fica no registro com o porquê,
+# como a do robô pausado (anotar_limpeza_sem_celular): o checkup diz por que a limpeza não rodou
+# na hora. Só o motivo fixo do código.
+PROCESSO_SEM_LIMPEZA = "hora do descurtir: rodada sem a limpeza"
+
+
+def anotar_rodada_sem_limpeza(motivo, agora=None):
+    """Na hora do descurtir, com a limpeza de hoje por fazer, a rodada que não chegou a ela (o motivo)."""
+    if na_hora_do_descurtir(agora) and descurtir_pendente(agora):
+        registro_processos.registrar(REGISTRO, PROCESSO_SEM_LIMPEZA, motivo, ok=None, agora=agora)
+
+
 # O Horário das Interações (responder os comentários dos vídeos do Rafael e comentar e
 # curtir no feed) fica separado do de preparar e postar: nele o robô só interage, e fora
 # dele, só prepara e posta. Sem ele escolhido, tudo segue no Horário do Robô, como antes.
@@ -6147,6 +6160,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
         return f"conta suspensa até {ate}"
     if d is None:
         if av.tela_aberta():
+            if not na_hora:
+                anotar_rodada_sem_limpeza("a tela do celular aberta no privado", agora)
             return _resposta(preparar, "a tela do celular está aberta no privado do Rafael")
         if not celular_robo.conectado():
             ok, motivo = celular_robo.reconectar_sozinho()
@@ -6170,6 +6185,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             logger.warning(f"⚠️ [Robô Shopee Vídeo] Prazo do pareamento não lido: {type(e).__name__}")
     with celular_robo.trava() as livre:
         if not livre:
+            if not na_hora:
+                anotar_rodada_sem_limpeza("o celular com o explorar", agora)
             return _resposta(preparar, "o explorar está tocando no celular")
         # Dentro da trava, nenhum preparo está rodando: o "preparando" antigo é de uma rodada morta.
         soltar_preparos_interrompidos(agora)
