@@ -56,7 +56,6 @@ import exemplos
 import registro_processos
 import robo_shopee_video as robo
 from fuso import fuso_horario
-from motor_filas import sortear_teto_do_dia
 
 logger = logging.getLogger("ShopeeVideo")
 
@@ -509,9 +508,17 @@ def rotulo_de_postar(config):
 
 
 def videos_hoje(config, agora=None):
-    """Quantos vídeos o dia de hoje sorteou dentro da faixa (o mesmo número o dia inteiro)."""
-    dia = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d")
-    return sortear_teto_do_dia(CHAVE_CONFIG, dia, config["limite_min"], config["limite_max"])
+    """
+    Quantos vídeos o dia de hoje sorteou dentro da faixa (o mesmo número o dia inteiro), com o
+    teto pelos pontos de penalidade quando ele vale (P145).
+    """
+    return assistente.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
+
+
+def linha_dos_pontos(agora=None):
+    """A linha do porquê da faixa menor pelos pontos de penalidade (P145), ou "" de 0 a 3 pontos."""
+    rotulo = apelacoes.rotulo_dos_pontos(apelacoes.pontos_de_agora(robo.ler_estado(), agora), agora)
+    return f"{rotulo}\n" if rotulo else ""
 
 
 def rascunhos_hoje(config, agora=None):
@@ -732,7 +739,8 @@ def status_robo(config):
 def texto_robo(config, agora=None, celular=None):
     """A tela do Robô Automático. celular: o adb fala com o Motorola agora (None = não olhou)."""
     piso, topo = config["robo_limite_min"], config["robo_limite_max"]
-    hoje = f" (hoje: <b>{rascunhos_hoje(config, agora)}</b>)" if topo > piso else ""
+    pontos = linha_dos_pontos(agora)
+    hoje = f" (hoje: <b>{rascunhos_hoje(config, agora)}</b>)" if topo > piso or pontos else ""
     linha_celular = ""
     if celular is not None:
         linha_celular = ("📱 Celular: ✅ <b>conectado</b>\n" if celular
@@ -744,6 +752,7 @@ def texto_robo(config, agora=None, celular=None):
         f"Status: {status_robo(config)}\n"
         f"{linha_celular}"
         f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
+        f"{pontos}"
         f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>"
         + (f" (prepara e posta {rotulo_de_postar(config)})" if robo.janela_das_interacoes(config) else "") + "\n"
         f"💬 Horário das interações: <b>{rotulo_interacoes(config)}</b>\n"
@@ -936,13 +945,15 @@ def texto_assistente(config, agora=None):
     else:
         status = "▶️ <b>Ativo</b>"
     piso, topo = config["limite_min"], config["limite_max"]
-    hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso else ""
+    pontos = linha_dos_pontos(agora)
+    hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso or pontos else ""
     return (
         "📲 <b>Modo Assistente</b>\n"
         "Prepara cada postagem (vídeo, título, produtos e comentário) e manda aqui no seu privado, para "
         "você postar pelo seu celular. Trabalha quando o robô automático está pausado.\n\n"
         f"Status: {status}\n"
         f"📦 Vídeos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
+        f"{pontos}"
         f"⏰ Horário dos envios: <b>{rotulo_janela(config['inicio'], config['fim'])}</b>\n"
         f"📤 Mandados hoje: <b>{assistente.enviados_hoje(agora)}</b>\n\n"
         "<b>O que cada botão faz</b>\n"
@@ -1584,9 +1595,12 @@ async def preparar_handler(message: types.Message, state: FSMContext):
         await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
         return
     logger.info("⚡ Shopee Vídeo: Preparar 1 Agora.")
+    # Acima do teto pelos pontos de penalidade, o botão continua valendo, com o aviso (P145).
+    aviso = apelacoes.aviso_acima_do_teto(robo.rascunhos_de_hoje(), rascunhos_hoje(ler_config()),
+                                          apelacoes.pontos_de_agora(robo.ler_estado()))
     await message.answer("⚡ Preparando 1 rascunho agora no Motorola. Em uns 5 a 10 min ele chega em "
                          f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se o vídeo tiver um problema próprio, ele passa "
-                         "sozinho ao próximo (até 3), e se algo impedir, ele diz o quê.")
+                         "sozinho ao próximo (até 3), e se algo impedir, ele diz o quê." + aviso, parse_mode="HTML")
     asyncio.create_task(rodar_robo("--preparar"))
 
 
@@ -1987,9 +2001,12 @@ async def postar_agora_handler(message: types.Message, state: FSMContext):
         return
     logger.info("🚀 Shopee Vídeo: Postar Agora.")
     await state.set_state(ShopeeVideoFluxo.menu)
+    # Acima do teto pelos pontos de penalidade, o botão continua valendo, com o aviso (P145).
+    aviso = apelacoes.aviso_acima_do_teto(robo.postados_de_hoje(), rascunhos_hoje(ler_config()),
+                                          apelacoes.pontos_de_agora(robo.ler_estado()), "posts")
     await message.answer("🚀 Postando agora no Motorola. Em uns 5 min o robô manda aqui o link do post e o "
-                         "comentário; se algo impedir, ele diz o quê, e o rascunho continua aprovado.",
-                         reply_markup=teclado_painel(ler_config()))
+                         "comentário; se algo impedir, ele diz o quê, e o rascunho continua aprovado." + aviso,
+                         parse_mode="HTML", reply_markup=teclado_painel(ler_config()))
     asyncio.create_task(rodar_robo("--postar", str(rascunho["id"])))
 
 

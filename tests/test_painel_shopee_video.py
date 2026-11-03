@@ -1538,3 +1538,34 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     rodar(sv.exemplo_editor_2_handler(msg, est))
     assert not msg.midias and any("O exemplo do Editor 2 (com legendas) não saiu: o vídeo não abre" in t
                                   for t in msg.saidas)
+
+
+def test_painel_mostra_o_teto_pelos_pontos_e_o_preparar_avisa_acima_dele(bm, Msg, Est, monkeypatch):
+    # Escolha do Rafael (03/11, P145): o painel mostra o teto de hoje e o porquê, e o Preparar 1
+    # Agora continua valendo acima do teto, com o aviso.
+    from datetime import datetime
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    agora = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+    assert "Pelos pontos de penalidade" not in sv.texto_robo(sv.ler_config())
+    sv.robo.gravar_estado(saude_pontos=7, saude_lida_em=agora)
+    texto = sv.texto_robo(sv.ler_config())
+    assert "Pelos pontos de penalidade (<b>7</b>): metade da sua faixa, até <b>6 por dia</b>" in texto
+    assert "(hoje: <b>" in texto
+    assert "Pelos pontos de penalidade (<b>7</b>)" in sv.texto_assistente(sv.ler_config())
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
+    msg = MsgComMidia(Msg, sv.BOTAO_PREPARAR)
+    rodar(sv.preparar_handler(msg, Est()))
+    assert "passa do teto" not in msg.saidas[-1]
+    for n in range(sv.rascunhos_hoje(sv.ler_config())):
+        _rascunho(sv, f"Hoje #{n}", agora)
+    msg = MsgComMidia(Msg, sv.BOTAO_PREPARAR)
+    rodar(sv.preparar_handler(msg, Est()))
+    rodar(asyncio.sleep(0))
+    assert rodadas == [("--preparar",), ("--preparar",)] and "este passa do teto" in msg.saidas[-1]

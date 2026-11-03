@@ -18,10 +18,16 @@ outro canal nunca ganha texto dizendo que o vídeo é dele; ganha o texto sem au
 (texto_sem_autoria: afiliado, o produto vendido na própria Shopee), e o aviso diz de onde
 veio o vídeo. Nenhum texto pede a revisão: o recurso já é o pedido, e os 200 caracteres vão
 para os fatos (sem_pedido_de_revisao).
+
+Os pontos de penalidade também dizem quantos posts por dia o robô e o modo assistente fazem
+(a escada da P144 e da P145, faixa_pelos_pontos): de 0 a 3, a faixa do painel; acima, uma
+parte dela com um teto, até os pontos baixarem (recurso aceito) ou zerarem, no começo de
+cada trimestre (pontos_de_agora).
 """
 import html
 import json
 import logging
+import math
 import re
 from datetime import datetime, timedelta
 
@@ -58,6 +64,21 @@ DIAS_ESPERANDO_O_RESULTADO = 7
 # não há suspensão, com 6 há; o recurso aceito tira os pontos da punição.
 PONTOS_DA_ESCALA = 15
 PONTOS_DA_SUSPENSAO = 6
+# A tabela oficial (Central de Ajuda do Afiliado, "Acompanhe a Saúde da conta e os indicadores
+# de seus vídeos", lida em 03/11/2026): a partir de quantos pontos, quantos dias sem postar
+# (None = para sempre). Os pontos zeram no começo de cada trimestre (MESES_DO_TRIMESTRE).
+BANIMENTOS = ((15, None), (12, 30), (9, 7), (6, 3))
+MESES_DO_TRIMESTRE = (1, 4, 7, 10)
+# A escada dos posts por dia pelos pontos (P144 e P145, escolhas do Rafael em 03/11/2026):
+# de 0 a 3 pontos, a faixa do painel; acima, (a partir de quantos pontos, a parte da faixa do
+# painel, o teto por dia). Sem parte, a faixa inteira até o teto; teto 0, nenhum post até os
+# pontos zerarem. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+ESCADA_DOS_PONTOS = ((12, None, 0), (9, None, 2), (6, 0.5, 6), (4, 0.5, 8))
+# Com estes pontos ou mais, só o produto do vídeo vai ao post: sem os produtos a mais (P145).
+PONTOS_SO_O_PRODUTO_DO_VIDEO = 4
+# Onde o robô guarda a última leitura da Saúde do Vídeo (saude_pontos e saude_lida_em): a
+# CHAVE_ESTADO do robo_shopee_video, lida aqui também pelo modo assistente, que não importa o robô.
+CHAVE_DA_SAUDE = "shopee_video_robo"
 # Fontes que são vídeos do próprio Rafael: só nelas o texto pode dizer que o vídeo é dele.
 FONTES_PROPRIAS = ("autorais",)
 CALLBACK_RECORRI, CALLBACK_NAO_VAI = "apel_ok:", "apel_nao:"
@@ -65,6 +86,113 @@ CALLBACK_RECORRI, CALLBACK_NAO_VAI = "apel_ok:", "apel_nao:"
 
 def _momento(agora=None):
     return (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# --- Os pontos e a escada dos posts por dia ---
+
+def inicio_do_trimestre(agora=None):
+    """O começo do trimestre de agora: a Shopee zera os pontos no 1º de janeiro, abril, julho e outubro."""
+    agora = agora or datetime.now(fuso_horario)
+    mes = max(m for m in MESES_DO_TRIMESTRE if m <= agora.month)
+    return agora.replace(month=mes, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def quando_zeram(agora=None):
+    """O dia em que os pontos zeram de novo ("01/01"): o começo do trimestre seguinte."""
+    mes = inicio_do_trimestre(agora).month + 3
+    return f"01/{(mes - 1) % 12 + 1:02d}"
+
+
+def pontos_de_agora(estado=None, agora=None):
+    """
+    Os pontos de penalidade da última leitura da Saúde do Vídeo (estado: o do robô; sem ele, lido
+    do banco). Sem leitura, 0; a leitura de antes do começo do trimestre também vale 0, porque
+    a Shopee zera os pontos nesse dia.
+    """
+    estado = (db.ler_config(CHAVE_DA_SAUDE, {}) or {}) if estado is None else estado
+    lida = str(estado.get("saude_lida_em") or "")
+    try:
+        pontos = max(0, int(estado.get("saude_pontos")))
+    except (TypeError, ValueError):
+        return 0
+    if lida[:10] < inicio_do_trimestre(agora).strftime("%Y-%m-%d"):
+        return 0
+    return pontos
+
+
+def degrau_dos_pontos(pontos):
+    """O degrau da escada para estes pontos, (a partir de, parte da faixa, teto), ou None (a faixa do painel)."""
+    for degrau in ESCADA_DOS_PONTOS:
+        if pontos >= degrau[0]:
+            return degrau
+    return None
+
+
+def faixa_pelos_pontos(piso, topo, pontos):
+    """
+    A faixa de posts por dia pelos pontos: (piso, topo, teto). Até 3 pontos, a do painel, sem teto
+    (None); acima, a parte dela que o degrau diz (arredondada para cima, pelo menos 1), com o teto.
+    """
+    degrau = degrau_dos_pontos(pontos)
+    if not degrau:
+        return piso, topo, None
+    _a_partir, parte, teto = degrau
+    if parte:
+        piso, topo = (max(1, math.ceil(n * parte)) if n else n for n in (piso, topo))
+    return piso, topo, teto
+
+
+def quantos_pelos_pontos(semente, dia, piso, topo, pontos):
+    """Quantos posts o dia faz: o sorteio de sempre na faixa pelos pontos, até o teto do degrau."""
+    from motor_filas import sortear_teto_do_dia
+    piso, topo, teto = faixa_pelos_pontos(piso, topo, pontos)
+    if teto == 0:
+        return 0
+    quantos = sortear_teto_do_dia(semente, dia, piso, topo)
+    return quantos if teto is None else min(quantos, teto)
+
+
+def rotulo_dos_pontos(pontos, agora=None):
+    """
+    A linha dos painéis com o porquê da faixa menor ("" de 0 a 3 pontos): os pontos, o degrau e
+    quando eles zeram.
+    """
+    degrau = degrau_dos_pontos(pontos)
+    if not degrau:
+        return ""
+    zeram = quando_zeram(agora)
+    if degrau[2] == 0:
+        return (f"⛔ Pelos pontos de penalidade (<b>{pontos}</b>): nenhum post até os pontos baixarem "
+                f"(recurso aceito) ou zerarem em <b>{zeram}</b>")
+    parte = "metade da sua faixa, " if degrau[1] else ""
+    return (f"⚠️ Pelos pontos de penalidade (<b>{pontos}</b>): {parte}até <b>{degrau[2]} por dia</b>, só com o "
+            f"produto do vídeo, até os pontos baixarem (recurso aceito) ou zerarem em <b>{zeram}</b>")
+
+
+def aviso_acima_do_teto(feitos, teto, pontos, oque="rascunhos"):
+    """
+    O aviso do Preparar 1 Agora e do Postar Agora quando o dia já chegou ao teto pelos pontos
+    (o botão continua valendo: é pedido do Rafael). "" sem teto ou abaixo dele.
+    """
+    if pontos < PONTOS_SO_O_PRODUTO_DO_VIDEO or feitos < teto:
+        return ""
+    return (f"\n\n⚠️ Hoje já foram <b>{feitos}</b> {oque}, e o teto pelos pontos de penalidade ({pontos}) é "
+            f"<b>{teto}</b> por dia: este passa do teto.")
+
+
+def nota_dos_pontos(pontos):
+    """O que estes pontos querem dizer, pela tabela oficial: a restrição e o próximo degrau."""
+    for minimo, dias in BANIMENTOS:
+        if pontos >= minimo:
+            atual = "banimento para sempre" if dias is None else f"cada alerta novo, {dias} dias sem postar"
+            break
+    else:
+        atual = "nenhuma restrição"
+    proximo = next(((m, d) for m, d in sorted(BANIMENTOS) if m > pontos), None)
+    if not proximo:
+        return atual
+    m, d = proximo
+    return f"{atual}; com {m}, " + ("banimento para sempre" if d is None else f"{d} dias sem postar")
 
 
 def _criar_tabela(con):
@@ -451,13 +579,11 @@ def texto_saude(config, estado_robo=None, agora=None):
         linhas.append("✅ Conta sem suspensão.")
     pontos = estado_robo.get("saude_pontos")
     if pontos is not None:
-        if pontos >= PONTOS_DA_SUSPENSAO:
-            nota = f"com {PONTOS_DA_SUSPENSAO} ou mais, a Shopee suspende as postagens; recurso aceito tira pontos"
-        elif pontos == PONTOS_DA_SUSPENSAO - 1:
-            nota = f"a 1 ponto da suspensão, que vem com {PONTOS_DA_SUSPENSAO}"
-        else:
-            nota = f"a suspensão vem com {PONTOS_DA_SUSPENSAO}"
-        linhas.append(f"⚠️ Pontos de penalidade: <b>{pontos}</b> ({nota})")
+        linhas.append(f"⚠️ Pontos de penalidade: <b>{pontos}</b> ({nota_dos_pontos(pontos)}; zeram em "
+                      f"{quando_zeram(agora)}; recurso aceito tira pontos)")
+        escada = rotulo_dos_pontos(pontos_de_agora(estado_robo, agora), agora)
+        if escada:
+            linhas.append(escada)
     lida = estado_robo.get("saude_lida_em") or ""
     try:
         lida = datetime.strptime(lida, "%Y-%m-%d %H:%M:%S").strftime("%d/%m às %H:%M")

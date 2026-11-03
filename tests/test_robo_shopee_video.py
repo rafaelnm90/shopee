@@ -6754,3 +6754,20 @@ def test_rodada_com_o_post_adiado_avisa_e_nao_conta_como_falha(monkeypatch, avis
     assert rascunho["estado"] == "aprovado" and not int(rascunho["falhas_ao_postar"] or 0)
     assert "Não postei agora" in avisos[-1] and "adiamento 2 de 3" in avisos[-1]
     assert consultar("SELECT resultado FROM shopee_video_tentativas WHERE acao = 'postar'") == ("adiado",)
+
+
+def test_plano_do_dia_segue_a_escada_dos_pontos_e_so_vai_o_produto_do_video():
+    # Escolha do Rafael (03/11, P145): com 4 pontos de penalidade ou mais, o dia faz a parte da
+    # faixa do painel até o teto do degrau, e só o produto do vídeo vai ao post.
+    import apelacoes_shopee_video as apelacoes
+    assert apelacoes.CHAVE_DA_SAUDE == robo.CHAVE_ESTADO
+    config = {**robo.PADRAO, "robo_limite_min": 6, "robo_limite_max": 10}
+    robo.gravar_estado(saude_pontos=7, saude_lida_em="2026-11-03 10:00:00")
+    assert 3 <= robo.quantos_hoje(config, "2026-11-10") <= 5
+    robo.gravar_estado(saude_pontos=12)
+    assert robo.quantos_hoje(config, "2026-11-10") == 0 and robo.planejar(config, "2026-11-10") == []
+    # No trimestre seguinte os pontos zeram, e volta a faixa do painel.
+    assert 6 <= robo.quantos_hoje(config, "2027-01-02") <= 10
+    robo.gravar_estado(saude_pontos=4, saude_lida_em=datetime.now(robo.fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
+    assert robo.espacos_livres(None, {"link": LINK}, PRINCIPAL, {"preco": 50.0}, [], time.monotonic() + 600) == []
+    assert _registro_dos_espacos() == ["nenhum - só o produto do vídeo pelos pontos"]

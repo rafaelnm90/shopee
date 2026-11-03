@@ -39,6 +39,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
+import apelacoes_shopee_video
 import backup_dados
 import casos_robo
 import db
@@ -872,6 +873,9 @@ def robo_da_shopee_video(agora=None):
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
             "sem_tentar": sem_tentar, "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
+            # Os pontos de penalidade da última leitura da Saúde do Vídeo (0 se de antes do
+            # trimestre): com 4 ou mais, a escada da P145 diminui os rascunhos do dia.
+            "pontos": apelacoes_shopee_video.pontos_de_agora(agora=agora),
             "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora),
             "do_canal_no_viral": do_canal}
 
@@ -1667,6 +1671,8 @@ def main():
         situacao += f" | conta suspensa pela Shopee até {robo_sv['suspenso']}"
     if robo_sv.get("punicoes"):
         situacao += f" | punições esperando recurso: {robo_sv['punicoes']}"
+    if robo_sv.get("pontos"):
+        situacao += f" | pontos de penalidade {robo_sv['pontos']}"
     print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
           f"vencidos {robo_sv['vencidos']} (sem tentativa: {robo_sv['sem_tentar']}) | "
           f"rascunhos salvos hoje {robo_sv['salvos']} | "

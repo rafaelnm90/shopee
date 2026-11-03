@@ -738,3 +738,14 @@ def test_video_mudo_pede_musica_da_shopee_na_postagem(monkeypatch):
     bot = Bot()
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
     assert conferidos == ["novo.mp4"] and "Vídeo sem som" in bot.mensagens[-1][1]
+
+
+def test_envios_do_dia_seguem_a_escada_dos_pontos():
+    # Escolha do Rafael (03/11, P145): o teto pelos pontos de penalidade vale também para o modo assistente.
+    import apelacoes_shopee_video as apelacoes
+    import db
+    config = {"limite_min": 4, "limite_max": 6, "inicio": 9, "fim": 21}
+    db.salvar_config(apelacoes.CHAVE_DA_SAUDE, {"saude_pontos": 9, "saude_lida_em": "2026-11-03 10:00:00"})
+    assert asv.quantos_hoje(config, "2026-11-10") == 2 and len(asv.planejar(config, "2026-11-10")) == 2
+    db.salvar_config(apelacoes.CHAVE_DA_SAUDE, {"saude_pontos": 2, "saude_lida_em": "2026-11-03 10:00:00"})
+    assert 4 <= asv.quantos_hoje(config, "2026-11-10") <= 6
