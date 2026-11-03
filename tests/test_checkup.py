@@ -221,6 +221,26 @@ def test_postagens_de_hoje_por_fila():
     assert filas["Autorais"]["postados"] == 0 and filas["Autorais"]["media"] == 1 / 7
 
 
+def test_canal_principal_pausado_nao_cobra_o_atraso_nem_o_dia_sem_post():
+    # A pausa da suspensão da Shopee Vídeo para o canal por dias: o pendente de ontem espera a
+    # volta, que refaz as datas, e o checkup não cobra o que a pausa explica.
+    _filas_de_teste()
+    inserir("INSERT INTO fila_postagens VALUES ('c', '2026-10-22', 'PENDENTE', NULL)")
+    for dia in ("2026-10-21", "2026-10-22"):
+        inserir("INSERT INTO historico_metricas VALUES (?, 'posts_dia_principal', 9)", dia)
+    parado = {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []}
+    db.salvar_config("pausa_programada", {"ativa": True, "data_retorno": "26/10/2026 03:05"})
+    filas = checkup.postagens_de_hoje(AGORA)
+    assert (filas["Canal principal"]["atrasados"], filas["Canal principal"]["pausado"]) == (1, "26/10/2026 03:05")
+    assert checkup.pontos_de_atencao([], {}, filas, parado, {}, ("x", 5.0, 1), AGORA) == []
+
+    db.salvar_config("pausa_programada", {"ativa": False, "data_retorno": None})
+    filas = checkup.postagens_de_hoje(AGORA)
+    texto = "\n".join(checkup.pontos_de_atencao([], {}, filas, parado, {}, ("x", 5.0, 1), AGORA))
+    assert filas["Canal principal"]["pausado"] is None
+    assert "Canal principal: 1 item(ns) atrasado(s)" in texto and "Canal principal: nenhum post hoje" in texto
+
+
 def test_fila_sem_tabela_nao_derruba_o_checkup():
     filas = checkup.postagens_de_hoje(AGORA)
     assert filas["Parceiros"]["postados"] is None and filas["Canal principal"]["media"] is None
