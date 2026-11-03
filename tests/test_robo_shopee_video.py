@@ -31,6 +31,8 @@ SAUDE_DO_DIA = robo.saude_do_dia_pendente
 TROCAR = robo.trocar_pela_maior_comissao
 # E o vídeo postado que vai à fila do Canal Afiliados (P62 a P64), com testes no fim.
 LEVAR_AO_CANAL = robo.levar_ao_canal
+# E a limpeza das 4h que volta no mesmo dia (P137): no banco novo do teste, ela nunca rodou.
+LIMPEZA_FORA_DA_HORA = robo.limpeza_fora_da_hora_pendente
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +40,7 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: None)
     # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
@@ -3486,6 +3489,7 @@ def test_treino_da_segunda_na_suspensao_roda_logo_depois_do_fim(monkeypatch, avi
     assert robo.ler_estado()["treino_depois_da_suspensao"] is False
     monkeypatch.undo()
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: True)
     assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-29 10:00")) == ("rascunho", None)
 
@@ -4258,6 +4262,37 @@ def test_limpeza_das_4h_que_para_no_meio_tenta_de_novo_na_mesma_hora(monkeypatch
     monkeypatch.setattr(robo.av, "abrir_tela", lambda **kwargs: None)
     robo.rodada(d=AppDosFavoritos(favoritos=3), agora=momento("2026-10-27 04:05"))
     assert robo.o_que_fazer(config, momento("2026-10-27 04:20")) is None
+
+
+def test_limpeza_que_nao_terminou_as_4h_volta_no_mesmo_dia_fora_das_interacoes(monkeypatch, avisos):
+    # Escolha do Rafael (02/11, P137 1): a limpeza das 4h que não terminou (o celular fora às 4h,
+    # o app travado) roda de novo no mesmo dia, na 1ª rodada livre: fora do Horário das
+    # Interações e sem segurar um post, até LIMPEZAS_FORA_DA_HORA vezes.
+    monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", LIMPEZA_FORA_DA_HORA)
+    config = {**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22, "robo_interacoes_inicio": 19,
+              "robo_interacoes_fim": 21}
+    robo.gravar_estado(descurtir_em="2026-10-24 04:10:00", descurtir_continuar=False)
+    assert not robo.limpeza_fora_da_hora_pendente(momento("2026-10-25 03:30"))
+    assert robo.o_que_fazer(config, momento("2026-10-25 10:00")) == ("descurtir", None)
+    assert robo.o_que_fazer(config, momento("2026-10-25 19:30")) != ("descurtir", None)
+    # Um aprovado indo ao ar logo: a limpeza espera, para não segurar o post.
+    aprovado = _rascunho("aprovado", postar_em="2026-10-25 10:10:00")
+    assert robo.o_que_fazer(config, momento("2026-10-25 10:00")) is None
+    robo.atualizar(aprovado, estado="postado")
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=3)
+    robo.rodada(d=app, agora=momento("2026-10-25 10:00"))
+    assert app.favoritos == [] and robo.lista_limpa()
+    assert not robo.limpeza_fora_da_hora_pendente(momento("2026-10-25 10:20"))
+    linhas = [(l[2], l[3]) for l in robo.registro_processos.contagem("2000-01-01 00:00:00")
+              if l[1] == "descurtir tudo (4h)"]
+    assert linhas == [("descurtido", "3 produto(s); fora da hora")]
+    # No máximo LIMPEZAS_FORA_DA_HORA vezes por dia fora da hora dela.
+    robo.gravar_estado(descurtir_continuar=True)
+    assert robo.limpeza_fora_da_hora_pendente(momento("2026-10-25 11:00"))
+    robo.gravar_estado(descurtir_fora={"dia": "2026-10-25", "vezes": robo.LIMPEZAS_FORA_DA_HORA})
+    assert not robo.limpeza_fora_da_hora_pendente(momento("2026-10-25 11:00"))
+    assert robo.limpeza_fora_da_hora_pendente(momento("2026-10-26 11:00"))
 
 
 def test_rascunho_que_nao_sai_deixa_o_caso_completo_para_o_checkup(monkeypatch, avisos):
