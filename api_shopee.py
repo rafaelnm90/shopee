@@ -303,6 +303,28 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
             motivo = (f"sem resposta da API ({type(e).__name__})", "sem_resposta", type(e).__name__)
     return falhou(motivo)
 
+# A busca de ofertas que a API nega (o garimpo, o buscador e o robô da Shopee Vídeo a usam): o
+# registro de processos guarda só o código do erro da API e o programa que pediu, para o checkup
+# mostrar a causa, sem a palavra buscada nem a mensagem.
+PROCESSO_DA_BUSCA_NEGADA = "busca de ofertas negada"
+
+
+def _registrar_busca_negada(erros):
+    primeiro = erros[0] if isinstance(erros, list) and erros and isinstance(erros[0], dict) else {}
+    codigo = re.sub(r"\D", "", str((primeiro.get("extensions") or {}).get("code") or ""))[:8]
+    quem = os.path.splitext(os.path.basename(sys.argv[0] or ""))[0] or "?"
+    try:
+        # Importado aqui, como o utils no link sem conversão: as ferramentas que só testam as
+        # chaves não precisam do banco.
+        import registro_processos
+        # Com o ponto do milhar (10.030): o registro troca os números de 5 dígitos por #, como ids.
+        registro_processos.registrar("api_shopee", PROCESSO_DA_BUSCA_NEGADA,
+                                     f"código {int(codigo):,}".replace(",", ".") if codigo else "sem código",
+                                     quem, ok=False)
+    except Exception as e:
+        logger.error(f"❌ [API Shopee] Não anotou a busca negada: {type(e).__name__}")
+
+
 async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None, sort_type=2):
     """
     Busca produtos na Shopee por palavra-chave. Devolve a lista de produtos
@@ -357,6 +379,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
                     erros = dados.get("errors")
                     if erros:
                         logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
+                        _registrar_busca_negada(erros)
                         return []
                     return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
     except Exception as e:
