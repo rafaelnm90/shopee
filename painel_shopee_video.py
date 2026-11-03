@@ -206,6 +206,11 @@ async def verificar_robo():
             logger.warning(f"⚠️ [Robô Shopee Vídeo] Aviso do fim da suspensão não saiu: {type(e).__name__}")
     config = ler_config()
     if robo_ocupado():
+        # Na hora do descurtir, a rodada que não sai fica no registro com o porquê (o checkup
+        # explica a limpeza que não rodou na hora).
+        robo.anotar_rodada_sem_limpeza("a rodada anterior ainda no celular" if _rodada.locked()
+                                       else "o celular com outro processo (o explorar ou uma rodada de antes "
+                                            "do reinício do bot)")
         return
     if config["robo_pausado"]:
         # Pausado pelo Rafael, os horários de rascunho que passam são pulados, como no

@@ -405,6 +405,30 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     assert r["janela_desde"] == f"{dia} 10:00:00"
 
 
+def test_rodadas_na_hora_do_descurtir_e_as_que_nao_chegaram_a_limpeza():
+    # A limpeza das 4h que não roda tem de dizer por quê: o checkup mostra quantas rodadas o bot
+    # pôs no celular nessa hora e as que não chegaram à limpeza, com o porquê.
+    import robo_shopee_video as robo
+    import registro_processos
+    assert checkup.PROCESSO_SEM_LIMPEZA_SV == robo.PROCESSO_SEM_LIMPEZA
+    assert checkup.classificado("shopee_video", robo.PROCESSO_SEM_LIMPEZA)
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    for hora in ("04:00", "04:15", "10:00"):
+        registro_processos.registrar("shopee_video", "rodada fora do bot", "unidade própria", agora=em(hora))
+    registro_processos.registrar("shopee_video", robo.PROCESSO_SEM_LIMPEZA, "o celular com o explorar",
+                                 agora=em("04:30"))
+    assert checkup.rodadas_na_hora_do_descurtir(AGORA) == (["04:00", "04:15"],
+                                                           [("04:30", "o celular com o explorar")])
+    r = checkup.sobreposicoes(AGORA)
+    assert r["rodadas_no_descurtir"] == ["04:00", "04:15"] and len(r["sem_limpeza"]) == 1
+    # A rodada sem a limpeza não é outra tarefa na hora do descurtir.
+    assert r["no_descurtir"] == []
+
+
 def test_preparo_pedido_no_botao_nao_e_sobreposicao():
     # 31/10, 20:32: o rascunho pedido no Preparar 1 Agora dentro do Horário das Interações entrou
     # como sobreposição, como se o robô tivesse preparado sozinho antes do feed. O pedido no
