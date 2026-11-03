@@ -623,7 +623,7 @@ def punicoes_por_tipo_de_post():
     """
     with db.conexao(linhas_por_nome=True) as con:
         _criar_tabela(con)
-        punicoes = con.execute("SELECT tipo, rascunho FROM shopee_video_punicoes").fetchall()
+        punicoes = con.execute("SELECT tipo, rascunho, titulo, postado_em FROM shopee_video_punicoes").fetchall()
         tem_rascunhos = con.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
                                     "AND name = 'shopee_video_rascunhos'").fetchone()
         existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")} \
@@ -651,8 +651,12 @@ def punicoes_por_tipo_de_post():
     tipos = {}
     for p in punicoes:
         tipos[p["tipo"] or "?"] = tipos.get(p["tipo"] or "?", 0) + 1
-    return {"posts": len(posts), "punidos": len(punidos),
-            "fora_do_robo": sum(1 for p in punicoes if p["rascunho"] not in ids),
+    # Sem post do robô ligado: a punição que o robô achou já recorrida no app, ou já conhecida,
+    # fica guardada sem ele abrir a tela do vídeo (sem título nem hora do post); as outras ele leu
+    # e o vídeo não casou com nenhum post dele (outro vídeo da conta, como os do modo assistente).
+    fora = [p for p in punicoes if p["rascunho"] not in ids]
+    return {"posts": len(posts), "punidos": len(punidos), "fora_do_robo": len(fora),
+            "fora_sem_a_tela": sum(1 for p in fora if not (p["titulo"] or p["postado_em"])),
             "desde": (posts[0]["postado_em"] or "")[:10] if posts else "",
             "caracteristicas": caracteristicas, "fontes": sorted((f, *c) for f, c in fontes.items()),
             "tipos": sorted(tipos.items(), key=lambda par: (-par[1], par[0]))}
@@ -677,7 +681,10 @@ def linhas_das_punicoes_por_post(medicao):
         linhas.append("• Por fonte: " + " · ".join(f"{html.escape(fonte)} {_parte(punidos, posts)}"
                                                    for fonte, posts, punidos in medicao["fontes"]))
     if medicao["fora_do_robo"]:
-        linhas.append(f"• Punições de vídeos que não são posts do robô: {medicao['fora_do_robo']}")
+        sem_a_tela = medicao.get("fora_sem_a_tela", 0)
+        linhas.append(f"• Punições sem post do robô ligado: {medicao['fora_do_robo']} (de {sem_a_tela}, o robô não leu "
+                      "a tela do vídeo, porque já estavam recorridas ou são de antes da leitura; as outras são de "
+                      "vídeos que não são posts do robô)")
     linhas.append("<i>Só mostra os números; desligar alguma coisa continua com você.</i>")
     return linhas
 

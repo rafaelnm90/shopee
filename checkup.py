@@ -951,7 +951,8 @@ def linha_das_punicoes_por_post(medicao):
     contagens (punidos/posts), nunca o título, o produto ou o texto da punição.
     """
     partes = [f"posts do robô {medicao['posts']}, punidos {medicao['punidos']}, "
-              f"punições fora dos posts do robô {medicao['fora_do_robo']}"]
+              f"punições sem post do robô ligado {medicao['fora_do_robo']} "
+              f"(sem a tela do vídeo lida {medicao.get('fora_sem_a_tela', 0)})"]
     for nome, com, com_punidos, sem, sem_punidos in medicao["caracteristicas"]:
         if com:
             partes.append(f"{nome}: com {com_punidos}/{com}, sem {sem_punidos}/{sem}")
