@@ -1024,3 +1024,23 @@ def test_medicao_da_capa_com_chamada_so_com_contagens_e_porcento():
                      "sem 1 (lidos 1 e 1); sem a marca 1 | com 1 dia(s): a chamada +50% (1 com, 1 sem) | "
                      "com 3 dia(s): sem comparação ainda (0 com, 0 sem)")
     assert "1234" not in linha and "1851" not in linha and "9999" not in linha
+
+
+def test_o_que_espera_o_rafael_sai_dos_pontos_de_atencao():
+    # P146 5: o que depende de algo que só o Rafael faz (os chips novos dos Autorais) vai para
+    # "Esperando o Rafael", conferido pelos números do dia; resolvida a causa, volta a contar.
+    import registro_processos
+    for _ in range(3):
+        registro_processos.registrar("autorais", "repostagem ao grupo", checkup.SEM_CONTA_DE_REPOSTAGEM, ok=False,
+                                     agora=AGORA)
+    pontos = ["Autorais: 1 item(ns) atrasado(s) na fila",
+              "autorais: repostagem ao grupo: 3 falha(s) e 0 acerto(s) (mais comum: sem conta de repostagem, 3x)",
+              "Viral: 2 item(ns) atrasado(s) na fila"]
+    ficam, esperando = checkup.separar_o_que_espera_o_rafael(pontos, checkup.processos_do_dia(AGORA))
+    assert ficam == ["Viral: 2 item(ns) atrasado(s) na fila"]
+    assert [p for p, _o in esperando] == pontos[:2] and "chips novos dos Autorais" in esperando[0][1]
+
+    # Uma repostagem que deu certo: a causa não é mais a falta de conta, e os dois voltam a contar.
+    registro_processos.registrar("autorais", "repostagem ao grupo", "repostado", ok=True, agora=AGORA)
+    ficam, esperando = checkup.separar_o_que_espera_o_rafael(pontos, checkup.processos_do_dia(AGORA))
+    assert ficam == pontos and esperando == []
