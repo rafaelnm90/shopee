@@ -686,9 +686,15 @@ def test_ligacao_presa_na_mesma_porta_nao_le_o_celular(cr, monkeypatch):
 
 
 def test_volta_do_celular_anota_o_motivo_no_registro_no_estado_e_no_retomar(bm, cr, monkeypatch, Msg, Est):
+    from datetime import datetime, timedelta
+
     from conftest import consultar
+    from fuso import fuso_horario
     sv = bm.painel_shopee_video
-    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00", visto_em="2026-10-31 21:50:00")
+    # Visto pela última vez há 30 min, pelo relógio do teste: ligado há 3 dias, o celular não
+    # reiniciou depois disso (com uma data fixa, a conta dependeria do dia em que o teste roda).
+    visto_em = (datetime.now(fuso_horario) - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00", visto_em=visto_em)
     monkeypatch.setattr(cr, "conectado", lambda: False)
     monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
     monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
