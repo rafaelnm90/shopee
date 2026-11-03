@@ -515,9 +515,12 @@ def videos_hoje(config, agora=None):
     return assistente.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
 
 
-def linha_dos_pontos(agora=None):
-    """A linha do porquê da faixa menor pelos pontos de penalidade (P145), ou "" de 0 a 3 pontos."""
-    rotulo = apelacoes.rotulo_dos_pontos(apelacoes.pontos_de_agora(robo.ler_estado(), agora), agora)
+def linha_dos_pontos(piso, topo, agora=None):
+    """
+    A linha do porquê da faixa menor pelos pontos de penalidade (P145), com a faixa que fica a partir
+    da do painel (piso e topo), ou "" de 0 a 3 pontos.
+    """
+    rotulo = apelacoes.rotulo_dos_pontos(apelacoes.pontos_de_agora(robo.ler_estado(), agora), agora, piso, topo)
     return f"{rotulo}\n" if rotulo else ""
 
 
@@ -739,7 +742,7 @@ def status_robo(config):
 def texto_robo(config, agora=None, celular=None):
     """A tela do Robô Automático. celular: o adb fala com o Motorola agora (None = não olhou)."""
     piso, topo = config["robo_limite_min"], config["robo_limite_max"]
-    pontos = linha_dos_pontos(agora)
+    pontos = linha_dos_pontos(piso, topo, agora)
     hoje = f" (hoje: <b>{rascunhos_hoje(config, agora)}</b>)" if topo > piso or pontos else ""
     linha_celular = ""
     if celular is not None:
@@ -945,7 +948,7 @@ def texto_assistente(config, agora=None):
     else:
         status = "▶️ <b>Ativo</b>"
     piso, topo = config["limite_min"], config["limite_max"]
-    pontos = linha_dos_pontos(agora)
+    pontos = linha_dos_pontos(piso, topo, agora)
     hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso or pontos else ""
     return (
         "📲 <b>Modo Assistente</b>\n"
