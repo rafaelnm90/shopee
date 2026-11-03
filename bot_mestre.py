@@ -12,8 +12,9 @@ canais e grupos.
   saúde; o Espelhador e o Disparador de Notas entram como routers.
 
 Os dados ficam no banco_dados.db (filas e a tabela configuracoes). Os jobs vivem no
-APScheduler em memória e o FSM no MemoryStorage: um restart refaz a grade do dia
-em main() e encerra as sessões abertas dos painéis.
+APScheduler em memória: um restart refaz a grade do dia em main(). O passo dos fluxos
+do privado do Rafael fica também no banco (armazem_fsm.py) e volta depois do restart;
+as sessões da submissão pública nos grupos se encerram.
 """
 import os
 import re
@@ -36,7 +37,6 @@ import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
 from aiogram import BaseMiddleware
 from typing import Callable, Dict, Any, Awaitable
@@ -74,6 +74,7 @@ import blacklist_captura  # de quem os userbots nunca capturam
 import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
+import armazem_fsm  # o passo dos fluxos do privado do Rafael também no banco
 import alertas  # os graves avisados na hora (robô fora do ar), conferidos também aqui
 import registro_processos  # cada processo dos robôs, 3 dias, para o checkup do dia
 import rotinas  # em que canal sai cada rotina de texto
@@ -528,7 +529,10 @@ class ConfigRotinaEspiao(StatesGroup):
     aguardando_confirmacao_tempo = State()
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+# O passo dos fluxos do privado do Rafael fica também no banco: o reinício de cada atualização
+# não o perde (P146 3, armazem_fsm.py). As sessões da submissão pública nos grupos ficam só na
+# memória: o bot as encerra ao subir (limpar_paineis_orfaos).
+dp = Dispatcher(storage=armazem_fsm.ArmazemNoBanco(guardar=lambda key: key.chat_id == ADMIN_ID == key.user_id))
 _lock_contador = asyncio.Lock()
 
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
@@ -573,8 +577,8 @@ teclado_plataforma = montar_teclado([
 ])
 
 # Cancelar só da tela de alvos do Grupo Público. O texto é próprio de propósito: o
-# handler usa StateFilter("*") e continua funcionando depois de um restart, quando o
-# MemoryStorage do aiogram já zerou o FSM.
+# handler usa StateFilter("*") e continua funcionando mesmo sem o passo do FSM (um passo
+# parado há mais de um dia não volta do banco: armazem_fsm.HORAS_GUARDADO).
 teclado_cancelar_alvos_publico = montar_teclado([[KeyboardButton(text="❌ Cancelar e Voltar às Rotinas")]])
 
 teclado_erro_ia = montar_teclado([
@@ -17053,8 +17057,9 @@ async def apagar_painel(chat_id, message_id):
 async def limpar_paineis_orfaos():
     """
     Apaga na subida todo painel de submissão registrado.
-    É sempre seguro: como o FSM é MemoryStorage, nenhuma sessão sobrevive ao restart,
-    então qualquer painel registrado já está morto de qualquer forma.
+    É sempre seguro: as sessões da submissão ficam só na memória (o armazem_fsm guarda no
+    banco só o privado do Rafael), nenhuma sobrevive ao restart, então qualquer painel
+    registrado já está morto de qualquer forma.
     """
     try:
         abertos = db.ler_config("paineis_wizard_abertos", [])
@@ -18036,6 +18041,11 @@ async def main():
                       id='backup_diario', replace_existing=True)
     agendar_backup_atrasado()
     agendar_copia_atrasada()
+    # Os passos dos fluxos parados há mais de um dia saem do banco (armazem_fsm).
+    try:
+        armazem_fsm.faxina()
+    except Exception as e:
+        logger.warning(f"⚠️ [FSM] Faxina dos passos guardados falhou ({type(e).__name__}).")
 
     # Contas dos Autorais: avisa no privado quando uma conta para ou volta na função dela
     scheduler.add_job(verificar_saude_contas, 'interval', minutes=2, id='saude_contas_loop', replace_existing=True)
