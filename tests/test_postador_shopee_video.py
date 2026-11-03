@@ -1920,8 +1920,9 @@ def test_marca_painel_e_desenho_diferentes_sao_outro_produto_e_a_ia_descreve_ant
                                 capa=b"\xff\xd8capa")[0] == []
     ok, _motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"}, [], avisar=False, capa=b"\xff\xd8capa")
     assert not ok and len(pedidos) == 2
+    # Na troca, a cor conta como detalhe; nos produtos a mais, a outra cor é variação.
+    assert ps.DETALHES_DOS_PRODUTOS_A_MAIS in pedidos[0] and ps.DETALHES_QUE_SE_VEEM in pedidos[1]
     for prompt in pedidos:
-        assert ps.DETALHES_QUE_SE_VEEM in prompt
         for detalhe in ("a marca ou o logotipo", "quantos botões", "o desenho do corpo", "Basta um desses diferente"):
             assert detalhe in prompt
         json_pedido = prompt[prompt.index("Responda só com um JSON"):]
@@ -1951,6 +1952,30 @@ def test_produtos_a_mais_aceitam_o_mesmo_modelo_em_outra_cor_como_variacao(monke
     assert 'é uma variação: ponha o número dele em "outra_cor", e não em "iguais"' in prompt
     assert '"outra_cor": [os números dos anúncios do mesmo produto em outra cor ou estampa]' in prompt
     assert "o mesmo produto em outra cor ou estampa, outra quantidade" not in prompt
+
+
+def test_nos_produtos_a_mais_a_cor_diferente_e_variacao_e_nao_detalhe_diferente(monkeypatch):
+    # Vídeo do Rafael das 21:58 de 02/11: no rascunho de uma garrafa, a IA recusou os 2 produtos a
+    # mais, a mesma garrafa em outras cores ("poderia ter colocado a miniatura, essa foto desse
+    # link aqui, e aí poderia passar"). O "basta um desses diferente" valia também para as cores e
+    # mandava recusar; agora a cor não entra nessa conta, e a foto com as cores do anúncio lado a
+    # lado não é um kit. Na troca do produto do post, a cor continua tendo de ser a mesma.
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(" ".join(prompt.split()))
+        return '{"iguais": [], "outra_cor": [1, 2], "confere": true, "motivo": "a mesma garrafa em outras cores"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    de_outra_cor = set()
+    assert ps.ia_confere_iguais({"arquivo": "v.mp4"}, "Garrafa", [("Garrafa A", b"\xff\xd8a"), ("Garrafa B", b"\xff\xd8b")],
+                                capa=b"\xff\xd8capa", outra_cor=de_outra_cor) == ([0, 1], "a mesma garrafa em outras cores")
+    assert de_outra_cor == {0, 1}
+    iguais = pedidos[0]
+    assert "A cor não entra nessa conta" in iguais and "também a cor da tampa ou de outra peça" in iguais
+    assert "não é um kit: quem diz se é kit é o nome do anúncio" in iguais
+    assert "e as cores. Basta um desses diferente" not in iguais
+    assert "e as cores. Basta um desses diferente" in " ".join(ps.DETALHES_QUE_SE_VEEM.split())
 
 
 def test_imitacao_com_a_foto_da_marca_nao_e_o_mesmo_produto_na_troca_e_nos_produtos_a_mais(monkeypatch):

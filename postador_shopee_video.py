@@ -183,6 +183,20 @@ DETALHES_QUE_SE_VEEM = ("Compare os detalhes do produto que se veem no vídeo e 
                         "botões giratórios, e onde ficam), o formato e o desenho do corpo (alças, tampas, janelas, "
                         "pés, cantos) e as cores. Basta um desses diferente para não ser o mesmo produto, mesmo que o "
                         "nome do anúncio pareça o mesmo.")
+# Nos produtos a mais, a cor diferente não tira o anúncio: o mesmo produto em outra cor ou
+# estampa é uma variação (outra_cor), que vai com a foto dele na miniatura (pedido do Rafael de
+# 02/11). Com o "basta um diferente" valendo também para a cor, a IA recusava a mesma garrafa em
+# outras cores, e a foto com as cores do anúncio lado a lado não é um kit (vídeo do Rafael das
+# 21:58 de 02/11). Na troca do produto do post, a cor continua tendo de ser a mesma
+# (DETALHES_QUE_SE_VEEM). DECISOES.md, Shopee Vídeo.
+DETALHES_DOS_PRODUTOS_A_MAIS = (
+    "Compare os detalhes do produto que se veem no vídeo e em cada foto (não o fundo nem a arrumação da foto): a "
+    "marca ou o logotipo, o painel e os controles (quantos botões, telas e botões giratórios, e onde ficam) e o "
+    "formato e o desenho do corpo (alças, tampas, janelas, pés, cantos). Basta um desses diferente para não ser o "
+    "mesmo produto, mesmo que o nome do anúncio pareça o mesmo. A cor não entra nessa conta: o mesmo produto, com o "
+    "mesmo formato e desenho, só que em outra cor ou estampa (também a cor da tampa ou de outra peça), é uma "
+    "variação. A foto que mostra o produto em várias cores (as opções do anúncio) não é um kit: quem diz se é kit é "
+    "o nome do anúncio.")
 # Loja que vende imitação usa a foto da marca: num rascunho de 02/11 (o vídeo de uns fones de
 # marca), a IA deu como o mesmo item um anúncio a mais com a foto da marca e só o número do
 # modelo no nome, e o Rafael recusou o rascunho. Com a marca no produto do vídeo, o nome do
@@ -1065,7 +1079,7 @@ def ia_confere_iguais(video, nome, anuncios, capa=None, recusas=None, precos=(),
         for i, (nome_do_anuncio, foto) in enumerate(anuncios, 1)]
     prompt = PROMPT_ITENS_IGUAIS.format(nome=nome, capa_pode_ser_outra=A_CAPA_PODE_SER_OUTRA,
                                         outra_medida=OUTRA_MEDIDA, outra_versao=OUTRA_VERSAO,
-                                        detalhes=DETALHES_QUE_SE_VEEM, imitacao=IMITACAO)
+                                        detalhes=DETALHES_DOS_PRODUTOS_A_MAIS, imitacao=IMITACAO)
     confirmados, de_outra_cor, motivo = set(range(1, len(anuncios) + 1)), set(), ""
     for vez in range(1, VEZES_DA_IA + 1):
         resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, imagens=imagens))
