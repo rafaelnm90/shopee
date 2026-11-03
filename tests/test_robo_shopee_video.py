@@ -1650,6 +1650,47 @@ def test_passo_do_motivo():
     assert robo.passo_do_motivo(f"{robo.MOTIVO_SEM_EDICAO} (a foto do anúncio não veio)") == "edição do vídeo"
     assert robo.passo_do_motivo(robo.MOTIVO_SEM_AVISOS) == "edição do vídeo"
     assert robo.passo_do_motivo("algo novo") == "outro" and robo.passo_do_motivo("") == ""
+    # O caminho até o Perfil (post, rascunho, treino) não é a limpeza dos favoritos, que também
+    # passa por Criadores & Afiliados.
+    assert robo.passo_do_motivo("depois de Criadores & Afiliados, a tela não mostrou Conta") == "navegar no app"
+    assert robo.passo_do_motivo("depois de Eu, a tela não mostrou Criadores & Afiliados") == "navegar no app"
+    assert robo.passo_do_motivo("não achei Criadores & Afiliados na aba Eu") == "descurtir em Meus Favoritos"
+
+
+PAINEL_DO_ANDROID = ('<hierarchy><node package="com.android.systemui" resource-id="com.android.systemui:id/qs_frame" '
+                     'bounds="[0,0][1080,2400]" text="" content-desc="" clickable="false" />'
+                     '<node package="com.android.systemui" resource-id="com.android.systemui:id/tile_label" '
+                     'bounds="[100,500][400,560]" text="Lanterna" content-desc="" clickable="false" /></hierarchy>')
+
+
+def test_painel_do_android_por_cima_do_app_e_fechado_e_a_tela_segue(monkeypatch):
+    # 02/11, 23:39: o painel do Android (Wi-Fi, Bluetooth, lanterna) estava aberto no Motorola, por
+    # cima do app, e o post parou em "depois de Criadores & Afiliados, a tela não mostrou Conta".
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    app = AppDeMentira()
+    app.atual = "eu"
+    shopee = app.dump_hierarchy()
+    assert not robo.painel_do_android_aberto(shopee) and robo.painel_do_android_aberto(PAINEL_DO_ANDROID)
+
+    class ComOPainel(AppDeMentira):
+        aberto = True
+
+        def dump_hierarchy(self):
+            return PAINEL_DO_ANDROID if self.aberto else super().dump_hierarchy()
+
+        def press(self, tecla):
+            self.teclas.append(tecla)
+            self.aberto = False
+
+    d = ComOPainel()
+    d.atual = "eu"
+    xml = robo.tela(d)
+    assert d.teclas == ["back"] and xml == shopee and robo.tem(xml, "Criadores & Afiliados")
+    registro = [(linha[2], linha[3]) for linha in robo.registro_processos.sequencia(
+        "shopee_video", "voltar no app", "2000-01-01 00:00:00")]
+    assert registro == [("painel do Android por cima", "fechado com o voltar")]
+    # Sem o painel, nenhuma tecla.
+    assert robo.tela(d) == shopee and d.teclas == ["back"]
 
 
 def test_historico_guarda_30_dias_e_mostra_as_12_mais_novas():
