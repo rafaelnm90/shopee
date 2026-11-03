@@ -123,9 +123,12 @@ def test_tela_saude_mostra_suspensao_e_punicoes():
     config = {**robo.PADRAO, "robo_suspenso_ate": "2026-10-26 19:04:26"}
     texto = ap.texto_saude(config, {"saude_lida_em": "2026-10-23 20:00:00", "saude_pontos": 6}, AGORA)
     assert "suspensa pela Shopee até <b>26/10 às 19:04</b>" in texto and "23/10 às 20:00" in texto
-    assert "Pontos de penalidade: <b>6</b> (com 6 ou mais, a Shopee suspende" in texto
+    # A tabela oficial da Saúde da conta (03/11): o que os pontos de agora dão e o próximo degrau.
+    assert ("Pontos de penalidade: <b>6</b> (cada alerta novo, 3 dias sem postar; com 9, 7 dias sem postar; "
+            "zeram em 01/01") in texto
+    assert "metade da sua faixa, até <b>6 por dia</b>, só com o produto do vídeo" in texto
     texto = ap.texto_saude({**robo.PADRAO}, {"saude_pontos": 5}, AGORA)
-    assert "a 1 ponto da suspensão" in texto and "Conta sem suspensão" in texto
+    assert "nenhuma restrição; com 6, 3 dias sem postar" in texto and "Conta sem suspensão" in texto
     assert "Punições dos últimos 30 dias: 1" in texto and "não recorrida" in texto and "Botijão" in texto
     assert "Gerar Apelação" in texto
     assert ap.ler_explicacao("Conteúdos   publicados devem promover. Apelar aqui.") == "Conteúdos publicados devem promover."
@@ -157,3 +160,38 @@ def test_recurso_nao_gasta_caracteres_pedindo_a_revisao(monkeypatch):
     assert ap.texto_para_copiar(ap.pegar(guardado)) == "O vídeo mostra o garrafão térmico do anúncio."
     assert ap.sem_pedido_de_revisao("Peço a revisão.") == "Peço a revisão."
     assert ap.sem_pedido_de_revisao(TEXTO) == TEXTO
+
+
+def test_escada_dos_posts_pelos_pontos_da_tabela_oficial():
+    # Escolha do Rafael (03/11, P144 e P145): de 0 a 3 pontos, a faixa do painel; de 4 a 5, metade
+    # dela, até 8 por dia; de 6 a 8, metade, até 6; de 9 a 11, até 2; de 12 a 14, nenhum post.
+    assert ap.faixa_pelos_pontos(6, 10, 0) == ap.faixa_pelos_pontos(6, 10, 3) == (6, 10, None)
+    assert ap.faixa_pelos_pontos(6, 10, 4) == ap.faixa_pelos_pontos(6, 10, 5) == (3, 5, 8)
+    assert ap.faixa_pelos_pontos(6, 10, 6) == ap.faixa_pelos_pontos(6, 10, 8) == (3, 5, 6)
+    assert ap.faixa_pelos_pontos(1, 2, 7) == (1, 1, 6)
+    assert ap.faixa_pelos_pontos(6, 10, 9) == ap.faixa_pelos_pontos(6, 10, 11) == (6, 10, 2)
+    assert ap.faixa_pelos_pontos(6, 10, 12)[2] == ap.faixa_pelos_pontos(6, 10, 15)[2] == 0
+    dias = [f"2026-11-{dia:02d}" for dia in range(1, 31)]
+    assert all(3 <= ap.quantos_pelos_pontos("x", dia, 6, 10, 7) <= 5 for dia in dias)
+    assert all(ap.quantos_pelos_pontos("x", dia, 16, 20, 4) == 8 for dia in dias)
+    assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 9) == 2 for dia in dias)
+    assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 12) == 0 for dia in dias)
+    # De 0 a 3 pontos, o mesmo sorteio de antes da escada.
+    from motor_filas import sortear_teto_do_dia
+    assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 3) == sortear_teto_do_dia("x", dia, 6, 10) for dia in dias)
+    assert ap.aviso_acima_do_teto(3, 3, 7) and not ap.aviso_acima_do_teto(2, 3, 7)
+    assert not ap.aviso_acima_do_teto(9, 3, 3)
+
+
+def test_pontos_zeram_no_comeco_de_cada_trimestre():
+    # A Shopee zera os pontos no 1º de janeiro, abril, julho e outubro (Central de Ajuda do
+    # Afiliado, lida em 03/11): a leitura de antes disso vale 0, como a falta de leitura.
+    novembro = datetime(2026, 11, 3, 10, 0, tzinfo=fuso_horario)
+    assert ap.pontos_de_agora({"saude_pontos": 7, "saude_lida_em": "2026-10-01 00:10:00"}, novembro) == 7
+    assert ap.pontos_de_agora({"saude_pontos": 7, "saude_lida_em": "2026-09-30 23:50:00"}, novembro) == 0
+    assert ap.pontos_de_agora({"saude_pontos": 7}, novembro) == ap.pontos_de_agora({}, novembro) == 0
+    janeiro = datetime(2027, 1, 1, 0, 30, tzinfo=fuso_horario)
+    assert ap.pontos_de_agora({"saude_pontos": 9, "saude_lida_em": "2026-12-31 20:00:00"}, janeiro) == 0
+    assert ap.quando_zeram(novembro) == "01/01" and ap.quando_zeram(janeiro) == "01/04"
+    assert "zerarem em <b>01/01</b>" in ap.rotulo_dos_pontos(7, novembro) and ap.rotulo_dos_pontos(3, novembro) == ""
+    assert "nenhum post" in ap.rotulo_dos_pontos(12, novembro)

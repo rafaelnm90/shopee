@@ -83,7 +83,6 @@ import visualizacoes_shopee_video as visualizacoes
 from api_shopee import eh_video, link_para_converter
 from fuso import fuso_horario
 from legendas import nome_da_legenda
-from motor_filas import sortear_teto_do_dia
 
 logger = logging.getLogger("RoboShopeeVideo")
 
@@ -387,7 +386,28 @@ def trechos_de_postar(config):
 
 
 def quantos_hoje(config, dia):
-    return sortear_teto_do_dia(CHAVE_ESTADO, dia, config["robo_limite_min"], config["robo_limite_max"])
+    """
+    Quantos rascunhos o dia faz: o sorteio na faixa do painel e, com 4 pontos de penalidade ou
+    mais, a parte dela com o teto da escada (P144 e P145; os pontos lidos antes do trimestre
+    valem 0). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    momento = datetime.strptime(dia, "%Y-%m-%d").replace(hour=12, tzinfo=fuso_horario)
+    pontos = apelacoes.pontos_de_agora(ler_estado(), momento)
+    return apelacoes.quantos_pelos_pontos(CHAVE_ESTADO, dia, config["robo_limite_min"], config["robo_limite_max"],
+                                          pontos)
+
+
+def rascunhos_de_hoje(agora=None):
+    """Os rascunhos salvos hoje (o do Preparar 1 Agora também), para o aviso do teto pelos pontos."""
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    return sum(1 for r in listar("rascunho", "aprovado", "postado", "recusado", "apagado")
+               if (r["criado_em"] or "").startswith(hoje))
+
+
+def postados_de_hoje(agora=None):
+    """Os posts de hoje, para o aviso do teto pelos pontos no Postar Agora."""
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    return sum(1 for r in listar("postado") if (r["postado_em"] or "").startswith(hoje))
 
 
 def planejar(config, dia):
@@ -3367,6 +3387,12 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
 
     if not ler_config().get("robo_produtos_a_mais", True):
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "nenhum - desligados")
+        return []
+    # Com 4 pontos de penalidade ou mais, só o produto do vídeo vai ao post (P145).
+    pontos = apelacoes.pontos_de_agora(ler_estado())
+    if pontos >= apelacoes.PONTOS_SO_O_PRODUTO_DO_VIDEO:
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "nenhum - só o produto do vídeo pelos pontos",
+                                     f"{pontos} ponto(s) de penalidade")
         return []
     if time.monotonic() > prazo:
         anotar("nenhum - sem tempo na rodada")

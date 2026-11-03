@@ -42,13 +42,13 @@ import aiohttp
 
 import api_gemini
 import api_shopee
+import apelacoes_shopee_video as apelacoes
 import db
 import legendas
 import pedidos_do_canal
 import registro_processos
 import videos
 from fuso import fuso_horario
-from motor_filas import sortear_teto_do_dia
 
 logger = logging.getLogger("ShopeeVideo")
 
@@ -151,7 +151,14 @@ def hoje(agora=None):
 
 
 def quantos_hoje(config, dia):
-    return sortear_teto_do_dia("shopee_video", dia, config["limite_min"], config["limite_max"])
+    """
+    Quantos envios o dia faz: o sorteio na faixa do painel e, com 4 pontos de penalidade ou mais
+    na Saúde do Vídeo, a parte dela com o teto da escada, como no robô (P145). Decisão do Rafael:
+    DECISOES.md, Shopee Vídeo.
+    """
+    momento = datetime.strptime(dia, "%Y-%m-%d").replace(hour=12, tzinfo=fuso_horario)
+    return apelacoes.quantos_pelos_pontos("shopee_video", dia, config["limite_min"], config["limite_max"],
+                                          apelacoes.pontos_de_agora(agora=momento))
 
 
 def planejar(config, dia):
