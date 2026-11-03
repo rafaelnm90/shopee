@@ -1550,7 +1550,7 @@ def test_painel_mostra_o_teto_pelos_pontos_e_o_preparar_avisa_acima_dele(bm, Msg
     assert "Pelos pontos de penalidade" not in sv.texto_robo(sv.ler_config())
     sv.robo.gravar_estado(saude_pontos=7, saude_lida_em=agora)
     texto = sv.texto_robo(sv.ler_config())
-    assert "Pelos pontos de penalidade (<b>7</b>): metade da sua faixa, até <b>6 por dia</b>" in texto
+    assert "Pelos pontos de penalidade (<b>7</b>): um quarto da sua faixa, até <b>6 por dia</b>" in texto
     assert "(hoje: <b>" in texto
     assert "Pelos pontos de penalidade (<b>7</b>)" in sv.texto_assistente(sv.ler_config())
     rodadas = []

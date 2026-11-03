@@ -6763,7 +6763,7 @@ def test_plano_do_dia_segue_a_escada_dos_pontos_e_so_vai_o_produto_do_video():
     assert apelacoes.CHAVE_DA_SAUDE == robo.CHAVE_ESTADO
     config = {**robo.PADRAO, "robo_limite_min": 6, "robo_limite_max": 10}
     robo.gravar_estado(saude_pontos=7, saude_lida_em="2026-11-03 10:00:00")
-    assert 3 <= robo.quantos_hoje(config, "2026-11-10") <= 5
+    assert 2 <= robo.quantos_hoje(config, "2026-11-10") <= 3
     robo.gravar_estado(saude_pontos=12)
     assert robo.quantos_hoje(config, "2026-11-10") == 0 and robo.planejar(config, "2026-11-10") == []
     # No trimestre seguinte os pontos zeram, e volta a faixa do painel.

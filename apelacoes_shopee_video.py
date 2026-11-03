@@ -71,9 +71,11 @@ BANIMENTOS = ((15, None), (12, 30), (9, 7), (6, 3))
 MESES_DO_TRIMESTRE = (1, 4, 7, 10)
 # A escada dos posts por dia pelos pontos (P144 e P145, escolhas do Rafael em 03/11/2026):
 # de 0 a 3 pontos, a faixa do painel; acima, (a partir de quantos pontos, a parte da faixa do
-# painel, o teto por dia). Sem parte, a faixa inteira até o teto; teto 0, nenhum post até os
-# pontos zerarem. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
-ESCADA_DOS_PONTOS = ((12, None, 0), (9, None, 2), (6, 0.5, 6), (4, 0.5, 8))
+# painel, o teto por dia). A parte é sempre da faixa que o Rafael pôs no painel, não do teto do
+# degrau anterior: de 4 a 5, a metade; de 6 a 8, a metade da metade. Sem parte, a faixa inteira
+# até o teto; teto 0, nenhum post até os pontos zerarem. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+ESCADA_DOS_PONTOS = ((12, None, 0), (9, None, 2), (6, 0.25, 6), (4, 0.5, 8))
+NOMES_DAS_PARTES = {0.5: "metade da sua faixa", 0.25: "um quarto da sua faixa"}
 # Com estes pontos ou mais, só o produto do vídeo vai ao post: sem os produtos a mais (P145).
 PONTOS_SO_O_PRODUTO_DO_VIDEO = 4
 # Onde o robô guarda a última leitura da Saúde do Vídeo (saude_pontos e saude_lida_em): a
@@ -164,7 +166,7 @@ def rotulo_dos_pontos(pontos, agora=None):
     if degrau[2] == 0:
         return (f"⛔ Pelos pontos de penalidade (<b>{pontos}</b>): nenhum post até os pontos baixarem "
                 f"(recurso aceito) ou zerarem em <b>{zeram}</b>")
-    parte = "metade da sua faixa, " if degrau[1] else ""
+    parte = f"{NOMES_DAS_PARTES[degrau[1]]}, " if degrau[1] else ""
     return (f"⚠️ Pelos pontos de penalidade (<b>{pontos}</b>): {parte}até <b>{degrau[2]} por dia</b>, só com o "
             f"produto do vídeo, até os pontos baixarem (recurso aceito) ou zerarem em <b>{zeram}</b>")
 
