@@ -226,10 +226,12 @@ def test_saude_mostra_quais_posts_levaram_punicao():
     rascunho_pulado = robo.criar("w", agora)
     robo.atualizar(rascunho_pulado, estado="pulado", fonte="viral")
     ap.guardar("Produto Irrelevante", "2026-10-31", "Em análise", rascunho=com_a_mais)
-    ap.guardar("Conteúdo repetido", "2026-11-01", "Em análise")                       # vídeo que não é do robô
+    ap.guardar("Conteúdo repetido", "2026-11-01", "Em análise", "Outro vídeo", "10:00:00 2026-11-01")  # não é do robô
+    ap.guardar("Propriedade intelectual", "2026-10-25", "Recorrida")                  # o robô não leu a tela do vídeo
 
     medicao = ap.punicoes_por_tipo_de_post()
-    assert (medicao["posts"], medicao["punidos"], medicao["fora_do_robo"], medicao["desde"]) == (4, 1, 1, "2026-10-29")
+    assert (medicao["posts"], medicao["punidos"], medicao["fora_do_robo"], medicao["desde"]) == (4, 1, 2, "2026-10-29")
+    assert medicao["fora_sem_a_tela"] == 1
     contas = {c[0]: list(c[1:]) for c in medicao["caracteristicas"]}
     assert contas["produtos a mais"] == [1, 1, 3, 0]
     assert contas["troca de loja"] == [1, 1, 1, 0]          # o antigo e o Ver Produtos não anotaram
@@ -238,7 +240,7 @@ def test_saude_mostra_quais_posts_levaram_punicao():
     assert contas["Ver Produtos"] == [1, 0, 3, 1]
     assert contas["rótulo de IA"] == [0, 0, 4, 1]
     assert medicao["fontes"] == [("autorais", 1, 0), ("viral", 3, 1)]
-    assert dict(medicao["tipos"]) == {"Produto Irrelevante": 1, "Conteúdo repetido": 1}
+    assert dict(medicao["tipos"]) == {"Produto Irrelevante": 1, "Conteúdo repetido": 1, "Propriedade intelectual": 1}
 
     texto = "\n".join(ap.linhas_das_punicoes_por_post(medicao))
     assert "4 posts do robô desde 29/10; 1 punidos" in texto
@@ -246,11 +248,13 @@ def test_saude_mostra_quais_posts_levaram_punicao():
     assert "• Com troca de loja: 1 de 1 (100%) · sem: 0 de 1 (0%) (anotada desde 03/11)" in texto
     assert "rótulo de IA" not in texto                       # nenhum post teve
     assert "• Por fonte: autorais 0 de 1 (0%) · viral 1 de 3 (33%)" in texto
-    assert "Punições de vídeos que não são posts do robô: 1" in texto
+    # Sem post do robô ligado não quer dizer vídeo de fora: o robô pode não ter lido a tela dele.
+    assert "• Punições sem post do robô ligado: 2 (de 1, o robô não leu a tela do vídeo" in texto
     assert "Quais posts levaram punição" in ap.texto_saude({}, {}, agora)
 
     linha = checkup.linha_das_punicoes_por_post(medicao)
-    assert linha.startswith("Punições por tipo de post (P146 2): posts do robô 4, punidos 1")
+    assert linha.startswith("Punições por tipo de post (P146 2): posts do robô 4, punidos 1, "
+                            "punições sem post do robô ligado 2 (sem a tela do vídeo lida 1)")
     assert "produtos a mais: com 1/1, sem 0/3" in linha and "fontes: autorais 0/1, viral 1/3" in linha
 
 
