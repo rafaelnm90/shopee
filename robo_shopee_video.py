@@ -2524,11 +2524,12 @@ def _codigos_da_ia():
     return sorted(ps.api_gemini.codigos_do_google(ps.api_gemini.ULTIMO_ERRO_IA))
 
 
-def _motivo_da_ia():
+def _motivo_da_ia(textos=None):
     """
     Por que a IA não deu o título, em códigos fixos do Google (nunca o texto dela): a resposta
     vazia traz o finish_reason (SAFETY, RECITATION, MAX_TOKENS...) ou o block_reason; a cota
-    e os outros erros vêm do ULTIMO_ERRO_IA; sem erro, a IA respondeu sem o título no JSON.
+    e os outros erros vêm do ULTIMO_ERRO_IA; sem erro, a IA respondeu sem o JSON (textos None)
+    ou com o JSON sem o título.
     """
     erro = ps.api_gemini.ULTIMO_ERRO_IA or ""
     codigos = _codigos_da_ia()
@@ -2538,7 +2539,9 @@ def _motivo_da_ia():
         return "resposta vazia"
     if re.search(r"429|RESOURCE_EXHAUSTED|quota", erro, re.I):
         return "cota da IA"
-    return "erro da IA" if erro else "resposta sem o título"
+    if erro:
+        return "erro da IA"
+    return "resposta sem o título" if textos is not None else "resposta sem o JSON"
 
 
 def _avisar_recusa(video, nomes, recusa):
@@ -2567,6 +2570,11 @@ def _textos_da_ia(video, nomes=None):
             ps.api_gemini.ULTIMO_ERRO_IA, assistente.ULTIMA_RECUSA = None, None
             textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
             recusa = assistente.ULTIMA_RECUSA or recusa
+            if textos and textos.get("violacao"):
+                # A IA viu violação das diretrizes, e o título costuma vir vazio: quem chama pula o
+                # vídeo e avisa o Rafael, sem gastar as tentativas do horário no mesmo vídeo (um kit
+                # de calcinhas voltou assim 4 vezes seguidas na madrugada de 03/11).
+                return textos
             if textos and textos["titulo"]:
                 if textos.get("regras_leves"):
                     registro_processos.registrar(REGISTRO, "título da IA", "veio com as regras em palavras leves",
@@ -2574,7 +2582,7 @@ def _textos_da_ia(video, nomes=None):
                 elif vez:
                     registro_processos.registrar(REGISTRO, "título da IA", "veio na nova tentativa", ok=True)
                 return textos
-            motivo = _motivo_da_ia()
+            motivo = _motivo_da_ia(textos)
             registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
             if BLOQUEIOS_DO_CONTEUDO & set(_codigos_da_ia()):
                 raise Parada(f"a IA não devolveu o título ({motivo}, também com as regras em palavras leves): o "

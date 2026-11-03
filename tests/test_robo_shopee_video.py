@@ -1399,6 +1399,40 @@ def test_bloqueio_do_google_pelo_conteudo_pula_o_video_sem_tentar_de_novo(monkey
     assert "PROHIBITED_CONTENT" in pulado["motivo"] and robo.passo_do_motivo(pulado["motivo"]) == "título da IA"
 
 
+def test_violacao_com_o_titulo_vazio_pula_o_video_na_hora(monkeypatch, avisos):
+    # Madrugada de 03/11: um kit de calcinhas parou 4 vezes seguidas em "título da IA" ("resposta sem
+    # o título"): a IA via violação (lingerie em foco) e deixava o título vazio, e o robô tentava o
+    # mesmo vídeo de novo. A violação pula o vídeo na hora, com o aviso no privado.
+    _fonte(monkeypatch)
+    chamadas = []
+
+    async def textos(arquivo, nome):
+        chamadas.append(arquivo)
+        return {"violacao": True, "motivo": "lingerie em foco", "titulo": "", "comentario": ""}
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert "a IA viu violação das diretrizes" in resultado and len(chamadas) == 1
+    assert "não devolveu o título" not in resultado
+    assert robo.listar("pulado") and any("possível violação" in aviso and "lingerie" in aviso for aviso in avisos)
+
+
+def test_ia_sem_o_json_ou_sem_o_titulo_anota_qual_dos_dois(monkeypatch, avisos):
+    # Sem erro do Google, o registro diz se a IA respondeu sem o JSON ou com o JSON sem o título.
+    from conftest import consultar
+    _fonte(monkeypatch)
+    respostas = [None, {"violacao": False, "motivo": "", "titulo": "", "comentario": ""}]
+
+    async def textos(arquivo, nome):
+        return respostas.pop(0)
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert "a IA não devolveu o título (resposta sem o título)" in resultado
+    detalhes = consultar("SELECT GROUP_CONCAT(detalhe, ' | ') FROM registro_processos WHERE processo = 'título da IA'")
+    assert detalhes == ("resposta sem o JSON | resposta sem o título",)
+
+
 def test_titulo_que_veio_com_as_regras_em_palavras_leves_fica_no_registro(monkeypatch, avisos):
     # Escolha do Rafael (P28): o assistente refaz o pedido recusado com as regras em palavras
     # leves; o checkup conta quantos títulos vieram assim.
