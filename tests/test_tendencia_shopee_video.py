@@ -136,10 +136,23 @@ def test_sem_videos_na_fonte_o_registro_diz_e_erro_nao_derruba_o_bot(monkeypatch
     assert _registro() == [("falhou", "RuntimeError", 0), ("sem vídeos na fonte", "0 vídeo(s) na fonte", None)]
 
 
-def test_bot_sobe_sem_a_anotacao_do_dia_e_agenda_uma(bm, monkeypatch):
+def test_bot_sobe_sem_a_anotacao_do_dia_e_agenda_uma(bm, monkeypatch, relogio):
+    relogio("10:00")
     bm.agendar_tendencia_atrasada()
     assert bm.scheduler.get_job("tendencia_atrasada") is not None
     bm.scheduler.remove_job("tendencia_atrasada")
     monkeypatch.setattr(bm.tendencia_shopee_video, "ja_anotou", lambda agora=None: True)
     bm.agendar_tendencia_atrasada()
     assert bm.scheduler.get_job("tendencia_atrasada") is None
+
+
+def test_bot_que_sobe_de_madrugada_espera_o_job_da_manha(bm, relogio):
+    # O deploy depois da meia-noite não anota o dia: o job das 06:41 ainda vem, e o dia ficaria
+    # com duas anotações misturadas.
+    relogio("01:23")
+    bm.agendar_tendencia_atrasada()
+    assert bm.scheduler.get_job("tendencia_atrasada") is None
+    relogio("06:45")
+    bm.agendar_tendencia_atrasada()
+    assert bm.scheduler.get_job("tendencia_atrasada") is not None
+    bm.scheduler.remove_job("tendencia_atrasada")

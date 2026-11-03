@@ -15632,7 +15632,12 @@ async def anotar_tendencia_da_fonte():
 
 
 def agendar_tendencia_atrasada():
-    """Na subida: o dia ainda sem a anotação da tendência = uma anotação daqui a 10 min."""
+    """
+    Na subida: o dia ainda sem a anotação da tendência = uma anotação daqui a 10 min. Antes da hora
+    do job da manhã, nada: ele ainda vem hoje.
+    """
+    if datetime.now(fuso_horario).time() < tendencia_shopee_video.HORA_DA_ANOTACAO:
+        return
     try:
         if tendencia_shopee_video.ja_anotou():
             return
@@ -17946,7 +17951,8 @@ async def main():
                       timezone=FUSO_STR, id='relatorio_semanal_vendas', replace_existing=True)
     # Todo dia de manhã: os sinais de tendência dos vídeos da fonte do robô (P135; e um já, se o
     # dia ainda não tem).
-    scheduler.add_job(anotar_tendencia_da_fonte, 'cron', hour=6, minute=41, timezone=FUSO_STR,
+    scheduler.add_job(anotar_tendencia_da_fonte, 'cron', hour=tendencia_shopee_video.HORA_DA_ANOTACAO.hour,
+                      minute=tendencia_shopee_video.HORA_DA_ANOTACAO.minute, timezone=FUSO_STR,
                       id='tendencia_da_fonte', replace_existing=True)
     agendar_tendencia_atrasada()
 

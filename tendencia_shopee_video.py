@@ -15,7 +15,7 @@ Escolha do Rafael (P135): DECISOES.md, Shopee Vídeo.
 """
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import aiohttp
 
@@ -36,6 +36,9 @@ DIAS_DO_ESPIAO = 3
 # Links novos seguidos numa vez (cada um é uma ida à Shopee); o resto fica para o dia seguinte.
 LINKS_POR_VEZ = 100
 DIAS_GUARDADOS = 14
+# A hora da anotação do dia (o job do bot_mestre). Na subida, o dia sem a anotação só ganha uma
+# depois dela: antes, o job da manhã ainda vem, e o dia ficaria com duas fotografias misturadas.
+HORA_DA_ANOTACAO = time(6, 41)
 PRODUTO = re.compile(r"/product/(\d+)/(\d+)")
 # O que cada link é: o produto, o vídeo da Shopee Vídeo (os produtos ficam no Ver Produtos, que
 # só o celular lê) ou outra página.
