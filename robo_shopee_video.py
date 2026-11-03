@@ -833,7 +833,7 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos")
+           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos", "trocado")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -859,7 +859,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # frase (a figurinha) não voltou no rascunho reaberto (P124); zera ao aprovar.
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "adiamentos")
+                 "adiamentos", "trocado")
 
 
 def _criar_tabela(con):
@@ -4499,6 +4499,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # vídeo, toma o lugar do produto do link (o video muda aqui: curtir, anexar e descurtir
         # usam o novo). Escolhas do Rafael (25/10, P33; 28/10, P58): DECISOES.md, Shopee Vídeo.
         troca = trocar_pela_maior_comissao(video)
+        # Se o produto foi trocado pelo de outra loja: a medição de quais posts levam punição
+        # (P146 2, apelacoes_shopee_video.punicoes_por_tipo_de_post) cruza isso com a Saúde.
+        atualizar(ident, trocado="1" if troca else "0")
         if troca:
             video["link"] = troca["link"]
             nome = ps.nome_do_produto(video) or troca["nome"]

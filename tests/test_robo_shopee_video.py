@@ -1016,6 +1016,8 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     # A IA já conferiu o produto novo com o vídeo na troca: a conferência não se repete.
     assert not any(p.startswith("Você confere um vídeo") for p in analises)
     assert json.loads(robo.pegar(rascunho["id"])["conferencia"]) == ["mesmo vestido", "mesmo vestido"]
+    # A troca fica anotada no rascunho, para a medição de quais posts levam punição (P146 2).
+    assert robo.pegar(rascunho["id"])["trocado"] == "1"
 
 
 def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None):
@@ -1065,6 +1067,8 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
                      robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS, 1)
     # Sem a capa com chamada, o rascunho fica no grupo de antes na medição (P76).
     assert not rascunho["chamada"]
+    # Sem troca de loja, o rascunho anota "0" (a medição da P146 2 separa do que não anotou).
+    assert rascunho["trocado"] == "0"
 
 
 def test_video_com_o_rotulo_de_ia_vai_a_edicao_com_ele(monkeypatch, avisos, tmp_path):
