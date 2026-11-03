@@ -2717,11 +2717,24 @@ def _marcar(d):
 def descurtir_tudo(d, agora=None):
     """
     A rotina das 4h: tira de Meus favoritos (a lista de afiliado, a do Minhas Curtidas) tudo o
-    que está curtido: Eu → Criadores & Afiliados → Meus favoritos → marcar → Like, até a lista
-    acabar. Sobrou depois de VOLTAS_DO_DESCURTIR voltas: a rodada seguinte, na mesma hora,
-    continua. O produto inválido (que saiu da loja), que o Like não tira, fica: sobrando só ele,
-    a lista acabou. Só números no registro, nunca o nome dos produtos.
-    Escolhas do Rafael (P25 e o caminho que ele ensinou): DECISOES.md, Shopee Vídeo.
+    que está curtido (_descurtir_os_de_afiliado) e, com essa lista acabada, também o que está em
+    Meus Favoritos de comprador (limpar_favoritos_de_comprador, P137 1). O que para no meio fica
+    para a rodada seguinte (_limpeza_de_novo). Escolhas do Rafael (P25, P137 e o caminho que ele
+    ensinou): DECISOES.md, Shopee Vídeo.
+    """
+    resultado, acabou = _descurtir_os_de_afiliado(d, agora)
+    if not acabou:
+        return resultado
+    return f"{resultado}; {limpar_favoritos_de_comprador(d, agora)}"
+
+
+def _descurtir_os_de_afiliado(d, agora=None):
+    """
+    Tira de Meus favoritos (a lista de afiliado, a do Minhas Curtidas) tudo o que está curtido:
+    Eu → Criadores & Afiliados → Meus favoritos → marcar → Like, até a lista acabar. Sobrou
+    depois de VOLTAS_DO_DESCURTIR voltas: a rodada seguinte, na mesma hora, continua. O produto
+    inválido (que saiu da loja), que o Like não tira, fica: sobrando só ele, a lista acabou. Só
+    números no registro, nunca o nome dos produtos. (o que dizer, se a lista acabou)
     """
     ir_ao_inicio(d)
     tocar(d, "Eu", 5)
@@ -2742,7 +2755,7 @@ def descurtir_tudo(d, agora=None):
         registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", fora, ok=True)
         gravar_estado(favoritos_limpos=True)
         ir_ao_inicio(d)
-        return "nada curtido em Meus favoritos"
+        return "nada curtido em Meus favoritos", True
     removidos, acabou, invalidos = 0, False, 0
     for _volta in range(VOLTAS_DO_DESCURTIR):
         xml = tela(d)
@@ -2788,9 +2801,142 @@ def descurtir_tudo(d, agora=None):
                                  f"{removidos} produto(s){ficam}" + (f"; {fora}" if fora else ""),
                                  ok=True if acabou else None)
     if not acabou:
-        return f"{removidos} produto(s) descurtido(s) em Meus favoritos; o resto fica para a próxima rodada"
+        return f"{removidos} produto(s) descurtido(s) em Meus favoritos; o resto fica para a próxima rodada", False
     return (f"{removidos} produto(s) descurtido(s) em Meus favoritos"
-            + (f"; {invalidos} inválido(s) ficam (o Like não tira produto que saiu da loja)" if invalidos else ""))
+            + (f"; {invalidos} inválido(s) ficam (o Like não tira produto que saiu da loja)" if invalidos else "")), True
+
+
+# Meus Favoritos de comprador (aba Eu → Meus Favoritos, a tela Visualização do Comprador): a
+# lista do coração da página do produto, que o robô curte para o Adicionar Produto e descurte no
+# fim do rascunho; o que não descurtiu ali ficava para sempre. A limpeza tira também esses (P137
+# 1): Editar (o app guarda a edição aberta: com o "Selecionado N/50" na tela, ela já está), a
+# caixa de marcar tudo da barra de baixo (até 50 de cada vez), Remover dos Favoritos e o Sim da
+# pergunta, até a lista acabar; no fim, Feito. O carrinho do alto e o de cada produto (que só
+# aparecem fora da edição) nunca são tocados. Mapa no Motorola em 02/11/2026 (o explorar):
+# roteiro. Escolha do Rafael (P137 1): DECISOES.md, Shopee Vídeo.
+FAVORITOS_DE_COMPRADOR = "Meus Favoritos"         # na aba Eu; o de afiliado fica em Criadores & Afiliados
+TITULO_DE_COMPRADOR = "Visualização do Comprador"
+EDITAR_FAVORITOS, FEITO_FAVORITOS = "Editar", "Feito"
+REMOVER_DOS_FAVORITOS = "Remover dos Favoritos"
+PROCESSO_DE_COMPRADOR = "descurtir em Meus Favoritos (comprador)"
+# A página aberta sem o Editar nem a seleção, até o fim desta espera: a lista está vazia.
+ESPERA_DA_EDICAO = 9
+
+
+def _marcar_tudo_de_comprador(xml):
+    """O centro da caixa de marcar tudo (a caixa à esquerda do "Selecionado N/M", na mesma linha); None sem ela."""
+    lista = ps.elementos(xml)
+    texto = next((el for el in lista if re.match(r"selecionado", el["texto"].strip(), re.I)), None)
+    if not texto:
+        return None
+    x1, y1, _x2, y2 = texto["caixa"]
+    meio = (y1 + y2) // 2
+    caixas = [el["caixa"] for el in lista if el.get("clicavel") and el["caixa"][1] <= meio <= el["caixa"][3]
+              and el["caixa"][2] <= x1 + 2 and el["caixa"][2] - el["caixa"][0] <= 2 * (y2 - y1) + 20]
+    if not caixas:
+        return None
+    caixa = max(caixas, key=lambda c: c[2])
+    return (caixa[0] + caixa[2]) // 2, (caixa[1] + caixa[3]) // 2
+
+
+def _edicao_de_comprador(d):
+    """
+    A tela de Meus Favoritos de comprador na edição (com o "Selecionado N/M"): toca no Editar
+    quando a edição está fechada. None quando a página não tem nem o Editar nem a seleção até o fim
+    da espera (a lista vazia).
+    """
+    voltas = max(1, ESPERA_DA_EDICAO // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        if selecionados(xml):
+            return xml
+        ponto = _ponto_exato(xml, EDITAR_FAVORITOS)
+        if ponto:
+            if not _seguro(xml, ponto):
+                raise Parada("o Editar de Meus Favoritos de comprador caiu num lugar proibido")
+            d.click(*ponto)
+            pausa(3)
+            xml = esperar_na_tela(d, "Selecionado", ESPERA_DA_EDICAO)
+            if not xml:
+                raise Parada("o Editar de Meus Favoritos de comprador não abriu a seleção")
+            return xml
+        if volta < voltas:
+            pausa(3)
+    return None
+
+
+def limpar_favoritos_de_comprador(d, agora=None):
+    """
+    Tira tudo de Meus Favoritos de comprador (o comentário acima), em VOLTAS_DO_DESCURTIR voltas,
+    e devolve o que dizer. Para (Parada) quando a tela não é a esperada; a limpeza tenta de novo
+    (_limpeza_de_novo). Só números no registro.
+    """
+    fora = "" if na_hora_do_descurtir(agora) else FORA_DA_HORA
+    ir_ao_inicio(d)
+    tocar(d, "Eu", 5)
+    xml = tela(d)
+    ponto = _ponto_exato(xml, FAVORITOS_DE_COMPRADOR)
+    if not ponto:
+        ps.rolar(d)
+        pausa(2)
+        xml = tela(d)
+        ponto = _ponto_exato(xml, FAVORITOS_DE_COMPRADOR)
+    if not ponto or not _seguro(xml, ponto):
+        raise Parada("não achei Meus Favoritos na aba Eu")
+    d.click(*ponto)
+    pausa(5)
+    if not esperar_na_tela(d, TITULO_DE_COMPRADOR, ESPERA_A_MAIS_NO_CAMINHO):
+        raise Parada("Meus Favoritos de comprador não abriu")
+    removidos, acabou = 0, False
+    for _volta in range(VOLTAS_DO_DESCURTIR):
+        xml = _edicao_de_comprador(d)
+        if xml is None:
+            acabou = True
+            break
+        marcados = _marcados(xml)
+        if not marcados:
+            ponto = _marcar_tudo_de_comprador(xml)
+            if not ponto or not _seguro(xml, ponto):
+                raise Parada("Meus Favoritos de comprador sem a caixa de marcar tudo")
+            d.click(*ponto)
+            pausa(2)
+            xml = tela(d)
+            marcados = _marcados(xml)
+        if not marcados:
+            acabou = True
+            break
+        ponto = _ponto_exato(xml, REMOVER_DOS_FAVORITOS)
+        if not ponto or not _seguro(xml, ponto):
+            raise Parada("Meus Favoritos de comprador sem o Remover dos Favoritos")
+        d.click(*ponto)
+        pausa(3)
+        _confirmar_remocao(d)
+        pausa(2)
+        # Com a pergunta ainda aberta, a tela só tem ela (sem o título da página).
+        depois = esperar_na_tela(d, TITULO_DE_COMPRADOR, ESPERA_DA_EDICAO)
+        if not depois:
+            raise Parada("depois do Remover dos Favoritos, a página de Meus Favoritos de comprador não voltou")
+        if selecionados(depois) and _marcados(depois) >= marcados:
+            raise Parada(f"toquei em Remover dos Favoritos, mas os {marcados} marcado(s) continuaram em Meus "
+                         "Favoritos de comprador")
+        removidos += marcados
+    # A edição fica fechada, como estava antes da limpeza (o app a guarda aberta).
+    xml = tela(d)
+    ponto = _ponto_exato(xml, FEITO_FAVORITOS)
+    if ponto and _seguro(xml, ponto):
+        d.click(*ponto)
+        pausa(2)
+    ir_ao_inicio(d)
+    detalhe = f"{removidos} produto(s)" + (f"; {fora}" if fora else "")
+    if not acabou:
+        registro_processos.registrar(REGISTRO, PROCESSO_DE_COMPRADOR, "continua depois", detalhe, ok=None)
+        gravar_estado(descurtir_continuar=True)
+        return f"{removidos} produto(s) tirado(s) de Meus Favoritos de comprador; o resto fica para a próxima rodada"
+    registro_processos.registrar(REGISTRO, PROCESSO_DE_COMPRADOR, "removido" if removidos else "nada curtido",
+                                 detalhe, ok=True)
+    if not removidos:
+        return "nada em Meus Favoritos de comprador"
+    return f"{removidos} produto(s) tirado(s) de Meus Favoritos de comprador"
 
 
 # --- O mesmo produto com mais comissão (P33) ---
