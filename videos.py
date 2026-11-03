@@ -158,7 +158,7 @@ SAIDA_DA_MUSICA = 1.5
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
-                             outras=(), troca=0.0, capa_do_resto=None, moldura=None):
+                             outras=(), troca=0.0, capa_do_resto=None, moldura=None, espera_da_moldura=0.0):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -176,7 +176,8 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     Com a `capa_do_resto` (o caminho de outra imagem), a `capa` fica só no 1º quadro, o que o app
     usa como capa na grade do perfil, e a `capa_do_resto` no resto da abertura (P129). Com a
     `moldura` (o caminho de uma imagem do tamanho da tela, com o fundo transparente), ela vai por
-    cima do vídeo depois da abertura, até o fim, por baixo da seta (a do cartão do produto, P128).
+    cima do vídeo `espera_da_moldura` segundos depois da abertura, até o fim, por baixo da seta (a
+    do cartão do produto, P128, que espera o cartão do app aparecer, P140 2).
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
@@ -244,14 +245,17 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     if moldura:
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-i", moldura]
-        filtro += f";[{indice}:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1[comfoto]"
+        # O t é o do corpo do vídeo: a espera conta do fim da abertura.
+        quando = f":enable='gte(t,{espera_da_moldura:.3f})'" if espera_da_moldura > 0 else ""
+        filtro += (f";[{indice}:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1{quando}"
+                   "[comfoto]")
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
             + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", destino])
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
                          centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=(),
-                         moldura=None):
+                         moldura=None, espera_da_moldura=0.0):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
@@ -261,7 +265,7 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
     ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
     igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Com a `moldura`
     (bytes de uma imagem do tamanho da tela, transparente fora dela), ela vai por cima do vídeo
-    depois da abertura; a que não abre fica de fora. Devolve "" quando
+    `espera_da_moldura` segundos depois da abertura; a que não abre fica de fora. Devolve "" quando
     deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
@@ -311,7 +315,7 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
                                            musica if total > segundos else None, total,
                                            caminhos_das_outras if troca else (), troca, caminho_do_resto,
-                                           caminho_da_moldura)
+                                           caminho_da_moldura, espera_da_moldura)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:
