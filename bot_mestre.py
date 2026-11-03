@@ -81,6 +81,7 @@ import perguntas_rafael  # as perguntas do Claude no privado, lembradas de hora 
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 import exemplos  # os exemplos das perguntas dos painéis, com o que está valendo agora
 import pedidos_do_canal  # os vídeos do robô da Shopee Vídeo que vão ao Canal Afiliados
+import tendencia_shopee_video  # a medição da P135: os sinais de tendência dos vídeos da fonte do robô
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
 logger = configurar_logs(__name__)
@@ -15621,6 +15622,27 @@ async def relatorio_semanal_de_vendas():
     await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
 
 
+async def anotar_tendencia_da_fonte():
+    """
+    Uma vez por dia, os sinais de tendência dos produtos dos vídeos mais novos da fonte do robô
+    da Shopee Vídeo, junto da comissão (só anota; a escolha do robô não muda). Escolha do
+    Rafael (P135): DECISOES.md, Shopee Vídeo.
+    """
+    await tendencia_shopee_video.anotar()
+
+
+def agendar_tendencia_atrasada():
+    """Na subida: o dia ainda sem a anotação da tendência = uma anotação daqui a 10 min."""
+    try:
+        if tendencia_shopee_video.ja_anotou():
+            return
+    except Exception as e:
+        logger.warning(f"⚠️ [Tendência] Não deu para ler a anotação do dia: {type(e).__name__}")
+        return
+    scheduler.add_job(anotar_tendencia_da_fonte, 'date', run_date=datetime.now(fuso_horario) + timedelta(minutes=10),
+                      id='tendencia_atrasada', replace_existing=True)
+
+
 @registro_processos.anotar("bot_mestre", "financeiro: varredura dos pendentes")
 async def varredura_retroativa_pendentes():
     """
@@ -17922,6 +17944,11 @@ async def main():
     # Toda segunda de manhã: as vendas da semana por canal e por produto (vendas.py).
     scheduler.add_job(relatorio_semanal_de_vendas, 'cron', day_of_week='mon', hour=9, minute=13,
                       timezone=FUSO_STR, id='relatorio_semanal_vendas', replace_existing=True)
+    # Todo dia de manhã: os sinais de tendência dos vídeos da fonte do robô (P135; e um já, se o
+    # dia ainda não tem).
+    scheduler.add_job(anotar_tendencia_da_fonte, 'cron', hour=6, minute=41, timezone=FUSO_STR,
+                      id='tendencia_da_fonte', replace_existing=True)
+    agendar_tendencia_atrasada()
 
     # Relatório diário de saúde dos canais (11:00)
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)

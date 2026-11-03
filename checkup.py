@@ -350,6 +350,7 @@ METAS = {
     ("divulgacao", "faxina do tópico do Baixador"): (144, 100),
     ("shopee_video", "resumo das 22h"): (1, 1),
     ("shopee_video", "descurtir tudo (4h)"): (1, 1),
+    ("bot_mestre", "tendência dos vídeos da fonte"): (1, 1),
 }
 # Os processos que acontecem quando há o que fazer (um pedido, uma postagem, um envio):
 # não têm uma quantidade certa por dia e entram na seção dos processos e nas seções de
