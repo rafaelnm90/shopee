@@ -362,6 +362,7 @@ METAS = {
 # processos com o escopo no fim, como "envio (grupos)"). O tests/test_checkup.py barra
 # processo novo de robô que não esteja aqui nem em METAS.
 SEM_META = {
+    ("api_shopee", "busca de ofertas negada"),
     ("autorais", "Correio Público: download"), ("autorais", "captura de parceiro"),
     ("autorais", "captura para o canal"), ("autorais", "repostagem ao grupo"), ("autorais", "checagem da conta"),
     ("baixador", "Shopee pela Apify"), ("baixador", "conferência semanal da Shopee Vídeo"),

@@ -6,7 +6,7 @@ import pytest
 import api_shopee
 import inventario
 import rotas_espelhador
-from conftest import rodar
+from conftest import consultar, rodar
 
 
 @pytest.fixture(autouse=True)
@@ -498,6 +498,19 @@ def test_recusa_da_api_registra_o_link_sem_conversao_sem_mostrar_o_link(monkeypa
     assert len(registros) == 1
     assert "sem a sua marcação" in registros[0] and "subId espiao" in registros[0]
     assert "10020 invalid signature" in registros[0] and "shopee.com.br" not in registros[0]
+
+
+def test_busca_negada_anota_so_o_codigo_da_api_e_quem_pediu(monkeypatch):
+    # O checkup só mostrava "a API negou o rastreio", sem a causa: o registro passa a guardar o
+    # código do erro da API e o programa que pediu, sem a palavra buscada nem a mensagem.
+    negada = {"errors": [{"message": "limite para a palavra garrafa", "extensions": {"code": 10030}}]}
+    _api_que_responde(monkeypatch, corpo=negada)
+    monkeypatch.setattr(api_shopee.sys, "argv", ["/home/x/shopee/bot_mestre.py"])
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == []
+    assert consultar("SELECT robo, processo, resultado, detalhe, ok FROM registro_processos") == (
+        "api_shopee", "busca de ofertas negada", "código 10.030", "bot_mestre", 0)
+    assert consultar("SELECT COUNT(*) FROM registro_processos WHERE detalhe LIKE '%garrafa%' "
+                     "OR resultado LIKE '%garrafa%'") == (0,)
 
 
 def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):
