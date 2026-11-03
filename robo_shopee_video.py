@@ -961,6 +961,12 @@ PASSOS = (
     ("✓ da capa", "capa pela figurinha"),
     ("as Fotos não abriram", "capa pela figurinha"),
     ("o recorte da foto não abriu", "capa pela figurinha"),
+    # O caminho até o Perfil em Shopee Vídeo (CAMINHO_PERFIL), o mesmo do post, do rascunho, do
+    # treino e da Saúde: antes do "Criadores & Afiliados" da limpeza dos favoritos.
+    ("a tela não mostrou Criadores & Afiliados", "navegar no app"),
+    ("a tela não mostrou Conta", "navegar no app"),
+    ("a tela não mostrou Perfil em Shopee Vídeo", "navegar no app"),
+    ("a tela não mostrou Postar vídeo", "navegar no app"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
     ("busca pela foto", "busca pela foto"),
     ("câmera da busca", "busca pela foto"),
@@ -1347,9 +1353,36 @@ def pausa(segundos):
     time.sleep(segundos + random.uniform(0.5, 2.5))
 
 
+# O painel do Android (a cortina que desce do alto da tela, com o Wi-Fi, o Bluetooth e a lanterna)
+# aberto por cima do app esconde a Shopee inteira: a leitura da tela traz só ele. Às 23:39 de
+# 02/11 ele estava aberto no Motorola na volta do celular, e o post parou sem ver o Conta embaixo.
+# O voltar fecha o painel sem mexer no app; as peças abaixo só existem com ele aberto.
+PECAS_DO_PAINEL_DO_ANDROID = ("quick_settings_panel", "qs_frame", "notification_stack_scroller",
+                              "notification_panel")
+
+
+def painel_do_android_aberto(xml):
+    """O painel do Android cobre a tela: as peças dele na leitura e nada da Shopee."""
+    texto = str(xml or "")
+    return (f'package="{ps.PACOTE}"' not in texto
+            and any(f'{ps.PACOTE_SISTEMA}:id/{peca}"' in texto for peca in PECAS_DO_PAINEL_DO_ANDROID))
+
+
+def fechar_o_painel_do_android(d):
+    """Fecha o painel do Android com o voltar e devolve a tela de baixo; fica no registro."""
+    d.press("back")
+    pausa(2)
+    xml = d.dump_hierarchy()
+    registro_processos.registrar(REGISTRO, "voltar no app", "painel do Android por cima",
+                                 "continuou aberto" if painel_do_android_aberto(xml) else "fechado com o voltar",
+                                 ok=None)
+    return xml
+
+
 def tela(d, seguir=False):
     """
-    A tela de agora; para na hora se for a Verificação. Com o aviso do Android de app que
+    A tela de agora; para na hora se for a Verificação. Com o painel do Android aberto por
+    cima do app, fecha o painel (fechar_o_painel_do_android). Com o aviso do Android de app que
     não responde ("Shopee não está respondendo", com Fechar app e Aguardar), toca em
     Aguardar e dá um tempo ao app. Ainda travado depois de VEZES_DO_AGUARDAR toques,
     fecha e reabre a Shopee (fechar_e_reabrir). O passo que esperava outra tela não
@@ -1357,6 +1390,8 @@ def tela(d, seguir=False):
     início de qualquer jeito), devolve a tela do app reaberto.
     """
     xml = d.dump_hierarchy()
+    if painel_do_android_aberto(xml):
+        xml = fechar_o_painel_do_android(d)
     for vez in range(VEZES_DO_AGUARDAR + 1):
         if ps.eh_verificacao(xml):
             raise Verificacao()
