@@ -3410,7 +3410,7 @@ def ia_da_apelacao(monkeypatch):
     async def gerar(prompt):
         pedidos.append(prompt)
         return ("O vídeo mostra o mesmo produto do anúncio: vestido infantil estampado de gatinho, igual em cor e "
-                "modelo. Peço a revisão da penalidade.")
+                "modelo.")
     import api_gemini
     monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
     return pedidos
