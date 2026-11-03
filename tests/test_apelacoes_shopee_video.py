@@ -205,3 +205,55 @@ def test_pontos_zeram_no_comeco_de_cada_trimestre():
     assert "nenhum post" in ap.rotulo_dos_pontos(12, novembro)
     assert "até <b>6 por dia</b> (fica <b>2 a 3</b>)" in ap.rotulo_dos_pontos(7, novembro, 8, 12)
     assert "até <b>2 por dia</b> (fica <b>2</b>)" in ap.rotulo_dos_pontos(9, novembro, 8, 12)
+
+
+def test_saude_mostra_quais_posts_levaram_punicao():
+    # P146 2: cada punição ligada ao post do robô é cruzada com o que o post tinha.
+    import checkup
+    import robo_shopee_video as robo
+    agora = datetime(2026, 11, 3, 15, 0, tzinfo=fuso_horario)
+
+    def post(fonte, postado_em, **campos):
+        ident = robo.criar("v", agora)
+        robo.atualizar(ident, estado="postado", fonte=fonte, postado_em=postado_em, **campos)
+        return ident
+
+    com_a_mais = post("viral", "2026-10-30 10:00:00", trocado="1",
+                      itens=[{"item": "1", "a_mais": False}, {"item": "2", "a_mais": True}])
+    post("viral", "2026-10-31 10:00:00", itens=[{"item": "3", "a_mais": False}], trocado="0", chamada="1")
+    post("autorais", "2026-10-29 10:00:00", itens=[{"item": "4", "a_mais": False}])  # antes da troca anotada
+    post("viral", "2026-11-01 10:00:00", links_dos_produtos=["x"], outra_cor=[2])     # Ver Produtos
+    rascunho_pulado = robo.criar("w", agora)
+    robo.atualizar(rascunho_pulado, estado="pulado", fonte="viral")
+    ap.guardar("Produto Irrelevante", "2026-10-31", "Em análise", rascunho=com_a_mais)
+    ap.guardar("Conteúdo repetido", "2026-11-01", "Em análise")                       # vídeo que não é do robô
+
+    medicao = ap.punicoes_por_tipo_de_post()
+    assert (medicao["posts"], medicao["punidos"], medicao["fora_do_robo"], medicao["desde"]) == (4, 1, 1, "2026-10-29")
+    contas = {c[0]: list(c[1:]) for c in medicao["caracteristicas"]}
+    assert contas["produtos a mais"] == [1, 1, 3, 0]
+    assert contas["troca de loja"] == [1, 1, 1, 0]          # o antigo e o Ver Produtos não anotaram
+    assert contas["chamada na capa"] == [1, 0, 3, 1]
+    assert contas["outra cor"] == [1, 0, 3, 1]
+    assert contas["Ver Produtos"] == [1, 0, 3, 1]
+    assert contas["rótulo de IA"] == [0, 0, 4, 1]
+    assert medicao["fontes"] == [("autorais", 1, 0), ("viral", 3, 1)]
+    assert dict(medicao["tipos"]) == {"Produto Irrelevante": 1, "Conteúdo repetido": 1}
+
+    texto = "\n".join(ap.linhas_das_punicoes_por_post(medicao))
+    assert "4 posts do robô desde 29/10; 1 punidos" in texto
+    assert "• Com produtos a mais: 1 de 1 (100%) · sem: 0 de 3 (0%)" in texto
+    assert "• Com troca de loja: 1 de 1 (100%) · sem: 0 de 1 (0%) (anotada desde 03/11)" in texto
+    assert "rótulo de IA" not in texto                       # nenhum post teve
+    assert "• Por fonte: autorais 0 de 1 (0%) · viral 1 de 3 (33%)" in texto
+    assert "Punições de vídeos que não são posts do robô: 1" in texto
+    assert "Quais posts levaram punição" in ap.texto_saude({}, {}, agora)
+
+    linha = checkup.linha_das_punicoes_por_post(medicao)
+    assert linha.startswith("Punições por tipo de post (P146 2): posts do robô 4, punidos 1")
+    assert "produtos a mais: com 1/1, sem 0/3" in linha and "fontes: autorais 0/1, viral 1/3" in linha
+
+
+def test_sem_posts_do_robo_a_medicao_nao_aparece():
+    medicao = ap.punicoes_por_tipo_de_post()
+    assert medicao["posts"] == 0 and ap.linhas_das_punicoes_por_post(medicao) == []

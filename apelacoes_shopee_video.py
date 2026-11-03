@@ -573,6 +573,115 @@ async def gerar_texto(tipo, explicacao="", titulo="", produtos=(), conferencia="
 
 # --- A tela Saúde da Shopee Vídeo ---
 
+# --- Quais posts levam punição (P146 2) ---
+# Cada punição que o robô lê na Saúde do Vídeo fica ligada ao post dele que a levou (coluna
+# rascunho, pelo rascunho_do_post do robô); aqui ela é cruzada com o que o post tinha, para o
+# Rafael decidir com números o que desligar. Só conta: nada muda no robô. Pedido do Rafael
+# (P146 2): DECISOES.md, Shopee Vídeo.
+
+def _lista(valor):
+    """A coluna em JSON do rascunho como lista (vazia quando não há)."""
+    try:
+        lido = json.loads(valor) if valor else []
+    except (TypeError, ValueError):
+        return []
+    return lido if isinstance(lido, list) else []
+
+
+CARACTERISTICAS_DO_POST = ("produtos a mais", "troca de loja", "outra foto de capa", "outra cor",
+                           "chamada na capa", "rótulo de IA", "Ver Produtos")
+
+
+def _tem(nome, r):
+    """
+    O post (rascunho postado) tem a característica? None = o rascunho não anotou (a troca de
+    loja só é anotada desde 03/11, e só nos de link de produto): fica fora da conta dessa linha.
+    """
+    if nome == "produtos a mais":
+        return any(isinstance(i, dict) and i.get("a_mais") for i in _lista(r["itens"]))
+    if nome == "troca de loja":
+        return {"1": True, "0": False}.get(r["trocado"])
+    if nome == "outra foto de capa":
+        return bool(_lista(r["outras_capas"]))
+    if nome == "outra cor":
+        return bool(_lista(r["outra_cor"]))
+    if nome == "chamada na capa":
+        return r["chamada"] == "1"
+    if nome == "rótulo de IA":
+        return bool(r["rotulo_ia"])
+    return bool(_lista(r["links_dos_produtos"]))  # Ver Produtos
+_COLUNAS_DO_POST = ("id", "postado_em", "fonte", "itens", "trocado", "outras_capas", "outra_cor", "chamada",
+                    "rotulo_ia", "links_dos_produtos")
+
+
+def punicoes_por_tipo_de_post():
+    """
+    Os posts do robô e quais levaram punição, por característica e por fonte:
+    {"posts", "punidos", "fora_do_robo", "desde", "caracteristicas": [(nome, com, com_punidos,
+    sem, sem_punidos)], "fontes": [(fonte, posts, punidos)], "tipos": [(tipo, quantas)]}.
+    fora_do_robo: as punições de vídeo que não é post do robô (ou que o robô não achou).
+    """
+    with db.conexao(linhas_por_nome=True) as con:
+        _criar_tabela(con)
+        punicoes = con.execute("SELECT tipo, rascunho FROM shopee_video_punicoes").fetchall()
+        tem_rascunhos = con.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                                    "AND name = 'shopee_video_rascunhos'").fetchone()
+        existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")} \
+            if tem_rascunhos else set()
+        colunas = [c if c in existentes else f"NULL AS {c}" for c in _COLUNAS_DO_POST]
+        posts = con.execute(f"SELECT {', '.join(colunas)} FROM shopee_video_rascunhos WHERE estado = 'postado' "
+                            "ORDER BY postado_em").fetchall() if tem_rascunhos else []
+    ids = {r["id"] for r in posts}
+    punidos = {p["rascunho"] for p in punicoes if p["rascunho"] in ids}
+    caracteristicas = []
+    for nome in CARACTERISTICAS_DO_POST:
+        contas = {True: [0, 0], False: [0, 0]}
+        for r in posts:
+            valor = _tem(nome, r)
+            if valor is None:
+                continue
+            contas[bool(valor)][0] += 1
+            contas[bool(valor)][1] += r["id"] in punidos
+        caracteristicas.append((nome, *contas[True], *contas[False]))
+    fontes = {}
+    for r in posts:
+        conta = fontes.setdefault(r["fonte"] or "?", [0, 0])
+        conta[0] += 1
+        conta[1] += r["id"] in punidos
+    tipos = {}
+    for p in punicoes:
+        tipos[p["tipo"] or "?"] = tipos.get(p["tipo"] or "?", 0) + 1
+    return {"posts": len(posts), "punidos": len(punidos),
+            "fora_do_robo": sum(1 for p in punicoes if p["rascunho"] not in ids),
+            "desde": (posts[0]["postado_em"] or "")[:10] if posts else "",
+            "caracteristicas": caracteristicas, "fontes": sorted((f, *c) for f, c in fontes.items()),
+            "tipos": sorted(tipos.items(), key=lambda par: (-par[1], par[0]))}
+
+
+def _parte(punidos, posts):
+    return f"{punidos} de {posts} ({round(punidos * 100 / posts)}%)" if posts else "nenhum post"
+
+
+def linhas_das_punicoes_por_post(medicao):
+    """As linhas da Saúde da Shopee Vídeo com a medição (só as características que algum post teve)."""
+    if not medicao["posts"]:
+        return []
+    desde = medicao["desde"]
+    linhas = ["", f"<b>Quais posts levaram punição</b> ({medicao['posts']} posts do robô desde "
+                  f"{desde[8:10]}/{desde[5:7]}; {medicao['punidos']} punidos)"]
+    for nome, com, com_punidos, sem, sem_punidos in medicao["caracteristicas"]:
+        if com:
+            nota = " (anotada desde 03/11)" if nome == "troca de loja" else ""
+            linhas.append(f"• Com {nome}: {_parte(com_punidos, com)} · sem: {_parte(sem_punidos, sem)}{nota}")
+    if medicao["fontes"]:
+        linhas.append("• Por fonte: " + " · ".join(f"{html.escape(fonte)} {_parte(punidos, posts)}"
+                                                   for fonte, posts, punidos in medicao["fontes"]))
+    if medicao["fora_do_robo"]:
+        linhas.append(f"• Punições de vídeos que não são posts do robô: {medicao['fora_do_robo']}")
+    linhas.append("<i>Só mostra os números; desligar alguma coisa continua com você.</i>")
+    return linhas
+
+
 def texto_saude(config, estado_robo=None, agora=None):
     """
     Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺: a suspensão, os pontos de penalidade
@@ -619,6 +728,7 @@ def texto_saude(config, estado_robo=None, agora=None):
         linhas.append("📲 No app: Notificações (ou Eu → Criadores &amp; Afiliados → Saúde do Vídeo) → o vídeo → "
                       "<b>Apelar aqui</b> → cole em Razão para apelar → <b>Enviar</b>. Depois toque em "
                       "<b>✅ Já recorri</b> no aviso do privado, para os lembretes pararem.")
+    linhas += linhas_das_punicoes_por_post(punicoes_por_tipo_de_post())
     linhas += ["", "<b>O que o botão faz</b>",
                "⚖️ <b>Gerar Apelação</b>: o robô olha agora a Saúde do Vídeo no Motorola e manda aqui o texto "
                "pronto de cada punição ainda não recorrida, com os botões Já recorri e Não vou recorrer. Ele "

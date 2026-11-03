@@ -945,6 +945,21 @@ def produtos_a_mais_da_shopee_video(agora=None):
             "verificacoes": sum(n for chave, n in tentativas.items() if chave.endswith(": verificação"))}
 
 
+def linha_das_punicoes_por_post(medicao):
+    """
+    Quais posts do robô levaram punição, por característica e por fonte (P146 2): só
+    contagens (punidos/posts), nunca o título, o produto ou o texto da punição.
+    """
+    partes = [f"posts do robô {medicao['posts']}, punidos {medicao['punidos']}, "
+              f"punições fora dos posts do robô {medicao['fora_do_robo']}"]
+    for nome, com, com_punidos, sem, sem_punidos in medicao["caracteristicas"]:
+        if com:
+            partes.append(f"{nome}: com {com_punidos}/{com}, sem {sem_punidos}/{sem}")
+    if medicao["fontes"]:
+        partes.append("fontes: " + ", ".join(f"{fonte} {punidos}/{posts}" for fonte, posts, punidos in medicao["fontes"]))
+    return "Punições por tipo de post (P146 2): " + " | ".join(partes)
+
+
 def _linha_dos_produtos_a_mais(medicao):
     """A linha da medição dos produtos a mais (P73) no checkup."""
     if medicao["ligados"]:
@@ -1702,6 +1717,7 @@ def main():
     print(f"Fila do Viral: vídeos que vieram do Canal Afiliados (o robô e o assistente não os pegam): "
           f"{robo_sv['do_canal_no_viral']}")
     print(_linha_dos_produtos_a_mais(produtos_a_mais_da_shopee_video(agora)))
+    print(linha_das_punicoes_por_post(apelacoes_shopee_video.punicoes_por_tipo_de_post()))
     print(_linha_da_capa_com_chamada(capa_com_chamada_da_shopee_video(agora)))
 
     interacoes = interacoes_da_shopee_video(agora)
