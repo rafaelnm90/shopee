@@ -7,7 +7,7 @@ from fuso import fuso_horario
 
 AGORA = datetime(2026, 10, 23, 20, 0, tzinfo=fuso_horario)
 TEXTO = ("O vídeo mostra o mesmo produto do anúncio: botijão térmico com torneira, que é um garrafão para bebidas, "
-         "não botijão de gás. Peço a revisão da penalidade.")
+         "não botijão de gás.")
 
 
 def _punicao(status="Não Recorrido", **campos):
@@ -94,7 +94,9 @@ def test_propriedade_intelectual_de_video_de_outro_canal_ganha_texto_sem_autoria
     pelo_titulo = ap.texto_sem_autoria(titulo="Mesa de Jantar Redonda #mesajantar #sala")
     assert "o produto Mesa de Jantar Redonda," in pelo_titulo and "#" not in pelo_titulo
     longo = ap.texto_sem_autoria(["Conjunto Mesa " + "Cadeira Madeira Maciça " * 10])
-    assert len(longo) <= ap.TAMANHO_DO_TEXTO and longo.endswith("Peço a revisão da remoção.")
+    assert len(longo) <= ap.TAMANHO_DO_TEXTO and longo.endswith("anexado ao vídeo.")
+    # Sem pedir a revisão: o recurso já é o pedido (pedido do Rafael, 03/11).
+    assert not ap.PEDIDO_DE_REVISAO.search(longo) and not ap.PEDIDO_DE_REVISAO.search(ap.texto_sem_autoria())
     assert ap.texto_sem_autoria() == ap.TEXTO_SEM_AUTORIA.format(produto="o produto do vídeo")
     assert ap.so_com_autoria_verdadeira("Violação de Propriedade Intelectual", "autorais")
 
@@ -127,3 +129,31 @@ def test_tela_saude_mostra_suspensao_e_punicoes():
     assert "Punições dos últimos 30 dias: 1" in texto and "não recorrida" in texto and "Botijão" in texto
     assert "Gerar Apelação" in texto
     assert ap.ler_explicacao("Conteúdos   publicados devem promover. Apelar aqui.") == "Conteúdos publicados devem promover."
+
+
+def test_recurso_nao_gasta_caracteres_pedindo_a_revisao(monkeypatch):
+    # Print do Rafael de 03/11, 07:05: o texto terminava com "Solicito a revisao da punicao.", e quem
+    # recorre já está pedindo a revisão; o espaço vai para os fatos, com os acentos certos.
+    import api_gemini
+    pedidos = []
+    respostas = iter(["O vídeo mostra o removedor de fiapos do anúncio. Solicito a revisao da punicao.",
+                      "O vídeo mostra o removedor de fiapos elétrico do anúncio tirando bolinhas de roupas."])
+
+    async def gerar(prompt):
+        pedidos.append(prompt)
+        return next(respostas)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
+    texto, observacao = rodar(ap.gerar_texto("Diretrizes da Comunidade", titulo="Removedor de Fiapos"))
+    # A resposta que pede a revisão vai de novo à IA.
+    assert texto == "O vídeo mostra o removedor de fiapos elétrico do anúncio tirando bolinhas de roupas."
+    assert len(pedidos) == 2 and observacao == ""
+    assert "Não peça a revisão" in pedidos[0] and "acentuação" in pedidos[0] and "termine pedindo" not in pedidos[0]
+    # As duas pedindo: sai só a frase do pedido.
+    respostas = iter(["O vídeo mostra o removedor de fiapos do anúncio. Peço a revisão da penalidade."] * 2)
+    texto, _ = rodar(ap.gerar_texto("Diretrizes da Comunidade", titulo="Removedor de Fiapos"))
+    assert texto == "O vídeo mostra o removedor de fiapos do anúncio."
+    # O texto guardado antes, com o pedido, vai para copiar sem ele; o que só pede fica como está.
+    guardado = _punicao(texto="O vídeo mostra o garrafão térmico do anúncio. Solicito a revisão da punição.")
+    assert ap.texto_para_copiar(ap.pegar(guardado)) == "O vídeo mostra o garrafão térmico do anúncio."
+    assert ap.sem_pedido_de_revisao("Peço a revisão.") == "Peço a revisão."
+    assert ap.sem_pedido_de_revisao(TEXTO) == TEXTO

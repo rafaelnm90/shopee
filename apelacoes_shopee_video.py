@@ -15,8 +15,9 @@ O caminho:
 
 O texto só diz o que é verdade: punição por propriedade intelectual de vídeo que veio de
 outro canal nunca ganha texto dizendo que o vídeo é dele; ganha o texto sem autoria
-(texto_sem_autoria: afiliado, o produto vendido na própria Shopee, o pedido de revisão), e
-o aviso diz de onde veio o vídeo.
+(texto_sem_autoria: afiliado, o produto vendido na própria Shopee), e o aviso diz de onde
+veio o vídeo. Nenhum texto pede a revisão: o recurso já é o pedido, e os 200 caracteres vão
+para os fatos (sem_pedido_de_revisao).
 """
 import html
 import json
@@ -259,11 +260,12 @@ def guardar_mensagens(ident, mensagens):
 
 def texto_para_copiar(p):
     """
-    O texto do recurso da punição: o guardado ou, na de propriedade intelectual de vídeo de
-    outro canal guardada sem texto, o texto sem autoria pelo título (P31).
+    O texto do recurso da punição: o guardado (sem a frase que pede a revisão, que os textos de
+    antes traziam) ou, na de propriedade intelectual de vídeo de outro canal guardada sem texto,
+    o texto sem autoria pelo título (P31).
     """
     if p.get("texto"):
-        return p["texto"]
+        return sem_pedido_de_revisao(p["texto"])
     if not so_com_autoria_verdadeira(p.get("tipo"), p.get("fonte")):
         return texto_sem_autoria(titulo=p.get("titulo") or "")
     return ""
@@ -327,8 +329,10 @@ O criador vai copiar e colar o texto no campo "Razão para apelar", que aceita n
 Regras:
 - No máximo {limite} caracteres, contando espaços. Uma ou duas frases, educadas e diretas.
 - Só fatos que estão abaixo. Nunca invente nada (marca, autorização, que o vídeo é original) que não esteja aqui.
-- Diga por que o vídeo cumpre a regra da punição e termine pedindo a revisão.
+- Use o espaço para os fatos que mostram que o vídeo cumpre a regra da punição: o que o vídeo mostra, o produto anexado e para que ele serve.
+- Não peça a revisão nem a reconsideração e não agradeça: o recurso já é o pedido, e cada caractere vale mais com um fato.
 - Se o nome do produto puder ser confundido com outra coisa (ex.: "botijão térmico" com botijão de gás), deixe claro o que o produto é.
+- Escreva com a acentuação e a ortografia corretas do português, também no nome do produto, que pode vir sem acento.
 - Sem hashtags, emojis, aspas ou link. Devolva só o texto.
 
 Punição: {tipo}
@@ -338,6 +342,22 @@ Produto anexado ao vídeo: {produtos}
 O que a IA viu no vídeo antes de postar: {conferencia}
 De onde veio o vídeo: {origem}
 """
+
+
+# A frase que pede a revisão (ou agradece) só gasta os 200 caracteres do campo: quem recorre já
+# está pedindo a revisão. Pedido do Rafael (03/11): DECISOES.md, Shopee Vídeo.
+PEDIDO_DE_REVISAO = re.compile(r"(revis[aã]o|revisar|revisem|reconsider|reavalia|rean[aá]lise|solicit|\bpe[çc]o\b|"
+                               r"\bpedimos\b|\baguardo\b|\bgostaria\b|agrade[çc]o|obrigad[oa])", re.IGNORECASE)
+
+
+def sem_pedido_de_revisao(texto):
+    """
+    O texto sem as frases que pedem a revisão da punição ou agradecem. Sem nenhuma frase de
+    fato, o texto volta como veio (melhor um texto que nenhum).
+    """
+    frases = [f for f in re.split(r"(?<=[.!?])\s+", " ".join(str(texto or "").split())) if f]
+    fatos = [f for f in frases if not PEDIDO_DE_REVISAO.search(f)]
+    return " ".join(fatos) if fatos else " ".join(frases)
 
 
 def _encurtar(texto, limite=TAMANHO_DO_TEXTO):
@@ -365,8 +385,7 @@ def so_com_autoria_verdadeira(tipo, fonte):
 # O recurso da punição por propriedade intelectual de vídeo que veio de outro canal: só o que
 # é verdade, sem dizer que o vídeo é do Rafael nem que é original. Escolha do Rafael (P31):
 # DECISOES.md, Shopee Vídeo.
-TEXTO_SEM_AUTORIA = ("Sou afiliado da Shopee. Este vídeo divulga {produto}, vendido na própria Shopee e anexado "
-                     "ao vídeo. Peço a revisão da remoção.")
+TEXTO_SEM_AUTORIA = "Sou afiliado da Shopee. Este vídeo divulga {produto}, vendido na própria Shopee e anexado ao vídeo."
 
 
 def texto_sem_autoria(produtos=(), titulo=""):
@@ -398,15 +417,20 @@ async def gerar_texto(tipo, explicacao="", titulo="", produtos=(), conferencia="
                                                                            if fonte else "não se sabe")
     prompt = PROMPT.format(limite=TAMANHO_DO_TEXTO, tipo=tipo, explicacao=explicacao or "—", titulo=titulo or "—",
                            produtos=", ".join(produtos) or "—", conferencia=conferencia or "—", origem=origem)
-    melhor = ""
+    # A resposta que pede a revisão vai de novo à IA; na última, sai só a frase do pedido.
+    respostas = []
     for _ in range(tentativas):
         resposta = await api_gemini.gerar_texto_gemini(prompt)
         texto = " ".join(str(resposta or "").replace('"', "").split())
-        if texto and len(texto) <= TAMANHO_DO_TEXTO:
+        if texto and len(texto) <= TAMANHO_DO_TEXTO and not PEDIDO_DE_REVISAO.search(texto):
             return texto, ""
-        melhor = melhor or texto
-    if melhor:
-        return _encurtar(melhor), ""
+        if texto:
+            respostas.append(sem_pedido_de_revisao(texto))
+    for texto in respostas:
+        if len(texto) <= TAMANHO_DO_TEXTO:
+            return texto, ""
+    if respostas:
+        return _encurtar(respostas[0]), ""
     return "", "A IA não respondeu agora: toque em Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺) para tentar de novo."
 
 
