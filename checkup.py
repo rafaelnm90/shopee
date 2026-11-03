@@ -1423,6 +1423,36 @@ def idade_da_copia_fora(agora=None):
 
 # --- Pontos de atenção ---
 
+# --- Esperando o Rafael ---
+# Os pontos cuja causa é algo que só o Rafael faz (e que já está no lembrete diário dele)
+# saem dos pontos de atenção e vão para uma linha só, para o que é novo aparecer. A causa
+# de cada um é conferida aqui, nos números do dia: resolvida, o ponto volta a contar. Pedido
+# do Rafael (P146 5): DECISOES.md, Trabalho com o Claude.
+SEM_CONTA_DE_REPOSTAGEM = "sem conta de repostagem"
+O_QUE_ESPERA_O_RAFAEL = {
+    "chips": "chips novos dos Autorais (Outros Canais → Vídeos Autorais 🎥 → Contas 👥 → Cadastrar Conta ➕)",
+}
+
+
+def _sem_conta_de_repostagem(processos):
+    """Nas últimas 24 h, a repostagem dos Autorais só falhou por não ter conta (os chips novos)."""
+    p = (processos or {}).get(("autorais", "repostagem ao grupo"))
+    return bool(p) and not p["ok"] and any(r[0] == SEM_CONTA_DE_REPOSTAGEM and not r[2] for r in p["resultados"])
+
+
+def separar_o_que_espera_o_rafael(pontos, processos):
+    """(pontos de atenção, [(ponto, o que ele precisa fazer)]) — os que esperam o Rafael à parte."""
+    esperando, ficam = [], []
+    sem_conta = _sem_conta_de_repostagem(processos)
+    for ponto in pontos:
+        if sem_conta and (ponto.startswith("autorais: repostagem ao grupo:")
+                          or re.match(r"Autorais: \d+ item\(ns\) atrasado\(s\) na fila", ponto)):
+            esperando.append((ponto, O_QUE_ESPERA_O_RAFAEL["chips"]))
+        else:
+            ficam.append(ponto)
+    return ficam, esperando
+
+
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
                       rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None, publico=None,
                       interacoes=None, metas=None, sobre=None):
@@ -1780,11 +1810,19 @@ def main():
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
                                              rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes,
                                              metas_do_dia(processos), sobre)
+    pontos, esperando = separar_o_que_espera_o_rafael(pontos, processos)
     marcas, resolvidos = lembrar_pontos(pontos, agora)
+    # O que passou a esperar o Rafael não saiu "resolvido": só mudou de lista.
+    resolvidos = [c for c in resolvidos if c not in {chave_do_ponto(p) for p, _o in esperando}]
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
         print(f"⚠️ {ponto} [{marcas[ponto]}]")
     if not pontos:
+        print("nenhum")
+    print(f"\n== Esperando o Rafael ({len(esperando)}; estão no lembrete diário dele)")
+    for ponto, o_que in esperando:
+        print(f"⏳ {ponto} → {o_que}")
+    if not esperando:
         print("nenhum")
     print(f"\n== Resolvidos desde o checkup anterior ({len(resolvidos)})")
     for chave in resolvidos:
