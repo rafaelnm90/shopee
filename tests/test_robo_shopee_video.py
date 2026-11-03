@@ -387,7 +387,8 @@ def test_conta_suspensa_as_4h_faz_a_limpeza_dos_favoritos_e_nao_le_a_saude(monke
     ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-11-01 00:00:00")
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: True)
     app = AppDosFavoritos(favoritos=3)
-    assert robo.rodada(d=app, agora=momento("2026-10-25 04:10")) == "3 produto(s) descurtido(s) em Meus favoritos"
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:10")) == (
+        "3 produto(s) descurtido(s) em Meus favoritos; nada em Meus Favoritos de comprador")
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:25")) == "nada a fazer agora"
 
 
@@ -3935,19 +3936,25 @@ class AppDosFavoritos(AppDeMentira):
     Eu → Criadores & Afiliados → Meus favoritos, como o Rafael mostrou no Motorola (25/10/2026):
     o título com quantos há (até 1000), o filtro Melhor Oferta e o aviso com Substituir Tudo no
     alto, 5 produtos por tela, cada um com a caixa de marcar; na barra de baixo, a caixa de
-    marcar tudo, o "Selecionado N/50", o Like (tira os marcados) e o Compartilhar. O Meus
-    Favoritos de comprador da aba Eu é outra lista: o robô não pode ir para lá.
+    marcar tudo, o "Selecionado N/50", o Like (tira os marcados) e o Compartilhar.
     marcar_tudo=False: a caixa de baixo não marca nada, e o robô marca um por um, rolando.
     invalidos: as posições dos produtos que saíram da loja, com o selo Inválido na foto, que o
     Like não tira e que continuam marcados depois dele (Motorola, 29/10/2026). Na linha dos
     filtros há também o filtro Inválido.
+    E o Meus Favoritos de comprador da aba Eu (Motorola, 02/11/2026, P137): a Visualização do
+    Comprador, com o Editar (o app guarda a edição aberta: editando), o carrinho no alto e em cada
+    produto fora da edição (nunca tocar), e, na edição, o Feito, a caixa de marcar tudo, o
+    "Selecionado N/50" e o Remover dos Favoritos, que pergunta (Não/Sim). comprador: quantos
+    estão lá; remover_pega=False: o Sim não tira nada.
     """
 
-    def __init__(self, favoritos=6, marcar_tudo=True, invalidos=()):
+    def __init__(self, favoritos=6, marcar_tudo=True, invalidos=(), comprador=0, editando=False, remover_pega=True):
         super().__init__()
         self.favoritos = [f"Produto {i}" for i in range(favoritos)]
         self.invalidos = {f"Produto {i}" for i in invalidos}
         self.marcados, self.marcar_tudo, self.topo = [], marcar_tudo, 0
+        self.comprador = [f"Item {i}" for i in range(comprador)]
+        self.editando, self.remover_pega, self.pergunta, self.marcados_de_comprador = editando, remover_pega, False, []
 
     def _visiveis(self):
         return self.favoritos[self.topo:self.topo + 5]
@@ -3974,13 +3981,83 @@ class AppDosFavoritos(AppDeMentira):
                     _no(f"Selecionado {len(self.marcados)}/50", caixa=(120, 2300, 380, 2350), clicavel=False),
                     _no("Like", caixa=(600, 2290, 750, 2356)), _no("Compartilhar", caixa=(800, 2290, 1010, 2356))]
             return nos
+        if self.atual == "comprador":
+            return self._nos_de_comprador()
         return super()._nos()
+
+    # O carrinho do alto e o de cada produto, fora da edição (sem texto, como no Motorola).
+    CARRINHO_DO_ALTO = (818, 137, 923, 242)
+
+    def _carrinho_do_produto(self, i):
+        y = 421 + 850 * (i // 2)
+        x = 22 + 529 * (i % 2)
+        return (x + 392, y + 724, x + 476, y + 808)
+
+    def _nos_de_comprador(self):
+        if self.pergunta:
+            # Como no Motorola: com a pergunta aberta, a leitura da tela só traz ela.
+            return [_no("Você deseja remover os itens selecionados dos Meus Favoritos?", ident="content",
+                        caixa=(123, 1136, 978, 1238), clicavel=False),
+                    _no("Não", ident="buttonDefaultNegative", caixa=(70, 1304, 538, 1430)),
+                    _no("Sim", ident="buttonDefaultPositive", caixa=(541, 1304, 1010, 1430))]
+        nos = [_no("Visualização do Comprador", caixa=(126, 158, 731, 221), clicavel=False)]
+        visiveis = self.comprador[:4]
+        if not self.editando:
+            nos += [_no(caixa=(934, 137, 1070, 242), filhos=_no("Editar", caixa=(955, 169, 1049, 211), clicavel=False)),
+                    _no(caixa=self.CARRINHO_DO_ALTO, filhos=_no("40", caixa=(882, 150, 908, 182), clicavel=False))]
+            for i, nome in enumerate(visiveis):
+                y = 421 + 850 * (i // 2)
+                x = 22 + 529 * (i % 2)
+                nos += [_no(nome, caixa=(x + 21, y + 526, x + 487, y + 600), clicavel=False),
+                        _no("Similares", caixa=(x + 206, y + 748, x + 330, y + 785), clicavel=False),
+                        _no(caixa=self._carrinho_do_produto(i))]
+            return nos
+        nos.append(_no(caixa=(951, 137, 1070, 242), filhos=_no("Feito", caixa=(972, 169, 1049, 211), clicavel=False)))
+        for i, nome in enumerate(visiveis):
+            y = 421 + 850 * (i // 2)
+            x = 22 + 529 * (i % 2)
+            nos += [_no(nome, caixa=(x + 21, y + 526, x + 487, y + 600), clicavel=False),
+                    _no(caixa=(x + 17, y + 756, x + 152, y + 808))]
+        nos += [_no(caixa=(32, 2300, 360, 2352),
+                    filhos=_no(caixa=(32, 2300, 84, 2352))
+                    + _no(f"Selecionado {len(self.marcados_de_comprador)}/50", caixa=(95, 2305, 360, 2347),
+                          clicavel=False)),
+                _no(caixa=(634, 2279, 1049, 2373),
+                    filhos=_no("Remover dos Favoritos", caixa=(666, 2306, 1018, 2348), clicavel=False))]
+        return nos
+
+    def _clique_de_comprador(self, x, y, tocados):
+        if self.pergunta:
+            if "Sim" in tocados:
+                if self.remover_pega:
+                    self.comprador = [c for c in self.comprador if c not in self.marcados_de_comprador]
+                    self.marcados_de_comprador = []
+                self.pergunta = False
+            elif "Não" in tocados:
+                self.pergunta = False
+            return
+        if not self.editando:
+            carrinhos = [self.CARRINHO_DO_ALTO] + [self._carrinho_do_produto(i) for i in range(len(self.comprador[:4]))]
+            assert not any(robo.ps._dentro((x, y), c) for c in carrinhos), "tocou no carrinho"
+            if "Editar" in tocados:
+                self.editando = True
+            return
+        if "Feito" in tocados:
+            self.editando, self.marcados_de_comprador = False, []
+        elif 32 <= x <= 84 and 2300 <= y <= 2352:
+            self.marcados_de_comprador = [] if self.marcados_de_comprador else self.comprador[:50]
+        elif "Remover dos Favoritos" in tocados and self.marcados_de_comprador:
+            self.pergunta = True
 
     def click(self, x, y):
         tocados = {el["texto"] for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])}
-        assert not tocados & {"Compartilhar", "Substituir Tudo", "Meus Favoritos"}, f"tocou em {tocados}"
+        assert not tocados & {"Compartilhar", "Substituir Tudo"}, f"tocou em {tocados}"
         if self.atual == "inicio" and "Eu" in tocados:
             self.atual = "eu"
+        elif self.atual == "eu" and "Meus Favoritos" in tocados:
+            self.atual = "comprador"
+        elif self.atual == "comprador":
+            self._clique_de_comprador(x, y, tocados)
         elif self.atual == "eu" and "Criadores & Afiliados" in tocados:
             self.atual = "afiliado"
         elif self.atual == "afiliado" and "Meus favoritos" in tocados:
@@ -4015,7 +4092,7 @@ def test_as_4h_descurte_tudo_em_meus_favoritos_pelo_caminho_de_afiliado(monkeypa
     ativar(robo_inicio=8, robo_fim=22)
     app = AppDosFavoritos(favoritos=6)
     resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
-    assert resultado == "6 produto(s) descurtido(s) em Meus favoritos"
+    assert resultado == "6 produto(s) descurtido(s) em Meus favoritos; nada em Meus Favoritos de comprador"
     assert app.favoritos == [] and "Like" in app.toques and robo.lista_limpa()
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'descurtir tudo (4h)'") == (
         "descurtido", "6 produto(s)", 1)
@@ -4030,7 +4107,8 @@ def test_lista_grande_vai_de_50_em_50_e_continua_na_rodada_seguinte(monkeypatch,
     assert "o resto fica para a próxima rodada" in robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
     assert len(app.favoritos) == 30
     assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-25 04:20")) == ("descurtir", None)
-    assert robo.rodada(d=app, agora=momento("2026-10-25 04:20")) == "30 produto(s) descurtido(s) em Meus favoritos"
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:20")) == (
+        "30 produto(s) descurtido(s) em Meus favoritos; nada em Meus Favoritos de comprador")
     assert app.favoritos == [] and robo.o_que_fazer(robo.ler_config(), momento("2026-10-25 04:35")) is None
 
 
@@ -4038,7 +4116,8 @@ def test_sem_a_caixa_de_marcar_tudo_marca_um_por_um_rolando(monkeypatch, avisos)
     # Como o Rafael fez no vídeo: marcando produto por produto, rolando a lista.
     ativar(robo_inicio=8, robo_fim=22)
     app = AppDosFavoritos(favoritos=12, marcar_tudo=False)
-    assert robo.rodada(d=app, agora=momento("2026-10-25 04:05")) == "12 produto(s) descurtido(s) em Meus favoritos"
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:05")) == (
+        "12 produto(s) descurtido(s) em Meus favoritos; nada em Meus Favoritos de comprador")
     assert app.favoritos == [] and "rolar" in app.toques
 
 
@@ -4072,7 +4151,7 @@ def test_caminho_espera_a_tela_que_demora_a_carregar(monkeypatch):
 def test_sem_nada_curtido_nao_ha_o_que_descurtir(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22)
     assert robo.rodada(d=AppDosFavoritos(favoritos=0), agora=momento("2026-10-25 04:05")) == (
-        "nada curtido em Meus favoritos")
+        "nada curtido em Meus favoritos; nada em Meus Favoritos de comprador")
     assert robo.lista_limpa()
 
 
@@ -4117,7 +4196,7 @@ def test_produto_invalido_que_o_like_nao_tira_fica_e_a_lista_acaba(monkeypatch, 
     app = AppDosFavoritos(favoritos=6, invalidos=[5])
     resultado = robo.rodada(d=app, agora=momento("2026-10-29 04:05"))
     assert resultado == ("5 produto(s) descurtido(s) em Meus favoritos; 1 inválido(s) ficam "
-                         "(o Like não tira produto que saiu da loja)")
+                         "(o Like não tira produto que saiu da loja); nada em Meus Favoritos de comprador")
     assert app.favoritos == ["Produto 5"] and robo.lista_limpa()
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'descurtir tudo (4h)'") == (
         "descurtido", "5 produto(s); 1 inválido(s) ficam", 1)
@@ -4293,6 +4372,41 @@ def test_limpeza_que_nao_terminou_as_4h_volta_no_mesmo_dia_fora_das_interacoes(m
     robo.gravar_estado(descurtir_fora={"dia": "2026-10-25", "vezes": robo.LIMPEZAS_FORA_DA_HORA})
     assert not robo.limpeza_fora_da_hora_pendente(momento("2026-10-25 11:00"))
     assert robo.limpeza_fora_da_hora_pendente(momento("2026-10-26 11:00"))
+
+
+def test_limpeza_tira_tambem_os_de_meus_favoritos_de_comprador(monkeypatch, avisos):
+    # Escolha do Rafael (02/11, P137 1): depois de Meus favoritos de afiliado, a limpeza tira
+    # também os de Meus Favoritos de comprador (aba Eu → Meus Favoritos, a Visualização do
+    # Comprador): Editar, marcar tudo, Remover dos Favoritos e o Sim da pergunta; no fim, Feito.
+    # O carrinho (no alto e em cada produto) nunca é tocado: o celular de teste barra.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=2, comprador=3)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
+    assert resultado == ("2 produto(s) descurtido(s) em Meus favoritos; 3 produto(s) tirado(s) de Meus "
+                         "Favoritos de comprador")
+    assert app.favoritos == [] and app.comprador == [] and not app.editando
+    linhas = [(l[2], l[3]) for l in robo.registro_processos.contagem("2000-01-01 00:00:00")
+              if l[1] == robo.PROCESSO_DE_COMPRADOR]
+    assert linhas == [("removido", "3 produto(s)")]
+    # O app guarda a edição aberta: com ela aberta, o robô segue sem o Editar; e mais de 50
+    # saem em voltas, 50 de cada vez.
+    robo.gravar_estado(descurtir_continuar=True)
+    app = AppDosFavoritos(favoritos=0, comprador=60, editando=True)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:20"))
+    assert resultado.endswith("; 60 produto(s) tirado(s) de Meus Favoritos de comprador")
+    assert app.comprador == [] and not app.editando
+
+
+def test_remover_dos_favoritos_de_comprador_que_nao_tira_para_e_a_limpeza_tenta_de_novo(monkeypatch, avisos):
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=0, comprador=3, remover_pega=False)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
+    assert "os 3 marcado(s) continuaram em Meus Favoritos de comprador" in resultado
+    assert len(app.comprador) == 3 and not app.pergunta
+    assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
+    # Na rodada seguinte, ainda na hora, tenta de novo (e a lista de afiliado já está limpa).
+    assert robo.o_que_fazer({**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22},
+                            momento("2026-10-25 04:20")) == ("descurtir", None)
 
 
 def test_rascunho_que_nao_sai_deixa_o_caso_completo_para_o_checkup(monkeypatch, avisos):

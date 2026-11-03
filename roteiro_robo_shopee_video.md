@@ -601,9 +601,18 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      ele continua marcado ("Selecionado 1/1", Motorola, 04:48 de 29/10/2026). Cada produto tem
      também o ícone de mais (`AN_component_OfferCard_Control_Icon_Img_more_N`), ainda não
      mapeado. Sobrando só inválidos, a rotina das 4h dá a lista por acabada.
-   - Meus Favoritos de comprador (aba **Eu** → **Meus Favoritos**, Motorola, 24/10/2026): outra
-     lista, com Editar, Todos, Status e Categoria e o Remover dos Favoritos; o app guarda a
-     edição aberta. Não é a do Minhas Curtidas: o robô não mexe nela.
+   - Meus Favoritos de comprador (aba **Eu** → **Meus Favoritos**, Motorola, 24/10 e 02/11/2026):
+     a tela **Visualização do Comprador** (React, `labelActionBarTitle`), outra lista, a do
+     coração da página do produto. No alto, o carrinho com o número (nunca tocar) e o
+     **Editar**; os filtros Todos, Status, Desconto e Categoria; cada produto com o "...", o
+     **Similares** e o carrinho (nunca tocar). No Editar, o alto mostra **Feito**, os carrinhos
+     somem, cada produto ganha uma caixa de marcar, e a barra de baixo tem a caixa de marcar tudo
+     (~58,2326), o "Selecionado N/50" e o **Remover dos Favoritos** (~842,2326), que pergunta
+     "Você deseja remover os itens selecionados dos Meus Favoritos?" (Não / **Sim**,
+     `buttonDefaultPositive`; com a pergunta aberta, a leitura da tela só traz ela). O app guarda
+     a edição aberta: o voltar sai da página, e ela abre de novo na edição. Desde a P137 (02/11),
+     a limpeza das 4h tira tudo daqui depois da lista de afiliado. Falta ver a lista vazia: o robô
+     a reconhece pela falta do Editar e da seleção.
    - Página do produto presa no esqueleto (ícone de presente e barras cinzas, ids
      `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
      de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a

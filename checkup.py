@@ -350,6 +350,7 @@ METAS = {
     ("divulgacao", "faxina do tópico do Baixador"): (144, 100),
     ("shopee_video", "resumo das 22h"): (1, 1),
     ("shopee_video", "descurtir tudo (4h)"): (1, 1),
+    ("shopee_video", "descurtir em Meus Favoritos (comprador)"): (1, 1),
     ("bot_mestre", "tendência dos vídeos da fonte"): (1, 1),
 }
 # Os processos que acontecem quando há o que fazer (um pedido, uma postagem, um envio):
@@ -1104,7 +1105,7 @@ def robo_agora(agora=None):
 
 # O que o robô da Shopee Vídeo faz no celular, pelo nome no registro e pela ação da
 # tentativa: o que fica de fora é do bot (rodada, assistente, avisos), não do celular.
-PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)",)
+PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)", "descurtir em Meus Favoritos (comprador)")
 # As respostas aos comentários dos vídeos do Rafael saem também fora do Horário das
 # Interações (às 12h e às 17h, P70); só o feed fica nele.
 PROCESSOS_DE_INTERACAO = ("feed:",)
