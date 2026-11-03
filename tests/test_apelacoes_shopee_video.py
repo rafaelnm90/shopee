@@ -126,7 +126,7 @@ def test_tela_saude_mostra_suspensao_e_punicoes():
     # A tabela oficial da Saúde da conta (03/11): o que os pontos de agora dão e o próximo degrau.
     assert ("Pontos de penalidade: <b>6</b> (cada alerta novo, 3 dias sem postar; com 9, 7 dias sem postar; "
             "zeram em 01/01") in texto
-    assert "metade da sua faixa, até <b>6 por dia</b>, só com o produto do vídeo" in texto
+    assert "um quarto da sua faixa, até <b>6 por dia</b>, só com o produto do vídeo" in texto
     texto = ap.texto_saude({**robo.PADRAO}, {"saude_pontos": 5}, AGORA)
     assert "nenhuma restrição; com 6, 3 dias sem postar" in texto and "Conta sem suspensão" in texto
     assert "Punições dos últimos 30 dias: 1" in texto and "não recorrida" in texto and "Botijão" in texto
@@ -164,15 +164,19 @@ def test_recurso_nao_gasta_caracteres_pedindo_a_revisao(monkeypatch):
 
 def test_escada_dos_posts_pelos_pontos_da_tabela_oficial():
     # Escolha do Rafael (03/11, P144 e P145): de 0 a 3 pontos, a faixa do painel; de 4 a 5, metade
-    # dela, até 8 por dia; de 6 a 8, metade, até 6; de 9 a 11, até 2; de 12 a 14, nenhum post.
+    # dela, até 8 por dia; de 6 a 8, um quarto (a metade da metade, sempre da faixa do painel e não
+    # do teto do degrau anterior), até 6; de 9 a 11, até 2; de 12 a 14, nenhum post.
     assert ap.faixa_pelos_pontos(6, 10, 0) == ap.faixa_pelos_pontos(6, 10, 3) == (6, 10, None)
     assert ap.faixa_pelos_pontos(6, 10, 4) == ap.faixa_pelos_pontos(6, 10, 5) == (3, 5, 8)
-    assert ap.faixa_pelos_pontos(6, 10, 6) == ap.faixa_pelos_pontos(6, 10, 8) == (3, 5, 6)
+    assert ap.faixa_pelos_pontos(6, 10, 6) == ap.faixa_pelos_pontos(6, 10, 8) == (2, 3, 6)
+    # Com a faixa de 20, o degrau de 4 a 5 dá 8 (o teto), e o de 6 a 8 dá 5: o quarto dos 20, não a metade dos 8.
+    assert ap.faixa_pelos_pontos(20, 20, 4) == (10, 10, 8) and ap.faixa_pelos_pontos(20, 20, 6) == (5, 5, 6)
     assert ap.faixa_pelos_pontos(1, 2, 7) == (1, 1, 6)
     assert ap.faixa_pelos_pontos(6, 10, 9) == ap.faixa_pelos_pontos(6, 10, 11) == (6, 10, 2)
     assert ap.faixa_pelos_pontos(6, 10, 12)[2] == ap.faixa_pelos_pontos(6, 10, 15)[2] == 0
     dias = [f"2026-11-{dia:02d}" for dia in range(1, 31)]
-    assert all(3 <= ap.quantos_pelos_pontos("x", dia, 6, 10, 7) <= 5 for dia in dias)
+    assert all(2 <= ap.quantos_pelos_pontos("x", dia, 6, 10, 7) <= 3 for dia in dias)
+    assert all(ap.quantos_pelos_pontos("x", dia, 20, 20, 7) == 5 for dia in dias)
     assert all(ap.quantos_pelos_pontos("x", dia, 16, 20, 4) == 8 for dia in dias)
     assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 9) == 2 for dia in dias)
     assert all(ap.quantos_pelos_pontos("x", dia, 6, 10, 12) == 0 for dia in dias)
