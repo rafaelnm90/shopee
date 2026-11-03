@@ -1,9 +1,9 @@
 """
 As setinhas em cascata dos vídeos da Shopee Vídeo (midia/setas_em_cascata.apng): três setinhas
-para baixo, uma embaixo da outra, no laranja da Shopee, com um contorno branco e uma sombra leve,
+para baixo, uma embaixo da outra, no vermelho do destaque, com um contorno branco e uma sombra leve,
 acendendo de cima para baixo, uma volta por segundo, logo acima do cartão do produto que o app
-mostra (escolhas do Rafael, 02/11: P127, o laranja com o contorno; P130, as setinhas em cascata no
-lugar da seta do arquivo dele: DECISOES.md, Shopee Vídeo). O quadro tem o tamanho do
+mostra (escolhas do Rafael: P127, 02/11, o contorno; P130, 02/11, as setinhas em cascata no lugar
+da seta do arquivo dele; P140 2, 03/11, o vermelho: DECISOES.md, Shopee Vídeo). O quadro tem o tamanho do
 TAMANHO_DA_SETA do edicao_video.py, com a margem transparente onde cabem o contorno e a sombra, e
 a ponta da setinha de baixo na altura do pé da legenda da fala. Ferramenta do Claude, fora dos
 robôs: roda só para refazer ou mudar as setinhas.
@@ -15,7 +15,7 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFilter
 
-LARANJA = (238, 77, 45)          # o LARANJA_DA_SHOPEE do edicao_video.py (o teste confere)
+COR = (214, 24, 38)              # o VERMELHO_DO_DESTAQUE do edicao_video.py (o teste confere)
 QUADRO = (202, 160)              # o TAMANHO_DA_SETA do edicao_video.py
 MARGEM = 10                      # o MARGEM_DA_SETA do edicao_video.py
 CONTORNO = 5                     # a grossura do contorno branco, em px do vídeo de 720
@@ -38,7 +38,7 @@ def contorno(alfa, grossura):
 
 
 def com_estilo(alfa):
-    """A forma (máscara L) no laranja, com o contorno branco e a sombra, em RGBA do mesmo tamanho."""
+    """A forma (máscara L) na COR, com o contorno branco e a sombra, em RGBA do mesmo tamanho."""
     saida = Image.new("RGBA", alfa.size, (0, 0, 0, 0))
     if not alfa.getbbox():
         return saida
@@ -50,9 +50,9 @@ def com_estilo(alfa):
     branca = Image.new("RGBA", alfa.size, (255, 255, 255, 255))
     branca.putalpha(borda)
     saida.alpha_composite(branca)
-    laranja = Image.new("RGBA", alfa.size, LARANJA + (255,))
-    laranja.putalpha(alfa)
-    saida.alpha_composite(laranja)
+    cor = Image.new("RGBA", alfa.size, COR + (255,))
+    cor.putalpha(alfa)
+    saida.alpha_composite(cor)
     return saida
 
 

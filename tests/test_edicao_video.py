@@ -87,17 +87,22 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
     assert "[corpo]null[semmoldura]" in filtro and "[mini]" not in filtro and f"scale={largura}:-2" not in filtro
-    # A moldura do cartão (P128) entra por último, por cima do corpo do vídeo, e sai em [comfoto].
+    # A moldura do cartão (P128) entra por último, por cima do corpo do vídeo, e sai em [comfoto]. Ela
+    # espera o cartão do app aparecer: entra ESPERA_DA_MOLDURA segundos depois do fim da abertura
+    # (vídeos do Rafael das 00:32 e 00:36 de 03/11, P140 2: a moldura vazia ficava solta).
     assert ffmpeg[[i for i, parte in enumerate(ffmpeg) if parte == "-i"][-1] + 1].endswith("moldura.png")
-    assert "[5:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1[comfoto]" in filtro
+    espera = edicao_video.ESPERA_DA_MOLDURA
+    assert 1 <= espera <= 2
+    assert ("[5:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1"
+            f":enable='gte(t,{espera:.3f})'[comfoto]") in filtro
     assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
     assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
 
 def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
-    # Escolha do Rafael (02/11, P130): três setinhas para baixo, uma embaixo da outra, no laranja da
-    # Shopee com o contorno branco e a sombra leve (P127), acendendo de cima para baixo, uma volta
-    # por segundo, num fundo transparente.
+    # Escolha do Rafael (02/11, P130): três setinhas para baixo, uma embaixo da outra, com o contorno
+    # branco e a sombra leve (P127), acendendo de cima para baixo, uma volta por segundo, num fundo
+    # transparente; no vermelho do destaque, para chamar mais a atenção (03/11, P140 2).
     from PIL import Image
     with Image.open(edicao_video.SETA) as arquivo:
         assert arquivo.format == "PNG" and arquivo.mode == "RGBA" and arquivo.size == edicao_video.TAMANHO_DA_SETA
@@ -108,18 +113,18 @@ def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
         for n in range(arquivo.n_frames):
             arquivo.seek(n)
             vistos.append(arquivo.convert("RGBA").copy())
-    laranja = edicao_video.LARANJA_DA_SHOPEE
+    cor = edicao_video.VERMELHO_DO_DESTAQUE
     largura, altura = vistos[0].size
 
     def pontas(quadro):
         """
-        Na coluna do meio, onde ficam as pontas das três setinhas: a força do laranja (a soma da
-        opacidade) de cada trecho seguido com laranja, de cima para baixo.
+        Na coluna do meio, onde ficam as pontas das três setinhas: a força do vermelho (a soma da
+        opacidade) de cada trecho seguido com vermelho, de cima para baixo.
         """
         trechos, soma = [], 0
         for y in range(altura):
             r, g, b, a = quadro.getpixel((largura // 2, y))
-            if a > 30 and sum(abs(c - d) for c, d in zip((r, g, b), laranja)) < 30:
+            if a > 30 and sum(abs(c - d) for c, d in zip((r, g, b), cor)) < 30:
                 soma += a
             elif soma:
                 trechos.append(soma)
@@ -131,7 +136,7 @@ def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
     for quadro in vistos:
         assert len(pontas(quadro)) == 3
         assert max(quadro.getpixel((x, y))[3] for x in range(largura) for y in range(altura)
-                   if sum(abs(c - d) for c, d in zip(quadro.getpixel((x, y))[:3], laranja)) < 30) > 150
+                   if sum(abs(c - d) for c, d in zip(quadro.getpixel((x, y))[:3], cor)) < 30) > 150
     # Cada uma acende na sua vez: a de cima, depois a do meio, depois a de baixo.
     for quadro, acesa in ((vistos[3], 0), (vistos[11], 1), (vistos[20], 2)):
         forcas = pontas(quadro)
@@ -147,9 +152,10 @@ def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
 
 
 def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
-    # Escolha do Rafael (02/11, P128, em teste): a moldura laranja em volta do cartão do produto que
-    # o app mostra embaixo, no lugar em que ele aparece no celular dele, abaixo da seta e da legenda
-    # da fala, acima da linha do Ver Produtos e dentro do que o app mostra do vídeo aberto.
+    # Escolha do Rafael (02/11, P128, em teste): a moldura em volta do cartão do produto que o app
+    # mostra embaixo, no lugar em que ele aparece no celular dele, abaixo da seta e da legenda da
+    # fala, acima da linha do Ver Produtos e dentro do que o app mostra do vídeo aberto; no vermelho
+    # do destaque (03/11, P140 2).
     import io
 
     from PIL import Image, ImageSequence
@@ -158,12 +164,12 @@ def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
     x1, y1, x2, y2 = edicao_video.CARTAO_DO_PRODUTO
     folga, grossura = edicao_video.FOLGA_DO_CARTAO, edicao_video.GROSSURA_DA_MOLDURA_DO_CARTAO
     meio_x, meio_y = (x1 + x2) // 2, (y1 + y2) // 2
-    laranja = edicao_video.LARANJA_DA_SHOPEE
-    # Laranja na moldura, nos quatro lados; transparente no cartão, na folga e fora dela.
+    vermelho = edicao_video.VERMELHO_DO_DESTAQUE
+    # Vermelho na moldura, nos quatro lados; transparente no cartão, na folga e fora dela.
     for ponto in ((x1 - folga - grossura // 2, meio_y), (x2 + folga + grossura // 2, meio_y),
                   (meio_x, y1 - folga - grossura // 2), (meio_x, y2 + folga + grossura // 2)):
         pixel = imagem.getpixel(ponto)
-        assert pixel[3] > 200 and sum(abs(a - b) for a, b in zip(pixel[:3], laranja)) < 30, ponto
+        assert pixel[3] > 200 and sum(abs(a - b) for a, b in zip(pixel[:3], vermelho)) < 30, ponto
     for ponto in ((meio_x, meio_y), (x1 - folga // 2, meio_y), (meio_x, y1 - folga - grossura - 3), (10, 10)):
         assert imagem.getpixel(ponto)[3] == 0, ponto
     caixa = imagem.getchannel("A").getbbox()
@@ -186,7 +192,7 @@ def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
 
 
 def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
-    # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o laranja aparece e o resto
+    # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o vermelho aparece e o resto
     # do recorte dela continua claro (sem o quadrado preto), também depois do fim do arquivo.
     if not shutil.which("ffmpeg"):
         assert edicao_video.editar(str(tmp_path / "nao_existe.mp4"), b"foto", str(tmp_path / "r.mp4")) != ""
@@ -209,14 +215,15 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
         assert tela.size == (720, 1280)
         cx, cy = edicao_video.CENTRO_DA_SETA
         recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
-        laranja = edicao_video.LARANJA_DA_SHOPEE
-        laranjas = [p for p in recorte if sum(abs(a - b) for a, b in zip(p, laranja)) < 70]
+        cor = edicao_video.VERMELHO_DO_DESTAQUE
+        vermelhos = [p for p in recorte if sum(abs(a - b) for a, b in zip(p, cor)) < 70]
         escuros = [p for p in recorte if max(p) < 90]
-        return len(laranjas) / len(recorte), escuros
+        return len(vermelhos) / len(recorte), escuros
 
     # Na foto (os 2 primeiros segundos), nada de seta; ela começa a se desenhar com o vídeo.
     assert onde_fica_a_seta(1.9) == (0, [])
-    # A moldura do cartão do produto (P128) também só entra no vídeo, depois da abertura.
+    # A moldura do cartão do produto (P128) também só entra no vídeo, e só ESPERA_DA_MOLDURA (1,5 s)
+    # depois da abertura, com o cartão do app já na tela (P140 2): aos 3 s, ainda não; aos 4 s, sim.
     def na_moldura(segundo):
         quadro = tmp_path / f"moldura_{segundo}.ppm"
         subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
@@ -226,14 +233,15 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
         x1, y1, _x2, y2 = edicao_video.CARTAO_DO_PRODUTO
         x = x1 - edicao_video.FOLGA_DO_CARTAO - edicao_video.GROSSURA_DA_MOLDURA_DO_CARTAO // 2
         return [tela.getpixel((x, y)) for y in range(y1 + 20, y2 - 20, 10)]
-    laranja = edicao_video.LARANJA_DA_SHOPEE
-    assert not [p for p in na_moldura(1.0) if sum(abs(a - b) for a, b in zip(p, laranja)) < 70]
-    assert all(sum(abs(a - b) for a, b in zip(p, laranja)) < 70 for p in na_moldura(3.5))
-    laranja, escuros = onde_fica_a_seta(2.6)
-    assert laranja > 0 and not escuros
+    cor = edicao_video.VERMELHO_DO_DESTAQUE
+    for segundo in (1.0, 3.0):
+        assert not [p for p in na_moldura(segundo) if sum(abs(a - b) for a, b in zip(p, cor)) < 70], segundo
+    assert all(sum(abs(a - b) for a, b in zip(p, cor)) < 70 for p in na_moldura(4.0))
+    vermelho, escuros = onde_fica_a_seta(2.6)
+    assert vermelho > 0 and not escuros
     # 7,5 s: depois do fim do arquivo, já na volta repetida da cascata (uma setinha acesa por inteiro).
-    laranja, escuros = onde_fica_a_seta(7.5)
-    assert laranja > 0.02 and not escuros
+    vermelho, escuros = onde_fica_a_seta(7.5)
+    assert vermelho > 0.02 and not escuros
 
 
 def test_foto_do_comeco_e_capa_dos_avisos_no_fundo_preto(tmp_path):
@@ -502,8 +510,8 @@ def test_textos_um_de_cada_vez_e_o_que_nao_cabe_sai():
 def test_chamada_para_o_produto_no_lugar_do_preco(monkeypatch):
     # Escolha do Rafael (29/10, P80): o preço ficava parado no vídeo e não batia com o do cartão
     # do app (o do Pix, mais baixo). No lugar dele, uma chamada para o produto anexado embaixo,
-    # que a IA escreve para cada vídeo, no laranja da Shopee; o preço e o desconto ficam só no
-    # cartão, sempre atualizados.
+    # que a IA escreve para cada vídeo, numa caixa vermelha (03/11, P140 2); o preço e o desconto
+    # ficam só no cartão, sempre atualizados.
     import api_gemini
     pedidos = []
 
@@ -522,10 +530,42 @@ def test_chamada_para_o_produto_no_lugar_do_preco(monkeypatch):
     from PIL import Image
     with Image.open(io.BytesIO(edicao_video.letreiro(textos["chamada"], edicao_video.FUNDO_DA_CHAMADA,
                                                      edicao_video.LUGARES_DOS_TEXTOS["alto"][2]))) as imagem:
-        # Dentro da caixa do alto, com o fundo transparente em volta e o laranja da Shopee.
+        # Dentro da caixa do alto, com o fundo transparente em volta e o vermelho do destaque.
         assert imagem.mode == "RGBA" and imagem.width <= 720 and imagem.getpixel((0, 0))[3] == 0
         vermelho, verde, _azul, opaco = imagem.getpixel((imagem.width // 2, 8))
         assert opaco > 150 and vermelho > 180 and verde < 120
+
+
+def test_chamada_vai_vermelha_e_em_caixa_alta_nas_mesmas_linhas():
+    # Vídeos do Rafael das 00:32 e 00:36 de 03/11 (P140 2): a última mensagem, a chamada para o
+    # produto, chamava pouco a atenção no laranja; vai numa caixa vermelha, com o texto em CAIXA
+    # ALTA, e cabe nas mesmas 2 linhas da caixa do alto (a letra desce um pouco mais que a dos
+    # outros textos, porque a maiúscula é mais larga).
+    import io
+
+    from PIL import Image
+    assert edicao_video.FUNDO_DA_CHAMADA[:3] == edicao_video.VERMELHO_DO_DESTAQUE
+    assert edicao_video.LARANJA_DA_SHOPEE != edicao_video.VERMELHO_DO_DESTAQUE
+    _x, _topo, largura, linhas = edicao_video.LUGARES_DOS_TEXTOS["alto"]
+    chamada = "Garanta sua garrafa na Shopee!"
+    caixa = edicao_video.letreiro_da_chamada(chamada, largura, linhas)
+    assert caixa == edicao_video.letreiro(chamada.upper(), edicao_video.FUNDO_DA_CHAMADA, largura, linhas,
+                                          edicao_video.LETRA_MENOR_DA_CHAMADA)
+    assert caixa != edicao_video.letreiro(chamada, edicao_video.FUNDO_DA_CHAMADA, largura, linhas)
+    with Image.open(io.BytesIO(caixa)) as imagem:
+        menor = edicao_video.LETRA_MENOR_DA_CHAMADA
+        # 2 linhas: a margem de 18 px em cima e embaixo e a altura de cada linha (1,25 da letra).
+        assert imagem.height <= 2 * round(edicao_video.LETRA_DOS_TEXTOS[0] * 1.25) + 36
+        assert imagem.height >= 2 * round(menor * 1.25) + 36 and imagem.width <= largura + 56
+        r, g, b, opaco = imagem.getpixel((imagem.width // 2, 8))
+        assert opaco > 150 and sum(abs(x - y) for x, y in zip((r, g, b), edicao_video.VERMELHO_DO_DESTAQUE)) < 30
+    # No vídeo, a chamada vai por ela; o nome e a vantagem continuam no fundo escuro, como escritos.
+    letreiros, textos = edicao_video._letreiros([("Copo Térmico", edicao_video.FUNDO_DOS_TEXTOS),
+                                                 ("Mantém gelado", edicao_video.FUNDO_DOS_TEXTOS),
+                                                 (chamada, edicao_video.FUNDO_DA_CHAMADA)], "alto", 30.0)
+    assert textos == ["Copo Térmico", "Mantém gelado", chamada]
+    assert letreiros[-1][0] == caixa
+    assert letreiros[0][0] == edicao_video.letreiro("Copo Térmico", edicao_video.FUNDO_DOS_TEXTOS, largura, linhas)
 
 
 def test_textos_da_ia_vem_limpos_e_curtos(monkeypatch):
@@ -585,7 +625,7 @@ def test_editor_2_de_verdade_e_o_video_original_sem_cortes_com_os_textos(tmp_pat
     meio_da_tela = (360, 700)
     assert all(abs(a - b) < 30 for a, b in zip(ponto(2.5, meio_da_tela), (0xd0, 0xc0, 0xa0)))
     assert all(abs(a - b) < 30 for a, b in zip(ponto(16.5, meio_da_tela), (0xa0, 0xc0, 0xd0)))
-    # O nome logo depois da foto (caixa escura) e a chamada na 2ª metade (caixa laranja, P80).
+    # O nome logo depois da foto (caixa escura) e a chamada na 2ª metade (caixa vermelha, P80 e P140 2).
     assert max(ponto(3.0, caixa)) < 80
     vermelho, verde, azul = ponto(11.0, caixa)
     assert vermelho > 180 and verde < 120 and azul < 100

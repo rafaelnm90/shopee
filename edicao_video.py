@@ -2,7 +2,7 @@
 """
 A edição dos vídeos da Shopee Vídeo como o Rafael faz à mão no LumaFusion: a foto do
 anúncio do produto nos primeiros segundos e, no vídeo inteiro, uma miniatura dela no canto
-de cima à direita e as setinhas laranja em cascata embaixo à esquerda (a montagem fica no
+de cima à direita e as setinhas vermelhas em cascata embaixo à esquerda (a montagem fica no
 videos.com_foto_e_miniatura, com o resto do tratamento de vídeo).
 
 Vale para os vídeos de todas as fontes do robô (FONTES_COM_EDICAO): o Rafael confirmou que
@@ -57,13 +57,13 @@ CANTO_DA_MINIATURA = (657, 150)
 CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
                        CANTO_DA_MINIATURA[1] + LARGURA_DA_MINIATURA // 2)
 # As setinhas em cascata (escolha do Rafael, 02/11, P130: no lugar da seta do arquivo dele, a do
-# LumaFusion, que ele pediu em 25/10): três setinhas para baixo, uma embaixo da outra, no laranja
-# da Shopee, com um contorno branco e uma sombra leve (P127), acendendo de cima para baixo, uma
-# volta por segundo, perto do canto de baixo à esquerda, logo acima do cartão do produto que o app
-# mostra e apontando para ele (inteiras acima do cartão, P71). Elas começam logo depois da foto e
-# vão até o fim do vídeo: o arquivo guarda uma volta, que se repete (PULSO_DA_SETA). O
-# setas_em_cascata.apng sai do .claude/scripts/gerar_seta.py, com MARGEM_DA_SETA px transparentes
-# de cada lado para o contorno e a sombra. DECISOES.md, Shopee Vídeo.
+# LumaFusion, que ele pediu em 25/10): três setinhas para baixo, uma embaixo da outra, no vermelho
+# do destaque (VERMELHO_DO_DESTAQUE, P140 2), com um contorno branco e uma sombra leve (P127),
+# acendendo de cima para baixo, uma volta por segundo, perto do canto de baixo à esquerda, logo
+# acima do cartão do produto que o app mostra e apontando para ele (inteiras acima do cartão,
+# P71). Elas começam logo depois da foto e vão até o fim do vídeo: o arquivo guarda uma volta, que
+# se repete (PULSO_DA_SETA). O setas_em_cascata.apng sai do .claude/scripts/gerar_seta.py, com
+# MARGEM_DA_SETA px transparentes de cada lado para o contorno e a sombra. DECISOES.md, Shopee Vídeo.
 SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "setas_em_cascata.apng")
 MARGEM_DA_SETA = 10
 CENTRO_DA_SETA = (142, 796)
@@ -75,14 +75,17 @@ CENTRO_DA_SETA = (142, 796)
 VISIVEL_NO_APP = (47, 673)
 FIM_DA_BARRA_DE_BUSCA = 140
 COMECO_DO_CARTAO_DO_PRODUTO = 870
-# A moldura laranja em volta do cartão do produto que o app mostra embaixo (o cartão é do app, por
-# cima do vídeo; a moldura vai no vídeo, por baixo dele), no lugar em que o cartão aparece no
-# celular do Rafael (medido no vídeo dele de 02/11, 12:36, com o nome em 2 linhas e uma linha de
-# estrelas ou de desconto), do fim da abertura até o fim do vídeo, como a seta. Em teste: o cartão
+# A moldura vermelha (VERMELHO_DO_DESTAQUE, P140 2) em volta do cartão do produto que o app mostra
+# embaixo (o cartão é do app, por cima do vídeo; a moldura vai no vídeo, por baixo dele), no lugar
+# em que o cartão aparece no celular do Rafael (medido no vídeo dele de 02/11, 12:36, com o nome em
+# 2 linhas e uma linha de estrelas ou de desconto), de ESPERA_DA_MOLDURA segundos depois do fim da
+# abertura até o fim do vídeo: o cartão do app aparece uns 0,5 s depois da abertura, e a moldura
+# vazia ficava solta antes dele (vídeos do Rafael das 00:32 e 00:36 de 03/11, P140 2). Em teste: o cartão
 # só aparece uns segundos depois do começo, pode ser fechado no X e muda de tamanho e de lugar com
 # o celular e o nome do produto; o Rafael confere em outros celulares e decide se fica (02/11,
 # P128: DECISOES.md, Shopee Vídeo). Para tirar, MOLDURA_DO_CARTAO = False.
 MOLDURA_DO_CARTAO = True
+ESPERA_DA_MOLDURA = 1.5                         # depois da abertura, com o cartão do app já na tela
 CARTAO_DO_PRODUTO = (68, 911, 550, 1096)        # x1, y1, x2, y2 no vídeo de 720x1280
 FOLGA_DO_CARTAO = 8                             # entre o cartão e a moldura
 GROSSURA_DA_MOLDURA_DO_CARTAO = 7               # a da moldura da miniatura
@@ -244,6 +247,11 @@ FOTO_DA_CAPA = (0, 280, 720, 1000)              # entre a sacolinha e o número:
 # escala do vídeo, e cai em cima da mesma foto do 1º quadro. DECISOES.md, Shopee Vídeo.
 RECORTE_DA_FIGURINHA = (100, 1180)              # de cima a baixo, em y: o miolo 720x1080
 LARANJA_DA_SHOPEE = (238, 77, 45)
+# O vermelho do destaque: a caixa da última mensagem (a chamada para o produto), as setinhas e a
+# moldura do cartão do produto, para chamar mais a atenção que o laranja, que se mistura nos vídeos
+# de tons quentes. A miniatura e a capa continuam no laranja da Shopee. Escolha do Rafael (03/11,
+# P140 2): DECISOES.md, Shopee Vídeo.
+VERMELHO_DO_DESTAQUE = (214, 24, 38)
 FAIXA_DA_CHAMADA = 104                          # a altura da faixa com uma linha
 FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da faixa, com duas linhas
 # O app, com o vídeo aberto, corta os lados do quadro (VISIVEL_NO_APP): a frase fica dentro
@@ -385,7 +393,7 @@ def _png(imagem):
 @functools.lru_cache(maxsize=1)
 def moldura_do_cartao():
     """
-    A moldura em volta do cartão do produto (PNG, bytes, 720x1280, transparente fora dela), ou
+    A moldura vermelha em volta do cartão do produto (PNG, bytes, 720x1280, transparente fora dela), ou
     None com ela desligada (MOLDURA_DO_CARTAO). Os cantos são arredondados como os do cartão,
     desenhados 4 vezes maiores e reduzidos, para a borda não ficar serrilhada.
     """
@@ -403,7 +411,7 @@ def moldura_do_cartao():
     dentro = GROSSURA_DA_MOLDURA_DO_CARTAO * vezes
     desenho.rounded_rectangle((dentro, dentro, largura - 1 - dentro, altura - 1 - dentro),
                               (RAIO_DO_CARTAO + FOLGA_DO_CARTAO) * vezes, fill=0)
-    anel = Image.new("RGBA", (caixa[2] - caixa[0], caixa[3] - caixa[1]), LARANJA_DA_SHOPEE + (255,))
+    anel = Image.new("RGBA", (caixa[2] - caixa[0], caixa[3] - caixa[1]), VERMELHO_DO_DESTAQUE + (255,))
     anel.putalpha(mascara.resize(anel.size, Image.LANCZOS))
     tela = Image.new("RGBA", TELA, (0, 0, 0, 0))
     tela.paste(anel, caixa[:2])
@@ -739,7 +747,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
         outras_fotos = [miniatura_com_moldura(outra, largura) or outra for outra in outras_fotos]
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
                                        SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica,
-                                       outras=outras_fotos, moldura=moldura_do_cartao())
+                                       outras=outras_fotos, moldura=moldura_do_cartao(),
+                                       espera_da_moldura=ESPERA_DA_MOLDURA)
 
 
 def largura_da_miniatura(miniatura):
@@ -819,7 +828,11 @@ LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
 LETRA_DOS_TEXTOS = (36, 28)         # a maior e a menor
 SEGUNDOS_DE_CADA_TEXTO = 3.0
 FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
-FUNDO_DA_CHAMADA = (238, 77, 45, 230)  # o laranja da Shopee
+FUNDO_DA_CHAMADA = VERMELHO_DO_DESTAQUE + (230,)
+# A chamada vai em CAIXA ALTA (P140 2), mais larga que em minúsculas: a letra dela pode descer até
+# esta, para caber nas mesmas linhas (a maiúscula desta letra tem a altura da minúscula da menor
+# dos outros textos).
+LETRA_MENOR_DA_CHAMADA = 24
 MAXIMO_DO_NOME = 28
 MAXIMO_DA_VANTAGEM = 36
 MAXIMO_DA_CHAMADA = 32
@@ -1093,10 +1106,11 @@ def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO, com_fala=frozen
     return trechos
 
 
-def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=2):
+def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=2, menor=None):
     """
     O texto da tela (PNG com fundo transparente, bytes): letras brancas numa caixa de cantos
-    redondos, em até linhas_maximas linhas de até largura_maxima (padrão: LARGURA_DOS_TEXTOS).
+    redondos, em até linhas_maximas linhas de até largura_maxima (padrão: LARGURA_DOS_TEXTOS), com a
+    letra de LETRA_DOS_TEXTOS, que desce até a `menor` (padrão: a menor de LETRA_DOS_TEXTOS).
     """
     import io
 
@@ -1104,7 +1118,7 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=
     from PIL import Image, ImageDraw, ImageFont
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
     rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    maior, menor = LETRA_DOS_TEXTOS
+    maior, menor = LETRA_DOS_TEXTOS[0], menor or LETRA_DOS_TEXTOS[1]
     limite = largura_maxima or LARGURA_DOS_TEXTOS
     for tamanho in range(maior, menor - 1, -2):
         fonte = ImageFont.truetype(fonte_ttf, tamanho)
@@ -1132,6 +1146,15 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=
     saida = io.BytesIO()
     imagem.save(saida, format="PNG")
     return saida.getvalue()
+
+
+def letreiro_da_chamada(texto, largura_maxima=None, linhas_maximas=2):
+    """
+    A caixa da chamada para o produto (a última mensagem): vermelha, com o texto em CAIXA ALTA e a
+    letra que desce até LETRA_MENOR_DA_CHAMADA. Escolha do Rafael (03/11, P140 2): DECISOES.md,
+    Shopee Vídeo.
+    """
+    return letreiro(texto.upper(), FUNDO_DA_CHAMADA, largura_maxima, linhas_maximas, LETRA_MENOR_DA_CHAMADA)
 
 
 # Palavra que não pode fechar o texto cortado: "amarração na" fica "amarração".
@@ -1969,7 +1992,10 @@ def _letreiros(textos, lugar, duracao):
     x_do_lugar, topo, largura_maxima, linhas_maximas = LUGARES_DOS_TEXTOS[lugar]
     letreiros, horarios = [], horarios_dos_textos(list(fundos), duracao)
     for texto, inicio, fim in horarios:
-        imagem = letreiro(texto, fundos[texto], largura_maxima, linhas_maximas)
+        if fundos[texto] == FUNDO_DA_CHAMADA:
+            imagem = letreiro_da_chamada(texto, largura_maxima, linhas_maximas)
+        else:
+            imagem = letreiro(texto, fundos[texto], largura_maxima, linhas_maximas)
         # A largura está no cabeçalho do PNG (bytes 16 a 20).
         largura = int.from_bytes(imagem[16:20], "big")
         if x_do_lugar is None:
