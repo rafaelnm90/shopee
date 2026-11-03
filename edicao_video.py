@@ -86,6 +86,12 @@ COMECO_DO_CARTAO_DO_PRODUTO = 870
 # P128: DECISOES.md, Shopee Vídeo). Para tirar, MOLDURA_DO_CARTAO = False.
 MOLDURA_DO_CARTAO = True
 ESPERA_DA_MOLDURA = 1.5                         # depois da abertura, com o cartão do app já na tela
+# Com o Rótulo de IA ligado, o app põe embaixo a linha "Identificado como conteúdo gerado por IA",
+# e o cartão do produto sobe a altura dela (medido no print do Rafael de 03/11, 07:08: o cartão 40
+# px mais alto no vídeo de 720x1280). A moldura, as setinhas e a legenda da fala sobem junto, para
+# ficarem no mesmo lugar em relação ao cartão. Pedido do Rafael (vídeo das 07:10 de 03/11):
+# DECISOES.md, Shopee Vídeo.
+SUBIDA_COM_O_ROTULO_DE_IA = 40
 CARTAO_DO_PRODUTO = (68, 911, 550, 1096)        # x1, y1, x2, y2 no vídeo de 720x1280
 FOLGA_DO_CARTAO = 8                             # entre o cartão e a moldura
 GROSSURA_DA_MOLDURA_DO_CARTAO = 7               # a da moldura da miniatura
@@ -390,17 +396,20 @@ def _png(imagem):
     return saida.getvalue()
 
 
-@functools.lru_cache(maxsize=1)
-def moldura_do_cartao():
+@functools.lru_cache(maxsize=2)
+def moldura_do_cartao(rotulo_de_ia=False):
     """
     A moldura vermelha em volta do cartão do produto (PNG, bytes, 720x1280, transparente fora dela), ou
-    None com ela desligada (MOLDURA_DO_CARTAO). Os cantos são arredondados como os do cartão,
-    desenhados 4 vezes maiores e reduzidos, para a borda não ficar serrilhada.
+    None com ela desligada (MOLDURA_DO_CARTAO). Com rotulo_de_ia=True, SUBIDA_COM_O_ROTULO_DE_IA
+    mais alta, como o cartão do app. Os cantos são arredondados como os do cartão, desenhados 4
+    vezes maiores e reduzidos, para a borda não ficar serrilhada.
     """
     if not MOLDURA_DO_CARTAO:
         return None
     from PIL import Image, ImageDraw
     x1, y1, x2, y2 = CARTAO_DO_PRODUTO
+    subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
+    y1, y2 = y1 - subida, y2 - subida
     fora = FOLGA_DO_CARTAO + GROSSURA_DA_MOLDURA_DO_CARTAO
     caixa = (x1 - fora, y1 - fora, x2 + fora, y2 + fora)
     vezes = 4
@@ -720,7 +729,8 @@ def _faixa_da_capa(capa, faixa, lados=None):
     return saida.getvalue()
 
 
-def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=()):
+def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+           rotulo_de_ia=False):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
@@ -731,6 +741,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     menor (miniatura_no_video), ela vai desse tamanho, no mesmo canto (P97). Com as outras_fotos
     (bytes de outras fotos do mesmo produto, na ordem, as que cabem: fotos_que_cabem), a
     miniatura troca entre a foto e cada uma delas, uma volta só, o mesmo tempo para cada (P103).
+    Com rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), as setinhas e a moldura do
+    cartão sobem SUBIDA_COM_O_ROTULO_DE_IA, como o cartão do app.
     """
     if avisos and foto:
         capa = capa_com_avisos(foto)
@@ -745,10 +757,11 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     if largura:
         foto = miniatura_com_moldura(foto, largura) or foto
         outras_fotos = [miniatura_com_moldura(outra, largura) or outra for outra in outras_fotos]
+    subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
-                                       SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA, capa, musica,
-                                       outras=outras_fotos, moldura=moldura_do_cartao(),
-                                       espera_da_moldura=ESPERA_DA_MOLDURA)
+                                       SETA, (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
+                                       PULSO_DA_SETA, capa, musica, outras=outras_fotos,
+                                       moldura=moldura_do_cartao(rotulo_de_ia), espera_da_moldura=ESPERA_DA_MOLDURA)
 
 
 def largura_da_miniatura(miniatura):
@@ -1924,11 +1937,12 @@ def _trechos_que_cabem(inicio, fim, texto, tempos=None):
     return [(comeco, final, imagem) for comeco, final, _texto, imagem in pedacos_da_legenda(inicio, fim, texto, tempos)]
 
 
-def letreiros_da_fala(legendas, duracao):
+def letreiros_da_fala(legendas, duracao, subida=0):
     """
     [(imagem, início, fim, x, y)]: as legendas da fala no vídeo, cada uma até a seguinte começar,
     dentro da duração do vídeo; o trecho curto demais para ler (MINIMO_NA_TELA) sai. O pé de cada uma
-    fica em PE_DA_LEGENDA, e ela vai centralizada entre ESQUERDA_DA_LEGENDA e DIREITA_DA_LEGENDA.
+    fica em PE_DA_LEGENDA (subida px mais alto: o vídeo com o Rótulo de IA, SUBIDA_COM_O_ROTULO_DE_IA),
+    e ela vai centralizada entre ESQUERDA_DA_LEGENDA e DIREITA_DA_LEGENDA.
     legendas: [(início, fim, texto)], ou com os tempos de cada palavra no áudio no 4º lugar
     (legendas_no_tempo_da_fala).
     """
@@ -1944,7 +1958,7 @@ def letreiros_da_fala(legendas, duracao):
         # A largura e a altura estão no cabeçalho do PNG (bytes 16 a 24).
         largura, altura = int.from_bytes(imagem[16:20], "big"), int.from_bytes(imagem[20:24], "big")
         x = ESQUERDA_DA_LEGENDA + (DIREITA_DA_LEGENDA - ESQUERDA_DA_LEGENDA - largura) // 2
-        letreiros.append((imagem, round(inicio, 2), round(fim, 2), x, PE_DA_LEGENDA - altura))
+        letreiros.append((imagem, round(inicio, 2), round(fim, 2), x, PE_DA_LEGENDA - subida - altura))
     return letreiros
 
 
@@ -2007,7 +2021,7 @@ def _letreiros(textos, lugar, duracao):
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-             capa=None, miniatura=True, outras_fotos=(), legendas=()):
+             capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -2016,17 +2030,18 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     DECISOES.md, Shopee Vídeo). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA;
     SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
     vídeo inteiro. As legendas da fala ([(início, fim, texto)], P118) vão embaixo, à direita da seta.
+    Com rotulo_de_ia=True, a legenda da fala, as setinhas e a moldura sobem com o cartão do app.
     Devolve (motivo, resumo {original, lugar, textos, legendas}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
-                                 musica, capa, miniatura, outras_fotos, legendas)
+                                 musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
-                          musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=()):
+                          musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False):
     """
     O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
     Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta.
@@ -2034,19 +2049,20 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
     import tempfile
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
                                     (chamada, FUNDO_DA_CHAMADA)], lugar, original)
-    da_fala = letreiros_da_fala(legendas, original) if legendas else []
+    subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
+    da_fala = letreiros_da_fala(legendas, original, subida) if legendas else []
     letreiros += da_fala
     resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura,
               "legendas": len(da_fala)}
     if not letreiros:
-        return editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos), resumo
+        return editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
         motivo = videos.com_cortes_e_ritmo(video, [(0.0, original, 1.0)], corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos), resumo
+        return editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia), resumo
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -2069,7 +2085,8 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
+def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
+                       rotulo_de_ia=False):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -2089,8 +2106,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     Com figurinha (um dict), a capa com a frase fica em figurinha["capa"] para o Selecionar Capa
     do app, e o vídeo abre com a foto no mesmo lugar, sem a frase (capa_sem_chamada); o jeito
     leva COM_A_CHAMADA_PARA_A_FIGURINHA (P110). Desde a P125 (02/11), o rascunho do robô vai sem
-    ela, como o modo assistente: a capa com a frase abre o vídeo. Escolhas do Rafael:
-    DECISOES.md, Shopee Vídeo.
+    ela, como o modo assistente: a capa com a frase abre o vídeo. Com rotulo_de_ia=True (o vídeo
+    vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a legenda da fala sobem com o
+    cartão do app (SUBIDA_COM_O_ROTULO_DE_IA). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -2142,7 +2160,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
-                                    miniatura, outras_fotos, legendas)
+                                    miniatura, outras_fotos, legendas, rotulo_de_ia)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -2166,8 +2184,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos), SO_COM_O_EDITOR_1 + avisado,
-            f"o Editor 2 não saiu: {motivo_2}")
+    return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia),
+            SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}")
 
 
 def _fontes_do_exemplo():

@@ -1018,13 +1018,17 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     assert json.loads(robo.pegar(rascunho["id"])["conferencia"]) == ["mesmo vestido", "mesmo vestido"]
 
 
-def _editar_para_postar(chamadas, respostas=None, capa=None):
+def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None):
     """
     O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado. Com a
-    capa (bytes), o vídeo abre com a capa com a frase, como na capa com chamada ligada (P125).
+    capa (bytes), o vídeo abre com a capa com a frase, como na capa com chamada ligada (P125). Com
+    rotulos (lista), guarda se o vídeo vai com o Rótulo de IA.
     """
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
+                           rotulo_de_ia=False):
         chamadas.append((video, foto, produto, avisos))
+        if rotulos is not None:
+            rotulos.append(rotulo_de_ia)
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
         if not motivo:
             with open(destino, "wb") as arquivo:
@@ -1061,6 +1065,22 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
                      robo.PROCESSO_DA_EDICAO) == (robo.edicao_video.COM_LEGENDAS, 1)
     # Sem a capa com chamada, o rascunho fica no grupo de antes na medição (P76).
     assert not rascunho["chamada"]
+
+
+def test_video_com_o_rotulo_de_ia_vai_a_edicao_com_ele(monkeypatch, avisos, tmp_path):
+    # Print e vídeo do Rafael de 03/11 (07:08 e 07:10): com o Rótulo de IA, o app põe embaixo a
+    # linha "Identificado como conteúdo gerado por IA" e o cartão do produto sobe; a edição sabe
+    # disso, para a moldura subir junto.
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
+    chamadas, rotulos = [], []
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar(chamadas, rotulos=rotulos))
+    ativar(edicao_ligada=True)
+    video = {"arquivo": os.path.abspath("v.mp4"), "link": "https://s.shopee.com.br/x"}
+    for rotulo in (True, False):
+        robo.copiar_para_o_rascunho(video, "autorais", str(tmp_path / f"c_{rotulo}.mp4"), [VESTIDO],
+                                    rotulo_de_ia=rotulo)
+    assert rotulos == [True, False]
 
 
 def test_rascunho_com_a_capa_com_chamada_abre_o_video_com_ela_sem_a_figurinha(monkeypatch, avisos):
@@ -1241,7 +1261,8 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
+                           rotulo_de_ia=False):
         fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
@@ -2865,7 +2886,8 @@ def _copia_com_a_miniatura(monkeypatch, com_miniatura=True):
     """A edição de mentira: guarda os nomes e as outras fotos e diz as fotos da miniatura que troca."""
     edicao = {}
 
-    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None):
+    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None,
+               rotulo_de_ia=False):
         edicao.update(nomes=list(nomes), outras=list(outras))
         if com_miniatura and miniatura is not None:
             miniatura["fotos"] = [b"\xff\xd8primeira"] + list(outras)
@@ -3706,8 +3728,16 @@ def test_video_feito_por_ia_vai_com_o_rotulo_ligado_e_o_rafael_ve(monkeypatch, a
         return {"violacao": False, "motivo": "", "feito_por_ia": True, "sinal_ia": "avatar com voz sintética",
                 "titulo": TITULO, "comentario": "Amei!"}
     monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    # A edição sabe que o vídeo vai com o rótulo (a moldura sobe com o cartão do app, 03/11).
+    pedidos, copiar = [], robo.copiar_para_o_rascunho
+
+    def copiar_para_o_rascunho(*args, **opcoes):
+        pedidos.append(opcoes.get("rotulo_de_ia"))
+        return copiar(*args, **opcoes)
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar_para_o_rascunho)
     app = ComRotuloDeIA()
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert pedidos == [True]
     assert app.rotulo and app.toques.index("rotulo_ia") < app.toques.index("@tv_drafts_box")
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["rotulo_ia"] == "avatar com voz sintética"
@@ -5452,7 +5482,8 @@ def test_miniatura_troca_entre_as_fotos_diferentes_dos_produtos_do_post(monkeypa
         arquivo.write(b"v")
     chamadas, duracoes = [], [30.0, 7.0, 4.0, 0.0, RuntimeError("sem ffprobe")]
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
+                           rotulo_de_ia=False):
         chamadas.append(list(outras_fotos))
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editado")
