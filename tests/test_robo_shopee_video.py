@@ -1376,6 +1376,16 @@ def test_titulo_vazio_da_ia_tenta_de_novo_e_anota_o_motivo(monkeypatch, avisos):
         "veio na nova tentativa",)
 
 
+def test_titulo_de_primeira_tambem_conta_no_registro(monkeypatch, avisos):
+    # Só as falhas e as novas tentativas iam para o registro: num dia com um vídeo que voltou
+    # vazio duas vezes, o checkup cobrou "8 falhas e 0 acertos" com os outros títulos em dia.
+    from conftest import consultar
+    _fonte(monkeypatch)
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'título da IA'") == (
+        "veio de primeira", 1)
+
+
 def test_titulo_vazio_duas_vezes_para_com_o_motivo_e_o_passo(monkeypatch, avisos):
     _fonte(monkeypatch)
     _titulo_vazio_e_depois(monkeypatch, [None, None])
