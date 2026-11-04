@@ -35,7 +35,8 @@ SERVICOS = {
 PASTAS_SEM_EFEITO = ("tests/", ".github/", ".claude/")
 # Lidos a cada uso (a seta da edição dos vídeos): o robô pega o arquivo novo sem reiniciar.
 PASTAS_LIDAS_NA_HORA = ("midia/",)
-ARQUIVOS_SEM_EFEITO = {".gitignore", "servicos_linux/instalar_servicos.sh"}
+# Os scripts que só rodam à mão ou na mudança de servidor (mudar_servidor.py).
+ARQUIVOS_SEM_EFEITO = {".gitignore", "servicos_linux/instalar_servicos.sh", "servicos_linux/instalar_servidor.sh"}
 
 
 @functools.lru_cache(maxsize=None)
