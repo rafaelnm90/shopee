@@ -2601,6 +2601,10 @@ def _textos_da_ia(video, nomes=None):
                                                  ok=True)
                 elif vez:
                     registro_processos.registrar(REGISTRO, "título da IA", "veio na nova tentativa", ok=True)
+                else:
+                    # O de primeira também conta: sem ele, o checkup via só as falhas e cobrava o
+                    # passo como se ele nunca desse certo.
+                    registro_processos.registrar(REGISTRO, "título da IA", "veio de primeira", ok=True)
                 return textos
             motivo = _motivo_da_ia(textos)
             registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
