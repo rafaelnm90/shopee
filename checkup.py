@@ -383,7 +383,7 @@ SEM_META = {
     ("shopee_video", "conferência da IA (produto × vídeo)"),
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
     ("shopee_video", "curtir o produto"), ("shopee_video", "descurtir no fim do rascunho"),
-    ("shopee_video", "feed: "),
+    ("shopee_video", "feed: "), ("shopee_video", "próprio post: "), ("shopee_video", "post antigo: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
@@ -1137,13 +1137,14 @@ def robo_agora(agora=None):
 # tentativa: o que fica de fora é do bot (rodada, assistente, avisos), não do celular.
 PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)", "descurtir em Meus Favoritos (comprador)")
 # As respostas aos comentários dos vídeos do Rafael saem também fora do Horário das
-# Interações (às 12h e às 17h, P70); só o feed fica nele.
-PROCESSOS_DE_INTERACAO = ("feed:",)
+# Interações (às 12h e às 17h, P70); o feed e o comentário do post antigo ficam nele. O
+# comentário de depois do post vai com o post (P148 2).
+PROCESSOS_DE_INTERACAO = ("feed:", "post antigo:")
 PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário")
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
-                        "preparo interrompido")
-ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed",), ("rascunho", "postar")
+                        "preparo interrompido", "próprio post:")
+ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed", "post_antigo"), ("rascunho", "postar", "comentar_post")
 # Apagar um rascunho recusado pode rodar no Horário das Interações e no de postar (P22 a
 # P24): não é preparo, mas conta na hora do descurtir. Decisão do Rafael: DECISOES.md,
 # Shopee Vídeo.
@@ -1303,6 +1304,8 @@ def rotinas_coladas(agora=None):
 
 # O mesmo de interacoes_shopee_video (o tests/test_checkup.py confere): 3 por dia (P10).
 COMENTARIOS_NO_FEED_POR_DIA = 3
+# Também de lá: o comentário do dia num post antigo (P148 2).
+POSTS_ANTIGOS_POR_DIA = 1
 # Os mesmos do robo_shopee_video (o tests/test_checkup.py confere): as respostas saem às 12h,
 # às 17h e no começo do Horário das Interações, às 20h sem ele (P70), e o robô roda no
 # Horário do Robô (o padrão) e no das Interações.
@@ -1398,7 +1401,33 @@ def interacoes_da_shopee_video(agora=None):
             "shopee_video", "curtir comentário", desde))),
         "lives": len(registro_processos.sequencia("shopee_video", "feed: vídeo olhado", desde, resultado="live pulada")),
         "seguidores": seguidores_da_shopee_video(agora),
+        # O comentário no próprio vídeo (P148 2): o de depois do post (24 h), as curtidas e o do post antigo.
+        "proprio": dict(Counter(resultado for _m, _p, resultado, _d, _o in registro_processos.sequencia(
+            "shopee_video", "próprio post: comentar", desde))),
+        "proprio_curtidas": dict(Counter(
+            f"{passo.split(': ', 1)[1]} → {resultado}" for prefixo in ("próprio post: curtir", "post antigo: curtir")
+            for _m, passo, resultado, _d, _o in registro_processos.sequencia("shopee_video", prefixo, desde))),
+        "antigos_hoje": sum(1 for _m, _p, resultado, _d, _o in registro_processos.sequencia(
+            "shopee_video", "post antigo: comentar", hoje) if resultado in ("comentado", "não confirmado")),
+        "antigos_parados": sum(1 for _m, _p, resultado, _d, _o in registro_processos.sequencia(
+            "shopee_video", "post antigo: comentar", hoje) if resultado == "parou"),
+        "antigo_possivel": post_antigo_para_hoje(agora),
     }
+
+
+def post_antigo_para_hoje(agora=None):
+    """
+    Algum post do robô ainda pode ganhar o comentário de post antigo hoje (P148 2), pela mesma
+    escolha do robô? Sem conseguir ler, False: o checkup não cobra.
+    """
+    try:
+        import interacoes_shopee_video
+        with db.conexao(linhas_por_nome=True) as conexao:
+            postados = [dict(linha) for linha in conexao.execute(
+                "SELECT link_post, postado_em FROM shopee_video_rascunhos WHERE estado = 'postado'")]
+        return interacoes_shopee_video.escolher_post_antigo(postados, _agora(agora)) is not None
+    except Exception:
+        return False
 
 
 # --- Baixador e backup ---
@@ -1537,6 +1566,12 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
         if interacoes["feed_repetidos"]:
             pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_repetidos']} vídeo(s) comentado(s) mais de uma "
                           "vez em 3 dias")
+        if interacoes.get("proprio", {}).get("desistiu"):
+            pontos.append(f"Comentário no próprio vídeo: {interacoes['proprio']['desistiu']} post(s) sem o comentário "
+                          "depois de 3 tentativas")
+        if interacoes.get("antigos_hoje", 0) > POSTS_ANTIGOS_POR_DIA:
+            pontos.append(f"Comentário no próprio vídeo: {interacoes['antigos_hoje']} posts antigos comentados hoje (o "
+                          f"combinado é {POSTS_ANTIGOS_POR_DIA})")
         # A meta do dia: com o robô no ar, as respostas rodam uma vez e o feed tem 3 comentários.
         if robo_sv["ativo"] and not robo_sv.get("suspenso") and agora.hour >= HORA_PARA_COBRAR:
             if not interacoes["rodou_hoje"]:
@@ -1550,6 +1585,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             if interacoes["feed_hoje"] < COMENTARIOS_NO_FEED_POR_DIA:
                 pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} "
                               "comentários hoje")
+            if interacoes.get("antigos_hoje", 0) < POSTS_ANTIGOS_POR_DIA and interacoes.get("antigo_possivel"):
+                pontos.append(f"Comentário no próprio vídeo: {interacoes['antigos_hoje']} de {POSTS_ANTIGOS_POR_DIA} "
+                              "post antigo comentado hoje")
     if sobre:
         if sobre["no_descurtir"]:
             pontos.append(f"Sobreposição: {len(sobre['no_descurtir'])} atividade(s) do robô da Shopee Vídeo na hora "
@@ -1777,6 +1815,11 @@ def main():
     print(f"Feed: comentados hoje {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA}{horas} | mesmo vídeo "
           f"mais de uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
           f"lives puladas (24 h): {interacoes['lives']}")
+    proprio = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["proprio"].items()))
+    curtidas_do_proprio = " | ".join(f"{passo}: {qtd}" for passo, qtd in sorted(interacoes["proprio_curtidas"].items()))
+    print(f"Comentário no próprio vídeo (P148 2): depois do post (24 h): {proprio or 'nenhum'} | posts antigos "
+          f"hoje: {interacoes['antigos_hoje']} de {POSTS_ANTIGOS_POR_DIA} (paradas: {interacoes['antigos_parados']}) | "
+          f"curtidas (24 h): {curtidas_do_proprio or 'nenhuma'}")
     seguidores = interacoes["seguidores"]
     print(f"Seguidores (Shopee Vídeo): lidos hoje: {'sim' if seguidores['lido_hoje'] else 'não'} | em 1 dia: "
           f"{_variacao(seguidores['dia'])} | em 7 dias: {_variacao(seguidores['semana'])}")
