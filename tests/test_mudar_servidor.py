@@ -43,6 +43,7 @@ def _o_novo(ativos=ATIVOS, preparado=True):
     return ServidorDeMentira("novo", [
         (r"test -x ~/shopee/venv/bin/python3", (0 if preparado else 1, "")),
         (r"systemctl is-active --quiet", (3, "")),          # nenhum robô ligado antes da mudança
+        (r"^crontab -l", (1, "")),                           # nem tarefa no crontab
         (r"^systemctl is-active bot_mestre_bot ;", (0, ativos)),
     ])
 
@@ -74,9 +75,15 @@ def test_mudanca_para_o_de_agora_antes_de_ligar_o_novo(transferencias):
     assert "mv ~/shopee ~/shopee.antes_da_mudanca" in agora.comandos
     assert not any("enable" in c for c in agora.comandos)
     assert _posicao(novo, "backup_dados.py restaurar") < _posicao(novo, "enable --quiet --now")
-    # O que passa de um para o outro: o pacote, a mesma senha da cópia e os vídeos dos rascunhos.
+    # O crontab do de agora sai de cena junto com os robôs, antes do backup.
+    guardar = "crontab -l > ~/crontab.antes_da_mudanca && crontab -r"
+    assert _posicao(agora, "systemctl disable") < agora.comandos.index(guardar) < _posicao(agora, "backup_dados.py")
+    # O que passa de um para o outro: o pacote, a mesma senha da cópia, os vídeos dos rascunhos
+    # e as tarefas do crontab.
     assert [t[1] for t in transferencias] == ["cat /home/ubuntu/backups/shopee_backup_2026-11-04_0100.tar.gz",
-                                              "cat ~/.config/backup_fora.chave", "tar czf - -C ~ shopee_video"]
+                                              "cat ~/.config/backup_fora.chave", "tar czf - -C ~ shopee_video",
+                                              "cat ~/crontab.antes_da_mudanca"]
+    assert transferencias[-1][3] == "crontab -"
     assert all(de == "de agora" and para == "novo" for de, _c, para, _d in transferencias)
 
 
@@ -93,6 +100,26 @@ def test_novo_que_nao_sobe_devolve_os_robos_ao_de_agora(transferencias):
     assert "mv ~/shopee.antes_da_mudanca ~/shopee" in agora.comandos
     assert any(c.startswith("sudo -n systemctl enable --quiet --now bot_mestre_bot") for c in agora.comandos)
     assert _posicao(novo, "disable --quiet --now") >= 0
+    # O crontab copiado sai do novo, e o do de agora volta ao lugar.
+    assert "crontab -r 2>/dev/null || true" in novo.comandos
+    assert "crontab ~/crontab.antes_da_mudanca && rm -f ~/crontab.antes_da_mudanca" in agora.comandos
+
+
+def test_novo_com_crontab_proprio_nada_para_no_de_agora(transferencias):
+    # O voltar apaga o crontab do novo: com tarefas que não são a cópia, a mudança nem começa.
+    agora, novo = _o_de_agora(), _o_novo()
+    novo.regras.insert(0, (r"^crontab -l", (0, "")))
+    with pytest.raises(ms.Falha, match="crontab"):
+        ms.mudar(agora, novo, esperar=lambda s: None)
+    assert agora.comandos == [] and transferencias == []
+
+
+def test_sem_crontab_no_de_agora_nada_de_crontab_vai(transferencias):
+    agora, novo = _o_de_agora(), _o_novo()
+    agora.regras[:0] = [(r"^crontab -l", (1, "")), (r"test -f ~/crontab.antes_da_mudanca", (1, ""))]
+    ms.mudar(agora, novo, esperar=lambda s: None)
+    assert not any("crontab -r" in c for c in agora.comandos)
+    assert "cat ~/crontab.antes_da_mudanca" not in [t[1] for t in transferencias]
 
 
 def test_sem_o_novo_preparado_nada_para_no_de_agora(transferencias):

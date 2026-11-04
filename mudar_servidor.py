@@ -39,6 +39,9 @@ PACOTE_NO_NOVO = "~/backups/da_mudanca.tar.gz"
 PACOTES = ("python3", "python3-venv", "python3-pip", "git", "ffmpeg", "adb", "sqlite3", "curl")
 INSTALADOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "servicos_linux", "instalar_servidor.sh")
 ESPERA_DA_RODADA = 15 * 60
+# As tarefas do crontab do usuário (postas à mão; o código não põe nenhuma) vão junto. No de
+# agora, ficam guardadas de lado desde que os robôs param, para nada rodar nos dois servidores.
+CRONTAB_GUARDADO = "~/crontab.antes_da_mudanca"
 ESPERA_DOS_ROBOS = 40
 
 
@@ -156,7 +159,8 @@ def _como_esta(servidor, com_dados):
                               ("senha da cópia do backup", "~/.config/backup_fora.chave")):
             linhas.append(f"{nome}: " + ("sim" if servidor.ok(f"test -f {caminho}") else "não"))
         _, tarefas = servidor.rodar("crontab -l 2>/dev/null | grep -cv '^#' || true")
-        linhas.append(f"tarefas no crontab: {tarefas or 0}")
+        linhas.append(f"tarefas no crontab: {tarefas or 0} (vão junto na mudança)"
+                      + (" | guardadas de lado: sim" if servidor.ok(f"test -f {CRONTAB_GUARDADO}") else ""))
     return linhas
 
 
@@ -196,6 +200,9 @@ def mudar(agora, novo, esperar=time.sleep):
         raise Falha("o servidor novo ainda não foi preparado (rode o preparar antes)")
     if any(novo.ok(f"systemctl is-active --quiet {s}") for s in SERVICOS):
         raise Falha("o servidor novo já está com robôs ligados")
+    if novo.ok("crontab -l >/dev/null 2>&1"):
+        # O voltar apaga o crontab do novo: ele tem de ser só a cópia do de agora.
+        raise Falha("o servidor novo já tem tarefas no crontab")
     if not agora.ok(f"test -d {PASTA}"):
         raise Falha("o servidor de agora não tem a pasta do projeto (a mudança já foi feita?)")
     linhas = ["== Mudança"]
@@ -232,6 +239,10 @@ def _parar_o_de_agora(agora, esperar, linhas):
     if not agora.ok(f"sudo -n systemctl stop {_servicos()} && sudo -n systemctl disable --quiet {_servicos()}"):
         raise Falha("os robôs do servidor de agora não pararam")
     linhas.append("servidor de agora: robôs parados e fora do início automático")
+    if agora.ok("crontab -l >/dev/null 2>&1"):
+        if not agora.ok(f"crontab -l > {CRONTAB_GUARDADO} && crontab -r"):
+            raise Falha("as tarefas do crontab do servidor de agora não foram guardadas de lado")
+        linhas.append("servidor de agora: tarefas do crontab guardadas de lado")
 
 
 def _levar_os_dados(agora, novo, linhas):
@@ -253,6 +264,10 @@ def _levar_os_dados(agora, novo, linhas):
         if not transferir(agora, "tar czf - -C ~ shopee_video", novo, "tar xzf - -C ~"):
             raise Falha("os vídeos dos rascunhos não chegaram ao servidor novo")
         linhas.append("vídeos e prints dos rascunhos: levados")
+    if agora.ok(f"test -f {CRONTAB_GUARDADO}"):
+        if not transferir(agora, f"cat {CRONTAB_GUARDADO}", novo, "crontab -"):
+            raise Falha("as tarefas do crontab não chegaram ao servidor novo")
+        linhas.append("tarefas do crontab: levadas")
     if not novo.ok(f"cd {PASTA} && git pull -q --ff-only && venv/bin/pip install -q --no-cache-dir -r requirements.txt "
                    f"&& venv/bin/python3 backup_dados.py restaurar {PACOTE_NO_NOVO} {PASTA}", tempo=1800):
         raise Falha("os dados não foram abertos no servidor novo")
@@ -274,8 +289,14 @@ def _devolver(agora, novo, esperar):
     """Desliga o novo e religa o de agora, com a pasta de volta ao lugar."""
     linhas = []
     novo.rodar(f"sudo -n systemctl disable --quiet --now {_servicos()}")
+    novo.rodar("crontab -r 2>/dev/null || true")              # o do novo é só a cópia do de agora
     if agora.ok(f"test -d {PASTA_ANTIGA} && ! test -e {PASTA}"):
         agora.rodar(f"mv {PASTA_ANTIGA} {PASTA}")
+    if agora.ok(f"test -f {CRONTAB_GUARDADO}"):
+        if agora.ok(f"crontab {CRONTAB_GUARDADO} && rm -f {CRONTAB_GUARDADO}"):
+            linhas.append("servidor de agora: tarefas do crontab de volta")
+        else:
+            linhas.append("❌ as tarefas do crontab do servidor de agora não voltaram")
     try:
         _ligar(agora, esperar, linhas)
     except Falha as e:

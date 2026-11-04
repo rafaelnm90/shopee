@@ -2,7 +2,8 @@
 
 O passo a passo para levar os robôs do servidor de agora para um servidor novo, do jeito
 que estão rodando: os dados, as filas, os logins das contas do Telegram, as chaves, o
-pareamento do celular do robô e os vídeos e prints dos rascunhos que esperam a aprovação.
+pareamento do celular do robô, os vídeos e prints dos rascunhos que esperam a aprovação e as
+tarefas do crontab do servidor.
 Pedido do Rafael (P147 1); o que cada parte faz está no `mudar_servidor.py`.
 
 ## Antes da mudança (só o Rafael faz)
@@ -33,7 +34,8 @@ Pedido do Rafael (P147 1); o que cada parte faz está no `mudar_servidor.py`.
    - A rodada do robô da Shopee Vídeo que estiver tocando no celular termina antes.
    - Os dois servidores nunca ficam ligados juntos: o mesmo bot em dois lugares atrapalha.
    - No servidor antigo, a pasta do projeto fica guardada de lado (`~/shopee.antes_da_mudanca`),
-     para nenhum deploy ou workflow religar os robôs lá.
+     para nenhum deploy ou workflow religar os robôs lá. As tarefas do crontab também
+     (`~/crontab.antes_da_mudanca`): passam a rodar só no novo.
 
 ## Logo depois da mudança (só o Rafael faz)
 
