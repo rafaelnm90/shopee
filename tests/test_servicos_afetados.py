@@ -7,6 +7,9 @@ TODOS = sorted(sa.SERVICOS)
 def test_so_documentacao_testes_e_workflows_nao_reinicia_ninguem():
     assert sa.servicos_afetados(["CLAUDE.md", "DECISOES.md", "tests/test_db.py", ".github/workflows/deploy.yml",
                                  ".claude/scripts/ver_video.sh", "inventario.py", "validar_deploy.py"]) == []
+    # O kit de mudança de servidor (P147 1) roda no GitHub ou no servidor novo, nunca nos robôs.
+    assert sa.servicos_afetados(["mudar_servidor.py", "servicos_linux/instalar_servidor.sh",
+                                 "MUDAR_DE_SERVIDOR.md", ".github/workflows/mudar_servidor.yml"]) == []
 
 
 def test_midia_lida_a_cada_uso_nao_reinicia_ninguem():
