@@ -1,6 +1,8 @@
 """
 Backup diário do que o git não guarda: o banco_dados.db, as sessões do Telethon
-(*.session), as configurações em JSON da pasta do projeto e o .env.
+(*.session), as configurações em JSON da pasta do projeto, o .env e, de fora da pasta, as
+chaves que não se baixam de novo (FORA_DO_PROJETO: a das cópias cifradas e a do adb que o
+celular do robô reconhece).
 
 O bot_mestre roda todo dia às 03:40 e avisa no privado se falhar. À mão:
 python3 backup_dados.py.
@@ -52,6 +54,16 @@ MANTER = 7
 PREFIXO = "shopee_backup_"
 MONTAGEM = ".montando_"
 
+# Arquivos fora da pasta do projeto que os robôs usam e que não se baixam de novo: a chave das
+# cópias cifradas (registro dos administradores, casos do robô, perguntas ao Rafael) e a chave
+# do adb que o celular do robô já reconhece (com ela, o servidor novo não pede o pareamento de
+# novo). Vão no pacote em PASTA_FORA, com o caminho a partir da casa do usuário. A senha da
+# cópia fora do servidor não vai: ela é o que abre a cópia. Pedido do Rafael (P147 1):
+# DECISOES.md, Monitor, deploy e servidor.
+CASA = os.path.expanduser("~")
+FORA_DO_PROJETO = (".config/registro_admins.chave", ".android/adbkey", ".android/adbkey.pub")
+PASTA_FORA = "fora_do_projeto"
+
 # A cópia fora do servidor: a senha, o estado no banco (só ids, datas e tamanhos) e o
 # limite do Telegram para arquivo mandado por bot (50 MB; a cifra cresce o pacote em 1/3).
 CHAVE_DA_COPIA = os.path.expanduser("~/.config/backup_fora.chave")
@@ -81,12 +93,18 @@ def _limpar_sobras(destino):
             os.remove(sobra)
 
 
-def fazer_backup(pasta=None, destino=None, manter=MANTER):
+def _fora_do_projeto(casa):
+    """(caminho no servidor, caminho no pacote) dos arquivos de FORA_DO_PROJETO que existem."""
+    return [(os.path.join(casa, relativo), f"{PASTA_FORA}/{relativo}") for relativo in FORA_DO_PROJETO
+            if os.path.isfile(os.path.join(casa, relativo))]
+
+
+def fazer_backup(pasta=None, destino=None, manter=MANTER, casa=None):
     """
     Cria o pacote e apaga os mais antigos que os `manter` mais recentes.
     Devolve (caminho do pacote, tamanho em bytes, quantos antigos saíram).
     """
-    pasta, destino = pasta or PASTA_PROJETO, destino or DESTINO
+    pasta, destino, casa = pasta or PASTA_PROJETO, destino or DESTINO, casa or CASA
     sqlite, comuns = _arquivos(pasta)
     if not sqlite and not comuns:
         raise FileNotFoundError(f"nada para guardar em {pasta}")
@@ -108,6 +126,8 @@ def fazer_backup(pasta=None, destino=None, manter=MANTER):
         with tarfile.open(parcial, "w:gz") as tar:
             for nome in sorted(os.listdir(copias)):
                 tar.add(os.path.join(copias, nome), arcname=nome)
+            for caminho, no_pacote in _fora_do_projeto(casa):
+                tar.add(caminho, arcname=no_pacote)
         os.chmod(parcial, 0o600)
         os.replace(parcial, pacote)
 
@@ -147,17 +167,36 @@ def cifrar_copia(pacote, valor_chave=None):
     return caminho
 
 
-def abrir_copia(arquivo_cifrado, pasta, valor_chave):
+def abrir_copia(arquivo_cifrado, pasta, valor_chave, casa=None):
     """
     Restaura a cópia: decifra e extrai os arquivos em `pasta` (a do projeto, com os robôs
-    parados). Senha errada = InvalidToken, sem tocar na pasta. Devolve os nomes extraídos.
+    parados); os de fora do projeto (PASTA_FORA) voltam ao lugar deles na casa do usuário,
+    só o dono lendo. Senha errada = InvalidToken, sem tocar em nada. Devolve os nomes.
     """
     with open(arquivo_cifrado, "rb") as arquivo:
         pacote = Fernet(valor_chave.strip()).decrypt(arquivo.read().strip())
+    return abrir_pacote(io.BytesIO(pacote), pasta, casa)
+
+
+def abrir_pacote(arquivo, pasta, casa=None):
+    """O pacote (aberto, tar.gz) extraído: o projeto em `pasta` e PASTA_FORA na casa do usuário."""
+    casa = casa or CASA
     os.makedirs(pasta, exist_ok=True)
-    with tarfile.open(fileobj=io.BytesIO(pacote), mode="r:gz") as tar:
+    with tarfile.open(fileobj=arquivo, mode="r:gz") as tar:
         nomes = sorted(tar.getnames())
-        tar.extractall(pasta, filter="data")
+        do_projeto = [m for m in tar.getmembers() if not m.name.startswith(f"{PASTA_FORA}/")]
+        tar.extractall(pasta, members=do_projeto, filter="data")
+        for membro in tar.getmembers():
+            relativo = membro.name[len(PASTA_FORA) + 1:] if membro.name.startswith(f"{PASTA_FORA}/") else ""
+            # Só os nomes conhecidos voltam à casa: nada de fora da lista é escrito lá.
+            if relativo not in FORA_DO_PROJETO or not membro.isfile():
+                continue
+            destino = os.path.join(casa, relativo)
+            os.makedirs(os.path.dirname(destino), mode=0o700, exist_ok=True)
+            descritor = os.open(destino, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descritor, "wb") as saida:
+                saida.write(tar.extractfile(membro).read())
+            os.chmod(destino, 0o600)
     return nomes
 
 
