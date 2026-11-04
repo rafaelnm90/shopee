@@ -65,7 +65,7 @@ import painel_espelhos
 import painel_notas
 import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
 import robo_shopee_video  # a suspensão da conta de Shopee Vídeo, que pausa o Canal Afiliados sozinho
-import painel_acessos  # Acessos do Servidor: Tailscale e Oracle (Opções do Servidor)
+import painel_acessos  # Acessos do Servidor: Tailscale, Oracle e a senha do backup (Opções do Servidor)
 import painel_admins  # Administradores dos grupos e canais (Opções do Servidor)
 import registro_privado  # a receita da chave, também a da senha da cópia do backup
 import painel_ia  # IA: o link da conversa com o Claude (Opções do Servidor)
@@ -17548,7 +17548,21 @@ def texto_da_senha_da_copia(valor):
             f"<code>{valor}</code>\n\n"
             "Guarde a senha <b>fora do Telegram</b> (no Google Drive, num bloco de notas ou anotada no papel) "
             "e toque em <b>Guardei a senha ✅</b>: eu apago esta mensagem. Não mande a senha para ninguém, "
-            "nem no chat do Claude.")
+            "nem no chat do Claude.\n\n"
+            "Depois, diga onde a guardou em <b>Opções do Servidor ⚙️ → Acessos do Servidor 🔐 → "
+            f"{painel_acessos.EDITAR_BACKUP}</b>: o lugar vai na legenda de cada cópia.")
+
+def legenda_da_copia(quando, tamanho, onde=None):
+    """
+    A legenda da cópia no privado, com onde está a senha (Acessos do Servidor 🔐): com o
+    servidor fora do ar o painel não abre, mas a última cópia continua na conversa.
+    """
+    onde = painel_acessos.onde_esta_a_senha() if onde is None else onde
+    senha = (f"Abre com a senha guardada em: {painel_acessos.texto_do_onde(onde)}" if onde else
+             "Abre com a senha que você guardou. Diga onde ela está em Opções do Servidor ⚙️ → "
+             f"Acessos do Servidor 🔐 → {painel_acessos.EDITAR_BACKUP}.")
+    return (f"💾 <b>Cópia do backup de {quando:%d/%m} às {quando:%H:%M}</b>, cifrada "
+            f"({tamanho / 1024 / 1024:.1f} MB). Fica só a mais nova aqui.\n🔑 {senha}")
 
 async def mandar_senha_da_copia():
     """Manda a senha da cópia ao Rafael, uma vez por senha (o servidor gera outra se a perder)."""
@@ -17585,9 +17599,7 @@ async def mandar_copia_fora(pacote):
         quando = datetime.now(fuso_horario)
         mensagem = await bot.send_document(
             ADMIN_ID, FSInputFile(cifrado, filename=f"backup_{quando:%Y-%m-%d_%H%M}.cifrado"),
-            caption=(f"💾 <b>Cópia do backup de {quando:%d/%m} às {quando:%H:%M}</b>, cifrada "
-                     f"({tamanho / 1024 / 1024:.1f} MB). Fica só a mais nova aqui; abre com a senha que "
-                     "você guardou."),
+            caption=legenda_da_copia(quando, tamanho),
             parse_mode="HTML", disable_notification=True)
         anterior = (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("mensagem")
         db.atualizar_config(backup_dados.CHAVE_STATUS, lambda s: s.update(

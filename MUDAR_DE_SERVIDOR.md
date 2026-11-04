@@ -57,6 +57,7 @@ de volta ao lugar.
 
 O `mudar` precisa dos dois servidores ligados. Se o de agora se perder (disco, conta), os dados
 estão na cópia cifrada do backup que o bot manda todo dia no privado do Rafael, e ela só abre
-com a senha que ele guardou fora do Telegram. Nesse caso: criar o servidor novo e os segredos
-`NOVO_*` como acima e avisar o Claude, que roda o `preparar` e combina com o Rafael como levar a
-cópia até lá (`python3 backup_dados.py abrir ARQUIVO PASTA`).
+com a senha que ele guardou fora do Telegram (onde ela está aparece na legenda da própria
+cópia). Nesse caso: criar o servidor novo e os segredos `NOVO_*` como acima e avisar o Claude,
+que roda o `preparar` e combina com o Rafael como levar a cópia até lá
+(`python3 backup_dados.py abrir ARQUIVO PASTA`).
