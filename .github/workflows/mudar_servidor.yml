@@ -1,0 +1,60 @@
+name: Mudar de servidor
+
+# O kit de mudança de servidor (pedido do Rafael, P147 1; DECISOES.md, Monitor, deploy e
+# servidor; passo a passo no MUDAR_DE_SERVIDOR.md). Só roda à mão, nesta ordem:
+#   conferir  só lê o servidor de agora e o novo
+#   preparar  instala no novo o sistema, o código, o venv e os serviços, sem ligar os robôs
+#   mudar     para o de agora, leva os dados, as chaves e os vídeos dos rascunhos e liga o
+#             novo; se o novo não subir, o de agora volta sozinho (escreva MUDAR para confirmar)
+#   voltar    desliga o novo e religa o de agora (escreva VOLTAR; só antes de trocar os segredos)
+# O servidor de agora é o dos segredos ORACLE_*; o novo, o dos NOVO_HOST, NOVO_USER e NOVO_SSH_KEY.
+#
+# O repositório é público, e os logs do Actions também: o mudar_servidor.py imprime só
+# estados, nomes fixos e números, nunca o endereço dos servidores nem os dados.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer"
+        type: choice
+        options: [conferir, preparar, mudar, voltar]
+        default: conferir
+      confirmar:
+        description: "Para mudar ou voltar: escreva MUDAR ou VOLTAR"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mudar-servidor
+  cancel-in-progress: false
+
+jobs:
+  mudar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Conferir a confirmação
+        if: inputs.acao == 'mudar' || inputs.acao == 'voltar'
+        env:
+          ACAO: ${{ inputs.acao }}
+          CONFIRMAR: ${{ inputs.confirmar }}
+        run: |
+          esperado="$(echo "$ACAO" | tr '[:lower:]' '[:upper:]')"
+          if [ "$CONFIRMAR" != "$esperado" ]; then
+            echo "❌ Para $ACAO, escreva $esperado no campo confirmar."
+            exit 1
+          fi
+      - name: ${{ inputs.acao }}
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          NOVO_HOST: ${{ secrets.NOVO_HOST }}
+          NOVO_USER: ${{ secrets.NOVO_USER }}
+          NOVO_SSH_KEY: ${{ secrets.NOVO_SSH_KEY }}
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: python3 mudar_servidor.py ${{ inputs.acao }}

@@ -30,7 +30,10 @@ servidor novo: baixar o arquivo do privado, parar os robôs e rodar
     python3 backup_dados.py abrir ARQUIVO PASTA_DO_PROJETO
 
 que pede a senha (ou a lê da variável BACKUP_CHAVE, ou do arquivo da senha, se o
-servidor ainda o tem).
+servidor ainda o tem). Na mudança de servidor com o de agora ainda ligado, o
+mudar_servidor.py leva o pacote sem cifra pelo SSH e o abre com
+
+    python3 backup_dados.py restaurar PACOTE PASTA_DO_PROJETO
 """
 import getpass
 import glob
@@ -211,6 +214,12 @@ def _senha_para_abrir():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "restaurar":
+        # O pacote sem cifra que a mudança de servidor leva pelo SSH (mudar_servidor.py).
+        with open(sys.argv[2], "rb") as arquivo:
+            extraidos = abrir_pacote(arquivo, sys.argv[3])
+        print(f"✅ {len(extraidos)} arquivo(s) no lugar")
+        sys.exit(0)
     if len(sys.argv) == 4 and sys.argv[1] == "abrir":
         try:
             extraidos = abrir_copia(sys.argv[2], sys.argv[3], _senha_para_abrir())
