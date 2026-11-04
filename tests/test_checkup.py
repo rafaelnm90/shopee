@@ -1044,3 +1044,17 @@ def test_o_que_espera_o_rafael_sai_dos_pontos_de_atencao():
     registro_processos.registrar("autorais", "repostagem ao grupo", "repostado", ok=True, agora=AGORA)
     ficam, esperando = checkup.separar_o_que_espera_o_rafael(pontos, checkup.processos_do_dia(AGORA))
     assert ficam == pontos and esperando == []
+
+
+def test_senha_da_copia_diz_se_foi_guardada_e_se_o_lugar_esta_no_painel():
+    # O lembrete diário cobra o Guardei a senha ✅: o checkup mostra se ele foi tocado e se o
+    # lugar da senha está no Acessos do Servidor, sem nunca mostrar o lugar.
+    import backup_dados
+    import painel_acessos
+    assert checkup.senha_da_copia() == ("senha da cópia: Guardei a senha ✅ ainda não tocado, "
+                                        "lugar no Acessos do Servidor: não")
+    db.salvar_config(backup_dados.CHAVE_STATUS, {"senha_guardada_em": "2026-11-03 21:40:05"})
+    painel_acessos.salvar_servico("backup", {"onde": "https://exemplo.com/onde-esta"})
+    linha = checkup.senha_da_copia()
+    assert linha == "senha da cópia: Guardei a senha ✅ em 03/11 21:40, lugar no Acessos do Servidor: sim"
+    assert "exemplo.com" not in linha

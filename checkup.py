@@ -1422,6 +1422,21 @@ def idade_da_copia_fora(agora=None):
     return f"há {(_agora(agora).replace(tzinfo=None) - quando).total_seconds() / 3600:.1f} h"
 
 
+def senha_da_copia():
+    """
+    Se o Rafael já tocou em Guardei a senha ✅ (a mensagem da senha sai do privado) e se o
+    lugar dela está no Acessos do Servidor 🔐. Só sim ou não: o lugar nunca vai para o log.
+    """
+    import painel_acessos
+    guardada = (db.ler_config(backup_dados.CHAVE_STATUS, {}) or {}).get("senha_guardada_em") or ""
+    try:
+        tocado = f"Guardei a senha ✅ em {datetime.strptime(guardada, '%Y-%m-%d %H:%M:%S'):%d/%m %H:%M}"
+    except ValueError:
+        tocado = "Guardei a senha ✅ ainda não tocado"
+    lugar = "sim" if painel_acessos.onde_esta_a_senha() else "não"
+    return f"senha da cópia: {tocado}, lugar no Acessos do Servidor: {lugar}"
+
+
 # --- Pontos de atenção ---
 
 # --- Esperando o Rafael ---
@@ -1806,7 +1821,7 @@ def main():
     print(" | ".join(f"{evento}: {qtd}" for evento, qtd in sorted(baixados.items())) or "nenhum evento")
     backup = backup_dados.ultimo_backup()
     print(("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
-          + f" | cópia no privado do Rafael: {idade_da_copia_fora(agora)}")
+          + f" | cópia no privado do Rafael: {idade_da_copia_fora(agora)} | {senha_da_copia()}")
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
                                              rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes,
