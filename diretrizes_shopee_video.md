@@ -114,6 +114,11 @@ atividade ilegal e risco à segurança das pessoas.
 - Curtidas e comentários (regra 9): o robô responde os comentários dos vídeos do
   Rafael e curte e comenta 3 vídeos de outros criadores por dia, sempre com um texto
   diferente, feito pela IA para aquele comentário ou vídeo, nunca uma mensagem
-  repetida; pula comentário ofensivo, golpe ou propaganda. O comentário do próprio
-  vídeo (o do Gem) continua no privado do Rafael, que comenta à mão se quiser.
-  Escolha do Rafael em 24/10/2026, avisado da regra 9 (DECISOES.md, Shopee Vídeo).
+  repetida; pula comentário ofensivo, golpe ou propaganda. Escolha do Rafael em
+  24/10/2026, avisado da regra 9 (DECISOES.md, Shopee Vídeo).
+- Comentário no próprio vídeo (regra 9): depois de cada post, o robô curte o vídeo,
+  comenta nele e curte o comentário; 1 vez por dia, comenta de novo num post dos
+  últimos 30 dias (cada um no máximo 1 vez por semana). O texto é curto, sem hashtag,
+  chama para comprar só com o que o título e o produto mostram e nunca sai igual nem
+  parecido com outro. Escolha do Rafael em 04/11/2026 (P148 2), avisado da regra 9 e
+  das punições (DECISOES.md, Shopee Vídeo).

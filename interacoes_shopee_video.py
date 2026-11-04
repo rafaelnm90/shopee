@@ -1,8 +1,10 @@
 """
 As interações do robô da Shopee Vídeo além de postar: responder os comentários dos
-vídeos do Rafael (e curtir o comentário respondido) e curtir e comentar vídeos de outros
-criadores no feed Live e Vídeo → Para você. Pedidos do Rafael de 24/10/2026 (P9, P10 e
-P11) e de 30/10/2026 (a curtida): DECISOES.md, Shopee Vídeo.
+vídeos do Rafael (e curtir o comentário respondido), curtir e comentar vídeos de outros
+criadores no feed Live e Vídeo → Para você e comentar no próprio vídeo (depois de cada post
+e, 1 vez por dia, num post antigo), curtindo o vídeo e o comentário. Pedidos do Rafael de
+24/10/2026 (P9, P10 e P11), de 30/10/2026 (a curtida) e de 04/11/2026 (P148 2):
+DECISOES.md, Shopee Vídeo.
 
 Aqui fica o que não toca no celular: a leitura das telas (a lista das Notificações, o
 painel de comentários e o player do feed), o texto da IA e as marcas do que já foi
@@ -38,6 +40,22 @@ TAMANHO_DA_RESPOSTA = 150
 # resposta mais curta): o painel corta a longa no fim, mas não a ponto de virar uma palavra.
 MINIMO_DA_RESPOSTA = 20
 TAMANHO_DO_COMENTARIO = 80
+# O comentário do Rafael no próprio vídeo (P148 2): depois de cada post e, POSTS_ANTIGOS_POR_DIA
+# vez por dia, num post do robô dos últimos DIAS_DOS_POSTS_ANTIGOS dias que ele não comentou há
+# DIAS_ENTRE_COMENTARIOS dias. O de depois do post que não sai na hora (o vídeo ainda em análise)
+# volta a cada INTERVALO_DO_PROPRIO, até TENTATIVAS_DO_PROPRIO vezes; depois, o texto vai ao Rafael,
+# que comenta à mão. Escolha do Rafael: DECISOES.md, Shopee Vídeo.
+TAMANHO_DO_PROPRIO = 100
+POSTS_ANTIGOS_POR_DIA = 1
+DIAS_DOS_POSTS_ANTIGOS = 30
+DIAS_ENTRE_COMENTARIOS = 7
+TENTATIVAS_DO_PROPRIO = 3
+INTERVALO_DO_PROPRIO = timedelta(minutes=30)
+# As marcas do comentário no próprio vídeo, pelo link do post: o de depois do post e o de post antigo.
+TIPO_DO_POST, TIPO_DO_ANTIGO = "proprio_post", "post_antigo"
+# O comentário do próprio vídeo que conta como feito: o que apareceu e o enviado sem aparecer
+# (pode ter saído; não é repetido).
+COMENTADOS_NO_PROPRIO = ("comentado", "não confirmado")
 # Os estados de um comentário em que ele não volta mais.
 FINAIS = frozenset({"respondido", "já respondido", "pulado", "desistiu", "anterior", "lugar errado"})
 # Os vídeos do feed que contam nos 3 do dia: o comentado e o que foi enviado sem aparecer
@@ -117,6 +135,15 @@ def resultado_de(marca_, tipo):
     return linha[0] if linha else None
 
 
+def situacao(marca_, tipo):
+    """{"resultado", "tentativas", "momento"} da marca, ou None se ela não foi guardada."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        linha = con.execute("SELECT resultado, tentativas, momento FROM shopee_video_interacoes "
+                            "WHERE marca = ? AND tipo = ?", (marca_, tipo)).fetchone()
+    return dict(zip(("resultado", "tentativas", "momento"), linha)) if linha else None
+
+
 def terminado(marca_):
     """O comentário já teve um fim (respondido, pulado, desistido...)? Esses não voltam."""
     return resultado_de(marca_, "comentario") in FINAIS
@@ -130,6 +157,51 @@ def quantos_desde(tipo, resultados, desde):
         return con.execute(f"SELECT COUNT(*) FROM shopee_video_interacoes WHERE tipo = ? AND resultado IN "
                            f"({','.join('?' * len(resultados))}) AND momento >= ?",
                            (tipo, *resultados, desde)).fetchone()[0]
+
+
+# --- O comentário no próprio vídeo (P148 2) ---
+
+def marca_do_post(link):
+    """A marca do post do robô, pelo link dele."""
+    return marca(link or "")
+
+
+def ultimo_comentario(link):
+    """Quando o robô comentou no post por último (o de depois do post ou o de post antigo), ou ""."""
+    momentos = [s["momento"] for s in (situacao(marca_do_post(link), tipo) for tipo in (TIPO_DO_POST, TIPO_DO_ANTIGO))
+                if s and s["resultado"] in COMENTADOS_NO_PROPRIO]
+    return max(momentos, default="")
+
+
+def antigos_hoje(agora=None):
+    """Quantos posts antigos o robô já comentou hoje (a meta é POSTS_ANTIGOS_POR_DIA)."""
+    return quantos_desde(TIPO_DO_ANTIGO, COMENTADOS_NO_PROPRIO, _agora(agora).strftime("%Y-%m-%d 00:00:00"))
+
+
+def escolher_post_antigo(postados, agora=None):
+    """
+    O post do robô que ganha o comentário do dia, entre os postados nos últimos
+    DIAS_DOS_POSTS_ANTIGOS dias, com o link, que o robô não comenta há DIAS_ENTRE_COMENTARIOS
+    dias (contando o de depois do post): primeiro o que nunca ganhou comentário do robô,
+    depois o comentado há mais tempo; no empate, o mais novo. None sem nenhum.
+    """
+    agora = _agora(agora)
+    desde = (agora - timedelta(days=DIAS_DOS_POSTS_ANTIGOS)).strftime("%Y-%m-%d %H:%M:%S")
+    corte = (agora - timedelta(days=DIAS_ENTRE_COMENTARIOS)).strftime("%Y-%m-%d %H:%M:%S")
+    candidatos = []
+    for post in postados:
+        if not post.get("link_post") or (post.get("postado_em") or "") < desde:
+            continue
+        ultimo = ultimo_comentario(post["link_post"])
+        if ultimo and ultimo > corte:
+            continue
+        candidatos.append((ultimo, post))
+    if not candidatos:
+        return None
+    nunca = [post for ultimo, post in candidatos if not ultimo]
+    if nunca:
+        return max(nunca, key=lambda post: post.get("postado_em") or "")
+    return min(candidatos, key=lambda par: par[0])[1]
 
 
 # --- As Notificações ---
@@ -213,7 +285,8 @@ def comentarios_do_painel(xml):
     Os comentários do painel aberto, de cima para baixo: {"nome", "texto", "resposta" (a
     linha recuada, resposta a um comentário), "criador" (o selo Criador: é do dono do vídeo),
     "responder", "ver_respostas" e "curtir" (os pontos de tocar, ou None; "curtir" é o
-    coração da linha), "curtido" (o "Curtido pelo criador" embaixo dele), "y"}. Cada
+    coração da linha), "curtido" (o "Curtido pelo criador" embaixo dele), "coracao_desc" (a
+    descrição do coração, que muda quando ele é curtido), "y"}. Cada
     comentário começa na foto (x pequeno, com "comment" na descrição) e vai até a foto
     seguinte. Lista vazia se o painel não está aberto.
     """
@@ -235,14 +308,15 @@ def comentarios_do_painel(xml):
         textos = [el["texto"] for el in dentro if _do_comentario(el["texto"])]
         responder = next((ps._centro(el) for el in dentro if ps._normal(el["texto"]) == "responder"), None)
         ver = next((ps._centro(el) for el in dentro if VER_RESPOSTAS.match(ps._normal(el["texto"]))), None)
-        curtir = next((ps._centro(el) for el in elementos if CORACAO_DO_COMENTARIO in el["descricao"].casefold()
-                       and comeco <= ps._centro(el)[1] < fim), None)
+        coracao = next((el for el in elementos if CORACAO_DO_COMENTARIO in el["descricao"].casefold()
+                        and comeco <= ps._centro(el)[1] < fim), None)
         comentarios.append({
             "nome": textos[0] if textos else "", "texto": " ".join(textos[1:2]),
             "resposta": ps._centro(foto)[0] >= 130,
             "criador": any(ps._normal(el["texto"]) == "criador" for el in dentro),
-            "responder": responder, "ver_respostas": ver, "curtir": curtir,
+            "responder": responder, "ver_respostas": ver, "curtir": ps._centro(coracao) if coracao else None,
             "curtido": any(CURTIDO_PELO_CRIADOR.match(ps._normal(el["texto"])) for el in dentro),
+            "coracao_desc": coracao["descricao"] if coracao else "",
             "y": ps._centro(foto)[1],
         })
     return comentarios
@@ -475,6 +549,20 @@ SOBRE_A_IMAGEM = """
 A imagem anexa é a tela do vídeo agora: comente o que aparece nela (o produto, o resultado, a ideia), junto com a legenda, sem falar dos botões nem dos textos do aplicativo. Se a imagem mostrar conteúdo adulto, político, ofensivo, de aposta ou de golpe, escreva só: PULAR"""
 
 
+PROMPT_PROPRIO = """Você é o criador de um vídeo de achadinhos na Shopee Vídeo e vai deixar um comentário no seu próprio vídeo, para chamar quem assiste a comprar.
+
+Produto do vídeo: {produto}
+Título do vídeo: {titulo}
+Comentários que já estão no vídeo ou que você já escreveu (não repita nem escreva parecido com nenhum): {anteriores}
+
+Escreva UM comentário curto, em português do Brasil, com no máximo {limite} caracteres:
+- natural e animado, chamando para comprar o produto do vídeo (exemplo do tom: "Esse aqui vale muito a pena! Ele está nos produtos do vídeo");
+- só o que o título e o produto mostram: sem preço, desconto, frete ou estoque que eles não dizem, sem promessa de resultado e sem exagero ("garantido", "milagre", "cura");
+- sem nome de marca, sem link, sem chamar para fora da Shopee e sem pedir curtida, seguidor ou compartilhamento;
+- com palavras que não mostram o gênero de quem escreve;
+- sem hashtags, no máximo 1 emoji e sem aspas."""
+
+
 def texto_simples(texto, limite):
     """
     O texto da IA pronto para o campo: sem aspas, sem quebra de linha e sem emoji de fora
@@ -522,3 +610,18 @@ async def gerar_comentario(legenda="", anteriores=(), imagem=None):
     prompt = PROMPT_COMENTARIO.format(legenda=legenda or "—", anteriores="; ".join(anteriores) or "nenhum",
                                       limite=TAMANHO_DO_COMENTARIO) + (SOBRE_A_IMAGEM if imagem else "")
     return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")] if imagem else None)
+
+
+async def gerar_proprio(produto="", titulo="", anteriores=()):
+    """
+    O comentário do Rafael no próprio vídeo (P148 2): curto, sem hashtag, chamando para comprar,
+    diferente dos que já estão no vídeo e dos últimos que o robô escreveu. Volta para a IA
+    uma vez quando o texto sai igual a um deles; None se ela não escreveu um novo.
+    """
+    prompt = PROMPT_PROPRIO.format(produto=produto or "—", titulo=titulo or "—",
+                                   anteriores="; ".join(anteriores) or "nenhum", limite=TAMANHO_DO_PROPRIO)
+    for _ in range(2):
+        texto = await _pedir(prompt, TAMANHO_DO_PROPRIO)
+        if texto and not any(parecidos(texto, anterior) for anterior in anteriores):
+            return texto
+    return None

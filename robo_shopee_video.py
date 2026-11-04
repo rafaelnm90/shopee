@@ -833,7 +833,8 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos", "trocado")
+           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos", "trocado",
+           "comentarios_proprios")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -857,9 +858,11 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # os tira da tela final na hora de postar, e o rascunho postado fica só com os que ficaram.
 # adiamentos: quantas vezes o post do aprovado ficou para a rodada seguinte porque a capa com a
 # frase (a figurinha) não voltou no rascunho reaberto (P124); zera ao aprovar.
+# comentarios_proprios: os textos que o robô comentou no vídeo do post (P148 2), para o próximo
+# nunca sair igual.
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "adiamentos", "trocado")
+                 "adiamentos", "trocado", "comentarios_proprios")
 
 
 def _criar_tabela(con):
@@ -890,6 +893,7 @@ def _linha_para_dict(linha):
     rascunho["recusadas"] = json.loads(rascunho["recusadas"] or "[]")
     rascunho["outra_cor"] = json.loads(rascunho["outra_cor"] or "[]")
     rascunho["tirar"] = json.loads(rascunho["tirar"] or "[]")
+    rascunho["comentarios_proprios"] = json.loads(rascunho["comentarios_proprios"] or "[]")
     return rascunho
 
 
@@ -913,7 +917,7 @@ def pegar(ident):
 
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
-                   "recusadas", "outra_cor", "tirar"):
+                   "recusadas", "outra_cor", "tirar", "comentarios_proprios"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -994,6 +998,7 @@ PASSOS = (
     ("Criadores & Afiliados", "descurtir em Meus Favoritos"),
     ("de férias", "loja de férias"),
     ("notificação do comentário", "achar a notificação"),
+    ("vídeo do post não abriu", "abrir o vídeo do post"),
     ("painel de comentários", "abrir os comentários"),
     ("comentário não está", "achar o comentário"),
     ("Responder", "tocar em Responder"),
@@ -1044,6 +1049,7 @@ SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
                    "responder": "Resposta a comentário", "feed": "Feed (Para você)",
+                   "comentar_post": "Comentário no post", "post_antigo": "Comentário em post antigo",
                    "descurtir": "Limpeza dos favoritos (4h)"}
 # Como o resultado aparece para o Rafael no resumo das 22h e no Histórico (no banco fica o
 # resultado de sempre, que o checkup conta). Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
@@ -1313,7 +1319,9 @@ def o_que_fazer(config, agora=None):
     hora só isso), ("treino", None), ("apagar", id), ("postar", id), ("saude",
     None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
     ("rascunho", None), ("responder", None) (os comentários dos vídeos, nas horas_das_respostas),
-    ("feed", None) (até 3 vídeos do feed por dia, comentarios_nesta_rodada) ou None. Gasta o horário do plano, ou
+    ("feed", None) (até 3 vídeos do feed por dia, comentarios_nesta_rodada), ("comentar_post", id) (o
+    comentário de depois do post que volta), ("post_antigo", id) (o comentário do dia num post antigo)
+    ou None. Gasta o horário do plano, ou
     uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
     """
     if na_hora_do_descurtir(agora):
@@ -1347,6 +1355,10 @@ def o_que_fazer(config, agora=None):
         prontos = [r for r in aprovados if r["postar_em"] and r["postar_em"] <= agora_txt]
     if postar and prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
+    # O comentário de depois do post que não saiu (o vídeo ainda em análise) volta com o post. (P148 2)
+    pendente = comentario_do_post_pendente(agora) if postar else None
+    if pendente:
+        return "comentar_post", pendente["id"]
     # Um aprovado vai ao ar antes da próxima rodada: nada de tarefa longa (Saúde, rascunho,
     # respostas, feed), que seguraria o celular na hora do post. Escolha do Rafael (P30).
     logo = _momento(agora_br(agora) + ANTES_DO_POST)
@@ -1362,6 +1374,10 @@ def o_que_fazer(config, agora=None):
         return "rascunho", None
     if respostas_pendentes(agora):
         return "responder", None
+    # O comentário do dia num post antigo, uma interação como o feed (P148 2).
+    antigo = post_antigo_pendente(agora) if interagir else None
+    if antigo:
+        return "post_antigo", antigo["id"]
     if interagir and feed_pendente(agora):
         return "feed", None
     return None
@@ -5117,7 +5133,7 @@ def abrir_rascunho(d, rascunho):
 
 def publicar(d, rascunho, agora=None):
     """
-    Posta o rascunho aprovado e manda no privado o link do post e o comentário. Antes,
+    Posta o rascunho aprovado, manda no privado o link do post e comenta no vídeo (P148 2). Antes,
     olha nas Notificações se a conta está suspensa: não se sabe o que o Postar faz com a
     conta suspensa, e o robô não marca como postado o que não foi ao ar. Os produtos que o
     Rafael marcou para sair do post saem antes de tudo (P123), e a tela final é conferida
@@ -5149,10 +5165,8 @@ def publicar(d, rascunho, agora=None):
            + (f", sem {'os produtos' if sairam > 1 else 'o produto'} que você marcou para sair "
               f"({sairam} de {len(rascunho['produtos'])})" if sairam else "")
            + ".\n\n" + (f"🔗 {link}" if link else "O link do post está no seu Perfil em Shopee Vídeo."))
-    if rascunho["comentario"]:
-        avisar(ps.AVISO_COMENTARIO)
-        avisar(rascunho["comentario"])
     levar_ao_canal(no_post, link)
+    comentar_depois_do_post(d, rascunho["id"], agora)
     return "rascunho aprovado postado"
 
 
@@ -5660,8 +5674,12 @@ def comentarios_nesta_rodada(config, agora=None):
 
 
 def interacoes_do_dia_feitas(agora=None):
-    """As respostas e os comentários do feed de hoje já saíram todos? Aí o postar volta, mesmo na janela."""
-    return not respostas_pendentes(agora) and not comentarios_do_feed_que_faltam(agora)
+    """
+    As respostas, os comentários do feed e o do post antigo de hoje já saíram todos? Aí o postar
+    volta, mesmo na janela.
+    """
+    return (not respostas_pendentes(agora) and not comentarios_do_feed_que_faltam(agora)
+            and not post_antigo_pendente(agora))
 
 
 def intervalo_do_feed(config):
@@ -6187,6 +6205,314 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
     return "feed: 1 vídeo curtido e comentado"
 
 
+# --- O comentário no próprio vídeo (P148 2) ---
+
+# Depois de cada post, o robô curte o vídeo, escreve um comentário (texto curto da IA, chamando
+# para comprar) e curte o comentário; 1 vez por dia, no Horário das Interações, faz o mesmo num
+# post antigo dele. O vídeo abre pelo link do post, no mesmo player do feed. Escolha do Rafael
+# (P148 2, avisado da regra de Spam e Falso Engajamento): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_PROPRIO = "próprio post: comentar"
+PROCESSO_DO_ANTIGO = "post antigo: comentar"
+MOTIVO_DO_POST_EM_ANALISE = "o vídeo do post ainda está em análise na Shopee"
+# Quantos textos do robô, de todos os posts, a IA recebe para não repetir nenhum.
+TEXTOS_GUARDADOS_DO_PROPRIO = 20
+
+
+def _abrir_o_video_do_post(d, link):
+    """O vídeo do Rafael pelo link do post, no player do feed (interacoes.video_do_feed). Parada se não abriu."""
+    ir_ao_inicio(d)
+    ps.abrir_link(d, link)
+    pausa(12)
+    xml = tela(d)
+    video = interacoes.video_do_feed(xml)
+    if not video and not ps.video_removido(xml) and not ps.video_em_analise(xml):
+        pausa(ESPERA_DO_VER_PRODUTOS)
+        xml = tela(d)
+        video = interacoes.video_do_feed(xml)
+    if ps.video_removido(xml):
+        raise Parada("o vídeo do post foi removido")
+    if ps.video_em_analise(xml):
+        raise Parada(MOTIVO_DO_POST_EM_ANALISE)
+    if not video:
+        raise Parada("o vídeo do post não abriu no player")
+    return video
+
+
+def _registrar_no_post(antigo, passo, resultado, ok, agora=None):
+    """O passo do comentário no próprio vídeo no registro: o de post antigo é interação; o outro vai com o post."""
+    if antigo:
+        registro_processos.registrar(REGISTRO, f"post antigo: {passo}", resultado, ok=ok, agora=agora)
+    else:
+        registro_processos.registrar(REGISTRO, f"próprio post: {passo}", resultado, ok=ok, agora=agora)
+
+
+def _curtir_o_video_do_post(d, video, antigo, agora=None):
+    """
+    Curte o vídeo do Rafael pelo coração do player, só se ele não está curtido: o toque no
+    curtido descurtiria, e sem a tela dizer o estado o robô não toca. A curtida que não sai
+    fica só no registro, e o comentário segue.
+    """
+    curtido = interacoes.coracao_curtido(video["coracao_desc"])
+    if curtido:
+        resultado = "já curtido"
+    elif curtido is None:
+        resultado = "coração sem o estado na tela"
+    elif ps.proibido_no_ponto(tela(d), *video["coracao"]):
+        resultado = "recusado"
+    else:
+        d.click(*video["coracao"])
+        pausa(2)
+        depois = interacoes.video_do_feed(tela(d))
+        resultado = "curtido" if depois and interacoes.coracao_curtido(depois["coracao_desc"]) else "não confirmado"
+    _registrar_no_post(antigo, "curtir o vídeo", resultado, resultado in ("curtido", "já curtido"), agora)
+    return resultado
+
+
+def _abrir_os_comentarios_do_post(d, video):
+    """O painel de comentários do vídeo do post, pelo balão do player: a tela com ele aberto."""
+    if ps.proibido_no_ponto(tela(d), *video["balao"]):
+        raise Parada(ps.RECUSA)
+    d.click(*video["balao"])
+    pausa(3)
+    xml = painel_de_comentarios(d)
+    if not xml:
+        raise Parada("o painel de comentários do vídeo do post não abriu")
+    return xml
+
+
+def _abrir_o_campo_do_post(d, xml):
+    """O campo de escrever do painel aberto. No vídeo sem nenhum comentário ele já abre escrevendo."""
+    if interacoes.campo_de_escrever(xml):
+        return
+    campo = interacoes.campo_de_comentar(xml)
+    if not campo:
+        raise Parada("não achei o campo de comentar no vídeo do post")
+    d.click(*campo)
+    pausa(2)
+    if not interacoes.campo_de_escrever(tela(d)):
+        raise Parada("o campo de comentar do vídeo do post não abriu")
+
+
+def _linha_do_texto(painel, texto):
+    """O comentário do painel com o texto que o robô escreveu, ou None."""
+    return next((c for c in painel if interacoes.parecidos(c["texto"], texto)), None)
+
+
+def _apareceu_no_painel(d, texto):
+    """O comentário enviado está na lista (relendo e, sem ele, com o painel rolado para o alto)?"""
+    for vez in range(2):
+        if _linha_do_texto(interacoes.comentarios_do_painel(tela(d)), texto):
+            return True
+        if not vez:
+            ps.rolar(d, para_cima=True)
+            pausa(2)
+    return False
+
+
+def _comentario_curtido(linha):
+    return bool(linha) and (linha["curtido"] or interacoes.coracao_curtido(linha["coracao_desc"]) is True)
+
+
+def _curtir_o_comentario_do_post(d, texto, antigo, agora=None):
+    """
+    Curte o comentário que o robô acabou de escrever, pelo coração da linha dele, e confere pelo
+    "Curtido pelo criador" ou pelo coração curtido. A curtida que não sai fica só no registro:
+    o comentário já foi.
+    """
+    try:
+        xml = tela(d)
+        linha = _linha_do_texto(interacoes.comentarios_do_painel(xml), texto)
+        if _comentario_curtido(linha):
+            resultado = "já curtido"
+        elif not linha or not linha["curtir"]:
+            resultado = "sem o coração na tela"
+        elif ps.proibido_no_ponto(xml, *linha["curtir"]):
+            resultado = "recusado"
+        else:
+            d.click(*linha["curtir"])
+            pausa(2)
+            depois = _linha_do_texto(interacoes.comentarios_do_painel(tela(d)), texto)
+            resultado = "curtido" if _comentario_curtido(depois) else "não confirmado"
+    except Exception as e:
+        resultado = f"erro ({type(e).__name__})"
+    _registrar_no_post(antigo, "curtir o comentário", resultado, resultado in ("curtido", "já curtido"), agora)
+    return resultado
+
+
+def comentar_no_post(d, rascunho, antigo=False, agora=None):
+    """
+    O comentário do Rafael num post do robô (P148 2): abre o vídeo pelo link do post, curte o
+    vídeo (se ainda não está curtido), abre os comentários, pede à IA um texto curto chamando
+    para comprar, diferente dos comentários do Rafael na tela, dos que o robô já fez nesse post
+    e dos últimos de todos os posts, escreve, envia, confere que apareceu e curte o comentário.
+    Devolve (resultado, texto, curtidas): "comentado" ou "não confirmado" (enviado sem aparecer
+    na lista: pode ter saído, e não é repetido), o texto e o que saiu das duas curtidas (o vídeo e
+    o comentário). O que não dá certo antes de enviar para (Parada), sem nada escrito.
+    """
+    video = _abrir_o_video_do_post(d, rascunho["link_post"])
+    curtiu_o_video = _curtir_o_video_do_post(d, video, antigo, agora)
+    xml = _abrir_os_comentarios_do_post(d, video)
+    na_tela = [c["texto"] for c in interacoes.comentarios_do_painel(xml) if c["criador"] and c["texto"]]
+    feitos = rascunho.get("comentarios_proprios") or []
+    recentes = ler_estado().get("proprio_textos") or []
+    anteriores = list(dict.fromkeys(na_tela + feitos + recentes))
+    produto = (rascunho.get("produtos") or [""])[0]
+    texto = asyncio.run(interacoes.gerar_proprio(produto, rascunho.get("titulo") or "", anteriores))
+    if not texto:
+        raise Parada("a IA não escreveu o comentário do post")
+    _abrir_o_campo_do_post(d, xml)
+    _escrever_e_enviar(d, texto)
+    apareceu = _apareceu_no_painel(d, texto)
+    atualizar(rascunho["id"], comentarios_proprios=feitos + [texto])
+    gravar_estado(proprio_textos=(recentes + [texto])[-TEXTOS_GUARDADOS_DO_PROPRIO:])
+    curtiu_o_comentario = _curtir_o_comentario_do_post(d, texto, antigo, agora) if apareceu else ""
+    return ("comentado" if apareceu else "não confirmado"), texto, (curtiu_o_video, curtiu_o_comentario)
+
+
+def _comentar_a_mao(rascunho, motivo=""):
+    """Sem o comentário do robô, o do Gem vai ao Rafael para ele comentar à mão, como antes da P148."""
+    if motivo:
+        avisar(f"⚠️ Robô da Shopee Vídeo: não consegui comentar no vídeo que foi ao ar ({motivo}).")
+    if rascunho.get("comentario"):
+        avisar(ps.AVISO_COMENTARIO)
+        avisar(rascunho["comentario"])
+
+
+def comentar_depois_do_post(d, ident, agora=None):
+    """
+    Logo depois do post, o comentário no vídeo (P148 2). Nada aqui desfaz nem para o post: o que
+    não dá certo fica no registro e volta nas rodadas seguintes (comentario_do_post_pendente). Sem
+    o link do post, o comentário do Gem vai ao Rafael para ele comentar à mão.
+    """
+    try:
+        rascunho = pegar(ident)
+        if not rascunho:
+            return ""
+        if not rascunho.get("link_post"):
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "sem o link do post", ok=False, agora=agora)
+            _comentar_a_mao(rascunho)
+            return "sem o link do post"
+        return tentar_o_comentario_do_post(d, rascunho, agora)
+    except Exception as e:
+        # O post já foi ao ar: nada daqui pode fazê-lo parecer que não saiu.
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O comentário depois do post não rodou: {type(e).__name__}")
+        return "erro"
+
+
+def tentar_o_comentario_do_post(d, rascunho, agora=None):
+    """
+    Uma tentativa do comentário de depois do post. Nunca para a rodada: o que não deu certo conta
+    uma tentativa e volta depois de INTERVALO_DO_PROPRIO; na última, o Rafael recebe o comentário
+    do Gem para fazer à mão. Devolve "comentado", "não confirmado" ou "parou".
+    """
+    marca = interacoes.marca_do_post(rascunho["link_post"])
+    try:
+        resultado, texto, curtidas = comentar_no_post(d, rascunho, antigo=False, agora=agora)
+    except Verificacao:
+        av.abrir_tela(celular=True, verificacao=True)
+        motivo = "verificação da Shopee na tela"
+    except Parada as e:
+        motivo = e.motivo
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O comentário no post não saiu: {type(e).__name__}")
+        motivo = f"erro inesperado ({type(e).__name__})"
+    else:
+        interacoes.guardar(marca, interacoes.TIPO_DO_POST, resultado, agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, resultado, ok=resultado == "comentado",
+                                     origem=marca, agora=agora)
+        registrar_tentativa("comentar_post", resultado, agora=agora)
+        avisar(_aviso_do_comentario(resultado, texto, curtidas))
+        return resultado
+    tentativas = interacoes.guardar_falha(marca, interacoes.TIPO_DO_POST, agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "parou", motivo, ok=False, origem=marca,
+                                 agora=agora)
+    registrar_tentativa("comentar_post", "parou", motivo, agora=agora)
+    try:
+        _guardar_caso(d, "comentar_post", "parou", motivo, ident=rascunho["id"], agora=agora)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Caso do comentário no post não guardado: {type(e).__name__}")
+    if tentativas >= interacoes.TENTATIVAS_DO_PROPRIO:
+        interacoes.guardar(marca, interacoes.TIPO_DO_POST, "desistiu", agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "desistiu", motivo, ok=False, origem=marca,
+                                     agora=agora)
+        _comentar_a_mao(rascunho, motivo)
+    return "parou"
+
+
+def _aviso_do_comentario(resultado, texto, curtidas):
+    """O aviso do comentário de depois do post: o texto e só as curtidas que saíram."""
+    feitas = [nome for nome, curtida in zip(("o vídeo", "o comentário"), curtidas) if curtida in ("curtido", "já curtido")]
+    curti = f" e curti {' e '.join(feitas)}" if feitas else ""
+    enviado = "" if resultado == "comentado" else " (enviado, mas não apareceu na lista)"
+    return f"💬 Robô da Shopee Vídeo: comentei no vídeo que foi ao ar{curti}{enviado}:\n\n{texto}"
+
+
+def comentario_do_post_pendente(agora=None):
+    """
+    O post do robô de menos de 1 dia cujo comentário de depois do post não saiu e volta agora
+    (P148 2): a última tentativa há INTERVALO_DO_PROPRIO ou mais e menos de TENTATIVAS_DO_PROPRIO
+    tentativas. O mais novo primeiro; None sem nenhum.
+    """
+    momento = agora_br(agora)
+    desde, limite = _momento(momento - timedelta(days=1)), _momento(momento - interacoes.INTERVALO_DO_PROPRIO)
+    for rascunho in reversed(listar("postado")):
+        if not rascunho["link_post"] or (rascunho["postado_em"] or "") < desde:
+            continue
+        situacao = interacoes.situacao(interacoes.marca_do_post(rascunho["link_post"]), interacoes.TIPO_DO_POST)
+        if (situacao and situacao["resultado"] == "falhou" and situacao["momento"] <= limite
+                and situacao["tentativas"] < interacoes.TENTATIVAS_DO_PROPRIO):
+            return rascunho
+    return None
+
+
+def _tentativas_do_antigo_hoje(momento):
+    """Quantas vezes o robô tentou hoje o comentário do post antigo."""
+    estado = ler_estado()
+    return int(estado.get("antigo_tentativas") or 0) if estado.get("antigo_dia") == momento.strftime("%Y-%m-%d") else 0
+
+
+def post_antigo_pendente(agora=None):
+    """
+    O post antigo que ganha o comentário do dia agora (P148 2), ou None: nenhum ainda hoje, menos
+    de TENTATIVAS_DO_PROPRIO tentativas hoje, a última há INTERVALO_DO_PROPRIO ou mais, e um post
+    que pode ganhá-lo (interacoes.escolher_post_antigo).
+    """
+    momento = agora_br(agora)
+    if interacoes.antigos_hoje(momento) >= interacoes.POSTS_ANTIGOS_POR_DIA:
+        return None
+    if _tentativas_do_antigo_hoje(momento) >= interacoes.TENTATIVAS_DO_PROPRIO:
+        return None
+    estado = ler_estado()
+    if (estado.get("antigo_em") or "") > _momento(momento - interacoes.INTERVALO_DO_PROPRIO):
+        return None
+    return interacoes.escolher_post_antigo(listar("postado"), momento)
+
+
+def comentar_post_antigo(d, rascunho, agora=None):
+    """
+    O comentário do dia num post antigo (P148 2). O que não dá certo fica no registro e no caso,
+    e volta mais tarde no mesmo dia (post_antigo_pendente).
+    """
+    momento = agora_br(agora)
+    gravar_estado(antigo_dia=momento.strftime("%Y-%m-%d"), antigo_tentativas=_tentativas_do_antigo_hoje(momento) + 1,
+                  antigo_em=_momento(agora))
+    marca = interacoes.marca_do_post(rascunho["link_post"])
+    try:
+        resultado, _texto, _curtidas = comentar_no_post(d, rascunho, antigo=True, agora=agora)
+    except Parada as e:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_ANTIGO, "parou", e.motivo, ok=False, origem=marca,
+                                     agora=agora)
+        _guardar_caso(d, "post_antigo", "parou", e.motivo, ident=rascunho["id"], agora=agora)
+        e.caso_guardado = True
+        raise
+    interacoes.guardar(marca, interacoes.TIPO_DO_ANTIGO, resultado, agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_ANTIGO, resultado, ok=resultado == "comentado", origem=marca,
+                                 agora=agora)
+    registrar_tentativa("post_antigo", resultado, agora=agora)
+    return ("post antigo: comentado e curtido" if resultado == "comentado"
+            else "post antigo: comentário enviado sem aparecer na lista")
+
+
 # --- A rodada ---
 
 # A pausa que o robô faz sozinho quando perde o celular (robo_pausa_motivo); o painel a
@@ -6396,6 +6722,13 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
                 gravar_estado(feed_em=_momento(agora))
                 resultados.append(interagir_no_feed(d, agora))
             return "; ".join(resultados)
+        if acao in ("comentar_post", "post_antigo"):
+            rascunho = pegar(ident)
+            if not rascunho or not rascunho["link_post"]:
+                return f"{acao}: o post não está mais no banco"
+            if acao == "post_antigo":
+                return comentar_post_antigo(d, rascunho, agora)
+            return f"comentário no post: {tentar_o_comentario_do_post(d, rascunho, agora)}"
         if acao == "apagar":
             resultado = apagar_do_app(d, pegar(ident))
             registrar_tentativa("apagar", "apagado", produto=produto, agora=agora)

@@ -35,6 +35,7 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.FOLGA_DA_SUSPENSAO_SV == robo.FOLGA_DA_SUSPENSAO
     assert robo.PADRAO["robo_pausado"] is True
     assert checkup.COMENTARIOS_NO_FEED_POR_DIA == robo.interacoes.COMENTARIOS_NO_FEED_POR_DIA
+    assert checkup.POSTS_ANTIGOS_POR_DIA == robo.interacoes.POSTS_ANTIGOS_POR_DIA
     assert checkup.HORAS_DAS_RESPOSTAS_SV == robo.HORAS_DAS_RESPOSTAS
     assert checkup.HORA_DAS_RESPOSTAS_SEM_JANELA_SV == robo.HORA_DAS_RESPOSTAS_SEM_JANELA
     assert checkup.HORARIO_DO_ROBO_SV == robo.ps.HORARIO_DAS_RODADAS
@@ -803,6 +804,36 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     assert "as Notificações não foram lidas hoje" in texto and "1 de 3 comentários hoje" in texto
     pausado = dict(robo_sv, ativo=False)
     assert checkup.pontos_de_atencao([], {}, {}, pausado, {}, ("x", 1.0, 1), AGORA, interacoes=vazio) == []
+
+
+def test_comentario_no_proprio_video_no_radar():
+    # Escolha do Rafael (P148 2): o de depois do post vai com o post; o do post antigo é interação,
+    # 1 por dia, cobrado à noite quando algum post podia ganhá-lo.
+    import registro_processos
+    import robo_shopee_video as robo
+    assert checkup._tipo_da_atividade("post antigo: comentar") == "interação"
+    assert checkup._tipo_da_atividade("próprio post: curtir o vídeo") == "preparo"
+    assert checkup._tipo_da_atividade(acao="post_antigo") == "interação"
+    assert checkup._tipo_da_atividade(acao="comentar_post") == "preparo"
+    antes = AGORA - timedelta(hours=2)
+    registro_processos.registrar("shopee_video", "próprio post: comentar", "comentado", ok=True, agora=antes)
+    registro_processos.registrar("shopee_video", "próprio post: comentar", "desistiu", "x", ok=False, agora=antes)
+    registro_processos.registrar("shopee_video", "próprio post: curtir o comentário", "curtido", ok=True, agora=antes)
+    r = checkup.interacoes_da_shopee_video(AGORA)
+    assert r["proprio"] == {"comentado": 1, "desistiu": 1} and r["antigos_hoje"] == 0
+    assert r["proprio_curtidas"] == {"curtir o comentário → curtido": 1} and not r["antigo_possivel"]
+    # Um post do robô de 10 dias atrás, nunca comentado: podia ganhar o comentário de hoje.
+    ident = robo.criar("video:1", None)
+    robo.atualizar(ident, estado="postado", postado_em=(AGORA - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S"),
+                   link_post="https://exemplo.com/post")
+    r = checkup.interacoes_da_shopee_video(AGORA)
+    assert r["antigo_possivel"]
+    robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
+    r.update(respostas={}, duplicadas=0, rodou_hoje=True, feed_hoje=3, feed_repetidos=0,
+             seguidores={"lido_hoje": True, "dia": None, "semana": None})
+    texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
+    assert "1 post(s) sem o comentário depois de 3 tentativas" in texto
+    assert "0 de 1 post antigo comentado hoje" in texto
 
 
 def test_leituras_das_notificacoes_contam_as_vezes_do_dia():

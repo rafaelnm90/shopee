@@ -865,3 +865,214 @@ def test_resposta_no_lugar_errado_nao_curte_o_comentario(avisos, ia):
 def _registro_das_curtidas():
     return [resultado for _m, _p, resultado, _d, _o
             in robo.registro_processos.sequencia("shopee_video", "curtir comentário", "2000-01-01 00:00:00")]
+
+
+# --- O comentário no próprio vídeo (P148 2) ---
+
+LINK_DO_POST = "https://sv.shopee.com.br/share-video/post1"
+TITULO_DO_POST = "Vestido Infantil Gatinho"
+
+
+class CelularDoPost:
+    """
+    O vídeo do Rafael aberto pelo link do post (o player do feed) e o painel de comentários
+    dele, com os comentários do Rafael (selo Criador; o novo aparece no alto). em_analise: o
+    link abre o aviso de vídeo em análise, sem o player.
+    """
+
+    def __init__(self, comentarios=(), curtido=False, em_analise=False):
+        self.atual, self.curtido, self.em_analise = "inicio", curtido, em_analise
+        self.comentarios, self.curtidos_no_painel = list(comentarios), set()
+        self.em_foco, self.escrito, self.toques = False, "", []
+
+    def dump_hierarchy(self):
+        if self.atual == "inicio":
+            return _xml(*BARRA)
+        if self.atual == "player":
+            if self.em_analise:
+                return _xml(_el("Vídeo em Análise", caixa=(300, 1000, 780, 1060)),
+                            _el("em breve estará disponível ao público", caixa=(200, 1080, 880, 1130)), *BARRA)
+            return _player("Loja Rafa", TITULO_DO_POST, coracao="unlike icon" if self.curtido else "like icon")
+        feitos = [_comentario("Loja Rafa", texto, 1250 + 250 * k, criador=True, curtido=texto in self.curtidos_no_painel)
+                  for k, texto in enumerate(self.comentarios)]
+        return _painel(*feitos, campo="" if self.atual == "escrevendo" else None)
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        tocados = [el for el in ps.elementos(self.dump_hierarchy()) if ps._dentro((x, y), el["caixa"])]
+        textos = [el["texto"] or el["descricao"] for el in tocados]
+        self.toques.append(textos[0] if textos else (x, y))
+        if self.atual == "player" and any(t in ("like icon", "unlike icon") for t in textos):
+            self.curtido = not self.curtido
+        elif self.atual == "player" and "comment video icon" in textos:
+            self.atual = "painel"
+        elif self.atual == "painel" and "input add a comment" in textos:
+            self.atual, self.em_foco = "escrevendo", True
+        elif self.atual == "escrevendo" and "send comment" in textos:
+            self.comentarios.insert(0, self.escrito)
+            self.atual, self.escrito, self.em_foco = "painel", "", False
+        elif self.atual == "painel" and "button comment like" in textos:
+            self.curtidos_no_painel ^= {self.comentarios[round((y - 1275) / 250)]}
+
+    def __call__(self, **seletor):
+        return Campo(self)
+
+    def press(self, tecla, meta=None):
+        if self.em_foco:
+            self.em_foco = False
+        elif self.atual in ("painel", "escrevendo"):
+            self.atual = "player"
+        else:
+            self.atual = "inicio"
+
+    def app_start(self, pacote, wait=False):
+        pass
+
+    def window_size(self):
+        return 1080, 2400
+
+    def swipe(self, *pontos):
+        pass
+
+
+def _postado(link=LINK_DO_POST, quando="2026-11-01 10:00:00"):
+    ident = robo.criar("video:1", None)
+    robo.atualizar(ident, estado="postado", criado_em=quando, postado_em=quando, link_post=link, titulo=TITULO_DO_POST,
+                   produtos=["Vestido Infantil Gatinho Estampado"], comentario="Amei! #achadinhos")
+    return ident
+
+
+@pytest.fixture
+def ia_do_proprio(monkeypatch):
+    pedidos = []
+
+    async def proprio(produto="", titulo="", anteriores=()):
+        pedidos.append(list(anteriores))
+        return f"Esse vale muito a pena! {len(pedidos)}"
+
+    monkeypatch.setattr(it, "gerar_proprio", proprio)
+    # O registro guarda as datas dos testes (2026-11-01), mais velhas que os 3 dias de sempre.
+    monkeypatch.setattr(robo.registro_processos, "DIAS_DO_REGISTRO", 3650)
+    return pedidos
+
+
+@pytest.fixture
+def pelo_link(monkeypatch):
+    abertos = []
+    monkeypatch.setattr(robo.ps, "abrir_link", lambda d, link: abertos.append(link) or setattr(d, "atual", "player"))
+    return abertos
+
+
+def _passos_do_proprio():
+    return [(processo, resultado) for _m, processo, resultado, _d, _o in robo.registro_processos.sequencia(
+        "shopee_video", "próprio post:", "2000-01-01 00:00:00")]
+
+
+def test_post_antigo_escolhido_nos_30_dias_e_no_maximo_1_vez_por_semana():
+    # Escolha do Rafael (P148 2): 1 post antigo por dia, dos últimos 30 dias, cada um no máximo
+    # 1 vez por semana, contando o comentário de depois do post.
+    agora = momento("2026-11-10 20:00")
+    novo = {"link_post": "https://exemplo.com/a", "postado_em": "2026-11-08 10:00:00"}
+    velho = {"link_post": "https://exemplo.com/b", "postado_em": "2026-10-28 10:00:00"}
+    fora = {"link_post": "https://exemplo.com/c", "postado_em": "2026-10-05 10:00:00"}
+    sem_link = {"link_post": "", "postado_em": "2026-11-09 10:00:00"}
+    postados = [velho, novo, fora, sem_link]
+    assert it.escolher_post_antigo(postados, agora) is novo              # o mais novo dos nunca comentados
+    it.guardar(it.marca_do_post(novo["link_post"]), it.TIPO_DO_POST, "comentado", momento("2026-11-08 10:05"))
+    assert it.escolher_post_antigo(postados, agora) is velho
+    it.guardar(it.marca_do_post(velho["link_post"]), it.TIPO_DO_ANTIGO, "comentado", momento("2026-11-05 20:00"))
+    assert it.escolher_post_antigo(postados, agora) is None              # os dois comentados há menos de 7 dias
+    assert it.escolher_post_antigo(postados, momento("2026-11-12 20:30")) is velho
+
+
+def test_comentario_do_proprio_video_pede_de_novo_quando_repete_e_vai_sem_hashtag(monkeypatch):
+    import api_gemini
+    pedidos, respostas = [], iter(["Corre que vale a pena!", "Esse é achado! Está nos produtos do vídeo",
+                                   "Corre que vale a pena!", "corre que vale a pena"])
+
+    async def gerar(prompt):
+        pedidos.append(prompt)
+        return next(respostas)
+
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
+    ja = ["Corre que vale a pena!"]
+    assert asyncio.run(it.gerar_proprio("Vestido", TITULO_DO_POST, ja)) == "Esse é achado! Está nos produtos do vídeo"
+    assert "Corre que vale a pena!" in pedidos[0] and "sem hashtags" in pedidos[0] and len(pedidos) == 2
+    assert asyncio.run(it.gerar_proprio("Vestido", TITULO_DO_POST, ja)) is None   # repetido nas duas vezes
+
+
+def test_depois_do_post_curte_o_video_comenta_e_curte_o_comentario(avisos, ia_do_proprio, pelo_link):
+    ident = _postado()
+    app = CelularDoPost(comentarios=[TITULO_DO_POST])                     # a legenda do vídeo, com o selo
+    assert robo.comentar_depois_do_post(app, ident, momento("2026-11-01 10:01")) == "comentado"
+    texto = "Esse vale muito a pena! 1"
+    assert pelo_link == [LINK_DO_POST] and app.curtido
+    assert app.comentarios[0] == texto and texto in app.curtidos_no_painel
+    # A IA recebe o que o Rafael já tem no vídeo, e o texto fica no post para o próximo não repetir.
+    assert ia_do_proprio == [[TITULO_DO_POST]]
+    assert robo.pegar(ident)["comentarios_proprios"] == [texto]
+    assert any(texto in aviso and "curti o vídeo e o comentário" in aviso for aviso in avisos)
+    assert it.situacao(it.marca_do_post(LINK_DO_POST), it.TIPO_DO_POST)["resultado"] == "comentado"
+    assert {("próprio post: curtir o vídeo", "curtido"), ("próprio post: comentar", "comentado"),
+            ("próprio post: curtir o comentário", "curtido")} <= set(_passos_do_proprio())
+
+
+def test_video_em_analise_volta_a_cada_30_min_e_na_3a_vez_o_comentario_vai_ao_rafael(avisos, ia_do_proprio,
+                                                                                    pelo_link):
+    ident = _postado()
+    app = CelularDoPost(em_analise=True)
+    assert robo.comentar_depois_do_post(app, ident, momento("2026-11-01 10:01")) == "parou"
+    assert app.comentarios == [] and avisos == [] and ia_do_proprio == []
+    assert robo.comentario_do_post_pendente(momento("2026-11-01 10:20")) is None     # antes dos 30 min
+    assert robo.comentario_do_post_pendente(momento("2026-11-01 10:32"))["id"] == ident
+    robo.tentar_o_comentario_do_post(app, robo.pegar(ident), momento("2026-11-01 10:32"))
+    assert avisos == []
+    robo.tentar_o_comentario_do_post(app, robo.pegar(ident), momento("2026-11-01 11:03"))
+    # Na 3ª, desiste: o comentário do Gem vai para ele comentar à mão, e o post não volta mais.
+    assert "não consegui comentar" in avisos[-3] and "em análise" in avisos[-3]
+    assert avisos[-2:] == [robo.ps.AVISO_COMENTARIO, "Amei! #achadinhos"]
+    assert robo.comentario_do_post_pendente(momento("2026-11-01 12:00")) is None
+    assert ("próprio post: comentar", "desistiu") in _passos_do_proprio()
+
+
+def test_coracao_ja_curtido_nao_e_tocado_e_texto_repetido_para_antes_de_escrever(monkeypatch, avisos, pelo_link):
+    async def so_repetido(produto="", titulo="", anteriores=()):
+        return None
+
+    monkeypatch.setattr(it, "gerar_proprio", so_repetido)
+    app = CelularDoPost(comentarios=["Corre que vale a pena!"], curtido=True)
+    with pytest.raises(robo.Parada, match="IA não escreveu"):
+        robo.comentar_no_post(app, robo.pegar(_postado()))
+    assert app.curtido and not {"like icon", "unlike icon"} & set(app.toques)
+    assert app.comentarios == ["Corre que vale a pena!"]                    # nada escrito
+
+
+def test_post_antigo_sai_no_horario_das_interacoes_uma_vez_por_dia(monkeypatch, avisos, ia_do_proprio, pelo_link):
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    config = _janela_das_20_as_21()
+    ident = _postado(quando="2026-10-28 10:00:00")
+    agora = momento("2026-11-01 20:05")
+    robo.gravar_estado(treino_semana=robo.semana(agora), respostas_em="2026-11-01 20:00:00")
+    assert robo.o_que_fazer(config, agora) == ("post_antigo", ident)
+    # Só no Horário das Interações.
+    assert robo.post_antigo_pendente(momento("2026-11-01 15:00"))["id"] == ident
+    assert (robo.o_que_fazer(config, momento("2026-11-01 15:00")) or (None,))[0] != "post_antigo"
+    app = CelularDoPost()
+    assert robo._agir(app, "post_antigo", ident, False, config, agora) == "post antigo: comentado e curtido"
+    assert app.curtido and app.comentarios == ["Esse vale muito a pena! 1"]
+    assert it.antigos_hoje(agora) == 1 and robo.post_antigo_pendente(momento("2026-11-01 20:40")) is None
+    # No dia seguinte, o mesmo post não volta antes de 7 dias.
+    assert robo.post_antigo_pendente(momento("2026-11-02 20:05")) is None
+    assert robo.post_antigo_pendente(momento("2026-11-08 20:10"))["id"] == ident
+
+
+def test_erro_no_comentario_nunca_desfaz_o_post_e_o_aviso_diz_so_a_curtida_que_saiu(monkeypatch, avisos):
+    # O post já foi ao ar: um erro no comentário de depois dele não pode virar "o post não saiu".
+    def quebra(d, rascunho, agora=None):
+        raise RuntimeError("banco travado")
+
+    monkeypatch.setattr(robo, "tentar_o_comentario_do_post", quebra)
+    assert robo.comentar_depois_do_post(CelularDoPost(), _postado()) == "erro"
+    aviso = robo._aviso_do_comentario("comentado", "Corre que vale!", ("não confirmado", "curtido"))
+    assert "curti o comentário" in aviso and "curti o vídeo" not in aviso and aviso.endswith("Corre que vale!")
+    assert "não apareceu na lista" in robo._aviso_do_comentario("não confirmado", "Oi", ("curtido", ""))
