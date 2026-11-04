@@ -39,7 +39,7 @@ def test_pacote_tem_tudo_e_so_o_dono_le(tmp_path):
     projeto.mkdir()
     _projeto(str(projeto))
 
-    caminho, tamanho, removidos = backup_dados.fazer_backup(str(projeto), str(destino))
+    caminho, tamanho, removidos = backup_dados.fazer_backup(str(projeto), str(destino), casa=str(tmp_path / "casa"))
 
     assert tamanho > 0 and removidos == 0 and oct(os.stat(caminho).st_mode & 0o777) == "0o600"
     with tarfile.open(caminho) as tar:
@@ -62,7 +62,7 @@ def test_ficam_so_os_7_mais_novos(tmp_path):
     for dia in range(1, 10):
         (destino / f"shopee_backup_2026-09-{dia:02d}_0340.tar.gz").write_bytes(b"velho")
 
-    caminho, _t, removidos = backup_dados.fazer_backup(str(projeto), str(destino))
+    caminho, _t, removidos = backup_dados.fazer_backup(str(projeto), str(destino), casa=str(tmp_path / "casa"))
 
     restantes = sorted(os.listdir(destino))   # nenhuma sobra da montagem
     assert removidos == 3 and len(restantes) == 7 and restantes[-1] == os.path.basename(caminho)
@@ -107,7 +107,7 @@ def test_sobra_de_backup_interrompido_sai(tmp_path):
     sobra = destino / ".montando_abc"
     sobra.mkdir(parents=True)
     os.utime(sobra, (0, 0))
-    backup_dados.fazer_backup(str(projeto), str(destino))
+    backup_dados.fazer_backup(str(projeto), str(destino), casa=str(tmp_path / "casa"))
     assert not sobra.exists()
 
 
@@ -121,7 +121,7 @@ def test_copia_cifrada_so_abre_com_a_senha_dela(tmp_path, monkeypatch):
     projeto, destino = tmp_path / "projeto", tmp_path / "backups"
     projeto.mkdir()
     _projeto(str(projeto))
-    pacote, _t, _r = backup_dados.fazer_backup(str(projeto), str(destino))
+    pacote, _t, _r = backup_dados.fazer_backup(str(projeto), str(destino), casa=str(tmp_path / "casa"))
 
     senha = backup_dados.chave_da_copia()
     assert backup_dados.chave_da_copia() == senha                 # criada uma vez só
@@ -174,7 +174,8 @@ def _backup_de_teste(bm, monkeypatch, tmp_path):
     projeto.mkdir()
     _projeto(str(projeto))
     original = backup_dados.fazer_backup          # o mesmo módulo: guardar antes de trocar
-    monkeypatch.setattr(bm.backup_dados, "fazer_backup", lambda: original(str(projeto), str(destino)))
+    monkeypatch.setattr(bm.backup_dados, "fazer_backup",
+                        lambda: original(str(projeto), str(destino), casa=str(tmp_path / "casa")))
     return destino
 
 
@@ -263,3 +264,47 @@ def test_robo_sobe_sem_copia_recente_e_manda_a_do_ultimo_backup(bm, monkeypatch,
 
 def test_sem_copia_ainda_o_status_avisa(bm):
     assert bm.linha_da_copia_fora() == "⚠️ Cópia do backup no seu privado: ainda não saiu"
+
+
+def test_chaves_de_fora_do_projeto_vao_no_pacote_e_voltam_ao_lugar(tmp_path, monkeypatch):
+    # P147 1: a chave das cópias cifradas e a do adb (o celular do robô já a reconhece) vão no
+    # pacote e voltam à casa do usuário no servidor novo, só o dono lendo.
+    _senha_no_tmp(monkeypatch, tmp_path)
+    projeto, destino, casa = tmp_path / "projeto", tmp_path / "backups", tmp_path / "casa"
+    projeto.mkdir()
+    _projeto(str(projeto))
+    for relativo, conteudo in ((".config/registro_admins.chave", b"chave do registro"),
+                               (".android/adbkey", b"chave do adb"), (".android/adbkey.pub", b"publica")):
+        (casa / relativo).parent.mkdir(parents=True, exist_ok=True)
+        (casa / relativo).write_bytes(conteudo)
+    (casa / ".config" / "outra_coisa").write_bytes(b"fica de fora")
+
+    pacote, _t, _r = backup_dados.fazer_backup(str(projeto), str(destino), casa=str(casa))
+    with tarfile.open(pacote) as tar:
+        nomes = tar.getnames()
+    assert "fora_do_projeto/.config/registro_admins.chave" in nomes and "fora_do_projeto/.android/adbkey" in nomes
+    assert not any("outra_coisa" in n or "backup_fora" in n for n in nomes)   # a senha da cópia não vai
+
+    cifrado = backup_dados.cifrar_copia(pacote)
+    nova_casa = tmp_path / "servidor_novo"
+    backup_dados.abrir_copia(cifrado, str(tmp_path / "volta"), backup_dados.chave_da_copia().decode(),
+                             casa=str(nova_casa))
+    assert (nova_casa / ".android" / "adbkey").read_bytes() == b"chave do adb"
+    assert (nova_casa / ".config" / "registro_admins.chave").read_bytes() == b"chave do registro"
+    assert oct(os.stat(nova_casa / ".android" / "adbkey").st_mode & 0o777) == "0o600"
+    assert not (tmp_path / "volta" / "fora_do_projeto").exists()   # nada disso fica na pasta do projeto
+    assert (tmp_path / "volta" / "banco_dados.db").exists()
+
+
+def test_pacote_com_nome_estranho_em_fora_do_projeto_nao_escreve_na_casa(tmp_path):
+    # Só os nomes da lista voltam à casa: um pacote com outro caminho não escreve fora dela.
+    pacote = tmp_path / "pacote.tar.gz"
+    origem = tmp_path / "estranho"
+    origem.write_bytes(b"x")
+    with tarfile.open(pacote, "w:gz") as tar:
+        tar.add(origem, arcname="fora_do_projeto/.bashrc")
+        tar.add(origem, arcname="fora_do_projeto/../../fora.txt")
+    casa = tmp_path / "casa"
+    with open(pacote, "rb") as arquivo:
+        backup_dados.abrir_pacote(arquivo, str(tmp_path / "projeto"), casa=str(casa))
+    assert not (casa / ".bashrc").exists() and not (tmp_path / "fora.txt").exists()
