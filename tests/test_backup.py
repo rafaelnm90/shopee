@@ -208,6 +208,25 @@ def test_backup_vai_cifrado_ao_privado_e_fica_so_a_copia_mais_nova(bm, monkeypat
     assert senha.decode() not in str(estado)
 
 
+def test_legenda_da_copia_mostra_onde_esta_a_senha(bm, monkeypatch, tmp_path):
+    # Com o servidor fora do ar o painel não abre: o lugar da senha vai na própria cópia.
+    _senha_no_tmp(monkeypatch, tmp_path)
+    _backup_de_teste(bm, monkeypatch, tmp_path)
+    enviados = _bot_falso(bm, monkeypatch)
+    quando = datetime(2026, 11, 4, 3, 41)
+    sem_onde = bm.legenda_da_copia(quando, 3 * 1024 * 1024)
+    assert "04/11 às 03:41" in sem_onde and "3.0 MB" in sem_onde
+    assert "Acessos do Servidor 🔐 → Editar Senha do Backup ✏️" in sem_onde and "<a href" not in sem_onde
+    assert "Editar Senha do Backup ✏️" in bm.texto_da_senha_da_copia("x")
+
+    link = "https://exemplo.com/arquivo?a=1&b=2"
+    bm.painel_acessos.salvar_servico("backup", {"onde": link})
+    rodar(bm.backup_diario())
+    legenda = enviados["documentos"][0][2]["caption"]
+    assert '<a href="https://exemplo.com/arquivo?a=1&amp;b=2">' in legenda and "senha guardada em" in legenda
+    assert "no caderno &lt;2&gt;" in bm.legenda_da_copia(quando, 1, onde="no caderno <2>")
+
+
 def test_copia_que_nao_sai_avisa_e_nao_deixa_o_arquivo(bm, monkeypatch, tmp_path):
     _senha_no_tmp(monkeypatch, tmp_path)
     destino = _backup_de_teste(bm, monkeypatch, tmp_path)

@@ -10,18 +10,21 @@ name: Avisar o Rafael
 #   print       o print da tela final e o 1º quadro do vídeo do rascunho mais novo esperando a
 #               aprovação, feito desde "dados" (AAAA-MM-DDTHH:MM, opcional), para o Rafael conferir a
 #               capa (robo_shopee_video.py --print-do-rascunho); o log mostra só o horário do rascunho.
+#   acesso      um dado do Acessos do Servidor 🔐 que o Rafael passou ao Claude (ex.: onde está a
+#               senha da cópia do backup), cifrado em "dados" (painel_acessos.py cifrar): o servidor
+#               guarda e avisa o Rafael; o log mostra só o nome do serviço.
 # Só roda à mão (run_workflow).
 #
 # O repositório é público, e os logs e as entradas do Actions também: o assunto vai
-# em poucas palavras, sem dado privado, e a pergunta vai cifrada com a chave do servidor.
+# em poucas palavras, sem dado privado, e a pergunta e o acesso vão cifrados com a chave do servidor.
 on:
   workflow_dispatch:
     inputs:
       acao:
-        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada), respondida ou print (do rascunho mais novo)"
+        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada), respondida, print (do rascunho mais novo) ou acesso (cifrado)"
         required: false
         type: choice
-        options: [aviso, pergunta, respondida, print]
+        options: [aviso, pergunta, respondida, print, acesso]
         default: aviso
       assunto:
         description: "Só no aviso: assunto em poucas palavras e sem dado privado"
@@ -32,7 +35,7 @@ on:
         required: false
         type: string
       dados:
-        description: "pergunta: o texto cifrado; respondida: o código (ex.: P3); print: desde quando (AAAA-MM-DDTHH:MM)"
+        description: "pergunta e acesso: o texto cifrado; respondida: o código (ex.: P3); print: desde quando (AAAA-MM-DDTHH:MM)"
         required: false
         type: string
 
@@ -63,5 +66,6 @@ jobs:
               pergunta) venv/bin/python3 perguntas_rafael.py nova "$DADOS" ;;
               respondida) venv/bin/python3 perguntas_rafael.py respondida "$DADOS" ;;
               print) venv/bin/python3 robo_shopee_video.py --print-do-rascunho "$DADOS" ;;
+              acesso) venv/bin/python3 painel_acessos.py guardar "$DADOS" ;;
               *) venv/bin/python3 avisar_rafael.py "$ASSUNTO" "$LINK" ;;
             esac
