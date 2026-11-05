@@ -413,6 +413,33 @@ def test_prazo_anotado_de_hora_em_hora_e_na_hora_pelo_painel(cr, monkeypatch):
     assert cr.anotar_prazo(forcar=True, agora=agora + timedelta(minutes=62)) == 7 and len(lidas) == 3
 
 
+def test_painel_nao_espera_o_adb_travado(bm, cr, monkeypatch, Msg, Est):
+    # Vídeo do Rafael de 04/11/2026: com o adb do celular travado, o Robô Automático 🤖 e o Celular
+    # do Robô 📱 esperavam o prazo inteiro do adb a cada tela. Com a ligação falhando há pouco, o
+    # painel mostra "desconectado" sem perguntar.
+    from datetime import datetime, timedelta
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00", visto_em="2026-11-02 23:43:00",
+               falha="o adb não respondeu", falha_em="2026-11-04 22:14:00")
+    perguntas = []
+    monkeypatch.setattr(cr, "conectado", lambda: perguntas.append("adb") or False)
+    agora = datetime(2026, 11, 4, 22, 20)
+    assert cr.conectado_no_painel(agora) is False and perguntas == []
+    # Passados 20 min, pergunta uma vez; o "não respondeu" vale outros 20 min.
+    assert cr.conectado_no_painel(agora + timedelta(minutes=30)) is False and perguntas == ["adb"]
+    assert cr.conectado_no_painel(agora + timedelta(minutes=35)) is False and perguntas == ["adb"]
+    # Visto depois (o celular voltou): pergunta na hora.
+    cr._gravar(visto_em="2026-11-04 23:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: perguntas.append("adb de novo") or True)
+    assert cr.conectado_no_painel(agora + timedelta(minutes=41)) is True and perguntas[-1] == "adb de novo"
+    # As duas telas usam o conectado do painel.
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    monkeypatch.setattr(cr, "conectado_no_painel", lambda: perguntas.append("painel") or False)
+    monkeypatch.setattr(cr, "conectado", lambda: pytest.fail("o painel não espera o adb"))
+    rodar(sv.mostrar_robo(Msg("Robô Automático 🤖"), Est()))
+    rodar(sv.celular_handler(Msg("Celular do Robô 📱"), Est()))
+    assert perguntas[-2:] == ["painel", "painel"]
+
+
 def test_porta_guardada_que_a_varredura_perde_e_conferida_sozinha(cr, monkeypatch):
     # 04/11/2026, 21:33: a varredura de todas as portas não achou a porta guardada, que respondia
     # no estado logo depois; o robô dizia "Depuração desligada" sem tentar reiniciar o adb.

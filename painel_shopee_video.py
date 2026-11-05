@@ -1004,7 +1004,7 @@ async def mostrar_painel(message: types.Message, state: FSMContext):
 async def mostrar_robo(message: types.Message, state: FSMContext):
     await state.set_state(ShopeeVideoFluxo.menu_robo)
     config = ler_config()
-    celular = await asyncio.to_thread(celular_robo.conectado)
+    celular = await asyncio.to_thread(celular_robo.conectado_no_painel)
     await message.answer(texto_robo(config, celular=celular), parse_mode="HTML", reply_markup=teclado_robo(config))
 
 
@@ -2151,7 +2151,7 @@ def _data_curta(texto):
 async def texto_celular():
     dados = celular_robo.ler()
     rede = await asyncio.to_thread(celular_robo.celulares_na_rede)
-    conectado = await asyncio.to_thread(celular_robo.conectado) if dados.get("porta") else False
+    conectado = await asyncio.to_thread(celular_robo.conectado_no_painel) if dados.get("porta") else False
     # Conectado, lê o prazo do pareamento na hora (e guarda, para o aviso do alertas.py).
     prazo = await asyncio.to_thread(celular_robo.anotar_prazo, True) if conectado else None
     if not rede:
@@ -2309,7 +2309,7 @@ async def pedir_reconexao(message: types.Message, state: FSMContext):
         await message.answer(f"⚠️ O celular ainda não foi pareado: toque em {BOTAO_PAREAR} primeiro.",
                              reply_markup=teclado_celular())
         return
-    await message.answer("⏳ Procurando o celular guardado (até 1 min)...")
+    await message.answer("⏳ Procurando o celular guardado (pode levar até 3 min)...")
     ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
     if ok:
         logger.info("✅ Celular do robô: reconectado sozinho.")
@@ -2522,7 +2522,7 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
                                  "postagens aqui no privado.", parse_mode="HTML")
         await mostrar_robo(message, state)
         return
-    await message.answer("⏳ Procurando o celular guardado (até 1 min)...")
+    await message.answer("⏳ Procurando o celular guardado (pode levar até 3 min)...")
     ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
     if not ok:
         logger.warning(f"⚠️ Robô automático: não retomou, celular fora ({resultado}).")
