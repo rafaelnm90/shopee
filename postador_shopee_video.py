@@ -1907,7 +1907,14 @@ def tirar_da_fileira(d, nomes, indice):
 # "Você Também Pode Gostar", recomendações da Shopee, que não são do vídeo. O toque no nome
 # de um produto abre a página dele (HalfPdpActivity), com o coração e o nome no id
 # labelProductPageProductName. Vídeo apagado: "Este vídeo foi removido".
-FIM_DOS_VINCULADOS = ("ver mais", "você também pode gostar")
+# O "Ver Mais (N)" (gravação do Rafael de 01/11/2026): a lista mostra 2 cartões de cara e o botão
+# com os outros N; o toque abre os outros na mesma lista, e depois do último vem "Esconder",
+# antes do "Você Também Pode Gostar". Os de baixo aparecem arrastando a lista devagar, de 70% a
+# 45% da altura da tela (ARRASTO_DA_LISTA): sem embalo, o fim da lista do criador nunca passa
+# entre uma olhada e a seguinte, e as recomendações ficam de fora.
+FIM_DOS_VINCULADOS = ("ver mais", "esconder", "você também pode gostar")
+FIM_DA_LISTA_DO_CRIADOR = ("esconder", "você também pode gostar")
+ARRASTO_DA_LISTA = (70, 45)
 
 
 def video_removido(xml):
@@ -1934,12 +1941,12 @@ def _texto_de_nome(texto):
                                  or texto_proibido(normal) or normal == "apenas vídeo")
 
 
-def produtos_vinculados(xml):
+def cartoes_vinculados(xml):
     """
-    Onde tocar para abrir cada produto que o criador vinculou ao vídeo, na lista do Ver
-    Produtos, de cima para baixo: o nome (o texto mais longo) de cada cartão abaixo do
-    título e acima de "Ver Mais" e de "Você Também Pode Gostar". Ponto sobre um botão de
-    comprar fica de fora.
+    Os produtos que o criador vinculou ao vídeo que a lista do Ver Produtos mostra agora, de
+    cima para baixo: [(o nome do cartão, onde tocar para abrir o produto)]. O nome é o texto
+    mais longo de cada cartão abaixo do título e acima de "Ver Mais", de "Esconder" e de "Você
+    Também Pode Gostar". Ponto sobre um botão de comprar fica de fora.
     """
     lista = elementos(xml)
     topo = max((el["caixa"][3] for el in lista if _normal(el["texto"]).startswith("ver produtos")), default=0)
@@ -1947,16 +1954,58 @@ def produtos_vinculados(xml):
     cartoes = sorted((el for el in lista if el["clicavel"] and el["caixa"][1] >= topo and el["caixa"][3] <= fim
                       and el["caixa"][2] - el["caixa"][0] >= 800 and 150 <= el["caixa"][3] - el["caixa"][1] <= 500),
                      key=lambda el: el["caixa"][1])
-    pontos = []
+    achados = []
     for cartao in cartoes:
         nomes = [el for el in lista if el["texto"] and _texto_de_nome(el["texto"]) and el is not cartao
                  and _dentro(_centro(el), cartao["caixa"])]
         if not nomes:
             continue
-        x, y = _centro(max(nomes, key=lambda el: len(el["texto"])))
+        nome = max(nomes, key=lambda el: len(el["texto"]))
+        x, y = _centro(nome)
         if not proibido_no_ponto(xml, x, y):
-            pontos.append((x, y))
-    return pontos
+            achados.append((sem_o_selo_colado(nome["texto"]).strip(), (x, y)))
+    return achados
+
+
+def produtos_vinculados(xml):
+    """Onde tocar para abrir cada produto que o criador vinculou (cartoes_vinculados), de cima para baixo."""
+    return [ponto for _nome, ponto in cartoes_vinculados(xml)]
+
+
+def ver_mais_da_lista(xml):
+    """O centro do "Ver Mais (N)" da lista do Ver Produtos, que abre os outros produtos do criador; None sem ele."""
+    botao = next((el for el in elementos(xml) if _normal(el["texto"]).startswith("ver mais")), None)
+    return _centro(botao) if botao else None
+
+
+def quantos_no_ver_mais(xml):
+    """Quantos produtos o "Ver Mais (N)" da lista do Ver Produtos esconde (o N); 0 sem o botão ou sem o número."""
+    for el in elementos(xml):
+        achado = re.match(r"ver mais\s*\((\d+)\)", _normal(el["texto"]))
+        if achado:
+            return int(achado.group(1))
+    return 0
+
+
+def lista_do_criador_na_tela(xml):
+    """
+    A tela mostra um ponto conhecido da lista do Ver Produtos: o título "Ver Produtos (N)", o "Ver
+    Mais", o "Esconder" ou o "Você Também Pode Gostar"? Sem nenhum deles (nem um cartão já visto),
+    os cartões da tela podem ser recomendações.
+    """
+    return any(_normal(el["texto"]).startswith(("ver produtos",) + FIM_DOS_VINCULADOS) for el in elementos(xml))
+
+
+def fim_da_lista_do_criador(xml):
+    """A lista do Ver Produtos mostra o fim dos produtos do criador ("Esconder" ou "Você Também Pode Gostar")?"""
+    return any(_normal(el["texto"]).startswith(FIM_DA_LISTA_DO_CRIADOR) for el in elementos(xml))
+
+
+def rolar_a_lista_devagar(d):
+    """Arrasta a lista do Ver Produtos para cima devagar, um quarto da tela (ARRASTO_DA_LISTA), sem embalo."""
+    largura, altura = d.window_size()
+    de, ate = (altura * pct // 100 for pct in ARRASTO_DA_LISTA)
+    d.swipe(largura // 2, de, largura // 2, ate, SEGUNDOS_DO_ARRASTO)
 
 
 def barra_dos_produtos(xml):
