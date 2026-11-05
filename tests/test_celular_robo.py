@@ -30,6 +30,7 @@ def de_verdade(monkeypatch):
              "certificado": celular_robo.certificado_do_celular_chega}
     monkeypatch.setattr(celular_robo, "adb_do_celular_responde", lambda ip, porta, prazo=0: True)
     monkeypatch.setattr(celular_robo, "certificado_do_celular_chega", lambda ip, porta, prazo=0: None)
+    monkeypatch.setattr(celular_robo, "PAUSA_ENTRE_RECONEXOES", 0)
     return reais
 
 
@@ -245,7 +246,7 @@ def test_reconecta_sozinho_procurando_a_porta_nova(cr, monkeypatch):
     assert cr.reconectar_sozinho() == (True, "moto g(100)")
     # A porta guardada é tentada uma vez, depois de desfazer a conexão presa; na busca, não de novo.
     # (Os comandos "shell" são a leitura do motivo da queda, na volta.)
-    assert [p for p in pedidos if "shell" not in p] == [("adb", "disconnect", f"{IP}:37000")]
+    assert [p for p in pedidos if "shell" not in p] == [("adb", "devices"), ("adb", "disconnect", f"{IP}:37000")]
     assert tentadas == [37000, 39999, 41000]
 
 
@@ -259,7 +260,7 @@ def test_conexao_presa_volta_na_porta_guardada_sem_procurar_outra(cr, monkeypatc
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
     monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)") if porta == 37000 else (False, "x"))
     assert cr.reconectar_sozinho() == (True, "moto g(100)")
-    assert pedidos == [("adb", "disconnect", f"{IP}:37000")]
+    assert pedidos == [("adb", "devices"), ("adb", "disconnect", f"{IP}:37000")]
 
 
 def test_porta_guardada_aberta_que_nao_conecta_nao_culpa_a_depuracao(cr, monkeypatch):
@@ -1209,3 +1210,53 @@ def test_adb_do_servidor_derrubado_a_forca_fica_no_registro_com_quem_o_iniciou(c
     # O log do registro é lido pelo checkup, que é público: nem o endereço nem a porta.
     assert IP not in str(consultar("SELECT detalhe FROM registro_processos WHERE processo = ?",
                                    cr.PROCESSO_DO_ADB_TRAVADO))
+
+
+def test_servidor_do_adb_travado_e_derrubado_antes_da_reconexao_que_insiste(cr, monkeypatch):
+    # Pedido do Rafael (05/11/2026): evitar que a queda de 03/11 se repita e reconectar à força depois
+    # de derrubar o adb. Sem resposta à lista de aparelhos, o servidor do adb é derrubado na hora, e a
+    # reconexão insiste na mesma rodada.
+    from conftest import consultar
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    pedidos = []
+
+    def rodar_falso(*partes, timeout=0):
+        pedidos.append(partes)
+        if partes == ("adb", "devices"):
+            return None
+        if partes[0] == "ps":
+            return 0, "4321 135000 adb -L tcp:5037 fork-server server --reply-fd 4"
+        return 0, ""
+    monkeypatch.setattr(cr.av, "_rodar", rodar_falso)
+    monkeypatch.setattr(cr, "_grupo_do_processo", lambda pid: "0::/system.slice/bot_mestre_bot.service\n")
+    tentativas = iter([(False, "o adb não respondeu", False), (False, "o adb não respondeu", False),
+                       (True, "moto g(100)", True)])
+    monkeypatch.setattr(cr, "_reconectar", lambda: next(tentativas))
+    monkeypatch.setattr(cr, "anotar_motivo_da_queda", lambda *partes, **nomes: None)
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert ("pkill", "-KILL", "-x", "adb") in pedidos and next(tentativas, None) is None
+    sql = "SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC"
+    assert consultar(sql, cr.PROCESSO_DO_ADB_TRAVADO) == ("voltou", "rodava há 38 h, iniciado por o bot")
+    # O servidor que responde não é derrubado, e sem derrubar não se insiste.
+    pedidos.clear()
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
+    cr._gravar(adb_derrubado_em="")
+    tentativas = iter([(False, "a Depuração por Wi-Fi está desligada", False), (True, "x", True)])
+    monkeypatch.setattr(cr, "_reconectar", lambda: next(tentativas))
+    assert cr.reconectar_sozinho()[0] is False
+    assert ("pkill", "-KILL", "-x", "adb") not in pedidos and next(tentativas)[0] is True
+    # Durante o pareamento pelo QR, nem a pergunta ao adb (que derrubaria o pareamento).
+    pedidos.clear()
+    cr._gravar(pareando_ate="2999-01-01 00:00:00")
+    assert cr.reconectar_sozinho() == (False, cr.PAREANDO_PELO_QR) and pedidos == []
+
+
+@pytest.mark.parametrize("saida, esperado", [
+    ((0, "Android Debug Bridge version 1.0.41\nVersion 34.0.4-debian\nInstalled as /usr/lib/x/adb"),
+     "instalado (versão 34.0.4-debian)"),
+    (None, "instalado"),
+])
+def test_versao_do_adb_no_estado(cr, monkeypatch, saida, esperado):
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: saida)
+    assert cr.av.versao_do_adb() == esperado
