@@ -55,6 +55,8 @@ COMO_PAREAR = ("pareie de novo em Celular do Robô 📱 → Parear Celular 🔗 
 # Onde o Android abre a porta da Depuração por Wi-Fi: as portas "efêmeras" do Linux,
 # sorteadas cada vez que a depuração é ligada.
 PORTAS_DA_DEPURACAO = range(32768, 61000)
+# Segundos para a porta guardada responder quando conferida sozinha (a varredura usa 0,5 s).
+PRAZO_DA_PORTA_GUARDADA = 3
 
 # Por que o celular saiu: o Android desliga a Depuração por Wi-Fi sozinho quando o Wi-Fi cai,
 # quando o celular troca de ponto de Wi-Fi (outro roteador, um repetidor ou a outra frequência do
@@ -285,6 +287,11 @@ def portas_abertas(ip, portas=PORTAS_DA_DEPURACAO, prazo=0.5, juntas=400):
     return asyncio.run(todas())
 
 
+def porta_responde(ip, porta):
+    """A porta aceita conexão agora, conferida sozinha e com mais tempo que na varredura?"""
+    return porta in portas_abertas(ip, [porta], prazo=PRAZO_DA_PORTA_GUARDADA)
+
+
 def reconectar_sozinho():
     """
     Reconecta sem o Rafael mandar a porta: primeiro a porta guardada, refazendo a conexão
@@ -331,6 +338,11 @@ def _reconectar():
             return True, resultado, True
         motivos.append(resultado)
     abertas = portas_abertas(dados["ip"])
+    if dados.get("porta") and dados["porta"] not in abertas and porta_responde(dados["ip"], dados["porta"]):
+        # A varredura de todas as portas, com o prazo curto, pode perder a porta pela rede privada
+        # (04/11/2026: a guardada respondia no estado e não na rodada, e o robô dizia "desligada"
+        # sem tentar reiniciar o adb). A guardada é conferida sozinha, com mais tempo.
+        abertas = [dados["porta"], *abertas]
     for porta in abertas:
         if porta == dados.get("porta"):
             continue

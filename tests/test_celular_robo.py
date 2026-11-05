@@ -366,7 +366,7 @@ def test_porta_nova_que_nao_aceita_o_servidor_nao_culpa_a_porta(cr, monkeypatch)
     cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
     monkeypatch.setattr(cr, "conectado", lambda: False)
     monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
-    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41999])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41999])
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, ""))
     monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, _vencido(cr)) if porta == 41999
                         else (False, "o celular recusou: a porta mudou ou a depuração está desligada"))
@@ -411,6 +411,29 @@ def test_prazo_anotado_de_hora_em_hora_e_na_hora_pelo_painel(cr, monkeypatch):
     assert cr.anotar_prazo(agora=agora + timedelta(minutes=30)) == 7 and lidas == [1]
     assert cr.anotar_prazo(agora=agora + timedelta(minutes=61)) == 7 and lidas == [1, 1]
     assert cr.anotar_prazo(forcar=True, agora=agora + timedelta(minutes=62)) == 7 and len(lidas) == 3
+
+
+def test_porta_guardada_que_a_varredura_perde_e_conferida_sozinha(cr, monkeypatch):
+    # 04/11/2026, 21:33: a varredura de todas as portas não achou a porta guardada, que respondia
+    # no estado logo depois; o robô dizia "Depuração desligada" sem tentar reiniciar o adb.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    conferidas = []
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, portas=cr.PORTAS_DA_DEPURACAO, prazo=0.5:
+                        conferidas.append((list(portas)[:2], prazo)) or ([37000] if list(portas) == [37000] else []))
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)") if ("adb", "kill-server") in pedidos
+                        else (False, "o adb vê o celular desligado (offline)"))
+    monkeypatch.setattr(cr, "anotar_motivo_da_queda", lambda *partes, **nomes: None)
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert ("adb", "kill-server") in pedidos and ([37000], cr.PRAZO_DA_PORTA_GUARDADA) in conferidas
+    # A guardada fechada de verdade continua dizendo que a depuração está desligada.
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, portas=cr.PORTAS_DA_DEPURACAO, prazo=0.5: [])
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o adb vê o celular desligado (offline)"))
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and "desligada" in motivo
 
 
 def test_reconexao_que_falha_fica_no_estado_ate_o_celular_voltar(cr, monkeypatch):
@@ -723,7 +746,7 @@ def test_volta_do_celular_anota_o_motivo_no_registro_no_estado_e_no_retomar(bm, 
     cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00", visto_em=visto_em)
     monkeypatch.setattr(cr, "conectado", lambda: False)
     monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
-    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41000])
     monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)") if porta == 41000 else (False, "x"))
     monkeypatch.setattr(cr.av, "_rodar", CelularQueVoltou(
         259200, _linha_do_android("Detected wifi network change. Disabling adbwifi.")))
@@ -737,6 +760,6 @@ def test_volta_do_celular_anota_o_motivo_no_registro_no_estado_e_no_retomar(bm, 
     retomado = next(t for t in msg.saidas if "retomado" in t)
     assert "Por que o celular tinha saído: o celular trocou de ponto de Wi-Fi" in retomado
     # O estado (android.yml) mostra a última queda, só com o motivo fixo e a hora.
-    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41000])
     cr._gravar(porta=41000)
     assert "última queda: o celular trocou de ponto de Wi-Fi" in cr.descrever_estado()
