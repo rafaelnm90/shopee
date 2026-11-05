@@ -264,6 +264,11 @@ def parear(ip, porta, codigo):
 # Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 ESPERA_DO_QR = 300
 TENTATIVAS_POR_PORTA_DO_QR = 2
+# Enquanto o pareamento pelo QR corre, a reconexão espera (reconectar_sozinho): o kill-server dela
+# derrubaria o pareamento no meio. A marca (pareando_ate) vence sozinha, com folga além da espera,
+# se o bot reiniciar no meio do pareamento.
+FOLGA_DO_PAREAMENTO = 60
+PAREANDO_PELO_QR = "o celular está sendo pareado pelo QR agora (a reconexão espera o fim do pareamento)"
 LETRAS_DO_QR = string.ascii_letters + string.digits
 
 
@@ -282,26 +287,38 @@ def imagem_do_qr(texto):
     return saida.getvalue()
 
 
-def parear_pelo_qr(ip, senha, ja_abertas=(), espera=ESPERA_DO_QR, relogio=time.monotonic, pausa=time.sleep):
+def parear_pelo_qr(ip, senha, ja_abertas=(), espera=ESPERA_DO_QR, relogio=time.monotonic, pausa=time.sleep,
+                   avisar=lambda etapa, detalhe="": None):
     """
     Procura pela rede privada, por até `espera` segundos, a porta de pareamento que o celular abre
     depois de ler o QR (uma que não estava aberta antes, ja_abertas) e pareia nela com a senha do
     QR. Cada porta nova é tentada até TENTATIVAS_POR_PORTA_DO_QR vezes (a varredura às vezes a
-    acha antes de ela aceitar). (True, "") ou (False, motivo).
+    acha antes de ela aceitar). (True, "") ou (False, motivo). avisar(etapa, detalhe) conta o
+    andamento ao painel: "procurando" (o celular ainda não abriu o pareamento), "pareando" (achou
+    a porta nova; detalhe = o número da tentativa) e "falhou" (a tentativa não completou; detalhe
+    = o motivo). Enquanto isso, a reconexão espera (pareando_ate).
     """
     if shutil.which("adb") is None:
         return False, "o adb não está instalado no servidor"
-    fim, tentadas, ultimo = relogio() + espera, {}, ""
-    while relogio() < fim:
-        for porta in portas_abertas(ip):
-            if porta in ja_abertas or tentadas.get(porta, 0) >= TENTATIVAS_POR_PORTA_DO_QR:
-                continue
-            tentadas[porta] = tentadas.get(porta, 0) + 1
-            ok, motivo = parear(ip, porta, senha)
-            if ok:
-                return True, ""
-            ultimo = motivo
-        pausa(5)
+    ate = datetime.now(fuso_horario) + timedelta(seconds=espera + FOLGA_DO_PAREAMENTO)
+    _gravar(pareando_ate=ate.strftime("%Y-%m-%d %H:%M:%S"))
+    try:
+        avisar("procurando")
+        fim, tentadas, ultimo = relogio() + espera, {}, ""
+        while relogio() < fim:
+            for porta in portas_abertas(ip):
+                if porta in ja_abertas or tentadas.get(porta, 0) >= TENTATIVAS_POR_PORTA_DO_QR:
+                    continue
+                tentadas[porta] = tentadas.get(porta, 0) + 1
+                avisar("pareando", str(tentadas[porta]))
+                ok, motivo = parear(ip, porta, senha)
+                if ok:
+                    return True, ""
+                ultimo = motivo
+                avisar("falhou", motivo)
+            pausa(5)
+    finally:
+        _gravar(pareando_ate="")
     if ultimo:
         return False, f"o celular abriu a porta do pareamento, mas não pareou ({ultimo})"
     return False, ("não achei a porta do pareamento pela rede privada: o QR não foi lido a tempo, ou a porta não "
@@ -514,6 +531,8 @@ def reconectar_sozinho():
     """
     if conectado():
         return True, ler().get("modelo") or "celular"
+    if (ler().get("pareando_ate") or "") > _agora():
+        return False, PAREANDO_PELO_QR
     visto_em = ler().get("visto_em")
     ok, resultado, mesma_porta = _reconectar()
     if ok:

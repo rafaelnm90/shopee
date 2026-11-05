@@ -2313,10 +2313,35 @@ async def pedir_pareamento_pelo_qr(message: types.Message, state: FSMContext):
     await _escolher_celular(message, state, "qr")
 
 
+# O andamento do pareamento pelo QR, na legenda do QR, trocado a cada tanto, com um relógio que
+# gira: o que o Motorola já fez, o que o servidor está fazendo e o tempo do prazo (pedido do
+# Rafael, vídeo de 05/11/2026: DECISOES.md, Shopee Vídeo).
+ANDAMENTO_DO_QR_A_CADA = 6
+RELOGIOS_DO_QR = "🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛"
+
+
+def _andamento_do_qr(etapa, detalhe, segundos, passo):
+    """As linhas do andamento do pareamento pelo QR (etapa e detalhe do celular_robo.parear_pelo_qr)."""
+    if etapa == "procurando":
+        motorola = "⏳ esperando você ler o QR"
+        servidor = "🔎 procurando, pela rede privada, o pareamento que o Motorola abre ao ler o QR"
+    elif etapa == "pareando":
+        motorola = "✅ leu o QR e abriu o pareamento"
+        servidor = f"📡 pareando (tentativa {detalhe} de {celular_robo.TENTATIVAS_POR_PORTA_DO_QR})"
+    else:
+        motorola = "✅ leu o QR e abriu o pareamento"
+        servidor = f"⚠️ a tentativa não completou ({detalhe[:120]}); sigo tentando até o fim do prazo"
+    total = celular_robo.ESPERA_DO_QR
+    return (f"\n\n<b>Agora</b> {RELOGIOS_DO_QR[passo % len(RELOGIOS_DO_QR)]} {segundos // 60}:{segundos % 60:02d} "
+            f"de {total // 60}:{total % 60:02d}\n📱 Motorola: {html_escape(motorola)}\n🖥️ Servidor: "
+            f"{html_escape(servidor)}")
+
+
 async def _parear_pelo_qr(message, state, celular):
     """
     O pareamento pelo QR (P149 2): manda o QR, espera o Rafael ler com a câmera do Motorola, pareia
-    na porta que o celular abre e conecta. O QR (com a senha do pareamento) sai da conversa no fim.
+    na porta que o celular abre e conecta. A legenda do QR mostra o andamento enquanto isso
+    (_andamento_do_qr), e o QR (com a senha do pareamento) sai da conversa no fim.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     await state.set_state(ShopeeVideoFluxo.celular)
@@ -2325,21 +2350,37 @@ async def _parear_pelo_qr(message, state, celular):
     antes = set(await asyncio.to_thread(celular_robo.portas_abertas, celular["ip"]))
     _nome, senha, texto = celular_robo.novo_qr()
     minutos = celular_robo.ESPERA_DO_QR // 60
-    foto = await message.answer_photo(
-        BufferedInputFile(celular_robo.imagem_do_qr(texto), "qr.png"),
-        caption=("📷 <b>Parear pelo QR</b>\n\nNo Motorola: Opções do desenvolvedor → <b>Depuração por Wi-Fi</b> → "
-                 "<b>Parear o dispositivo com um código QR</b>, e aponte a câmera para este QR (aberto em outra "
-                 f"tela, como o seu celular ou o computador).\n\n<i>Fico procurando o celular por até {minutos} "
-                 "min. Apago o QR depois.</i>"),
-        parse_mode="HTML")
-    ok, motivo = await asyncio.to_thread(celular_robo.parear_pelo_qr, celular["ip"], senha, antes)
+    legenda = ("📷 <b>Parear pelo QR</b>\n\nNo Motorola: Opções do desenvolvedor → <b>Depuração por Wi-Fi</b> → "
+               "<b>Parear o dispositivo com um código QR</b>, e aponte a câmera para este QR (aberto em outra "
+               f"tela, como o seu celular ou o computador).\n\n<i>Fico procurando o celular por até {minutos} "
+               "min. Apago o QR depois.</i>")
+    foto = await message.answer_photo(BufferedInputFile(celular_robo.imagem_do_qr(texto), "qr.png"),
+                                      caption=legenda + _andamento_do_qr("procurando", "", 0, 0), parse_mode="HTML")
+    andamento = {"etapa": "procurando", "detalhe": ""}
+    tarefa = asyncio.ensure_future(asyncio.to_thread(
+        celular_robo.parear_pelo_qr, celular["ip"], senha, antes,
+        avisar=lambda etapa, detalhe="": andamento.update(etapa=etapa, detalhe=detalhe)))
+    relogio = asyncio.get_running_loop().time
+    inicio, passo = relogio(), 0
+    while not tarefa.done():
+        await asyncio.wait({tarefa}, timeout=ANDAMENTO_DO_QR_A_CADA)
+        if tarefa.done():
+            break
+        passo += 1
+        try:
+            await foto.edit_caption(caption=legenda + _andamento_do_qr(
+                andamento["etapa"], andamento["detalhe"], int(relogio() - inicio), passo), parse_mode="HTML")
+        except Exception as e:
+            logger.debug(f"Celular do robô: o andamento do QR não foi atualizado ({type(e).__name__}).")
+    ok, motivo = tarefa.result()
     try:
         await foto.delete()
     except Exception as e:
         logger.warning(f"⚠️ Celular do robô: não consegui apagar o QR do pareamento ({type(e).__name__}).")
     if not ok:
         logger.warning(f"⚠️ Celular do robô: pareamento pelo QR falhou ({motivo}).")
-        await message.answer(f"⚠️ Não pareou pelo QR: {html_escape(motivo)}. Tente de novo, ou use o "
+        await message.answer(f"⚠️ Não pareou pelo QR: {html_escape(motivo)}. No Motorola, toque em voltar para sair "
+                             "do “Pareando dispositivo…”. Tente de novo, ou use o "
                              f"{BOTAO_PAREAR} (o código de 6 dígitos).", reply_markup=teclado_celular())
         return
     logger.info("✅ Celular do robô: pareado pelo QR.")
