@@ -5592,6 +5592,33 @@ def test_punicao_de_produto_irrelevante_para_os_produtos_a_mais(monkeypatch, avi
     assert _registro_dos_espacos() == ["desligados - punição de produto", "nenhum - desligados"]
 
 
+def test_pausa_sem_a_hora_sai_e_os_produtos_a_mais_voltam_quando_os_pontos_deixarem(avisos):
+    # Escolha do Rafael (05/11, P153 3): os produtos a mais, parados pela punição de produto, voltam
+    # como estavam, até 6, quando os pontos deixarem. A pausa que não guardou a hora sai na rodada
+    # seguinte; com 4 pontos ou mais, a escada (P145) continua deixando só o produto do vídeo.
+    robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(
+        robo_produtos_a_mais=False, robo_produtos_a_mais_parados="punição de Produto Irrelevante (03/11/2026 09:00:00)"))
+    assert robo.rodada(agora=momento("2026-11-05 15:00")) == "pausado"
+    config = robo.ler_config()
+    assert config["robo_produtos_a_mais"] is True and not config.get("robo_produtos_a_mais_parados")
+    assert _registro_dos_espacos() == ["religados - voltam quando os pontos deixarem"]
+    agora = datetime.now(robo.fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+    robo.gravar_estado(saude_pontos=8, saude_lida_em=agora)
+    assert robo.espacos_livres(None, {"link": LINK}, PRINCIPAL, {"preco": 50.0}, [], time.monotonic() + 600) == []
+    assert _registro_dos_espacos()[-1] == "nenhum - só o produto do vídeo pelos pontos"
+    # A pausa de uma punição nova guarda a hora e fica até o Rafael ligar no painel (P73).
+    robo.parar_os_produtos_a_mais({"tipo": "Produto Irrelevante", "data": "20/11/2026 10:00:00"})
+    config = robo.ler_config()
+    assert config["robo_produtos_a_mais"] is False and config["robo_produtos_a_mais_parados_em"][:4] == agora[:4]
+    assert robo.religar_a_pausa_sem_hora() is False
+    robo.rodada(agora=momento("2026-11-20 15:00"))
+    assert robo.ler_config()["robo_produtos_a_mais"] is False
+    # Desligados pelo Rafael (sem o motivo da punição), a migração não mexe.
+    robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(
+        robo_produtos_a_mais_parados=None, robo_produtos_a_mais_parados_em=None))
+    assert robo.religar_a_pausa_sem_hora() is False and robo.ler_config()["robo_produtos_a_mais"] is False
+
+
 def test_punicao_de_outro_tipo_nao_mexe_nos_produtos_a_mais(avisos):
     robo.parar_os_produtos_a_mais({"tipo": "Produto Irrelevante", "data": "23/10/2026 19:04:25"})
     assert "O vídeo punido" not in avisos[-1] and "Não achei o rascunho do robô desse vídeo." in avisos[-1]

@@ -511,7 +511,7 @@ def test_produtos_a_mais_ligam_e_desligam_pelo_painel(bm, Msg, Est):
     assert "Produtos a mais: ✅ <b>ligados</b>" in sv.texto_robo(sv.ler_config())
     msg = Msg(sv.BOTAO_PRODUTOS_A_MAIS)
     rodar(sv.produtos_a_mais_handler(msg, est))
-    assert "Medição" in msg.saidas[-1] and "Produto Irrelevante" in msg.saidas[-1]
+    assert "Pontos de penalidade" in msg.saidas[-1] and "Produto Irrelevante" in msg.saidas[-1]
     assert "O que cada botão faz" in msg.saidas[-1]
     assert _textos(sv.teclado_produtos_a_mais(sv.ler_config())) == ["Desligar Produtos a Mais ⏸️", "Voltar ao Robô 🔙"]
     rodar(sv.ligar_produtos_a_mais_handler(Msg("Desligar Produtos a Mais ⏸️"), est))
@@ -523,7 +523,22 @@ def test_produtos_a_mais_ligam_e_desligam_pelo_painel(bm, Msg, Est):
     rodar(sv.ligar_produtos_a_mais_handler(Msg("Ligar Produtos a Mais ✅"), est))
     config = sv.robo.ler_config()
     assert config["robo_produtos_a_mais"] is True and not config.get("robo_produtos_a_mais_parados")
+    assert not config.get("robo_produtos_a_mais_parados_em")
     assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ?", sv.robo.PROCESSO_DOS_ESPACOS) == (2,)
+
+
+def test_produtos_a_mais_ligados_dizem_que_os_pontos_seguram_so_o_produto_do_video(bm):
+    # Escolhas do Rafael (03/11, P145; 05/11, P153 3): ligados, com 4 pontos ou mais só vai o
+    # produto do vídeo, e eles voltam sozinhos quando os pontos baixam ou zeram; o painel diz isso.
+    from datetime import datetime
+    sv = _painel(bm)
+    agora = datetime(2026, 11, 5, 15, 0, tzinfo=sv.robo.fuso_horario)
+    sv.robo.gravar_estado(saude_pontos=8, saude_lida_em="2026-11-05 10:00:00")
+    rotulo = sv.rotulo_produtos_a_mais(sv.ler_config(), agora)
+    assert "ligados" in rotulo and "<b>8</b> pontos" in rotulo and "só vai o produto do vídeo" in rotulo
+    assert "zerarem em <b>01/01</b>" in rotulo
+    sv.robo.gravar_estado(saude_pontos=3)
+    assert sv.rotulo_produtos_a_mais(sv.ler_config(), agora) == "✅ <b>ligados</b> (até 6 por vídeo)"
 
 
 def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10:00:00"):
