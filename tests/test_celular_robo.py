@@ -467,7 +467,8 @@ def test_parear_por_qr_manda_o_qr_pareia_conecta_e_apaga_o_qr(bm, cr, monkeypatc
     monkeypatch.setattr(cr, "portas_abertas", lambda ip: [39615])
     monkeypatch.setattr(cr, "novo_qr", lambda: ("robo-teste", "senha", "WIFI:T:ADB;S:robo-teste;P:senha;;"))
     pedidos = []
-    monkeypatch.setattr(cr, "parear_pelo_qr", lambda ip, senha, antes: pedidos.append((ip, senha, antes)) or (True, ""))
+    monkeypatch.setattr(cr, "parear_pelo_qr", lambda ip, senha, antes, avisar=None: pedidos.append((ip, senha, antes))
+                        or (True, ""))
     monkeypatch.setattr(cr, "reconectar_sozinho", lambda: (True, "moto g(100)"))
 
     def com_foto(msg):
@@ -489,11 +490,77 @@ def test_parear_por_qr_manda_o_qr_pareia_conecta_e_apaga_o_qr(bm, cr, monkeypatc
     assert enviadas[0].apagada
     assert any("Pareado pelo QR" in s for s in msg.saidas) and any("Celular conectado" in s for s in msg.saidas)
     # Sem achar a porta: o QR sai do mesmo jeito, e o código de 6 dígitos fica de reserva.
-    monkeypatch.setattr(cr, "parear_pelo_qr", lambda ip, senha, antes: (False, "não achei a porta do pareamento"))
+    monkeypatch.setattr(cr, "parear_pelo_qr", lambda ip, senha, antes, avisar=None:
+                        (False, "não achei a porta do pareamento"))
     msg = Msg("Parear por QR 📷")
     enviadas = com_foto(msg)
     rodar(sv.pedir_pareamento_pelo_qr(msg, Est()))
     assert enviadas[0].apagada and "Não pareou pelo QR" in msg.saidas[-1] and "Parear Celular 🔗" in msg.saidas[-1]
+    # No Motorola, o "Pareando dispositivo…" fica girando: a mensagem diz como sair dele.
+    assert "toque em voltar" in msg.saidas[-1]
+
+
+def test_parear_por_qr_mostra_o_andamento_na_legenda_do_qr(bm, cr, monkeypatch, Msg, Est):
+    # Vídeo do Rafael de 05/11/2026: o Motorola leu o QR e ficou girando, sem nada no bot dizer o que
+    # acontecia. A legenda do QR mostra o que o Motorola já fez, o que o servidor faz e o tempo.
+    import time
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [39615])
+    monkeypatch.setattr(sv, "ANDAMENTO_DO_QR_A_CADA", 0.02)
+
+    def pareando(ip, senha, antes, avisar):
+        for etapa, detalhe in (("procurando", ""), ("pareando", "1"), ("falhou", "o adb não respondeu")):
+            avisar(etapa, detalhe)
+            time.sleep(0.15)
+        return False, "o celular abriu a porta do pareamento, mas não pareou (o adb não respondeu)"
+    monkeypatch.setattr(cr, "parear_pelo_qr", pareando)
+    legendas = []
+    msg = Msg("Parear por QR 📷")
+
+    async def answer_photo(foto, caption="", **_):
+        legendas.append(caption)
+        enviada = Msg(caption, saidas=msg.saidas)
+
+        async def edit_caption(caption="", **_):
+            legendas.append(caption)
+        enviada.edit_caption = edit_caption
+        return enviada
+    msg.answer_photo = answer_photo
+    rodar(sv.pedir_pareamento_pelo_qr(msg, Est()))
+    assert "📱 Motorola: ⏳ esperando você ler o QR" in legendas[0] and "0:00 de 5:00" in legendas[0]
+    assert any("📱 Motorola: ✅ leu o QR e abriu o pareamento" in l and "📡 pareando (tentativa 1 de 2)" in l
+               for l in legendas)
+    assert any("⚠️ a tentativa não completou (o adb não respondeu)" in l for l in legendas)
+    # O relógio gira: cada troca mostra outro.
+    relogios = {l.split("<b>Agora</b> ")[1][0] for l in legendas}
+    assert len(relogios) > 1
+    assert "Não pareou pelo QR" in msg.saidas[-1]
+
+
+def test_pareamento_pelo_qr_conta_o_andamento_e_a_reconexao_espera(cr, monkeypatch):
+    # O kill-server da reconexão do robô derrubaria o pareamento pelo QR no meio: ela espera o fim.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "_reconectar", lambda: pytest.fail("não devia reconectar durante o pareamento"))
+    etapas, durante = [], []
+    varreduras = iter([[39615], [39615, 41001]])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: next(varreduras, [39615, 41001]))
+
+    def parear(ip, porta, senha):
+        durante.append(cr.reconectar_sozinho())
+        return (len(durante) > 1, "o adb não respondeu")
+    monkeypatch.setattr(cr, "parear", parear)
+    tempos = iter(range(0, 10000, 10))
+    ok, _ = cr.parear_pelo_qr(IP, "senha", {39615}, relogio=lambda: next(tempos), pausa=lambda s: None,
+                              avisar=lambda etapa, detalhe="": etapas.append((etapa, detalhe)))
+    assert ok and etapas == [("procurando", ""), ("pareando", "1"), ("falhou", "o adb não respondeu"),
+                             ("pareando", "2")]
+    assert durante == [(False, cr.PAREANDO_PELO_QR)] * 2
+    # No fim, a marca sai e a reconexão volta.
+    assert not cr.ler().get("pareando_ate")
+    monkeypatch.setattr(cr, "_reconectar", lambda: (False, "x", False))
+    assert cr.reconectar_sozinho() == (False, "x")
 
 
 def test_painel_nao_espera_o_adb_travado(bm, cr, monkeypatch, Msg, Est):
