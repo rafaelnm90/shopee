@@ -54,6 +54,16 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   os pontos baixam e, abaixo de 6, o bloqueio some da Saúde antes do prazo; o aviso
   "banida até" continua nas Notificações, por isso o robô confere sempre na Saúde.
   O Centro do criador e a Saúde carregam pela rede: o robô relê a tela por até 24 s.
+  **Desde 04/11/2026 (vídeo do Rafael, no celular dele):** o Centro do criador abre como
+  **Creator Center**, sem o quadro Saúde do Vídeo. No alto, debaixo do nome, ficam "Ao vivo:
+  Exce… >" e "Vídeo: Pro… >" (a situação de cada um). O **"Vídeo: …"** abre a **Account
+  Health**, com as abas **Live** e **Vídeo** (abre na Vídeo). A aba Vídeo tem o mesmo de antes:
+  o "Banido Temporariamente", "Status da Saúde do Vídeo" com o "Ponto de Penalidade" e o
+  número, as Diretrizes e os **Vídeos de Violação**. A aba Live tem os pontos das lives
+  ("Status de Saúde da Live", "Lives com Violação"), que não contam. A página mostra os
+  títulos antes do número e da lista: o robô espera o número, e sem ele não conclui nada
+  da página (nem a suspensão acabada, nem a punição tirada, nem os pontos), e para com o
+  caso guardado. O robô aceita as duas telas (o app do Motorola pode atualizar depois).
   Se a Saúde não abre antes de postar, o teste é o Postar vídeo: abrindo a Biblioteca,
   a conta não está bloqueada e o aviso antigo não vale (em 23/10 a Saúde não abriu uma
   vez, e o aviso antigo sozinho teria pausado o robô até 26/10).

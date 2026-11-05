@@ -174,6 +174,19 @@ PENALIDADE = "pontos de penalidade"
 CAMINHO_CENTRO_DO_CRIADOR = [("Centro do criador", 8, "Saúde do Vídeo")]
 SAUDE_DO_VIDEO = "Saúde do Vídeo"
 VIDEOS_DE_VIOLACAO = "Vídeos de Violação"
+# Desde 04/11/2026 (vídeo do Rafael), o Centro do criador abre como "Creator Center", sem o
+# quadro Saúde do Vídeo: no alto ficam "Ao vivo: ..." e "Vídeo: ..." (a situação de cada um),
+# e o "Vídeo: ..." abre a Account Health, com as abas Live e Vídeo. A aba Vídeo traz o mesmo de
+# antes (o aviso de suspensão, o Ponto de Penalidade e os Vídeos de Violação); a Live tem os
+# pontos das lives, que não contam aqui. O robô aceita as duas telas: o app do Motorola pode
+# atualizar depois do celular do Rafael.
+ENTRADA_DA_SAUDE = ("vídeo:", "video:")
+ABA_DO_VIDEO = "Vídeo"
+NA_ABA_DA_LIVE = ("Lives com Violação", "Status de Saúde da Live")
+STATUS_DO_VIDEO = "status da saúde do vídeo"
+# A página carrega pela rede e mostra os títulos antes do número: sem o número, a suspensão e a
+# lista podem estar pela metade, e o robô não tira conclusão nenhuma dela.
+MOTIVO_SEM_OS_PONTOS = "a Saúde do Vídeo abriu sem o número do Ponto de Penalidade"
 DATA_DA_PUNICAO = "Data de Punição:"
 STATUS_DA_APELACAO = "Status da Apelação:"
 POSTADO_EM = "Postado em:"
@@ -1012,6 +1025,7 @@ PASSOS = (
     ("Centro do criador", "achar a Saúde no Centro do criador"),
     ("Rótulo de IA", "rótulo de IA"),
     ("Saúde do Vídeo não abriu", "abrir a Saúde do Vídeo"),
+    ("sem o número do Ponto", "ler os pontos de penalidade"),
     ("em análise na Shopee", "vídeo em análise"),
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("o link não diz o produto", "achar o produto do link"),
@@ -1845,8 +1859,11 @@ def ler_suspensao(d, agora=None, postar_fechado=False):
     if not ate or suspensao_retirada(ate):
         return None
     try:
-        abrir_saude(d, agora)
-        na_saude = suspensao_na_tela(tela(d), agora)
+        xml = abrir_saude(d, agora)
+        if pontos_de_penalidade(xml) is None:
+            # A página pela metade pode ainda não mostrar o bloqueio: não vale como confirmação.
+            raise Parada(MOTIVO_SEM_OS_PONTOS)
+        na_saude = suspensao_na_tela(xml, agora)
     except Parada as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Não confirmei a suspensão na Saúde do Vídeo: {ps.mascarar(e.motivo)}")
         if postar_fechado or not postar_abre(d):
@@ -1938,9 +1955,13 @@ def punicoes_na_tela(xml):
 
 
 def pontos_de_penalidade(xml):
-    """O número logo depois de "Ponto de Penalidade" na Saúde do Vídeo, ou None."""
+    """
+    O número logo depois de "Ponto de Penalidade" na Saúde do Vídeo, ou None. Com a seção "Status
+    da Saúde do Vídeo" na tela (a Account Health), o dela: a aba Live tem os pontos das lives.
+    """
     elementos = [el for el in ps.elementos(xml) if el["texto"].strip()]
-    for i, el in enumerate(elementos):
+    inicio = next((i for i, el in enumerate(elementos) if STATUS_DO_VIDEO in ps._normal(el["texto"])), 0)
+    for i, el in enumerate(elementos[inicio:], inicio):
         if "ponto de penalidade" in el["texto"].casefold():
             seguinte = next((e["texto"].strip() for e in elementos[i + 1:i + 3] if e["texto"].strip().isdigit()), None)
             return int(seguinte) if seguinte else None
@@ -2044,29 +2065,84 @@ def anotar_seguidores(xml, agora=None):
     return numero
 
 
+def _entrada_da_saude(xml):
+    """
+    Onde tocar no Centro do criador para abrir a Saúde do Vídeo, ou None. No app de antes, o
+    nome do quadro Saúde do Vídeo não aceita toque: o que aceita na mesma linha (o "Melhoria
+    Necessária", "Bom"...) ou, sem ele, a frase logo abaixo. No de agora (Creator Center,
+    04/11/2026), o "Vídeo: ..." do alto da tela.
+    """
+    elementos = ps.elementos(xml) if xml else []
+    rotulo = next((el for el in elementos if ps._normal(el["texto"]) == ps._normal(SAUDE_DO_VIDEO)), None)
+    if rotulo:
+        x, y = ps._centro(rotulo)
+        na_linha = [el for el in elementos
+                    if el["clicavel"] and abs(ps._centro(el)[1] - y) <= 60 and ps._centro(el)[0] > x]
+        abaixo = [el for el in elementos if el["clicavel"] and y < ps._centro(el)[1] <= y + 200]
+        return ps._centro((na_linha or sorted(abaixo, key=lambda el: ps._centro(el)[1]) or [rotulo])[0])
+    novo = next((el for el in elementos
+                 if any(ps._normal(el[campo]).startswith(ENTRADA_DA_SAUDE) for campo in ("texto", "descricao"))), None)
+    return ps._centro(novo) if novo else None
+
+
+def _na_aba_da_live(xml):
+    """A Account Health aberta na aba Live (os pontos das lives), sem a lista dos vídeos?"""
+    return any(tem(xml, texto) for texto in NA_ABA_DA_LIVE) and not tem(xml, VIDEOS_DE_VIOLACAO)
+
+
+def _esperar_a_saude(d):
+    """
+    Relê a Saúde do Vídeo, que carrega pela rede (os títulos antes do número), até aparecerem os
+    Vídeos de Violação e o número do Ponto de Penalidade. Aberta na aba Live (a Account Health),
+    toca uma vez na aba Vídeo. Devolve a tela com os Vídeos de Violação (com o número, se ele
+    chegou a tempo), ou None.
+    """
+    vista, trocou = None, False
+    voltas = max(1, ESPERA_DA_SAUDE // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        aba = None if trocou or not _na_aba_da_live(xml) else next(
+            (el for el in ps.elementos(xml) if ps._normal(el["texto"]) == ps._normal(ABA_DO_VIDEO)), None)
+        if aba:
+            d.click(*ps._centro(aba))
+            trocou = True
+        elif tem(xml, VIDEOS_DE_VIOLACAO):
+            vista = xml
+            if pontos_de_penalidade(xml) is not None:
+                return xml
+        if volta < voltas:
+            pausa(3)
+    return vista
+
+
 def abrir_saude(d, agora=None):
     """
-    Perfil em Shopee Vídeo → Centro do criador → o quadro Saúde do Vídeo. O nome do quadro
-    não aceita toque: o robô toca no que aceita na mesma linha (o "Melhoria Necessária",
-    "Bom"...) ou, sem ele, na frase logo abaixo. De passagem pelo Perfil, anota os seguidores.
+    Perfil em Shopee Vídeo → Centro do criador → a Saúde do Vídeo (_entrada_da_saude: o quadro do
+    app de antes ou o "Vídeo: ..." do de agora) → a aba Vídeo. De passagem pelo Perfil, anota os
+    seguidores. Devolve a tela da Saúde; sem o número dos pontos, só se ele não chegou a tempo.
     """
     ir_ao_perfil(d)
     anotar_seguidores(tela(d), agora)
-    botao, espera, esperado = CAMINHO_CENTRO_DO_CRIADOR[0]
+    botao, espera, _quadro = CAMINHO_CENTRO_DO_CRIADOR[0]
     tocar(d, botao, espera)
-    xml = esperar_na_tela(d, esperado, ESPERA_DA_SAUDE)
-    elementos = ps.elementos(xml) if xml else []
-    rotulo = next((el for el in elementos if ps._normal(el["texto"]) == ps._normal(SAUDE_DO_VIDEO)), None)
-    if not rotulo:
+    xml, ponto = None, None
+    voltas = max(1, ESPERA_DA_SAUDE // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        ponto = _entrada_da_saude(xml)
+        if ponto or volta == voltas:
+            break
+        pausa(3)
+    if not ponto:
         raise Parada("o Centro do criador não mostrou a Saúde do Vídeo")
-    x, y = ps._centro(rotulo)
-    na_linha = [el for el in elementos if el["clicavel"] and abs(ps._centro(el)[1] - y) <= 60 and ps._centro(el)[0] > x]
-    abaixo = [el for el in elementos if el["clicavel"] and y < ps._centro(el)[1] <= y + 200]
-    alvo = (na_linha or sorted(abaixo, key=lambda el: ps._centro(el)[1]) or [rotulo])[0]
-    d.click(*ps._centro(alvo))
+    if ps.proibido_no_ponto(xml, *ponto):
+        raise Parada(ps.RECUSA)
+    d.click(*ponto)
     pausa(8)
-    if not esperar_na_tela(d, VIDEOS_DE_VIOLACAO, ESPERA_DA_SAUDE):
+    saude = _esperar_a_saude(d)
+    if not saude:
         raise Parada("a Saúde do Vídeo não abriu")
+    return saude
 
 
 def ler_saude(d, agora=None):
@@ -2081,9 +2157,13 @@ def ler_saude(d, agora=None):
     # A tentativa conta para a leitura do dia mesmo se der errado: a Saúde que não abre não
     # pode tomar todas as rodadas do dia no lugar dos rascunhos.
     gravar_estado(saude_tentada_em=_momento(agora))
-    abrir_saude(d, agora)
-    xml = tela(d)
+    xml = abrir_saude(d, agora)
     pontos = pontos_de_penalidade(xml)
+    if pontos is None:
+        # Sem o número, a página não carregou inteira: a punição que ainda não apareceu pareceria
+        # tirada, a suspensão acabada e os pontos zerados. Os da última leitura continuam valendo
+        # (a escada dos posts por dia, P145), e a parada guarda o caso com a tela.
+        raise Parada(MOTIVO_SEM_OS_PONTOS)
     ate = suspensao_na_tela(xml, agora)
     if ate:
         if guardar_suspensao(ate):
