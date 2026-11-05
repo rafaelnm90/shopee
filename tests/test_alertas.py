@@ -23,6 +23,7 @@ def test_chaves_do_robo_sao_as_mesmas():
     import robo_shopee_video as robo
     assert alertas.CHAVE_CONFIG_SV == robo.CHAVE_CONFIG and alertas.CHAVE_ESTADO_SV == robo.CHAVE_ESTADO
     assert alertas.CHAVE_CELULAR == celular_robo.CHAVE and alertas.OPCAO_DO_PRAZO == celular_robo.OPCAO_DO_PRAZO
+    assert alertas.DEPURACAO_RESPONDE == celular_robo.DEPURACAO_RESPONDE
 
 
 def test_grave_avisado_uma_vez_de_novo_em_6_h_e_o_voltou_ao_normal(monkeypatch):
@@ -125,7 +126,10 @@ def test_bot_mestre_confere_os_graves_do_servidor_de_hora_em_hora(bm, monkeypatc
     # para o diagnóstico (nada de "voltou ao normal" falso).
     monkeypatch.setattr(bm.alertas, "servicos_fora", lambda: None)
     rodar(bm.conferir_graves_do_servidor())
-    assert chamadas[-1] == ([], ("robo_sv", "prazo_adb"))
+    assert chamadas[-1] == ([], ("robo_sv", "prazo_adb", alertas.CELULAR_DO_SERVIDOR))
+    # Entre as conferências de hora em hora, só o celular do robô, de 15 em 15 min (P155 1).
+    rodar(bm.conferir_o_celular_do_robo())
+    assert chamadas[-1] == ([], (alertas.CELULAR_DO_SERVIDOR,))
 
 
 def test_opcao_do_prazo_desligada_no_celular_avisa_e_volta_ao_normal():
@@ -154,3 +158,72 @@ def test_opcao_do_prazo_desligada_no_celular_avisa_e_volta_ao_normal():
     alertas.verificar([], AGORA + timedelta(hours=8), mandar, alertas.GRAVES_DO_SERVIDOR)
     assert mandados[-1] == "✅ Voltou ao normal: prazo do pareamento ligado no celular do robô."
     assert db.ler_config(alertas.CHAVE, {}) == {}
+
+
+def _momento(quando):
+    return quando.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _celular(visto, falha_em, falha, suspensa_ate=AGORA + timedelta(hours=12)):
+    """O que o robô guardou do celular (a última vez visto e a última reconexão que falhou) e a suspensão."""
+    db.salvar_config(alertas.CHAVE_CELULAR, {"pareado_em": "2026-10-20 10:00:00", "visto_em": _momento(visto),
+                                             "falha_em": _momento(falha_em) if falha_em else "", "falha": falha})
+    db.salvar_config(alertas.CHAVE_CONFIG_SV, {"robo_pausado": False,
+                                               "robo_suspenso_ate": _momento(suspensa_ate) if suspensa_ate else ""})
+
+
+def test_celular_sem_ligacao_por_falha_do_servidor_na_suspensao_avisa_e_volta_ao_normal():
+    # Escolha do Rafael (05/11, P155 1): na suspensão, a queda do celular só vira aviso quando a falha
+    # é do servidor (o Motorola na rede e a Depuração por Wi-Fi respondendo) e a ligação não volta
+    # sozinha em 30 min; de 03/11 a 05/11 ele ficou fora assim por 38 h, e o Rafael não soube.
+    import celular_robo
+    mandados = []
+
+    def mandar(texto):
+        mandados.append(texto)
+        return True
+
+    do_servidor = f"{celular_robo.DEPURACAO_RESPONDE} no celular, mas o adb não conecta (sem resposta do adb)"
+    _celular(AGORA - timedelta(minutes=40), AGORA - timedelta(minutes=5), do_servidor)
+    assert alertas.verificar([], AGORA, mandar, alertas.GRAVES_DO_SERVIDOR) == [alertas.CELULAR_DO_SERVIDOR]
+    assert len(mandados) == 1 and "há 40 min" in mandados[0] and "a falha é do servidor" in mandados[0]
+    assert do_servidor in mandados[0]
+    # Continua fora: não repete antes de 6 h.
+    _celular(AGORA - timedelta(minutes=40), AGORA + timedelta(minutes=55), do_servidor)
+    alertas.verificar([], AGORA + timedelta(hours=1), mandar, (alertas.CELULAR_DO_SERVIDOR,))
+    assert len(mandados) == 1
+    # Agora sem a depuração (o Rafael levou o celular): nem aviso nem o voltou ao normal.
+    _celular(AGORA - timedelta(minutes=40), AGORA + timedelta(hours=2),
+             "a Depuração por Wi-Fi está desligada no celular (nenhuma porta dela aberta)")
+    assert alertas.verificar([], AGORA + timedelta(hours=2), mandar, (alertas.CELULAR_DO_SERVIDOR,)) == []
+    assert len(mandados) == 1 and alertas.CELULAR_DO_SERVIDOR in db.ler_config(alertas.CHAVE, {})
+    # Ligado de novo (visto depois da última falha): o voltou ao normal.
+    _celular(AGORA + timedelta(hours=3), AGORA + timedelta(hours=2), do_servidor)
+    alertas.verificar([], AGORA + timedelta(hours=3), mandar, (alertas.CELULAR_DO_SERVIDOR,))
+    assert mandados[-1] == "✅ Voltou ao normal: celular do robô sem ligação por falha do servidor."
+    assert db.ler_config(alertas.CHAVE, {}) == {}
+
+
+@pytest.mark.parametrize("caso", ["fora da suspensão", "há pouco", "fora da rede", "falha velha", "ligado"])
+def test_celular_fora_sem_falha_do_servidor_na_suspensao_nao_avisa(caso):
+    # Fora da suspensão o robô já pausa e avisa sozinho; o celular fora da rede (o Rafael o levou),
+    # há menos de 30 min ou com a última tentativa velha (o robô parou de tentar) não vira aviso.
+    import celular_robo
+    do_servidor = f"{celular_robo.DEPURACAO_RESPONDE}, mas o pareamento venceu"
+    visto, falha_em, falha, ate = (AGORA - timedelta(minutes=50), AGORA - timedelta(minutes=5), do_servidor,
+                                   AGORA + timedelta(hours=12))
+    if caso == "fora da suspensão":
+        ate = AGORA - timedelta(hours=1)
+    elif caso == "há pouco":
+        visto = AGORA - timedelta(minutes=20)
+    elif caso == "fora da rede":
+        falha = "o celular não está na rede privada (Tailscale desligado ou celular sem internet)"
+    elif caso == "falha velha":
+        visto, falha_em = AGORA - timedelta(hours=3), AGORA - timedelta(hours=1)
+    else:
+        falha_em = None
+    _celular(visto, falha_em, falha, ate)
+    mandados = []
+    assert alertas.verificar([], AGORA, lambda texto: mandados.append(texto) or True,
+                             (alertas.CELULAR_DO_SERVIDOR,)) == []
+    assert mandados == []

@@ -6993,7 +6993,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
             ok, motivo = celular_robo.reconectar_sozinho()
             if not ok and not na_hora and suspensa(config, agora):
                 # Na suspensão o Rafael pode tirar o Motorola do carregador: o celular fora é
-                # esperado, e o robô não pausa nem avisa. No fim dela, sem o celular, pausa e
+                # esperado, e o robô não pausa; só a falha do servidor vira aviso, depois de 30 min
+                # (alertas.py, P155 1). No fim dela, sem o celular, pausa e
                 # avisa como sempre. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
                 anotar_limpeza_sem_celular(agora)
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}; celular fora (esperado)"
