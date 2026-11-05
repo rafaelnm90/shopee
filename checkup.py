@@ -93,6 +93,13 @@ ATRASO_DO_APROVADO = timedelta(minutes=30)
 # O vídeo postado pelo robô que espera mais que isso (em minutos) para entrar na fila do
 # Canal Afiliados: o bot_mestre confere os pedidos a cada 5 min.
 ESPERA_DO_CANAL = 30
+# O celular do robô sem conexão: a última reconexão falhou depois da última vez em que o servidor o
+# viu (as datas do celular_robo), e faz mais que isto. Na suspensão o robô não avisa o Rafael do
+# celular fora (é esperado: ele pode tirar o Motorola do carregador), e o adb do servidor travado
+# ficou 37 h sem ninguém ver (03/11 a 05/11/2026). O checkup aponta, só com as horas e o motivo
+# fixo da última reconexão.
+CHAVE_CELULAR_SV = "celular_robo"
+CELULAR_FORA_MAXIMO = timedelta(hours=3)
 # As janelas que a retomada do Claude lê no diagnóstico (a cada 3 h; às 8h, a noite toda).
 JANELAS_DA_RETOMADA = (3, 12)
 # A hora em que o robô da Shopee Vídeo só descurte (P25); o tests/test_checkup.py confere
@@ -840,6 +847,25 @@ def postagens_de_hoje(agora=None):
 
 # --- Robô da Shopee Vídeo ---
 
+def celular_fora(agora=None):
+    """
+    O celular do robô sem conexão há mais de CELULAR_FORA_MAXIMO, com a última reconexão falhando
+    depois da última vez em que o servidor o viu: (horas, motivo fixo da falha, hora da falha) ou None.
+    """
+    agora = _agora(agora)
+    dados = db.ler_config(CHAVE_CELULAR_SV, {}) or {}
+    visto, falha_em = dados.get("visto_em") or "", dados.get("falha_em") or ""
+    if not dados.get("pareado_em") or not visto or not falha_em or falha_em <= visto:
+        return None
+    try:
+        fora = agora.replace(tzinfo=None) - datetime.strptime(visto, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if fora < CELULAR_FORA_MAXIMO:
+        return None
+    return int(fora.total_seconds() // 3600), dados.get("falha") or "?", falha_em[11:16]
+
+
 def robo_da_shopee_video(agora=None):
     """Plano de hoje, rascunhos salvos hoje e as tentativas ruins das últimas 24 h (ação, resultado, passo)."""
     agora = _agora(agora)
@@ -883,7 +909,7 @@ def robo_da_shopee_video(agora=None):
             # trimestre): com 4 ou mais, a escada da P145 diminui os rascunhos do dia.
             "pontos": apelacoes_shopee_video.pontos_de_agora(agora=agora),
             "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora),
-            "do_canal_no_viral": do_canal}
+            "do_canal_no_viral": do_canal, "celular_fora": celular_fora(agora)}
 
 
 # A medição dos produtos a mais da Shopee Vídeo (P73) conta desde o dia em que eles entraram
@@ -1551,6 +1577,10 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
     if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv.get("atrasados"):
         pontos.append(f"Robô da Shopee Vídeo: {robo_sv['atrasados']} aprovado(s) passaram da hora de ir ao ar "
                       f"(o mais atrasado há {robo_sv['minutos_de_atraso']} min)")
+    if robo_sv.get("celular_fora"):
+        horas, motivo, quando = robo_sv["celular_fora"]
+        pontos.append(f"Celular do robô da Shopee Vídeo: sem conexão há {horas} h (a última reconexão, às {quando}, "
+                      f"falhou: {motivo})")
     if robo_sv.get("canal_parados"):
         pontos.append(f"Canal Afiliados: {robo_sv['canal_parados']} vídeo(s) postado(s) pelo robô da Shopee Vídeo "
                       f"esperando há mais de {ESPERA_DO_CANAL} min para entrar na fila do canal")
@@ -1799,6 +1829,10 @@ def main():
     # O caso completo de cada falha fica cifrado para o Claude (casos_robo.yml exportar) e
     # sai depois de analisado (casos_robo.yml apagar).
     print(f"Casos guardados para o checkup do Claude: {len(casos_robo.casos())}")
+    fora = robo_sv.get("celular_fora")
+    print("Celular do robô: " + (f"sem conexão há {fora[0]} h (a última reconexão, às {fora[2]}, falhou: {fora[1]})"
+                                 if fora else f"nenhuma queda de mais de "
+                                              f"{int(CELULAR_FORA_MAXIMO.total_seconds() // 3600)} h agora"))
     for tentativa in robo_sv.get("linhas", []):
         print(_linha_da_tentativa(tentativa))
     print(f"Aprovados que passaram da hora de ir ao ar: {robo_sv['atrasados']}"

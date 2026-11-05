@@ -1100,3 +1100,29 @@ def test_senha_da_copia_diz_se_foi_guardada_e_se_o_lugar_esta_no_painel():
     linha = checkup.senha_da_copia()
     assert linha == "senha da cópia: Guardei a senha ✅ em 03/11 21:40, lugar no Acessos do Servidor: sim"
     assert "exemplo.com" not in linha
+
+
+def test_celular_do_robo_fora_por_horas_vira_ponto_de_atencao():
+    # De 03/11 a 05/11/2026 o adb do servidor ficou travado 37 h; na suspensão o robô não avisa do
+    # celular fora (pedido do Rafael), e nada apontava. O checkup aponta, com as horas e o motivo fixo.
+    import celular_robo
+    motivo = "a Depuração por Wi-Fi responde no celular, mas o adb não conecta (o adb não respondeu)"
+    db.salvar_config(celular_robo.CHAVE, {"pareado_em": "2026-10-17 10:00:00", "visto_em": "2026-10-22 09:20:00",
+                                          "falha_em": "2026-10-23 22:07:00", "falha": motivo})
+    fora = checkup.celular_fora(AGORA)
+    assert fora == (37, motivo, "22:07")
+    robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": [], "celular_fora": fora}
+    pontos = checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA)
+    assert pontos == [f"Celular do robô da Shopee Vídeo: sem conexão há 37 h (a última reconexão, às 22:07, "
+                      f"falhou: {motivo})"]
+    assert checkup.robo_da_shopee_video(AGORA)["celular_fora"] == fora
+    # Visto depois da última falha (voltou), ou fora há menos de 3 h: nada.
+    db.salvar_config(celular_robo.CHAVE, {"pareado_em": "x", "visto_em": "2026-10-23 22:10:00",
+                                          "falha_em": "2026-10-23 22:07:00", "falha": motivo})
+    assert checkup.celular_fora(AGORA) is None
+    db.salvar_config(celular_robo.CHAVE, {"pareado_em": "x", "visto_em": "2026-10-23 20:00:00",
+                                          "falha_em": "2026-10-23 22:07:00", "falha": motivo})
+    assert checkup.celular_fora(AGORA) is None
+    # Nunca pareado: nada.
+    db.salvar_config(celular_robo.CHAVE, {})
+    assert checkup.celular_fora(AGORA) is None
