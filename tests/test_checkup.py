@@ -710,11 +710,22 @@ def test_captura_por_grupo_de_origem_mostra_quem_parou_pela_posicao():
     rp.registrar("espelhador", "vídeo com link na origem da rota", "visto", origem="@origem2",
                  agora=AGORA - timedelta(hours=1))
     c = checkup.captura_por_origem(AGORA)
-    assert c["Espião"] == {"origens": 3, "com_video": 1, "sem_video": [2, 3], "pararam": [2]}
+    assert c["Espião"] == {"origens": 3, "com_video": 1, "sem_video": [2, 3], "pararam": [2], "pararam_todo_dia": [],
+                           "por_dia": (1, 1, 0)}
     assert c["Espelhador"]["sem_video"] == [1] and c["Espelhador"]["pararam"] == []
-    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
-                                       {}, ("x", 1.0, 1), AGORA, {}, {}, None, c, None)
-    assert pontos == ["Espião: pararam de mandar vídeo (tinham nos 2 dias antes): nº 2 da lista do painel"]
+
+    def pontos():
+        return checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                         {}, ("x", 1.0, 1), AGORA, {}, {}, None, c, None)
+    # Checkup de 04/11/2026: os grupos que postam de vez em quando param e voltam a cada dia. O que
+    # mandou só num dos 2 dias antes fica na linha do sistema, sem virar ponto de atenção.
+    assert pontos() == []
+    # O que mandava nos dois dias e parou vira.
+    rp.registrar("espiao", "vídeo com link no grupo vigiado", "visto", origem="-1009:5",
+                 agora=AGORA - timedelta(hours=54))
+    c = checkup.captura_por_origem(AGORA)
+    assert c["Espião"]["pararam_todo_dia"] == [2] and c["Espião"]["por_dia"] == (1, 1, 1)
+    assert pontos() == ["Espião: pararam de mandar vídeo (mandavam todo dia nos 2 dias antes): nº 2 da lista do painel"]
 
 
 def test_parceiros_produto_repetido_entre_parceiros_e_com_a_conta_principal():

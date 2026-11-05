@@ -650,26 +650,31 @@ def divulgacao_do_dia(agora=None):
 # --- Captura por grupo de origem e parceiros ---
 
 def _por_origem(robo, prefixo, agora):
-    """(últimas 24 h, as 48 h antes delas): quantos registros por apelido de origem."""
-    corte = _momento(agora - timedelta(hours=24))
-    recente, antes = Counter(), Counter()
+    """(últimas 24 h, as 24 h antes, as 24 h antes dessas): quantos registros por apelido de origem."""
+    cortes = [_momento(agora - timedelta(hours=24 * dias)) for dias in (1, 2)]
+    dias = (Counter(), Counter(), Counter())
     for momento, _p, _r, _d, origem in registro_processos.sequencia(robo, prefixo, _momento(agora - timedelta(hours=72))):
-        (recente if momento >= corte else antes)[origem] += 1
-    return recente, antes
+        dias[0 if momento >= cortes[0] else 1 if momento >= cortes[1] else 2][origem] += 1
+    return dias
 
 
 def _resumo_das_origens(origens, contagens):
     """
-    Pela posição na lista do painel (1, 2, 3...): quantas origens, quantas mandaram
-    vídeo nas 24 h, as que não mandaram e as que pararam (mandaram nas 48 h antes).
+    Pela posição na lista do painel (1, 2, 3...): quantas origens, quantas mandaram vídeo nas
+    24 h, as que não mandaram, as que pararam (mandaram nas 48 h antes), as que mandavam nos dois
+    dias antes e pararam, e os vídeos de cada dia (para ver se o volume caiu). Só as que mandavam
+    todo dia viram ponto de atenção: as que postam de vez em quando param e voltam a cada dia
+    (checkup de 04/11/2026: 7 por sistema num dia, outras 7 no seguinte).
     """
-    recente, antes = contagens
+    recente, ontem, anteontem = contagens
     apelidos = [registro_processos.apelido(str(o).lower()) for o in origens]
     return {
         "origens": len(apelidos),
         "com_video": sum(1 for a in apelidos if recente[a]),
         "sem_video": [i + 1 for i, a in enumerate(apelidos) if not recente[a]],
-        "pararam": [i + 1 for i, a in enumerate(apelidos) if not recente[a] and antes[a]],
+        "pararam": [i + 1 for i, a in enumerate(apelidos) if not recente[a] and (ontem[a] or anteontem[a])],
+        "pararam_todo_dia": [i + 1 for i, a in enumerate(apelidos) if not recente[a] and ontem[a] and anteontem[a]],
+        "por_dia": tuple(sum(dia[a] for a in apelidos) for dia in contagens),
     }
 
 
@@ -1626,9 +1631,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
     if divulgacao and divulgacao["pico"] >= PICO_PARA_COBRAR:
         pontos.append(f"Divulgação: {divulgacao['pico']} envios em {JANELA_DO_PICO} min (rajada)")
     for sistema, c in (captura or {}).items():
-        if c["pararam"]:
-            pontos.append(f"{sistema}: pararam de mandar vídeo (tinham nos 2 dias antes): nº "
-                          + ", nº ".join(map(str, c["pararam"])) + " da lista do painel")
+        if c.get("pararam_todo_dia"):
+            pontos.append(f"{sistema}: pararam de mandar vídeo (mandavam todo dia nos 2 dias antes): nº "
+                          + ", nº ".join(map(str, c["pararam_todo_dia"])) + " da lista do painel")
     if repetidos and repetidos["entre_parceiros"]:
         pontos.append(f"Parceiros: {repetidos['entre_parceiros']} produto(s) capturado(s) para mais de um parceiro "
                       "nos últimos 3 dias")
@@ -1748,8 +1753,12 @@ def main():
     captura = captura_por_origem(agora)
     for sistema, c in captura.items():
         sem = ", ".join(f"nº {n}" for n in c["sem_video"]) or "nenhuma"
-        print(f"{sistema}: {c['origens']} na lista | com vídeo em 24 h: {c['com_video']} | sem vídeo em 24 h: {sem}"
-              + (f" | pararam: {', '.join(f'nº {n}' for n in c['pararam'])}" if c["pararam"] else ""))
+        hoje, ontem, anteontem = c["por_dia"]
+        print(f"{sistema}: {c['origens']} na lista | com vídeo em 24 h: {c['com_video']} | vídeos: 24 h {hoje}, "
+              f"24-48 h {ontem}, 48-72 h {anteontem} | sem vídeo em 24 h: {sem}"
+              + (f" | pararam: {', '.join(f'nº {n}' for n in c['pararam'])}" if c["pararam"] else "")
+              + (f" (mandavam todo dia: {', '.join(f'nº {n}' for n in c['pararam_todo_dia'])})"
+                 if c["pararam_todo_dia"] else ""))
     repetidos = parceiros_repetidos(agora)
     print(f"Parceiros (3 dias): capturas com produto identificado {repetidos['capturas']} | mesmo produto em mais "
           f"de um parceiro {repetidos['entre_parceiros']} | também na conta principal {repetidos['com_a_conta']}")
