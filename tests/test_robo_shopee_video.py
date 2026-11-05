@@ -4003,6 +4003,111 @@ def test_saude_que_demora_a_carregar_e_esperada():
         robo.abrir_saude(SaudeDevagar({"centro": 50}))
 
 
+# O Centro do criador e a Saúde do Vídeo do app de agora (vídeo do Rafael de 04/11/2026): o
+# Creator Center sem o quadro, com "Ao vivo: ..." e "Vídeo: ..." no alto, e a Account Health
+# com as abas Live e Vídeo (a Live com os pontos das lives).
+ENTRADA_NOVA = "Vídeo: Precisa melhorar"
+PONTOS_DA_SAUDE_NOVA = _no("8", caixa=(510, 690, 570, 750), clicavel=False)
+TELAS_DA_SAUDE_NOVA = {
+    "centro": [_no("Creator Center", caixa=(160, 90, 600, 150), clicavel=False),
+               _no("Ao vivo: Excelente", caixa=(150, 200, 420, 240)),
+               _no(ENTRADA_NOVA, caixa=(440, 200, 760, 240)),
+               _no("Dados dos Últimos 7 Dias", caixa=(60, 600, 600, 650), clicavel=False),
+               _no("Ao vivo", caixa=(60, 680, 220, 730)), _no("Vídeo", caixa=(240, 680, 400, 730))],
+    "saude_live": [_no("Account Health", caixa=(160, 90, 600, 150), clicavel=False),
+                   _no("Live", caixa=(100, 180, 400, 240)), _no("Vídeo", caixa=(560, 180, 900, 240)),
+                   _no("Status de Saúde da Live", caixa=(60, 280, 700, 320), clicavel=False),
+                   _no("Ponto de Penalidade", caixa=(380, 520, 700, 560), clicavel=False),
+                   _no("0", caixa=(510, 580, 570, 640), clicavel=False),
+                   _no("Lives com Violação", caixa=(60, 1500, 700, 1540), clicavel=False)],
+    "saude": ([_no("Account Health", caixa=(160, 90, 600, 150), clicavel=False),
+               _no("Live", caixa=(100, 180, 400, 240)), _no("Vídeo", caixa=(560, 180, 900, 240)),
+               _no("Banido Temporariamente", caixa=(400, 280, 760, 320), clicavel=False),
+               _no(SAUDE_BANIDO, caixa=(60, 340, 1020, 420), clicavel=False),
+               _no("Status da Saúde do Vídeo", caixa=(60, 460, 700, 500), clicavel=False),
+               _no("Ponto de Penalidade", caixa=(380, 630, 700, 670), clicavel=False),
+               PONTOS_DA_SAUDE_NOVA,
+               _no("Vídeos de Violação", caixa=(60, 1300, 700, 1340), clicavel=False)]
+              + _punicao_na_lista("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido", 1400)
+              + _punicao_na_lista("Contrafeito", "06/10/2026 22:44:53", "Bem-sucedido", 1560)
+              + _punicao_na_lista("Violação de Propriedade Intelectual", "18/10/2026 20:20:56", "Não Recorrido", 1720)),
+}
+
+
+class AppDaSaudeNova(AppDaSaude):
+    """O app de mentira com o Creator Center e a Account Health (o app de 04/11/2026)."""
+
+    def __init__(self, abre_na_live=False):
+        super().__init__()
+        self.CAMINHO = {**{chave: tela for chave, tela in AppDaSaude.CAMINHO.items() if chave[0] != "centro"},
+                        ("centro", ENTRADA_NOVA): "saude_live" if abre_na_live else "saude",
+                        ("saude_live", "Vídeo"): "saude"}
+
+    def _nos(self):
+        return TELAS_DA_SAUDE_NOVA.get(self.atual) or super()._nos()
+
+
+class SaudeCarregando(AppDaSaude):
+    """A Saúde do Vídeo (a de antes) que mostra os títulos antes do número e da lista, pela rede."""
+
+    def __init__(self, leituras_pela_metade):
+        super().__init__()
+        self.pela_metade = leituras_pela_metade
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.atual == "saude" and self.pela_metade > 0:
+            self.pela_metade -= 1
+            return [n for n in nos if '"Saúde do Vídeo"' in n or '"Vídeos de Violação"' in n]
+        return nos
+
+
+def test_saude_no_app_de_agora_pelo_creator_center_e_a_aba_video(avisos, ia_da_apelacao):
+    # Vídeo do Rafael de 04/11/2026: o Centro do criador virou Creator Center, sem o quadro, e o
+    # "Vídeo: ..." do alto abre a Account Health; os pontos e a lista são os da aba Vídeo.
+    _postado_pelo_robo()
+    app = AppDaSaudeNova()
+    assert robo.rodada(saude=True, d=app, agora=momento("2026-10-24 10:00")) == (
+        "saúde lida: 3 punição(ões) em 30 dias, 2 nova(s)")
+    assert app.toques.index("Centro do criador") < app.toques.index(ENTRADA_NOVA)
+    assert robo.ler_estado()["saude_pontos"] == 8 and "Pontos de penalidade: 8" in avisos[-1]
+    assert robo.ler_config()["robo_suspenso_ate"] == "2026-10-26 19:04:26"
+    # Aberta na aba Live, o robô troca para a aba Vídeo: os pontos das lives (0) não contam.
+    robo.gravar_estado(saude_pontos=None)
+    na_live = AppDaSaudeNova(abre_na_live=True)
+    robo.rodada(saude=True, d=na_live, agora=momento("2026-10-24 11:00"))
+    assert na_live.toques.index(ENTRADA_NOVA) < na_live.toques.index("Vídeo")
+    assert robo.ler_estado()["saude_pontos"] == 8
+    # Com as duas seções na mesma tela, o número é o da seção do vídeo.
+    duas = _xml(*TELAS_DA_SAUDE_NOVA["saude_live"][3:], *TELAS_DA_SAUDE_NOVA["saude"][3:])
+    assert robo.pontos_de_penalidade(duas) == 8
+    assert robo.pontos_de_penalidade(_xml(*TELAS_DA_SAUDE_NOVA["saude_live"])) == 0
+
+
+def test_saude_espera_o_numero_e_pela_metade_nao_tira_conclusao(avisos, ia_da_apelacao):
+    # A página carrega os títulos antes do número e da lista: o robô espera o número.
+    _postado_pelo_robo()
+    agora = momento("2026-10-24 10:00")
+    robo.rodada(saude=True, d=SaudeCarregando(4), agora=agora)
+    estado = robo.ler_estado()
+    assert estado["saude_pontos"] == 6 and estado["saude_lida_em"] == "2026-10-24 10:00:00"
+    pendentes = [p for p in robo.apelacoes.todas() if p["situacao"] == "pendente"]
+    assert len(pendentes) == 2
+    # Sem o número até o fim da espera, nada da página vale: os pontos da última leitura ficam
+    # (nunca 0), a punição que não apareceu não vira recurso aceito, e a suspensão não acaba.
+    avisos.clear()
+    depois = momento("2026-10-24 16:00")
+    resultado = robo.rodada(saude=True, d=SaudeCarregando(99), agora=depois)
+    assert robo.MOTIVO_SEM_OS_PONTOS in resultado
+    estado = robo.ler_estado()
+    assert estado["saude_pontos"] == 6 and estado["saude_lida_em"] == "2026-10-24 10:00:00"
+    assert robo.apelacoes.pontos_de_agora(agora=depois) == 6
+    assert [p["situacao"] for p in robo.apelacoes.todas() if p["situacao"] == "pendente"] == ["pendente"] * 2
+    assert not any("deu certo" in a for a in avisos)
+    assert robo.ler_config()["robo_suspenso_ate"] == "2026-10-26 19:04:26"
+    assert robo.passo_do_motivo(robo.MOTIVO_SEM_OS_PONTOS) == "ler os pontos de penalidade"
+
+
 def test_saude_que_nao_abre_nao_pausa_pelo_aviso_antigo_se_o_postar_abre(monkeypatch, avisos, caminho_do_rascunho,
                                                                           conta_suspensa):
     # O recurso aceito tira a suspensão, mas o aviso antigo fica nas Notificações. Sem a
