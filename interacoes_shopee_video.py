@@ -30,9 +30,10 @@ DIAS_DAS_MARCAS = 90
 # Um comentário que não deu para responder volta nas rodadas seguintes; na 3ª vez o robô
 # desiste, avisa o Rafael (ele responde à mão) e o checkup aponta.
 TENTATIVAS_DO_COMENTARIO = 3
-# Os vídeos do feed por dia: um limite, não uma meta (o dia com menos é normal), com cada
-# comentário diferente. Escolhas do Rafael (P10 e P151 1): DECISOES.md, Shopee Vídeo.
-VIDEOS_NO_FEED_POR_DIA = 3
+# Os vídeos do feed por dia: um limite, não uma meta (o dia com menos é normal), espalhados
+# pelo dia, com cada comentário diferente. Escolhas do Rafael (P10, P151 1 e P152): DECISOES.md,
+# Shopee Vídeo.
+VIDEOS_NO_FEED_POR_DIA = 5
 # No feed, o robô prefere os vídeos com até tantos comentários: o dele fica no alto e é
 # visto. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
 POUCOS_COMENTARIOS = 20

@@ -31,8 +31,9 @@ Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
    quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô;
 5. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia (P70; Notificações →
    Lives, Vídeos e ...; o texto é da IA e cada resposta é conferida embaixo do comentário);
-6. curte e comenta um vídeo de outro criador no feed Live e Vídeo → Para você, até 3 por
-   dia, espalhados (interacoes_shopee_video.py).
+6. curte um vídeo de outro criador no feed Live e Vídeo → Para você e, quando a IA tem algo
+   específico a dizer, comenta nele: até 5 por dia, um por rodada, espalhados pelo Horário do
+   Robô; o que falha tenta de novo na rodada seguinte (P151 1 e P152; interacoes_shopee_video.py).
 Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celular aberta no
 privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular desconectado:
 tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
@@ -44,10 +45,9 @@ suspensão (o Postar vídeo fica fechado), e o modo assistente espera junto; o r
 no horário de sempre, e com o celular fora da tomada só pula. No fim, os dois voltam
 sozinhos (painel_shopee_video), e o treino da segunda que caiu na suspensão roda primeiro.
 
-Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Curtir e
-comentar o próprio vídeo continuam à mão: depois de postar, o comentário chega no
-privado, numa mensagem só dele. No log, só estados e números: nada de nome de
-produto, título ou link.
+Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Depois de
+postar, curte o próprio vídeo, comenta nele e curte o comentário (P148 2). No log, só
+estados e números: nada de nome de produto, título ou link.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
@@ -1175,10 +1175,10 @@ def motivo_da_espera(config, agora=None):
     if not no_horario(config, agora):
         return "fora do Horário do Robô"
     if na_hora_das_interacoes(config, agora) and not interacoes_do_dia_feitas(agora):
-        faltam = videos_do_feed_que_faltam(agora)
-        partes = ([f"{faltam} vídeo(s) no feed"] if faltam else []) + (
-            ["as respostas aos comentários"] if respostas_pendentes(agora) else [])
-        return f"no Horário das Interações, esperando acabarem {' e '.join(partes) or 'as interações'} do dia"
+        partes = (["as respostas aos comentários"] if respostas_pendentes(agora) else []) + (
+            ["o comentário no post antigo"] if post_antigo_pendente(agora) else [])
+        return (f"no Horário das Interações, esperando o robô terminar {' e '.join(partes) or 'as interações'} "
+                "do dia")
     return "sai numa das próximas rodadas (a cada 15 min)"
 
 
@@ -1337,7 +1337,7 @@ def o_que_fazer(config, agora=None):
     hora só isso), ("treino", None), ("apagar", id), ("postar", id), ("saude",
     None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
     ("rascunho", None), ("responder", None) (os comentários dos vídeos, nas horas_das_respostas),
-    ("feed", None) (os vídeos do feed do dia, videos_nesta_rodada), ("comentar_post", id) (o
+    ("feed", None) (um vídeo do feed, espalhados pelo dia, P152), ("comentar_post", id) (o
     comentário de depois do post que volta), ("post_antigo", id) (o comentário do dia num post antigo)
     ou None. Gasta o horário do plano, ou
     uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
@@ -1354,10 +1354,11 @@ def o_que_fazer(config, agora=None):
     recusados = listar("recusado")
     if recusados:
         return "apagar", recusados[0]["id"]
-    # O feed só no Horário das Interações (sem ele escolhido, no Horário do Robô, como antes);
-    # preparar e postar fora dele, ou nele depois que as interações do dia acabam. As
-    # respostas, nas horas_das_respostas, dentro ou fora dele. Escolhas do Rafael (P22 a
-    # P24, P26 e P70). (A rodada já confere o horário: aqui só a separação entre os dois.)
+    # O comentário do post antigo só no Horário das Interações (sem ele escolhido, no Horário
+    # do Robô); preparar e postar fora dele, ou nele depois que as interações dele acabam. As
+    # respostas, nas horas_das_respostas, dentro ou fora dele. O feed se espalha pelo dia todo,
+    # dentro ou fora dele (P152). Escolhas do Rafael (P22 a P24, P26, P70 e P152). (A rodada
+    # já confere o horário: aqui só a separação entre os dois.)
     na_janela = na_hora_das_interacoes(config, agora)
     postar = (not na_janela or interacoes_do_dia_feitas(agora)) and not sem_postar
     interagir = na_janela or not janela_das_interacoes(config)
@@ -1396,7 +1397,7 @@ def o_que_fazer(config, agora=None):
     antigo = post_antigo_pendente(agora) if interagir else None
     if antigo:
         return "post_antigo", antigo["id"]
-    if interagir and feed_pendente(agora):
+    if feed_pendente(agora):
         return "feed", None
     return None
 
@@ -5669,15 +5670,13 @@ ABA_DO_FEED = "Live e Vídeo"
 ABA_PARA_VOCE = "Para você"
 # Quantos vídeos do feed o robô passa, no máximo, procurando um para comentar.
 VIDEOS_OLHADOS_NO_FEED = 12
-# Os vídeos do feed do dia saem espalhados, não um atrás do outro.
-INTERVALO_DO_FEED = timedelta(hours=2)
 # O painel chama uma rodada a cada 15 min (painel_shopee_video).
 INTERVALO_DAS_RODADAS = timedelta(minutes=15)
-# Quanto leva um comentário no feed (passar as lives, assistir, a IA, curtir, comentar e
-# conferir): no Horário das Interações, ele só começa se der para acabar dentro do horário.
-DURACAO_DO_FEED = timedelta(minutes=5)
-# Entre dois vídeos na mesma rodada, em segundos (sorteados): o robô fica um pouco no feed.
-PAUSA_ENTRE_VIDEOS = (60, 120)
+# Os vídeos do feed do dia se espalham pelo Horário do Robô, um por rodada: o espaço entre dois
+# que deram certo é o dia do robô dividido pelos do dia, no passo das rodadas, menos esta folga
+# (a rodada seguinte começa uns segundos ou minutos antes da hora certa). Escolha do Rafael
+# (P152): DECISOES.md, Shopee Vídeo.
+FOLGA_DO_FEED = timedelta(minutes=5)
 REGISTRO = "shopee_video"
 
 
@@ -5714,67 +5713,37 @@ def videos_do_feed_que_faltam(agora=None):
                - interacoes.quantos_desde("video_feed", interacoes.FEITOS_NO_FEED, inicio))
 
 
-def rodadas_que_restam(config, agora=None):
-    """
-    Quantas rodadas, contando esta, ainda começam a tempo de comentar no feed antes do fim do
-    Horário das Interações (DURACAO_DO_FEED antes dele); None sem o horário ou fora dele.
-    """
-    janela = janela_das_interacoes(config)
-    if not janela or not na_hora_das_interacoes(config, agora):
-        return None
-    momento = agora_br(agora)
-    ultimo_comeco = (momento.replace(hour=0, minute=0, second=0, microsecond=0)
-                     + timedelta(hours=janela[1]) - DURACAO_DO_FEED)
-    if momento > ultimo_comeco:
-        return 0
-    return int((ultimo_comeco - momento) / INTERVALO_DAS_RODADAS) + 1
-
-
 def feed_pendente(agora=None):
     """
-    Falta algum vídeo do feed hoje (o limite do dia, P10 e P151 1), e o último foi há
-    INTERVALO_DO_FEED ou mais? Num Horário das Interações curto, o intervalo encolhe para os do
-    dia caberem nele (P22 a P24) e some quando as rodadas que ainda cabem nele não passam dos
-    vídeos que faltam; sem tempo de acabar dentro dele, o feed não começa.
+    Falta algum vídeo do feed hoje (até VIDEOS_NO_FEED_POR_DIA, sem meta), e o último que deu
+    certo foi há intervalo_do_feed ou mais? Um por rodada, em qualquer hora do robô, dentro ou
+    fora do Horário das Interações. O que falha não conta nem mexe no feed_em: a rodada seguinte
+    tenta de novo, até dar certo. Escolhas do Rafael (P151 1 e P152): DECISOES.md, Shopee Vídeo.
     """
-    faltam = videos_do_feed_que_faltam(agora)
-    if not faltam:
+    if not videos_do_feed_que_faltam(agora):
         return False
-    config = ler_config()
-    restam = rodadas_que_restam(config, agora)
-    if restam is not None and restam <= faltam:
-        return restam > 0
-    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(config))
-
-
-def videos_nesta_rodada(config, agora=None):
-    """
-    Quantos vídeos do feed esta rodada faz: um, ou mais quando as rodadas que ainda cabem
-    no Horário das Interações não bastam para os que faltam hoje (numa janela de 1 hora, a
-    rodada das respostas e o começo das rodadas, que muda a cada reinício do bot, podem não
-    deixar 3 livres). Escolha do Rafael (P22 a P24): os do dia cabem no horário. DECISOES.md, Shopee Vídeo.
-    """
-    restam = rodadas_que_restam(config, agora)
-    if not restam:
-        return 1
-    return max(1, videos_do_feed_que_faltam(agora) - (restam - 1))
+    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config()))
 
 
 def interacoes_do_dia_feitas(agora=None):
     """
-    As respostas, os vídeos do feed e o comentário do post antigo de hoje já saíram todos? Aí o
-    postar volta, mesmo na janela.
+    As respostas e o comentário do post antigo de hoje já saíram? Aí o postar volta, mesmo no
+    Horário das Interações (P26). O feed se espalha pelo dia todo e não segura o postar (P152).
     """
-    return (not respostas_pendentes(agora) and not videos_do_feed_que_faltam(agora)
-            and not post_antigo_pendente(agora))
+    return not respostas_pendentes(agora) and not post_antigo_pendente(agora)
 
 
 def intervalo_do_feed(config):
-    """INTERVALO_DO_FEED, ou a janela das interações dividida pelos vídeos do feed do dia, se for menor."""
-    janela = janela_das_interacoes(config)
-    if not janela:
-        return INTERVALO_DO_FEED
-    return min(INTERVALO_DO_FEED, timedelta(hours=janela[1] - janela[0]) / interacoes.VIDEOS_NO_FEED_POR_DIA)
+    """
+    O espaço entre dois vídeos do feed que deram certo: as horas do Horário do Robô (sem a hora
+    do descurtir) divididas pelos do dia, no passo das rodadas, menos a FOLGA_DO_FEED. No Dia
+    Todo, com 5 por dia, 4h25; das 8h às 22h, 2h40. Escolha do Rafael (P152): DECISOES.md.
+    """
+    inicio, fim = int(config["robo_inicio"]), int(config["robo_fim"])
+    horas = max(1, fim - inicio - (1 if inicio <= HORA_DO_DESCURTIR < fim else 0))
+    espaco = timedelta(hours=horas) / interacoes.VIDEOS_NO_FEED_POR_DIA
+    passos = max(1, int(espaco / INTERVALO_DAS_RODADAS))
+    return passos * INTERVALO_DAS_RODADAS - FOLGA_DO_FEED
 
 
 def _ir_as_notificacoes(d):
@@ -6179,8 +6148,8 @@ def interagir_no_feed(d, agora=None):
     """
     Live e Vídeo → Para você: passa as lives, olha uns vídeos e, num vídeo de outro criador
     em que ainda não esteve, curte e, quando a IA tem algo específico a dizer, comenta (texto
-    da IA, diferente dos anteriores; sem nada a dizer, só a curtida, P151 1). Um vídeo de cada
-    vez; os do dia saem espalhados (feed_pendente e videos_nesta_rodada). Pedido do Rafael (P10).
+    da IA, diferente dos anteriores; sem nada a dizer, só a curtida, P151 1). Um vídeo por
+    rodada; os do dia se espalham pelo Horário do Robô (feed_pendente, P152). Pedido do Rafael (P10).
     """
     ir_ao_inicio(d)
     tocar(d, ABA_DO_FEED, 8)
@@ -6276,7 +6245,7 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
     if texto == interacoes.CURTIR:
         # Sem nada específico para dizer, fica só a curtida: o vídeo conta nos do dia e não
         # volta. Escolha do Rafael (P151 1): DECISOES.md, Shopee Vídeo.
-        interacoes.guardar(marca, "video_feed", interacoes.SO_CURTIDO, agora)
+        _feito_no_feed(marca, interacoes.SO_CURTIDO, agora)
         registro_processos.registrar(REGISTRO, "feed: comentar", interacoes.SO_CURTIDO,
                                      "a IA não viu nada específico para comentar", ok=True, origem=marca)
         registrar_tentativa("feed", "curtido", agora=agora)
@@ -6284,20 +6253,34 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
     try:
         apareceu = _comentar_no_feed(d, video, texto)
     except Parada as e:
-        registro_processos.registrar(REGISTRO, "feed: comentar", "parou", e.motivo, ok=False, origem=marca)
+        # A curtida já saiu: o vídeo conta nos do dia, como só curtido, para nunca passarem de
+        # VIDEOS_NO_FEED_POR_DIA curtidas por dia. A parada segue para o caso e o checkup.
+        _feito_no_feed(marca, interacoes.SO_CURTIDO, agora)
+        registro_processos.registrar(REGISTRO, "feed: comentar", interacoes.SO_CURTIDO,
+                                     f"o comentário parou: {e.motivo}", ok=False, origem=marca)
         raise
     gravar_estado(feed_textos=(anteriores + [texto])[-10:])
     if not apareceu:
         # Enviado sem aparecer: pode ter saído, então o vídeo não volta e conta no dia.
-        interacoes.guardar(marca, "video_feed", "não confirmado", agora)
+        _feito_no_feed(marca, "não confirmado", agora)
         registro_processos.registrar(REGISTRO, "feed: comentar", "não confirmado", "enviado sem aparecer na lista",
                                      ok=False, origem=marca)
         registrar_tentativa("feed", "parou", "o comentário não apareceu no vídeo do feed", agora=agora)
         return "feed: comentário enviado sem aparecer na lista"
-    interacoes.guardar(marca, "video_feed", "comentado", agora)
+    _feito_no_feed(marca, "comentado", agora)
     registro_processos.registrar(REGISTRO, "feed: comentar", "comentado", ok=True, origem=marca)
     registrar_tentativa("feed", "comentado", agora=agora)
     return "feed: 1 vídeo curtido e comentado"
+
+
+def _feito_no_feed(marca, estado, agora=None):
+    """
+    O vídeo do feed que conta nos do dia (FEITOS_NO_FEED): a marca, para não voltar, e o feed_em,
+    de onde se conta o espaço até o próximo. O que falha antes da curtida não passa por aqui, e a
+    rodada seguinte tenta de novo (P152).
+    """
+    interacoes.guardar(marca, "video_feed", estado, agora)
+    gravar_estado(feed_em=_momento(agora))
 
 
 # --- O comentário no próprio vídeo (P148 2) ---
@@ -6728,7 +6711,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
             return "nada a fazer agora"
         if preparar:
             # O rascunho pedido no botão vale a qualquer hora, também no Horário das Interações: o
-            # checkup o separa do preparo do plano, que ali espera os comentários do feed.
+            # checkup o separa do preparo do plano, que ali espera as respostas e o post antigo.
             registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "pedido", ok=None, agora=agora)
         # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
         d = casos_robo.com_historico(d or ps.conectar(celular=True))
@@ -6808,15 +6791,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             gravar_estado(respostas_em=_momento(agora), respostas_continuar=False)
             return responder_comentarios(d, agora)
         if acao == "feed":
-            resultados = []
-            for vez in range(videos_nesta_rodada(config, agora)):
-                if vez:
-                    pausa(random.uniform(*PAUSA_ENTRE_VIDEOS))
-                    if not videos_do_feed_que_faltam(agora) or not rodadas_que_restam(config, agora):
-                        break
-                gravar_estado(feed_em=_momento(agora))
-                resultados.append(interagir_no_feed(d, agora))
-            return "; ".join(resultados)
+            return interagir_no_feed(d, agora)
         if acao in ("comentar_post", "post_antigo"):
             rascunho = pegar(ident)
             if not rascunho or not rascunho["link_post"]:

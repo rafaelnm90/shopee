@@ -392,8 +392,11 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
 
     robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:10"))
     robo.registrar_tentativa("feed", "comentado", agora=em("04:20"))                # na hora do descurtir
-    robo.registrar_tentativa("feed", "comentado", agora=em("15:00"))                # fora da janela
-    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # antes dos 3 do feed
+    robo.registrar_tentativa("feed", "comentado", agora=em("15:00"))                # o feed, no dia todo (P152)
+    robo.registrar_tentativa("post_antigo", "comentado", agora=em("15:10"))         # fora da janela
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # antes do post antigo
+    robo.registrar_tentativa("post_antigo", "comentado", agora=em("10:20"))         # na janela
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("10:40"))                # depois dele: certo
     robo.registrar_tentativa("rascunho", "salvo", agora=em("13:00"))                # fora da janela: certo
     robo.registrar_tentativa("responder", "respondido", agora=em("17:05"))          # as respostas: em qualquer hora (P70)
     # Apagar o rascunho recusado roda nos dois horários (P22 a P24): não é preparo na janela,
@@ -411,20 +414,20 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     r = checkup.sobreposicoes(AGORA)
     assert r["janela"] == (9, 11)
     assert [hora for hora, _o in r["no_descurtir"]] == ["04:05", "04:20", "04:30"]
-    assert [hora for hora, _o in r["fora_da_janela"]] == ["04:20", "15:00"]
+    assert [hora for hora, _o in r["fora_da_janela"]] == ["15:10"]
     assert [hora for hora, _o in r["preparo_na_janela"]] == ["09:30"]
     assert r["rotinas_coladas"] == {"Viral": [("10:00", "link_grupo_viral", "10:00", "promo_principal")]}
     assert r["assistente"] == [("15:20", "postagem mandada no seu privado")]
     pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "ruins": [], "salvos": 0, "vencidos": 0},
                                        {}, None, AGORA, sobre=r)
     assert "Sobreposição: 3 atividade(s) do robô da Shopee Vídeo na hora do descurtir (4h)" in pontos
-    assert "Sobreposição: 2 interação(ões) do robô fora do Horário das Interações" in pontos
-    assert ("Sobreposição: 1 passo(s) de preparo ou postagem no Horário das Interações antes dos comentários "
-            "do feed") in pontos
+    assert "Sobreposição: 1 interação(ões) do robô fora do Horário das Interações" in pontos
+    assert ("Sobreposição: 1 passo(s) de preparo ou postagem no Horário das Interações antes das respostas e "
+            "do post antigo") in pontos
     # A janela escolhida às 10:00 não cobra o que o robô fez antes dela.
     db.atualizar_config(robo.CHAVE_CONFIG, lambda c: c.update(robo_interacoes_desde=f"{dia} 10:00:00"))
     r = checkup.sobreposicoes(AGORA)
-    assert [hora for hora, _o in r["fora_da_janela"]] == ["15:00"] and r["preparo_na_janela"] == []
+    assert [hora for hora, _o in r["fora_da_janela"]] == ["15:10"] and r["preparo_na_janela"] == []
     assert r["janela_desde"] == f"{dia} 10:00:00"
 
 
@@ -467,7 +470,8 @@ def test_preparo_pedido_no_botao_nao_e_sobreposicao():
 
     registro_processos.registrar("shopee_video", robo.PROCESSO_DO_BOTAO, "pedido", ok=None, agora=em("09:20"))
     robo.registrar_tentativa("rascunho", "salvo", agora=em("09:31"))                # o pedido no botão
-    robo.registrar_tentativa("rascunho", "pulado", agora=em("10:15"))               # do plano, antes do feed
+    robo.registrar_tentativa("rascunho", "pulado", agora=em("10:15"))               # do plano, antes do post antigo
+    robo.registrar_tentativa("post_antigo", "comentado", agora=em("10:50"))         # a interação da janela
     r = checkup.sobreposicoes(AGORA)
     assert [hora for hora, _o in r["pedidos_no_botao"]] == ["09:31"]
     assert [hora for hora, _o in r["preparo_na_janela"]] == ["10:15"]
@@ -799,15 +803,18 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
         registro("shopee_video", "feed: comentar", "comentado", ok=True, origem=origem, agora=antes(horas))
     registro("shopee_video", "feed: comentar", "não confirmado", ok=False, origem="v4", agora=antes(2))
     registro("shopee_video", "feed: comentar", "parou", ok=False, origem="v5", agora=antes(1))
+    registro("shopee_video", "feed: comentar", "só curtido", ok=True, origem="v6", agora=antes(0.75))
+    registro("shopee_video", "feed: comentar", "comentado", ok=True, origem="v7", agora=antes(0.5))
     r = checkup.interacoes_da_shopee_video(AGORA)
     assert r["respostas"] == {"respondido": 1, "resposta no lugar errado": 1, "já respondido": 1, "sem resposta": 1}
-    assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 4 and r["feed_repetidos"] == 1
-    assert r["feed_horas"] == ["17:20", "18:20", "19:20", "20:20"]
+    assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 6 and r["feed_repetidos"] == 1
+    assert r["feed_horas"] == ["17:20", "18:20", "19:20", "20:20", "21:35", "21:50"]
+    assert r["feed_so_curtidos"] == 1
     assert (r["leituras_hoje"], r["leituras_esperadas"]) == (1, 3)           # só a das 12h (P70)
     robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
     for trecho in ("não ficaram embaixo do comentário certo", "ficaram sem resposta depois de 3 tentativas",
-                   "com mais de uma resposta do perfil", "4 vídeos hoje (o limite é 3)",
+                   "com mais de uma resposta do perfil", "6 vídeos hoje (o limite é 5)",
                    "as Notificações foram lidas 1 de 3 vezes hoje",
                    "comentado(s) mais de uma vez em 3 dias"):
         assert trecho in texto
@@ -822,7 +829,8 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
 
 def test_feed_so_curtido_conta_no_dia_e_o_dia_com_menos_nao_e_cobrado():
     # Escolha do Rafael (P151 1): nem toda curtida vem com comentário, e o feed tem limite, não
-    # meta. O só curtido conta nos do dia e no fim do feed da janela (P26); abaixo do limite, nada.
+    # meta. O só curtido conta nos do dia; abaixo do limite, nada. O feed se espalha pelo dia todo
+    # e não segura o preparo da janela (P152).
     import registro_processos
     import robo_shopee_video as robo
     db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_interacoes_inicio": 20,
@@ -837,7 +845,7 @@ def test_feed_so_curtido_conta_no_dia_e_o_dia_com_menos_nao_e_cobrado():
                                  ok=True, origem="v2", agora=em("20:25"))
     registro_processos.registrar("shopee_video", "feed: comentar", "não confirmado", ok=False, origem="v3",
                                  agora=em("20:40"))
-    # Os 3 do dia feitos às 20:40: o preparo das 20:50, ainda na janela, já pode (P26).
+    # Sem interação da janela depois dele, o preparo das 20:50 não é sobreposição (P26 e P152).
     robo.registrar_tentativa("rascunho", "salvo", agora=em("20:50"))
     r = checkup.interacoes_da_shopee_video(AGORA)
     assert (r["feed_hoje"], r["feed_so_curtidos"]) == (3, 1)
