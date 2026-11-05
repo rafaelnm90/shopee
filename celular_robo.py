@@ -28,10 +28,14 @@ Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 import asyncio
 import contextlib
 import fcntl
+import io
 import json
 import os
 import re
+import secrets
 import shutil
+import string
+import time
 from datetime import datetime, timedelta
 
 import android_virtual as av
@@ -226,6 +230,59 @@ def parear(ip, porta, codigo):
         _gravar(ip=ip, pareado_em=_agora())
         return True, ""
     return False, _motivo(r)
+
+
+# O pareamento pelo código QR (P149 2): o bot manda o QR, no formato que o Android lê na
+# Depuração por Wi-Fi → Parear o dispositivo com um código QR, e o celular abre uma porta de
+# pareamento. O QR foi feito para o celular achar o computador no mesmo Wi-Fi (mDNS), o que não
+# passa pela rede privada: o servidor procura a porta nova pela rede privada, como no
+# reconectar_sozinho, e pareia nela com a senha do QR. O código de 6 dígitos continua de reserva.
+# A senha vale só para esse pareamento e nunca vai para o log nem para o banco.
+# Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+ESPERA_DO_QR = 300
+TENTATIVAS_POR_PORTA_DO_QR = 2
+LETRAS_DO_QR = string.ascii_letters + string.digits
+
+
+def novo_qr():
+    """O nome e a senha de um pareamento pelo QR e o texto do QR: (nome, senha, texto)."""
+    nome = "robo-" + "".join(secrets.choice(LETRAS_DO_QR) for _ in range(8))
+    senha = "".join(secrets.choice(LETRAS_DO_QR) for _ in range(12))
+    return nome, senha, f"WIFI:T:ADB;S:{nome};P:{senha};;"
+
+
+def imagem_do_qr(texto):
+    """O QR em PNG (bytes), grande o bastante para a câmera do Motorola ler de outra tela."""
+    import qrcode
+    saida = io.BytesIO()
+    qrcode.make(texto, box_size=12, border=4).save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def parear_pelo_qr(ip, senha, ja_abertas=(), espera=ESPERA_DO_QR, relogio=time.monotonic, pausa=time.sleep):
+    """
+    Procura pela rede privada, por até `espera` segundos, a porta de pareamento que o celular abre
+    depois de ler o QR (uma que não estava aberta antes, ja_abertas) e pareia nela com a senha do
+    QR. Cada porta nova é tentada até TENTATIVAS_POR_PORTA_DO_QR vezes (a varredura às vezes a
+    acha antes de ela aceitar). (True, "") ou (False, motivo).
+    """
+    if shutil.which("adb") is None:
+        return False, "o adb não está instalado no servidor"
+    fim, tentadas, ultimo = relogio() + espera, {}, ""
+    while relogio() < fim:
+        for porta in portas_abertas(ip):
+            if porta in ja_abertas or tentadas.get(porta, 0) >= TENTATIVAS_POR_PORTA_DO_QR:
+                continue
+            tentadas[porta] = tentadas.get(porta, 0) + 1
+            ok, motivo = parear(ip, porta, senha)
+            if ok:
+                return True, ""
+            ultimo = motivo
+        pausa(5)
+    if ultimo:
+        return False, f"o celular abriu a porta do pareamento, mas não pareou ({ultimo})"
+    return False, ("não achei a porta do pareamento pela rede privada: o QR não foi lido a tempo, ou a porta não "
+                   "respondeu")
 
 
 def conectar(ip, porta):

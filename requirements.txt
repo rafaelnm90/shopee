@@ -46,3 +46,4 @@ onnxruntime==1.31.1
 av==18.1.0
 tokenizers==0.23.3
 huggingface-hub==0.36.0
+qrcode==8.2
