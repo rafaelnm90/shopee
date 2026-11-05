@@ -796,8 +796,16 @@ def texto_robo(config, agora=None, celular=None):
     )
 
 
-def rotulo_produtos_a_mais(config):
+def rotulo_produtos_a_mais(config, agora=None):
+    """
+    Ligados ou desligados e, ligados com apelacoes.PONTOS_SO_O_PRODUTO_DO_VIDEO pontos ou mais,
+    que só vai o produto do vídeo até os pontos deixarem (P145 e P153 3).
+    """
     if config.get("robo_produtos_a_mais", True):
+        pontos = apelacoes.pontos_de_agora(robo.ler_estado(), agora)
+        if pontos >= apelacoes.PONTOS_SO_O_PRODUTO_DO_VIDEO:
+            return (f"✅ <b>ligados</b>, mas com <b>{pontos}</b> pontos de penalidade só vai o produto do vídeo, até "
+                    f"os pontos baixarem (recurso aceito) ou zerarem em <b>{apelacoes.quando_zeram(agora)}</b>")
         return "✅ <b>ligados</b> (até 6 por vídeo)"
     parados = config.get("robo_produtos_a_mais_parados")
     return "⏸️ <b>desligados</b>" + (f" (parados sozinhos: {html_escape(parados)})" if parados else "")
@@ -805,8 +813,8 @@ def rotulo_produtos_a_mais(config):
 
 def texto_produtos_a_mais(config):
     """
-    A tela dos Produtos a Mais. Escolhas do Rafael (28/10, P59; 29/10, P73; 30/10, P102):
-    DECISOES.md, Shopee Vídeo.
+    A tela dos Produtos a Mais. Escolhas do Rafael (28/10, P59 e P66; 29/10, P73; 30/10, P102; 05/11,
+    P153 3): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🛍️ <b>Produtos a Mais</b>\n"
@@ -817,9 +825,10 @@ def texto_produtos_a_mais(config):
         "paga menos. Sem itens iguais, o rascunho vai só com o produto do link. No rascunho, você vê as fotos de "
         "capa de todos antes de aprovar, com a de outra foto que a do anúncio do post marcada.\n\n"
         f"Agora: {rotulo_produtos_a_mais(config)}\n\n"
-        "<b>Medição</b>: até 05/11 o Claude conta as vendas que vieram dos produtos a mais, as punições, as "
-        "verificações e os rascunhos que não saíram, e traz os números para você decidir. Se a Shopee der uma "
-        "punição de Produto Irrelevante, os produtos a mais param sozinhos e você recebe o aviso no privado.\n\n"
+        "<b>Pontos de penalidade</b>: com 4 pontos ou mais, só vai o produto do vídeo; os produtos a mais voltam "
+        "sozinhos quando os pontos baixarem (recurso aceito) ou zerarem no começo do trimestre. Se a Shopee der "
+        "uma punição de Produto Irrelevante, eles param sozinhos, você recebe o aviso no privado e eles só voltam "
+        "quando você ligar aqui.\n\n"
         "<b>O que cada botão faz</b>\n"
         f"✅ <b>{BOTAO_LIGAR_A_MAIS}</b> / ⏸️ <b>{BOTAO_DESLIGAR_A_MAIS}</b>: liga ou desliga os produtos a mais "
         "nos próximos rascunhos (os já salvos ficam como estão).\n"
@@ -1229,7 +1238,7 @@ async def produtos_a_mais_handler(message: types.Message, state: FSMContext):
 async def ligar_produtos_a_mais_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     ligar = message.text == BOTAO_LIGAR_A_MAIS
-    alterar_config(robo_produtos_a_mais=ligar, robo_produtos_a_mais_parados=None)
+    alterar_config(robo_produtos_a_mais=ligar, robo_produtos_a_mais_parados=None, robo_produtos_a_mais_parados_em=None)
     registro_processos.registrar("shopee_video", PROCESSO_DOS_ESPACOS,
                                  "ligados no painel" if ligar else "desligados no painel", ok=True)
     logger.info(f"🛍️ [Shopee Vídeo] Produtos a mais {'ligados' if ligar else 'desligados'} pelo painel.")

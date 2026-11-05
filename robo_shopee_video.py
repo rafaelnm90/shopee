@@ -3667,7 +3667,8 @@ def parar_os_produtos_a_mais(punicao, rascunho=None):
         return
     parados = f"punição de {punicao['tipo']} ({punicao['data']})"
     db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.update(robo_produtos_a_mais=False,
-                                                                 robo_produtos_a_mais_parados=parados))
+                                                                 robo_produtos_a_mais_parados=parados,
+                                                                 robo_produtos_a_mais_parados_em=_momento()))
     a_mais = sum(1 for item in (rascunho or {}).get("itens") or [] if item.get("a_mais"))
     if not rascunho:
         contexto = "Não achei o rascunho do robô desse vídeo."
@@ -3682,6 +3683,33 @@ def parar_os_produtos_a_mais(punicao, rascunho=None):
     avisar(f"⚠️ Robô da Shopee Vídeo: a Shopee deu uma punição de {punicao['tipo']} ({punicao['data']}). Como "
            "você escolheu, desliguei os produtos a mais (o mesmo item de outras lojas): os próximos rascunhos vão "
            f"só com o produto do link. {contexto}\n\nPara ligar de novo: {CAMINHO_DOS_PRODUTOS_A_MAIS}.")
+
+
+def religar_a_pausa_sem_hora():
+    """
+    Migração única (P153 3): a pausa dos produtos a mais por punição de produto que não guarda
+    quando parou (robo_produtos_a_mais_parados_em, que toda pausa guarda) sai, e eles voltam como
+    estavam, até 6 por vídeo: o Rafael escolheu que voltem quando os pontos deixarem. Até lá, com
+    apelacoes.PONTOS_SO_O_PRODUTO_DO_VIDEO pontos ou mais, a escada já deixa só o produto do vídeo
+    (espacos_livres, P145). A pausa de uma punição nova fica até ele ligar de novo no painel (P73).
+    Devolve True quando religou. Escolha do Rafael (05/11, P153 3): DECISOES.md, Shopee Vídeo.
+    """
+    config = ler_config()
+    if (config.get("robo_produtos_a_mais", True) or not config.get("robo_produtos_a_mais_parados")
+            or config.get("robo_produtos_a_mais_parados_em")):
+        return False
+
+    def religar(dados):
+        if dados.get("robo_produtos_a_mais_parados_em") or not dados.get("robo_produtos_a_mais_parados"):
+            return False
+        dados.update(robo_produtos_a_mais=True, robo_produtos_a_mais_parados=None)
+        return True
+
+    religados = bool(db.atualizar_config(CHAVE_CONFIG, religar))
+    if religados:
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "religados - voltam quando os pontos deixarem",
+                                     "escolha da P153", ok=True)
+    return religados
 
 
 def _mais_produtos(produtos):
@@ -6633,6 +6661,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
     celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo botão). Devolve o que
     aconteceu, numa frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
+    religar_a_pausa_sem_hora()
     config = ler_config()
     pedido_de_post = postar is not None
     na_hora = treino or preparar or saude or pedido_de_post
