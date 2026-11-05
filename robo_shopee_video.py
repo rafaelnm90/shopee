@@ -3229,6 +3229,118 @@ def _trocar_pela_maior_comissao(video):
     return None
 
 
+# --- O mesmo produto com mais comissão no Ver Produtos (P57) ---
+
+PROCESSO_DA_TROCA_DO_VER_PRODUTOS = "ver produtos: o mesmo produto que paga mais"
+
+
+def _valor_da_oferta(oferta):
+    """O que o Rafael recebe numa venda pela oferta da API (o preço "a partir de" vezes a comissão); 0 sem ela."""
+    preco = assistente._numero((oferta or {}).get("priceMin")) or assistente._numero((oferta or {}).get("price"))
+    return valor_por_venda(preco, assistente._numero((oferta or {}).get("commissionRate")) * 100)
+
+
+def trocar_os_do_ver_produtos(d, video, nomes, fotos, vistos, curtidos, prazo, de_outra_cor=()):
+    """
+    Os produtos do Ver Produtos (nomes: os que a IA confirmou, na ordem) como o post os leva
+    (P57): cada um da mesma cor do vídeo ganha a busca da troca do link de produto (P33 e P58: a
+    API pelo nome, por maior comissão; os de nome parecido, até MAIS_CARO_NA_TROCA% mais caros,
+    que pagam mais por venda; a IA confere cada um com o vídeo, com a foto da página do produto
+    do criador, fotos[nome], como o produto do post), e o 1º confirmado toma o lugar dele,
+    curtido pelo link (curtidos recebe (link, nome)). Depois, os da mesma cor do vídeo do que
+    paga mais por venda para o que paga menos (o 1º dá a foto da edição, P39) e os de outra cor
+    (de_outra_cor) no fim, do mesmo jeito; o valor vem da oferta achada pelo nome, e o produto
+    sem ela fica atrás dos que têm, na ordem do criador. Devolve [{nome, link (o curto do
+    trocado; "" no do criador), valor, trocado (o nome do produto do criador que saiu, ou "")}],
+    na ordem do post. Passado o prazo (time.monotonic), os que faltam ficam os do criador. A
+    troca é um ganho a mais: um erro nela deixa o produto do criador; a Verificação, não.
+    Escolhas do Rafael (28/10, P57 e P58; 05/11, P154 3): DECISOES.md, Shopee Vídeo.
+    """
+    produtos = []
+    for nome in nomes:
+        try:
+            parecido, _exato, oferta = _oferta_parecida(nome)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] A oferta de um produto do Ver Produtos não veio: {type(e).__name__}")
+            parecido, oferta = 0, {}
+        oferta = oferta if parecido >= PARECIDO_DA_FOTO else {}
+        produto = {"nome": nome, "link": "", "valor": _valor_da_oferta(oferta), "trocado": ""}
+        if nome not in de_outra_cor:
+            produto = _trocar_um_do_ver_produtos(d, video, produto, oferta, fotos.get(nome), vistos, curtidos,
+                                                 prazo) or produto
+        produtos.append(produto)
+    return (sorted((p for p in produtos if p["nome"] not in de_outra_cor), key=lambda p: -p["valor"])
+            + sorted((p for p in produtos if p["nome"] in de_outra_cor), key=lambda p: -p["valor"]))
+
+
+def _trocar_um_do_ver_produtos(d, video, produto, oferta, foto, vistos, curtidos, prazo):
+    """Um produto do Ver Produtos trocado pelo mesmo item da loja que paga mais (trocar_os_do_ver_produtos), ou None."""
+    def anotar(resultado, detalhe="", ok=None):
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_TROCA_DO_VER_PRODUTOS, resultado, detalhe, ok=ok)
+
+    if time.monotonic() > prazo:
+        anotar("mantido - sem tempo na rodada")
+        return None
+    preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
+    if not oferta or not preco:
+        anotar("mantido - a API não achou o produto pelo nome" if not oferta else "mantido - a API não disse o preço")
+        return None
+    if not foto:
+        anotar("mantido - sem a foto da página do produto")
+        return None
+    original = {"nome": produto["nome"], "preco": preco,
+                "comissao": assistente._numero(oferta.get("commissionRate")) * 100}
+    try:
+        ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(produto["nome"]),
+                                                               limite=OFERTAS_NA_BUSCA, sort_type=5))
+        candidatos = candidatos_de_mais_comissao(original, ofertas)
+        if not candidatos:
+            anotar("mantido - nenhum que pague mais por venda" if ofertas else "mantido - a busca não trouxe nada")
+            return None
+        for candidato in candidatos[:CANDIDATOS_NA_IA]:
+            if time.monotonic() > prazo:
+                anotar("mantido - sem tempo na rodada")
+                return None
+            link = asyncio.run(api_shopee.converter_link_shopee(candidato["link"], api_shopee.ETIQUETA_SHOPEE_VIDEO,
+                                                                avisar_falha=False))
+            if not link or link == candidato["link"]:
+                # Sem o link curto, o celular não abre o produto (fica no esqueleto da página).
+                continue
+            deste = []
+            ok, _ = ps.ia_confere_produto(dict(video, link=link), deste, avisar=False, capa=foto)
+            if not ok:
+                continue
+            # O da outra loja é curtido pela página dele, como no link de produto: sem a curtida,
+            # fica o do criador (já curtido pela lista).
+            ir_ao_inicio(d)
+            ps.limpar_aviso_rapido(d)
+            ps.abrir_link(d, link)
+            curtiu = _esperar_a_pagina_do_produto(d, a_mais=True) and ps.curtir(d, dict(video, link=link))
+            pausa(3)
+            if not curtiu or not curtiu[0]:
+                anotar("mantido - o da outra loja não curtiu")
+                return None
+            if curtiu[1] == ps.CURTIDO_DE_ANTES:
+                gravar_estado(favoritos_limpos=False)
+            curtidos.append((link, candidato["nome"]))
+            vistos.extend(deste)
+            anotar("trocado", f"mais {round((candidato['valor'] / valor_por_venda(preco, original['comissao']) - 1) * 100)}% "
+                   "por venda" if original["comissao"] else "", ok=True)
+            return {"nome": candidato["nome"], "link": link, "valor": candidato["valor"], "trocado": produto["nome"],
+                    "comissao": candidato["comissao"], "antes": original["comissao"],
+                    "valor_antes": valor_por_venda(preco, original["comissao"])}
+        anotar("mantido - a IA não confirmou nenhum")
+    except (Verificacao, Suspensa):
+        raise
+    except Parada as e:
+        anotar("mantido - parou", passo_do_motivo(e.motivo))
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A troca de um produto do Ver Produtos parou: {ps.mascarar(e.motivo)}")
+    except Exception as e:
+        anotar(f"mantido - erro ({type(e).__name__})")
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A troca de um produto do Ver Produtos deu erro: {type(e).__name__}")
+    return None
+
+
 # --- Os espaços livres com o mesmo item de outras lojas (P59) ---
 # A busca pela foto do app, como o Rafael ensinou em vídeo (28/10/2026; o caminho está no
 # roteiro): Eu → Criadores & Afiliados → a câmera da barra de busca → a foto do anúncio na
@@ -4616,11 +4728,30 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # No Ver Produtos, os de outra cor (nome, foto da página): a foto deles vai na miniatura. Nos
     # produtos a mais, as fotos de capa dos que a IA recusou: o álbum dos recusados do rascunho.
     variacoes, recusados = [], []
+    # No Ver Produtos, o link curto de cada produto trocado pelo da loja que paga mais (P57).
+    links_trocados, trocados = {}, 0
     if video.get("de_video"):
         celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
                f"confere cada um.\nVídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
-        nomes = _produtos_do_video(d, video, vistos, curtidos, variacoes)
+        fotos_da_pagina = {}
+        nomes = _produtos_do_video(d, video, vistos, curtidos, variacoes, fotos_da_pagina)
+        # Cada um trocado pelo mesmo item da loja que paga mais, e todos do que paga mais por venda
+        # para o que paga menos (o 1º dá a foto da edição). Escolhas do Rafael (28/10, P57 e P58;
+        # 05/11, P154 3): DECISOES.md, Shopee Vídeo.
+        do_post = trocar_os_do_ver_produtos(d, video, nomes, fotos_da_pagina, vistos, curtidos, prazo,
+                                            {nome for nome, _foto in variacoes})
+        nomes = [p["nome"] for p in do_post]
+        links_trocados = {p["nome"]: p["link"] for p in do_post if p["trocado"]}
+        trocados = len(links_trocados)
+        # A medição de quais posts levam punição (P146 2) cruza a troca com a Saúde.
+        atualizar(ident, trocado="1" if trocados else "0")
+        if trocados:
+            avisar(f"🤖 Robô da Shopee Vídeo: troquei {trocados} de {len(do_post)} produto(s) do Ver Produtos pelo "
+                   "mesmo item de outra loja, que paga mais por venda (conferido pela IA com o vídeo):\n"
+                   + "\n".join(f"• {p['nome']}: {p['comissao']:.1f}%, "
+                               f"{assistente._reais(p['valor'])} por venda (o do criador pagava {p['antes']:.1f}%, "
+                               f"{assistente._reais(p['valor_antes'])})" for p in do_post if p["trocado"]))
     else:
         nome = ps.nome_do_produto(video)
         if not nome:
@@ -4700,7 +4831,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # ar sem a figurinha do Selecionar Capa. Escolha do Rafael (02/11, P125): DECISOES.md, Shopee Vídeo.
     miniatura = {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
-                                  outras=outras, miniatura=miniatura, rotulo_de_ia=bool(rotulo_ia))
+                                  outras=outras, miniatura=miniatura, rotulo_de_ia=bool(rotulo_ia),
+                                  link_do_1o=links_trocados.get(nomes[0]) if nomes else None)
     # O de outra cor só vai com a foto dele na miniatura que troca: sem ela (sem a nossa
     # miniatura, ou sem tempo para a foto dele), sai antes de anexar. Ele já foi curtido e fica no
     # alto de Minhas Curtidas até o descurtir do fim: o anexar procura os outros abaixo dele.
@@ -4714,7 +4846,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     elif de_outra_cor:
         nomes = com_a_foto_na_miniatura([(n, de_outra_cor.get(n), n in de_outra_cor) for n in nomes],
                                         miniatura.get("fotos", []))
-    curtidos_de_fora = antes - len(nomes)
+    # O do criador trocado pelo da loja que paga mais (P57) também continua curtido no alto.
+    curtidos_de_fora = antes - len(nomes) + trocados
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
@@ -4752,7 +4885,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                   recusadas=guardar_recusados(ident, recusados),
                   outra_cor=[n for n, produto in enumerate(ordem, 1) if produto.get("outra_cor")])
     else:
-        atualizar(ident, produtos=anexados, links_dos_produtos=links_do_ver_produtos(anexados),
+        atualizar(ident, produtos=anexados,
+                  links_dos_produtos=links_do_ver_produtos(anexados, [links_trocados.get(nomes[i], "") for i in no_post]),
                   outra_cor=[n for n, i in enumerate(no_post, 1) if nomes[i] in de_outra_cor])
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rotulo_ia)))
@@ -4781,7 +4915,8 @@ MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à S
 MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
 
 
-def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
+                           link_do_1o=None):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
@@ -4799,7 +4934,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     "fotos" as fotos da miniatura que troca no vídeo, a do 1º e as outras, e nada sem a nossa
     miniatura: o de outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura). Com
     rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a
-    legenda da fala sobem com o cartão do app, que sobe com a linha do rótulo (03/11).
+    legenda da fala sobem com o cartão do app, que sobe com a linha do rótulo (03/11). link_do_1o:
+    no Ver Produtos, o link curto do 1º produto trocado pelo da loja que paga mais (P57): a foto vem
+    do anúncio dele, como no link de produto.
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -4808,7 +4945,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
             raise Parada(MOTIVO_SEM_AVISOS, do_video=True)
         shutil.copyfile(video["arquivo"], copia)
         return ""
-    if video.get("de_video"):
+    if video.get("de_video") and link_do_1o:
+        anuncio = ps.anuncio_do_produto(dict(video, link=link_do_1o))
+    elif video.get("de_video"):
         anuncio = anuncio_do_ver_produtos(nomes[0]) if nomes else {}
     else:
         anuncio = ps.anuncio_do_produto(video)
@@ -4934,26 +5073,32 @@ def oferta_pelo_nome(nome):
 PROCESSO_DOS_LINKS_DO_VER_PRODUTOS = "ver produtos: links pelo nome"
 
 
-def links_do_ver_produtos(nomes):
+def links_do_ver_produtos(nomes, ja_sabidos=()):
     """
     O link de cada produto anexado num vídeo de Ver Produtos, na ordem do post, para o Rafael
     conferir no rascunho, produto por produto: a oferta achada na API pelo nome (a mesma busca
     dos links do Canal Afiliados), em link curto com a etiqueta da Shopee Vídeo, como o dos
-    produtos a mais; "" no que a API não acha. Dois produtos de nome quase igual que caem no
-    mesmo anúncio: o link fica com o de nome igual ao do anúncio (senão, o mais parecido) e o
-    outro fica sem, para nunca mostrar o link de um produto no lugar do de outro. O registro
-    conta quantos links vieram com o nome igual ao do app, com o nome parecido e quantos ficaram
-    sem (P105). Pedido do Rafael (29/10, P83): DECISOES.md, Shopee Vídeo.
+    produtos a mais; "" no que a API não acha. ja_sabidos (na ordem de nomes): o link curto do
+    produto trocado pelo da loja que paga mais (P57), que vale como veio, sem a busca. Dois
+    produtos de nome quase igual que caem no mesmo anúncio: o link fica com o de nome igual ao do
+    anúncio (senão, o mais parecido) e o outro fica sem, para nunca mostrar o link de um produto
+    no lugar do de outro. O registro conta quantos links vieram com o nome igual ao do app, com o
+    nome parecido, da troca e quantos ficaram sem (P105). Pedido do Rafael (29/10, P83):
+    DECISOES.md, Shopee Vídeo.
     """
+    ja_sabidos = (list(ja_sabidos) + [""] * len(nomes))[:len(nomes)]
     achados = []
-    for nome in nomes:
+    for nome, sabido in zip(nomes, ja_sabidos):
+        if sabido:
+            achados.append((0, False, {}))
+            continue
         try:
             parecido, exato, oferta = _oferta_parecida(nome)
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] O link do produto do Ver Produtos não veio: {type(e).__name__}")
             parecido, exato, oferta = 0, False, {}
         achados.append((parecido, exato, oferta if parecido >= PARECIDO_DA_FOTO else {}))
-    links, usados = [""] * len(nomes), set()
+    links, usados = list(ja_sabidos), set()
     for i in sorted(range(len(achados)), key=lambda i: (not achados[i][1], -achados[i][0])):
         oferta = achados[i][2]
         item, endereco = str(oferta.get("itemId") or ""), oferta.get("productLink") or ""
@@ -4965,14 +5110,17 @@ def links_do_ver_produtos(nomes):
                                                                    avisar_falha=False)) or endereco
         except Exception:
             links[i] = endereco
-    iguais = sum(1 for link, (_, exato, _o) in zip(links, achados) if link and exato)
-    parecidos = sum(1 for link, (_, exato, _o) in zip(links, achados) if link and not exato)
-    sem = len(links) - iguais - parecidos
+    pela_busca = [(link, achado) for link, achado, sabido in zip(links, achados, ja_sabidos) if not sabido]
+    iguais = sum(1 for link, (_, exato, _o) in pela_busca if link and exato)
+    parecidos = sum(1 for link, (_, exato, _o) in pela_busca if link and not exato)
+    da_troca = len(links) - len(pela_busca)
+    sem = len(pela_busca) - iguais - parecidos
     if links:
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_LINKS_DO_VER_PRODUTOS,
                                      "todos achados" if not sem else "nenhum achado" if sem == len(links)
                                      else "achados em parte",
-                                     f"{iguais} com o nome igual, {parecidos} com o nome parecido, {sem} sem",
+                                     f"{iguais} com o nome igual, {parecidos} com o nome parecido, {sem} sem"
+                                     + (f", {da_troca} da troca de loja" if da_troca else ""),
                                      ok=True if not sem else None)
     return links
 
@@ -5099,7 +5247,7 @@ def _anotar_o_ver_mais(lidos, andamento):
         ok=None if andamento.get("sem_referencia") else True)
 
 
-def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
+def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None, fotos=None):
     """
     Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos (pelo
     "Ver Produtos (N)" ou, com um produto só, pela barra dele), cada produto que o criador
@@ -5107,8 +5255,9 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
     até MAXIMO_PRODUTOS_DO_VIDEO: lê o nome na página dele, a IA compara a foto da página com o
     vídeo VEZES_DA_IA vezes, e o confirmado é curtido (curtidos recebe (NoVerProdutos, nome)). O
     mesmo modelo em outra cor ou estampa entra também, e variacoes (lista) recebe (nome, foto)
-    dele: a foto vai na miniatura que troca. Devolve os nomes confirmados, os da mesma cor
-    primeiro (o 1º dá a foto da edição); nenhum ou vídeo removido: o vídeo fica de lado.
+    dele: a foto vai na miniatura que troca. fotos (dict) recebe a foto da página de cada
+    confirmado, para a troca pela loja que paga mais (P57). Devolve os nomes confirmados, os da
+    mesma cor primeiro (o 1º dá a foto da edição); nenhum ou vídeo removido: o vídeo fica de lado.
     Decisões do Rafael (23/10; 28/10, P66; 01/11, a outra cor): DECISOES.md, Shopee Vídeo.
     """
     _abrir_ver_produtos(d, video)
@@ -5151,6 +5300,8 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
                     curtidos.append((NoVerProdutos(cartao), nome))
                 confirmados.append(nome)
                 vistos.extend(deste)
+                if fotos is not None:
+                    fotos[nome] = foto
                 if outra_cor:
                     de_outra_cor.append(nome)
                     if variacoes is not None:
