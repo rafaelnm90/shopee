@@ -179,6 +179,26 @@ def test_ia_que_diz_pular_e_ia_fora(monkeypatch):
     assert asyncio.run(it.gerar_comentario("Mini saia")) is None
 
 
+def test_ia_sem_nada_especifico_para_dizer_no_feed_responde_curtir(monkeypatch):
+    # Escolha do Rafael (P151 1): nem toda curtida vem com comentário. O pedido do comentário
+    # continua o mesmo, com a saída de só curtir; a palavra nunca vira o texto do comentário.
+    import api_gemini
+    pedidos, respostas = [], iter(["Curtir.", "CURTIR 👍", "Que cor linda!", "CURTIR"])
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append(prompt)
+        return next(respostas)
+
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
+    assert asyncio.run(it.gerar_comentario("Dança nova")) == it.CURTIR
+    assert asyncio.run(it.gerar_comentario("Dança nova", imagem=b"\xff\xd8jpeg")) == it.CURTIR
+    assert asyncio.run(it.gerar_comentario("Mini saia")) == "Que cor linda!"
+    assert all(it.PROMPT_COMENTARIO.split("{legenda}")[0] in prompt and prompt.endswith("escreva só: CURTIR")
+               for prompt in pedidos)
+    # Nas respostas aos comentários dos vídeos do Rafael não há a saída de só curtir.
+    assert asyncio.run(it.gerar_resposta("Amei!")) == "CURTIR"
+
+
 def test_comentario_do_feed_com_a_tela_do_video_vai_a_ia_com_a_imagem(monkeypatch):
     # Escolha do Rafael (P70): a IA comenta o que aparece no vídeo, não só a legenda.
     import api_gemini
@@ -570,13 +590,13 @@ def test_feed_no_fim_da_janela_nao_comeca_sem_tempo_e_junta_os_que_nao_cabem():
     # 20:59, a das 20:59 não acaba antes das 21h, e a das 20:14 é das respostas.
     config = _janela_das_20_as_21()
     assert robo.rodadas_que_restam(config, momento("2026-10-28 20:00")) == 4
-    assert robo.comentarios_nesta_rodada(config, momento("2026-10-28 20:00")) == 1
+    assert robo.videos_nesta_rodada(config, momento("2026-10-28 20:00")) == 1
     assert robo.rodadas_que_restam(config, momento("2026-10-28 20:29")) == 2
-    assert robo.comentarios_nesta_rodada(config, momento("2026-10-28 20:29")) == 2
+    assert robo.videos_nesta_rodada(config, momento("2026-10-28 20:29")) == 2
     assert not robo.feed_pendente(momento("2026-10-28 20:59"))
     # Fora do horário ou sem ele escolhido, um por rodada, a cada INTERVALO_DO_FEED.
     assert robo.rodadas_que_restam(config, momento("2026-10-28 21:10")) is None
-    assert robo.comentarios_nesta_rodada({**robo.PADRAO}, momento("2026-10-28 20:29")) == 1
+    assert robo.videos_nesta_rodada({**robo.PADRAO}, momento("2026-10-28 20:29")) == 1
 
 
 class CelularDoFeed:
@@ -723,7 +743,30 @@ def test_rodada_do_feed_sem_rodadas_bastantes_comenta_mais_de_um_video(avisos, i
     resultado = robo._agir(app, "feed", None, False, robo.ler_config(), agora)
     assert resultado == "feed: 1 vídeo curtido e comentado; feed: 1 vídeo curtido e comentado"
     assert app.comentarios == {2: ["Que achado! 0"], 3: ["Que achado! 1"]}
-    assert robo.comentarios_do_feed_que_faltam(agora) == 1
+    assert robo.videos_do_feed_que_faltam(agora) == 1
+
+
+def test_feed_sem_nada_para_dizer_so_curte_e_o_video_conta_no_dia(monkeypatch, avisos, ia_do_feed):
+    # Escolha do Rafael (P151 1): sem nada específico para dizer, fica só a curtida; o vídeo conta
+    # nos do dia e não volta.
+    async def so_curtir(legenda="", anteriores=(), imagem=None):
+        return it.CURTIR
+
+    monkeypatch.setattr(it, "gerar_comentario", so_curtir)
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda"), ("Ana Achados", "Copo térmico")])
+    agora = momento("2026-10-24 10:00")
+    faltavam = robo.videos_do_feed_que_faltam(agora)
+    assert robo.interagir_no_feed(app, agora) == "feed: 1 vídeo curtido, sem comentário"
+    assert app.curtidos == {0} and not app.comentarios
+    assert "comment video icon" not in app.toques                        # o painel de comentários nem abre
+    assert it.resultado_de(it.marca("Loja da Bia", "Mini saia linda"), "video_feed") == it.SO_CURTIDO
+    assert robo.videos_do_feed_que_faltam(agora) == faltavam - 1
+    assert [r for _m, _p, r, _d, _o in robo.registro_processos.sequencia("shopee_video", "feed: comentar", "")] == [
+        it.SO_CURTIDO]
+    # O mesmo vídeo não volta: na rodada seguinte, o próximo é o escolhido.
+    app.atual, app.indice = "inicio", 0
+    robo.interagir_no_feed(app, momento("2026-10-24 12:00"))
+    assert app.curtidos == {0, 1} and not app.comentarios
 
 
 def test_feed_com_o_coracao_que_nao_curte_para_sem_comentar(monkeypatch, avisos, ia_do_feed):
@@ -761,7 +804,7 @@ def test_comentario_do_feed_que_nao_aparece_conta_no_dia_e_o_video_nao_volta(mon
     assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: comentário enviado sem aparecer na lista"
     marca = it.marca("Loja da Bia", "Mini saia linda")
     assert it.resultado_de(marca, "video_feed") == "não confirmado"
-    assert it.quantos_desde("video_feed", it.COMENTADOS_NO_FEED, "2026-10-24 00:00:00") == 1
+    assert it.quantos_desde("video_feed", it.FEITOS_NO_FEED, "2026-10-24 00:00:00") == 1
 
 
 class CelularDoFeedSemComentarios(CelularDoFeed):

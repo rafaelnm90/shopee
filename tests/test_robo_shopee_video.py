@@ -170,7 +170,7 @@ def test_fila_mostra_os_que_esperam_aprovacao_e_os_aprovados_com_a_hora_e_o_porq
     assert texto.index("Copo Térmico") < texto.index("Mini Saia (+1)")
     assert "posta por volta de 25/10 às 09:50" in texto and "posta por volta de 25/10 às 12:20" in texto
     assert texto.count("já passou da hora") == 1
-    assert "no Horário das Interações, esperando acabarem 3 comentário(s) no feed" in texto
+    assert "no Horário das Interações, esperando acabarem 3 vídeo(s) no feed" in texto
     # Pausado, o motivo é a pausa; sem nada, a fila diz "nenhum".
     ativar(robo_pausado=True)
     assert "a Postagem está pausada" in robo.texto_da_fila(agora=momento("2026-10-25 10:30"))

@@ -30,8 +30,9 @@ DIAS_DAS_MARCAS = 90
 # Um comentário que não deu para responder volta nas rodadas seguintes; na 3ª vez o robô
 # desiste, avisa o Rafael (ele responde à mão) e o checkup aponta.
 TENTATIVAS_DO_COMENTARIO = 3
-# Escolha do Rafael (P10): 3 comentários por dia no feed, cada um diferente.
-COMENTARIOS_NO_FEED_POR_DIA = 3
+# Os vídeos do feed por dia: um limite, não uma meta (o dia com menos é normal), com cada
+# comentário diferente. Escolhas do Rafael (P10 e P151 1): DECISOES.md, Shopee Vídeo.
+VIDEOS_NO_FEED_POR_DIA = 3
 # No feed, o robô prefere os vídeos com até tantos comentários: o dele fica no alto e é
 # visto. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
 POUCOS_COMENTARIOS = 20
@@ -58,9 +59,13 @@ TIPO_DO_POST, TIPO_DO_ANTIGO = "proprio_post", "post_antigo"
 COMENTADOS_NO_PROPRIO = ("comentado", "não confirmado")
 # Os estados de um comentário em que ele não volta mais.
 FINAIS = frozenset({"respondido", "já respondido", "pulado", "desistiu", "anterior", "lugar errado"})
-# Os vídeos do feed que contam nos 3 do dia: o comentado e o que foi enviado sem aparecer
-# na tela (pode ter saído; não é comentado de novo).
-COMENTADOS_NO_FEED = ("comentado", "não confirmado")
+# Nem todo vídeo curtido no feed ganha comentário: sem nada específico para dizer sobre ele,
+# a IA responde CURTIR, e o robô só curte. Escolha do Rafael (P151 1): DECISOES.md, Shopee Vídeo.
+CURTIR = "CURTIR"
+SO_CURTIDO = "só curtido"
+# Os vídeos do feed que contam nos do dia: o comentado, o enviado sem aparecer na tela (pode
+# ter saído; não é comentado de novo) e o só curtido.
+FEITOS_NO_FEED = ("comentado", "não confirmado", SO_CURTIDO)
 
 # O aviso de comentário nas Notificações: "Fulana comentou no seu vídeo: "Amei!"".
 COMENTOU = re.compile(r"^(?P<nome>.+?)\s+comentou no seu v[ií]deo\s*:?\s*(?P<texto>.*)$", re.S | re.I)
@@ -548,6 +553,11 @@ SOBRE_A_IMAGEM = """
 
 A imagem anexa é a tela do vídeo agora: comente o que aparece nela (o produto, o resultado, a ideia), junto com a legenda, sem falar dos botões nem dos textos do aplicativo. Se a imagem mostrar conteúdo adulto, político, ofensivo, de aposta ou de golpe, escreva só: PULAR"""
 
+# O pedido do comentário continua o mesmo; só ganha a saída de só curtir (P151 1).
+SO_CURTIR = f"""
+
+Se o vídeo não for para PULAR, mas não houver nada específico para comentar sobre o que ele mostra (o produto, o resultado ou a ideia), escreva só: {CURTIR}"""
+
 
 PROMPT_PROPRIO = """Você é o criador de um vídeo de achadinhos na Shopee Vídeo e vai deixar um comentário no seu próprio vídeo, para chamar quem assiste a comprar.
 
@@ -576,10 +586,11 @@ def texto_simples(texto, limite):
     return texto
 
 
-async def _pedir(prompt, limite, tentativas=2, imagens=None):
+async def _pedir(prompt, limite, tentativas=2, imagens=None, curtir=False):
     """
-    O texto da IA (com as imagens [(bytes, tipo)], se vierem); "" quando ela diz PULAR; None
-    quando ela não respondeu.
+    O texto da IA (com as imagens [(bytes, tipo)], se vierem); "" quando ela diz PULAR; CURTIR
+    quando ela diz CURTIR (com curtir, no vídeo do feed sem nada específico para comentar);
+    None quando ela não respondeu.
     """
     import api_gemini
     for _ in range(tentativas):
@@ -589,6 +600,9 @@ async def _pedir(prompt, limite, tentativas=2, imagens=None):
             continue
         if resposta.strip().strip(".!").upper() == "PULAR":
             return ""
+        # Só a palavra, com ou sem pontuação ou emoji em volta: nunca vira o texto do comentário.
+        if curtir and re.sub(r"[^A-Za-z]", "", resposta).upper() == CURTIR:
+            return CURTIR
         texto = texto_simples(resposta, limite)
         if len(texto) >= 2:
             return texto
@@ -605,11 +619,13 @@ async def gerar_resposta(comentario, produto="", legenda="", anteriores=()):
 async def gerar_comentario(legenda="", anteriores=(), imagem=None):
     """
     O comentário num vídeo do feed (P10: curto e diferente a cada vez). Com a imagem (JPEG da
-    tela do vídeo), sobre o que aparece nele (P70).
+    tela do vídeo), sobre o que aparece nele (P70). CURTIR quando a IA não vê nada específico
+    para dizer: o robô só curte (P151 1).
     """
-    prompt = PROMPT_COMENTARIO.format(legenda=legenda or "—", anteriores="; ".join(anteriores) or "nenhum",
-                                      limite=TAMANHO_DO_COMENTARIO) + (SOBRE_A_IMAGEM if imagem else "")
-    return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")] if imagem else None)
+    prompt = (PROMPT_COMENTARIO.format(legenda=legenda or "—", anteriores="; ".join(anteriores) or "nenhum",
+                                       limite=TAMANHO_DO_COMENTARIO) + (SOBRE_A_IMAGEM if imagem else "") + SO_CURTIR)
+    return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")] if imagem else None,
+                        curtir=True)
 
 
 async def gerar_proprio(produto="", titulo="", anteriores=()):
