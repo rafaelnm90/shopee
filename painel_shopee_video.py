@@ -96,11 +96,20 @@ def configurar_dependencias(bot: Bot, scheduler, admin_id):
 _envio = asyncio.Lock()
 
 
+def cobrindo_o_robo(config):
+    """
+    O robô está pausado sozinho, sem o celular: o vídeo que o assistente manda agora cobre o robô,
+    e o que o Rafael marcar com Postei ✅ conta no plano do dia dele (P156 1: DECISOES.md, Shopee Vídeo).
+    """
+    return bool(config["robo_pausado"]) and config.get("robo_pausa_motivo") == robo.MOTIVO_DA_DESCONEXAO
+
+
 async def enviar_um(fonte):
     """Prepara e manda uma postagem (vídeo da fonte) no privado. Devolve o que aconteceu, numa frase."""
     async with _envio:
         try:
-            return await assistente.preparar_e_enviar(bot_instance, ADMIN_ID, fonte=fonte)
+            return await assistente.preparar_e_enviar(bot_instance, ADMIN_ID, fonte=fonte,
+                                                      cobrindo=cobrindo_o_robo(ler_config()))
         except Exception as e:
             logger.error(f"❌ [Shopee Vídeo] Erro ao preparar a postagem: {type(e).__name__}: {e}")
             return f"deu erro ao preparar ({type(e).__name__})"
@@ -275,6 +284,39 @@ async def lembrar_apelacoes():
 
 
 LEMBRETE_RESOLVIDO = "✅ Punição resolvida: este lembrete não vale mais."
+
+
+# O Postei ✅ dos vídeos do modo assistente (assistente_shopee_video.botao_postei). Escolha do Rafael
+# (05/11, P156 1): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_POSTEI = "assistente: postei"
+RESPOSTAS_DO_POSTEI = {
+    (assistente.MARCADO, True): ("✅ Anotado: você postou este vídeo. Ele saiu enquanto o robô estava sem o celular, "
+                                 "então conta no plano de hoje do robô: na volta, ele prepara só o que falta para "
+                                 "fechar o dia."),
+    (assistente.MARCADO, False): "✅ Anotado: você postou este vídeo.",
+}
+
+
+@router.callback_query(F.data.startswith(assistente.CALLBACK_POSTEI))
+async def postei_no_assistente(callback: types.CallbackQuery):
+    """Postei ✅ num vídeo do assistente: fica anotado, e o que cobriu o robô sem o celular fecha um horário dele."""
+    if callback.from_user is None or callback.from_user.id != ADMIN_ID:
+        return
+    chave = callback.data[len(assistente.CALLBACK_POSTEI):]
+    resultado, cobrindo = assistente.marcar_postado(chave)
+    if resultado == assistente.MARCADO:
+        registro_processos.registrar("shopee_video", PROCESSO_DO_POSTEI, "marcado",
+                                     "cobrindo o robô sem o celular" if cobrindo else "", ok=True)
+    resposta = RESPOSTAS_DO_POSTEI.get((resultado, cobrindo)) or (
+        "Este vídeo já estava marcado como postado." if resultado == assistente.JA_MARCADO
+        else "Não achei este vídeo entre os que o assistente mandou.")
+    await callback.answer(resposta[:200])
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if resultado == assistente.MARCADO:
+        await callback.message.answer(resposta)
 
 
 @router.callback_query(F.data.startswith((apelacoes.CALLBACK_RECORRI, apelacoes.CALLBACK_NAO_VAI)))
@@ -2659,15 +2701,28 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     # recuperar_horarios e o_que_fazer). Pedido do Rafael (01/11): DECISOES.md, Shopee Vídeo.
     estado = robo.estado_do_dia(config)
     perdidos = robo.horarios_vencidos(estado) - estado["feitos"]
+    # Os vídeos que o assistente mandou com o robô sem o celular e o Rafael marcou com Postei ✅
+    # fecham horários do plano de hoje, primeiro os que passaram (P156 1); os que ainda estão sem
+    # o toque, ele pode marcar agora.
+    cobertos = len(robo.cobertos_pelo_assistente(estado))
+    sem_postei = assistente.sem_postei_cobrindo_o_robo(estado["data"])
+    a_preparar = max(perdidos - cobertos, 0)
     agora_txt = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
     atrasados = sum(1 for r in robo.listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt)
-    para_tras = (f"\n\n🗓️ Ficou para trás hoje: {perdidos} horário(s) de rascunho e {atrasados} aprovado(s) "
+    para_tras = (f"\n\n🗓️ Ficou para trás hoje: {a_preparar} horário(s) de rascunho e {atrasados} aprovado(s) "
                  "atrasado(s). O primeiro sai na próxima rodada, e os outros voltam espalhados no resto do dia, "
                  f"com pelo menos {robo.ESPACO_MINIMO} min entre um e outro (1 h em média). O rascunho que não "
                  "couber sem apertar fica de fora; o aprovado que não couber hoje sai amanhã cedo."
-                 if perdidos > 1 or atrasados > 1 else "")
+                 if a_preparar > 1 or atrasados > 1 else "")
+    fechados = (f"\n\n📲 {cobertos} vídeo(s) que o assistente mandou sem o celular e você marcou com "
+                f"{assistente.BOTAO_POSTEI} fecham horário(s) de rascunho de hoje (primeiro os que passaram, depois "
+                "os próximos): o robô prepara só o que falta para fechar o dia." if cobertos else "")
+    marcar = (f"\n\n📲 {sem_postei} vídeo(s) que o assistente mandou hoje sem o celular ainda estão sem o "
+              f"{assistente.BOTAO_POSTEI}. Se você postou, toque nele na mensagem do vídeo: o robô desconta do plano "
+              "de hoje." if sem_postei else "")
     await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
-                         f"assistente fica em espera.{motivo_da_queda}{para_tras}{suspensao}", parse_mode="HTML")
+                         f"assistente fica em espera.{motivo_da_queda}{para_tras}{fechados}{marcar}{suspensao}",
+                         parse_mode="HTML")
     await mostrar_robo(message, state)
 
 

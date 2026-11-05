@@ -405,6 +405,7 @@ SEM_META = {
     ("shopee_video", "celular: adb do servidor derrubado à força"),
     ("shopee_video", "postar agora"),
     ("shopee_video", "horários perdidos na volta"), ("shopee_video", "celular no fim da rodada"),
+    ("shopee_video", "horários cobertos pelo assistente"), ("shopee_video", "assistente: postei"),
     ("shopee_video", "horário sem rascunho"), ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
 }
 
@@ -884,9 +885,11 @@ def robo_da_shopee_video(agora=None):
     hoje = agora.strftime("%Y-%m-%d")
     horarios = plano.get("horarios", []) if plano.get("data") == hoje else []
     vencidos = sum(1 for h in horarios if h <= agora.strftime("%H:%M"))
-    # Os que passaram sem tentativa: pulados na pausa do Rafael ou na suspensão, ou de fora na
-    # volta do celular por falta de espaço no resto do dia. O checkup não os cobra.
+    # Os que passaram sem tentativa: pulados na pausa do Rafael ou na suspensão, de fora na volta
+    # do celular por falta de espaço no resto do dia, ou fechados pelos vídeos que o assistente
+    # mandou sem o celular e o Rafael marcou com Postei ✅ (cobertos, P156 1). O checkup não os cobra.
     sem_tentar = int(plano.get("sem_tentar") or 0) if plano.get("data") == hoje else 0
+    cobertos = len(plano.get("cobertos") or []) if plano.get("data") == hoje else 0
     # Pela tabela dos rascunhos, que guarda todos; o histórico das tentativas pode ter
     # começado depois.
     salvos = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? "
@@ -904,7 +907,8 @@ def robo_da_shopee_video(agora=None):
     fila_viral = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
     do_canal = sum(1 for item in fila_viral if str(item.get("chat_origem")) == pedidos_do_canal.CANAL)
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
-            "sem_tentar": sem_tentar, "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
+            "sem_tentar": sem_tentar, "cobertos": cobertos, "salvos": salvos or 0, "pulados": pulados or 0,
+            "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
             # Os pontos de penalidade da última leitura da Saúde do Vídeo (0 se de antes do
             # trimestre): com 4 ou mais, a escada da P145 diminui os rascunhos do dia.
@@ -1836,7 +1840,8 @@ def main():
     if robo_sv.get("pontos"):
         situacao += f" | pontos de penalidade {robo_sv['pontos']}"
     print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
-          f"vencidos {robo_sv['vencidos']} (sem tentativa: {robo_sv['sem_tentar']}) | "
+          f"vencidos {robo_sv['vencidos']} (sem tentativa: {robo_sv['sem_tentar']}"
+          + (f", fechados pelo assistente: {robo_sv['cobertos']}" if robo_sv.get("cobertos") else "") + ") | "
           f"rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")
     # O caso completo de cada falha fica cifrado para o Claude (casos_robo.yml exportar) e

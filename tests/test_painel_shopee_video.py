@@ -154,7 +154,7 @@ def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatc
     sv = _painel(bm)
     pedidos = []
 
-    async def preparar(bot, admin_id, agora=None, fonte=None):
+    async def preparar(bot, admin_id, agora=None, fonte=None, cobrindo=False):
         pedidos.append(fonte)
         return "postagem mandada no seu privado"
 
@@ -945,7 +945,7 @@ def test_enviar_agora_manda_mesmo_pausado(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
     pedidos = []
 
-    async def preparar(bot, admin_id, agora=None, fonte=None):
+    async def preparar(bot, admin_id, agora=None, fonte=None, cobrindo=False):
         pedidos.append((admin_id, fonte))
         return "postagem mandada no seu privado"
 
@@ -959,10 +959,10 @@ def test_enviar_agora_manda_mesmo_pausado(bm, Msg, Est, monkeypatch):
 def test_enviar_agora_diz_por_que_nao_mandou(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
 
-    async def sem_video(bot, admin_id, agora=None, fonte=None):
+    async def sem_video(bot, admin_id, agora=None, fonte=None, cobrindo=False):
         return "não há vídeo em Autorais 🎥 para mandar (a fila está vazia ou sem arquivos)"
 
-    async def quebra(bot, admin_id, agora=None, fonte=None):
+    async def quebra(bot, admin_id, agora=None, fonte=None, cobrindo=False):
         raise RuntimeError("segredo")
 
     monkeypatch.setattr(sv.assistente, "preparar_e_enviar", sem_video)
@@ -979,7 +979,7 @@ def test_agendador_so_manda_quando_chega_a_hora_e_nao_pausado(bm, monkeypatch):
     sv = _painel(bm)
     pedidos = []
 
-    async def preparar(bot, admin_id, agora=None, fonte=None):
+    async def preparar(bot, admin_id, agora=None, fonte=None, cobrindo=False):
         pedidos.append(fonte)
         return "postagem mandada no seu privado"
 
@@ -1149,7 +1149,7 @@ def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, mon
     sv = _painel(bm)
     pedidos, rodadas, enviados = [], [], []
 
-    async def preparar(bot, admin_id, agora=None, fonte=None):
+    async def preparar(bot, admin_id, agora=None, fonte=None, cobrindo=False):
         pedidos.append(fonte)
         return "postagem mandada no seu privado"
 
@@ -1584,3 +1584,77 @@ def test_painel_mostra_o_teto_pelos_pontos_e_o_preparar_avisa_acima_dele(bm, Msg
     rodar(sv.preparar_handler(msg, Est()))
     rodar(asyncio.sleep(0))
     assert rodadas == [("--preparar",), ("--preparar",)] and "este passa do teto" in msg.saidas[-1]
+
+
+# --- Postei ✅ do modo assistente (P156 1) ---
+
+def test_assistente_sabe_quando_cobre_o_robo_sem_o_celular(bm, monkeypatch):
+    # Escolha do Rafael (05/11, P156 1): o vídeo mandado com o robô pausado sozinho, sem o celular,
+    # conta no plano do dia dele quando o Rafael marca Postei ✅.
+    sv = _painel(bm)
+    pedidos = []
+
+    async def preparar(bot, admin_id, agora=None, fonte=None, cobrindo=False):
+        pedidos.append(cobrindo)
+        return "postagem mandada no seu privado"
+
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado")
+    rodar(sv.enviar_um("autorais"))
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="")      # a pausa do Rafael
+    rodar(sv.enviar_um("autorais"))
+    sv.alterar_config(robo_pausado=False, robo_pausa_motivo="")     # Enviar 1 Agora com o robô no ar
+    rodar(sv.enviar_um("autorais"))
+    assert pedidos == [True, False, False]
+
+
+def test_postei_anota_o_video_e_tira_o_botao(bm, Msg, monkeypatch):
+    from types import SimpleNamespace
+    sv = _painel(bm)
+    sv.assistente.registrar("v1", "enviado", "", cobrindo=True)
+    botao = sv.assistente.botao_postei("v1").inline_keyboard[0][0]
+    respostas, teclados = [], []
+    mensagem = Msg()
+
+    async def editar(reply_markup=None):
+        teclados.append(reply_markup)
+    mensagem.edit_reply_markup = editar
+
+    async def responder(texto, **k):
+        respostas.append(texto)
+    clique = SimpleNamespace(data=botao.callback_data, from_user=SimpleNamespace(id=bm.ADMIN_ID),
+                             message=mensagem, answer=responder)
+    rodar(sv.postei_no_assistente(clique))
+    assert "conta no plano de hoje do robô" in respostas[0] and teclados == [None]
+    assert "conta no plano de hoje do robô" in mensagem.saidas[-1]
+    assert consultar("SELECT postado_em IS NOT NULL FROM shopee_video_enviados WHERE id_unico = 'v1'") == (1,)
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     sv.PROCESSO_DO_POSTEI) == ("marcado", "cobrindo o robô sem o celular")
+    # Outro toque no mesmo vídeo não anota de novo.
+    rodar(sv.postei_no_assistente(clique))
+    assert respostas[-1] == "Este vídeo já estava marcado como postado."
+    # Só o Rafael marca.
+    estranho = SimpleNamespace(data=botao.callback_data, from_user=SimpleNamespace(id=1), message=mensagem,
+                               answer=responder)
+    rodar(sv.postei_no_assistente(estranho))
+    assert len(respostas) == 2
+
+
+def test_retomar_diz_os_horarios_fechados_pelo_assistente_e_os_sem_postei(bm, Msg, Est, monkeypatch):
+    from datetime import datetime
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho", lambda: (True, "moto g(100)"))
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado", robo_inicio=0, robo_fim=24)
+    agora = datetime.now(fuso_horario)
+    sv.robo.db.salvar_config(sv.robo.CHAVE_DIA, {"data": agora.strftime("%Y-%m-%d"), "horarios": ["00:00"] * 3,
+                                                 "feitos": 0})
+    sv.assistente.registrar("v1", "enviado", "", agora=agora, cobrindo=True)
+    sv.assistente.marcar_postado(sv.assistente.chave_do_envio("v1"), agora)
+    sv.assistente.registrar("v2", "enviado", "", agora=agora, cobrindo=True)
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, Est()))
+    texto = next(t for t in msg.saidas if "retomado" in t)
+    assert "Ficou para trás hoje: 2 horário(s) de rascunho" in texto
+    assert "1 vídeo(s) que o assistente mandou sem o celular e você marcou com Postei ✅" in texto
+    assert "1 vídeo(s) que o assistente mandou hoje sem o celular ainda estão sem o Postei ✅" in texto

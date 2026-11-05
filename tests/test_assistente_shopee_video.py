@@ -749,3 +749,61 @@ def test_envios_do_dia_seguem_a_escada_dos_pontos():
     assert asv.quantos_hoje(config, "2026-11-10") == 2 and len(asv.planejar(config, "2026-11-10")) == 2
     db.salvar_config(apelacoes.CHAVE_DA_SAUDE, {"saude_pontos": 2, "saude_lida_em": "2026-11-03 10:00:00"})
     assert 4 <= asv.quantos_hoje(config, "2026-11-10") <= 6
+
+
+# --- Postei ✅ (P156 1) ---
+
+class BotComBotao(Bot):
+    def __init__(self):
+        super().__init__()
+        self.botoes = []
+
+    async def send_message(self, chat_id, text, **kw):
+        await super().send_message(chat_id, text, **kw)
+        self.botoes.append(kw.get("reply_markup"))
+
+
+def test_video_mandado_cobrindo_o_robo_tem_o_postei_e_conta_no_plano_dele(monkeypatch):
+    # Escolha do Rafael (05/11, P156 1): sem o celular, o assistente cobre o robô no privado; cada
+    # vídeo ganha o Postei ✅, e o que ele marca conta no plano do dia do robô.
+    _preparar(monkeypatch, TEXTOS)
+    bot = BotComBotao()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"), cobrindo=True)) == "postagem mandada no seu privado"
+    [teclado] = bot.botoes
+    [[botao]] = teclado.inline_keyboard
+    chave = asv.chave_do_envio("novo")
+    assert botao.text == "Postei ✅" and botao.callback_data == asv.CALLBACK_POSTEI + chave
+    assert len(botao.callback_data.encode()) <= 64
+    texto = bot.mensagens[0][1]
+    assert "5️⃣ <b>Postou?</b> Toque em <b>Postei ✅</b>" in texto and "conta no plano de hoje" in texto
+    assert texto.index("4️⃣") < texto.index("5️⃣")
+    assert asv.sem_postei_cobrindo_o_robo("2026-10-05") == 1 and asv.postados_cobrindo_o_robo("2026-10-05") == []
+    assert asv.marcar_postado(chave, _as("14:30")) == (asv.MARCADO, True)
+    assert asv.marcar_postado(chave, _as("14:40")) == (asv.JA_MARCADO, True)
+    assert asv.marcar_postado("0" * 16, _as("14:40")) == (asv.NAO_ACHADO, False)
+    assert consultar("SELECT cobrindo, postado_em FROM shopee_video_enviados WHERE id_unico = 'novo'") == (
+        "1", "2026-10-05 14:30:00")
+    assert asv.postados_cobrindo_o_robo("2026-10-05") == ["novo"] and asv.postados_cobrindo_o_robo("2026-10-06") == []
+    assert asv.sem_postei_cobrindo_o_robo("2026-10-05") == 0
+
+
+def test_video_mandado_com_o_robo_no_ar_tem_o_postei_mas_nao_conta_no_plano_dele(monkeypatch):
+    _preparar(monkeypatch, TEXTOS)
+    bot = BotComBotao()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == "postagem mandada no seu privado"
+    assert bot.botoes[0].inline_keyboard[0][0].text == "Postei ✅"
+    assert "5️⃣ <b>Postou?</b>" in bot.mensagens[0][1] and "conta no plano" not in bot.mensagens[0][1]
+    assert asv.marcar_postado(asv.chave_do_envio("novo"), _as("14:30")) == (asv.MARCADO, False)
+    assert asv.postados_cobrindo_o_robo("2026-10-05") == [] and asv.sem_postei_cobrindo_o_robo("2026-10-05") == 0
+
+
+def test_tabela_dos_enviados_de_antes_ganha_as_colunas_do_postei():
+    # No servidor a tabela já existe com as 4 colunas de antes, e o robô também grava nela.
+    inserir("CREATE TABLE shopee_video_enviados (id_unico TEXT PRIMARY KEY, enviado_em TEXT, status TEXT, motivo TEXT)")
+    inserir("INSERT INTO shopee_video_enviados VALUES ('velho', '2026-10-01 10:00:00', 'enviado', '')")
+    asv.registrar("novo", "enviado", "", _as("14:00"), cobrindo=True)
+    asv.registrar("do_robo", "robo", "rascunho do robô", _as("14:05"))
+    assert consultar("SELECT cobrindo FROM shopee_video_enviados WHERE id_unico = 'novo'") == ("1",)
+    assert consultar("SELECT status, cobrindo FROM shopee_video_enviados WHERE id_unico = 'do_robo'") == ("robo", "")
+    assert asv.marcar_postado(asv.chave_do_envio("velho"), _as("15:00")) == (asv.MARCADO, False)
+    assert asv.marcar_postado(asv.chave_do_envio("do_robo"), _as("15:00")) == (asv.NAO_ACHADO, False)

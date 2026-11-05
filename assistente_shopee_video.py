@@ -25,10 +25,15 @@ horários pela janela do painel, com um sorteio fixo por dia. A cada volta do ag
 manda no máximo um vídeo, e só se um horário já passou. Pausado, os horários que
 passam são pulados, para não sair tudo de uma vez ao retomar.
 
+Cada mensagem traz o botão Postei ✅, que o Rafael toca depois de postar. O vídeo mandado com
+o robô pausado sozinho, sem o celular (cobrindo), conta no plano do dia do robô: na volta,
+ele prepara só o que falta para fechá-lo (P156 1).
+
 O robô nunca posta, curte nem comenta na Shopee (diretriz 9.1.1).
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -213,9 +218,19 @@ def decidir_envio(config, agora=None):
 
 # --- Qual vídeo ---
 
+# As colunas que vieram depois entram na tabela que já existe no servidor. cobrindo: "1" no vídeo
+# mandado enquanto o robô estava pausado sozinho, sem o celular (o assistente cobrindo o robô);
+# postado_em: quando o Rafael tocou em Postei ✅ nele (P156 1).
+COLUNAS_NOVAS = ("cobrindo", "postado_em")
+
+
 def _criar_tabela(con):
     con.execute("CREATE TABLE IF NOT EXISTS shopee_video_enviados ("
                 "id_unico TEXT PRIMARY KEY, enviado_em TEXT, status TEXT, motivo TEXT)")
+    existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_enviados)")}
+    for coluna in COLUNAS_NOVAS:
+        if coluna not in existentes:
+            con.execute(f"ALTER TABLE shopee_video_enviados ADD COLUMN {coluna} TEXT")
 
 
 # Consulta de cada fila em tabela: (SQL, prefixo do id). Os Autorais ficam sem prefixo,
@@ -286,12 +301,72 @@ def proximo_video(fonte=FONTE_PADRAO):
     return None
 
 
-def registrar(id_unico, status, motivo="", agora=None):
+def registrar(id_unico, status, motivo="", agora=None, cobrindo=False):
     momento = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
     with db.conexao() as con:
         _criar_tabela(con)
-        con.execute("INSERT OR REPLACE INTO shopee_video_enviados VALUES (?, ?, ?, ?)",
-                    (id_unico, momento, status, motivo))
+        con.execute("INSERT OR REPLACE INTO shopee_video_enviados (id_unico, enviado_em, status, motivo, cobrindo) "
+                    "VALUES (?, ?, ?, ?, ?)", (id_unico, momento, status, motivo, "1" if cobrindo else ""))
+
+
+# O botão Postei ✅ de cada vídeo mandado: o Rafael toca depois de postar. O vídeo mandado com o
+# robô sem o celular (cobrindo) conta no plano do dia do robô, que na volta prepara só o que falta
+# para fechá-lo (robo_shopee_video.consumir_horarios). Escolha do Rafael (05/11, P156 1):
+# DECISOES.md, Shopee Vídeo.
+CALLBACK_POSTEI = "sv_postei:"
+BOTAO_POSTEI = "Postei ✅"
+MARCADO, JA_MARCADO, NAO_ACHADO = "marcado", "já marcado", "não achado"
+
+
+def chave_do_envio(id_unico):
+    """O id do vídeo em poucos caracteres, para o botão: o Telegram aceita até 64 bytes no callback."""
+    return hashlib.sha1(id_unico.encode()).hexdigest()[:16]
+
+
+def botao_postei(id_unico):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text=BOTAO_POSTEI, callback_data=f"{CALLBACK_POSTEI}{chave_do_envio(id_unico)}")]])
+
+
+def marcar_postado(chave, agora=None):
+    """
+    O Rafael tocou em Postei ✅: guarda a hora no vídeo mandado (o de chave_do_envio). Devolve
+    (MARCADO, JA_MARCADO ou NAO_ACHADO, se ele saiu cobrindo o robô).
+    """
+    momento = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
+    with db.conexao() as con:
+        _criar_tabela(con)
+        linhas = con.execute("SELECT id_unico, postado_em, cobrindo FROM shopee_video_enviados "
+                             "WHERE status = 'enviado'").fetchall()
+        for id_unico, postado_em, cobrindo in linhas:
+            if chave_do_envio(id_unico) != chave:
+                continue
+            if postado_em:
+                return JA_MARCADO, cobrindo == "1"
+            con.execute("UPDATE shopee_video_enviados SET postado_em = ? WHERE id_unico = ?", (momento, id_unico))
+            return MARCADO, cobrindo == "1"
+    return NAO_ACHADO, False
+
+
+def postados_cobrindo_o_robo(dia):
+    """
+    Os ids dos vídeos que saíram com o robô sem o celular e que o Rafael marcou como postados no dia
+    (AAAA-MM-DD), na ordem em que ele marcou (P156 1).
+    """
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return [linha[0] for linha in con.execute(
+            "SELECT id_unico FROM shopee_video_enviados WHERE status = 'enviado' AND cobrindo = '1' "
+            "AND postado_em LIKE ? ORDER BY postado_em, id_unico", (dia + "%",))]
+
+
+def sem_postei_cobrindo_o_robo(dia):
+    """Quantos vídeos mandados no dia (AAAA-MM-DD) com o robô sem o celular ainda estão sem o Postei ✅."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return con.execute("SELECT COUNT(*) FROM shopee_video_enviados WHERE status = 'enviado' AND cobrindo = '1' "
+                           "AND enviado_em LIKE ? AND COALESCE(postado_em, '') = ''", (dia + "%",)).fetchone()[0]
 
 
 def enviados_hoje(agora=None):
@@ -557,10 +632,12 @@ def _linha_do_produto(produto):
             f"comissão {produto['comissao']:.1f}%").replace(".0%", "%")
 
 
-def montar_mensagem(textos, produtos, link, mudo=False):
+def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False):
     """
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
-    copiar com um toque: salvar o vídeo, favoritar o produto, postar e comentar.
+    copiar com um toque: salvar o vídeo, favoritar o produto, postar, comentar e tocar em
+    Postei ✅ (o botão da mensagem; com cobrindo=True, o robô está sem o celular, e o passo diz
+    que o vídeo conta no plano do dia dele, P156 1).
     Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
     Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo que vai não
     tem som: o editado já leva a música de fundo, P55), o passo de postar lembra de pôr uma
@@ -604,16 +681,20 @@ def montar_mensagem(textos, produtos, link, mudo=False):
         f"<code>{html.escape(textos['titulo'])}</code>\n"
         f"{adicionar}\n\n"
         "4️⃣ <b>Depois de postar, comente</b> no vídeo (toque para copiar):\n"
-        f"<code>{html.escape(textos['comentario'])}</code>"
+        f"<code>{html.escape(textos['comentario'])}</code>\n\n"
+        f"5️⃣ <b>Postou?</b> Toque em <b>{BOTAO_POSTEI}</b> aqui embaixo."
+        + (" O robô está sem o celular, e este vídeo conta no plano de hoje dele: na volta, ele prepara só o "
+           "que falta para fechar o dia." if cobrindo else "")
     )
 
 
 # --- Envio ---
 
-async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
+async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobrindo=False):
     """
     Prepara o próximo vídeo e manda no privado. Devolve o que aconteceu, numa frase,
-    para o log e para o botão Enviar 1 Agora.
+    para o log e para o botão Enviar 1 Agora. cobrindo=True: o robô está pausado sozinho, sem o
+    celular, e o vídeo postado conta no plano do dia dele (P156 1).
     """
     for _ in range(VIDEOS_POR_ENVIO):
         video = proximo_video(fonte)
@@ -622,7 +703,7 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
             return f"não há vídeo em {FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
         try:
             with tempfile.TemporaryDirectory() as pasta:
-                resultado = await _preparar_e_enviar(bot, admin_id, video, agora, fonte, pasta)
+                resultado = await _preparar_e_enviar(bot, admin_id, video, agora, fonte, pasta, cobrindo)
         except Exception as e:
             # Vídeo que dá erro (ex.: o Telegram recusa o arquivo) é pulado: sem isso, ele
             # voltaria em todo horário e travaria a fila.
@@ -667,7 +748,7 @@ def _edicao_ligada(fonte):
     return edicao_video.vale_para(fonte)
 
 
-async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None):
+async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None, cobrindo=False):
     from aiogram.types import FSInputFile
 
     # Com a edição ligada, o vídeo que não sai editado fica de lado antes de gastar a IA.
@@ -714,7 +795,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     mudo = await asyncio.to_thread(videos.mudo, arquivo)
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
-    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo), parse_mode="HTML",
-                           disable_web_page_preview=True)
-    registrar(video["id"], "enviado", "", agora)
+    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo), parse_mode="HTML",
+                           disable_web_page_preview=True, reply_markup=botao_postei(video["id"]))
+    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo)
     return "postagem mandada no seu privado"
