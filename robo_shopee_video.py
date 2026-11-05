@@ -63,6 +63,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import namedtuple
 from datetime import datetime, timedelta
 
 import android_virtual as av
@@ -2511,8 +2512,8 @@ def faixa_do_tempo(segundos):
 def descurtir_no_fim(d, video, curtidos):
     """
     O fim de cada rascunho, salvo ou não: descurte os produtos que o robô curtiu nele
-    (curtidos: (posição no Ver Produtos, nome), ou (link, nome) no link de produto, com os
-    produtos a mais da P59; o link None é o do vídeo), pelo mesmo caminho do curtir. A
+    (curtidos: (NoVerProdutos, nome), pelo cartão da lista do Ver Produtos, ou (link, nome), pelo
+    link, com os produtos a mais da P59; o link None é o do vídeo), pelo mesmo caminho do curtir. A
     curtida só serve para o produto subir em Minhas Curtidas; o rascunho salvo guarda o
     produto anexado, e o postar confere a tela final antes de tocar em Postar. O que não
     descurtir aqui fica para o descurtir das 4h. A Verificação da Shopee segue parando
@@ -2523,38 +2524,37 @@ def descurtir_no_fim(d, video, curtidos):
         return
     todos = False
     try:
-        if video.get("de_video"):
+        # Os curtidos pela lista do Ver Produtos são achados de novo nela, pelo nome do cartão (os
+        # do Ver Mais também); os outros, um por um, pelo link de cada um. A lista só fica limpa
+        # se todos descurtirem.
+        pela_lista = [(onde.cartao, nome) for onde, nome in curtidos if isinstance(onde, NoVerProdutos)]
+        descurtidos = 0
+        if pela_lista:
             _abrir_ver_produtos(d, video)
-            descurtidos = 0
-            for indice, nome in curtidos:
-                xml = tela(d)
-                pontos = ps.produtos_vinculados(xml)
-                if indice >= len(pontos) or ps.proibido_no_ponto(xml, *pontos[indice]):
-                    registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "produto fora da lista",
-                                                 ok=False)
-                    continue
-                d.click(*pontos[indice])
-                pausa(8)
-                xml = tela(d)
-                if ps.nome_na_pagina_do_produto(xml) == nome:
-                    descurtidos += ps.descurtir_na_pagina(d, xml)[0]
-                else:
-                    registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho",
-                                                 "outro produto na posição", ok=False)
-                d.press("back")
-                pausa(4)
-            todos = descurtidos == len(curtidos)
-        else:
-            # Um por um, pelo link de cada um; a lista só fica limpa se todos descurtirem.
-            descurtidos = 0
-            for link, _nome in curtidos:
-                link = link or video["link"]
-                ir_ao_inicio(d)
-                ps.limpar_aviso_rapido(d)
-                ps.abrir_link(d, link)
-                pausa(8)
-                descurtidos += ps.descurtir(d, dict(video, link=link))[0]
-            todos = descurtidos == len(curtidos)
+        for cartao, nome in pela_lista:
+            achado = _achar_cartao(d, lambda texto, cartao=cartao: texto == cartao, {cartao})
+            if not achado or ps.proibido_no_ponto(achado[2], *achado[1]):
+                registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "produto fora da lista",
+                                             ok=False)
+                continue
+            d.click(*achado[1])
+            pausa(8)
+            xml = tela(d)
+            if ps.nome_na_pagina_do_produto(xml) == nome:
+                descurtidos += ps.descurtir_na_pagina(d, xml)[0]
+            else:
+                registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "outro produto no cartão",
+                                             ok=False)
+            d.press("back")
+            pausa(4)
+        for link, _nome in [(onde, nome) for onde, nome in curtidos if not isinstance(onde, NoVerProdutos)]:
+            link = link or video["link"]
+            ir_ao_inicio(d)
+            ps.limpar_aviso_rapido(d)
+            ps.abrir_link(d, link)
+            pausa(8)
+            descurtidos += ps.descurtir(d, dict(video, link=link))[0]
+        todos = descurtidos == len(curtidos)
     except Verificacao:
         gravar_estado(favoritos_limpos=False)
         raise
@@ -5031,29 +5031,98 @@ def _esperar_a_pagina_do_produto(d, voltas=4, a_mais=False):
 
 
 PROCESSO_DO_CRIADOR = "ver produtos: conferência pela foto"
+# Os produtos que o criador esconde no "Ver Mais (N)" da lista do Ver Produtos entram como os
+# outros (P66): o robô toca no botão e lê os cartões que aparecem, arrastando a lista devagar
+# até o "Esconder". Em cada procura do próximo cartão, até VEZES_DO_VER_MAIS toques no botão (a
+# lista pode voltar fechada da página do produto) e ROLAGENS_DO_VER_PRODUTOS arrastos. O registro
+# conta, só em números, quantos cartões o robô abriu, quantos o botão escondia e os toques e
+# arrastos. Escolha do Rafael (28/10, P66): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_VER_MAIS = "ver produtos: ver mais"
+VEZES_DO_VER_MAIS = 2
+ROLAGENS_DO_VER_PRODUTOS = 6
+# O produto curtido pela lista do Ver Produtos, pelo nome do cartão dele na lista: o descurtir do
+# fim (descurtir_no_fim) o acha de novo nela. O curtido pelo link guarda o link.
+NoVerProdutos = namedtuple("NoVerProdutos", "cartao")
+
+
+def _achar_cartao(d, procurado, conhecidos, andamento=None):
+    """
+    O 1º cartão do criador na lista do Ver Produtos cujo nome procurado(nome) aceita (o próximo
+    que o robô ainda não abriu, ou o de um produto curtido): (o nome do cartão, onde tocar, a
+    tela), ou None quando a lista acabou. Sem ele na tela, toca no "Ver Mais (N)" (os outros
+    abrem na mesma lista) e, sem o botão, arrasta a lista devagar, nunca passando do "Esconder"
+    nem do "Você Também Pode Gostar" (as recomendações, que não são do vídeo). Sem nada
+    conhecido da lista na tela (o título, o Ver Mais, o fim da lista do criador ou um cartão de
+    conhecidos, os nomes já vistos nela), os cartões podem ser recomendações: o robô não toca
+    nem arrasta, e a lista acabou para ele. andamento (dict) soma os toques no Ver Mais, os
+    arrastos e quantos o botão escondia.
+    """
+    andamento = {} if andamento is None else andamento
+    toques = rolagens = 0
+    while True:
+        xml = tela(d)
+        cartoes = ps.cartoes_vinculados(xml)
+        if not ps.lista_do_criador_na_tela(xml) and not any(cartao in conhecidos for cartao, _ in cartoes):
+            andamento["sem_referencia"] = True
+            return None
+        for cartao, ponto in cartoes:
+            if procurado(cartao):
+                return cartao, ponto, xml
+        ver_mais = ps.ver_mais_da_lista(xml)
+        if ver_mais and toques < VEZES_DO_VER_MAIS:
+            if ps.proibido_no_ponto(xml, *ver_mais):
+                raise Parada(ps.RECUSA)
+            andamento["escondidos"] = max(andamento.get("escondidos", 0), ps.quantos_no_ver_mais(xml))
+            ps.limpar_aviso_rapido(d)
+            d.click(*ver_mais)
+            pausa(4)
+            toques += 1
+            andamento["ver_mais"] = andamento.get("ver_mais", 0) + 1
+            continue
+        if ps.fim_da_lista_do_criador(xml) or rolagens >= ROLAGENS_DO_VER_PRODUTOS:
+            return None
+        ps.rolar_a_lista_devagar(d)
+        pausa(3)
+        rolagens += 1
+        andamento["rolagens"] = andamento.get("rolagens", 0) + 1
+
+
+def _anotar_o_ver_mais(lidos, andamento):
+    """A linha do registro do Ver Mais (PROCESSO_DO_VER_MAIS), só quando a lista tinha o botão ou se perdeu."""
+    if not andamento.get("ver_mais") and not andamento.get("sem_referencia"):
+        return
+    registro_processos.registrar(
+        REGISTRO, PROCESSO_DO_VER_MAIS,
+        "parou - a lista sem nada conhecido na tela" if andamento.get("sem_referencia") else "lidos",
+        f"{len(lidos)} cartão(ões) aberto(s); o Ver Mais escondia {andamento.get('escondidos', 0)}, tocado "
+        f"{andamento.get('ver_mais', 0)} vez(es); {andamento.get('rolagens', 0)} arrasto(s)",
+        ok=None if andamento.get("sem_referencia") else True)
 
 
 def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
     """
     Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos (pelo
-    "Ver Produtos (N)" ou, com um produto só, pela barra dele), cada produto que o criador vinculou (nunca as recomendações de "Você Também Pode Gostar"):
-    lê o nome na página dele, a IA compara a foto da página com o vídeo VEZES_DA_IA vezes, e o
-    confirmado é curtido. O mesmo modelo em outra cor ou estampa entra também, e variacoes
-    (lista) recebe (nome, foto) dele: a foto vai na miniatura que troca. Devolve os nomes
-    confirmados, os da mesma cor primeiro (o 1º dá a foto da edição); nenhum ou vídeo removido:
-    o vídeo fica de lado. Decisões do Rafael (23/10; 01/11, a outra cor): DECISOES.md, Shopee Vídeo.
+    "Ver Produtos (N)" ou, com um produto só, pela barra dele), cada produto que o criador
+    vinculou, também os do Ver Mais (P66; nunca as recomendações de "Você Também Pode Gostar"),
+    até MAXIMO_PRODUTOS_DO_VIDEO: lê o nome na página dele, a IA compara a foto da página com o
+    vídeo VEZES_DA_IA vezes, e o confirmado é curtido (curtidos recebe (NoVerProdutos, nome)). O
+    mesmo modelo em outra cor ou estampa entra também, e variacoes (lista) recebe (nome, foto)
+    dele: a foto vai na miniatura que troca. Devolve os nomes confirmados, os da mesma cor
+    primeiro (o 1º dá a foto da edição); nenhum ou vídeo removido: o vídeo fica de lado.
+    Decisões do Rafael (23/10; 28/10, P66; 01/11, a outra cor): DECISOES.md, Shopee Vídeo.
     """
-    quantos = _abrir_ver_produtos(d, video)
-    confirmados, de_ferias, de_outra_cor = [], 0, []
-    for i in range(min(quantos, MAXIMO_PRODUTOS_DO_VIDEO)):
-        xml = tela(d)
-        pontos = ps.produtos_vinculados(xml)
-        if i >= len(pontos):
+    _abrir_ver_produtos(d, video)
+    confirmados, de_ferias, de_outra_cor, lidos, andamento = [], 0, [], [], {}
+    for _ in range(MAXIMO_PRODUTOS_DO_VIDEO):
+        achado = _achar_cartao(d, lambda cartao: cartao not in lidos, lidos, andamento)
+        if not achado:
             break
-        if ps.proibido_no_ponto(xml, *pontos[i]):
+        cartao, ponto, xml = achado
+        lidos.append(cartao)
+        if ps.proibido_no_ponto(xml, *ponto):
             raise Parada(ps.RECUSA)
         ps.limpar_aviso_rapido(d)
-        d.click(*pontos[i])
+        d.click(*ponto)
         pausa(8)
         xml = tela(d)
         nome = ps.nome_na_pagina_do_produto(xml)
@@ -5079,7 +5148,7 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
             if ok and not fora_pela_cor:
                 _conferir_curtida(ps.curtir_na_pagina(d, xml))
                 if curtidos is not None:
-                    curtidos.append((i, nome))
+                    curtidos.append((NoVerProdutos(cartao), nome))
                 confirmados.append(nome)
                 vistos.extend(deste)
                 if outra_cor:
@@ -5088,6 +5157,7 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None):
                         variacoes.append((nome, foto))
         d.press("back")
         pausa(4)
+    _anotar_o_ver_mais(lidos, andamento)
     if not confirmados:
         raise Parada(MOTIVO_DE_FERIAS if de_ferias else "a IA não confirmou nenhum produto do Ver Produtos",
                      do_video=True)

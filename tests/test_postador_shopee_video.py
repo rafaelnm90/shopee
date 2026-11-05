@@ -1366,6 +1366,24 @@ def test_ver_produtos_toca_no_nome_dos_vinculados_e_nunca_nas_recomendacoes():
     assert all(not ps.proibido_no_ponto(VER_PRODUTOS, x, y) for x, y in ps.produtos_vinculados(VER_PRODUTOS))
 
 
+def test_ver_mais_e_o_fim_da_lista_do_criador_no_ver_produtos():
+    # Gravação do Rafael (01/11): a lista mostra 2 cartões e o "Ver Mais (N)"; o toque abre os
+    # outros, e depois do último vem "Esconder", antes do "Você Também Pode Gostar" (P66).
+    assert ps.cartoes_vinculados(VER_PRODUTOS) == [("Garrafa Térmica Inox 1 Litro Com Alça", (685, 1095)),
+                                                    ("Copo Térmico 500 ml", (685, 1415))]
+    assert ps.ver_mais_da_lista(VER_PRODUTOS) == (520, 1745) and ps.quantos_no_ver_mais(VER_PRODUTOS) == 1
+    assert ps.fim_da_lista_do_criador(VER_PRODUTOS) and ps.lista_do_criador_na_tela(VER_PRODUTOS)
+    aberta = VER_PRODUTOS.replace("Ver Mais (1)", "Esconder").replace("Você Também Pode Gostar", "Outra coisa")
+    # O "Esconder" fecha a lista do criador: o cartão de baixo dele não é do vídeo.
+    assert [nome for nome, _ in ps.cartoes_vinculados(aberta)] == ["Garrafa Térmica Inox 1 Litro Com Alça",
+                                                                    "Copo Térmico 500 ml"]
+    assert ps.fim_da_lista_do_criador(aberta) and ps.ver_mais_da_lista(aberta) is None
+    assert ps.quantos_no_ver_mais(aberta) == 0
+    # Só cartões, sem o título, o Ver Mais nem o fim da lista: nada conhecido da lista na tela.
+    solta = aberta.replace("Ver Produtos (2)", "Outro título").replace("Esconder", "Outra")
+    assert not ps.lista_do_criador_na_tela(solta) and not ps.fim_da_lista_do_criador(solta)
+
+
 def test_foto_da_pagina_do_produto_e_so_o_quadro_da_foto():
     # A página do produto no Motorola (02/11/2026): embaixo do quadro da foto vêm as "2 Variações
     # Disponíveis" e o contador da oferta, que não são da foto e iam juntos para a IA e para a

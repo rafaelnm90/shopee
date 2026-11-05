@@ -202,7 +202,15 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     (o recorte entre a barra de cima e a linha do preço, a do coração) com o vídeo 2 vezes, e o
     confirmado é curtido; o mesmo modelo em outra cor entra, com a foto na miniatura (01/11/2026). Anexa todos os confirmados (o 1º pelo Adicionar produto,
     os outros pelo Adicionar Mais) e confere a tela final um a um. Nenhum confirmado, ou vídeo
-    removido: o vídeo fica de lado. Os produtos de "Ver Mais" ainda não entram.
+    removido: o vídeo fica de lado. Os do "Ver Mais" entram como os outros (P66, 05/11/2026): com
+    os cartões da tela já abertos, o robô toca no "Ver Mais (N)" e lê os que aparecem, arrastando
+    a lista devagar (de 70% a 45% da altura da tela, sem embalo) até o "Esconder", sem nunca passar
+    dele nem do "Você Também Pode Gostar"; cada cartão é reconhecido pelo nome, porque a lista
+    pode voltar da página do produto aberta ou fechada (o robô toca no Ver Mais de novo). Sem
+    nada conhecido da lista na tela (o título, o Ver Mais, o fim dela ou um cartão já visto), ele
+    para ali com os que já conferiu. O descurtir do fim acha cada curtido pelo cartão do mesmo
+    jeito. Falta ver no Motorola como a lista volta da página do produto (o registro "ver
+    produtos: ver mais" conta os cartões abertos, quantos o botão escondia, os toques e os arrastos).
   - **link de vídeo sem o Ver Produtos** (23/10/2026: 3 vídeos pulados assim no dia): o robô
     olha de novo depois de mais 8 s e, se ainda não há, diz qual tela viu, em texto fixo que
     o `investigar_robo.yml` mostra: o link não abriu o player (`rn_vod_player_view_with_surface`),
@@ -304,8 +312,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     com 1 e 2 produtos (Live e Vídeo → aba Vídeos), o "Ver Produtos (N)" fica na própria barra
     de baixo, junto do desconto, e a lista não tem o Ver Mais. Nas lives, a sacolinha com número
     e o cartão do alto são o carrinho da live, outra tela, que o robô não usa.
-  - **Falta:** pôr no robô o Ver Mais (P66: tocar nele e ler os cartões até o "Esconder",
-    rolando) e os espaços livres dos vídeos de vários produtos (P57), depois da medição de 05/11.
+  - **No robô desde 05/11/2026** (P154 3): o Ver Mais (P66, acima, em "o robô com link de vídeo").
 
 ## Onde paramos
 

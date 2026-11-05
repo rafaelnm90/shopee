@@ -2859,6 +2859,91 @@ class AppDoVerProdutos(AppDeMentira):
         self.atual = {"ver_produtos": "player", "player": "inicio"}.get(self.atual, "ver_produtos")
 
 
+PRODUTO_C = "Squeeze Térmico Inox 750 ml Com Bico Retrátil"
+PRODUTO_D = "Caneca Térmica Inox 350 ml Com Tampa Deslizante"
+PRODUTO_E = "Garrafa Térmica Inox 2 Litros Com Alça Dobrável"
+
+
+class AppDoVerMais(AppDoVerProdutos):
+    """
+    O Ver Produtos com o "Ver Mais (3)" (gravação do Rafael de 01/11/2026): 2 cartões de cara; o
+    toque abre os outros 3 na mesma lista, com o "Esconder" depois do último, e os de baixo só
+    aparecem arrastando a lista (a tela mostra só o que cabe nela). fecha_ao_voltar: a lista volta
+    fechada da página do produto. perdida_depois: depois da página do 2º produto, a lista volta
+    rolada até as recomendações, sem nada conhecido dela na tela.
+    """
+
+    def __init__(self, fecha_ao_voltar=False, perdida_depois=None):
+        super().__init__()
+        self.aberta, self.deslocamento, self.arrastos, self.toques_no_ver_mais = False, 0, 0, 0
+        self.fecha_ao_voltar, self.perdida_depois, self.paginas = fecha_ao_voltar, perdida_depois, 0
+
+    def _itens(self):
+        nomes = [PRODUTO_A, PRODUTO_B] + ([PRODUTO_C, PRODUTO_D, PRODUTO_E] if self.aberta else [])
+        itens, y = [("Ver Produtos (5)", 700, 50)], 1030
+        for nome in nomes:
+            itens.append((nome, y, 300))
+            y += 320
+        itens += [("Esconder" if self.aberta else "Ver Mais (3)", y, 50), ("Você Também Pode Gostar", y + 150, 50),
+                  (RECOMENDADO, y + 220, 300)]
+        return itens
+
+    def _nos(self):
+        if self.atual != "ver_produtos":
+            return super()._nos()
+        nos = []
+        for texto, topo, altura in self._itens():
+            topo -= self.deslocamento
+            if topo < 400 or topo + altura > 2400:
+                continue
+            nos.append(_cartao(texto, topo) if altura == 300 else
+                       _no(texto, caixa=(300, topo, 780, topo + altura), clicavel=texto in ("Ver Mais (3)", "Esconder")))
+        return [_no(caixa=(0, 400, 1080, 2400), filhos="".join(nos))]
+
+    def click(self, x, y):
+        if self.atual == "ver_produtos":
+            tocados = [el for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])]
+            textos = {el["texto"] for el in tocados}
+            assert not any(robo.ps.texto_proibido(t) for t in textos), f"tocou num botão de comprar: {textos}"
+            nome = next((t for t in textos if t in (PRODUTO_A, PRODUTO_B, PRODUTO_C, PRODUTO_D, PRODUTO_E,
+                                                    RECOMENDADO, "Ver Mais (3)")), None)
+            self.toques.append(nome or (x, y))
+            if nome == "Ver Mais (3)":
+                self.aberta, self.toques_no_ver_mais = True, self.toques_no_ver_mais + 1
+            elif nome:
+                self.atual = "pdp:" + nome
+            return
+        antes = self.atual
+        super().click(x, y)
+        if antes == "player" and self.atual == "ver_produtos":
+            # A lista abre sempre fechada e no começo.
+            self.aberta, self.deslocamento = False, 0
+
+    def press(self, tecla, meta=None):
+        da_pagina = self.atual.startswith("pdp:")
+        super().press(tecla, meta)
+        if da_pagina and self.atual == "ver_produtos":
+            self.paginas += 1
+            if self.fecha_ao_voltar:
+                self.aberta, self.deslocamento = False, 0
+            if self.perdida_depois == self.paginas:
+                recomendado = next(topo for texto, topo, _ in self._itens() if texto == RECOMENDADO)
+                self.deslocamento = recomendado - 400
+
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        if self.atual == "ver_produtos":
+            self.arrastos += 1
+            self.deslocamento = max(0, self.deslocamento + y1 - y2)
+
+
+def _produtos_do_ver_mais(app, confirma):
+    """Os produtos do Ver Produtos que o robô lê na lista do AppDoVerMais: (os confirmados, os curtidos)."""
+    app.atual = "player"
+    app.click(500, 1970)
+    video, curtidos = {"link": LINK_DE_VIDEO, "arquivo": "archive/vestido.mp4", "de_video": True}, []
+    return robo._produtos_do_video(app, video, [], curtidos), curtidos
+
+
 def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B), outra_cor=()):
     _fonte(monkeypatch)
     inserir("UPDATE fila_autorais SET legenda = ?", f"Garrafa 🧴\n{LINK_DE_VIDEO}")
@@ -2911,6 +2996,54 @@ def test_link_de_video_curte_e_anexa_todos_os_produtos_que_a_ia_confirma(monkeyp
     # rascunho; o que a API não acha pelo nome fica sem.
     assert rascunho["links_dos_produtos"] == ["https://s.shopee.com.br/curto-11", ""]
 
+
+
+def test_ver_produtos_abre_o_ver_mais_e_le_os_escondidos_sem_tocar_nas_recomendacoes(monkeypatch):
+    # Escolha do Rafael (28/10, P66): os produtos que o criador esconde no "Ver Mais (N)" entram
+    # como os outros, conferidos pela IA, até 6; nunca os de "Você Também Pode Gostar".
+    _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_C, PRODUTO_E))
+    monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: None)
+    app = AppDoVerMais()
+    confirmados, curtidos = _produtos_do_ver_mais(app, (PRODUTO_A, PRODUTO_C, PRODUTO_E))
+    assert confirmados == [PRODUTO_A, PRODUTO_C, PRODUTO_E]
+    assert app.ja_curtidos == {PRODUTO_A, PRODUTO_C, PRODUTO_E} and RECOMENDADO not in app.toques
+    # O botão uma vez (a lista ficou aberta) e um arrasto devagar até o último, o 5º.
+    assert app.toques_no_ver_mais == 1 and app.arrastos == 1
+    assert [n for n in app.toques if isinstance(n, str) and not n.startswith("@")] == [
+        PRODUTO_A, PRODUTO_B, "Ver Mais (3)", PRODUTO_C, PRODUTO_D, PRODUTO_E]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_VER_MAIS, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [
+        ("lidos", "5 cartão(ões) aberto(s); o Ver Mais escondia 3, tocado 1 vez(es); 1 arrasto(s)")]
+    assert curtidos == [(robo.NoVerProdutos(n), n) for n in (PRODUTO_A, PRODUTO_C, PRODUTO_E)]
+    # No fim do rascunho, cada um é achado de novo pelo cartão, também os do Ver Mais, e descurtido.
+    robo.gravar_estado(favoritos_limpos=True)
+    robo.descurtir_no_fim(app, {"link": LINK_DE_VIDEO, "de_video": True}, curtidos)
+    assert app.curtidos == set() and robo.lista_limpa() and RECOMENDADO not in app.toques
+
+
+def test_ver_mais_que_fecha_ao_voltar_da_pagina_e_tocado_de_novo(monkeypatch):
+    # A lista pode voltar fechada da página do produto: o robô toca no Ver Mais de novo a cada
+    # procura do próximo cartão (do 3º ao 5º e na que acha o fim da lista, depois do 5º).
+    _fonte_de_video(monkeypatch, confirma=(PRODUTO_B, PRODUTO_D))
+    monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: None)
+    app = AppDoVerMais(fecha_ao_voltar=True)
+    confirmados, curtidos = _produtos_do_ver_mais(app, (PRODUTO_B, PRODUTO_D))
+    assert confirmados == [PRODUTO_B, PRODUTO_D] and RECOMENDADO not in app.toques
+    assert app.toques_no_ver_mais == 4 and app.arrastos == 2
+    robo.descurtir_no_fim(app, {"link": LINK_DE_VIDEO, "de_video": True}, curtidos)
+    assert app.curtidos == set()
+
+
+def test_ver_produtos_que_volta_sem_nada_conhecido_da_lista_para_sem_tocar_nas_recomendacoes(monkeypatch):
+    # A lista que volta da página do produto rolada até as recomendações, sem o título, o Ver
+    # Mais nem o fim da lista na tela: os cartões podem ser recomendações, e o robô para ali,
+    # com os que já conferiu.
+    _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B, RECOMENDADO))
+    app = AppDoVerMais(perdida_depois=2)
+    confirmados, _ = _produtos_do_ver_mais(app, (PRODUTO_A, PRODUTO_B))
+    assert confirmados == [PRODUTO_A, PRODUTO_B] and RECOMENDADO not in app.toques
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_VER_MAIS, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["parou - a lista sem nada conhecido na tela"]
 
 
 def test_ver_produtos_de_outra_cor_entra_e_a_foto_dele_vai_na_miniatura(monkeypatch, avisos):
