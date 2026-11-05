@@ -13,7 +13,8 @@ juntos tocariam em cima um do outro.
 
 A porta da Depuração por Wi-Fi muda cada vez que ela é ligada (o celular reiniciou,
 trocou de Wi-Fi). Com ela ligada, reconectar_sozinho() acha a porta nova pela rede
-privada, sem o Rafael mandar nada; só a depuração desligada pede a mão dele.
+privada, sem o Rafael mandar nada; só a depuração desligada pede a mão dele, e o adb
+do celular travado (a porta abre e nada responde), que só volta reiniciando o celular.
 
 O Android corta o pareamento 7 dias depois de feito, a não ser que a opção OPCAO_DO_PRAZO
 (Opções do desenvolvedor) esteja ligada: aí o celular abre a ligação, mas não reconhece
@@ -34,7 +35,9 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import string
+import struct
 import time
 from datetime import datetime, timedelta
 
@@ -61,6 +64,16 @@ COMO_PAREAR = ("pareie de novo em Celular do Robô 📱 → Parear Celular 🔗 
 PORTAS_DA_DEPURACAO = range(32768, 61000)
 # Segundos para a porta guardada responder quando conferida sozinha (a varredura usa 0,5 s).
 PRAZO_DA_PORTA_GUARDADA = 3
+# A porta pode aceitar a ligação e o adb do celular não responder nada: travou, e nem o adb do
+# servidor reiniciado nem parear de novo resolvem, só reiniciar o celular (04/11/2026: a porta
+# abria, também a nova depois de desligar e ligar a depuração, e a conexão não se completava).
+# Para saber, o servidor manda à porta o começo da ligação do adb (CNXN) e espera a resposta:
+# a Depuração por Wi-Fi pede a ligação cifrada (STLS); sem ela, o adb responde AUTH ou CNXN
+# (adb_do_celular_responde).
+RESPOSTAS_DO_ADB = (b"STLS", b"AUTH", b"CNXN")
+PRAZO_DO_ADB_DO_CELULAR = 5
+ADB_DO_CELULAR_TRAVADO = ("o adb do celular não responde na porta aberta (travou, ou a Depuração por Wi-Fi está "
+                          "desligada): reinicie o Motorola e ligue de novo a Depuração por Wi-Fi")
 
 # Por que o celular saiu: o Android desliga a Depuração por Wi-Fi sozinho quando o Wi-Fi cai,
 # quando o celular troca de ponto de Wi-Fi (outro roteador, um repetidor ou a outra frequência do
@@ -372,12 +385,45 @@ def porta_responde(ip, porta):
     return porta in portas_abertas(ip, [porta], prazo=PRAZO_DA_PORTA_GUARDADA)
 
 
+def _pacote_de_conexao():
+    """O CNXN com que o adb abre a ligação: versão, tamanho máximo, "host::" e a soma dos bytes."""
+    dados = b"host::\x00"
+    comando = int.from_bytes(b"CNXN", "little")
+    return struct.pack("<6I", comando, 0x01000001, 256 * 1024, len(dados), sum(dados),
+                       comando ^ 0xFFFFFFFF) + dados
+
+
+def adb_do_celular_responde(ip, porta, prazo=PRAZO_DO_ADB_DO_CELULAR):
+    """
+    O adb do celular responde na porta? True: respondeu como o adb (RESPOSTAS_DO_ADB);
+    False: a porta aceitou a ligação e nada respondeu (ou respondeu outra coisa); None: a
+    porta não aceitou. Só lê o começo da resposta e fecha: não conecta o adb nem pede nada.
+    """
+    try:
+        ligacao = socket.create_connection((ip, porta), timeout=prazo)
+    except OSError:
+        return None
+    resposta = b""
+    with ligacao:
+        try:
+            ligacao.sendall(_pacote_de_conexao())
+            while len(resposta) < 4:
+                pedaco = ligacao.recv(4 - len(resposta))
+                if not pedaco:
+                    break
+                resposta += pedaco
+        except OSError:
+            return False
+    return resposta in RESPOSTAS_DO_ADB
+
+
 def reconectar_sozinho():
     """
     Reconecta sem o Rafael mandar a porta: primeiro a porta guardada, refazendo a conexão
     do adb (ela pode ficar presa com o celular e a depuração ligados); se não der, procura
     a porta nova da Depuração por Wi-Fi no celular, pela rede privada, e conecta nela.
-    Só a depuração desligada, o celular fora da rede ou o pareamento vencido impedem.
+    Só a depuração desligada, o celular fora da rede, o pareamento vencido ou o adb do
+    celular travado (adb_do_celular_responde: aí só reiniciar o celular resolve) impedem.
     (True, modelo) ou (False, motivo em palavras simples, que diz se a porta da depuração
     respondia e se é preciso parear de novo: pede_pareamento). Na volta, anota por que o
     celular tinha saído (anotar_motivo_da_queda).
@@ -430,21 +476,29 @@ def _reconectar():
         if ok:
             return True, resultado, False
         motivos.append(resultado)
-    if dados.get("porta") in abertas:
+    # A porta aceita a ligação e o adb não conecta: com o adb do celular calado em todas as
+    # portas abertas, quem travou foi ele, e só reiniciar o celular resolve.
+    sondas = {porta: adb_do_celular_responde(dados["ip"], porta) for porta in abertas}
+    if sondas and all(sonda is False for sonda in sondas.values()):
+        return False, ADB_DO_CELULAR_TRAVADO, False
+    # A porta nova (a depuração foi desligada e ligada) também não aceita o servidor: não é a
+    # porta, é o pareamento.
+    vencido = next((m for m in motivos if pede_pareamento(m)), None)
+    guardada = dados["porta"] if dados.get("porta") in abertas else None
+    novas = [porta for porta, sonda in sondas.items() if sonda and porta != guardada]
+    if guardada or (novas and not vencido):
         # A porta da depuração responde e o adb não conecta: o servidor do adb pode ter ficado
         # preso. Reiniciá-lo (as chaves do pareamento ficam) e tentar de novo uma vez, antes de
-        # pedir o pareamento.
+        # pedir o pareamento: na porta guardada e na nova em que o adb do celular responde.
         av._rodar("adb", "kill-server", timeout=20)
-        ok, resultado = conectar(dados["ip"], dados["porta"])
-        if ok:
-            return True, resultado, True
+        for porta in ([guardada] if guardada else []) + novas:
+            ok, resultado = conectar(dados["ip"], porta)
+            if ok:
+                return True, resultado, porta == guardada
         if pede_pareamento(resultado):
             return False, f"a Depuração por Wi-Fi responde, mas {resultado}", False
         return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "
                        "se continuar, parear de novo pelo Celular do Robô"), False
-    # A porta nova (a depuração foi desligada e ligada) também não aceita o servidor: não é a
-    # porta, é o pareamento.
-    vencido = next((m for m in motivos if pede_pareamento(m)), None)
     if vencido:
         return False, f"a Depuração por Wi-Fi responde, mas {vencido}", False
     if abertas:
@@ -719,8 +773,9 @@ def descrever_estado():
     se está na rede privada, se a porta guardada está aberta, o estado do adb nela,
     quantas portas abertas o celular tem, o prazo do pareamento, há quanto tempo ele está
     ligado e os pontos de Wi-Fi com o mesmo nome da rede dele (esses três com o celular
-    conectado) e o motivo da última queda, com o detalhe (ultima_queda). Só lê: não conecta
-    nem desconecta nada.
+    conectado), em quantas portas abertas o adb do celular responde (com ele desconectado) e
+    o motivo da última queda, com o detalhe (ultima_queda). Só lê: não conecta nem
+    desconecta nada.
     """
     dados = ler()
     if not dados.get("pareado_em") or not dados.get("ip"):
@@ -737,6 +792,11 @@ def descrever_estado():
     alvo = endereco()
     estado = _estado_do_adb(av._rodar("adb", "-s", alvo, "get-state", timeout=10)) if alvo else "sem porta guardada"
     prazo = ler_prazo_da_autorizacao() if estado == "device" else None
+    # Sem o adb conectado: em quantas portas abertas o adb do celular responde (em nenhuma, ele
+    # travou ou a porta não é a da depuração; adb_do_celular_responde).
+    sonda = (f" | adb do celular responde em "
+             f"{sum(1 for porta in abertas if adb_do_celular_responde(dados['ip'], porta))} de {len(abertas)}"
+             if estado != "device" and abertas else "")
     conectado_agora = ""
     if estado == "device":
         ligado = ligado_ha()
@@ -744,7 +804,7 @@ def descrever_estado():
     queda = dados.get("ultima_queda") or {}
     detalhe = f"; {queda['detalhe']}" if queda.get("detalhe") else ""
     return (f"na rede privada: sim | porta guardada: {'aberta' if dados.get('porta') in abertas else 'fechada'} | "
-            f"adb: {estado} | portas abertas no celular: {len(abertas)} | "
+            f"adb: {estado} | portas abertas no celular: {len(abertas)}{sonda} | "
             f"prazo do pareamento: {descrever_prazo(prazo)}{conectado_agora}"
             + (f" | última queda: {queda['motivo']}{detalhe} (voltou em {queda['voltou_em'][8:10]}/"
                f"{queda['voltou_em'][5:7]} {queda['voltou_em'][11:16]})"

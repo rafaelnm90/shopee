@@ -19,6 +19,15 @@ def cr(monkeypatch):
     return celular_robo
 
 
+@pytest.fixture(autouse=True)
+def sonda_de_verdade(monkeypatch):
+    """Nos testes, o adb do celular responde sem rede; o teste da sonda recebe a de verdade."""
+    import celular_robo
+    real = celular_robo.adb_do_celular_responde
+    monkeypatch.setattr(celular_robo, "adb_do_celular_responde", lambda ip, porta, prazo=0: True)
+    return real
+
+
 def _rede(*pares):
     return json.dumps({"BackendState": "Running", "Peer": {
         str(i): {"HostName": nome, "OS": so, "Online": online, "TailscaleIPs": [ip, "fd7a::1"]}
@@ -859,3 +868,115 @@ def test_volta_do_celular_anota_o_motivo_no_registro_no_estado_e_no_retomar(bm, 
     monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41000])
     cr._gravar(porta=41000)
     assert "última queda: o celular trocou de ponto de Wi-Fi" in cr.descrever_estado()
+
+
+def _servidor_de_teste(resposta):
+    """Um servidor local que recebe o começo da ligação e responde (ou fica calado, com None)."""
+    import contextlib
+    import socket
+    import threading
+    escuta = socket.socket()
+    escuta.bind(("127.0.0.1", 0))
+    escuta.listen()
+    recebido = []
+
+    def atender():
+        ligacao, _ = escuta.accept()
+        with ligacao:
+            recebido.append(ligacao.recv(31, socket.MSG_WAITALL))
+            # Espera a sonda fechar; ela pode fechar sem ler o resto (a ligação cai).
+            with contextlib.suppress(OSError):
+                if resposta is not None:
+                    ligacao.sendall(resposta)
+                ligacao.recv(64)
+
+    threading.Thread(target=atender, daemon=True).start()
+    return escuta, recebido
+
+
+@pytest.mark.parametrize("resposta, esperado", [
+    (b"STLS" + bytes(20), True), (b"AUTH" + bytes(20), True), (b"HTTP/1.1 400 Bad Request\r\n\r\n", False),
+    (None, False),
+])
+def test_sonda_separa_o_adb_do_celular_que_responde_do_calado(sonda_de_verdade, resposta, esperado):
+    # 04/11/2026: a porta da depuração abria, também a nova, e a conexão não se completava. A sonda
+    # manda o começo da ligação do adb (CNXN) e lê a resposta: o adb do celular calado travou.
+    import struct
+    escuta, recebido = _servidor_de_teste(resposta)
+    try:
+        assert sonda_de_verdade("127.0.0.1", escuta.getsockname()[1], prazo=0.5) is esperado
+    finally:
+        escuta.close()
+    comando, versao, maximo, tamanho, soma, magica = struct.unpack("<6I", recebido[0][:24])
+    assert recebido[0][:4] == b"CNXN" and magica == comando ^ 0xFFFFFFFF and versao == 0x01000001
+    assert recebido[0][24:] == b"host::\x00" and tamanho == 7 and soma == sum(b"host::\x00") and maximo > 0
+
+
+def test_sonda_na_porta_fechada_diz_que_nem_aceitou(sonda_de_verdade):
+    import socket
+    fechada = socket.socket()
+    fechada.bind(("127.0.0.1", 0))
+    porta = fechada.getsockname()[1]
+    fechada.close()
+    assert sonda_de_verdade("127.0.0.1", porta, prazo=0.5) is None
+
+
+def test_adb_do_celular_calado_pede_para_reiniciar_o_celular(cr, monkeypatch):
+    # 04/11/2026, 23:16: depois de desligar e ligar a depuração, a porta nova abria e o adb não
+    # conectava; com o adb do celular travado, nem o adb do servidor reiniciado nem parear de novo
+    # resolvem: o motivo manda reiniciar o celular.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41000])
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o adb não respondeu"))
+    monkeypatch.setattr(cr, "adb_do_celular_responde", lambda ip, porta, prazo=0: False)
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and motivo == cr.ADB_DO_CELULAR_TRAVADO and "reinicie o Motorola" in motivo
+    assert not cr.pede_pareamento(motivo) and ("adb", "kill-server") not in pedidos
+    # Também com a porta guardada aberta e calada: o adb do servidor não é reiniciado à toa.
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [37000])
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and motivo == cr.ADB_DO_CELULAR_TRAVADO and ("adb", "kill-server") not in pedidos
+
+
+def test_porta_nova_em_que_o_adb_responde_reinicia_o_adb_do_servidor(cr, monkeypatch):
+    # Com a porta guardada fechada (a depuração foi desligada e ligada), o adb do servidor preso só
+    # era reiniciado se a guardada estivesse aberta, e a porta nova nunca conectava.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41000])
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)")
+                        if porta == 41000 and ("adb", "kill-server") in pedidos else (False, "o adb não respondeu"))
+    quedas = []
+    monkeypatch.setattr(cr, "anotar_motivo_da_queda", lambda visto_em, mesma_porta=False, **_: quedas.append(mesma_porta))
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert ("adb", "kill-server") in pedidos and quedas == [False]
+    # Se nem assim conectar, o motivo diz que a depuração responde, sem mandar reiniciar o celular.
+    pedidos.clear()
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o adb não respondeu"))
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and "responde no celular, mas o adb não conecta (o adb não respondeu)" in motivo
+    assert ("adb", "kill-server") in pedidos and "reinicie" not in motivo
+
+
+def test_estado_mostra_se_o_adb_do_celular_responde_nas_portas_abertas(cr, monkeypatch):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [41000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: None)
+    monkeypatch.setattr(cr, "adb_do_celular_responde", lambda ip, porta, prazo=0: False)
+    linha = cr.descrever_estado()
+    assert "portas abertas no celular: 1 | adb do celular responde em 0 de 1 | prazo do pareamento" in linha
+    # O log do android.yml é público: nem o endereço nem a porta.
+    assert IP not in linha and "41000" not in linha
+    # Conectado, o adb já responde: nada é sondado.
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "0") if "settings" in partes else (0, "device"))
+    monkeypatch.setattr(cr, "adb_do_celular_responde", lambda *_, **__: pytest.fail("conectado não sonda"))
+    assert "adb do celular responde" not in cr.descrever_estado()
