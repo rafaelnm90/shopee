@@ -211,10 +211,19 @@ def android_ligado():
     return _ok(r) and r[1] == "1"
 
 
+def versao_do_adb():
+    """"instalado (versão X)", só a versão do adb do servidor, ou "não instalado"."""
+    if shutil.which("adb") is None:
+        return "não instalado"
+    r = _rodar("adb", "version", timeout=10)
+    versao = re.search(r"^Version (\S+)", r[1], re.MULTILINE) if _ok(r) else None
+    return f"instalado (versão {versao.group(1)})" if versao else "instalado"
+
+
 def mostrar_estado():
     print("== Android virtual (Shopee Vídeo)")
     print(f"docker: {'instalado' if docker_instalado() else 'não instalado'} | "
-          f"adb: {'instalado' if shutil.which('adb') else 'não instalado'} | "
+          f"adb: {versao_do_adb()} | "
           f"binder: {'carregado' if binder_carregado() else 'não carregado'}")
     estado = estado_conteiner()
     print(f"contêiner {CONTEINER}: {estado or 'não existe'}")

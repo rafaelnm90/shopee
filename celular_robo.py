@@ -100,6 +100,14 @@ PROCESSO_DA_QUEDA = "celular: motivo da queda"
 PROCESSO_DO_ADB_TRAVADO = "celular: adb do servidor derrubado à força"
 DONOS_DO_ADB = (("bot_mestre_bot.service", "o bot"), ("robo-shopee-video", "uma rodada do robô"),
                 ("session-", "uma conexão SSH (workflow ou teste)"))
+# Antes de cada reconexão, o servidor do adb é conferido com uma pergunta simples (a lista de
+# aparelhos): sem resposta no prazo, ele travou e é derrubado à força na hora (destravar_servidor_do_adb),
+# sem esperar as tentativas de conexão. Derrubado (aqui ou na reconexão), a reconexão insiste até
+# RECONEXOES_DEPOIS_DE_DERRUBAR vezes na mesma rodada, com uma pausa entre elas. Pedido do Rafael
+# (05/11): evitar que a queda de 03/11 se repita e reconectar à força depois de derrubar.
+PRAZO_DO_SERVIDOR_DO_ADB = 8
+RECONEXOES_DEPOIS_DE_DERRUBAR = 3
+PAUSA_ENTRE_RECONEXOES = 20
 TAG_DA_DEPURACAO = "AdbDebuggingManager"
 MOTIVOS_DA_QUEDA = (
     ("network disconnected", "o Wi-Fi caiu"),
@@ -553,6 +561,21 @@ def anotar_adb_travado(travado, voltou, agora=None):
                else "o processo do servidor do adb não foi achado")
     registro_processos.registrar("shopee_video", PROCESSO_DO_ADB_TRAVADO, "voltou" if voltou else "não voltou",
                                  detalhe, ok=voltou, agora=agora)
+    _gravar(adb_derrubado_em=_agora())
+
+
+def destravar_servidor_do_adb():
+    """
+    Confere o servidor do adb com uma pergunta simples (a lista de aparelhos); sem resposta em
+    PRAZO_DO_SERVIDOR_DO_ADB, ele travou: é derrubado à força (as chaves do pareamento ficam), e o
+    próximo comando do adb sobe um novo. (derrubou?, o que adb_do_servidor viu dele).
+    """
+    if shutil.which("adb") is None or av._rodar("adb", "devices", timeout=PRAZO_DO_SERVIDOR_DO_ADB) is not None:
+        return False, None
+    travado = adb_do_servidor()
+    av._rodar("pkill", "-KILL", "-x", "adb", timeout=10)
+    _gravar(adb_derrubado_em=_agora())
+    return True, travado
 
 
 def reconectar_sozinho():
@@ -571,8 +594,19 @@ def reconectar_sozinho():
         return True, ler().get("modelo") or "celular"
     if (ler().get("pareando_ate") or "") > _agora():
         return False, PAREANDO_PELO_QR
+    inicio = _agora()
+    derrubou, travado = destravar_servidor_do_adb()
     visto_em = ler().get("visto_em")
     ok, resultado, mesma_porta = _reconectar()
+    # Com o adb do servidor derrubado à força (aqui ou dentro da reconexão), a reconexão insiste
+    # na mesma rodada, sem esperar a próxima.
+    tentativas = 1
+    while not ok and tentativas < RECONEXOES_DEPOIS_DE_DERRUBAR and (ler().get("adb_derrubado_em") or "") >= inicio:
+        time.sleep(PAUSA_ENTRE_RECONEXOES)
+        tentativas += 1
+        ok, resultado, mesma_porta = _reconectar()
+    if derrubou:
+        anotar_adb_travado(travado, ok)
     if ok:
         anotar_motivo_da_queda(visto_em, mesma_porta)
         _gravar(falha="", falha_em="")
