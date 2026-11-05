@@ -42,7 +42,7 @@ from aiogram import Router, Bot, types, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import FSInputFile, InputMediaPhoto, KeyboardButton
+from aiogram.types import BufferedInputFile, FSInputFile, InputMediaPhoto, KeyboardButton
 from teclados import (montar_teclado, teclado_com_cancelar, teclado_cancelar,
                       teclado_aprovar_cancelar, teclado_janela_dia_todo)
 
@@ -532,6 +532,7 @@ def rascunhos_hoje(config, agora=None):
 
 BOTAO_CELULAR = "Celular do Robô 📱"
 BOTAO_PAREAR = "Parear Celular 🔗"
+BOTAO_PAREAR_QR = "Parear por QR 📷"
 BOTAO_RECONECTAR = "Reconectar Celular 🔄"
 BOTAO_VOLTAR = "Voltar à Shopee Vídeo 🔙"
 BOTAO_PASSO_A_PASSO = "Passo a Passo 📖"
@@ -2098,8 +2099,8 @@ async def marcar_produto_a_tirar(message: types.Message, state: FSMContext):
 
 def teclado_celular():
     return montar_teclado([[KeyboardButton(text=BOTAO_RECONECTAR), KeyboardButton(text=BOTAO_TELA)],
-                           [KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_PASSO_A_PASSO)],
-                           [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+                           [KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_PAREAR_QR)],
+                           [KeyboardButton(text=BOTAO_PASSO_A_PASSO), KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
 # Para o Rafael refazer tudo sozinho depois de resetar o celular, talvez meses depois:
@@ -2197,6 +2198,8 @@ async def texto_celular():
             "longe (por exemplo, para resolver a verificação da Shopee).\n"
             f"🔗 <b>{BOTAO_PAREAR}</b>: depois de resetar o Motorola, trocar de celular ou quando eu disser que o "
             "celular não reconhece mais o servidor (o pareamento venceu).\n"
+            f"📷 <b>{BOTAO_PAREAR_QR}</b>: o mesmo pareamento, lendo com a câmera do Motorola um QR que eu mando "
+            f"aqui (se não der, o {BOTAO_PAREAR} com o código de 6 dígitos).\n"
             f"📖 <b>{BOTAO_PASSO_A_PASSO}</b>: o guia completo para deixar o celular pronto de novo.")
 
 
@@ -2252,9 +2255,12 @@ async def voltar_ao_painel(message: types.Message, state: FSMContext):
 
 
 async def _seguir_com_celular(message, state, celular, acao):
-    """Com o celular escolhido, pede o código (parear) ou a porta (reconectar)."""
+    """Com o celular escolhido, pede o código (parear), pareia pelo QR (qr) ou pede a porta (reconectar)."""
     await state.update_data(celular_ip=celular["ip"], celular_nome=celular["nome"])
     nome = html_escape(celular["nome"])
+    if acao == "qr":
+        await _parear_pelo_qr(message, state, celular)
+        return
     if acao == "parear":
         await message.answer(
             f"🔗 <b>Parear o celular</b> ({nome})\n\n"
@@ -2299,6 +2305,51 @@ async def _escolher_celular(message, state, acao):
 async def pedir_pareamento(message: types.Message, state: FSMContext):
     if not _admin(message): return
     await _escolher_celular(message, state, "parear")
+
+
+@router.message(F.text == BOTAO_PAREAR_QR, StateFilter("*"))
+async def pedir_pareamento_pelo_qr(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await _escolher_celular(message, state, "qr")
+
+
+async def _parear_pelo_qr(message, state, celular):
+    """
+    O pareamento pelo QR (P149 2): manda o QR, espera o Rafael ler com a câmera do Motorola, pareia
+    na porta que o celular abre e conecta. O QR (com a senha do pareamento) sai da conversa no fim.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    await state.set_state(ShopeeVideoFluxo.celular)
+    await message.answer("⏳ Preparando o QR (uns 30 s)…")
+    # As portas abertas antes do QR (a da Depuração por Wi-Fi): a do pareamento é a que aparece depois.
+    antes = set(await asyncio.to_thread(celular_robo.portas_abertas, celular["ip"]))
+    _nome, senha, texto = celular_robo.novo_qr()
+    minutos = celular_robo.ESPERA_DO_QR // 60
+    foto = await message.answer_photo(
+        BufferedInputFile(celular_robo.imagem_do_qr(texto), "qr.png"),
+        caption=("📷 <b>Parear pelo QR</b>\n\nNo Motorola: Opções do desenvolvedor → <b>Depuração por Wi-Fi</b> → "
+                 "<b>Parear o dispositivo com um código QR</b>, e aponte a câmera para este QR (aberto em outra "
+                 f"tela, como o seu celular ou o computador).\n\n<i>Fico procurando o celular por até {minutos} "
+                 "min. Apago o QR depois.</i>"),
+        parse_mode="HTML")
+    ok, motivo = await asyncio.to_thread(celular_robo.parear_pelo_qr, celular["ip"], senha, antes)
+    try:
+        await foto.delete()
+    except Exception as e:
+        logger.warning(f"⚠️ Celular do robô: não consegui apagar o QR do pareamento ({type(e).__name__}).")
+    if not ok:
+        logger.warning(f"⚠️ Celular do robô: pareamento pelo QR falhou ({motivo}).")
+        await message.answer(f"⚠️ Não pareou pelo QR: {html_escape(motivo)}. Tente de novo, ou use o "
+                             f"{BOTAO_PAREAR} (o código de 6 dígitos).", reply_markup=teclado_celular())
+        return
+    logger.info("✅ Celular do robô: pareado pelo QR.")
+    await message.answer("✅ <b>Pareado pelo QR!</b> ⏳ Conectando ao celular…", parse_mode="HTML")
+    ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
+    if ok:
+        await message.answer(f"✅ <b>Celular conectado:</b> {html_escape(resultado)}.", parse_mode="HTML")
+    else:
+        await message.answer(f"⚠️ Pareou, mas não conectou: {html_escape(resultado)}. Toque em {BOTAO_RECONECTAR}.")
+    await mostrar_celular(message, state)
 
 
 @router.message(F.text == BOTAO_RECONECTAR, StateFilter("*"))
