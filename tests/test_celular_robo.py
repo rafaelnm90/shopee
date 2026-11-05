@@ -413,6 +413,32 @@ def test_prazo_anotado_de_hora_em_hora_e_na_hora_pelo_painel(cr, monkeypatch):
     assert cr.anotar_prazo(forcar=True, agora=agora + timedelta(minutes=62)) == 7 and len(lidas) == 3
 
 
+def test_reconexao_que_falha_fica_no_estado_ate_o_celular_voltar(cr, monkeypatch):
+    # 04/11/2026: na suspensão o robô não pausa nem avisa sem o celular, e o estado do android.yml
+    # mostrava só "adb: sem resposta". O porquê da última reconexão que falhou fica no estado.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: None)
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o celular ainda não autorizou este servidor"))
+    ok, motivo = cr.reconectar_sozinho()
+    linha = cr.descrever_estado()
+    assert not ok and "adb: sem resposta | portas abertas no celular: 1" in linha
+    assert f"última reconexão que falhou: {motivo} (" in linha
+    # O log do android.yml é público: nem o endereço nem a porta.
+    assert IP not in linha and "37000" not in linha
+    # Fora da rede privada também aparece.
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": False}])
+    assert cr.descrever_estado().startswith("na rede privada: não | última reconexão que falhou:")
+    # Voltou: o motivo sai.
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)"))
+    monkeypatch.setattr(cr, "anotar_motivo_da_queda", lambda *partes, **nomes: None)
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert "última reconexão que falhou" not in cr.descrever_estado()
+
+
 def test_estado_mostra_o_prazo_do_pareamento(cr, monkeypatch):
     cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
     monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])

@@ -302,6 +302,12 @@ def reconectar_sozinho():
     ok, resultado, mesma_porta = _reconectar()
     if ok:
         anotar_motivo_da_queda(visto_em, mesma_porta)
+        _gravar(falha="", falha_em="")
+    else:
+        # O porquê da última reconexão que falhou (o motivo em palavras simples, sem o endereço)
+        # fica para o estado do android.yml: na suspensão o robô não pausa nem avisa sem o
+        # celular (pedido do Rafael), e sem isto não se via por que ele não conectava.
+        _gravar(falha=resultado, falha_em=_agora())
     return ok, resultado
 
 
@@ -629,9 +635,12 @@ def descrever_estado():
         return "ainda não pareado"
     if shutil.which("adb") is None:
         return "sem o adb no servidor"
+    falha = dados.get("falha_em") or ""
+    falha = (f" | última reconexão que falhou: {dados['falha']} ({falha[8:10]}/{falha[5:7]} {falha[11:16]})"
+             if dados.get("falha") and falha else "")
     online = {c["ip"]: c["online"] for c in celulares_na_rede()}.get(dados["ip"])
     if not online:
-        return "na rede privada: não"
+        return "na rede privada: não" + falha
     abertas = portas_abertas(dados["ip"])
     alvo = endereco()
     estado = _estado_do_adb(av._rodar("adb", "-s", alvo, "get-state", timeout=10)) if alvo else "sem porta guardada"
@@ -647,7 +656,8 @@ def descrever_estado():
             f"prazo do pareamento: {descrever_prazo(prazo)}{conectado_agora}"
             + (f" | última queda: {queda['motivo']}{detalhe} (voltou em {queda['voltou_em'][8:10]}/"
                f"{queda['voltou_em'][5:7]} {queda['voltou_em'][11:16]})"
-               if queda.get("motivo") and queda.get("voltou_em") else ""))
+               if queda.get("motivo") and queda.get("voltou_em") else "")
+            + falha)
 
 
 def ocupado():
