@@ -120,6 +120,66 @@ def test_horarios_perdidos_voltam_espalhados_no_resto_do_dia():
     assert robo.estado_do_dia(config, agora)["feitos"] == 3
 
 
+def _postado_pelo_assistente(ident, postado_em, cobrindo=True):
+    """Um vídeo que o assistente mandou (cobrindo o robô sem o celular, ou não) e o Rafael marcou com Postei ✅."""
+    robo.assistente.registrar(ident, "enviado", "", agora=momento(postado_em), cobrindo=cobrindo)
+    assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio(ident), momento(postado_em))[0] == "marcado"
+
+
+def test_videos_do_assistente_com_postei_fecham_horarios_do_plano_do_robo():
+    # Escolha do Rafael (05/11, P156 1): sem o celular, o assistente cobre o robô no privado; cada
+    # vídeo dele que o Rafael marca com Postei ✅ fecha um horário do plano do dia do robô, primeiro
+    # os que passaram e depois os próximos, e o dia não passa do plano.
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_inicio": 8, "robo_fim": 22}
+    horarios = ["09:00", "12:00", "15:00", "18:00", "21:00"]
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-11-05", "horarios": horarios, "feitos": 1})
+    _postado_pelo_assistente("a1", "2026-11-05 13:10")
+    _postado_pelo_assistente("no_ar", "2026-11-05 14:00", cobrindo=False)   # com o robô no ar: não conta
+    _postado_pelo_assistente("ontem", "2026-11-04 20:00")                    # de outro dia: não conta
+    agora = momento("2026-11-05 16:00")
+    # Passaram o das 12h e o das 15h: o a1 fecha um, e o outro sai agora, sem nada para espalhar.
+    assert robo.consumir_horarios(config, agora) is True
+    estado = robo.estado_do_dia(config, agora)
+    assert (estado["feitos"], estado["sem_tentar"], estado["cobertos"]) == (3, 1, ["a1"])
+    assert estado["horarios"] == horarios
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DOS_COBERTOS) == ("1 de 2",)
+    assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ?", robo.PROCESSO_DOS_PERDIDOS) == (0,)
+    assert robo.consumir_horarios(config, agora) is False
+    # Marcado depois da volta, o próximo vídeo fecha o horário das 18h, que passa sem rascunho.
+    _postado_pelo_assistente("a2", "2026-11-05 16:30")
+    assert robo.consumir_horarios(config, momento("2026-11-05 18:00")) is False
+    estado = robo.estado_do_dia(config, agora)
+    assert (estado["feitos"], estado["sem_tentar"], estado["cobertos"]) == (4, 2, ["a1", "a2"])
+    # Sem outro marcado, o das 21h sai como sempre.
+    assert robo.consumir_horarios(config, momento("2026-11-05 21:00")) is True
+
+
+def test_sem_o_postei_o_robo_recupera_todos_os_horarios_como_antes():
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_inicio": 8, "robo_fim": 22}
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-11-05", "horarios": ["09:00", "12:00", "15:00"], "feitos": 0})
+    # Mandado cobrindo o robô, mas sem o toque no Postei ✅.
+    robo.assistente.registrar("a1", "enviado", "", agora=momento("2026-11-05 10:00"), cobrindo=True)
+    agora = momento("2026-11-05 16:00")
+    assert robo.consumir_horarios(config, agora) is True
+    assert not robo.estado_do_dia(config, agora).get("cobertos")
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DOS_PERDIDOS) == ("2 de 2 de volta ao plano",)
+
+
+def test_na_pausa_do_rafael_o_video_do_assistente_conta_contra_os_horarios_pulados():
+    # Os horários da pausa passam sem rascunho de qualquer jeito: o vídeo marcado conta contra eles
+    # e não fecha mais um depois dela.
+    config = {**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22}
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-11-05", "horarios": ["09:00", "12:00", "18:00"], "feitos": 0})
+    _postado_pelo_assistente("a1", "2026-11-05 10:00")
+    agora = momento("2026-11-05 13:00")
+    robo.consumir_horarios(config, agora, pular=True)
+    estado = robo.estado_do_dia(config, agora)
+    assert (estado["feitos"], estado["sem_tentar"], estado["cobertos"]) == (2, 2, ["a1"])
+    assert robo.consumir_horarios(config, momento("2026-11-05 18:00")) is True
+
+
 def test_dois_posts_nunca_saem_colados_e_os_atrasados_se_espalham():
     # Pedido do Rafael (01/11): na volta do celular, os 2 aprovados atrasados saíam um logo depois
     # do outro. Com um post saído há menos de 30 min, os atrasados ganham horário novo, espalhados.

@@ -489,6 +489,18 @@ def horarios_vencidos(estado, agora=None):
 ESPACO_MEDIO = 60
 ESPACO_MINIMO = INTERVALO_DAS_POSTAGENS[0]
 PROCESSO_DOS_PERDIDOS = "horários perdidos na volta"
+# Sem o celular, o modo assistente cobre o robô no privado. Cada vídeo que ele mandou nesse tempo e
+# o Rafael marcou com Postei ✅ fecha um horário do plano do dia do robô: primeiro os que passaram
+# (na volta do celular), depois os próximos que chegarem. Assim o dia não passa do plano nem do
+# teto da escada dos pontos (P145). Sem o toque, o robô recupera todos, como antes. Escolha do
+# Rafael (05/11, P156 1): DECISOES.md, Shopee Vídeo.
+PROCESSO_DOS_COBERTOS = "horários cobertos pelo assistente"
+
+
+def cobertos_pelo_assistente(estado):
+    """Os vídeos do assistente postados no dia do plano, cobrindo o robô sem o celular, que ainda não fecharam um horário."""
+    ja_contados = set(estado.get("cobertos") or [])
+    return [ident for ident in assistente.postados_cobrindo_o_robo(estado["data"]) if ident not in ja_contados]
 
 
 def _espalhar(trechos, quantos, sorteio):
@@ -604,20 +616,31 @@ def consumir_horarios(config, agora=None, pular=False):
     vez (o celular fora, o robô fora do ar): o primeiro sai agora e os outros voltam ao resto
     do dia (recuperar_horarios), nunca todos de uma vez. O horário novo ganha as tentativas a
     mais, começa no primeiro vídeo e tira a repetição do anterior. pular=True (a pausa do
-    Rafael, a suspensão): passam sem rascunho. Os que passam sem tentativa, pulados ou de
-    fora por falta de espaço no dia, somam em "sem_tentar", que o checkup desconta do que cobra.
+    Rafael, a suspensão): passam sem rascunho. Os vídeos que o assistente mandou com o robô sem
+    o celular e o Rafael marcou com Postei ✅ fecham horários antes disso (cobertos_pelo_assistente,
+    P156 1): com todos fechados, nenhum rascunho agora (False). Os que passam sem tentativa,
+    pulados, cobertos ou de fora por falta de espaço no dia, somam em "sem_tentar", que o
+    checkup desconta do que cobra.
     """
     estado = estado_do_dia(config, agora)
     passados = horarios_vencidos(estado, agora)
     if passados <= estado["feitos"]:
         return False
     novos = passados - estado["feitos"]
-    de_fora = novos if pular else novos - 1
+    # Na pausa do Rafael os horários passam sem rascunho de qualquer jeito: o vídeo do assistente
+    # marcado conta contra eles, e não fecha mais um depois.
+    cobertos = cobertos_pelo_assistente(estado)[:novos]
+    if cobertos:
+        estado["cobertos"] = list(estado.get("cobertos") or []) + cobertos
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_COBERTOS, f"{len(cobertos)} de {novos}",
+                                     "fechados pelos vídeos do assistente com Postei ✅", ok=None, agora=agora)
+    sobram = 0 if pular else novos - len(cobertos)
+    de_fora = novos - len(cobertos) if pular else max(sobram - 1, 0)
     recuperados = 0
-    if not pular and novos > 1:
-        recuperados, de_fora = recuperar_horarios(config, estado, novos - 1, agora)
+    if not pular and sobram > 1:
+        recuperados, de_fora = recuperar_horarios(config, estado, sobram - 1, agora)
         passados -= recuperados
-        registro_processos.registrar(REGISTRO, PROCESSO_DOS_PERDIDOS, f"{recuperados} de {novos - 1} de volta ao plano",
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_PERDIDOS, f"{recuperados} de {sobram - 1} de volta ao plano",
                                      f"de fora por falta de espaço no dia: {de_fora}", ok=None, agora=agora)
     # O horário que começa agora é a volta de um que acabou sem rascunho (P132)? Os horários
     # espalhados de novo na volta do celular (recuperar_horarios) mudam de minuto: a marca sai.
@@ -625,10 +648,11 @@ def consumir_horarios(config, agora=None, pular=False):
     atual = sorted(estado["horarios"])[passados - 1]
     hora = agora_br(agora).strftime("%H:%M")
     estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, videos=1, repetir=False,
-                  sem_tentar=estado.get("sem_tentar", 0) + de_fora, reposto=not pular and atual in repostos,
+                  sem_tentar=estado.get("sem_tentar", 0) + de_fora + len(cobertos),
+                  reposto=not pular and sobram > 0 and atual in repostos,
                   repostos=[h for h in repostos if h > hora], volta_do_horario="")
     db.salvar_config(CHAVE_DIA, estado)
-    return True
+    return pular or sobram > 0
 
 
 def marcar_para_repetir(config, agora=None, video=None, do_video=False):
