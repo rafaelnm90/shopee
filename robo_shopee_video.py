@@ -335,6 +335,9 @@ def anotar_limpeza_sem_celular(agora=None, resultado="celular fora na suspensão
         return
     gravar_estado(descurtir_sem_celular=hoje)
     registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", resultado, ok=None, agora=agora)
+    # A de Meus Favoritos (comprador) vem junto com a das 4h (P137 1): o mesmo porquê, para o
+    # checkup não cobrá-la como esquecida.
+    registro_processos.registrar(REGISTRO, PROCESSO_DE_COMPRADOR, resultado, ok=None, agora=agora)
 
 
 # A rodada da hora do descurtir que não chega à limpeza ainda por fazer (o celular com outra
