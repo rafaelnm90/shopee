@@ -3716,12 +3716,14 @@ def test_limpeza_das_4h_sem_celular_na_suspensao_fica_no_registro_uma_vez(monkey
     monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
     monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (False, "fora da tomada"))
 
-    def anotados():
+    def anotados(processo="descurtir tudo (4h)"):
         return consultar("SELECT COUNT(*), MIN(resultado), MAX(ok) FROM registro_processos "
-                         "WHERE processo = 'descurtir tudo (4h)'")
+                         "WHERE processo = ?", processo)
     for hora in ("04:05", "04:20", "04:35"):
         assert "celular fora (esperado)" in robo.rodada(agora=momento(f"2026-10-26 {hora}"))
     assert anotados() == (1, "celular fora na suspensão", None)
+    # Checkup de 04/11: a limpeza de Meus Favoritos (comprador), que vem junto, também anota o porquê.
+    assert anotados(robo.PROCESSO_DE_COMPRADOR) == (1, "celular fora na suspensão", None)
     # Fora da hora da limpeza, nada vai ao registro dela; no dia seguinte, de novo uma vez.
     robo.rodada(agora=momento("2026-10-26 10:00"))
     robo.rodada(agora=momento("2026-10-27 04:05"))
