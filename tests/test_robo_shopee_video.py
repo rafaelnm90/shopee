@@ -29,6 +29,8 @@ def momento(texto):
 SAUDE_DO_DIA = robo.saude_do_dia_pendente
 # A busca do mesmo produto com mais comissão (P33) também: ela vai à API de afiliado.
 TROCAR = robo.trocar_pela_maior_comissao
+# E a troca de cada produto do Ver Produtos pelo da loja que paga mais (P57).
+TROCAR_OS_DO_VER_PRODUTOS = robo.trocar_os_do_ver_produtos
 # E o vídeo postado que vai à fila do Canal Afiliados (P62 a P64), com testes no fim.
 LEVAR_AO_CANAL = robo.levar_ao_canal
 # E a limpeza das 4h que volta no mesmo dia (P137): no banco novo do teste, ela nunca rodou.
@@ -42,6 +44,9 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
+    # A troca do Ver Produtos (P57) tem testes próprios: aqui, cada produto fica o do criador, na ordem dele.
+    monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", lambda d, video, nomes, *a, **k: [
+        {"nome": nome, "link": "", "valor": 0, "trocado": ""} for nome in nomes])
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: None)
     # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
@@ -967,6 +972,139 @@ def test_troca_compara_os_reais_por_venda_com_preco_parecido(monkeypatch):
                                               [_oferta(FOLHAS + " Kit", 0.06, 6, preco=teto),
                                                _oferta(FOLHAS + " Atacado", 0.06, 7, preco=teto + 0.01)])
     assert [c["link"].rsplit("/", 1)[-1] for c in dentro] == ["6"]
+
+
+def _troca_do_ver_produtos(monkeypatch, ofertas_pelo_nome, busca, confirma=(), curte=True):
+    """
+    A API (a oferta de cada produto do criador pelo nome e a busca por maior comissão), o link
+    curto, a IA e o celular de mentira da troca do Ver Produtos; devolve o que foi pedido.
+    """
+    pedidos = {"busca": [], "ia": [], "abertos": []}
+
+    def oferta_parecida(nome):
+        oferta = ofertas_pelo_nome.get(nome)
+        return (100, True, oferta) if oferta else (0, False, {})
+
+    async def buscar(termo, limite=10, sort_type=2):
+        pedidos["busca"].append((termo, sort_type))
+        return busca.get(termo, [])
+
+    async def encurtar(link, etiqueta, avisar_falha=True):
+        return "https://s.shopee.com.br/" + link.rsplit("/", 1)[-1]
+
+    def conferir(video, vistos=None, avisar=True, capa=None):
+        pedidos["ia"].append((video["link"], capa))
+        if vistos is not None:
+            vistos.append("a IA viu o mesmo produto")
+        return video["link"] in confirma, ""
+
+    monkeypatch.setattr(robo, "_oferta_parecida", oferta_parecida)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", encurtar)
+    monkeypatch.setattr(robo.ps, "ia_confere_produto", conferir)
+    monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: None)
+    monkeypatch.setattr(robo.ps, "limpar_aviso_rapido", lambda d: None)
+    monkeypatch.setattr(robo.ps, "abrir_link", lambda d, link: pedidos["abertos"].append(link))
+    monkeypatch.setattr(robo, "_esperar_a_pagina_do_produto", lambda d, voltas=4, a_mais=False: True)
+    monkeypatch.setattr(robo.ps, "curtir", lambda d, video: (curte, "curtido"))
+    return pedidos
+
+
+def test_ver_produtos_troca_cada_produto_pelo_da_loja_que_paga_mais_e_ordena_pelo_valor(monkeypatch):
+    # Escolhas do Rafael (28/10, P57 e P58; 05/11, P154 3): cada produto do Ver Produtos ganha a
+    # busca da troca do link de produto (o mesmo item, que paga mais por venda, até 20% mais caro,
+    # conferido pela IA com a foto da página do produto do criador), e o post vai do que paga mais
+    # por venda para o que paga menos: o 1º dá a foto da edição.
+    termo_a, termo_b = robo.termo_da_busca(PRODUTO_A), robo.termo_da_busca(PRODUTO_B)
+    pelo_nome = {PRODUTO_A: _oferta(PRODUTO_A, 0.05, 1, preco=50.0),       # R$ 2,50 por venda
+                 PRODUTO_B: _oferta(PRODUTO_B, 0.08, 2, preco=100.0)}      # R$ 8,00; o C sem oferta
+    busca = {termo_a: [_oferta(PRODUTO_A + " Envio Rápido", 0.10, 3, preco=55.0),   # R$ 5,50: troca
+                       _oferta(PRODUTO_A + " Atacado", 0.20, 4, preco=90.0)],       # 80% mais caro: não
+             termo_b: [_oferta(PRODUTO_B + " Kit", 0.05, 5, preco=100.0)]}          # paga menos: não
+    pedidos = _troca_do_ver_produtos(monkeypatch, pelo_nome, busca, confirma=("https://s.shopee.com.br/3",))
+    fotos = {PRODUTO_A: b"\xff\xd8pagina A", PRODUTO_B: b"\xff\xd8pagina B", PRODUTO_C: b"\xff\xd8pagina C"}
+    vistos, curtidos = [], []
+    produtos = TROCAR_OS_DO_VER_PRODUTOS(None, {"link": LINK_DE_VIDEO, "arquivo": "video.mp4", "de_video": True},
+                                         [PRODUTO_A, PRODUTO_B, PRODUTO_C], fotos, vistos, curtidos,
+                                         time.monotonic() + 600)
+    assert [(p["nome"], p["link"], p["trocado"]) for p in produtos] == [
+        (PRODUTO_B, "", ""), (PRODUTO_A + " Envio Rápido", "https://s.shopee.com.br/3", PRODUTO_A),
+        (PRODUTO_C, "", "")]
+    assert produtos[1]["valor"] == pytest.approx(5.5) and produtos[1]["valor_antes"] == pytest.approx(2.5)
+    # A IA viu o anúncio da outra loja com a foto da página do produto do criador.
+    assert pedidos["ia"] == [("https://s.shopee.com.br/3", b"\xff\xd8pagina A")]
+    # O da outra loja é curtido pelo link dele, e o descurtir do fim o acha pelo link.
+    assert pedidos["abertos"] == ["https://s.shopee.com.br/3"]
+    assert curtidos == [("https://s.shopee.com.br/3", PRODUTO_A + " Envio Rápido")]
+    assert vistos == ["a IA viu o mesmo produto"]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_TROCA_DO_VER_PRODUTOS,
+                                                 "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("trocado", "mais 120% por venda"),
+                                                ("mantido - nenhum que pague mais por venda", ""),
+                                                ("mantido - a API não achou o produto pelo nome", "")]
+
+
+def test_ver_produtos_sem_tempo_ou_sem_curtir_fica_o_do_criador(monkeypatch):
+    # A troca é um ganho a mais: passado o prazo do rascunho, ou sem curtir o da outra loja, fica o
+    # produto do criador (já curtido pela lista); a ordem pelo valor continua.
+    termo_a = robo.termo_da_busca(PRODUTO_A)
+    pelo_nome = {PRODUTO_A: _oferta(PRODUTO_A, 0.05, 1, preco=50.0), PRODUTO_B: _oferta(PRODUTO_B, 0.08, 2, preco=100.0)}
+    busca = {termo_a: [_oferta(PRODUTO_A + " Envio Rápido", 0.10, 3, preco=55.0)]}
+    video, fotos = {"link": LINK_DE_VIDEO, "arquivo": "video.mp4", "de_video": True}, {PRODUTO_A: b"\xff\xd8a"}
+    pedidos = _troca_do_ver_produtos(monkeypatch, pelo_nome, busca, confirma=("https://s.shopee.com.br/3",))
+    produtos = TROCAR_OS_DO_VER_PRODUTOS(None, video, [PRODUTO_A, PRODUTO_B], fotos, [], [], time.monotonic() - 1)
+    assert [p["nome"] for p in produtos] == [PRODUTO_B, PRODUTO_A] and pedidos["busca"] == []
+    pedidos = _troca_do_ver_produtos(monkeypatch, pelo_nome, busca, confirma=("https://s.shopee.com.br/3",),
+                                     curte=False)
+    curtidos = []
+    produtos = TROCAR_OS_DO_VER_PRODUTOS(None, video, [PRODUTO_A], fotos, [], curtidos, time.monotonic() + 600)
+    assert [p["nome"] for p in produtos] == [PRODUTO_A] and curtidos == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_TROCA_DO_VER_PRODUTOS,
+                                                 "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mantido - sem tempo na rodada", "mantido - sem tempo na rodada",
+                                        "mantido - o da outra loja não curtiu"]
+
+
+def test_ver_produtos_com_o_produto_trocado_leva_o_link_e_a_foto_da_troca(monkeypatch, avisos):
+    # O trocado vai no rascunho com o link curto dele (P83, sem a busca pelo nome), a foto da edição
+    # vem do anúncio dele quando ele é o 1º, e o do criador que saiu continua curtido no alto de
+    # Minhas Curtidas até o fim: o anexar procura os outros abaixo dele.
+    _fonte_de_video(monkeypatch)
+    trocado, link = PRODUTO_B + " Loja Dois", "https://s.shopee.com.br/troca"
+
+    def trocar(d, video, nomes, fotos, vistos, curtidos, prazo, de_outra_cor=()):
+        assert nomes == [PRODUTO_A, PRODUTO_B] and set(fotos) == {PRODUTO_A, PRODUTO_B}
+        curtidos.append((link, trocado))
+        return [{"nome": trocado, "link": link, "valor": 9.0, "trocado": PRODUTO_B, "comissao": 12.0, "antes": 8.0,
+                 "valor_antes": 4.0}, {"nome": PRODUTO_A, "link": "", "valor": 2.0, "trocado": ""}]
+
+    edicao, anexar = {}, {}
+
+    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
+               link_do_1o=None):
+        edicao.update(nomes=list(nomes), link_do_1o=link_do_1o)
+        robo.shutil.copyfile(video["arquivo"], copia)
+        return ""
+
+    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+        anexar.update(nomes=list(nomes), de_fora=curtidos_de_fora)
+        return list(nomes), list(range(len(nomes)))
+
+    monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", trocar)
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar)
+    monkeypatch.setattr(robo, "anexar_os_produtos", anexar_os)
+    monkeypatch.setattr(robo.ps, "conferir_tela_final", lambda d, video: (True, "conferida"))
+    assert robo.rodada(preparar=True, d=AppDoVerProdutos(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert edicao == {"nomes": [trocado, PRODUTO_A], "link_do_1o": link}
+    assert anexar == {"nomes": [trocado, PRODUTO_A], "de_fora": 1}
+    rascunho = robo.pegar(1)
+    assert rascunho["links_dos_produtos"] == [link, "https://s.shopee.com.br/curto-11"]
+    assert rascunho["trocado"] == "1"
+    assert any("troquei 1 de 2 produto(s) do Ver Produtos" in a and "12.0%" in a for a in avisos if isinstance(a, str))
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_LINKS_DO_VER_PRODUTOS,
+                                                 "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("todos achados",
+                                                 "1 com o nome igual, 0 com o nome parecido, 0 sem, 1 da troca de loja")]
 
 
 def test_sem_o_preco_do_link_fica_o_do_link(monkeypatch):
@@ -3080,7 +3218,7 @@ def _copia_com_a_miniatura(monkeypatch, com_miniatura=True):
     edicao = {}
 
     def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None,
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, link_do_1o=None):
         edicao.update(nomes=list(nomes), outras=list(outras))
         if com_miniatura and miniatura is not None:
             miniatura["fotos"] = [b"\xff\xd8primeira"] + list(outras)

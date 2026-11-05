@@ -312,7 +312,12 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     com 1 e 2 produtos (Live e Vídeo → aba Vídeos), o "Ver Produtos (N)" fica na própria barra
     de baixo, junto do desconto, e a lista não tem o Ver Mais. Nas lives, a sacolinha com número
     e o cartão do alto são o carrinho da live, outra tela, que o robô não usa.
-  - **No robô desde 05/11/2026** (P154 3): o Ver Mais (P66, acima, em "o robô com link de vídeo").
+  - **No robô desde 05/11/2026** (P154 3): o Ver Mais (P66, acima, em "o robô com link de vídeo") e a
+    troca de loja dos vídeos de vários produtos (P57): depois da lista do Ver Produtos, cada produto
+    confirmado ganha a busca da troca do link de produto (pela API, sem o celular), o da outra loja
+    confirmado pela IA é curtido pela página completa dele (o link curto), e o post vai do que paga
+    mais por venda para o que paga menos. A troca só começa nos primeiros 10 min do rascunho
+    (MINUTOS_PARA_OS_ESPACOS).
 
 ## Onde paramos
 

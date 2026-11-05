@@ -595,7 +595,8 @@ CARACTERISTICAS_DO_POST = ("produtos a mais", "troca de loja", "outra foto de ca
 def _tem(nome, r):
     """
     O post (rascunho postado) tem a característica? None = o rascunho não anotou (a troca de
-    loja só é anotada desde 03/11, e só nos de link de produto): fica fora da conta dessa linha.
+    loja é anotada desde 03/11 nos de link de produto e desde 05/11 nos de Ver Produtos): fica fora
+    da conta dessa linha.
     """
     if nome == "produtos a mais":
         return any(isinstance(i, dict) and i.get("a_mais") for i in _lista(r["itens"]))
