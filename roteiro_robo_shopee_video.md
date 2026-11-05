@@ -317,7 +317,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     confirmado ganha a busca da troca do link de produto (pela API, sem o celular), o da outra loja
     confirmado pela IA é curtido pela página completa dele (o link curto), e o post vai do que paga
     mais por venda para o que paga menos. A troca só começa nos primeiros 10 min do rascunho
-    (MINUTOS_PARA_OS_ESPACOS).
+    (MINUTOS_PARA_OS_ESPACOS). Depois, os espaços que sobram até 6 (P66) recebem o mesmo item do 1º
+    produto do post, de outras lojas, pela busca pela foto acima, com as travas dos produtos a mais
+    (o painel, a punição, os pontos e os 10 min).
 
 ## Onde paramos
 
