@@ -13,8 +13,9 @@ sem esperar o checkup da noite.
 Os robôs já avisam na hora os graves que eles mesmos veem (conta suspensa, celular
 desconectado, resposta no lugar errado, comentário sem resposta); aqui ficam os que
 nenhum robô vê sozinho: robô fora do ar, disco cheio, backup atrasado, erros demais na
-última hora, o robô da Shopee Vídeo sem rodar e, no Motorola dele, a opção que impede o
-Android de cortar o pareamento desligada (o robô a lê de hora em hora: celular_robo).
+última hora, o robô da Shopee Vídeo sem rodar, no Motorola dele a opção que impede o
+Android de cortar o pareamento desligada (o robô a lê de hora em hora: celular_robo) e, na
+suspensão da conta, o celular dele sem ligação por falha do servidor (P155 1).
 
 O GitHub pula boa parte das rodadas agendadas do diagnóstico (em 27 e 28/10, 8 de 37), e o
 aviso "na hora" chegava com horas de atraso. Por isso o bot_mestre também confere, de hora
@@ -55,8 +56,23 @@ NOMES = {"bot_mestre_bot": "bot principal (bot_mestre)", "divulgacao_canal_bot":
          "downloader_bot": "Baixador"}
 
 
-# O que o bot_mestre confere sozinho de hora em hora (o começo da chave de cada grave).
-GRAVES_DO_SERVIDOR = ("fora:", "robo_sv", "prazo_adb")
+# Na suspensão da conta o robô não pausa sem o celular, porque o Rafael pode levá-lo (pedido dele
+# de 24/10). A queda que vira aviso é só a falha do servidor (P155 1): o Motorola na rede privada e
+# a Depuração por Wi-Fi respondendo (o motivo da última reconexão começa com DEPURACAO_RESPONDE, o
+# celular_robo.DEPURACAO_RESPONDE, conferido no tests/test_alertas.py), e a ligação sem voltar
+# sozinha há CELULAR_FORA_PELO_SERVIDOR. O robô tenta reconectar a cada 15 min: a falha mais velha
+# que FALHA_DO_CELULAR_VALE é de quando ele parou de tentar e não diz como está agora. Fora da
+# suspensão, o robô já pausa e avisa sozinho. Escolha do Rafael (05/11, P155 1): DECISOES.md,
+# Shopee Vídeo.
+DEPURACAO_RESPONDE = "a Depuração por Wi-Fi responde"
+CELULAR_FORA_PELO_SERVIDOR = timedelta(minutes=30)
+FALHA_DO_CELULAR_VALE = timedelta(minutes=45)
+CELULAR_DO_SERVIDOR = "celular_servidor"
+
+
+# O que o bot_mestre confere sozinho de hora em hora (o começo da chave de cada grave); o celular
+# do robô, também de 15 em 15 min (CELULAR_DO_SERVIDOR).
+GRAVES_DO_SERVIDOR = ("fora:", "robo_sv", "prazo_adb", CELULAR_DO_SERVIDOR)
 # Como o diagnóstico: um serviço parado é conferido de novo depois disto, porque o systemd
 # o religa sozinho em segundos e o reinício não é grave.
 ESPERA_PARA_CONFIRMAR = 60
@@ -142,6 +158,46 @@ def _prazo_do_pareamento(agora):
     return prazo if isinstance(prazo, int) else None
 
 
+def _suspensa(agora):
+    """A conta de Shopee Vídeo está suspensa pela Shopee agora (a data que o robô guardou)?"""
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    try:
+        return agora.replace(tzinfo=None) < datetime.strptime(config.get("robo_suspenso_ate") or "",
+                                                              "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return False
+
+
+def _celular_do_robo(agora):
+    """
+    O celular do robô pela última reconexão dele: "ligado" (visto depois da última falha), (minutos
+    fora, o motivo) na falha do servidor durante a suspensão, há CELULAR_FORA_PELO_SERVIDOR ou mais,
+    ou None (fora por outro motivo, só há pouco, fora da suspensão ou sem leitura recente: não é caso
+    de aviso agora, e o que foi avisado fica como está, sem o "voltou ao normal").
+    """
+    dados = db.ler_config(CHAVE_CELULAR, {}) or {}
+    visto, falha_em = dados.get("visto_em") or "", dados.get("falha_em") or ""
+    if not dados.get("pareado_em") or not visto:
+        return None
+    if not falha_em or falha_em <= visto:
+        return "ligado"
+    try:
+        momento = agora.replace(tzinfo=None)
+        fora = momento - datetime.strptime(visto, "%Y-%m-%d %H:%M:%S")
+        idade_da_falha = momento - datetime.strptime(falha_em, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    falha = dados.get("falha") or ""
+    if (fora < CELULAR_FORA_PELO_SERVIDOR or idade_da_falha > FALHA_DO_CELULAR_VALE
+            or not falha.startswith(DEPURACAO_RESPONDE) or not _suspensa(agora)):
+        return None
+    return int(fora.total_seconds() // 60), falha
+
+
+def _duracao(minutos):
+    return f"{minutos} min" if minutos < 120 else f"{minutos // 60} h"
+
+
 def graves(caidos=(), agora=None):
     """
     {chave: texto do aviso} dos graves de agora. caidos: os serviços fora do ar (o
@@ -177,12 +233,23 @@ def graves(caidos=(), agora=None):
                                 f"Android corta o pareamento {prazo} dia(s) depois de feito e o robô perde o "
                                 "celular. Ligue em Configurações → Sistema → Opções do desenvolvedor → "
                                 f"{OPCAO_DO_PRAZO} (logo abaixo da Depuração por Wi-Fi).")
+    celular = _celular_do_robo(agora)
+    if celular is None:
+        achados[CELULAR_DO_SERVIDOR] = None
+    elif celular != "ligado":
+        minutos, falha = celular
+        achados[CELULAR_DO_SERVIDOR] = (
+            f"📱 O celular do robô está sem ligação com o servidor há {_duracao(minutos)}, mas o Motorola está na "
+            "rede e a Depuração por Wi-Fi responde: a falha é do servidor, não do celular. O robô tenta de novo a "
+            "cada 15 min, e o Claude investiga na próxima retomada. Na suspensão, só esta falha vira aviso: se "
+            f"foi você que levou o celular ou desligou a depuração, não vem aviso.\n\nO que o servidor viu: {falha}.")
     return achados
 
 
 ROTULOS = {"disco": "disco cheio", "backup": "backup atrasado", "erros": "erros demais na última hora",
            "robo_sv": "robô da Shopee Vídeo sem rodar",
-           "prazo_adb": "prazo do pareamento ligado no celular do robô"}
+           "prazo_adb": "prazo do pareamento ligado no celular do robô",
+           CELULAR_DO_SERVIDOR: "celular do robô sem ligação por falha do servidor"}
 
 
 def rotulo(chave):

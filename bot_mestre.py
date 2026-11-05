@@ -17863,10 +17863,11 @@ async def monitor_saude():
 async def conferir_graves_do_servidor():
     """
     De hora em hora, os graves que só o alertas.py vê (robô fora do ar, o robô da Shopee
-    Vídeo sem rodar e o prazo do pareamento ligado no Motorola dele), avisados no privado do
-    Rafael como no diagnóstico: o GitHub pula boa parte das rodadas agendadas dele, e o aviso
-    chegava horas depois. Sem resposta do systemctl, confere só os outros (os robôs fora do
-    ar ficam para o diagnóstico).
+    Vídeo sem rodar, o prazo do pareamento ligado no Motorola dele e, na suspensão, o celular
+    do robô sem ligação por falha do servidor), avisados no privado do Rafael como no
+    diagnóstico: o GitHub pula boa parte das rodadas agendadas dele, e o aviso chegava horas
+    depois. Sem resposta do systemctl, confere só os outros (os robôs fora do ar ficam para o
+    diagnóstico).
     """
     caidos = await asyncio.to_thread(alertas.servicos_fora)
     so = alertas.GRAVES_DO_SERVIDOR if caidos is not None else tuple(
@@ -17874,6 +17875,16 @@ async def conferir_graves_do_servidor():
     if caidos is None:
         logger.warning("🩺 [Graves] O systemctl não respondeu: os robôs fora do ar ficam para o diagnóstico.")
     await asyncio.to_thread(alertas.verificar, caidos or [], None, None, so)
+
+
+async def conferir_o_celular_do_robo():
+    """
+    De 15 em 15 min, entre as conferências de hora em hora, só o grave do celular do robô sem
+    ligação por falha do servidor na suspensão (alertas.CELULAR_DO_SERVIDOR): o robô tenta
+    reconectar a cada 15 min, e o aviso sai logo depois dos 30 min sem a ligação.
+    Escolha do Rafael (05/11, P155 1): DECISOES.md, Shopee Vídeo.
+    """
+    await asyncio.to_thread(alertas.verificar, [], None, None, (alertas.CELULAR_DO_SERVIDOR,))
 
 
 def contar_links_sem_conversao(horas=24):
@@ -18032,6 +18043,10 @@ async def main():
     # Shopee Vídeo sem rodar), também aqui: o GitHub pula boa parte das rodadas dele.
     scheduler.add_job(conferir_graves_do_servidor, 'cron', minute=37, timezone=FUSO_STR,
                       id='graves_do_servidor_loop', replace_existing=True,
+                      misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
+    # O celular do robô sem ligação por falha do servidor na suspensão, também entre elas (P155 1).
+    scheduler.add_job(conferir_o_celular_do_robo, 'cron', minute='7,22,52', timezone=FUSO_STR,
+                      id='celular_do_robo_loop', replace_existing=True,
                       misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
 
     # Os vídeos do robô da Shopee Vídeo, aprovados e postados, para a fila do Canal Afiliados.

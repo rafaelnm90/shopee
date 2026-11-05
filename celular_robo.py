@@ -612,10 +612,16 @@ def reconectar_sozinho():
         _gravar(falha="", falha_em="")
     else:
         # O porquê da última reconexão que falhou (o motivo em palavras simples, sem o endereço)
-        # fica para o estado do android.yml: na suspensão o robô não pausa nem avisa sem o
-        # celular (pedido do Rafael), e sem isto não se via por que ele não conectava.
+        # fica para o estado do android.yml e para o alertas.py: na suspensão o robô não pausa sem
+        # o celular (pedido do Rafael), e só a falha do servidor vira aviso (P155 1).
         _gravar(falha=resultado, falha_em=_agora())
     return ok, resultado
+
+
+# O começo do motivo da reconexão que falhou com o Motorola na rede privada e a Depuração por Wi-Fi
+# dele respondendo: a falha é do servidor (ou do pareamento), não do celular. Na suspensão, ela é a
+# única queda que vira aviso ao Rafael (alertas.py, que guarda o mesmo texto; P155 1).
+DEPURACAO_RESPONDE = "a Depuração por Wi-Fi responde"
 
 
 def _reconectar():
@@ -683,11 +689,11 @@ def _reconectar():
                     return True, resultado, porta == guardada
             anotar_adb_travado(travado, False)
         if pede_pareamento(resultado):
-            return False, f"a Depuração por Wi-Fi responde, mas {resultado}", False
-        return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "
+            return False, f"{DEPURACAO_RESPONDE}, mas {resultado}", False
+        return False, (f"{DEPURACAO_RESPONDE} no celular, mas o adb não conecta ({resultado}); "
                        "se continuar, parear de novo pelo Celular do Robô"), False
     if vencido:
-        return False, f"a Depuração por Wi-Fi responde, mas {vencido}", False
+        return False, f"{DEPURACAO_RESPONDE}, mas {vencido}", False
     if abertas:
         return False, (f"o celular tem {len(abertas)} porta(s) aberta(s), mas nenhuma é a da Depuração por Wi-Fi; "
                        "se ela estiver ligada, parear de novo pelo Celular do Robô"), False
