@@ -269,6 +269,29 @@ def conectado():
     return ligado
 
 
+# Os painéis não fazem o Rafael esperar o adb do celular travado: cada pergunta a ele espera o
+# prazo inteiro, e o Robô Automático 🤖 e o Celular do Robô 📱 demoravam a abrir (vídeo do Rafael
+# de 04/11/2026). Com a ligação falhando há menos disto e o celular não visto depois, eles mostram
+# "desconectado" sem perguntar; o robô tenta reconectar a cada rodada, e o Reconectar Celular 🔄
+# sempre pergunta.
+FALHA_RECENTE = timedelta(minutes=20)
+
+
+def conectado_no_painel(agora=None):
+    """O conectado() dos painéis, sem perguntar ao adb quando a ligação falhou há pouco (FALHA_RECENTE)."""
+    dados = ler()
+    momento = (agora or datetime.now(fuso_horario)).replace(tzinfo=None)
+    limite = (momento - FALHA_RECENTE).strftime("%Y-%m-%d %H:%M:%S")
+    visto = dados.get("visto_em") or ""
+    if any(quando and quando > visto and quando >= limite
+           for quando in (dados.get("falha_em"), dados.get("sem_resposta_em"))):
+        return False
+    ligado = conectado()
+    if not ligado:
+        _gravar(sem_resposta_em=momento.strftime("%Y-%m-%d %H:%M:%S"))
+    return ligado
+
+
 def portas_abertas(ip, portas=PORTAS_DA_DEPURACAO, prazo=0.5, juntas=400):
     """As portas TCP abertas do celular, testadas em paralelo pela rede privada (uns 30 s)."""
     async def testar(porta, limite):
