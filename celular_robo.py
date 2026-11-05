@@ -74,6 +74,16 @@ RESPOSTAS_DO_ADB = (b"STLS", b"AUTH", b"CNXN")
 PRAZO_DO_ADB_DO_CELULAR = 5
 ADB_DO_CELULAR_TRAVADO = ("o adb do celular não responde na porta aberta (travou, ou a Depuração por Wi-Fi está "
                           "desligada): reinicie o Motorola e ligue de novo a Depuração por Wi-Fi")
+# O adb do celular pode responder ao começo da ligação (pacotes pequenos) e a parte cifrada não
+# se completar: ela troca os certificados, em pacotes maiores, e o pareamento usa a mesma parte
+# (04/11/2026: a conexão e o pareamento pelo QR paravam, com o adb do servidor reiniciado).
+# Sem o celular conectado, o estado testa o caminho até ele (rede_ate_o_celular): direto ou pelo
+# relay do Tailscale, o ping pequeno e o grande sem fragmentar, e se o certificado do celular
+# chega ao servidor. Só estados e números: nunca o endereço.
+TAMANHOS_DO_PING = (56, 1200)
+PINGS = 3
+PRAZO_DO_CERTIFICADO = 8
+SEM_RESPOSTA_DO_ADB = "o adb não respondeu"
 
 # Por que o celular saiu: o Android desliga a Depuração por Wi-Fi sozinho quando o Wi-Fi cai,
 # quando o celular troca de ponto de Wi-Fi (outro roteador, um repetidor ou a outra frequência do
@@ -182,7 +192,7 @@ def interpretar_porta(texto):
 def _motivo(resultado):
     """Por que o adb falhou, em palavras simples (sem a saída crua, que traz o endereço)."""
     if resultado is None:
-        return "o adb não respondeu"
+        return SEM_RESPOSTA_DO_ADB
     saida = resultado[1].lower()
     for trecho, motivo in (("wrong password", "o código não confere (ou a janela já fechou)"),
                            ("protocol fault", "o código não confere (ou a janela já fechou)"),
@@ -385,12 +395,26 @@ def porta_responde(ip, porta):
     return porta in portas_abertas(ip, [porta], prazo=PRAZO_DA_PORTA_GUARDADA)
 
 
+def _pacote(comando, arg0, arg1, dados=b""):
+    """Uma mensagem do adb: o comando (4 letras), os dois números, o tamanho, a soma dos bytes e a marca."""
+    numero = int.from_bytes(comando, "little")
+    return struct.pack("<6I", numero, arg0, arg1, len(dados), sum(dados), numero ^ 0xFFFFFFFF) + dados
+
+
 def _pacote_de_conexao():
-    """O CNXN com que o adb abre a ligação: versão, tamanho máximo, "host::" e a soma dos bytes."""
-    dados = b"host::\x00"
-    comando = int.from_bytes(b"CNXN", "little")
-    return struct.pack("<6I", comando, 0x01000001, 256 * 1024, len(dados), sum(dados),
-                       comando ^ 0xFFFFFFFF) + dados
+    """O CNXN com que o adb abre a ligação: versão, tamanho máximo e "host::"."""
+    return _pacote(b"CNXN", 0x01000001, 256 * 1024, b"host::\x00")
+
+
+def _ler(ligacao, tamanho):
+    """Até `tamanho` bytes da ligação (menos, se ela fechar antes)."""
+    lido = b""
+    while len(lido) < tamanho:
+        pedaco = ligacao.recv(tamanho - len(lido))
+        if not pedaco:
+            break
+        lido += pedaco
+    return lido
 
 
 def adb_do_celular_responde(ip, porta, prazo=PRAZO_DO_ADB_DO_CELULAR):
@@ -403,18 +427,77 @@ def adb_do_celular_responde(ip, porta, prazo=PRAZO_DO_ADB_DO_CELULAR):
         ligacao = socket.create_connection((ip, porta), timeout=prazo)
     except OSError:
         return None
-    resposta = b""
     with ligacao:
         try:
             ligacao.sendall(_pacote_de_conexao())
-            while len(resposta) < 4:
-                pedaco = ligacao.recv(4 - len(resposta))
-                if not pedaco:
-                    break
-                resposta += pedaco
+            resposta = _ler(ligacao, 4)
         except OSError:
             return False
     return resposta in RESPOSTAS_DO_ADB
+
+
+def certificado_do_celular_chega(ip, porta, prazo=PRAZO_DO_CERTIFICADO):
+    """
+    Na parte cifrada do adb (depois do STLS), o certificado do celular chega ao servidor? True:
+    chegou (e o servidor, que não o conhece, recusa: nada é conectado nem muda no celular); False:
+    não chegou no prazo (os pacotes grandes se perdem no caminho); None: sem a parte cifrada (a
+    porta não aceitou, o celular não pediu o STLS ou cortou a ligação). A conferência do
+    certificado fica ligada: é a recusa dela que mostra que ele chegou.
+    """
+    import ssl
+    try:
+        ligacao = socket.create_connection((ip, porta), timeout=prazo)
+    except OSError:
+        return None
+    with ligacao:
+        try:
+            ligacao.sendall(_pacote_de_conexao())
+            if _ler(ligacao, 24)[:4] != b"STLS":
+                return None
+            ligacao.sendall(_pacote(b"STLS", 0x01000000, 0))
+        except OSError:
+            return None
+        try:
+            with ssl.create_default_context().wrap_socket(ligacao, server_hostname="celular-do-robo"):
+                return True
+        except ssl.SSLCertVerificationError:
+            return True
+        except TimeoutError:
+            return False
+        except OSError:
+            return None
+
+
+def caminho_ate_o_celular(ip):
+    """Como o Tailscale chega ao celular: "direto, N ms", "pelo relay, N ms" ou "sem resposta"."""
+    r = av._rodar("tailscale", "ping", "-c", "3", "--timeout", "5s", ip, timeout=30)
+    pongs = [linha for linha in (r[1] if r else "").splitlines() if linha.startswith("pong")]
+    if not pongs:
+        return "sem resposta"
+    tempo = re.search(r" in (\d+(?:\.\d+)?) ?ms", pongs[-1])
+    caminho = "pelo relay" if "via DERP" in pongs[-1] else "direto"
+    return f"{caminho}, {round(float(tempo.group(1)))} ms" if tempo else caminho
+
+
+def ping_ao_celular(ip, tamanho):
+    """Quantos dos PINGS pings de `tamanho` bytes, sem fragmentar, o celular respondeu; None sem o ping."""
+    if shutil.which("ping") is None:
+        return None
+    r = av._rodar("ping", "-n", "-q", "-c", str(PINGS), "-W", "2", "-M", "do", "-s", str(tamanho), ip,
+                  timeout=PINGS * 3 + 5)
+    recebidos = re.search(r"(\d+) (?:packets )?received", r[1]) if r else None
+    return int(recebidos.group(1)) if recebidos else None
+
+
+def rede_ate_o_celular(ip, porta_do_adb):
+    """O caminho da rede privada até o celular, em uma linha só com estados e números."""
+    pings = [ping_ao_celular(ip, tamanho) for tamanho in TAMANHOS_DO_PING]
+    ping = ("ping: sem o ping no servidor" if None in pings
+            else f"ping pequeno: {pings[0]} de {PINGS}, grande: {pings[1]} de {PINGS}")
+    chega = certificado_do_celular_chega(ip, porta_do_adb) if porta_do_adb else None
+    certificado = {True: "chega", False: "não chega (os pacotes grandes se perdem no caminho)",
+                   None: "não testado"}[chega]
+    return f"caminho: {caminho_ate_o_celular(ip)} | {ping} | certificado do celular: {certificado}"
 
 
 def reconectar_sozinho():
@@ -491,10 +574,20 @@ def _reconectar():
         # preso. Reiniciá-lo (as chaves do pareamento ficam) e tentar de novo uma vez, antes de
         # pedir o pareamento: na porta guardada e na nova em que o adb do celular responde.
         av._rodar("adb", "kill-server", timeout=20)
-        for porta in ([guardada] if guardada else []) + novas:
+        alvos = ([guardada] if guardada else []) + novas
+        for porta in alvos:
             ok, resultado = conectar(dados["ip"], porta)
             if ok:
                 return True, resultado, porta == guardada
+        if resultado == SEM_RESPOSTA_DO_ADB:
+            # Nem assim o adb respondeu: o servidor dele pode ter travado de um jeito que o
+            # kill-server não derruba. Derrubado à força (as chaves do pareamento ficam), mais
+            # uma tentativa.
+            av._rodar("pkill", "-KILL", "-x", "adb", timeout=10)
+            for porta in alvos:
+                ok, resultado = conectar(dados["ip"], porta)
+                if ok:
+                    return True, resultado, porta == guardada
         if pede_pareamento(resultado):
             return False, f"a Depuração por Wi-Fi responde, mas {resultado}", False
         return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "
@@ -773,9 +866,9 @@ def descrever_estado():
     se está na rede privada, se a porta guardada está aberta, o estado do adb nela,
     quantas portas abertas o celular tem, o prazo do pareamento, há quanto tempo ele está
     ligado e os pontos de Wi-Fi com o mesmo nome da rede dele (esses três com o celular
-    conectado), em quantas portas abertas o adb do celular responde (com ele desconectado) e
-    o motivo da última queda, com o detalhe (ultima_queda). Só lê: não conecta nem
-    desconecta nada.
+    conectado), em quantas portas abertas o adb do celular responde e o caminho da rede até
+    ele (esses dois com ele desconectado: rede_ate_o_celular) e o motivo da última queda, com
+    o detalhe (ultima_queda). Só lê: não conecta nem desconecta nada.
     """
     dados = ler()
     if not dados.get("pareado_em") or not dados.get("ip"):
@@ -794,9 +887,12 @@ def descrever_estado():
     prazo = ler_prazo_da_autorizacao() if estado == "device" else None
     # Sem o adb conectado: em quantas portas abertas o adb do celular responde (em nenhuma, ele
     # travou ou a porta não é a da depuração; adb_do_celular_responde).
-    sonda = (f" | adb do celular responde em "
-             f"{sum(1 for porta in abertas if adb_do_celular_responde(dados['ip'], porta))} de {len(abertas)}"
+    respondem = [porta for porta in abertas if adb_do_celular_responde(dados["ip"], porta)] \
+        if estado != "device" else []
+    sonda = (f" | adb do celular responde em {len(respondem)} de {len(abertas)}"
              if estado != "device" and abertas else "")
+    if estado != "device":
+        sonda += f" | {rede_ate_o_celular(dados['ip'], respondem[0] if respondem else None)}"
     conectado_agora = ""
     if estado == "device":
         ligado = ligado_ha()
