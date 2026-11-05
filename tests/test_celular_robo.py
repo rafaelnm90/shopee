@@ -20,12 +20,17 @@ def cr(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def sonda_de_verdade(monkeypatch):
-    """Nos testes, o adb do celular responde sem rede; o teste da sonda recebe a de verdade."""
+def de_verdade(monkeypatch):
+    """
+    Nos testes, a sonda do adb do celular e o teste do certificado, sem rede; os testes deles
+    recebem os de verdade (com um servidor local).
+    """
     import celular_robo
-    real = celular_robo.adb_do_celular_responde
+    reais = {"sonda": celular_robo.adb_do_celular_responde,
+             "certificado": celular_robo.certificado_do_celular_chega}
     monkeypatch.setattr(celular_robo, "adb_do_celular_responde", lambda ip, porta, prazo=0: True)
-    return real
+    monkeypatch.setattr(celular_robo, "certificado_do_celular_chega", lambda ip, porta, prazo=0: None)
+    return reais
 
 
 def _rede(*pares):
@@ -898,13 +903,13 @@ def _servidor_de_teste(resposta):
     (b"STLS" + bytes(20), True), (b"AUTH" + bytes(20), True), (b"HTTP/1.1 400 Bad Request\r\n\r\n", False),
     (None, False),
 ])
-def test_sonda_separa_o_adb_do_celular_que_responde_do_calado(sonda_de_verdade, resposta, esperado):
+def test_sonda_separa_o_adb_do_celular_que_responde_do_calado(de_verdade, resposta, esperado):
     # 04/11/2026: a porta da depuração abria, também a nova, e a conexão não se completava. A sonda
     # manda o começo da ligação do adb (CNXN) e lê a resposta: o adb do celular calado travou.
     import struct
     escuta, recebido = _servidor_de_teste(resposta)
     try:
-        assert sonda_de_verdade("127.0.0.1", escuta.getsockname()[1], prazo=0.5) is esperado
+        assert de_verdade["sonda"]("127.0.0.1", escuta.getsockname()[1], prazo=0.5) is esperado
     finally:
         escuta.close()
     comando, versao, maximo, tamanho, soma, magica = struct.unpack("<6I", recebido[0][:24])
@@ -912,13 +917,13 @@ def test_sonda_separa_o_adb_do_celular_que_responde_do_calado(sonda_de_verdade, 
     assert recebido[0][24:] == b"host::\x00" and tamanho == 7 and soma == sum(b"host::\x00") and maximo > 0
 
 
-def test_sonda_na_porta_fechada_diz_que_nem_aceitou(sonda_de_verdade):
+def test_sonda_na_porta_fechada_diz_que_nem_aceitou(de_verdade):
     import socket
     fechada = socket.socket()
     fechada.bind(("127.0.0.1", 0))
     porta = fechada.getsockname()[1]
     fechada.close()
-    assert sonda_de_verdade("127.0.0.1", porta, prazo=0.5) is None
+    assert de_verdade["sonda"]("127.0.0.1", porta, prazo=0.5) is None
 
 
 def test_adb_do_celular_calado_pede_para_reiniciar_o_celular(cr, monkeypatch):
@@ -957,12 +962,22 @@ def test_porta_nova_em_que_o_adb_responde_reinicia_o_adb_do_servidor(cr, monkeyp
     monkeypatch.setattr(cr, "anotar_motivo_da_queda", lambda visto_em, mesma_porta=False, **_: quedas.append(mesma_porta))
     assert cr.reconectar_sozinho() == (True, "moto g(100)")
     assert ("adb", "kill-server") in pedidos and quedas == [False]
-    # Se nem assim conectar, o motivo diz que a depuração responde, sem mandar reiniciar o celular.
+    # Se nem assim conectar, o adb do servidor é derrubado à força e tentado de novo; sem conectar,
+    # o motivo diz que a depuração responde, sem mandar reiniciar o celular.
+    pedidos.clear()
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)")
+                        if ("pkill", "-KILL", "-x", "adb") in pedidos else (False, "o adb não respondeu"))
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert pedidos.index(("adb", "kill-server")) < pedidos.index(("pkill", "-KILL", "-x", "adb"))
     pedidos.clear()
     monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o adb não respondeu"))
     ok, motivo = cr.reconectar_sozinho()
     assert not ok and "responde no celular, mas o adb não conecta (o adb não respondeu)" in motivo
     assert ("adb", "kill-server") in pedidos and "reinicie" not in motivo
+    # Outro motivo (o celular respondeu algo) não derruba o adb do servidor à força.
+    pedidos.clear()
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o celular ainda não autorizou este servidor"))
+    assert not cr.reconectar_sozinho()[0] and ("pkill", "-KILL", "-x", "adb") not in pedidos
 
 
 def test_estado_mostra_se_o_adb_do_celular_responde_nas_portas_abertas(cr, monkeypatch):
@@ -972,7 +987,8 @@ def test_estado_mostra_se_o_adb_do_celular_responde_nas_portas_abertas(cr, monke
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: None)
     monkeypatch.setattr(cr, "adb_do_celular_responde", lambda ip, porta, prazo=0: False)
     linha = cr.descrever_estado()
-    assert "portas abertas no celular: 1 | adb do celular responde em 0 de 1 | prazo do pareamento" in linha
+    assert "portas abertas no celular: 1 | adb do celular responde em 0 de 1 | caminho: " in linha
+    assert "certificado do celular: não testado | prazo do pareamento" in linha
     # O log do android.yml é público: nem o endereço nem a porta.
     assert IP not in linha and "41000" not in linha
     # Conectado, o adb já responde: nada é sondado.
@@ -980,3 +996,98 @@ def test_estado_mostra_se_o_adb_do_celular_responde_nas_portas_abertas(cr, monke
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, "0") if "settings" in partes else (0, "device"))
     monkeypatch.setattr(cr, "adb_do_celular_responde", lambda *_, **__: pytest.fail("conectado não sonda"))
     assert "adb do celular responde" not in cr.descrever_estado()
+
+
+def _certificado_de_teste(pasta):
+    """Um certificado próprio (como o do adb do celular), feito na hora numa pasta do teste."""
+    from datetime import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    chave = ec.generate_private_key(ec.SECP256R1())
+    nome = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "adb")])
+    certificado = (x509.CertificateBuilder().subject_name(nome).issuer_name(nome).public_key(chave.public_key())
+                   .serial_number(x509.random_serial_number()).not_valid_before(datetime(2026, 1, 1))
+                   .not_valid_after(datetime(2036, 1, 1)).sign(chave, hashes.SHA256()))
+    (pasta / "cert.pem").write_bytes(certificado.public_bytes(serialization.Encoding.PEM))
+    (pasta / "chave.pem").write_bytes(chave.private_bytes(serialization.Encoding.PEM,
+                                                          serialization.PrivateFormat.PKCS8,
+                                                          serialization.NoEncryption()))
+    return str(pasta / "cert.pem"), str(pasta / "chave.pem")
+
+
+@pytest.mark.parametrize("comportamento, esperado", [("tls", True), ("calado", False), ("auth", None)])
+def test_certificado_do_celular_chega_ou_se_perde_no_caminho(de_verdade, tmp_path, comportamento, esperado):
+    # 04/11/2026: o adb do celular respondia ao começo da ligação e a parte cifrada (a dos
+    # certificados, com pacotes maiores) não se completava, nem no pareamento pelo QR.
+    import contextlib
+    import socket
+    import ssl
+    import struct
+    import threading
+    contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    contexto.load_cert_chain(*_certificado_de_teste(tmp_path))
+    escuta = socket.socket()
+    escuta.bind(("127.0.0.1", 0))
+    escuta.listen()
+    recebido = []
+
+    def cabecalho(comando):
+        numero = int.from_bytes(comando, "little")
+        return struct.pack("<6I", numero, 0x01000000, 0, 0, 0, numero ^ 0xFFFFFFFF)
+
+    def atender():
+        ligacao, _ = escuta.accept()
+        with ligacao, contextlib.suppress(OSError):
+            ligacao.recv(31, socket.MSG_WAITALL)
+            ligacao.sendall(cabecalho(b"AUTH" if comportamento == "auth" else b"STLS"))
+            recebido.append(ligacao.recv(24, socket.MSG_WAITALL))
+            if comportamento == "tls":
+                contexto.wrap_socket(ligacao, server_side=True)
+            # Calado: lê o que chega (o começo da parte cifrada) e não responde, até a sonda fechar.
+            while ligacao.recv(4096):
+                pass
+
+    threading.Thread(target=atender, daemon=True).start()
+    try:
+        assert de_verdade["certificado"]("127.0.0.1", escuta.getsockname()[1], prazo=1) is esperado
+    finally:
+        escuta.close()
+    # Depois do STLS do celular, o servidor responde STLS, como o adb, antes da parte cifrada.
+    if comportamento != "auth":
+        assert recebido and recebido[0][:4] == b"STLS"
+
+
+def test_caminho_e_ping_ate_o_celular_so_com_estados_e_numeros(cr, monkeypatch):
+    respostas = {
+        "direto": (0, f"pong from moto ({IP}) via 189.1.2.3:41641 in 33ms"),
+        "relay": (1, f"pong from moto ({IP}) via DERP(sao) in 152ms\npong from moto ({IP}) via DERP(sao) "
+                     "in 140ms\ndirect connection not established"),
+        "nada": (1, "timeout waiting for ping reply"),
+    }
+    caminho = ["direto"]
+
+    def rodar_falso(*partes, timeout=0):
+        if partes[:2] == ("tailscale", "ping"):
+            return respostas[caminho[0]]
+        if partes[0] == "ping":
+            grande = partes[partes.index("-s") + 1] == "1200"
+            return (1, "3 packets transmitted, 0 received, 100% packet loss") if grande else \
+                (0, f"--- {IP} ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss")
+        return None
+    monkeypatch.setattr(cr.av, "_rodar", rodar_falso)
+    monkeypatch.setattr(cr, "certificado_do_celular_chega", lambda ip, porta, prazo=0: False)
+    linha = cr.rede_ate_o_celular(IP, 41000)
+    assert linha == ("caminho: direto, 33 ms | ping pequeno: 3 de 3, grande: 0 de 3 | certificado do celular: "
+                     "não chega (os pacotes grandes se perdem no caminho)")
+    # O log do android.yml é público: nem o endereço nem a porta.
+    assert IP not in linha and "41000" not in linha and "189.1" not in linha
+    caminho[0] = "relay"
+    assert cr.caminho_ate_o_celular(IP) == "pelo relay, 140 ms"
+    caminho[0] = "nada"
+    assert cr.caminho_ate_o_celular(IP) == "sem resposta"
+    # Sem porta do adb que responda, o certificado não é testado; sem o ping no servidor, diz isso.
+    monkeypatch.setattr(cr.shutil, "which", lambda nome: None if nome == "ping" else f"/usr/bin/{nome}")
+    assert cr.rede_ate_o_celular(IP, None).endswith("ping: sem o ping no servidor | certificado do celular: não testado")
