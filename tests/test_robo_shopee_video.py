@@ -46,7 +46,7 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
     # A troca do Ver Produtos (P57) tem testes próprios: aqui, cada produto fica o do criador, na ordem dele.
     monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", lambda d, video, nomes, *a, **k: [
-        {"nome": nome, "link": "", "valor": 0, "trocado": ""} for nome in nomes])
+        {"nome": nome, "link": "", "valor": 0, "trocado": "", "do_video": True} for nome in nomes])
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: None)
     # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
@@ -1076,7 +1076,8 @@ def test_ver_produtos_com_o_produto_trocado_leva_o_link_e_a_foto_da_troca(monkey
         assert nomes == [PRODUTO_A, PRODUTO_B] and set(fotos) == {PRODUTO_A, PRODUTO_B}
         curtidos.append((link, trocado))
         return [{"nome": trocado, "link": link, "valor": 9.0, "trocado": PRODUTO_B, "comissao": 12.0, "antes": 8.0,
-                 "valor_antes": 4.0}, {"nome": PRODUTO_A, "link": "", "valor": 2.0, "trocado": ""}]
+                 "valor_antes": 4.0, "do_video": True}, {"nome": PRODUTO_A, "link": "", "valor": 2.0, "trocado": "",
+                                                         "do_video": True}]
 
     edicao, anexar = {}, {}
 
@@ -3184,6 +3185,88 @@ def test_ver_produtos_que_volta_sem_nada_conhecido_da_lista_para_sem_tocar_nas_r
     assert [r[2] for r in registro] == ["parou - a lista sem nada conhecido na tela"]
 
 
+def _do_criador(nome, valor, **campos):
+    return {"nome": nome, "link": "", "valor": valor, "trocado": "", "do_video": True, "foto": b"\xff\xd8" + nome.encode(),
+            "imagem": "https://cf.shopee.com.br/" + nome[:6], "item": nome[:3], "preco": 50.0, **campos}
+
+
+def test_ver_produtos_enche_os_espacos_que_sobram_com_o_mesmo_item_de_outras_lojas(monkeypatch):
+    # Escolhas do Rafael (28/10, P59 e P66; 05/11, P154 3): depois dos produtos do criador e do Ver
+    # Mais, os espaços que sobram, até 6, recebem o mesmo item do 1º produto do post, de outras
+    # lojas, pela mesma busca pela foto do link de produto; o post vai do que paga mais por venda
+    # para o que paga menos.
+    pedidos = []
+
+    def espacos(d, video, principal, original, vistos, prazo, inicio=None, recusados=None, espacos=5):
+        pedidos.append((principal, original, espacos))
+        return [{"nome": "Igual Loja 3", "link": "https://s.shopee.com.br/3", "valor": 9.0, "foto": b"\xff\xd8c3"},
+                {"nome": "Igual Loja 4", "link": "https://s.shopee.com.br/4", "valor": 1.0, "foto": b"\xff\xd8c4"}]
+
+    monkeypatch.setattr(robo, "espacos_livres", espacos)
+    monkeypatch.setattr(robo, "_curtir_os_produtos", lambda d, video, produtos, curtidos: [
+        p for p in produtos if not curtidos.append((p["link"], p["nome"]))])
+    produtos = [_do_criador(PRODUTO_A, 5.0), _do_criador(PRODUTO_B, 3.0)]
+    curtidos, variacoes = [], []
+    ordem = robo.espacos_do_ver_produtos(None, {"link": LINK_DE_VIDEO, "de_video": True}, produtos, [],
+                                         time.monotonic() + 600, time.monotonic(), [], curtidos, variacoes)
+    # A busca parte do 1º da mesma cor do vídeo (a foto e o preço do anúncio dele) e enche os 4 que sobram.
+    assert pedidos == [({"nome": PRODUTO_A, "item": PRODUTO_A[:3]},
+                        {"imagem": "https://cf.shopee.com.br/" + PRODUTO_A[:6], "preco": 50.0}, 4)]
+    assert [p["nome"] for p in ordem] == ["Igual Loja 3", PRODUTO_A, PRODUTO_B, "Igual Loja 4"]
+    assert curtidos == [("https://s.shopee.com.br/3", "Igual Loja 3"), ("https://s.shopee.com.br/4", "Igual Loja 4")]
+    assert produtos[0]["base"] is True and variacoes == []
+    # Com os 6 já cheios pelos do criador, nada de busca.
+    cheio = [_do_criador(f"Produto {n}", n) for n in range(6)]
+    assert robo.espacos_do_ver_produtos(None, {}, cheio, [], 0, 0, [], [], []) == cheio and len(pedidos) == 1
+
+
+def test_ver_produtos_com_4_pontos_ou_mais_vai_so_com_os_produtos_do_video(monkeypatch):
+    # Com 4 pontos de penalidade ou mais, só os produtos do vídeo (P145): os espaços livres do Ver
+    # Produtos ficam vazios, como no link de produto, antes de qualquer toque no celular.
+    robo.gravar_estado(saude_pontos=8, saude_lida_em=datetime.now(robo.fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
+    produtos = [_do_criador(PRODUTO_A, 5.0)]
+    assert robo.espacos_do_ver_produtos(None, {"link": LINK_DE_VIDEO}, produtos, [], time.monotonic() + 600,
+                                        time.monotonic(), [], [], []) == produtos
+    assert _registro_dos_espacos() == ["nenhum - só o produto do vídeo pelos pontos"]
+
+
+def test_rascunho_de_ver_produtos_com_produto_a_mais_leva_o_album_e_a_medicao(monkeypatch, avisos):
+    # O rascunho de Ver Produtos com produto a mais vai como o de link de produto: o álbum das
+    # capas (P75), a marca do a mais com outra foto de capa (P102), os números da medição (P73) e
+    # o link curto de cada um (P83).
+    _fonte_de_video(monkeypatch)
+    extra = {"nome": "Garrafa Térmica Inox Loja Três", "link": "https://s.shopee.com.br/3", "valor": 1.0,
+             "item": "33", "foto": b"\xff\xd8outra foto"}
+
+    def espacos(d, video, principal, original, vistos, prazo, inicio=None, recusados=None, espacos=5):
+        recusados.append(b"\xff\xd8recusado")
+        return [extra]
+
+    anexar = {}
+
+    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+        anexar.update(nomes=list(nomes), a_mais=set(a_mais))
+        return list(nomes), list(range(len(nomes)))
+
+    monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", lambda d, video, nomes, *a, **k: [
+        _do_criador(nome, 5.0 - n) for n, nome in enumerate(nomes)])
+    monkeypatch.setattr(robo, "espacos_livres", espacos)
+    monkeypatch.setattr(robo, "_curtir_os_produtos", lambda d, video, produtos, curtidos: list(produtos))
+    monkeypatch.setattr(robo, "foto_do_anuncio", lambda endereco: b"\xff\xd8capa do anuncio")
+    monkeypatch.setattr(robo, "mesma_foto", lambda uma, outra: uma == outra)
+    monkeypatch.setattr(robo, "anexar_os_produtos", anexar_os)
+    monkeypatch.setattr(robo.ps, "conferir_tela_final", lambda d, video: (True, "conferida"))
+    _copia_com_a_miniatura(monkeypatch)
+    assert robo.rodada(preparar=True, d=AppDoVerProdutos(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert anexar == {"nomes": [PRODUTO_A, PRODUTO_B, extra["nome"]], "a_mais": {2}}
+    rascunho = robo.pegar(1)
+    assert rascunho["itens"] == [{"item": PRODUTO_A[:3], "a_mais": False}, {"item": PRODUTO_B[:3], "a_mais": False},
+                                 {"item": "33", "a_mais": True}]
+    assert len(rascunho["capas"]) == 3 and rascunho["outras_capas"] == [3] and len(rascunho["recusadas"]) == 1
+    assert rascunho["links_dos_produtos"][2] == "https://s.shopee.com.br/3"
+    assert "(os do vídeo e 1 iguais de outras lojas)" in avisos[-1]
+
+
 def test_ver_produtos_de_outra_cor_entra_e_a_foto_dele_vai_na_miniatura(monkeypatch, avisos):
     # Pedido do Rafael (01/11): num post de Ver Produtos, um dos produtos da criadora era o mesmo
     # puff em outra cor, e a IA, que conferia só pelo nome, deixou passar sem ninguém saber. Agora
@@ -5135,6 +5218,29 @@ def test_ver_produtos_vai_ao_canal_com_cada_produto_achado_na_api_pelo_nome(monk
     # O que a API não acha pelo nome fica de fora.
     assert robo.pedidos_do_canal.pendentes()[0]["links"] == ["https://s.shopee.com.br/canal-1/1",
                                                              "https://s.shopee.com.br/canal-2/2"]
+
+
+def test_ver_produtos_vai_ao_canal_pelo_link_de_cada_produto_no_rascunho(monkeypatch, avisos, tmp_path):
+    # O trocado pelo da loja que paga mais (P57) e o a mais (P66) vão ao Canal Afiliados pelo link
+    # deles no rascunho, que leva ao anúncio exato do post; o sem link, pela busca do nome.
+    async def link_para_converter(link):
+        if link == "https://s.shopee.com.br/41":
+            return "https://shopee.com.br/Produto-i.7.41"
+        return "https://sv.shopee.com.br/share-video/xyz?jumpType=1"
+
+    async def buscar(termo, limite=10, app_id=None, app_secret=None, sort_type=2):
+        return [{"itemId": 3, "productName": "Brinco Argola Dourado Grande",
+                 "productLink": "https://shopee.com.br/product/1/3"}]
+
+    async def converter(endereco, etiqueta="geral", **kw):
+        return endereco.replace("https://shopee.com.br/product/", "https://s.shopee.com.br/canal-")
+
+    monkeypatch.setattr(robo, "link_para_converter", link_para_converter)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    produtos = ["Mini Saia Plissada Feminina Cintura Alta Loja Dois", "Brinco Argola Dourado Grande"]
+    rascunho = _postado_com_video(tmp_path, produtos=produtos, links_dos_produtos=["https://s.shopee.com.br/41", ""])
+    assert robo.links_para_o_canal(rascunho) == ["https://s.shopee.com.br/canal-7/41", "https://s.shopee.com.br/canal-1/3"]
 
 
 def test_sem_o_link_do_post_o_video_nao_vai_ao_canal_e_o_rafael_fica_sabendo(avisos, tmp_path):
