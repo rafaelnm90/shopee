@@ -93,6 +93,13 @@ SEM_RESPOSTA_DO_ADB = "o adb não respondeu"
 # Android (logcat) que desliga a depuração. Só o motivo fixo vai ao registro e ao banco, nunca a
 # linha crua. Pergunta do Rafael (31/10): por que desconectou. DECISOES.md, Trabalho com o Claude.
 PROCESSO_DA_QUEDA = "celular: motivo da queda"
+# Quando nem o kill-server derruba o adb do servidor (travado de 03/11 a 05/11/2026, sem saber por
+# quê), o registro anota há quanto tempo ele rodava e quem o iniciou, pelo grupo do systemd do
+# processo (adb_do_servidor): um deploy que reinicia o bot, uma rodada do robô ou um workflow.
+# Só estados e números. Pergunta do Rafael (05/11): por que desconectou sozinho.
+PROCESSO_DO_ADB_TRAVADO = "celular: adb do servidor derrubado à força"
+DONOS_DO_ADB = (("bot_mestre_bot.service", "o bot"), ("robo-shopee-video", "uma rodada do robô"),
+                ("session-", "uma conexão SSH (workflow ou teste)"))
 TAG_DA_DEPURACAO = "AdbDebuggingManager"
 MOTIVOS_DA_QUEDA = (
     ("network disconnected", "o Wi-Fi caiu"),
@@ -517,6 +524,37 @@ def rede_ate_o_celular(ip, porta_do_adb):
     return f"caminho: {caminho_ate_o_celular(ip)} | {ping} | certificado do celular: {certificado}"
 
 
+def _grupo_do_processo(pid):
+    """O grupo do systemd (cgroup) do processo; "" se não deu para ler."""
+    try:
+        with open(f"/proc/{pid}/cgroup", encoding="utf-8") as arquivo:
+            return arquivo.read()
+    except OSError:
+        return ""
+
+
+def adb_do_servidor():
+    """
+    O servidor do adb rodando agora (o processo "fork-server"): (há quantos segundos ele roda,
+    quem o iniciou, pelo grupo do systemd: DONOS_DO_ADB) ou None. Só estados e números.
+    """
+    r = av._rodar("ps", "-C", "adb", "-o", "pid=,etimes=,args=", timeout=10)
+    for linha in (r[1] if av._ok(r) else "").splitlines():
+        partes = linha.split(None, 2)
+        if len(partes) == 3 and partes[0].isdigit() and partes[1].isdigit() and "fork-server" in partes[2]:
+            grupo = _grupo_do_processo(partes[0])
+            return int(partes[1]), next((dono for trecho, dono in DONOS_DO_ADB if trecho in grupo), "outro")
+    return None
+
+
+def anotar_adb_travado(travado, voltou, agora=None):
+    """Anota no registro o adb do servidor derrubado à força (PROCESSO_DO_ADB_TRAVADO), e se o celular voltou."""
+    detalhe = (f"rodava há {_duracao(travado[0])}, iniciado por {travado[1]}" if travado
+               else "o processo do servidor do adb não foi achado")
+    registro_processos.registrar("shopee_video", PROCESSO_DO_ADB_TRAVADO, "voltou" if voltou else "não voltou",
+                                 detalhe, ok=voltou, agora=agora)
+
+
 def reconectar_sozinho():
     """
     Reconecta sem o Rafael mandar a porta: primeiro a porta guardada, refazendo a conexão
@@ -601,12 +639,15 @@ def _reconectar():
         if resultado == SEM_RESPOSTA_DO_ADB:
             # Nem assim o adb respondeu: o servidor dele pode ter travado de um jeito que o
             # kill-server não derruba. Derrubado à força (as chaves do pareamento ficam), mais
-            # uma tentativa.
+            # uma tentativa, e o registro anota quem o tinha iniciado (anotar_adb_travado).
+            travado = adb_do_servidor()
             av._rodar("pkill", "-KILL", "-x", "adb", timeout=10)
             for porta in alvos:
                 ok, resultado = conectar(dados["ip"], porta)
                 if ok:
+                    anotar_adb_travado(travado, True)
                     return True, resultado, porta == guardada
+            anotar_adb_travado(travado, False)
         if pede_pareamento(resultado):
             return False, f"a Depuração por Wi-Fi responde, mas {resultado}", False
         return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({resultado}); "

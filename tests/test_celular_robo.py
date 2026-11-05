@@ -1158,3 +1158,54 @@ def test_caminho_e_ping_ate_o_celular_so_com_estados_e_numeros(cr, monkeypatch):
     # Sem porta do adb que responda, o certificado não é testado; sem o ping no servidor, diz isso.
     monkeypatch.setattr(cr.shutil, "which", lambda nome: None if nome == "ping" else f"/usr/bin/{nome}")
     assert cr.rede_ate_o_celular(IP, None).endswith("ping: sem o ping no servidor | certificado do celular: não testado")
+
+
+@pytest.mark.parametrize("grupo, dono", [
+    ("0::/system.slice/bot_mestre_bot.service\n", "o bot"),
+    ("0::/system.slice/robo-shopee-video-20261105010400.service\n", "uma rodada do robô"),
+    ("0::/user.slice/user-1001.slice/session-77.scope\n", "uma conexão SSH (workflow ou teste)"),
+    ("0::/system.slice/outra.service\n", "outro"),
+])
+def test_quem_iniciou_o_adb_do_servidor(cr, monkeypatch, grupo, dono):
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (
+        0, "4400 3 adb connect x\n4321 135000 adb -L tcp:5037 fork-server server --reply-fd 4"))
+    monkeypatch.setattr(cr, "_grupo_do_processo", lambda pid: grupo if pid == "4321" else "")
+    assert cr.adb_do_servidor() == (135000, dono)
+    # Sem o servidor do adb rodando (ou sem o ps): nada.
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, ""))
+    assert cr.adb_do_servidor() is None
+
+
+def test_adb_do_servidor_derrubado_a_forca_fica_no_registro_com_quem_o_iniciou(cr, monkeypatch):
+    # Pergunta do Rafael (05/11/2026): por que o celular desconectou sozinho. O adb do servidor travou
+    # em 03/11 sem deixar rastro; da próxima vez, o registro diz há quanto tempo ele rodava, quem o
+    # iniciou e se o celular voltou.
+    from conftest import consultar
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip, *_, **__: [41000])
+    pedidos = []
+
+    def rodar_falso(*partes, timeout=0):
+        pedidos.append(partes)
+        if partes[0] == "ps":
+            return 0, "4321 135000 adb -L tcp:5037 fork-server server --reply-fd 4"
+        return 0, ""
+    monkeypatch.setattr(cr.av, "_rodar", rodar_falso)
+    monkeypatch.setattr(cr, "_grupo_do_processo", lambda pid: "0::/user.slice/user-1001.slice/session-77.scope\n")
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)")
+                        if ("pkill", "-KILL", "-x", "adb") in pedidos else (False, "o adb não respondeu"))
+    monkeypatch.setattr(cr, "anotar_motivo_da_queda", lambda *partes, **nomes: None)
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    sql = "SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC"
+    assert consultar(sql, cr.PROCESSO_DO_ADB_TRAVADO) == (
+        "voltou", "rodava há 38 h, iniciado por uma conexão SSH (workflow ou teste)")
+    # Nem derrubado à força: o registro diz que não voltou.
+    pedidos.clear()
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o adb não respondeu"))
+    assert not cr.reconectar_sozinho()[0]
+    assert consultar(sql, cr.PROCESSO_DO_ADB_TRAVADO)[0] == "não voltou"
+    # O log do registro é lido pelo checkup, que é público: nem o endereço nem a porta.
+    assert IP not in str(consultar("SELECT detalhe FROM registro_processos WHERE processo = ?",
+                                   cr.PROCESSO_DO_ADB_TRAVADO))
