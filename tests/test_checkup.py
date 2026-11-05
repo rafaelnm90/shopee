@@ -34,7 +34,9 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.CHAVE_DIA_SV == robo.CHAVE_DIA
     assert checkup.FOLGA_DA_SUSPENSAO_SV == robo.FOLGA_DA_SUSPENSAO
     assert robo.PADRAO["robo_pausado"] is True
-    assert checkup.COMENTARIOS_NO_FEED_POR_DIA == robo.interacoes.COMENTARIOS_NO_FEED_POR_DIA
+    assert checkup.VIDEOS_NO_FEED_POR_DIA == robo.interacoes.VIDEOS_NO_FEED_POR_DIA
+    assert checkup.FEITOS_NO_FEED == robo.interacoes.FEITOS_NO_FEED
+    assert checkup.SO_CURTIDO_NO_FEED == robo.interacoes.SO_CURTIDO
     assert checkup.POSTS_ANTIGOS_POR_DIA == robo.interacoes.POSTS_ANTIGOS_POR_DIA
     assert checkup.HORAS_DAS_RESPOSTAS_SV == robo.HORAS_DAS_RESPOSTAS
     assert checkup.HORA_DAS_RESPOSTAS_SEM_JANELA_SV == robo.HORA_DAS_RESPOSTAS_SEM_JANELA
@@ -805,16 +807,49 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
     for trecho in ("não ficaram embaixo do comentário certo", "ficaram sem resposta depois de 3 tentativas",
-                   "com mais de uma resposta do perfil", "4 comentários hoje (o combinado é 3)",
+                   "com mais de uma resposta do perfil", "4 vídeos hoje (o limite é 3)",
                    "as Notificações foram lidas 1 de 3 vezes hoje",
                    "comentado(s) mais de uma vez em 3 dias"):
         assert trecho in texto
-    # A meta do dia: sem as Notificações lidas e com menos de 3 no feed, à noite, cobra.
+    # A meta do dia: sem as Notificações lidas, à noite, cobra. O feed tem limite, não meta: o dia
+    # com menos é normal (P151 1).
     vazio = {"respostas": {}, "duplicadas": 0, "rodou_hoje": False, "feed_hoje": 1, "feed_repetidos": 0}
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=vazio))
-    assert "as Notificações não foram lidas hoje" in texto and "1 de 3 comentários hoje" in texto
+    assert "as Notificações não foram lidas hoje" in texto and "Feed da Shopee Vídeo" not in texto
     pausado = dict(robo_sv, ativo=False)
     assert checkup.pontos_de_atencao([], {}, {}, pausado, {}, ("x", 1.0, 1), AGORA, interacoes=vazio) == []
+
+
+def test_feed_so_curtido_conta_no_dia_e_o_dia_com_menos_nao_e_cobrado():
+    # Escolha do Rafael (P151 1): nem toda curtida vem com comentário, e o feed tem limite, não
+    # meta. O só curtido conta nos do dia e no fim do feed da janela (P26); abaixo do limite, nada.
+    import registro_processos
+    import robo_shopee_video as robo
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_interacoes_inicio": 20,
+                                         "robo_interacoes_fim": 21})
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    registro_processos.registrar("shopee_video", "feed: comentar", "comentado", ok=True, origem="v1", agora=em("20:10"))
+    registro_processos.registrar("shopee_video", "feed: comentar", "só curtido", "a IA não viu nada específico",
+                                 ok=True, origem="v2", agora=em("20:25"))
+    registro_processos.registrar("shopee_video", "feed: comentar", "não confirmado", ok=False, origem="v3",
+                                 agora=em("20:40"))
+    # Os 3 do dia feitos às 20:40: o preparo das 20:50, ainda na janela, já pode (P26).
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("20:50"))
+    r = checkup.interacoes_da_shopee_video(AGORA)
+    assert (r["feed_hoje"], r["feed_so_curtidos"]) == (3, 1)
+    assert checkup.sobreposicoes(AGORA)["preparo_na_janela"] == []
+    robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
+    r.update(respostas={}, duplicadas=0, rodou_hoje=True, leituras_hoje=1, leituras_esperadas=1,
+             seguidores={"lido_hoje": True, "dia": None, "semana": None})
+    pontos = checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r)
+    assert not any(p.startswith("Feed da Shopee Vídeo") for p in pontos)
+    r.update(feed_hoje=1)
+    pontos = checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r)
+    assert not any(p.startswith("Feed da Shopee Vídeo") for p in pontos)
 
 
 def test_comentario_no_proprio_video_no_radar():
