@@ -783,10 +783,11 @@ def texto_robo(config, agora=None, celular=None):
         "canto, as setinhas vermelhas e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
-        "Interações).\n"
-        f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele curte os vídeos de outros criadores (e comenta "
-        "nos que têm algo para dizer) e responde os comentários dos seus (as respostas saem também às 12h e às "
-        "17h). Nessa janela, ele só volta a preparar e postar quando acaba o feed e as respostas do dia.\n"
+        "Interações). Nele também se espalham os vídeos de outros criadores que ele curte (até 5 por dia, "
+        "comentando nos que têm algo para dizer).\n"
+        f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele responde os comentários dos seus vídeos (as "
+        "respostas saem também às 12h e às 17h) e comenta num post antigo seu. Nessa janela, ele só volta a "
+        "preparar e postar quando acaba isso.\n"
         f"🛍️ <b>{BOTAO_PRODUTOS_A_MAIS}</b>: nos vídeos de link de produto, o mesmo item de outras lojas nos "
         "espaços livres (até 6 produtos); ligar ou desligar.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
@@ -1568,22 +1569,21 @@ async def pedir_janela_robo(message: types.Message, state: FSMContext):
 @router.message(F.text == BOTAO_HORARIO_INTERACOES, StateFilter("*"))
 async def pedir_janela_interacoes(message: types.Message, state: FSMContext):
     """
-    O Horário das Interações: nele o robô só responde os comentários e curte (e comenta) no
-    feed; fora dele, prepara e posta, e responde às 12h e às 17h. Escolhas do Rafael (24/10,
-    P22 a P24, 29/10, P70, e 05/11, P151 1): DECISOES.md, Shopee Vídeo.
+    O Horário das Interações: nele o robô só responde os comentários e comenta num post antigo;
+    fora dele, prepara e posta, e responde às 12h e às 17h. O feed se espalha pelo dia todo.
+    Escolhas do Rafael (24/10, P22 a P24, 29/10, P70, e 05/11, P152): DECISOES.md, Shopee Vídeo.
     """
     if not _admin(message): return
     config = ler_config()
     janela = robo.janela_das_interacoes(config) or (None, None)
     exemplo = exemplos.janela("shopee_video_interacoes", *janela, "12-15")
     await message.answer(
-        "Em que horário o robô curte os vídeos de outros criadores (e comenta nos que têm algo para dizer) e "
-        "responde os comentários dos seus? Nessa janela, ele só volta a preparar e postar quando acaba o feed "
-        "e as respostas do dia; fora dela, prepara e posta, e responde também às 12h e às 17h.\n\n"
+        "Em que horário o robô responde os comentários dos seus vídeos e comenta num post antigo seu? Nessa "
+        "janela, ele só volta a preparar e postar quando acaba isso; fora dela, prepara e posta, e responde "
+        "também às 12h e às 17h. Os vídeos de outros criadores que ele curte se espalham pelo dia todo.\n\n"
         f"Envie <code>início-fim</code> (ex.: <code>{exemplo}</code>) ou toque em {BOTAO_SEM_HORARIO_PROPRIO} para "
         "ele voltar a interagir dentro do Horário do Robô.\n"
-        f"<i>Hoje está {rotulo_interacoes(config)}. Com 3 h ou mais cabem, com folga, os 3 vídeos do feed do "
-        "dia e as respostas.</i>",
+        f"<i>Hoje está {rotulo_interacoes(config)}. Com 1 h já cabem as respostas e o post antigo.</i>",
         parse_mode="HTML", reply_markup=teclado_janela_interacoes)
     await state.set_state(ShopeeVideoFluxo.aguardando_janela_interacoes)
 

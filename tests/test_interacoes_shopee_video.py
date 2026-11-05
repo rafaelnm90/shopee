@@ -1,6 +1,6 @@
 """Respostas aos comentários e interação no feed da Shopee Vídeo (interacoes_shopee_video e o robô)."""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from xml.sax.saxutils import escape
 
 import pytest
@@ -536,7 +536,7 @@ def test_comentario_que_a_ia_pula_avisa_e_nao_volta(monkeypatch, avisos):
     assert not app.enviadas and avisos and it.terminado(it.marca(NOTIFICACAO))
 
 
-def test_respostas_tres_vezes_por_dia_e_o_feed_3_por_dia_espalhados():
+def test_respostas_tres_vezes_por_dia_e_o_feed_espalhado_no_horario_do_robo():
     # Escolha do Rafael (P70): as Notificações às 12h, às 17h e no começo do Horário das
     # Interações (às 20h sem ele), dentro ou fora dele.
     assert not robo.respostas_pendentes(momento("2026-10-24 11:59"))
@@ -556,14 +556,18 @@ def test_respostas_tres_vezes_por_dia_e_o_feed_3_por_dia_espalhados():
     # Com o Horário das Interações às 15h, a 3ª vez é às 15h.
     robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_interacoes_inicio": 15, "robo_interacoes_fim": 16})
     assert robo.horas_das_respostas(robo.ler_config()) == [12, 15, 17]
+    # O feed (P152): até 5 por dia, espalhados pelo Horário do Robô (das 8h às 22h: um a cada 2h40).
     robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO})
     agora = momento("2026-10-24 10:00")
     assert robo.feed_pendente(agora)
     robo.gravar_estado(feed_em="2026-10-24 09:00:00")
     assert not robo.feed_pendente(agora)
-    assert robo.feed_pendente(momento("2026-10-24 11:00"))
-    for n in range(3):
+    assert not robo.feed_pendente(momento("2026-10-24 11:35"))
+    assert robo.feed_pendente(momento("2026-10-24 11:40"))
+    for n in range(4):
         it.guardar(f"video{n}", "video_feed", "comentado", agora)
+    assert robo.feed_pendente(momento("2026-10-24 20:00"))
+    it.guardar("video4", "video_feed", it.SO_CURTIDO, agora)
     assert not robo.feed_pendente(momento("2026-10-24 20:00"))
 
 
@@ -573,30 +577,37 @@ def _janela_das_20_as_21():
     return config
 
 
-def test_feed_na_janela_de_1_hora_faz_os_3_do_dia():
-    # 28/10, Horário das Interações das 20h às 21h: saíram 2 de 3. A rodada das 20h foi das
-    # respostas, e o espaço de 20 min entre os comentários pulava a das 20:30.
-    _janela_das_20_as_21()
-    for hora in ("20:15", "20:30", "20:45"):
-        agora = momento(f"2026-10-28 {hora}")
-        assert robo.feed_pendente(agora), hora
-        robo.gravar_estado(feed_em=robo._momento(agora))
-        it.guardar(f"video {hora}", "video_feed", "comentado", agora)
-    assert not robo.feed_pendente(momento("2026-10-28 20:50"))
-
-
-def test_feed_no_fim_da_janela_nao_comeca_sem_tempo_e_junta_os_que_nao_cabem():
-    # O começo das rodadas muda a cada reinício do bot: com rodadas às 20:14, 20:29, 20:44 e
-    # 20:59, a das 20:59 não acaba antes das 21h, e a das 20:14 é das respostas.
-    config = _janela_das_20_as_21()
-    assert robo.rodadas_que_restam(config, momento("2026-10-28 20:00")) == 4
-    assert robo.videos_nesta_rodada(config, momento("2026-10-28 20:00")) == 1
-    assert robo.rodadas_que_restam(config, momento("2026-10-28 20:29")) == 2
-    assert robo.videos_nesta_rodada(config, momento("2026-10-28 20:29")) == 2
-    assert not robo.feed_pendente(momento("2026-10-28 20:59"))
-    # Fora do horário ou sem ele escolhido, um por rodada, a cada INTERVALO_DO_FEED.
-    assert robo.rodadas_que_restam(config, momento("2026-10-28 21:10")) is None
-    assert robo.videos_nesta_rodada({**robo.PADRAO}, momento("2026-10-28 20:29")) == 1
+def test_feed_espalhado_no_dia_todo_e_o_que_falha_tenta_de_novo_na_rodada_seguinte(monkeypatch, avisos, ia_do_feed):
+    # Escolha do Rafael (P152): os 5 do dia espalhados pelo Horário do Robô (no Dia Todo, um a
+    # cada 4h25, fora a hora das 4h, que é do descurtir), fora ou dentro do Horário das
+    # Interações; o que falha não conta, e a rodada seguinte tenta de novo, até dar certo.
+    config = {**_janela_das_20_as_21(), "robo_inicio": 0, "robo_fim": 24}
+    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
+    assert robo.intervalo_do_feed(config) == timedelta(hours=4, minutes=25)
+    robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
+    app = CelularDoFeed()
+    agora = momento("2026-10-28 00:05")
+    assert robo.feed_pendente(agora)
+    assert robo._agir(app, "feed", None, False, config, agora) == "feed: 1 vídeo curtido e comentado"
+    assert robo.ler_estado()["feed_em"] == "2026-10-28 00:05:00"
+    assert not robo.feed_pendente(momento("2026-10-28 04:20"))
+    assert robo.feed_pendente(momento("2026-10-28 04:30"))
+    # Às 4h, a hora é do descurtir: o feed fica para as 5h.
+    robo.gravar_estado(treino_semana=robo.semana(agora), descurtir_em="2026-10-28 04:00:00", favoritos_limpos=True)
+    assert robo.o_que_fazer(config, momento("2026-10-28 04:30")) is None
+    # Às 5h, a curtida não pega: nada conta, o feed_em fica, e a rodada das 5:15 tenta de novo.
+    app.atual, app.indice = "inicio", 0
+    monkeypatch.setattr(app, "click", lambda x, y, original=app.click: None if (x, y) == (1000, 1640)
+                        else original(x, y))
+    with pytest.raises(robo.Parada, match="coração"):
+        robo.interagir_no_feed(app, momento("2026-10-28 05:00"))
+    assert robo.ler_estado()["feed_em"] == "2026-10-28 00:05:00"
+    assert robo.videos_do_feed_que_faltam(momento("2026-10-28 05:15")) == 4
+    assert robo.feed_pendente(momento("2026-10-28 05:15"))
+    # Fora do Horário das Interações (20h às 21h), o feed sai mesmo assim.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    assert robo.o_que_fazer(config, momento("2026-10-28 05:15")) == ("feed", None)
 
 
 class CelularDoFeed:
@@ -734,16 +745,32 @@ def test_feed_pula_a_live_e_o_video_do_rafael_curte_e_comenta_um_de_outro_criado
     assert app.comentarios == {2: ["Que achado! 0"], 3: ["Que achado! 1"]}
 
 
-def test_rodada_do_feed_sem_rodadas_bastantes_comenta_mais_de_um_video(avisos, ia_do_feed):
-    # Às 20:29 faltam os 3 do dia e só esta rodada e a das 20:44 cabem no horário: 2 agora.
+def test_rodada_do_feed_faz_um_video_so_mesmo_no_fim_do_horario_das_interacoes(avisos, ia_do_feed):
+    # Escolha do Rafael (P152): um vídeo por rodada, nunca vários seguidos, mesmo com os 5 do dia
+    # por fazer e o Horário das Interações acabando.
     _janela_das_20_as_21()
     robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
     app = CelularDoFeed()
-    agora = momento("2026-10-28 20:29")
+    agora = momento("2026-10-28 20:44")
     resultado = robo._agir(app, "feed", None, False, robo.ler_config(), agora)
-    assert resultado == "feed: 1 vídeo curtido e comentado; feed: 1 vídeo curtido e comentado"
-    assert app.comentarios == {2: ["Que achado! 0"], 3: ["Que achado! 1"]}
-    assert robo.videos_do_feed_que_faltam(agora) == 1
+    assert resultado == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {2: ["Que achado! 0"]}
+    assert robo.videos_do_feed_que_faltam(agora) == robo.interacoes.VIDEOS_NO_FEED_POR_DIA - 1
+
+
+def test_comentario_que_para_depois_da_curtida_conta_como_so_curtido(monkeypatch, avisos, ia_do_feed):
+    # A curtida já saiu quando o comentário para: o vídeo conta nos do dia, para nunca passarem de
+    # 5 curtidas por dia com as tentativas de novo (P152), e a parada segue para o caso.
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda")])
+    monkeypatch.setattr(robo, "painel_de_comentarios", lambda d, segundos=12: None)
+    agora = momento("2026-10-24 10:00")
+    with pytest.raises(robo.Parada):
+        robo.interagir_no_feed(app, agora)
+    assert app.curtidos == {0} and not app.comentarios
+    assert it.resultado_de(it.marca("Loja da Bia", "Mini saia linda"), "video_feed") == it.SO_CURTIDO
+    assert robo.ler_estado()["feed_em"] == "2026-10-24 10:00:00"
+    linhas = robo.registro_processos.sequencia("shopee_video", "feed: comentar", "")
+    assert [(r, d.startswith("o comentário parou: ")) for _m, _p, r, d, _o in linhas] == [(it.SO_CURTIDO, True)]
 
 
 def test_feed_sem_nada_para_dizer_so_curte_e_o_video_conta_no_dia(monkeypatch, avisos, ia_do_feed):

@@ -1169,14 +1169,15 @@ def robo_agora(agora=None):
 # tentativa: o que fica de fora é do bot (rodada, assistente, avisos), não do celular.
 PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)", "descurtir em Meus Favoritos (comprador)")
 # As respostas aos comentários dos vídeos do Rafael saem também fora do Horário das
-# Interações (às 12h e às 17h, P70); o feed e o comentário do post antigo ficam nele. O
-# comentário de depois do post vai com o post (P148 2).
-PROCESSOS_DE_INTERACAO = ("feed:", "post antigo:")
+# Interações (às 12h e às 17h, P70); o comentário do post antigo fica nele. O feed se espalha
+# pelo dia todo, dentro ou fora dele (P152). O comentário de depois do post vai com o post (P148 2).
+PROCESSOS_DE_INTERACAO = ("post antigo:",)
+PROCESSOS_DO_FEED = ("feed:",)
 PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário")
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
                         "preparo interrompido", "próprio post:")
-ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed", "post_antigo"), ("rascunho", "postar", "comentar_post")
+ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("post_antigo",), ("rascunho", "postar", "comentar_post")
 # Apagar um rascunho recusado pode rodar no Horário das Interações e no de postar (P22 a
 # P24): não é preparo, mas conta na hora do descurtir. Decisão do Rafael: DECISOES.md,
 # Shopee Vídeo.
@@ -1191,17 +1192,20 @@ PREPARO_DO_BOTAO = timedelta(minutes=30)
 
 def _tipo_da_atividade(processo=None, acao=None):
     """
-    'descurtir', 'interação' (o feed), 'respostas', 'preparo' (preparar e postar), 'apagar'
-    (o rascunho recusado) ou None (outra coisa).
+    'descurtir', 'interação' (o comentário do post antigo), 'feed', 'respostas', 'preparo'
+    (preparar e postar), 'apagar' (o rascunho recusado) ou None (outra coisa).
     """
     if acao:
         return ("descurtir" if acao == "descurtir" else "interação" if acao in ACOES_DE_INTERACAO
-                else "respostas" if acao == "responder" else "preparo" if acao in ACOES_DE_PREPARO
+                else "feed" if acao == "feed" else "respostas" if acao == "responder"
+                else "preparo" if acao in ACOES_DE_PREPARO
                 else "apagar" if acao in ACOES_EM_QUALQUER_HORARIO else None)
     if processo.startswith(PROCESSOS_DO_DESCURTIR):
         return "descurtir"
     if processo.startswith(PROCESSOS_DE_INTERACAO):
         return "interação"
+    if processo.startswith(PROCESSOS_DO_FEED):
+        return "feed"
     if processo.startswith(PROCESSOS_DAS_RESPOSTAS):
         return "respostas"
     if processo.startswith(PROCESSOS_DE_PREPARO):
@@ -1241,8 +1245,9 @@ def sobreposicoes(agora=None):
     Rafael, 25/10: "a sobreposição pode atrapalhar"). O celular tem uma trava (uma tarefa
     de cada vez); aqui entra o que cai no horário de outra:
     - na hora do descurtir (4h), qualquer outra atividade do robô;
-    - com o Horário das Interações escolhido, interação fora dele e preparo ou postagem
-      dentro dele antes de acabarem os comentários do feed do dia (P26);
+    - com o Horário das Interações escolhido, o comentário do post antigo fora dele e preparo ou
+      postagem dentro dele antes de acabarem as interações dele, as respostas e o post antigo
+      (P26); o feed se espalha pelo dia todo e não conta aqui (P152);
     - rotinas de texto do mesmo canal a menos de INTERVALO_CURTO_ROTINA min uma da outra;
     - os envios do modo assistente (só com o robô pausado: um cobre o outro).
     Só horas, ações e nomes fixos do código.
@@ -1268,17 +1273,20 @@ def sobreposicoes(agora=None):
         return any(b <= quando <= b + PREPARO_DO_BOTAO for b in botao)
 
     if janela:
-        feitos = defaultdict(int)
+        def na_janela(momento):
+            return janela[0] <= int(momento[11:13]) < janela[1]
+
+        # A última interação da janela em cada dia (as respostas e o post antigo): preparo ou
+        # postagem dentro dela antes disso furou a P26 (o postar só volta quando elas acabam).
+        ultima_da_janela = {momento[:10]: momento for momento, tipo, _o in atividades
+                            if tipo in ("interação", "respostas") and na_janela(momento)}
         for momento, tipo, o_que in atividades:
-            dentro = janela[0] <= int(momento[11:13]) < janela[1]
-            if o_que in FEITOS_NO_FEED_NAS_ATIVIDADES:
-                feitos[momento[:10]] += 1
             if momento < janela_desde:
                 continue
-            if tipo == "interação" and not dentro:
+            if tipo == "interação" and not na_janela(momento):
                 fora_da_janela.append((momento[11:16], o_que))
-            elif (tipo == "preparo" and dentro and int(momento[11:13]) != HORA_DO_DESCURTIR_SV
-                  and feitos[momento[:10]] < VIDEOS_NO_FEED_POR_DIA):
+            elif (tipo == "preparo" and na_janela(momento) and int(momento[11:13]) != HORA_DO_DESCURTIR_SV
+                  and momento < ultima_da_janela.get(momento[:10], "")):
                 (pedidos_no_botao if pedido_no_botao(momento) else preparo_na_janela).append((momento[11:16], o_que))
     coladas = {}
     for canal, horarios in rotinas_coladas(agora).items():
@@ -1335,12 +1343,11 @@ def rotinas_coladas(agora=None):
 # --- Respostas aos comentários e feed da Shopee Vídeo ---
 
 # Os mesmos de interacoes_shopee_video (o tests/test_checkup.py confere): o limite dos vídeos
-# do feed por dia, que não é meta (P10 e P151 1), e o que conta nele (o comentado, o enviado sem
-# aparecer e o só curtido).
-VIDEOS_NO_FEED_POR_DIA = 3
+# do feed por dia, que não é meta (P10, P151 1 e P152), e o que conta nele (o comentado, o
+# enviado sem aparecer e o só curtido).
+VIDEOS_NO_FEED_POR_DIA = 5
 SO_CURTIDO_NO_FEED = "só curtido"
 FEITOS_NO_FEED = ("comentado", "não confirmado", SO_CURTIDO_NO_FEED)
-FEITOS_NO_FEED_NAS_ATIVIDADES = tuple(f"feed: comentar → {resultado}" for resultado in FEITOS_NO_FEED)
 # Também de lá: o comentário do dia num post antigo (P148 2).
 POSTS_ANTIGOS_POR_DIA = 1
 # Os mesmos do robo_shopee_video (o tests/test_checkup.py confere): as respostas saem às 12h,
@@ -1638,7 +1645,7 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
                           "das Interações")
         if sobre["preparo_na_janela"]:
             pontos.append(f"Sobreposição: {len(sobre['preparo_na_janela'])} passo(s) de preparo ou postagem no "
-                          "Horário das Interações antes dos comentários do feed")
+                          "Horário das Interações antes das respostas e do post antigo")
     for robo, processo, esperado, feito, minimo in metas or []:
         if feito < minimo:
             pontos.append(f"{robo}: {processo}: rodou {feito} vez(es) em 24 h, o esperado é {esperado}")
@@ -1879,7 +1886,7 @@ def main():
     for titulo, lista in ((f"Robô na hora do descurtir ({HORA_DO_DESCURTIR_SV}h), fora o descurtir",
                            sobre["no_descurtir"]),
                           ("Interação fora do Horário das Interações", sobre["fora_da_janela"]),
-                          ("Preparo ou postagem no Horário das Interações antes dos comentários do feed",
+                          ("Preparo ou postagem no Horário das Interações antes das respostas e do post antigo",
                            sobre["preparo_na_janela"])):
         print(f"{titulo}: {len(lista)}")
         for hora, o_que in lista[:10]:

@@ -159,6 +159,7 @@ def test_fila_mostra_os_que_esperam_aprovacao_e_os_aprovados_com_a_hora_e_o_porq
     # Pedido do Rafael (25/10): ver os rascunhos e os aprovados, e saber por que o aprovado
     # que passou da hora ainda não saiu.
     ativar(robo_inicio=8, robo_fim=22, robo_interacoes_inicio=10, robo_interacoes_fim=12)
+    monkeypatch.setattr(robo, "post_antigo_pendente", lambda agora=None: {"id": 1})
     _rascunho(criado="2026-10-25 09:00:00")
     atrasado = _rascunho()
     robo.atualizar(atrasado, estado="aprovado", postar_em="2026-10-25 09:50:00", produtos=["Copo Térmico"])
@@ -170,7 +171,7 @@ def test_fila_mostra_os_que_esperam_aprovacao_e_os_aprovados_com_a_hora_e_o_porq
     assert texto.index("Copo Térmico") < texto.index("Mini Saia (+1)")
     assert "posta por volta de 25/10 às 09:50" in texto and "posta por volta de 25/10 às 12:20" in texto
     assert texto.count("já passou da hora") == 1
-    assert "no Horário das Interações, esperando acabarem 3 vídeo(s) no feed" in texto
+    assert "no Horário das Interações, esperando o robô terminar o comentário no post antigo do dia" in texto
     # Pausado, o motivo é a pausa; sem nada, a fila diz "nenhum".
     ativar(robo_pausado=True)
     assert "a Postagem está pausada" in robo.texto_da_fila(agora=momento("2026-10-25 10:30"))
@@ -251,7 +252,7 @@ def test_plano_do_dia_pula_o_horario_das_interacoes():
     assert robo.planejar(sem, "2026-10-25") != horarios
 
 
-def test_na_janela_das_interacoes_so_responde_e_comenta_no_feed(monkeypatch):
+def test_na_janela_das_interacoes_responde_e_o_feed_sai_tambem_fora_dela(monkeypatch):
     config = _com_interacoes()
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-25 13:00")))
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
@@ -261,8 +262,8 @@ def test_na_janela_das_interacoes_so_responde_e_comenta_no_feed(monkeypatch):
     # 13h: na janela, nem o aprovado vencido sai nem o plano gasta horário.
     assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("responder", None)
     assert robo.estado_do_dia(config, momento("2026-10-25 13:00"))["feitos"] == 0
-    # 16h: fora dela, o robô posta e prepara, e não comenta no feed; as respostas, nas horas
-    # delas, saem dentro ou fora (P70).
+    # 16h: fora dela, o robô posta e prepara; as respostas, nas horas delas, saem dentro ou fora
+    # (P70), e o feed se espalha pelo dia todo, também fora dela (P152).
     assert robo.o_que_fazer(config, momento("2026-10-25 16:00")) == ("postar", aprovado)
     robo.atualizar(aprovado, estado="postado")
     assert robo.o_que_fazer(config, momento("2026-10-25 16:00")) == ("rascunho", None)
@@ -270,34 +271,38 @@ def test_na_janela_das_interacoes_so_responde_e_comenta_no_feed(monkeypatch):
     monkeypatch.setattr(robo, "repetir_o_que_falhou", lambda config, agora=None: False)
     assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) == ("responder", None)
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) == ("feed", None)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
     assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) is None
 
 
-def test_na_janela_o_postar_volta_quando_as_interacoes_do_dia_acabam(monkeypatch):
-    # Escolha do Rafael (P26): o postar só para enquanto ainda tem comentário ou resposta.
+def test_na_janela_o_postar_volta_quando_as_respostas_e_o_post_antigo_acabam(monkeypatch):
+    # Escolha do Rafael (P26): o postar só para enquanto falta interação da janela. O feed se
+    # espalha pelo dia todo e não segura o postar (P152).
     config = _com_interacoes()
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-25 13:00")))
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
-    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: True)
+    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 0)          # nenhum do feed ainda
     aprovado = _rascunho("aprovado", postar_em="2026-10-25 09:00:00")
-    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 2)
-    assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) is None        # falta 1 do feed
-    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 3)
+    monkeypatch.setattr(robo, "post_antigo_pendente", lambda agora=None: {"id": 99})
+    assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("post_antigo", 99)
+    monkeypatch.setattr(robo, "post_antigo_pendente", lambda agora=None: None)
     assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("postar", aprovado)
 
 
 def test_perto_do_horario_das_interacoes_o_rascunho_espera(monkeypatch):
     # 01/11: um rascunho começado perto das 20h foi até 20:08, dentro do Horário das Interações
-    # (20h-21h) e antes dos comentários do feed; o preparo fica fora dele (P22 a P24).
+    # (20h-21h) e antes das interações dele; o preparo fica fora dele (P22 a P24).
     config = _com_interacoes()
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-25 11:45")))
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
-    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: True)
-    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 0)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "post_antigo_pendente", lambda agora=None: {"id": 7})
     robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-25", "horarios": ["11:30"], "feitos": 0})
-    # A janela começa às 12h: às 11:45, com o feed do dia por fazer, o horário espera.
+    # A janela começa às 12h: às 11:45, com o post antigo do dia por fazer, o horário espera.
     assert robo.perto_das_interacoes(config, momento("2026-10-25 11:45"))
     assert robo.o_que_fazer(config, momento("2026-10-25 11:45")) is None
     assert robo.estado_do_dia(config, momento("2026-10-25 11:45"))["feitos"] == 0
@@ -305,7 +310,7 @@ def test_perto_do_horario_das_interacoes_o_rascunho_espera(monkeypatch):
     assert not robo.perto_das_interacoes(config, momento("2026-10-25 11:35"))
     assert not robo.perto_das_interacoes(config, momento("2026-10-25 12:30"))
     # Com as interações do dia feitas (P26), o perto não segura mais.
-    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 3)
+    monkeypatch.setattr(robo, "post_antigo_pendente", lambda agora=None: None)
     assert not robo.perto_das_interacoes(config, momento("2026-10-25 11:45"))
     assert robo.o_que_fazer(config, momento("2026-10-25 11:45")) == ("rascunho", None)
     # Sem a janela escolhida, nada muda.
@@ -332,11 +337,16 @@ def test_aprovado_nao_cai_no_horario_das_interacoes():
     assert quando == "2026-10-26 08:05:00"
 
 
-def test_feed_numa_janela_curta_espalha_os_3_comentarios_nela():
+def test_feed_se_espalha_pelo_horario_do_robo_e_nao_pela_janela():
+    # Escolha do Rafael (P152): os 5 do dia pelo Horário do Robô (sem a hora do descurtir), no
+    # passo das rodadas, com a folga da rodada que começa um pouco antes.
     from datetime import timedelta
-    assert robo.intervalo_do_feed(_com_interacoes(inicio=12, fim=15)) == timedelta(hours=1)
-    assert robo.intervalo_do_feed(_com_interacoes(inicio=10, fim=20)) == robo.INTERVALO_DO_FEED
-    assert robo.intervalo_do_feed({**robo.PADRAO}) == robo.INTERVALO_DO_FEED
+    assert robo.interacoes.VIDEOS_NO_FEED_POR_DIA == 5
+    assert robo.intervalo_do_feed({**robo.PADRAO}) == timedelta(hours=2, minutes=40)               # 8h às 22h
+    assert robo.intervalo_do_feed(_com_interacoes(inicio=12, fim=15)) == timedelta(hours=2, minutes=40)
+    assert robo.intervalo_do_feed({**robo.PADRAO, "robo_inicio": 0, "robo_fim": 24}) == timedelta(hours=4,
+                                                                                                minutes=25)
+    assert robo.intervalo_do_feed({**robo.PADRAO, "robo_inicio": 9, "robo_fim": 10}) == timedelta(minutes=10)
 
 
 def test_mudar_a_janela_replaneja_o_que_falta_sem_perder_os_feitos():
