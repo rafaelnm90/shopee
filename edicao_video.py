@@ -338,6 +338,12 @@ PE_DA_FAIXA_NA_GRADE = FOTO_DA_CAPA[3]           # logo acima do número de visu
 CARTAO_NO_VIDEO_ABERTO = 920
 PE_DA_FAIXA_NO_VIDEO = CARTAO_NO_VIDEO_ABERTO - MARGEM_DA_FAIXA
 TOPO_NO_VIDEO_ABERTO = 140
+# No vídeo aberto, a coluna de ícones do app (o perfil, o coração, os comentários) fica do lado
+# direito, a partir deste x do quadro, e o coração cai na altura da faixa (medido no mesmo vídeo):
+# a frase da capa do vídeo aberto acaba antes dela, um pouco à esquerda e com a letra um pouco
+# menor; a faixa continua de um lado ao outro, e a capa da grade fica igual. Escolha do Rafael
+# (06/11, P165 1): DECISOES.md, Shopee Vídeo.
+ICONES_NO_VIDEO_ABERTO = 586
 # As letras da frase ficam dentro do que o app mostra do vídeo aberto (no modo assistente, a capa
 # vai no começo do vídeo), com a margem da faixa de cada lado.
 LETRAS_DA_FAIXA = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * MARGEM_DA_FAIXA
@@ -528,8 +534,9 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     beirada de cima dela e, logo abaixo dela, a chamada numa faixa sempre da mesma altura, de um
     lado ao outro (lados_da_capa): na da grade, logo acima do número de visualizações; com
     no_video=True, a do resto da abertura (P129), acima do cartão do produto que o app põe por cima
-    do vídeo aberto (P160 2). O fio e a faixa vão na cor do produto (P159 2; sem ela, o laranja da
-    Shopee), com a letra que contrasta. Nada da foto fica coberto (P139 2). None sem a chamada, com
+    do vídeo aberto (P160 2), com a frase acabando antes dos ícones do app (P165 1). O fio e a faixa
+    vão na cor do produto (P159 2; sem ela, o laranja da Shopee), com a letra que contrasta. Nada da
+    foto fica coberto (P139 2). None sem a chamada, com
     a foto que não abre ou com a chamada que não cabe nem na menor letra.
     """
     import matplotlib
@@ -549,8 +556,10 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
 
     desenho = ImageDraw.Draw(capa)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    # No vídeo aberto, a frase acaba antes dos ícones do app (P165 1).
+    fim_da_frase = min(direita, ICONES_NO_VIDEO_ABERTO) if no_video else direita
     quebra = _quebra_da_chamada(chamada, desenho, fonte_ttf,
-                                min(direita - esquerda - 2 * MARGEM_DA_FAIXA, LETRAS_DA_FAIXA))
+                                min(fim_da_frase - esquerda - 2 * MARGEM_DA_FAIXA, LETRAS_DA_FAIXA))
     if not quebra:
         return None
     fonte, linhas = quebra
@@ -560,8 +569,8 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     altura_da_linha = round(fonte.size * 1.2)
     meio = pe - FAIXA_DA_CHAMADA / 2
     for i, linha in enumerate(linhas):
-        desenho.text((TELA[0] / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
-                     fill=letra_que_contrasta(cor), anchor="mm")
+        desenho.text(((esquerda + fim_da_frase) / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha,
+                     font=fonte, fill=letra_que_contrasta(cor), anchor="mm")
     return _png(capa)
 
 

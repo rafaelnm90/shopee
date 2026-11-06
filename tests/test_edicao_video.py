@@ -3010,3 +3010,23 @@ def test_faixa_da_capa_na_cor_do_produto_e_achada_no_print():
         assert edicao_video.faixa_nos_lados(grade(png), caixa, cor) is True, nome
         no_video = edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", no_video=True, cor=cor)
         assert edicao_video.faixa_nos_lados(grade(no_video), caixa, cor) is False, nome
+
+
+def test_frase_do_video_aberto_acaba_antes_dos_icones_do_app():
+    # Escolha do Rafael (06/11, P165 1): no vídeo aberto, o coração e os ícones da direita do app
+    # ficavam por cima do fim da frase; ela acaba antes deles, e a faixa continua de um lado ao outro.
+    # A capa da grade fica igual.
+    import io
+
+    from PIL import Image
+    frase = "Almofada respirável"
+    pe, faixa = edicao_video.PE_DA_FAIXA_NO_VIDEO, edicao_video.FAIXA_DA_CHAMADA
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), frase, no_video=True))).convert("RGB")
+    letras = [x for x in range(esquerda, direita) for y in range(pe - faixa, pe, 2) if min(capa.getpixel((x, y))) > 200]
+    assert letras and max(letras) < edicao_video.ICONES_NO_VIDEO_ABERTO - edicao_video.MARGEM_DA_FAIXA + 3
+    assert _cor_de(capa, (direita - 2, pe - 3), edicao_video.LARANJA_DA_SHOPEE)
+    grade = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), frase))).convert("RGB")
+    pe = edicao_video.PE_DA_FAIXA_NA_GRADE
+    letras = [x for x in range(0, 720) for y in range(pe - faixa, pe, 2) if min(grade.getpixel((x, y))) > 200]
+    assert abs((min(letras) + max(letras)) / 2 - 360) <= 3 and max(letras) > edicao_video.ICONES_NO_VIDEO_ABERTO
