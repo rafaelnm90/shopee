@@ -6863,7 +6863,8 @@ def _comentario_curtido(linha):
 def _curtir_o_comentario_do_post(d, texto, antigo, agora=None, ident=None):
     """
     Curte o comentário que o robô acabou de escrever, pelo coração da linha dele, e confere pelo
-    "Curtido pelo criador" ou pelo coração curtido. A curtida que não sai não para nada (o
+    "Curtido pelo criador", pelo coração curtido ou pelo número de curtidas do coração, que sobe (no
+    comentário do próprio Rafael, só o número muda). A curtida que não sai não para nada (o
     comentário já foi): fica no registro, e o caso dela guarda a tela de logo depois e os últimos
     toques, para o Claude ver se o toque não pegou ou se a curtida não aparece (casos_robo).
     """
@@ -6880,7 +6881,8 @@ def _curtir_o_comentario_do_post(d, texto, antigo, agora=None, ident=None):
             d.click(*linha["curtir"])
             pausa(2)
             depois = _linha_do_texto(interacoes.comentarios_do_painel(tela(d)), texto)
-            resultado = "curtido" if _comentario_curtido(depois) else "não confirmado"
+            subiu = bool(depois) and depois["curtidas"] > linha["curtidas"]
+            resultado = "curtido" if _comentario_curtido(depois) or subiu else "não confirmado"
     except Exception as e:
         resultado = f"erro ({type(e).__name__})"
     ok = resultado in ("curtido", "já curtido")
