@@ -5390,6 +5390,7 @@ PROCESSO_DAS_VISUALIZACOES = "visualizações na grade do perfil"
 # do vídeo aberto, mais estreita).
 LADOS_DA_CAPA = {True: "o 1º quadro na grade (a faixa de lado a lado)",
                  False: "outro quadro na grade (a faixa só no meio)"}
+COR_NA_CAPA = "na cor do produto"
 
 
 def marcar_o_post(d, ident, caixa):
@@ -5413,9 +5414,13 @@ def marcar_o_post(d, ident, caixa):
                     cor = edicao_video.cor_do_produto(rascunho.get("cor"))
                     faixa = faixa_da_capa(imagem, caixa, cor)
                     lados = edicao_video.faixa_nos_lados(imagem, caixa, cor) if faixa else None
+                    # O registro diz também se a faixa procurada era a da cor do produto ou a de
+                    # sempre: o checkup separa a 1ª capa colorida que chega à grade.
+                    detalhe = "; ".join(filter(None, (LADOS_DA_CAPA.get(lados, ""),
+                                                      COR_NA_CAPA if cor else "")))
                     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
                                                  "no post com a faixa" if faixa else "no post sem a faixa",
-                                                 LADOS_DA_CAPA.get(lados, ""), ok=bool(faixa))
+                                                 detalhe, ok=bool(faixa))
                 return marca
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A marca da capa do post não saiu: {type(e).__name__}")
