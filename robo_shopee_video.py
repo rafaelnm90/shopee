@@ -402,16 +402,28 @@ def trechos_de_postar(config):
     return [(a, b) for a, b in trechos if b > a]
 
 
+def pontos_do_dia(dia):
+    """Os pontos de penalidade que valem para o plano do dia (os lidos antes do trimestre valem 0)."""
+    momento = datetime.strptime(dia, "%Y-%m-%d").replace(hour=12, tzinfo=fuso_horario)
+    return apelacoes.pontos_de_agora(ler_estado(), momento)
+
+
 def quantos_hoje(config, dia):
     """
     Quantos rascunhos o dia faz: o sorteio na faixa do painel e, com 4 pontos de penalidade ou
     mais, a parte dela com o teto da escada (P144 e P145; os pontos lidos antes do trimestre
     valem 0). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    momento = datetime.strptime(dia, "%Y-%m-%d").replace(hour=12, tzinfo=fuso_horario)
-    pontos = apelacoes.pontos_de_agora(ler_estado(), momento)
     return apelacoes.quantos_pelos_pontos(CHAVE_ESTADO, dia, config["robo_limite_min"], config["robo_limite_max"],
-                                          pontos)
+                                          pontos_do_dia(dia))
+
+
+def feito_com(config, dia):
+    """
+    Com o que o plano do dia é feito: a faixa do painel e os pontos daquela hora. Fica no plano
+    para o checkup e o painel mostrarem quando o que vale agora já não é o do plano.
+    """
+    return {"faixa": [config["robo_limite_min"], config["robo_limite_max"]], "pontos": pontos_do_dia(dia)}
 
 
 def rascunhos_de_hoje(agora=None):
@@ -461,16 +473,16 @@ def replanejar_hoje(config, agora=None):
     novo, fora da janela nova; os já feitos continuam contados.
     """
     estado = estado_do_dia(config, agora)
-    estado["horarios"] = planejar(config, estado["data"])
+    estado.update(horarios=planejar(config, estado["data"]), feito_com=feito_com(config, estado["data"]))
     db.salvar_config(CHAVE_DIA, estado)
 
 
 def estado_do_dia(config, agora=None):
-    """O plano de hoje ({data, horarios, feitos}), refeito quando o dia muda."""
+    """O plano de hoje ({data, horarios, feitos, feito_com}), refeito quando o dia muda."""
     dia = agora_br(agora).strftime("%Y-%m-%d")
     estado = db.ler_config(CHAVE_DIA, {}) or {}
     if estado.get("data") != dia:
-        estado = {"data": dia, "horarios": planejar(config, dia), "feitos": 0}
+        estado = {"data": dia, "horarios": planejar(config, dia), "feitos": 0, "feito_com": feito_com(config, dia)}
         db.salvar_config(CHAVE_DIA, estado)
     return estado
 

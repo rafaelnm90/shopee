@@ -7351,6 +7351,19 @@ def test_rodada_com_o_post_adiado_avisa_e_nao_conta_como_falha(monkeypatch, avis
     assert consultar("SELECT resultado FROM shopee_video_tentativas WHERE acao = 'postar'") == ("adiado",)
 
 
+def test_plano_do_dia_guarda_a_faixa_e_os_pontos_com_que_foi_feito():
+    # 06/11: o plano saiu com 1 rascunho com 8 pontos, e nada mostrava com que faixa ele foi feito.
+    # O plano guarda a faixa e os pontos, para o checkup e o painel mostrarem.
+    config = {**robo.PADRAO, "robo_limite_min": 8, "robo_limite_max": 12}
+    robo.gravar_estado(saude_pontos=8, saude_lida_em="2026-11-05 10:00:00")
+    agora = datetime(2026, 11, 6, 0, 5, tzinfo=fuso_horario)
+    estado = robo.estado_do_dia(config, agora)
+    assert estado["feito_com"] == {"faixa": [8, 12], "pontos": 8} and 2 <= len(estado["horarios"]) <= 3
+    # O plano refeito (o Horário das Interações mudou) guarda o que vale agora.
+    robo.replanejar_hoje({**config, "robo_limite_min": 1, "robo_limite_max": 2}, agora)
+    assert robo.db.ler_config(robo.CHAVE_DIA)["feito_com"] == {"faixa": [1, 2], "pontos": 8}
+
+
 def test_plano_do_dia_segue_a_escada_dos_pontos_e_so_vai_o_produto_do_video():
     # Escolha do Rafael (03/11, P145): com 4 pontos de penalidade ou mais, o dia faz a parte da
     # faixa do painel até o teto do degrau, e só o produto do vídeo vai ao post.

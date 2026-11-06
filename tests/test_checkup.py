@@ -276,6 +276,33 @@ def test_robo_da_shopee_video_horarios_vencidos_e_tentativas_ruins():
     assert "Fone X" not in str(r)
 
 
+def test_checkup_mostra_a_faixa_do_painel_e_com_que_o_plano_do_dia_foi_feito():
+    # 06/11: o plano saiu com 1 rascunho com 8 pontos, e o checkup não mostrava a faixa que o robô
+    # leu nem com que faixa e pontos o plano foi feito.
+    import painel_shopee_video as painel
+    import robo_shopee_video as robo
+    assert checkup.FAIXA_PADRAO_DO_ROBO_SV == (robo.PADRAO["robo_limite_min"], robo.PADRAO["robo_limite_max"])
+    assert checkup.FAIXA_PADRAO_DO_ASSISTENTE_SV == (painel.PADRAO["limite_min"], painel.PADRAO["limite_max"])
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
+    robo.gravar_estado(saude_pontos=8, saude_lida_em=_momento(1))
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert checkup.linha_das_faixas(r) == (
+        "Rascunhos por Dia do robô: 1 a 2 (a padrão, nunca mudada no painel), pelos pontos 1 | "
+        "Vídeos por Dia do assistente: 5 a 10 (a padrão, nunca mudada no painel), pelos pontos 2 a 3")
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_limite_min": 8, "robo_limite_max": 12,
+                                         "limite_min": 6, "limite_max": 6})
+    db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-23", "horarios": ["21:03"], "feitos": 0,
+                                      "feito_com": {"faixa": [1, 2], "pontos": 8}})
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert checkup.linha_das_faixas(r) == (
+        "Rascunhos por Dia do robô: 8 a 12, pelos pontos 2 a 3 | Vídeos por Dia do assistente: 6, pelos pontos 2 | "
+        "o plano de hoje foi feito com a faixa 1 a 2 e 8 ponto(s)")
+    # Feito com o que vale agora, o plano não ganha a parte dele.
+    db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-23", "horarios": ["14:01", "17:23"], "feitos": 0,
+                                      "feito_com": {"faixa": [8, 12], "pontos": 8}})
+    assert "plano de hoje" not in checkup.linha_das_faixas(checkup.robo_da_shopee_video(AGORA))
+
+
 def test_horarios_sem_tentativa_nao_sao_cobrados():
     # 28/10: a suspensão pulou os horários da manhã e a pausa sem o celular juntou os da tarde
     # num só; o checkup cobrava "8 horários vencidos e 1 rascunho salvo".

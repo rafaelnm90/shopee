@@ -549,12 +549,34 @@ def rotulo_de_postar(config):
     return " e ".join(rotulo_janela(a // 60, -(-b // 60)) for a, b in trechos) or "nenhum"
 
 
+def plano_de_hoje(chave, agora=None):
+    """Os horários do plano de hoje guardado na chave (o do robô ou o do assistente); None sem o de hoje."""
+    plano = db.ler_config(chave, {}) or {}
+    if plano.get("data") != (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"):
+        return None
+    return plano.get("horarios") or []
+
+
 def videos_hoje(config, agora=None):
     """
-    Quantos vídeos o dia de hoje sorteou dentro da faixa (o mesmo número o dia inteiro), com o
-    teto pelos pontos de penalidade quando ele vale (P145).
+    Quantos vídeos o assistente manda hoje: os do plano de hoje, que ele segue o dia inteiro; sem o
+    plano ainda, o sorteio na faixa, com o teto pelos pontos de penalidade quando ele vale (P145).
     """
-    return assistente.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
+    horarios = plano_de_hoje(assistente.CHAVE_DIA, agora)
+    if horarios is None:
+        return assistente.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
+    return len(horarios)
+
+
+def linha_do_plano(no_plano, pela_faixa, coisa):
+    """
+    O plano do dia é feito uma vez, à meia-noite: com a faixa ou os pontos mudados depois, o número
+    de hoje continua o do plano, e a linha diz isso ("" quando são o mesmo).
+    """
+    if no_plano == pela_faixa:
+        return ""
+    return (f"ℹ️ O plano de hoje foi feito antes da última mudança, com <b>{no_plano}</b> {coisa}; "
+            "a mudança vale a partir de amanhã.\n")
 
 
 def linha_dos_pontos(piso, topo, agora=None):
@@ -567,7 +589,11 @@ def linha_dos_pontos(piso, topo, agora=None):
 
 
 def rascunhos_hoje(config, agora=None):
-    return robo.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
+    """Quantos rascunhos o robô faz hoje: os do plano de hoje; sem o plano ainda, o sorteio de hoje."""
+    horarios = plano_de_hoje(robo.CHAVE_DIA, agora)
+    if horarios is None:
+        return robo.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
+    return len(horarios)
 
 
 # --- Painel ---
@@ -786,7 +812,10 @@ def texto_robo(config, agora=None, celular=None):
     """A tela do Robô Automático. celular: o adb fala com o Motorola agora (None = não olhou)."""
     piso, topo = config["robo_limite_min"], config["robo_limite_max"]
     pontos = linha_dos_pontos(piso, topo, agora)
-    hoje = f" (hoje: <b>{rascunhos_hoje(config, agora)}</b>)" if topo > piso or pontos else ""
+    no_plano = rascunhos_hoje(config, agora)
+    hoje = f" (hoje: <b>{no_plano}</b>)" if topo > piso or pontos else ""
+    plano = linha_do_plano(no_plano, robo.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime(
+        "%Y-%m-%d")), "rascunho(s)")
     linha_celular = ""
     if celular is not None:
         linha_celular = ("📱 Celular: ✅ <b>conectado</b>\n" if celular
@@ -799,6 +828,7 @@ def texto_robo(config, agora=None, celular=None):
         f"{linha_celular}"
         f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
         f"{pontos}"
+        f"{plano}"
         f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>"
         + (f" (prepara e posta {rotulo_de_postar(config)})" if robo.janela_das_interacoes(config) else "") + "\n"
         f"💬 Horário das interações: <b>{rotulo_interacoes(config)}</b>\n"
@@ -1004,7 +1034,10 @@ def texto_assistente(config, agora=None):
         status = "▶️ <b>Ativo</b>"
     piso, topo = config["limite_min"], config["limite_max"]
     pontos = linha_dos_pontos(piso, topo, agora)
-    hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso or pontos else ""
+    no_plano = videos_hoje(config, agora)
+    hoje = f" (sorteado a cada dia; hoje: <b>{no_plano}</b>)" if topo > piso or pontos else ""
+    plano = linha_do_plano(no_plano, assistente.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime(
+        "%Y-%m-%d")), "vídeo(s)")
     return (
         "📲 <b>Modo Assistente</b>\n"
         "Prepara cada postagem (vídeo, título, produtos e comentário) e manda aqui no seu privado, para "
@@ -1012,6 +1045,7 @@ def texto_assistente(config, agora=None):
         f"Status: {status}\n"
         f"📦 Vídeos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
         f"{pontos}"
+        f"{plano}"
         f"⏰ Horário dos envios: <b>{rotulo_janela(config['inicio'], config['fim'])}</b>\n"
         f"📤 Mandados hoje: <b>{assistente.enviados_hoje(agora)}</b>\n\n"
         "<b>O que cada botão faz</b>\n"

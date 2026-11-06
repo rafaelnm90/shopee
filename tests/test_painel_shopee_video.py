@@ -1586,6 +1586,29 @@ def test_painel_mostra_o_teto_pelos_pontos_e_o_preparar_avisa_acima_dele(bm, Msg
     assert rodadas == [("--preparar",), ("--preparar",)] and "este passa do teto" in msg.saidas[-1]
 
 
+def test_painel_mostra_o_numero_do_plano_de_hoje_e_que_a_mudanca_vale_amanha(bm):
+    # 06/11: o painel mostrava o sorteio com a faixa de agora, e o robô seguia o plano feito à
+    # meia-noite com a faixa de antes.
+    from datetime import datetime
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    sv.alterar_config(robo_limite_min=8, robo_limite_max=12, limite_min=8, limite_max=12)
+    sv.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": ["21:03"], "feitos": 0})
+    texto = sv.texto_robo(sv.ler_config())
+    assert "(hoje: <b>1</b>)" in texto
+    assert ("ℹ️ O plano de hoje foi feito antes da última mudança, com <b>1</b> rascunho(s); a mudança vale "
+            "a partir de amanhã.") in texto
+    # Feito com o que vale agora, nenhuma linha a mais.
+    sv.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": sv.robo.planejar(sv.ler_config(), hoje),
+                                            "feitos": 0})
+    assert "antes da última mudança" not in sv.texto_robo(sv.ler_config())
+    # O modo assistente também.
+    sv.db.salvar_config(sv.assistente.CHAVE_DIA, {"data": hoje, "horarios": ["14:00"], "feitos": 0})
+    texto = sv.texto_assistente(sv.ler_config())
+    assert "hoje: <b>1</b>" in texto and "com <b>1</b> vídeo(s); a mudança vale a partir de amanhã" in texto
+
+
 # --- Postei ✅ do modo assistente (P156 1) ---
 
 def test_assistente_sabe_quando_cobre_o_robo_sem_o_celular(bm, monkeypatch):
