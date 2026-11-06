@@ -468,11 +468,12 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     rodar(sv.capa_handler(msg, est))
     texto = msg.saidas[-1]
     assert "Os números ficam livres" in texto and "O que cada botão faz" in texto
-    # Escolha do Rafael (30/10, P107): a foto do tamanho da capa sem texto e a frase numa faixa laranja.
-    assert "mesmo tamanho da capa sem texto" in texto and "faixa laranja" in texto
+    # Escolha do Rafael (30/10, P107): a foto do tamanho da capa sem texto e a frase numa faixa, na cor
+    # principal do produto (P159 2).
+    assert "mesmo tamanho da capa sem texto" in texto and "faixa na cor principal do produto" in texto
     assert "um pouco menor" not in texto
-    # Vídeo do Rafael das 20:14 de 02/11: a foto inteira, o fio laranja em cima e a faixa que não cresce.
-    assert "fio laranja em cima" in texto and "a faixa não cresce" in texto
+    # Vídeo do Rafael das 20:14 de 02/11: a foto inteira, o fio em cima e a faixa que não cresce.
+    assert "com um fio em cima" in texto and "a faixa não cresce" in texto
     assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto
     assert _textos(sv.teclado_capa(sv.ler_config())) == [
         "Ver Exemplo da Capa 👀", "Ligar Capa com Chamada ✅", "Voltar à Edição 🔙", "Voltar ao Robô 🔙"]
@@ -513,7 +514,7 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     tipo, caminhos, legenda = msg.midias[-1]
     assert tipo == "album" and [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png"]
     assert "Copo Térmico" in legenda and "“Gelado por 12 horas”" in legenda and "não foi postado" in legenda
-    assert "O número de visualizações fica no preto, logo abaixo da faixa laranja" in legenda
+    assert "O número de visualizações fica no preto, logo abaixo da faixa" in legenda
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      "edição do vídeo: exemplo da capa") == ("mandado",)
     # Com a capa do vídeo aberto (P129), ela vai como 3ª foto.

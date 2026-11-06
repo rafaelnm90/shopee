@@ -1253,7 +1253,7 @@ def test_ver_produtos_com_o_produto_trocado_leva_o_link_e_a_foto_da_troca(monkey
     edicao, anexar = {}, {}
 
     def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
-               link_do_1o=None):
+               link_do_1o=None, **_opcoes):
         edicao.update(nomes=list(nomes), link_do_1o=link_do_1o)
         robo.shutil.copyfile(video["arquivo"], copia)
         return ""
@@ -1340,14 +1340,18 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     assert robo.pegar(rascunho["id"])["trocado"] == "1"
 
 
-def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None):
+def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor=""):
     """
     O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado. Com a
     capa (bytes), o vídeo abre com a capa com a frase, como na capa com chamada ligada (P125). Com
-    rotulos (lista), guarda se o vídeo vai com o Rótulo de IA.
+    rotulos (lista), guarda se o vídeo vai com o Rótulo de IA. Com a cor (o nome), a edição diz que
+    usou a cor do produto (P159 2).
     """
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
+                           anotar=None):
         chamadas.append((video, foto, produto, avisos))
+        if anotar is not None:
+            anotar["cor"] = cor
         if rotulos is not None:
             rotulos.append(rotulo_de_ia)
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
@@ -1421,6 +1425,23 @@ def test_rascunho_com_a_capa_com_chamada_abre_o_video_com_ela(monkeypatch, aviso
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["chamada"] == "1"
     assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_CAPA) == (0,)
+
+
+def test_rascunho_guarda_a_cor_do_produto_que_a_edicao_usou(monkeypatch, avisos):
+    # Escolha do Rafael (06/11, P159 2): o vídeo vai na cor principal do produto, e o rascunho guarda
+    # o nome dela, para o post conferir a faixa da capa nela.
+    _fonte(monkeypatch)
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa", cor="verde"))
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["cor"] == "verde"
 
 
 def test_produto_recusado_pela_ia_deixa_no_caso_o_produto_e_o_que_ela_viu(monkeypatch, avisos):
@@ -1631,7 +1652,8 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
+                           anotar=None):
         fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
@@ -3517,7 +3539,7 @@ def _copia_com_a_miniatura(monkeypatch, com_miniatura=True):
     edicao = {}
 
     def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
-               link_do_1o=None):
+               link_do_1o=None, **_opcoes):
         edicao.update(nomes=list(nomes), outras=list(outras))
         if com_miniatura and miniatura is not None:
             miniatura["fotos"] = [b"\xff\xd8primeira"] + list(outras)
@@ -6301,7 +6323,8 @@ def test_miniatura_troca_entre_as_fotos_diferentes_dos_produtos_do_post(monkeypa
         arquivo.write(b"v")
     chamadas, duracoes = [], [30.0, 7.0, 4.0, 0.0, RuntimeError("sem ffprobe")]
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
+                           anotar=None):
         chamadas.append(list(outras_fotos))
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editado")
@@ -6682,6 +6705,31 @@ def test_post_diz_se_a_grade_usou_o_1o_quadro_com_a_faixa_de_lado_a_lado():
     linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
                                               ("no post com a faixa", robo.LADOS_DA_CAPA[False])]
+
+
+def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
+    # P159 2: a faixa da capa vai na cor do produto, e o post a procura na cor que o rascunho guardou;
+    # sem a cor guardada, procura o laranja de sempre.
+    from PIL import Image
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    ev = robo.edicao_video
+
+    def grade(capa_png):
+        tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        esquerda, direita = ev.LADOS_NA_GRADE
+        cima, baixo = ev.VISIVEL_NA_GRADE
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((esquerda, cima, direita, baixo))
+        tela.paste(capa.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
+        return type("Celular", (), {"screenshot": lambda self, caminho=None: tela})()
+
+    capa = ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor", cor=ev.CORES_DO_PRODUTO["verde"])
+    com_a_cor = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1", cor="verde")
+    assert robo.marcar_o_post(grade(capa), com_a_cor, caixa)
+    sem_a_cor = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
+    assert robo.marcar_o_post(grade(capa), sem_a_cor, caixa)
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
+                                              ("no post sem a faixa", "")]
 
 
 def test_laranja_estreito_nao_e_a_faixa_da_capa():

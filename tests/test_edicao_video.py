@@ -229,7 +229,7 @@ def test_com_o_rotulo_de_ia_a_moldura_as_setinhas_e_a_legenda_sobem_com_o_cartao
         return ""
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         vistos.append(rotulo_de_ia)
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
@@ -726,7 +726,7 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=()):
+                           lugar=None, miniatura=True, legendas=(), cor=None):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -890,7 +890,7 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
     monkeypatch.setattr(edicao_video, "editar",
                         lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True,
-                               outras_fotos=(), rotulo_de_ia=False: "")
+                               outras_fotos=(), rotulo_de_ia=False, cor=None: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -1026,7 +1026,7 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         return ""
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -1183,7 +1183,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     avisos = []
 
     def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True,
-               outras_fotos=(), rotulo_de_ia=False):
+               outras_fotos=(), rotulo_de_ia=False, cor=None):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1718,7 +1718,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     capas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         capas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1763,7 +1763,7 @@ def test_capa_com_a_frase_abre_o_video_no_robo_e_no_assistente(monkeypatch, tmp_
     aberturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         aberturas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1860,7 +1860,7 @@ def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     capas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         capas.append(capa is not None)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2058,7 +2058,8 @@ def test_capa_vai_com_a_frase_curta_e_sem_ela_com_o_nome(monkeypatch, tmp_path):
     frases = []
     # A capa do vídeo aberto (P129) usa a mesma frase: conta só a da grade.
     monkeypatch.setattr(edicao_video, "_capa_da_vez",
-                        lambda foto, frase, no_video=False: (None if no_video else frases.append(frase)) or b"\x89PNG")
+                        lambda foto, frase, no_video=False, cor=None: (None if no_video else frases.append(frase))
+                        or b"\x89PNG")
     monkeypatch.setattr(edicao_video, "editar", lambda *a, **k: "")
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
@@ -2204,7 +2205,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     pedidas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         pedidas.append(list(outras_fotos))
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2263,7 +2264,7 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2334,7 +2335,7 @@ def test_canto_so_com_o_que_foi_filmado_nao_tira_a_miniatura(monkeypatch, tmp_pa
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2377,7 +2378,7 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2446,7 +2447,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2796,7 +2797,7 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
     recebidas = []
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=()):
+                           lugar=None, miniatura=True, legendas=(), cor=None):
         recebidas.append(list(legendas))
         return "", {"versoes": []}
 
@@ -2866,7 +2867,7 @@ def test_capa_que_vai_ao_ar_usa_a_foto_sem_as_letras_e_anota_no_registro(monkeyp
     aberturas, fotos = [], []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False):
+               rotulo_de_ia=False, cor=None):
         aberturas.append(capa)
         fotos.append(foto)
         return ""
@@ -2884,3 +2885,128 @@ def test_capa_que_vai_ao_ar_usa_a_foto_sem_as_letras_e_anota_no_registro(monkeyp
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: False})
     edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa")
     assert len(pedidas) == 1 and aberturas[-1] is None
+
+
+# --- A cor de cada vídeo (P159 2) ---
+
+def test_cada_cor_do_produto_tem_um_tom_e_a_letra_que_contrasta():
+    # Escolha do Rafael (06/11, P159 2): a cor principal do produto no lugar do laranja e do preto,
+    # com a letra branca ou preta, a de mais contraste. O vermelho (a cor da chamada final), o de
+    # várias cores e o sem a cor da IA ficam com as cores de sempre.
+    assert edicao_video.cor_do_produto("Azul") == edicao_video.CORES_DO_PRODUTO["azul"]
+    assert edicao_video.cor_do_produto(" azul-claro ") == edicao_video.CORES_DO_PRODUTO["azul-claro"]
+    for nome in ("vermelho", "colorido", "", None, "fúcsia"):
+        assert edicao_video.cor_do_produto(nome) is None, nome
+    branca, preta = edicao_video.LETRA_BRANCA, edicao_video.LETRA_PRETA
+    # As cores de sempre continuam com a letra branca.
+    for cor in (edicao_video.LARANJA_DA_SHOPEE, edicao_video.FUNDO_DOS_TEXTOS, edicao_video.FUNDO_DA_CHAMADA):
+        assert edicao_video.letra_que_contrasta(cor) == branca
+    for nome, letra in (("preto", branca), ("azul", branca), ("verde", branca), ("rosa", branca),
+                        ("amarelo", preta), ("branco", preta), ("bege", preta)):
+        assert edicao_video.letra_que_contrasta(edicao_video.CORES_DO_PRODUTO[nome]) == letra, nome
+    # A IA escolhe da lista, pelo nome, nos dois pedidos; a resposta fora dela vale como sem a cor.
+    assert edicao_video._nome_lugar_e_falas({"cor": "Amarelo"})["cor"] == "amarelo"
+    assert edicao_video._nome_lugar_e_falas({"cor": "vermelho"})["cor"] == "vermelho"
+    assert "cor" not in edicao_video._nome_lugar_e_falas({"cor": "fúcsia"})
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        assert '"cor"' in prompt and all(nome in prompt for nome in edicao_video.CORES_DO_PRODUTO)
+
+
+def test_capa_com_a_cor_do_produto_no_fio_e_na_faixa_com_a_letra_que_contrasta():
+    import io
+
+    from PIL import Image
+    esquerda, _cima, direita, pe = edicao_video.lugar_da_foto()
+    faixa, fio = edicao_video.FAIXA_DA_CHAMADA, edicao_video.FIO_DA_CAPA
+    topo = pe - faixa - (direita - esquerda)
+    for nome, clara in (("azul", True), ("amarelo", False)):
+        cor = edicao_video.CORES_DO_PRODUTO[nome]
+        capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha",
+                                                                   cor=cor))).convert("RGB")
+        for ponto in [(0, topo - fio), (719, topo - 1), (0, pe - faixa), (719, pe - 1)]:
+            assert _cor_de(capa, ponto, cor), (nome, ponto)
+        pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(pe - faixa, pe, 2)]
+        brancos = sum(1 for p in pontos if min(p) > 200)
+        pretos = sum(1 for p in pontos if max(p) < 50)
+        assert (brancos > 50 and pretos == 0) if clara else (pretos > 50 and brancos == 0), nome
+
+
+def test_caixa_do_nome_e_moldura_da_miniatura_na_cor_do_produto():
+    import io
+
+    from PIL import Image
+    azul, amarelo = edicao_video.CORES_DO_PRODUTO["azul"], edicao_video.CORES_DO_PRODUTO["amarelo"]
+    assert edicao_video.caixa_dos_textos() == edicao_video.FUNDO_DOS_TEXTOS
+    assert edicao_video.caixa_dos_textos(azul) == azul + (edicao_video.ALFA_DA_CAIXA_DA_COR,)
+    import numpy
+    caixa = Image.open(io.BytesIO(edicao_video.letreiro("Copo Térmico", edicao_video.caixa_dos_textos(amarelo))))
+    pontos = numpy.asarray(caixa.convert("RGBA")).reshape(-1, 4)
+    pontos = pontos[pontos[:, 3] > 200, :3]
+    assert (pontos.max(axis=1) < 50).any() and not (pontos.min(axis=1) > 220).any()
+    largura = edicao_video.LARGURA_DA_MINIATURA
+    miniatura = Image.open(io.BytesIO(edicao_video.miniatura_com_moldura(_foto_jpg(), cor=azul))).convert("RGB")
+    assert _cor_de(miniatura, (largura // 2, 2), azul)
+    assert _cor_de(miniatura, (largura // 2, largura // 2), (200, 120, 40))
+
+
+def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatch, tmp_path):
+    # A cor que a IA disse vai na capa da grade e na do vídeo aberto, no Editor 2 (a caixa do nome
+    # e da vantagem e a moldura da miniatura) e no rascunho do robô (anotar). O produto vermelho e o
+    # sem a cor ficam com as cores de sempre.
+    _versoes_de_mentira(monkeypatch)
+    textos = {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "capa": "Bolsa leve e forte",
+              "lugar": "alto", "cor": "azul"}
+    monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.SEM_LETRAS))
+    capas, editores = [], []
+    monkeypatch.setattr(edicao_video, "capa_com_chamada",
+                        lambda foto, frase, no_video=False, cor=None: capas.append(cor) or b"capa")
+
+    def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
+        editores.append(cor)
+        return "", {"textos": [nome], "legendas": 0}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    azul = edicao_video.CORES_DO_PRODUTO["azul"]
+    for cor, esperada, nome in (("azul", azul, "azul"), ("vermelho", None, ""), (None, None, "")):
+        _textos_da_tela(monkeypatch, {**textos, "cor": cor} if cor else {k: v for k, v in textos.items() if k != "cor"})
+        capas.clear()
+        editores.clear()
+        anotado = {}
+        edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa", anotar=anotado)
+        assert (capas, editores, anotado) == ([esperada, esperada], [esperada], {"cor": nome}), cor
+    linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DA_COR,
+                                                       "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("azul", ""), (edicao_video.COM_AS_CORES_DE_SEMPRE, "vermelho"),
+                                              (edicao_video.COM_AS_CORES_DE_SEMPRE, "a IA não disse a cor")]
+
+
+def test_faixa_da_capa_na_cor_do_produto_e_achada_no_print():
+    # O post confere a faixa da capa na cor que o rascunho guardou (marcar_o_post): azul com a letra
+    # branca, amarelo com a preta e o grafite do preto, no fundo preto da capa.
+    import io
+
+    from PIL import Image
+    caixa = (100, 300, 454, 772)
+
+    def grade(capa_png):
+        tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        esquerda, direita = edicao_video.LADOS_NA_GRADE
+        cima, baixo = edicao_video.VISIVEL_NA_GRADE
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((esquerda, cima, direita, baixo))
+        tela.paste(capa.resize((caixa[2] - caixa[0], caixa[3] - caixa[1])), caixa[:2])
+        return tela
+
+    y2 = edicao_video.FOTO_DA_CAPA[3]
+    for nome in ("azul", "amarelo", "preto"):
+        cor = edicao_video.CORES_DO_PRODUTO[nome]
+        png = edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", cor=cor)
+        capa = Image.open(io.BytesIO(png)).convert("RGB")
+        assert edicao_video.faixa_laranja(capa, cor=cor) == (y2 - edicao_video.FAIXA_DA_CHAMADA, y2, 0,
+                                                             edicao_video.TELA[0]), nome
+        # Pelo laranja de sempre, ela não é achada.
+        assert edicao_video.faixa_laranja(capa) is None, nome
+        assert edicao_video.faixa_nos_lados(grade(png), caixa, cor) is True, nome
+        no_video = edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", no_video=True, cor=cor)
+        assert edicao_video.faixa_nos_lados(grade(no_video), caixa, cor) is False, nome

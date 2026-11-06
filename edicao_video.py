@@ -225,8 +225,9 @@ def capa_com_avisos(foto):
 
 # A capa com chamada: a foto do anúncio do mesmo tamanho da capa sem texto (a foto quadrada
 # ocupa a largura toda, no meio da tela, como no FILTRO_720P do começo do vídeo) e, por cima do
-# pé da foto, uma faixa laranja da Shopee com a frase da capa em letras brancas (a frase curta
-# que a IA escreve para ela, P106; sem marca, sem preço e sem promoção, regras 9, 13 e 14).
+# pé da foto, uma faixa com a frase da capa (no laranja da Shopee com letras brancas, ou na cor do
+# produto, P159 2; a frase curta que a IA escreve para ela, P106; sem marca, sem preço e sem
+# promoção, regras 9, 13 e 14).
 # Tudo dentro do que a grade do perfil mostra da capa (o corte do meio, medido no print do
 # Rafael de 29/10: de y 196 a 1116 da tela de 720x1280; na largura, a grade mostra o quadro em
 # 3:4, os 690 px do meio, de x 15 a 705, e o que fica na borda da tela some: vídeo do Rafael de
@@ -248,9 +249,57 @@ FOTO_DA_CAPA = (0, 280, 720, 1000)              # entre a sacolinha e o número:
 LARANJA_DA_SHOPEE = (238, 77, 45)
 # O vermelho do destaque: a caixa da última mensagem (a chamada para o produto), as setinhas e a
 # moldura do cartão do produto, para chamar mais a atenção que o laranja, que se mistura nos vídeos
-# de tons quentes. A miniatura e a capa continuam no laranja da Shopee. Escolha do Rafael (03/11,
-# P140 2): DECISOES.md, Shopee Vídeo.
+# de tons quentes. A miniatura e a capa ficam na cor do produto (CORES_DO_PRODUTO), ou no laranja da
+# Shopee. Escolha do Rafael (03/11, P140 2): DECISOES.md, Shopee Vídeo.
 VERMELHO_DO_DESTAQUE = (214, 24, 38)
+# A cor de cada vídeo: a cor principal do produto, que a IA diz junto com os textos da tela, no
+# lugar do laranja do fio e da faixa da capa e da moldura da miniatura, e do preto da caixa do nome
+# e da vantagem, com a letra branca ou preta, a de mais contraste (CONTRASTE_DA_LETRA_BRANCA: com o
+# laranja da Shopee, a branca de sempre). As setinhas, a moldura do cartão e a chamada final
+# continuam no vermelho do destaque. O produto vermelho (para a chamada final continuar se
+# destacando) ou de várias cores, e o vídeo sem a cor da IA, ficam com as cores de sempre. Cada
+# nome tem um tom fixo, para o vídeo não sair com um tom estranho; o preto é um grafite, para a
+# faixa aparecer no fundo preto da capa. Escolha do Rafael (06/11, P159 2): DECISOES.md, Shopee Vídeo.
+CORES_DO_PRODUTO = {
+    "preto": (45, 45, 45), "branco": (245, 245, 245), "cinza": (120, 120, 120), "prata": (180, 184, 190),
+    "azul": (30, 90, 210), "azul-claro": (80, 170, 235), "azul-marinho": (25, 45, 105), "verde": (35, 150, 75),
+    "verde-claro": (130, 205, 95), "amarelo": (250, 205, 35), "dourado": (205, 165, 65),
+    "laranja": LARANJA_DA_SHOPEE, "rosa": (230, 90, 150), "roxo": (125, 65, 175), "lilás": (185, 145, 225),
+    "marrom": (115, 75, 45), "bege": (220, 195, 155),
+}
+CORES_DE_SEMPRE = ("vermelho", "colorido")
+CONTRASTE_DA_LETRA_BRANCA = 3.0
+LETRA_BRANCA, LETRA_PRETA = (255, 255, 255), (0, 0, 0)
+ALFA_DA_CAIXA_DA_COR = 230
+PROCESSO_DA_COR = "edição do vídeo: cor do produto"
+COM_AS_CORES_DE_SEMPRE = "as cores de sempre"
+
+
+def cor_do_produto(nome):
+    """
+    O tom (RGB) da cor do produto pelo nome que a IA deu; None com as cores de sempre (vermelho,
+    colorido, sem a cor).
+    """
+    return CORES_DO_PRODUTO.get(" ".join(str(nome or "").lower().split()))
+
+
+def letra_que_contrasta(cor):
+    """
+    A letra (RGB) em cima da cor: a branca quando o contraste dela com a cor chega a
+    CONTRASTE_DA_LETRA_BRANCA (a conta da luminância do W3C), senão a preta.
+    """
+    def linear(canal):
+        canal /= 255
+        return canal / 12.92 if canal <= 0.03928 else ((canal + 0.055) / 1.055) ** 2.4
+    luminancia = sum(peso * linear(canal) for peso, canal in zip((0.2126, 0.7152, 0.0722), cor[:3]))
+    return LETRA_BRANCA if 1.05 / (luminancia + 0.05) >= CONTRASTE_DA_LETRA_BRANCA else LETRA_PRETA
+
+
+def caixa_dos_textos(cor=None):
+    """O fundo (RGBA) da caixa do nome e da vantagem: na cor do produto, ou o preto de sempre (FUNDO_DOS_TEXTOS)."""
+    return tuple(cor[:3]) + (ALFA_DA_CAIXA_DA_COR,) if cor else FUNDO_DOS_TEXTOS
+
+
 FAIXA_DA_CHAMADA = 104                          # a altura da faixa com uma linha
 FOLGA_DA_FAIXA = 9                              # entre as letras e a borda da faixa, com duas linhas
 # O app, com o vídeo aberto, corta os lados do quadro (VISIVEL_NO_APP): a frase fica dentro
@@ -260,20 +309,21 @@ MARGEM_DA_FAIXA = 12
 LETRAS_DA_CHAMADA = (72, 40)                    # a maior e a menor numa linha
 # Quando não cabe numa linha: duas, na mesma faixa (a maior cabe com a folga em FAIXA_DA_CHAMADA).
 LETRAS_EM_DUAS_LINHAS = (36, 28)
-# A moldura laranja da miniatura, de cantos arredondados (pedidos do Rafael, P115, P117 e P119:
-# DECISOES.md, Shopee Vídeo). As camadas vão de fora para dentro, (cor, grossura em px na foto do
-# tamanho da capa); na miniatura, cada uma tem a metade da grossura (ESCALA_NA_MINIATURA), dentro
-# do lugar dela. A foto do começo do vídeo, sem a frase, vai sem moldura (P119).
+# A moldura da miniatura, de cantos arredondados, no laranja ou na cor do produto (pedidos do
+# Rafael, P115, P117, P119 e P159 2: DECISOES.md, Shopee Vídeo). As camadas vão de fora para dentro,
+# (cor, grossura em px na foto do tamanho da capa); na miniatura, cada uma tem a metade da grossura
+# (ESCALA_NA_MINIATURA), dentro do lugar dela. A foto do começo do vídeo, sem a frase, vai sem
+# moldura (P119).
 CAMADAS_DA_MOLDURA = ((LARANJA_DA_SHOPEE, 14),)
 GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
 RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto da miniatura, dentro da moldura
 ESCALA_NA_MINIATURA = 0.5
 # A capa com a frase (vídeo do Rafael das 20:14 de 02/11, no lugar da moldura em volta da foto e
 # das laterais laranja encostadas nos lados da grade): a foto inteira, sem moldura dos lados; um
-# fio laranja (FIO_DA_CAPA) logo acima da beirada de cima dela e, logo abaixo do pé dela, a faixa
-# laranja com a frase, sempre da altura de uma linha (FAIXA_DA_CHAMADA), e a sacolinha da grade
-# fica por cima do canto de cima da foto (P139 2). A frase que não cabe numa linha vai em duas,
-# com a letra menor. Na capa da grade (o 1º quadro do vídeo), a faixa fica logo acima do número
+# fio (FIO_DA_CAPA) logo acima da beirada de cima dela e, logo abaixo do pé dela, a faixa com a
+# frase (os dois no laranja ou na cor do produto, P159 2), sempre da altura de uma linha
+# (FAIXA_DA_CHAMADA), e a sacolinha da grade fica por cima do canto de cima da foto (P139 2). A
+# frase que não cabe numa linha vai em duas, com a letra menor. Na capa da grade (o 1º quadro do vídeo), a faixa fica logo acima do número
 # de visualizações (PE_DA_FAIXA_NA_GRADE) e a foto entra inteira, sem corte, no maior tamanho que
 # cabe no que a grade mostra (LADOS_NA_GRADE e VISIVEL_NA_GRADE) acima da faixa; o fio e a faixa
 # vão de uma beirada à outra (a tela final do app mostra o vídeo de lado a lado). No resto da
@@ -334,14 +384,15 @@ def _quebra_da_chamada(texto, desenho, fonte_ttf, largura=LETRAS_DA_FAIXA):
     return (melhor[1], melhor[2]) if melhor else None
 
 
-def com_moldura(imagem, escala=1.0):
+def com_moldura(imagem, escala=1.0, cor=None):
     """
-    A imagem do PIL com a moldura em volta (CAMADAS_DA_MOLDURA, cada grossura vezes a escala):
-    RGBA, maior que ela duas vezes a grossura, com os cantos da foto e da moldura arredondados e
-    o transparente fora deles (a miniatura).
+    A imagem do PIL com a moldura em volta (CAMADAS_DA_MOLDURA, cada grossura vezes a escala; com a
+    cor do produto, P159 2, nela): RGBA, maior que ela duas vezes a grossura, com os cantos da foto e
+    da moldura arredondados e o transparente fora deles (a miniatura).
     """
     from PIL import Image, ImageDraw
-    camadas = [(cor, max(1, round(grossura * escala))) for cor, grossura in CAMADAS_DA_MOLDURA]
+    camadas = [(tuple(cor) if cor else da_camada, max(1, round(grossura * escala)))
+               for da_camada, grossura in CAMADAS_DA_MOLDURA]
     total = sum(grossura for _cor, grossura in camadas)
     raio = max(2, round(RAIO_DA_FOTO * escala))
     largura, altura = imagem.size
@@ -374,11 +425,12 @@ def _foto_que_cabe(foto, lado, altura=None):
     return imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
 
 
-def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA):
+def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA, cor=None):
     """
     A foto (bytes) da miniatura com a moldura (ESCALA_NA_MINIATURA da grossura da foto do
-    começo), num quadrado de largura px com o fundo transparente (PNG, bytes): a moldura fica
-    dentro do lugar de sempre da miniatura. None com a foto que não abre.
+    começo; na cor do produto, quando vem, P159 2), num quadrado de largura px com o fundo
+    transparente (PNG, bytes): a moldura fica dentro do lugar de sempre da miniatura. None com a
+    foto que não abre.
     """
     from PIL import Image
     escala = ESCALA_NA_MINIATURA * largura / LARGURA_DA_MINIATURA
@@ -386,7 +438,7 @@ def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA):
     imagem = _foto_que_cabe(foto, max(1, largura - 2 * total))
     if not imagem:
         return None
-    emoldurada = com_moldura(imagem, escala)
+    emoldurada = com_moldura(imagem, escala, cor)
     quadro = Image.new("RGBA", (largura, largura), (0, 0, 0, 0))
     quadro.paste(emoldurada, ((largura - emoldurada.width) // 2, (largura - emoldurada.height) // 2), emoldurada)
     return _png(quadro)
@@ -469,16 +521,16 @@ def lugar_da_foto(no_video=False):
     return LADOS_NA_GRADE[0], VISIVEL_NA_GRADE[0], LADOS_NA_GRADE[1], PE_DA_FAIXA_NA_GRADE
 
 
-def capa_com_chamada(foto, chamada, no_video=False):
+def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     """
     A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) inteira, sem corte, no
-    maior tamanho que cabe no lugar dela (lugar_da_foto), no fundo preto, com o fio laranja logo
-    acima da beirada de cima dela e, logo abaixo dela, a chamada em letras brancas numa faixa
-    laranja, sempre da mesma altura, de um lado ao outro (lados_da_capa): na da grade, logo acima
-    do número de visualizações; com no_video=True, a do resto da abertura (P129), acima do cartão
-    do produto que o app põe por cima do vídeo aberto (P160 2). Nada da foto fica coberto (P139
-    2). None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem na menor
-    letra.
+    maior tamanho que cabe no lugar dela (lugar_da_foto), no fundo preto, com o fio logo acima da
+    beirada de cima dela e, logo abaixo dela, a chamada numa faixa sempre da mesma altura, de um
+    lado ao outro (lados_da_capa): na da grade, logo acima do número de visualizações; com
+    no_video=True, a do resto da abertura (P129), acima do cartão do produto que o app põe por cima
+    do vídeo aberto (P160 2). O fio e a faixa vão na cor do produto (P159 2; sem ela, o laranja da
+    Shopee), com a letra que contrasta. Nada da foto fica coberto (P139 2). None sem a chamada, com
+    a foto que não abre ou com a chamada que não cabe nem na menor letra.
     """
     import matplotlib
     from PIL import Image, ImageDraw
@@ -502,19 +554,21 @@ def capa_com_chamada(foto, chamada, no_video=False):
     if not quebra:
         return None
     fonte, linhas = quebra
-    desenho.rectangle((esquerda, y - FIO_DA_CAPA, direita - 1, y - 1), fill=LARANJA_DA_SHOPEE)
-    desenho.rectangle((esquerda, pe - FAIXA_DA_CHAMADA, direita - 1, pe - 1), fill=LARANJA_DA_SHOPEE)
+    cor = tuple(cor) if cor else LARANJA_DA_SHOPEE
+    desenho.rectangle((esquerda, y - FIO_DA_CAPA, direita - 1, y - 1), fill=cor)
+    desenho.rectangle((esquerda, pe - FAIXA_DA_CHAMADA, direita - 1, pe - 1), fill=cor)
     altura_da_linha = round(fonte.size * 1.2)
     meio = pe - FAIXA_DA_CHAMADA / 2
     for i, linha in enumerate(linhas):
         desenho.text((TELA[0] / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha, font=fonte,
-                     fill="white", anchor="mm")
+                     fill=letra_que_contrasta(cor), anchor="mm")
     return _png(capa)
 
 
-# A faixa laranja da capa com chamada num print (o quadro da grade do perfil): por ela o robô
-# confere a capa do post (marcar_o_post). Laranja: até TOLERANCIA_DO_LARANJA de LARANJA_DA_SHOPEE (a soma das
-# diferenças das três cores). A faixa são linhas seguidas com o laranja nas mesmas pontas (a
+# A faixa da capa com chamada num print (o quadro da grade do perfil): por ela o robô confere a capa
+# do post (marcar_o_post). Aqui, laranja é a cor da faixa (a de sempre, ou a do produto, P159 2), e
+# branco, a das letras (letra_que_contrasta). Laranja: até TOLERANCIA_DO_LARANJA da cor da faixa
+# (a soma das diferenças das três cores). A faixa são linhas seguidas com o laranja nas mesmas pontas (a
 # faixa é um retângulo), cheias (pelo menos LINHA_CHEIA entre as pontas) ou com as letras
 # brancas (pelo menos LINHA_COM_LETRAS), de pelo menos LARGURA_MINIMA_DA_FAIXA da caixa.
 # Nas linhas do meio das letras, o branco pode passar do laranja (letra grossa, o print em JPEG
@@ -535,7 +589,6 @@ LINHAS_CHEIAS_DA_FAIXA = 2
 # finas: a faixa da chamada tem pelo menos esta fração da altura da caixa (no quadro da grade, ela
 # fica em uns 11%; a borda da moldura, em uns 1%).
 ALTURA_MINIMA_DA_FAIXA = 0.02
-BRANCO_DAS_LETRAS = (255, 255, 255)
 # Na mesma linha da faixa, o laranja de fora dela (a moldura laranja da miniatura, P115, um
 # produto laranja na foto) fica separado dela por outras cores: as pontas da faixa saem só do
 # pedaço da linha nas cores dela, com fendas de até FENDA_NA_FAIXA px (o borrado do JPEG em volta
@@ -545,14 +598,15 @@ FENDA_NA_FAIXA = 3
 LINHA_ENTRE_PEDACOS = 0.75
 
 
-def cores_da_faixa(pontos):
+def cores_da_faixa(pontos, cor=LARANJA_DA_SHOPEE):
     """
-    Os pontos (numpy, altura x largura x 3) no laranja, no branco das letras ou na mistura dos
-    dois (a borda das letras), até TOLERANCIA_DO_LARANJA do caminho entre as duas cores.
+    Os pontos (numpy, altura x largura x 3) na cor da faixa (o laranja, ou a cor do produto, P159
+    2), na cor das letras (letra_que_contrasta) ou na mistura das duas (a borda das letras), até
+    TOLERANCIA_DO_LARANJA do caminho entre as duas cores.
     """
     import numpy
-    laranja = numpy.array(LARANJA_DA_SHOPEE, dtype=numpy.float32)
-    rumo = numpy.array(BRANCO_DAS_LETRAS, dtype=numpy.float32) - laranja
+    laranja = numpy.array(cor, dtype=numpy.float32)
+    rumo = numpy.array(letra_que_contrasta(cor), dtype=numpy.float32) - laranja
     pontos = pontos.astype(numpy.float32)
     passo = numpy.clip(((pontos - laranja) @ rumo) / float(rumo @ rumo), 0, 1)
     return numpy.abs(pontos - (laranja + passo[..., None] * rumo)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
@@ -600,17 +654,18 @@ def _juntar_os_pedacos(blocos, laranja, da_faixa):
     return juntos
 
 
-def faixa_laranja(imagem, caixa=None):
+def faixa_laranja(imagem, caixa=None, cor=None):
     """
-    A faixa laranja dentro da caixa (x1, y1, x2, y2; sem ela, a imagem inteira) da imagem do
-    PIL: (cima, baixo, esquerda, direita), em pontos da imagem, a de mais linhas entre as achadas
-    (com pelo menos LINHAS_CHEIAS_DA_FAIXA linhas cheias). None sem ela.
+    A faixa laranja (ou na cor do produto, P159 2) dentro da caixa (x1, y1, x2, y2; sem ela, a
+    imagem inteira) da imagem do PIL: (cima, baixo, esquerda, direita), em pontos da imagem, a de
+    mais linhas entre as achadas (com pelo menos LINHAS_CHEIAS_DA_FAIXA linhas cheias). None sem ela.
     """
     import numpy
+    cor = tuple(cor) if cor else LARANJA_DA_SHOPEE
     x1, y1, x2, y2 = caixa or (0, 0, imagem.width, imagem.height)
     pontos = numpy.asarray(imagem.convert("RGB").crop((x1, y1, x2, y2)), dtype=numpy.int16)
-    laranja = numpy.abs(pontos - numpy.array(LARANJA_DA_SHOPEE, dtype=numpy.int16)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
-    da_faixa = cores_da_faixa(pontos)
+    laranja = numpy.abs(pontos - numpy.array(cor, dtype=numpy.int16)).sum(axis=2) <= TOLERANCIA_DO_LARANJA
+    da_faixa = cores_da_faixa(pontos, cor)
     minimo = max(2, int(laranja.shape[1] * LARGURA_MINIMA_DA_FAIXA))
     blocos, atual = [], None
     for y, linha in enumerate(laranja):
@@ -650,10 +705,10 @@ def faixa_laranja(imagem, caixa=None):
     return (y1 + melhor["cima"], y1 + melhor["baixo"], x1 + melhor["esquerda"], x1 + melhor["direita"] + 1)
 
 
-def _capa_da_vez(foto, vantagem, no_video=False):
+def _capa_da_vez(foto, vantagem, no_video=False, cor=None):
     """A capa com chamada do vídeo que vai ao ar, ou None (a capa de sempre) quando ela não sai: o vídeo não para por ela."""
     try:
-        return capa_com_chamada(foto, vantagem, no_video)
+        return capa_com_chamada(foto, vantagem, no_video, cor)
     except Exception:
         return None
 
@@ -734,21 +789,22 @@ def recorte_do_video_aberto(capa):
     return _faixa_da_capa(capa, (0, TELA[1]), VISIVEL_NO_APP)
 
 
-# Na grade do perfil, a capa do post é o 1º quadro do vídeo quando a faixa laranja da frase chega
-# aos dois lados do quadro (a capa da grade vai de uma beirada à outra); com a faixa só no meio e
-# os lados sem laranja, a grade pegou outro quadro da abertura (o do vídeo aberto, P129). Olha uma
+# Na grade do perfil, a capa do post é o 1º quadro do vídeo quando a faixa da frase chega aos dois
+# lados do quadro (a capa da grade vai de uma beirada à outra); com a faixa só no meio e os lados
+# sem a cor dela, a grade pegou outro quadro da abertura (o do vídeo aberto, P129). Olha uma
 # tira fina de cada lado, perto da borda do quadro, e a do meio, de cima a baixo.
 TIRA_DOS_LADOS = 0.008                          # da largura do quadro, a partir de cada borda
-PARTE_DOS_LADOS = 0.8                           # da altura da faixa, em pontos laranja, para dizer que ela está ali
+PARTE_DOS_LADOS = 0.8                           # da altura da faixa, na cor dela, para dizer que ela está ali
 
 
-def faixa_nos_lados(imagem, caixa):
+def faixa_nos_lados(imagem, caixa, cor=None):
     """
     No print da grade (PIL), com o quadro da capa do post em caixa (x1, y1, x2, y2): True quando a
-    faixa laranja da frase chega aos dois lados do quadro (o 1º quadro do vídeo), False quando ela
-    está no meio e não chega a nenhum dos lados (outro quadro da abertura) e None quando não dá
-    para dizer (sem a faixa, ou num lado só).
+    faixa da frase (laranja, ou na cor do produto, P159 2) chega aos dois lados do quadro (o 1º
+    quadro do vídeo), False quando ela está no meio e não chega a nenhum dos lados (outro quadro
+    da abertura) e None quando não dá para dizer (sem a faixa, ou num lado só).
     """
+    cor = tuple(cor) if cor else LARANJA_DA_SHOPEE
     x1, y1, x2, y2 = caixa
     largura, altura = x2 - x1, y2 - y1
     if largura < 50 or altura < 50:
@@ -759,7 +815,7 @@ def faixa_nos_lados(imagem, caixa):
 
     def laranjas(x):
         return sum(1 for y in range(y1, y2)
-                   if sum(abs(a - b) for a, b in zip(imagem.getpixel((x, y)), LARANJA_DA_SHOPEE)) <= TOLERANCIA_DO_LARANJA)
+                   if sum(abs(a - b) for a, b in zip(imagem.getpixel((x, y)), cor)) <= TOLERANCIA_DO_LARANJA)
 
     lados = [laranjas(x) for x in (x1 + round(largura * TIRA_DOS_LADOS), x2 - 1 - round(largura * TIRA_DOS_LADOS))]
     if all(n >= minimo for n in lados):
@@ -788,7 +844,7 @@ def _faixa_da_capa(capa, faixa, lados=None):
 
 
 def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-           rotulo_de_ia=False):
+           rotulo_de_ia=False, cor=None):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
@@ -800,7 +856,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     (bytes de outras fotos do mesmo produto, na ordem, as que cabem: fotos_que_cabem), a
     miniatura troca entre a foto e cada uma delas, uma volta só, o mesmo tempo para cada (P103).
     Com rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), as setinhas e a moldura do
-    cartão sobem SUBIDA_COM_O_ROTULO_DE_IA, como o cartão do app.
+    cartão sobem SUBIDA_COM_O_ROTULO_DE_IA, como o cartão do app. Com a cor do produto (RGB, P159
+    2), a moldura da miniatura vai nela.
     """
     if avisos and foto:
         capa = capa_com_avisos(foto)
@@ -813,8 +870,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
         capa = foto_em_tela_cheia(foto)
     largura = largura_da_miniatura(miniatura)
     if largura:
-        foto = miniatura_com_moldura(foto, largura) or foto
-        outras_fotos = [miniatura_com_moldura(outra, largura) or outra for outra in outras_fotos]
+        foto = miniatura_com_moldura(foto, largura, cor) or foto
+        outras_fotos = [miniatura_com_moldura(outra, largura, cor) or outra for outra in outras_fotos]
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
                                        SETA, (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
@@ -953,6 +1010,10 @@ _CAPA_NO_PROMPT = ("- \"capa\": para a capa do vídeo, uma frase curta que come�
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
+# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO.
+_COR_NO_PROMPT = ("Diga também \"cor\", a cor principal do produto que o vídeo mostra, uma destas: "
+                  + ", ".join(list(CORES_DO_PRODUTO) + list(CORES_DE_SEMPRE[:1]))
+                  + "; ou \"colorido\", quando ele tem várias cores e nenhuma é a principal.\n")
 _REGRAS_NO_PROMPT = ("Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; "
                      "sem preço, desconto, promoção, emoji ou hashtag. Escreva com a ortografia e a acentuação "
                      "certas do português do Brasil e confira cada palavra antes de responder.\n")
@@ -1042,11 +1103,11 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
-    + _REGRAS_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
     + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
-    "\"lugar\": \"alto\", \"textos_do_video\": [], \"canto_ocupado\": false, \"por_cima_no_alto\": [], "
-    "\"legendas\": [], \"legenda_no_video\": false}}"
+    "\"cor\": \"...\", \"lugar\": \"alto\", \"textos_do_video\": [], \"canto_ocupado\": false, "
+    "\"por_cima_no_alto\": [], \"legendas\": [], \"legenda_no_video\": false}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -1179,9 +1240,11 @@ def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO, com_fala=frozen
 
 def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=2, menor=None):
     """
-    O texto da tela (PNG com fundo transparente, bytes): letras brancas numa caixa de cantos
-    redondos, em até linhas_maximas linhas de até largura_maxima (padrão: LARGURA_DOS_TEXTOS), com a
-    letra de LETRA_DOS_TEXTOS, que desce até a `menor` (padrão: a menor de LETRA_DOS_TEXTOS).
+    O texto da tela (PNG com fundo transparente, bytes): as letras numa caixa de cantos redondos,
+    brancas ou pretas, as de mais contraste com o fundo (letra_que_contrasta: na caixa na cor do
+    produto, P159 2), em até linhas_maximas linhas de até largura_maxima (padrão:
+    LARGURA_DOS_TEXTOS), com a letra de LETRA_DOS_TEXTOS, que desce até a `menor` (padrão: a menor
+    de LETRA_DOS_TEXTOS).
     """
     import io
 
@@ -1213,7 +1276,7 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=
     desenho.rounded_rectangle((0, 0, largura - 1, altura - 1), radius=22, fill=fundo)
     for i, texto_da_linha in enumerate(linhas):
         desenho.text((largura / 2, 18 + altura_da_linha * (i + 0.5)), texto_da_linha, font=fonte,
-                     fill="white", anchor="mm")
+                     fill=letra_que_contrasta(fundo), anchor="mm")
     saida = io.BytesIO()
     imagem.save(saida, format="PNG")
     return saida.getvalue()
@@ -1373,10 +1436,10 @@ def _resposta_da_ia(video, prompt):
 
 def _nome_lugar_e_falas(dados, duracao=0.0):
     """
-    O nome, o lugar, as falas, se o vídeo já tem texto próprio na tela na maior parte do tempo
-    (pelos trechos que a IA deu e a duracao do vídeo, em segundos; com a parte do tempo em
-    "parte_com_texto") e se o canto da nossa miniatura tem coisa do criador, da resposta da IA,
-    só os que vieram certos.
+    O nome, o lugar, a cor do produto (P159 2), as falas, se o vídeo já tem texto próprio na tela
+    na maior parte do tempo (pelos trechos que a IA deu e a duracao do vídeo, em segundos; com a
+    parte do tempo em "parte_com_texto") e se o canto da nossa miniatura tem coisa do criador, da
+    resposta da IA, só os que vieram certos.
     """
     textos = {}
     nome = _texto_certo(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
@@ -1384,6 +1447,9 @@ def _nome_lugar_e_falas(dados, duracao=0.0):
         textos["nome"] = nome
     if dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
         textos["lugar"] = dados["lugar"]
+    cor = " ".join(str(dados.get("cor") or "").lower().split())
+    if cor in CORES_DO_PRODUTO or cor in CORES_DE_SEMPRE:
+        textos["cor"] = cor
     if isinstance(dados.get("canto_ocupado"), bool):
         textos["canto_ocupado"] = dados["canto_ocupado"]
     trechos = _trechos_com_texto(dados.get("textos_do_video"))
@@ -2079,7 +2145,7 @@ def _letreiros(textos, lugar, duracao):
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-             capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False):
+             capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -2089,38 +2155,40 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
     vídeo inteiro. As legendas da fala ([(início, fim, texto)], P118) vão embaixo, à direita da seta.
     Com rotulo_de_ia=True, a legenda da fala, as setinhas e a moldura sobem com o cartão do app.
+    Com a cor do produto (RGB, P159 2), a caixa do nome e da vantagem e a moldura da miniatura vão nela.
     Devolve (motivo, resumo {original, lugar, textos, legendas}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
-                                 musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia)
+                                 musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia, cor)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
-                          musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False):
+                          musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False,
+                          cor=None):
     """
     O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
     Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta.
     """
     import tempfile
-    letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
-                                    (chamada, FUNDO_DA_CHAMADA)], lugar, original)
+    caixa = caixa_dos_textos(cor)
+    letreiros, textos = _letreiros([(nome, caixa), (vantagem, caixa), (chamada, FUNDO_DA_CHAMADA)], lugar, original)
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     da_fala = letreiros_da_fala(legendas, original, subida) if legendas else []
     letreiros += da_fala
     resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura,
               "legendas": len(da_fala)}
     if not letreiros:
-        return editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia), resumo
+        return editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor), resumo
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
         motivo = videos.com_cortes_e_ritmo(video, [(0.0, original, 1.0)], corpo, letreiros, ESPERA_MAXIMA)
         if motivo:
             return motivo, resumo
-        return editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia), resumo
+        return editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor), resumo
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -2140,7 +2208,8 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
+def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
+                       anotar=None):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -2159,13 +2228,24 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     troca entre a foto e cada uma delas (P103), e o jeito leva COM_A_MINIATURA_ALTERNADA.
     A capa com a frase abre o vídeo, no rascunho do robô e no modo assistente (P125). Com
     rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a legenda da fala sobem com o
-    cartão do app (SUBIDA_COM_O_ROTULO_DE_IA). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+    cartão do app (SUBIDA_COM_O_ROTULO_DE_IA). Com a cor principal do produto, que a IA diz com os
+    textos (P159 2), o fio e a faixa da capa, a caixa do nome e da vantagem e a moldura da
+    miniatura vão nela; anotar (dict) recebe em "cor" o nome dela ("" com as cores de sempre), que
+    o robô guarda no rascunho para conferir a faixa no post. Escolhas do Rafael: DECISOES.md,
+    Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
         return editar(video, foto, destino, avisos), SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), ""
     musica = _caminho(musicas_de_fundo(video)[0])
     textos = textos_da_tela(video, produto) if produto else {}
+    # A cor do produto no lugar do laranja e do preto (P159 2); o registro conta cada uma.
+    cor = cor_do_produto(textos.get("cor"))
+    if textos:
+        registro_processos.registrar("shopee_video", PROCESSO_DA_COR, textos.get("cor") if cor else COM_AS_CORES_DE_SEMPRE,
+                                     "" if cor else (textos.get("cor") or "a IA não disse a cor"), ok=None)
+    if anotar is not None:
+        anotar["cor"] = textos.get("cor", "") if cor else ""
     # Sem a frase da capa, o nome e a vantagem da IA, a capa fica a de antes; a bebida alcoólica, com a
     # dos avisos. A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre
     # com a capa dos avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
@@ -2180,12 +2260,12 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         foto_da_capa, letras = foto_sem_letras(foto)
         registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras,
                                      ok={SEM_LETRAS: True, LETRAS_CORTADAS: True, LETRAS_NO_PRODUTO: None}.get(letras, False))
-        capa = _capa_da_vez(foto_da_capa, frase)
+        capa = _capa_da_vez(foto_da_capa, frase, cor=cor)
     abertura = capa
     if capa:
         # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
         # abertura, com a do vídeo aberto (P129). Sem esta, a da grade fica na abertura toda.
-        no_video = _capa_da_vez(foto_da_capa, frase, no_video=True)
+        no_video = _capa_da_vez(foto_da_capa, frase, no_video=True, cor=cor)
         if no_video:
             abertura = (capa, no_video)
     chamada = COM_A_CHAMADA if capa else ""
@@ -2212,7 +2292,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
-                                    miniatura, outras_fotos, legendas, rotulo_de_ia)
+                                    miniatura, outras_fotos, legendas, rotulo_de_ia, cor=cor)
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -2236,7 +2316,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia),
+    return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia, cor=cor),
             SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}")
 
 
@@ -2364,8 +2444,8 @@ PROMPT_DAS_VERSOES = (
     f"vídeo, chamando para o produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, diferente em cada "
     "versão, sem mandar para fora da Shopee). Só ponha uma versão com um momento e uma vantagem que as outras "
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
-    + _REGRAS_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", "
+    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
+    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", \"cor\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
     "\"textos_do_video\": [], \"canto_ocupado\": false, \"por_cima_no_alto\": [], \"legendas\": [], "
@@ -2492,7 +2572,7 @@ def _resumo_da_versao(arquivo, plano, da_ia, textos=(), musica=None):
 
 
 def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, textos_da_versao, musicas,
-                         miniatura=True):
+                         miniatura=True, cor=None):
     """
     As versões modificadas (planos de planejar_versoes) em arquivo_da_versao(destino, 2, 3...):
     cada uma remontada com os trechos dela, com os letreiros de textos_da_versao(plano, da_ia)
@@ -2510,7 +2590,7 @@ def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, te
             corpo = os.path.join(pasta, f"remontado_{numero}.mp4")
             motivo = videos.com_cortes_e_ritmo(video, plano["trechos"], corpo, letreiros, ESPERA_MAXIMA)
             if not motivo:
-                motivo = editar(corpo, foto, arquivo, musica=_caminho(musica), miniatura=miniatura)
+                motivo = editar(corpo, foto, arquivo, musica=_caminho(musica), miniatura=miniatura, cor=cor)
             if motivo:
                 return motivo, resumo
     return "", resumo
@@ -2543,26 +2623,29 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                       lugar=None, miniatura=True, legendas=()):
+                       lugar=None, miniatura=True, legendas=(), cor=None):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
     versões modificadas (planejar_versoes), cada uma remontada (sem as partes paradas, com o
     ritmo), com os seus textos (a vantagem do gancho, o nome e a chamada da versão, nessa ordem)
-    e com o Editor 1 por cima. versoes_da_ia = [{"vantagem", "chamada", "inicio", "fim"}].
-    Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas versões
-    fica em resumo["remontagem"].
+    e com o Editor 1 por cima. versoes_da_ia = [{"vantagem", "chamada", "inicio", "fim"}]. Com a cor
+    do produto (RGB, P159 2), a caixa do nome e da vantagem e a moldura da miniatura vão nela, como
+    no vídeo que vai ao ar. Devolve (motivo, resumo): motivo "" quando todos saíram; o que a
+    remontagem muda nas versões fica em resumo["remontagem"].
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     com_fala, trechos = _remontagem(video, original, falas)
     lugar = _lugar(lugar)
+    caixa = caixa_dos_textos(cor)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
     musicas = musicas_de_fundo(video, 1 + len(planos))
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
-                                                musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas)
+                                                musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas,
+                                                cor=cor)
     resumo = {"original": original, "inteiro": original, "lugar": lugar, "miniatura": miniatura,
               "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
@@ -2570,9 +2653,8 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     if motivo:
         return motivo, resumo
     return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: _letreiros(
-        [(da_ia.get("vantagem", ""), FUNDO_DOS_TEXTOS), (nome, FUNDO_DOS_TEXTOS),
-         (da_ia.get("chamada", ""), FUNDO_DA_CHAMADA)],
-        lugar, _segundos_remontados(plano["trechos"])), musicas[1:], miniatura)
+        [(da_ia.get("vantagem", ""), caixa), (nome, caixa), (da_ia.get("chamada", ""), FUNDO_DA_CHAMADA)],
+        lugar, _segundos_remontados(plano["trechos"])), musicas[1:], miniatura, cor)
 
 
 def _exemplo_das_versoes(destino, lista, editar_versoes):
@@ -2613,7 +2695,7 @@ def exemplo_editor_2(destino):
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
         textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos), miniatura_no_video(textos),
-        legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0]))
+        legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0], cor=cor_do_produto(textos.get("cor"))))
 
 
 def exemplo_capa():
@@ -2630,13 +2712,14 @@ def exemplo_capa():
         frase = frase_da_capa(textos)
         if not frase:
             return "a IA não escreveu a frase da capa, o nome nem a vantagem do produto deste vídeo", None
-        # A foto sem as letras do anúncio, como no vídeo que vai ao ar (P160 2).
+        # A foto sem as letras do anúncio e a cor do produto, como no vídeo que vai ao ar (P160 2 e P159 2).
         foto = foto_sem_letras(foto)[0]
-        capa = capa_com_chamada(foto, frase)
+        cor = cor_do_produto(textos.get("cor"))
+        capa = capa_com_chamada(foto, frase, cor=cor)
         if not capa:
             return "a capa com a chamada não saiu", None
         exemplo = {"capa": capa, "grade": recorte_da_grade(capa), "chamada": frase}
-        no_video = capa_com_chamada(foto, frase, no_video=True)
+        no_video = capa_com_chamada(foto, frase, no_video=True, cor=cor)
         if no_video:
             exemplo["video"] = recorte_do_video_aberto(no_video)
         return "", exemplo
