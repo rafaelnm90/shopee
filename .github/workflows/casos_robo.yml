@@ -53,12 +53,20 @@ jobs:
           git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPOSITORIO}.git"
 
           if [ "$ACAO" = "apagar" ]; then
-            servidor apagar
+            # Só os casos que foram exportados (até o mais novo do ramo): o que chegou depois,
+            # que o Claude ainda não viu, fica no servidor para a próxima exportação.
             if git ls-remote --exit-code --heads origin casos-robo >/dev/null 2>&1; then
+              git fetch -q --depth 1 origin casos-robo
+              ULTIMO=$(git show FETCH_HEAD:ultimo_caso.txt 2>/dev/null | tr -dc '0-9a-z_-' || true)
+              if [ -n "$ULTIMO" ]; then
+                servidor "apagar $ULTIMO"
+              else
+                servidor apagar
+              fi
               git push -q origin --delete casos-robo
               echo "✅ Ramo casos-robo apagado."
             else
-              echo "Ramo casos-robo: já não existia."
+              echo "Ramo casos-robo: já não existia (nada exportado, nada apagado no servidor)."
             fi
             exit 0
           fi
@@ -69,6 +77,9 @@ jobs:
             echo "Nada para exportar."
             exit 0
           fi
+          # O mais novo antes do pacote: o caso que chegar entre os dois vai no pacote e fica
+          # no servidor depois do apagar, que só tira até este nome.
+          ULTIMO=$(servidor ultimo | tr -dc '0-9a-z_-')
           servidor cifrado > ../novo
           if ! grep -q '^gAAAAA' ../novo; then
             echo "❌ O servidor não devolveu os casos cifrados."
@@ -76,14 +87,16 @@ jobs:
           fi
           git checkout -q --orphan casos-robo
           mv ../novo casos.zip.cifrado
+          printf '%s\n' "$ULTIMO" > ultimo_caso.txt
           cat > README.md <<'FIM'
           # Casos das falhas do robô da Shopee Vídeo (cifrados)
 
-          Este ramo guarda só o `casos.zip.cifrado`, montado pelo servidor dos robôs
-          (`casos_robo.py`) e gravado pelo workflow `casos_robo.yml`. Sem a chave do
-          servidor, o arquivo não abre. Depois de analisado, o workflow apaga o ramo.
+          Este ramo guarda o `casos.zip.cifrado`, montado pelo servidor dos robôs
+          (`casos_robo.py`) e gravado pelo workflow `casos_robo.yml`, e o nome do caso mais
+          novo da exportação (`ultimo_caso.txt`). Sem a chave do servidor, o arquivo não abre.
+          Depois de analisado, o workflow apaga o ramo e, no servidor, os casos até esse nome.
           FIM
-          git add README.md casos.zip.cifrado
+          git add README.md casos.zip.cifrado ultimo_caso.txt
           git -c user.name="github-actions[bot]" \
               -c user.email="41898173+github-actions[bot]@users.noreply.github.com" \
               commit -q -m "Casos das falhas do robô (cifrados)"
