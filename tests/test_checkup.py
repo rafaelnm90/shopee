@@ -38,8 +38,10 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.FEITOS_NO_FEED == robo.interacoes.FEITOS_NO_FEED
     assert checkup.SO_CURTIDO_NO_FEED == robo.interacoes.SO_CURTIDO
     assert checkup.POSTS_ANTIGOS_POR_DIA == robo.interacoes.POSTS_ANTIGOS_POR_DIA
-    assert checkup.HORAS_DAS_RESPOSTAS_SV == robo.HORAS_DAS_RESPOSTAS
-    assert checkup.HORA_DAS_RESPOSTAS_SEM_JANELA_SV == robo.HORA_DAS_RESPOSTAS_SEM_JANELA
+    assert checkup.DURANTE_O_DIA_SV == robo.DURANTE_O_DIA
+    assert checkup.LEITURAS_DAS_RESPOSTAS_SV == robo.LEITURAS_DAS_RESPOSTAS
+    assert checkup.ESPACO_DAS_RESPOSTAS_SV == robo.ESPACO_DAS_RESPOSTAS
+    assert checkup.PROCESSO_DA_LEITURA_SV == robo.PROCESSO_DA_LEITURA
     assert checkup.HORARIO_DO_ROBO_SV == robo.ps.HORARIO_DAS_RODADAS
     assert checkup.CHAVE_SEGUIDORES_SV == robo.CHAVE_SEGUIDORES
     assert checkup.CHAVE_TENTATIVAS_POR_DIA_SV == robo.CHAVE_TENTATIVAS_POR_DIA
@@ -405,8 +407,9 @@ def test_aprovados_postados_mostram_o_atraso_sobre_o_previsto():
 
 def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     # Pergunta do Rafael (25/10): uma tarefa em cima da outra pode atrapalhar; o checkup mostra
-    # quando o robô fez outra coisa na hora do descurtir, interação fora do Horário das
-    # Interações, preparo dentro dele antes do feed, rotinas coladas e os envios do assistente.
+    # quando o robô fez outra coisa na hora do descurtir antes de a limpeza acabar, as leituras das
+    # respostas e o post antigo fora do dia ou coladas (P161 1), as rotinas coladas e os envios do
+    # assistente. A janela das interações que ficou no banco não conta mais.
     import robo_shopee_video as robo
     import registro_processos
     assert checkup.HORA_DO_DESCURTIR_SV == robo.HORA_DO_DESCURTIR
@@ -417,100 +420,67 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     def em(hora):
         return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
 
-    robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:10"))
-    robo.registrar_tentativa("feed", "comentado", agora=em("04:20"))                # na hora do descurtir
-    robo.registrar_tentativa("feed", "comentado", agora=em("15:00"))                # o feed, no dia todo (P152)
-    robo.registrar_tentativa("post_antigo", "comentado", agora=em("15:10"))         # fora da janela
-    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # antes do post antigo
-    robo.registrar_tentativa("post_antigo", "comentado", agora=em("10:20"))         # na janela
-    robo.registrar_tentativa("rascunho", "salvo", agora=em("10:40"))                # depois dele: certo
-    robo.registrar_tentativa("rascunho", "salvo", agora=em("13:00"))                # fora da janela: certo
-    robo.registrar_tentativa("responder", "respondido", agora=em("17:05"))          # as respostas: em qualquer hora (P70)
-    # Apagar o rascunho recusado roda nos dois horários (P22 a P24): não é preparo na janela,
-    # mas na hora do descurtir conta.
-    robo.registrar_tentativa("apagar", "apagado", agora=em("09:40"))
-    robo.registrar_tentativa("apagar", "apagado", agora=em("04:30"))
-    registro_processos.registrar("shopee_video", "notificações (respostas)", "topo achado", agora=em("17:00"))
-    registro_processos.registrar("shopee_video", "descurtir tudo (4h)", "descurtido", agora=em("04:12"))
-    registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", agora=em("04:05"))
     registro_processos.registrar("shopee_video", "rodada fora do bot", "unidade própria", agora=em("04:00"))
+    registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", agora=em("04:05"))   # antes dela
+    robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:10"))
+    registro_processos.registrar("shopee_video", "descurtir tudo (4h)", "descurtido", agora=em("04:12"))
+    robo.registrar_tentativa("feed", "comentado", agora=em("04:20"))                # acabada a limpeza: livre
+    robo.registrar_tentativa("apagar", "apagado", agora=em("04:30"))
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # na antiga janela: certo
+    robo.registrar_tentativa("post_antigo", "comentado", agora=em("10:20"))         # durante o dia: certo
+    robo.registrar_tentativa("feed", "comentado", agora=em("15:00"))                # o feed, no dia todo (P152)
+    robo.registrar_tentativa("post_antigo", "comentado", agora=em("22:05"))         # fora do dia
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DA_LEITURA, "1ª de 3 hoje", agora=em("08:10"))
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DA_LEITURA, "2ª de 3 hoje", agora=em("10:00"))
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DA_LEITURA, "3ª de 3 hoje", agora=em("22:10"))
     registro_processos.registrar("shopee_video", "assistente: envio", "postagem mandada no seu privado",
                                  agora=em("15:20"))
     db.salvar_config("config_rotina", {"historico_diario": {"data": dia, "contagem": {
         "link_grupo_viral": ["10:00", "18:00"], "promo_principal": ["10:00"]}}})
     r = checkup.sobreposicoes(AGORA)
-    assert r["janela"] == (9, 11)
-    assert [hora for hora, _o in r["no_descurtir"]] == ["04:05", "04:20", "04:30"]
-    assert [hora for hora, _o in r["fora_da_janela"]] == ["15:10"]
-    assert [hora for hora, _o in r["preparo_na_janela"]] == ["09:30"]
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:05"] and r["pedidos_no_botao"] == []
+    assert [hora for hora, _o in r["antigo_fora"]] == ["22:05"]
+    assert r["leituras_fora"] == [("22:10", "3ª de 3 hoje")]
+    assert r["leituras_coladas"] == [("08:10", "10:00")]
     assert r["rotinas_coladas"] == {"Viral": [("10:00", "link_grupo_viral", "10:00", "promo_principal")]}
     assert r["assistente"] == [("15:20", "postagem mandada no seu privado")]
     pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "ruins": [], "salvos": 0, "vencidos": 0},
                                        {}, None, AGORA, sobre=r)
-    assert "Sobreposição: 3 atividade(s) do robô da Shopee Vídeo na hora do descurtir (4h)" in pontos
-    assert "Sobreposição: 1 interação(ões) do robô fora do Horário das Interações" in pontos
-    assert ("Sobreposição: 1 passo(s) de preparo ou postagem no Horário das Interações antes das respostas e "
-            "do post antigo") in pontos
-    # A janela escolhida às 10:00 não cobra o que o robô fez antes dela.
-    db.atualizar_config(robo.CHAVE_CONFIG, lambda c: c.update(robo_interacoes_desde=f"{dia} 10:00:00"))
-    r = checkup.sobreposicoes(AGORA)
-    assert [hora for hora, _o in r["fora_da_janela"]] == ["15:10"] and r["preparo_na_janela"] == []
-    assert r["janela_desde"] == f"{dia} 10:00:00"
+    assert ("Sobreposição: 1 atividade(s) do robô da Shopee Vídeo na hora do descurtir (4h) antes de a limpeza "
+            "acabar") in pontos
+    assert "Sobreposição: 1 leitura(s) das respostas fora do dia (das 8h às 22h)" in pontos
+    assert "Sobreposição: 1 leitura(s) das respostas a menos de 3 h da anterior" in pontos
+    assert "Sobreposição: 1 comentário(s) no post antigo fora do dia (das 8h às 22h)" in pontos
 
 
-def test_rodadas_na_hora_do_descurtir_e_as_que_nao_chegaram_a_limpeza():
-    # A limpeza das 4h que não roda tem de dizer por quê: o checkup mostra quantas rodadas o bot
-    # pôs no celular nessa hora e as que não chegaram à limpeza, com o porquê.
+def test_pedido_nos_botoes_nao_e_sobreposicao():
+    # 31/10, 20:32: o rascunho pedido no Preparar 1 Agora entrou como sobreposição, como se o robô
+    # tivesse preparado sozinho. O pedido nos botões do painel vale a qualquer hora: o que o robô faz
+    # logo depois dele aparece à parte.
     import robo_shopee_video as robo
     import registro_processos
-    assert checkup.PROCESSO_SEM_LIMPEZA_SV == robo.PROCESSO_SEM_LIMPEZA
-    assert checkup.classificado("shopee_video", robo.PROCESSO_SEM_LIMPEZA)
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
     dia = AGORA.strftime("%Y-%m-%d")
 
     def em(hora):
         return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
 
-    for hora in ("04:00", "04:15", "10:00"):
-        registro_processos.registrar("shopee_video", "rodada fora do bot", "unidade própria", agora=em(hora))
-    registro_processos.registrar("shopee_video", robo.PROCESSO_SEM_LIMPEZA, "o celular com o explorar",
-                                 agora=em("04:30"))
-    assert checkup.rodadas_na_hora_do_descurtir(AGORA) == (["04:00", "04:15"],
-                                                           [("04:30", "o celular com o explorar")])
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DO_BOTAO, "pedido", ok=None, agora=em("04:00"))
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("04:11"))                # o pedido no botão
+    robo.registrar_tentativa("rascunho", "pulado", agora=em("04:35"))               # do plano, antes da limpeza
+    robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:50"))
     r = checkup.sobreposicoes(AGORA)
-    assert r["rodadas_no_descurtir"] == ["04:00", "04:15"] and len(r["sem_limpeza"]) == 1
-    # A rodada sem a limpeza não é outra tarefa na hora do descurtir.
-    assert r["no_descurtir"] == []
-
-
-def test_preparo_pedido_no_botao_nao_e_sobreposicao():
-    # 31/10, 20:32: o rascunho pedido no Preparar 1 Agora dentro do Horário das Interações entrou
-    # como sobreposição, como se o robô tivesse preparado sozinho antes do feed. O pedido no
-    # botão vale a qualquer hora: o preparo que começa logo depois dele aparece à parte.
-    import robo_shopee_video as robo
-    import registro_processos
-    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_interacoes_inicio": 9,
-                                         "robo_interacoes_fim": 11})
-    dia = AGORA.strftime("%Y-%m-%d")
-
-    def em(hora):
-        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
-
-    registro_processos.registrar("shopee_video", robo.PROCESSO_DO_BOTAO, "pedido", ok=None, agora=em("09:20"))
-    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:31"))                # o pedido no botão
-    robo.registrar_tentativa("rascunho", "pulado", agora=em("10:15"))               # do plano, antes do post antigo
-    robo.registrar_tentativa("post_antigo", "comentado", agora=em("10:50"))         # a interação da janela
-    r = checkup.sobreposicoes(AGORA)
-    assert [hora for hora, _o in r["pedidos_no_botao"]] == ["09:31"]
-    assert [hora for hora, _o in r["preparo_na_janela"]] == ["10:15"]
+    assert [hora for hora, _o in r["pedidos_no_botao"]] == ["04:11"]
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:35"]
     # O post pedido no Postar Agora 🚀 (P138) também vale a qualquer hora.
     assert checkup.PROCESSO_DO_POSTAR_AGORA == robo.PROCESSO_DO_POSTAR_AGORA
     assert checkup.classificado("shopee_video", robo.PROCESSO_DO_POSTAR_AGORA)
     registro_processos.registrar("shopee_video", robo.PROCESSO_DO_POSTAR_AGORA, "pedido", ok=None,
-                                 agora=em("10:40"))
-    robo.registrar_tentativa("postar", "postado", agora=em("10:44"))
+                                 agora=em("04:36"))
+    robo.registrar_tentativa("postar", "postado", agora=em("04:38"))
     r = checkup.sobreposicoes(AGORA)
-    assert [hora for hora, _o in r["pedidos_no_botao"]] == ["09:31", "10:44"]
-    assert [hora for hora, _o in r["preparo_na_janela"]] == ["10:15"]
+    assert [hora for hora, _o in r["pedidos_no_botao"]] == ["04:11", "04:38"]
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:35"]
 
 
 def test_pontos_de_atencao():
@@ -819,6 +789,7 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     def antes(horas):
         return AGORA - timedelta(hours=horas)
 
+    registro("shopee_video", "leitura das respostas", "1ª de 3 hoje", ok=None, agora=antes(10))
     registro("shopee_video", "notificações (respostas)", "topo achado", "2 linha(s) nova(s)", ok=True, agora=antes(10))
     registro("shopee_video", "responder comentário", "respondido", ok=True, origem="a", agora=antes(10))
     registro("shopee_video", "responder comentário", "resposta no lugar errado", ok=False, origem="b", agora=antes(9))
@@ -837,7 +808,7 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 6 and r["feed_repetidos"] == 1
     assert r["feed_horas"] == ["17:20", "18:20", "19:20", "20:20", "21:35", "21:50"]
     assert r["feed_so_curtidos"] == 1
-    assert (r["leituras_hoje"], r["leituras_esperadas"]) == (1, 3)           # só a das 12h (P70)
+    assert (r["leituras_hoje"], r["leituras_esperadas"]) == (1, 3)           # só uma das 3 do dia (P161 1)
     robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
     for trecho in ("não ficaram embaixo do comentário certo", "ficaram sem resposta depois de 3 tentativas",
@@ -857,11 +828,10 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
 def test_feed_so_curtido_conta_no_dia_e_o_dia_com_menos_nao_e_cobrado():
     # Escolha do Rafael (P151 1): nem toda curtida vem com comentário, e o feed tem limite, não
     # meta. O só curtido conta nos do dia; abaixo do limite, nada. O feed se espalha pelo dia todo
-    # e não segura o preparo da janela (P152).
+    # (P152) e não conta nas sobreposições.
     import registro_processos
     import robo_shopee_video as robo
-    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_interacoes_inicio": 20,
-                                         "robo_interacoes_fim": 21})
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
     dia = AGORA.strftime("%Y-%m-%d")
 
     def em(hora):
@@ -872,11 +842,11 @@ def test_feed_so_curtido_conta_no_dia_e_o_dia_com_menos_nao_e_cobrado():
                                  ok=True, origem="v2", agora=em("20:25"))
     registro_processos.registrar("shopee_video", "feed: comentar", "não confirmado", ok=False, origem="v3",
                                  agora=em("20:40"))
-    # Sem interação da janela depois dele, o preparo das 20:50 não é sobreposição (P26 e P152).
     robo.registrar_tentativa("rascunho", "salvo", agora=em("20:50"))
     r = checkup.interacoes_da_shopee_video(AGORA)
     assert (r["feed_hoje"], r["feed_so_curtidos"]) == (3, 1)
-    assert checkup.sobreposicoes(AGORA)["preparo_na_janela"] == []
+    sobre = checkup.sobreposicoes(AGORA)
+    assert sobre["no_descurtir"] == [] and sobre["antigo_fora"] == [] and sobre["leituras_fora"] == []
     robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
     r.update(respostas={}, duplicadas=0, rodou_hoje=True, leituras_hoje=1, leituras_esperadas=1,
              seguidores={"lido_hoje": True, "dia": None, "semana": None})
@@ -918,31 +888,35 @@ def test_comentario_no_proprio_video_no_radar():
 
 
 def test_leituras_das_notificacoes_contam_as_vezes_do_dia():
-    # Escolha do Rafael (P70): as Notificações às 12h, às 17h e no começo do Horário das Interações.
+    # Escolhas do Rafael (P70 e P161 1): as Notificações 3 vezes por dia, das 8h às 22h, uma em cada
+    # parte do dia (8h, 12h40 e 17h20), cobrada só depois que a parte acaba.
     import registro_processos
     import robo_shopee_video as robo
-    db.salvar_config(robo.CHAVE_CONFIG, {"robo_interacoes_inicio": 20, "robo_interacoes_fim": 21})
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_inicio": 0, "robo_fim": 24})
     dia = AGORA.strftime("%Y-%m-%d")
 
     def em(hora):
         return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
 
-    def leu(hora):
-        registro_processos.registrar("shopee_video", "notificações (respostas)", "topo achado", ok=True, agora=em(hora))
+    def leu(hora, vez):
+        registro_processos.registrar("shopee_video", robo.PROCESSO_DA_LEITURA, f"{vez}ª de 3 hoje", ok=None,
+                                     agora=em(hora))
 
-    assert checkup.leituras_das_notificacoes(em("12:30")) == (0, 0)           # a vez das 12h ainda pode sair
-    leu("12:10")
-    leu("12:25")                                                                # a continuação, na mesma vez
-    assert checkup.leituras_das_notificacoes(em("12:30")) == (1, 1)
-    assert checkup.leituras_das_notificacoes(em("18:00")) == (1, 2)           # a das 17h faltou
-    leu("18:40")                                                                # atrasada, ainda na vez das 17h
+    assert checkup.leituras_das_notificacoes(em("12:30")) == (0, 0)           # a 1ª ainda pode sair
+    assert checkup.leituras_das_notificacoes(em("12:40")) == (0, 1)
+    leu("12:10", 1)
+    registro_processos.registrar("shopee_video", "notificações (respostas)", "topo achado", ok=True,
+                                 agora=em("12:25"))                            # a continuação não conta
+    assert checkup.leituras_das_notificacoes(em("12:45")) == (1, 1)
+    assert checkup.leituras_das_notificacoes(em("17:20")) == (1, 2)           # a 2ª faltou
+    leu("17:30", 2)                                                             # atrasada
     assert checkup.leituras_das_notificacoes(em("22:20")) == (2, 3)
-    leu("20:05")
+    leu("20:30", 3)
     assert checkup.leituras_das_notificacoes(em("22:20")) == (3, 3)
-    # A vez que cai toda fora do horário em que o robô roda não é cobrada.
+    # A parte que cai toda fora do horário em que o robô roda não é cobrada.
     db.salvar_config(robo.CHAVE_CONFIG, {"robo_inicio": 8, "robo_fim": 12})
-    assert checkup.leituras_das_notificacoes(em("10:00").replace(day=AGORA.day + 1)) == (0, 0)
-    assert checkup.leituras_das_notificacoes(em("23:00").replace(day=AGORA.day + 1)) == (0, 0)
+    amanha = em("23:00").replace(day=AGORA.day + 1)
+    assert checkup.leituras_das_notificacoes(amanha) == (0, 1)
 
 
 def test_seguidores_mostram_so_a_variacao():

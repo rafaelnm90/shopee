@@ -396,7 +396,8 @@ SEM_META = {
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
     ("shopee_video", "curtir o produto"), ("shopee_video", "descurtir no fim do rascunho"),
     ("shopee_video", "feed: "), ("shopee_video", "próprio post: "), ("shopee_video", "post antigo: "),
-    ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
+    ("shopee_video", "notificações (respostas)"), ("shopee_video", "leitura das respostas"),
+    ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
@@ -1218,9 +1219,9 @@ def robo_agora(agora=None):
 # O que o robô da Shopee Vídeo faz no celular, pelo nome no registro e pela ação da
 # tentativa: o que fica de fora é do bot (rodada, assistente, avisos), não do celular.
 PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)", "descurtir em Meus Favoritos (comprador)")
-# As respostas aos comentários dos vídeos do Rafael saem também fora do Horário das
-# Interações (às 12h e às 17h, P70); o comentário do post antigo fica nele. O feed se espalha
-# pelo dia todo, dentro ou fora dele (P152). O comentário de depois do post vai com o post (P148 2).
+# As respostas aos comentários dos vídeos do Rafael e o comentário do post antigo saem durante o
+# dia (P161 1); o feed se espalha pelo dia todo (P152). O comentário de depois do post vai com o
+# post (P148 2).
 PROCESSOS_DE_INTERACAO = ("post antigo:",)
 PROCESSOS_DO_FEED = ("feed:",)
 PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário")
@@ -1228,13 +1229,12 @@ PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
                         "preparo interrompido", "próprio post:")
 ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("post_antigo",), ("rascunho", "postar", "comentar_post")
-# Apagar um rascunho recusado pode rodar no Horário das Interações e no de postar (P22 a
-# P24): não é preparo, mas conta na hora do descurtir. Decisão do Rafael: DECISOES.md,
-# Shopee Vídeo.
+# Apagar um rascunho recusado não é preparo, mas conta na hora do descurtir. Decisão do Rafael:
+# DECISOES.md, Shopee Vídeo.
 ACOES_EM_QUALQUER_HORARIO = ("apagar",)
-# O rascunho que o Rafael pede no Preparar 1 Agora vale a qualquer hora: o preparo que começa
-# até PREPARO_DO_BOTAO depois do pedido (o registro "preparar 1 agora") não é sobreposição. O
-# post pedido no Postar Agora 🚀 (P138, o registro "postar agora") também vale a qualquer hora.
+# O rascunho que o Rafael pede no Preparar 1 Agora vale a qualquer hora: o que o robô faz até
+# PREPARO_DO_BOTAO depois do pedido (o registro "preparar 1 agora") não é sobreposição. O post
+# pedido no Postar Agora 🚀 (P138, o registro "postar agora") também vale a qualquer hora.
 PROCESSO_DO_BOTAO = "preparar 1 agora"
 PROCESSO_DO_POSTAR_AGORA = "postar agora"
 PREPARO_DO_BOTAO = timedelta(minutes=30)
@@ -1293,62 +1293,58 @@ def sobreposicoes(agora=None):
     """
     Uma tarefa em cima da outra nas últimas 24 h, para o Claude conferir (pergunta do
     Rafael, 25/10: "a sobreposição pode atrapalhar"). O celular tem uma trava (uma tarefa
-    de cada vez); aqui entra o que cai no horário de outra:
-    - na hora do descurtir (4h), qualquer outra atividade do robô;
-    - com o Horário das Interações escolhido, o comentário do post antigo fora dele e preparo ou
-      postagem dentro dele antes de acabarem as interações dele, as respostas e o post antigo
-      (P26); o feed se espalha pelo dia todo e não conta aqui (P152);
+    de cada vez); aqui entra o que cai no horário de outra ou fora do horário dela:
+    - na hora do descurtir (4h), outra atividade do robô antes de a limpeza acabar: ela é a 1ª
+      coisa do dia, e só acabada a hora fica livre (P25 e P161 1);
+    - leitura das respostas fora do dia (DURANTE_O_DIA_SV) ou a menos de ESPACO_DAS_RESPOSTAS_SV
+      da anterior, e o comentário do post antigo fora do dia (P161 1); o feed se espalha pelo
+      dia todo e não conta aqui (P152);
     - rotinas de texto do mesmo canal a menos de INTERVALO_CURTO_ROTINA min uma da outra;
     - os envios do modo assistente (só com o robô pausado: um cobre o outro).
     Só horas, ações e nomes fixos do código.
     """
     agora = _agora(agora)
     config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    desde = _momento(agora - timedelta(hours=24))
     atividades = atividades_do_celular(agora)
-    no_descurtir = [(m[11:16], o_que) for m, tipo, o_que in atividades
-                    if int(m[11:13]) == HORA_DO_DESCURTIR_SV and tipo != "descurtir"]
-    janela = None
-    if config.get("robo_interacoes_inicio") is not None and config.get("robo_interacoes_fim") is not None:
-        janela = (int(config["robo_interacoes_inicio"]), int(config["robo_interacoes_fim"]))
-    # A janela só vale do momento em que o Rafael a escolheu: o que veio antes seguia a regra
-    # de então e não conta como sobreposição.
-    janela_desde = config.get("robo_interacoes_desde") or ""
-    fora_da_janela, preparo_na_janela, pedidos_no_botao = [], [], []
+    # O último passo da limpeza na hora dela, em cada dia: o que veio antes dele na hora furou a vez dela.
+    fim_da_limpeza = {momento[:10]: momento for momento, tipo, _o in atividades
+                      if tipo == "descurtir" and int(momento[11:13]) == HORA_DO_DESCURTIR_SV}
     botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S") for processo in (PROCESSO_DO_BOTAO, PROCESSO_DO_POSTAR_AGORA)
-             for m, _p, _r, _d, _o in registro_processos.sequencia(
-                 "shopee_video", processo, _momento(agora - timedelta(hours=24)))]
+             for m, _p, _r, _d, _o in registro_processos.sequencia("shopee_video", processo, desde)]
 
     def pedido_no_botao(momento):
         quando = datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")
         return any(b <= quando <= b + PREPARO_DO_BOTAO for b in botao)
 
-    if janela:
-        def na_janela(momento):
-            return janela[0] <= int(momento[11:13]) < janela[1]
+    no_descurtir, pedidos_no_botao = [], []
+    for momento, tipo, o_que in atividades:
+        if (int(momento[11:13]) == HORA_DO_DESCURTIR_SV and tipo != "descurtir"
+                and momento < fim_da_limpeza.get(momento[:10], "")):
+            (pedidos_no_botao if pedido_no_botao(momento) else no_descurtir).append((momento[11:16], o_que))
 
-        # A última interação da janela em cada dia (as respostas e o post antigo): preparo ou
-        # postagem dentro dela antes disso furou a P26 (o postar só volta quando elas acabam).
-        ultima_da_janela = {momento[:10]: momento for momento, tipo, _o in atividades
-                            if tipo in ("interação", "respostas") and na_janela(momento)}
-        for momento, tipo, o_que in atividades:
-            if momento < janela_desde:
-                continue
-            if tipo == "interação" and not na_janela(momento):
-                fora_da_janela.append((momento[11:16], o_que))
-            elif (tipo == "preparo" and na_janela(momento) and int(momento[11:13]) != HORA_DO_DESCURTIR_SV
-                  and momento < ultima_da_janela.get(momento[:10], "")):
-                (pedidos_no_botao if pedido_no_botao(momento) else preparo_na_janela).append((momento[11:16], o_que))
+    def fora_do_dia(momento):
+        return not DURANTE_O_DIA_SV[0] <= int(momento[11:13]) < DURANTE_O_DIA_SV[1]
+
+    leituras = registro_processos.sequencia("shopee_video", PROCESSO_DA_LEITURA_SV, desde)
+    leituras_fora = [(momento[11:16], resultado) for momento, _p, resultado, _d, _o in leituras
+                     if fora_do_dia(momento) and not pedido_no_botao(momento)]
+    leituras_coladas = [(antes[0][11:16], depois[0][11:16]) for antes, depois in zip(leituras, leituras[1:])
+                        if antes[0][:10] == depois[0][:10] and not pedido_no_botao(depois[0])
+                        and datetime.strptime(depois[0], "%Y-%m-%d %H:%M:%S")
+                        - datetime.strptime(antes[0], "%Y-%m-%d %H:%M:%S") < ESPACO_DAS_RESPOSTAS_SV]
+    antigo_fora = [(momento[11:16], o_que) for momento, tipo, o_que in atividades
+                   if tipo == "interação" and fora_do_dia(momento) and not pedido_no_botao(momento)]
     coladas = {}
     for canal, horarios in rotinas_coladas(agora).items():
         if horarios:
             coladas[canal] = horarios
     assistente = [(momento[11:16], resultado) for momento, _p, resultado, _d, _o in registro_processos.sequencia(
-        "shopee_video", "assistente: envio", _momento(agora - timedelta(hours=24)))]
+        "shopee_video", "assistente: envio", desde)]
     rodadas, sem_limpeza = rodadas_na_hora_do_descurtir(agora)
-    return {"janela": janela, "janela_desde": janela_desde, "no_descurtir": no_descurtir,
-            "rodadas_no_descurtir": rodadas, "sem_limpeza": sem_limpeza,
-            "fora_da_janela": fora_da_janela,
-            "preparo_na_janela": preparo_na_janela, "pedidos_no_botao": pedidos_no_botao,
+    return {"no_descurtir": no_descurtir, "pedidos_no_botao": pedidos_no_botao, "rodadas_no_descurtir": rodadas,
+            "sem_limpeza": sem_limpeza,
+            "leituras_fora": leituras_fora, "leituras_coladas": leituras_coladas, "antigo_fora": antigo_fora,
             "rotinas_coladas": coladas, "assistente": assistente,
             "robo_ativo": not config.get("robo_pausado", True)}
 
@@ -1400,37 +1396,41 @@ SO_CURTIDO_NO_FEED = "só curtido"
 FEITOS_NO_FEED = ("comentado", "não confirmado", SO_CURTIDO_NO_FEED)
 # Também de lá: o comentário do dia num post antigo (P148 2).
 POSTS_ANTIGOS_POR_DIA = 1
-# Os mesmos do robo_shopee_video (o tests/test_checkup.py confere): as respostas saem às 12h,
-# às 17h e no começo do Horário das Interações, às 20h sem ele (P70), e o robô roda no
-# Horário do Robô (o padrão) e no das Interações.
-HORAS_DAS_RESPOSTAS_SV, HORA_DAS_RESPOSTAS_SEM_JANELA_SV = (12, 17), 20
+# Os mesmos do robo_shopee_video (o tests/test_checkup.py confere): as respostas e o post antigo
+# saem durante o dia (DURANTE_O_DIA_SV), sem hora marcada; as respostas, LEITURAS_DAS_RESPOSTAS_SV
+# vezes por dia, cada leitura a partir do começo da parte dela no dia e a pelo menos
+# ESPACO_DAS_RESPOSTAS_SV da anterior, e cada leitura nova fica no registro (PROCESSO_DA_LEITURA_SV,
+# P161 1). O robô roda no Horário do Robô (o padrão, HORARIO_DO_ROBO_SV).
+DURANTE_O_DIA_SV = (8, 22)
+LEITURAS_DAS_RESPOSTAS_SV = 3
+ESPACO_DAS_RESPOSTAS_SV = timedelta(hours=3)
+PROCESSO_DA_LEITURA_SV = "leitura das respostas"
 HORARIO_DO_ROBO_SV = (8, 22)
 
 
 def leituras_das_notificacoes(agora=None):
     """
-    (feitas, esperadas) hoje: as vezes em que o robô devia ler as Notificações e responder
-    (horas_das_respostas do robô, P70) e quantas tiveram leitura. Cada vez vai até a
-    seguinte; a da hora de agora só é cobrada depois que a hora passa, e a que cai toda fora
-    do horário em que o robô roda não é cobrada.
+    (feitas, esperadas) hoje: as leituras das Notificações para responder (o registro de cada
+    leitura nova, P161 1) e quantas já deviam ter saído: uma por parte do dia (DURANTE_O_DIA_SV
+    dividido em LEITURAS_DAS_RESPOSTAS_SV partes iguais), cobrada depois que a parte acaba; a parte
+    que cai toda fora do Horário do Robô não é cobrada.
     """
     agora = _agora(agora)
     config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
-    inicio, fim = config.get("robo_interacoes_inicio"), config.get("robo_interacoes_fim")
-    janela = (int(inicio), int(fim)) if inicio is not None and fim is not None else None
     robo = (int(config.get("robo_inicio", HORARIO_DO_ROBO_SV[0])), int(config.get("robo_fim", HORARIO_DO_ROBO_SV[1])))
-    horas = sorted(set(HORAS_DAS_RESPOSTAS_SV) | {janela[0] if janela else HORA_DAS_RESPOSTAS_SEM_JANELA_SV})
-    leituras = registro_processos.sequencia("shopee_video", "notificações (respostas)",
+    leituras = registro_processos.sequencia("shopee_video", PROCESSO_DA_LEITURA_SV,
                                             agora.strftime("%Y-%m-%d 00:00:00"))
-    lidas = {int(momento[11:13]) for momento, *_ in leituras if momento <= _momento(agora)}
-    feitas = esperadas = 0
-    for hora, seguinte in zip(horas, horas[1:] + [24]):
-        feita = any(hora <= lida < seguinte for lida in lidas)
-        roda = any(robo[0] <= h < robo[1] or (janela and janela[0] <= h < janela[1])
-                   for h in range(hora, min(seguinte, agora.hour)))
-        feitas += feita
-        esperadas += feita or roda
-    return feitas, esperadas
+    feitas = sum(1 for momento, *_ in leituras if momento <= _momento(agora))
+    inicio, fim = (hora * 60 for hora in DURANTE_O_DIA_SV)
+    parte = (fim - inicio) / LEITURAS_DAS_RESPOSTAS_SV
+    agora_em_minutos = agora.hour * 60 + agora.minute
+    esperadas = 0
+    for vez in range(LEITURAS_DAS_RESPOSTAS_SV):
+        comeco, acaba = inicio + vez * parte, inicio + (vez + 1) * parte
+        if agora_em_minutos < acaba:
+            break
+        esperadas += max(comeco, robo[0] * 60) < min(acaba, robo[1] * 60)
+    return feitas, max(esperadas, feitas)
 
 
 # Os seguidores que o robô anota (a mesma chave do robo_shopee_video.CHAVE_SEGUIDORES; o
@@ -1467,7 +1467,7 @@ def interacoes_da_shopee_video(agora=None):
     resultado das respostas nas últimas 24 h, os comentários com mais de uma resposta do
     perfil, as vezes em que as Notificações foram lidas hoje (P70), os vídeos do feed hoje
     (até o limite, sem meta, e quantos só curtidos: P151 1), com a hora de cada um (espalhados
-    e no Horário das Interações), o mesmo vídeo do feed feito mais de uma vez em 3 dias e os
+    pelo dia, P152), o mesmo vídeo do feed feito mais de uma vez em 3 dias e os
     seguidores (P70). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
     """
     agora = _agora(agora)
@@ -1484,7 +1484,7 @@ def interacoes_da_shopee_video(agora=None):
         "duplicadas": sum(1 for _m, _p, resultado, detalhe, _o in respostas
                           if resultado == "já respondido" and not str(detalhe).startswith("1 ")),
         "rodou_hoje": bool(registro_processos.sequencia("shopee_video", "notificações (respostas)", hoje)),
-        # As vezes de hoje com leitura das Notificações e as que já deviam ter saído (P70).
+        # As leituras das Notificações de hoje e as que já deviam ter saído (P70 e P161 1).
         **dict(zip(("leituras_hoje", "leituras_esperadas"), leituras_das_notificacoes(agora))),
         "feed_hoje": sum(1 for momento, *_ in feed if momento >= hoje),
         "feed_so_curtidos": sum(1 for momento, _p, resultado, *_ in feed
@@ -1687,15 +1687,17 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
                 pontos.append(f"Comentário no próprio vídeo: {interacoes['antigos_hoje']} de {POSTS_ANTIGOS_POR_DIA} "
                               "post antigo comentado hoje")
     if sobre:
+        dia = f"das {DURANTE_O_DIA_SV[0]}h às {DURANTE_O_DIA_SV[1]}h"
         if sobre["no_descurtir"]:
             pontos.append(f"Sobreposição: {len(sobre['no_descurtir'])} atividade(s) do robô da Shopee Vídeo na hora "
-                          f"do descurtir ({HORA_DO_DESCURTIR_SV}h)")
-        if sobre["fora_da_janela"]:
-            pontos.append(f"Sobreposição: {len(sobre['fora_da_janela'])} interação(ões) do robô fora do Horário "
-                          "das Interações")
-        if sobre["preparo_na_janela"]:
-            pontos.append(f"Sobreposição: {len(sobre['preparo_na_janela'])} passo(s) de preparo ou postagem no "
-                          "Horário das Interações antes das respostas e do post antigo")
+                          f"do descurtir ({HORA_DO_DESCURTIR_SV}h) antes de a limpeza acabar")
+        if sobre["leituras_fora"]:
+            pontos.append(f"Sobreposição: {len(sobre['leituras_fora'])} leitura(s) das respostas fora do dia ({dia})")
+        if sobre["leituras_coladas"]:
+            pontos.append(f"Sobreposição: {len(sobre['leituras_coladas'])} leitura(s) das respostas a menos de "
+                          f"{int(ESPACO_DAS_RESPOSTAS_SV.total_seconds() // 3600)} h da anterior")
+        if sobre["antigo_fora"]:
+            pontos.append(f"Sobreposição: {len(sobre['antigo_fora'])} comentário(s) no post antigo fora do dia ({dia})")
     for robo, processo, esperado, feito, minimo in metas or []:
         if feito < minimo:
             pontos.append(f"{robo}: {processo}: rodou {feito} vez(es) em 24 h, o esperado é {esperado}")
@@ -1935,14 +1937,17 @@ def main():
 
     print("\n== Sobreposições (uma tarefa no horário de outra, 24 h)")
     sobre = sobreposicoes(agora)
-    for titulo, lista in ((f"Robô na hora do descurtir ({HORA_DO_DESCURTIR_SV}h), fora o descurtir",
+    dia = f"das {DURANTE_O_DIA_SV[0]}h às {DURANTE_O_DIA_SV[1]}h"
+    for titulo, lista in ((f"Robô na hora do descurtir ({HORA_DO_DESCURTIR_SV}h) antes de a limpeza acabar",
                            sobre["no_descurtir"]),
-                          ("Interação fora do Horário das Interações", sobre["fora_da_janela"]),
-                          ("Preparo ou postagem no Horário das Interações antes das respostas e do post antigo",
-                           sobre["preparo_na_janela"])):
+                          (f"Leitura das respostas fora do dia ({dia})", sobre["leituras_fora"]),
+                          (f"Comentário no post antigo fora do dia ({dia})", sobre["antigo_fora"])):
         print(f"{titulo}: {len(lista)}")
         for hora, o_que in lista[:10]:
             print(f"   {hora} {o_que}")
+    print(f"Leituras das respostas a menos de {int(ESPACO_DAS_RESPOSTAS_SV.total_seconds() // 3600)} h da anterior: "
+          f"{len(sobre['leituras_coladas'])}" + "".join(f"\n   {antes} → {depois}"
+                                                       for antes, depois in sobre["leituras_coladas"][:10]))
     rodadas = sobre["rodadas_no_descurtir"]
     print(f"Rodadas na hora do descurtir ({HORA_DO_DESCURTIR_SV}h): {len(rodadas)}"
           + (f" ({', '.join(rodadas[:8])})" if rodadas else "")
@@ -1950,16 +1955,8 @@ def main():
     for hora, porque in sobre["sem_limpeza"][:8]:
         print(f"   {hora} {porque}")
     if sobre["pedidos_no_botao"]:
-        print(f"   à parte, pedidos no Preparar 1 Agora (valem a qualquer hora): {len(sobre['pedidos_no_botao'])} - "
+        print(f"   à parte, pedidos nos botões do painel (valem a qualquer hora): {len(sobre['pedidos_no_botao'])} - "
               + ", ".join(hora for hora, _o in sobre["pedidos_no_botao"][:10]))
-    if not sobre["janela"]:
-        print("   (Horário das Interações não escolhido: interações e preparo dividem o Horário do Robô)")
-    elif sobre["janela_desde"]:
-        print(f"   (Horário das Interações {sobre['janela'][0]}h-{sobre['janela'][1]}h, conferido desde "
-              f"{sobre['janela_desde'][8:10]}/{sobre['janela_desde'][5:7]} {sobre['janela_desde'][11:16]})")
-    else:
-        print(f"   (Horário das Interações {sobre['janela'][0]}h-{sobre['janela'][1]}h, sem a hora em que foi "
-              "escolhido: conferido nas 24 h)")
     print("Rotinas de texto coladas (menos de "
           f"{INTERVALO_CURTO_ROTINA} min no mesmo canal): {sum(len(v) for v in sobre['rotinas_coladas'].values())}")
     for canal, pares in sobre["rotinas_coladas"].items():

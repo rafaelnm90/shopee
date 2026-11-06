@@ -541,28 +541,44 @@ def test_comentario_que_a_ia_pula_avisa_e_nao_volta(monkeypatch, avisos):
     assert not app.enviadas and avisos and it.terminado(it.marca(NOTIFICACAO))
 
 
-def test_respostas_tres_vezes_por_dia_e_o_feed_espalhado_no_horario_do_robo():
-    # Escolha do Rafael (P70): as Notificações às 12h, às 17h e no começo do Horário das
-    # Interações (às 20h sem ele), dentro ou fora dele.
-    assert not robo.respostas_pendentes(momento("2026-10-24 11:59"))
-    assert robo.respostas_pendentes(momento("2026-10-24 12:05"))
-    robo.gravar_estado(respostas_em="2026-10-24 12:05:00")
-    assert not robo.respostas_pendentes(momento("2026-10-24 16:59"))
+def test_respostas_tres_vezes_durante_o_dia_com_3_h_entre_elas_e_o_feed_espalhado(monkeypatch):
+    # Escolhas do Rafael (P70 e P161 1): as Notificações 3 vezes por dia, das 8h às 22h, sem hora
+    # marcada, com pelo menos 3 h entre uma leitura e outra; cada uma a partir do começo da parte
+    # dela no dia (8h, 12h40 e 17h20), para as três não saírem todas de manhã.
+    assert robo.LEITURAS_DAS_RESPOSTAS == 3 and robo.DURANTE_O_DIA == (8, 22)
+    assert not robo.respostas_pendentes(momento("2026-10-24 07:59"))
+    assert robo.respostas_pendentes(momento("2026-10-24 08:00"))
+    robo.contar_leitura(momento("2026-10-24 08:05"))
+    assert robo.leituras_de_hoje(momento("2026-10-24 09:00")) == 1
+    assert not robo.respostas_pendentes(momento("2026-10-24 12:35"))
+    assert robo.respostas_pendentes(momento("2026-10-24 12:40"))
     robo.gravar_estado(respostas_continuar=True)                          # parou no limite: segue
-    assert robo.respostas_pendentes(momento("2026-10-24 12:20"))
+    assert robo.respostas_pendentes(momento("2026-10-24 09:20"))
     robo.gravar_estado(respostas_continuar=False)
-    assert robo.respostas_pendentes(momento("2026-10-24 17:00"))
-    robo.gravar_estado(respostas_em="2026-10-24 17:10:00")
-    assert not robo.respostas_pendentes(momento("2026-10-24 19:59"))
-    assert robo.respostas_pendentes(momento("2026-10-24 20:00"))
-    robo.gravar_estado(respostas_em="2026-10-24 20:05:00")
-    assert not robo.respostas_pendentes(momento("2026-10-24 23:59"))
-    assert robo.respostas_pendentes(momento("2026-10-25 12:00"))
-    # Com o Horário das Interações às 15h, a 3ª vez é às 15h.
-    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_interacoes_inicio": 15, "robo_interacoes_fim": 16})
-    assert robo.horas_das_respostas(robo.ler_config()) == [12, 15, 17]
+    # A leitura que começou tarde empurra a seguinte para 3 h depois dela.
+    robo.contar_leitura(momento("2026-10-24 15:00"))
+    assert not robo.respostas_pendentes(momento("2026-10-24 17:20"))
+    assert not robo.respostas_pendentes(momento("2026-10-24 17:59"))
+    assert robo.respostas_pendentes(momento("2026-10-24 18:00"))
+    robo.contar_leitura(momento("2026-10-24 18:00"))
+    # Feitas as 3, só no dia seguinte, a partir das 8h.
+    assert not robo.respostas_pendentes(momento("2026-10-24 21:30"))
+    assert not robo.respostas_pendentes(momento("2026-10-25 07:59"))
+    assert robo.respostas_pendentes(momento("2026-10-25 08:00"))
+    linhas = [r[2] for r in robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_LEITURA,
+                                                               "2000-01-01 00:00:00")]
+    assert linhas == ["1ª de 3 hoje", "2ª de 3 hoje", "3ª de 3 hoje"]
+    # A continuação da leitura que parou no limite da rodada não conta como outra leitura.
+    monkeypatch.setattr(robo, "responder_comentarios", lambda d, agora=None: "respostas: nenhum comentário novo")
+    robo.gravar_estado(respostas_continuar=True)
+    robo._agir(None, "responder", None, False, robo.ler_config(), momento("2026-10-25 08:15"))
+    assert robo.leituras_de_hoje(momento("2026-10-25 08:15")) == 0 and not robo.ler_estado()["respostas_continuar"]
+    robo._agir(None, "responder", None, False, robo.ler_config(), momento("2026-10-25 08:30"))
+    assert robo.leituras_de_hoje(momento("2026-10-25 08:30")) == 1
+    # Uma leitura que não saiu até as 22h não sai fora do dia.
+    robo.gravar_estado(respostas_leituras={"dia": "2026-10-26", "vezes": 2}, respostas_em="2026-10-26 18:30:00")
+    assert not robo.respostas_pendentes(momento("2026-10-26 22:00"))
     # O feed (P152): até 5 por dia, espalhados pelo Horário do Robô (das 8h às 22h: um a cada 2h40).
-    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO})
     agora = momento("2026-10-24 10:00")
     assert robo.feed_pendente(agora)
     robo.gravar_estado(feed_em="2026-10-24 09:00:00")
@@ -576,30 +592,28 @@ def test_respostas_tres_vezes_por_dia_e_o_feed_espalhado_no_horario_do_robo():
     assert not robo.feed_pendente(momento("2026-10-24 20:00"))
 
 
-def _janela_das_20_as_21():
-    config = {**robo.PADRAO, "robo_interacoes_inicio": 20, "robo_interacoes_fim": 21}
-    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
-    return config
-
-
 def test_feed_espalhado_no_dia_todo_e_o_que_falha_tenta_de_novo_na_rodada_seguinte(monkeypatch, avisos, ia_do_feed):
     # Escolha do Rafael (P152): os 5 do dia espalhados pelo Horário do Robô (no Dia Todo, um a
-    # cada 4h25, fora a hora das 4h, que é do descurtir), fora ou dentro do Horário das
-    # Interações; o que falha não conta, e a rodada seguinte tenta de novo, até dar certo.
-    config = {**_janela_das_20_as_21(), "robo_inicio": 0, "robo_fim": 24}
+    # cada 4h40: a hora das 4h conta, porque acabada a limpeza ela fica livre, P161 1); o que falha
+    # não conta, e a rodada seguinte tenta de novo, até dar certo.
+    config = {**robo.PADRAO, "robo_inicio": 0, "robo_fim": 24}
     robo.db.salvar_config(robo.CHAVE_CONFIG, config)
-    assert robo.intervalo_do_feed(config) == timedelta(hours=4, minutes=25)
+    assert robo.intervalo_do_feed(config) == timedelta(hours=4, minutes=40)
     robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
     app = CelularDoFeed()
     agora = momento("2026-10-28 00:05")
     assert robo.feed_pendente(agora)
     assert robo._agir(app, "feed", None, False, config, agora) == "feed: 1 vídeo curtido e comentado"
     assert robo.ler_estado()["feed_em"] == "2026-10-28 00:05:00"
-    assert not robo.feed_pendente(momento("2026-10-28 04:20"))
-    assert robo.feed_pendente(momento("2026-10-28 04:30"))
-    # Às 4h, a hora é do descurtir: o feed fica para as 5h.
-    robo.gravar_estado(treino_semana=robo.semana(agora), descurtir_em="2026-10-28 04:00:00", favoritos_limpos=True)
-    assert robo.o_que_fazer(config, momento("2026-10-28 04:30")) is None
+    assert not robo.feed_pendente(momento("2026-10-28 04:40"))
+    assert robo.feed_pendente(momento("2026-10-28 04:45"))
+    # Às 4h, a limpeza vem primeiro; acabada, o feed sai na mesma hora.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    robo.gravar_estado(treino_semana=robo.semana(agora))
+    assert robo.o_que_fazer(config, momento("2026-10-28 04:45")) == ("descurtir", None)
+    robo.gravar_estado(descurtir_em="2026-10-28 04:00:00", favoritos_limpos=True)
+    assert robo.o_que_fazer(config, momento("2026-10-28 04:45")) == ("feed", None)
     # Às 5h, a curtida não pega: nada conta, o feed_em fica, e a rodada das 5:15 tenta de novo.
     app.atual, app.indice = "inicio", 0
     monkeypatch.setattr(app, "click", lambda x, y, original=app.click: None if (x, y) == (1000, 1640)
@@ -609,9 +623,6 @@ def test_feed_espalhado_no_dia_todo_e_o_que_falha_tenta_de_novo_na_rodada_seguin
     assert robo.ler_estado()["feed_em"] == "2026-10-28 00:05:00"
     assert robo.videos_do_feed_que_faltam(momento("2026-10-28 05:15")) == 4
     assert robo.feed_pendente(momento("2026-10-28 05:15"))
-    # Fora do Horário das Interações (20h às 21h), o feed sai mesmo assim.
-    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
-    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
     assert robo.o_que_fazer(config, momento("2026-10-28 05:15")) == ("feed", None)
 
 
@@ -750,10 +761,10 @@ def test_feed_pula_a_live_e_o_video_do_rafael_curte_e_comenta_um_de_outro_criado
     assert app.comentarios == {2: ["Que achado! 0"], 3: ["Que achado! 1"]}
 
 
-def test_rodada_do_feed_faz_um_video_so_mesmo_no_fim_do_horario_das_interacoes(avisos, ia_do_feed):
+def test_rodada_do_feed_faz_um_video_so_mesmo_com_os_5_do_dia_por_fazer(avisos, ia_do_feed):
     # Escolha do Rafael (P152): um vídeo por rodada, nunca vários seguidos, mesmo com os 5 do dia
-    # por fazer e o Horário das Interações acabando.
-    _janela_das_20_as_21()
+    # por fazer e o dia acabando.
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO})
     robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
     app = CelularDoFeed()
     agora = momento("2026-10-28 20:44")
@@ -813,13 +824,15 @@ def test_rodada_responde_depois_dos_rascunhos_e_o_feed_por_ultimo(monkeypatch):
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     config = {**robo.PADRAO, "robo_pausado": False, "robo_limite_min": 1, "robo_limite_max": 1,
               "robo_inicio": 0, "robo_fim": 24}
-    agora = momento("2026-10-27 23:59")
+    agora = momento("2026-10-27 21:00")
     robo.gravar_estado(treino_semana=robo.semana(agora))
+    robo.estado_do_dia(config, agora)
+    robo.db.atualizar_config(robo.CHAVE_DIA, lambda plano: plano.update(horarios=["20:00"], feitos=0))
     assert robo.o_que_fazer(config, agora) == ("rascunho", None)
     assert robo.o_que_fazer(config, agora) == ("responder", None)
-    robo.gravar_estado(respostas_em="2026-10-27 23:59:00")
+    robo.contar_leitura(agora)
     assert robo.o_que_fazer(config, agora) == ("feed", None)
-    robo.gravar_estado(feed_em="2026-10-27 23:59:00")
+    robo.gravar_estado(feed_em="2026-10-27 21:00:00")
     assert robo.o_que_fazer(config, agora) is None
 
 
@@ -1180,16 +1193,21 @@ def test_coracao_ja_curtido_nao_e_tocado_e_texto_repetido_para_antes_de_escrever
     assert app.comentarios == ["Corre que vale a pena!"]                    # nada escrito
 
 
-def test_post_antigo_sai_no_horario_das_interacoes_uma_vez_por_dia(monkeypatch, avisos, ia_do_proprio, pelo_link):
+def test_post_antigo_sai_durante_o_dia_uma_vez_por_dia(monkeypatch, avisos, ia_do_proprio, pelo_link):
+    # Escolhas do Rafael (P148 2 e P161 1): 1 por dia, a qualquer hora das 8h às 22h.
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
-    config = _janela_das_20_as_21()
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: False)
+    config = {**robo.PADRAO, "robo_pausado": False}
+    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
     ident = _postado(quando="2026-10-28 10:00:00")
     agora = momento("2026-11-01 20:05")
-    robo.gravar_estado(treino_semana=robo.semana(agora), respostas_em="2026-11-01 20:00:00")
+    robo.gravar_estado(treino_semana=robo.semana(agora))
     assert robo.o_que_fazer(config, agora) == ("post_antigo", ident)
-    # Só no Horário das Interações.
     assert robo.post_antigo_pendente(momento("2026-11-01 15:00"))["id"] == ident
-    assert (robo.o_que_fazer(config, momento("2026-11-01 15:00")) or (None,))[0] != "post_antigo"
+    # Fora do dia, não.
+    assert robo.post_antigo_pendente(momento("2026-11-01 07:59")) is None
+    assert robo.post_antigo_pendente(momento("2026-11-01 22:00")) is None
     app = CelularDoPost()
     assert robo._agir(app, "post_antigo", ident, False, config, agora) == "post antigo: comentado e curtido"
     assert app.curtido and app.comentarios == ["Esse vale muito a pena! 1"]
