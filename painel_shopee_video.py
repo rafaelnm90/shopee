@@ -213,6 +213,10 @@ async def verificar_robo():
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] Aviso do fim da suspensão não saiu: {type(e).__name__}")
     config = ler_config()
+    if not robo_ocupado() and robo.pedidos_de_agora():
+        # O pedido do Fazer Agora ⏩ que ainda espera vale mesmo pausado ou fora do horário (P162 1).
+        await rodar_robo("--fazer")
+        return
     if robo_ocupado():
         # Na hora do descurtir, a rodada que não sai fica no registro com o porquê (o checkup
         # explica a limpeza que não rodou na hora).
@@ -409,6 +413,7 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_janela_robo = State()
     aguardando_confirmacao_janela_robo = State()
     aguardando_confirmacao_pausa_robo = State()
+    fazer_agora = State()
     rascunho = State()
     aguardando_confirmacao_recusa = State()
     aguardando_produtos_a_tirar = State()
@@ -621,6 +626,7 @@ BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
 BOTAO_ANTIGO_INTERACOES = "Horário das Interações 💬"
 BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
+BOTAO_FAZER_AGORA = "Fazer Agora ⏩"
 BOTAO_HISTORICO = "Histórico do Robô 📋"
 BOTAO_FILA = "Fila de Rascunhos 🗂️"
 BOTAO_EDICAO = "Edição dos Vídeos ✂️"
@@ -687,8 +693,8 @@ def teclado_robo(config):
         [KeyboardButton(text=BOTAO_FILA), KeyboardButton(text=BOTAO_PREPARAR)],
         [KeyboardButton(text=BOTAO_HISTORICO), KeyboardButton(text=BOTAO_EDICAO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
-        [KeyboardButton(text=BOTAO_PRODUTOS_A_MAIS), KeyboardButton(text=BOTAO_TREINO)],
-        [KeyboardButton(text=BOTAO_CELULAR)],
+        [KeyboardButton(text=BOTAO_FAZER_AGORA), KeyboardButton(text=BOTAO_PRODUTOS_A_MAIS)],
+        [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
 
@@ -854,6 +860,9 @@ def texto_robo(config, agora=None, celular=None):
         "prevista de cada post e, se algum passou da hora, por que ainda não saiu.\n"
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado); se o vídeo "
         "tiver um problema próprio, ele passa sozinho ao próximo, até 3.\n"
+        f"⏩ <b>{BOTAO_FAZER_AGORA}</b>: manda o robô fazer na próxima folga do celular a limpeza, a Saúde do Vídeo, as "
+        "respostas, o post antigo ou o feed, sem esperar a vez deles; o que já saiu hoje até o limite do dia ele não "
+        "repete.\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
@@ -1113,7 +1122,7 @@ async def mostrar_assistente(message: types.Message, state: FSMContext):
 # Depois de um Cancelar ❌ (bot_mestre), volta à tela de onde o ajuste saiu.
 ESTADOS_DO_ROBO = ("aguardando_tipo_faixa_robo", "aguardando_faixa_robo", "aguardando_confirmacao_faixa_robo", "aguardando_janela_robo",
                    "aguardando_confirmacao_janela_robo", "aguardando_confirmacao_pausa_robo", "menu_robo",
-                   "rascunho", "aguardando_confirmacao_recusa")
+                   "rascunho", "aguardando_confirmacao_recusa", "fazer_agora")
 # Do Tirar Produto ➖, o Cancelar ❌ volta ao rascunho, sem mudar as marcas.
 ESTADOS_DO_RASCUNHO = ("aguardando_produtos_a_tirar",)
 ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
@@ -1695,6 +1704,55 @@ async def preparar_handler(message: types.Message, state: FSMContext):
                          f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se o vídeo tiver um problema próprio, ele passa "
                          "sozinho ao próximo (até 3), e se algo impedir, ele diz o quê." + aviso, parse_mode="HTML")
     asyncio.create_task(rodar_robo("--preparar"))
+
+
+def rotulo_da_atividade(atividade, agora=None):
+    """A tecla da atividade no Fazer Agora: o nome e se já saiu hoje (✅) ou não (⏳), com a conta quando é mais de 1."""
+    nome = robo.ATIVIDADES_DO_FAZER_AGORA[atividade][0]
+    feitas, limite = robo.feitas_hoje(atividade, agora)
+    marca = "✅" if feitas >= limite else "⏳"
+    return f"{nome} {marca}" if limite == 1 else f"{nome} {feitas}/{limite} {marca}"
+
+
+def atividade_da_tecla(texto):
+    """A atividade do Fazer Agora pela tecla tocada (o nome no começo dela), ou None."""
+    return next((atividade for atividade, (nome, _acao) in robo.ATIVIDADES_DO_FAZER_AGORA.items()
+                 if (texto or "").startswith(nome)), None)
+
+
+def teclado_fazer_agora(agora=None):
+    teclas = [KeyboardButton(text=rotulo_da_atividade(atividade, agora)) for atividade in robo.ATIVIDADES_DO_FAZER_AGORA]
+    return montar_teclado([teclas[i:i + 2] for i in range(0, len(teclas), 2)] + [[KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+
+
+def texto_fazer_agora(agora=None):
+    """A tela do Fazer Agora ⏩: o que cada tecla faz e o que já saiu hoje. Escolha do Rafael (P162 1)."""
+    linhas = ["⏩ <b>Fazer Agora</b>",
+              "Toque numa atividade e o robô faz na próxima folga do celular, sem esperar a vez dela no dia (mesmo "
+              "pausado). O que já saiu hoje até o limite do dia ele não repete.", ""]
+    for atividade, (nome, _acao) in robo.ATIVIDADES_DO_FAZER_AGORA.items():
+        feitas, limite = robo.feitas_hoje(atividade, agora)
+        if limite == 1:
+            situacao = "✅ já saiu hoje" if feitas else "⏳ ainda não saiu hoje"
+        else:
+            situacao = f"{'✅' if feitas >= limite else '⏳'} {feitas} de {limite} hoje"
+        linhas.append(f"• <b>{nome}</b>: {situacao}")
+    pedidos = robo.pedidos_de_agora(agora)
+    if pedidos:
+        linhas.append("\n⏳ Esperando a folga do celular: "
+                      + ", ".join(robo.ATIVIDADES_DO_FAZER_AGORA[p["atividade"]][0] for p in pedidos) + ".")
+    return "\n".join(linhas)
+
+
+@router.message(F.text == BOTAO_FAZER_AGORA, StateFilter("*"))
+async def fazer_agora_handler(message: types.Message, state: FSMContext):
+    """
+    A tela do Fazer Agora ⏩: uma tecla para cada atividade do dia, dizendo se já saiu hoje.
+    Escolha do Rafael (06/11, P162 1): DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.fazer_agora)
+    await message.answer(texto_fazer_agora(), parse_mode="HTML", reply_markup=teclado_fazer_agora())
 
 
 @router.message(F.text == BOTAO_HISTORICO, StateFilter("*"))
@@ -2618,6 +2676,31 @@ async def confirmar_janela_robo(message: types.Message, state: FSMContext):
     await message.answer(f"Robô trabalhando <b>{rotulo_janela(inicio, fim)}</b>?", parse_mode="HTML",
                          reply_markup=teclado_aprovar_cancelar)
     await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_janela_robo)
+
+
+@router.message(ShopeeVideoFluxo.fazer_agora)
+async def pedir_atividade_agora(message: types.Message, state: FSMContext):
+    """
+    A tecla de uma atividade no Fazer Agora: a que ainda não saiu hoje até o limite do dia fica pedida,
+    e o robô a faz na próxima folga do celular; a que já saiu, ele avisa e não repete (P162 1).
+    """
+    if not _admin(message): return
+    atividade = atividade_da_tecla(message.text)
+    if not atividade:
+        await message.answer(f"Toque numa das atividades ou em {BOTAO_VOLTAR_ROBO}.", reply_markup=teclado_fazer_agora())
+        return
+    nome = robo.ATIVIDADES_DO_FAZER_AGORA[atividade][0]
+    pedido, feitas, limite = robo.pedir_agora(atividade)
+    if not pedido:
+        conta = f" ({feitas} de {limite}, o limite do dia)" if limite > 1 else ""
+        texto = f"✅ {nome} já saiu hoje{conta}. Não repito, para não passar do limite do dia."
+    else:
+        logger.info("⏩ Shopee Vídeo: Fazer Agora.")
+        texto = (f"⏩ Pedido anotado: o robô faz <b>{nome}</b> na próxima folga do celular"
+                 + (" (agora ele está no meio de uma rodada; faz logo depois)" if robo_ocupado() else "")
+                 + " e avisa aqui como foi.")
+        asyncio.create_task(rodar_robo("--fazer"))
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_fazer_agora())
 
 
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_janela_robo, F.text == "Aprovar ✅")

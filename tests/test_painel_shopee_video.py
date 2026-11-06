@@ -55,8 +55,8 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
         "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Fila de Rascunhos 🗂️", "Preparar 1 Agora ⚡",
         "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
-        "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Produtos a Mais 🛍️", "Testar Caminho 🧭",
-        "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
+        "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Fazer Agora ⏩", "Produtos a Mais 🛍️",
+        "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
     for trecho in ("Um cobre o outro", "Depuração por Wi-Fi", "Retomar Postagem ▶️", "Passo a Passo 📖"):
@@ -955,10 +955,10 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     botoes = ("painel_handler", "menu_robo_handler", "menu_assistente_handler", "como_funciona_handler",
               "voltar_ao_robo", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
               "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "escolher_tipo_faixa", "pedir_janela_robo",
-              "botao_antigo_das_interacoes", "treino_handler", "preparar_handler",
+              "botao_antigo_das_interacoes", "treino_handler", "preparar_handler", "fazer_agora_handler",
               "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
-                 "confirmar_faixa_robo", "confirmar_janela_robo", "salvar_recusa")
+                 "confirmar_faixa_robo", "confirmar_janela_robo", "pedir_atividade_agora", "salvar_recusa")
     assert max(ordem.index(b) for b in botoes) < min(ordem.index(r) for r in respostas)
 
 
@@ -1687,3 +1687,57 @@ def test_retomar_diz_os_horarios_fechados_pelo_assistente_e_os_sem_postei(bm, Ms
     assert "Ficou para trás hoje: 2 horário(s) de rascunho" in texto
     assert "1 vídeo(s) que o assistente mandou sem o celular e você marcou com Postei ✅" in texto
     assert "1 vídeo(s) que o assistente mandou hoje sem o celular ainda estão sem o Postei ✅" in texto
+
+
+def test_fazer_agora_mostra_o_que_saiu_hoje_e_pede_o_que_falta(bm, Msg, Est, monkeypatch):
+    # Escolha do Rafael (06/11, P162 1): uma tecla para cada atividade do dia, dizendo se já saiu hoje;
+    # a que não saiu, o robô faz na próxima folga do celular; a que já saiu, ele avisa e não repete.
+    sv, est = _painel(bm), Est()
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
+    hoje = sv.datetime.now(sv.fuso_horario).strftime("%Y-%m-%d")
+    sv.robo.gravar_estado(saude_lida_em=f"{hoje} 00:01:00", respostas_leituras={"dia": hoje, "vezes": 1})
+    msg = Msg("Fazer Agora ⏩")
+    rodar(sv.fazer_agora_handler(msg, est))
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.fazer_agora.state
+    assert "<b>Saúde do Vídeo</b>: ✅ já saiu hoje" in msg.saidas[-1]
+    assert "<b>Responder Comentários</b>: ⏳ 1 de 3 hoje" in msg.saidas[-1]
+    assert _textos(sv.teclado_fazer_agora()) == [
+        "Limpeza dos Favoritos ⏳", "Saúde do Vídeo ✅", "Responder Comentários 1/3 ⏳", "Comentário no Post Antigo ⏳",
+        "Feed 0/5 ⏳", "Voltar ao Robô 🔙"]
+    # A que já saiu: avisa e não pede.
+    msg = Msg("Saúde do Vídeo ✅")
+    rodar(sv.pedir_atividade_agora(msg, est))
+    assert "já saiu hoje. Não repito" in msg.saidas[-1] and sv.robo.pedidos_de_agora() == []
+    # A que falta: fica pedida, e a rodada do pedido sai na hora.
+    msg = Msg("Responder Comentários 1/3 ⏳")
+    rodar(sv.pedir_atividade_agora(msg, est))
+    rodar(sv.asyncio.sleep(0))
+    assert "Pedido anotado" in msg.saidas[-1] and rodadas == [("--fazer",)]
+    assert [p["atividade"] for p in sv.robo.pedidos_de_agora()] == ["respostas"]
+    assert "Esperando a folga do celular: Responder Comentários." in sv.texto_fazer_agora()
+    msg = Msg("qualquer coisa")
+    rodar(sv.pedir_atividade_agora(msg, est))
+    assert "Toque numa das atividades" in msg.saidas[-1]
+
+
+def test_rodada_agendada_atende_o_pedido_do_fazer_agora_mesmo_pausada(bm, monkeypatch):
+    sv = _painel(bm)
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
+    sv.alterar_config(robo_pausado=True)
+    rodar(sv.verificar_robo())
+    assert rodadas == []
+    sv.robo.pedir_agora("feed")
+    rodar(sv.verificar_robo())
+    assert rodadas == [("--fazer",)]
