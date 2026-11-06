@@ -1441,40 +1441,59 @@ def _pretos(imagem, caixa, passo=4):
     return all(max(imagem.getpixel((x, y))) < 20 for x in range(x1, x2, passo) for y in range(y1, y2, passo))
 
 
-def test_capa_com_chamada_tem_a_foto_inteira_e_maior_o_fio_em_cima_e_a_faixa_no_pe():
-    # Vídeo do Rafael das 20:14 de 02/11: sem as laterais laranja, a foto inteira e maior (do
-    # tamanho da capa sem texto), um fio laranja em cima dela e, no pé, a faixa laranja com a frase
-    # em letras brancas (P107), logo acima do número de visualizações. Vídeo das 23:58 (P139 2): a
-    # faixa cobria o pé da foto; a foto sobe a altura da faixa e fica inteira logo acima dela.
+def test_capa_da_grade_tem_a_foto_inteira_no_que_a_grade_mostra_com_o_fio_e_a_faixa():
+    # Vídeo do Rafael das 20:14 de 02/11: sem as laterais laranja, um fio laranja em cima da foto e,
+    # no pé, a faixa laranja com a frase em letras brancas (P107), logo acima do número de
+    # visualizações (P139 2). Print das 10:13 de 06/11 (P160 2): a grade cortava o alto e os lados
+    # da foto; ela entra inteira no que a grade mostra, no maior tamanho que cabe acima da faixa.
     capa = _capa("Organize sua cozinha")
     assert capa.size == edicao_video.TELA
-    x1, y1, x2, y2 = edicao_video.FOTO_DA_CAPA
+    esquerda, cima, direita, pe = edicao_video.lugar_da_foto()
+    assert (esquerda, direita) == edicao_video.LADOS_NA_GRADE and cima == edicao_video.VISIVEL_NA_GRADE[0]
     fio, faixa = edicao_video.FIO_DA_CAPA, edicao_video.FAIXA_DA_CHAMADA
-    topo, pe = y1 - faixa, y2 - faixa
-    # A foto de um lado ao outro do vídeo, sem laranja nos lados.
-    for ponto in [(x1 + 1, topo + fio + 2), (x2 - 2, topo + fio + 2), (x1 + 1, 640), (x2 - 2, 640), (360, 640),
-                  (x1 + 1, pe - 3), (x2 - 2, pe - 3)]:
-        assert _cor_de(capa, ponto, (200, 120, 40)), ponto
-    # Fora o fio, a foto é a do anúncio inteira, no maior tamanho que cabe: nada dela fica menor nem
-    # coberto.
-    foto = edicao_video._foto_que_cabe(_foto_jpg(), min(x2 - x1, y2 - y1)).convert("RGB")
-    assert capa.crop((0, topo + fio, 720, pe)).tobytes() == foto.crop((0, fio, 720, 720)).tobytes()
-    # O fio, por cima da beirada de cima da foto, de uma beirada à outra do vídeo; acima, o preto.
-    for ponto in [(0, topo), (360, topo + fio - 1), (719, topo + fio // 2)]:
+    lado = direita - esquerda
+    topo = pe - faixa - lado
+    assert topo - fio >= cima and 0 < fio <= 10
+    # A foto quadrada, inteira e sem nada por cima, da largura do que a grade mostra.
+    foto = edicao_video._foto_que_cabe(_foto_jpg(), lado)
+    assert capa.crop((esquerda, topo, direita, pe - faixa)).tobytes() == foto.tobytes()
+    # O fio logo acima da foto, de uma beirada à outra do vídeo; acima dele e dos lados da foto, o preto.
+    for ponto in [(0, topo - fio), (360, topo - 1), (719, topo - fio // 2)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
-    assert _pretos(capa, (0, 0, 720, topo), passo=2) and _pretos(capa, (0, y2, 720, 1280), passo=2)
-    assert 0 < fio <= 10
-    # A faixa no pé da foto, de uma beirada à outra, com as letras brancas só dentro dela.
-    for ponto in [(0, y2 - faixa), (719, y2 - faixa), (3, y2 - 1), (716, y2 - 1)]:
+    assert _pretos(capa, (0, 0, 720, topo - fio), passo=2)
+    assert _pretos(capa, (0, topo, esquerda, pe - faixa), passo=2)
+    assert _pretos(capa, (direita, topo, 720, pe - faixa), passo=2)
+    # A faixa logo abaixo da foto, de uma beirada à outra, com as letras brancas só dentro dela.
+    for ponto in [(0, pe - faixa), (719, pe - faixa), (3, pe - 1), (716, pe - 1)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
-    assert _claros(capa, (0, y2 - faixa, 720, y2)) > 50
-    assert _claros(capa, (0, 0, 720, y2 - faixa)) == 0 and _claros(capa, (0, y2, 720, 1280)) == 0
-    # Pedido do Rafael: o número de visualizações fica livre, no preto, logo abaixo da faixa. A foto
-    # sobe até acima da sacolinha da Shopee, que fica por cima do canto dela (P139 2).
+    assert _claros(capa, (0, pe - faixa, 720, pe)) > 50
+    assert _claros(capa, (0, 0, 720, pe - faixa)) == 0 and _claros(capa, (0, pe, 720, 1280)) == 0
+    # O número de visualizações fica livre, no preto, logo abaixo da faixa; a sacolinha da Shopee
+    # fica por cima do canto de cima da foto (P139 2).
     assert _pretos(capa, edicao_video.NUMERO_DA_GRADE)
     assert topo < edicao_video.SACOLINHA_DA_GRADE[1] and not _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
-    _cima, baixo = edicao_video.VISIVEL_NA_GRADE
-    assert y2 <= edicao_video.NUMERO_DA_GRADE[1] < baixo
+    assert pe <= edicao_video.NUMERO_DA_GRADE[1] < edicao_video.VISIVEL_NA_GRADE[1]
+
+
+def test_capa_da_grade_com_a_foto_de_pe_fica_inteira_e_no_meio():
+    # A foto que não é quadrada (de pé, 3:4) também entra inteira, no maior tamanho que cabe acima da
+    # faixa, no meio, com o preto dos lados (P160 2).
+    import io
+
+    from PIL import Image
+    saida = io.BytesIO()
+    Image.new("RGB", (600, 800), (200, 120, 40)).save(saida, "JPEG")
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(saida.getvalue(), "Leve"))).convert("RGB")
+    esquerda, cima, direita, pe = edicao_video.lugar_da_foto()
+    fio, faixa = edicao_video.FIO_DA_CAPA, edicao_video.FAIXA_DA_CHAMADA
+    altura = pe - faixa - cima - fio
+    largura = round(600 * altura / 800)
+    x = esquerda + (direita - esquerda - largura) // 2
+    assert _cor_de(capa, (x + 2, cima + fio + 2), (200, 120, 40)) and _cor_de(capa, (x + largura - 3, pe - faixa - 3),
+                                                                             (200, 120, 40))
+    assert _pretos(capa, (esquerda, cima + fio, x - 1, pe - faixa), passo=2)
+    assert _pretos(capa, (x + largura + 1, cima + fio, direita, pe - faixa), passo=2)
+    assert _cor_de(capa, (360, cima + fio - 1), edicao_video.LARANJA_DA_SHOPEE)
 
 
 def test_foto_em_tela_cheia_como_o_ffmpeg_punha_antes_da_moldura():
@@ -1543,10 +1562,12 @@ def test_frase_da_capa_fica_dentro_do_que_o_app_mostra_do_video_aberto():
         assert _claros(capa, (direita - folga, cima, 720, y2), passo=1) == 0, frase
 
 
-def test_capa_do_video_aberto_tem_a_foto_inteira_de_um_lado_ao_outro_do_que_o_app_mostra():
+def test_capa_do_video_aberto_tem_a_foto_inteira_e_a_faixa_acima_do_cartao_do_produto():
     # No vídeo aberto, que corta mais dos lados que a grade (P129), o resto da abertura vai com a
     # foto inteira da largura do que o app mostra, o fio em cima e a faixa no pé, de um lado ao
-    # outro dela (vídeo do Rafael das 20:14 de 02/11: a foto inteira, sem as laterais laranja).
+    # outro dela (vídeo do Rafael das 20:14 de 02/11). Vídeo das 09:56 de 06/11 (P160 2): o cartão
+    # do produto que o app põe por cima do vídeo cobria a metade de baixo da frase; a faixa fica
+    # acima dele, e a foto, inteira entre a barra de pesquisa do app e a faixa.
     import io
 
     from PIL import Image
@@ -1555,19 +1576,21 @@ def test_capa_do_video_aberto_tem_a_foto_inteira_de_um_lado_ao_outro_do_que_o_ap
     assert capa.size == edicao_video.TELA
     esquerda, direita = edicao_video.VISIVEL_NO_APP
     assert edicao_video.lados_da_capa(True) == (esquerda, direita) and edicao_video.lados_da_capa() == (0, 720)
-    _x1, y1, _x2, y2 = edicao_video.FOTO_DA_CAPA
+    x1, cima, x2, pe = edicao_video.lugar_da_foto(True)
+    assert (x1, x2) == (esquerda, direita) and pe < edicao_video.CARTAO_NO_VIDEO_ABERTO
     lado = direita - esquerda
     fio, faixa = edicao_video.FIO_DA_CAPA, edicao_video.FAIXA_DA_CHAMADA
-    # A faixa onde ficaria o pé da foto na capa sem texto, e a foto inteira logo acima dela (P139 2).
-    pe = y1 + (y2 - y1 - lado) // 2 + lado
     topo = pe - faixa - lado
+    assert topo - fio >= cima == edicao_video.TOPO_NO_VIDEO_ABERTO
     for x in (esquerda, direita - 1):
-        assert _cor_de(capa, (x, 640), (200, 120, 40)), x
-        assert _cor_de(capa, (x, topo + 1), edicao_video.LARANJA_DA_SHOPEE), x
+        assert _cor_de(capa, (x, (topo + pe - faixa) // 2), (200, 120, 40)), x
+        assert _cor_de(capa, (x, topo - fio + 1), edicao_video.LARANJA_DA_SHOPEE), x
         assert _cor_de(capa, (x, pe - faixa // 2), edicao_video.LARANJA_DA_SHOPEE), x
-    assert _cor_de(capa, (360, topo + fio + 2), (200, 120, 40)) and _cor_de(capa, (360, pe - faixa - 3), (200, 120, 40))
+    assert _cor_de(capa, (360, topo + 2), (200, 120, 40)) and _cor_de(capa, (360, pe - faixa - 3), (200, 120, 40))
     assert _pretos(capa, (0, 0, esquerda, 1280), passo=2) and _pretos(capa, (direita, 0, 720, 1280), passo=2)
-    assert _pretos(capa, (0, 0, 720, topo), passo=2) and _pretos(capa, (0, pe, 720, 1280), passo=2)
+    assert _pretos(capa, (0, 0, 720, topo - fio), passo=2) and _pretos(capa, (0, pe, 720, 1280), passo=2)
+    # Nada da capa onde fica o cartão do produto.
+    assert _pretos(capa, (0, edicao_video.CARTAO_NO_VIDEO_ABERTO, 720, 1280), passo=2)
     # O que o app mostra do vídeo aberto: a foto de um lado ao outro, sem preto dos lados.
     recorte = Image.open(io.BytesIO(edicao_video.recorte_do_video_aberto(
         edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", no_video=True)))).convert("RGB")
@@ -1662,7 +1685,7 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     _x1, y1, _x2, y2 = edicao_video.FOTO_DA_CAPA
     cima = y2 - edicao_video.FAIXA_DA_CHAMADA
     assert _cor_de(capa, (3, cima), edicao_video.LARANJA_DA_SHOPEE)
-    assert _cor_de(capa, (3, cima - 3), (200, 120, 40)) and _cor_de(capa, (360, cima - 3), (200, 120, 40))
+    assert _cor_de(capa, (20, cima - 3), (200, 120, 40)) and _cor_de(capa, (360, cima - 3), (200, 120, 40))
     acima = (0, 0, 720, cima)
     assert capa.crop(acima).tobytes() == curta.crop(acima).tobytes()
     assert _claros(capa, (0, cima, 720, y2)) > 50 and _claros(capa, acima) == 0
@@ -1671,7 +1694,8 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
     assert edicao_video.capa_com_chamada(b"nao e imagem", "Leve") is None
     # O exemplo do painel mostra também o pedaço que a grade do perfil mostra, com o corte dos
-    # lados: a foto, o fio e a faixa vão até as bordas, sem preto dos lados.
+    # lados: a foto, o fio e a faixa vão até as bordas, sem preto dos lados, e o fio e a foto
+    # inteiros, sem corte em cima (P160 2).
     capa_png = edicao_video.capa_com_chamada(_foto_jpg(), "Leve")
     recorte = Image.open(io.BytesIO(edicao_video.recorte_da_grade(capa_png))).convert("RGB")
     cima_da_grade, baixo = edicao_video.VISIVEL_NA_GRADE
@@ -1679,10 +1703,13 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     assert recorte.size == (edicao_video.LARGURA_NA_GRADE, baixo - cima_da_grade)
     capa = Image.open(io.BytesIO(capa_png)).convert("RGB")
     assert recorte.tobytes() == capa.crop((esquerda, cima_da_grade, direita, baixo)).tobytes()
+    topo = y2 - edicao_video.FAIXA_DA_CHAMADA - (direita - esquerda) - cima_da_grade
     for x in (0, recorte.width - 1):
         assert _cor_de(recorte, (x, 640 - cima_da_grade), (200, 120, 40)), x
-        assert _cor_de(recorte, (x, 2), (200, 120, 40)), x
+        assert _cor_de(recorte, (x, topo + 2), (200, 120, 40)), x
+        assert _cor_de(recorte, (x, topo - 2), edicao_video.LARANJA_DA_SHOPEE), x
         assert _cor_de(recorte, (x, y2 - 3 - cima_da_grade), edicao_video.LARANJA_DA_SHOPEE), x
+    assert topo - edicao_video.FIO_DA_CAPA >= 0
 
 
 def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkeypatch, tmp_path):
@@ -2783,3 +2810,77 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
     inserir("DELETE FROM configuracoes")
     edicao_video.exemplo_editor_2("exemplo.mp4")
     assert [legenda[:3] for legenda in recebidas[0]] == [(1.5, 3.2, "Olha só esse vestido")]
+
+
+def test_foto_da_capa_sem_as_letras_do_anuncio(monkeypatch):
+    # Pedido do Rafael (06/11, P160 2): na foto da capa não pode ter letra nenhuma, de outra língua
+    # nem em português, para não se misturar com a frase da faixa. Com as letras numa beirada,
+    # fora do produto, a capa usa o pedaço da foto sem elas.
+    import io
+
+    import api_gemini
+    from PIL import Image
+    respostas, pedidos = [], []
+
+    async def ia(prompt, imagens=None):
+        pedidos.append((prompt, [tipo for _dados, tipo in imagens or []]))
+        return respostas.pop(0)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", ia)
+    foto = _foto_jpg()
+    respostas.append('{"letras": true, "sobre_o_produto": false, "caixa": [150, 0, 1000, 1000]}')
+    cortada, resultado = edicao_video.foto_sem_letras(foto)
+    assert resultado == edicao_video.LETRAS_CORTADAS
+    assert Image.open(io.BytesIO(cortada)).size == (800, 680)
+    assert pedidos == [(edicao_video.PROMPT_DAS_LETRAS_DA_FOTO, ["image/jpeg"])]
+    # Sem letras, com as letras em cima do produto (até a resposta da P164), com a IA sem resposta
+    # ou com a caixa que não serve (pequena demais, a foto toda ou fora do formato), a foto vai
+    # como está.
+    for resposta, esperado in (
+            ('{"letras": false}', edicao_video.SEM_LETRAS),
+            ('```json\n{"letras": true, "sobre_o_produto": true, "caixa": [0, 0, 500, 500]}\n```',
+             edicao_video.LETRAS_NO_PRODUTO),
+            (None, edicao_video.SEM_RESPOSTA_DAS_LETRAS), ("sem json", edicao_video.SEM_RESPOSTA_DAS_LETRAS),
+            ('{"letras": true, "sobre_o_produto": false, "caixa": [0, 0, 300, 300]}', edicao_video.CAIXA_QUE_NAO_SERVE),
+            ('{"letras": true, "sobre_o_produto": false, "caixa": [0, 0, 1000, 1000]}', edicao_video.CAIXA_QUE_NAO_SERVE),
+            ('{"letras": true, "sobre_o_produto": false, "caixa": "alto"}', edicao_video.CAIXA_QUE_NAO_SERVE)):
+        respostas.append(resposta)
+        assert edicao_video.foto_sem_letras(foto) == (foto, esperado), resposta
+    assert edicao_video.foto_sem_letras(b"nao e imagem") == (b"nao e imagem", edicao_video.SEM_RESPOSTA_DAS_LETRAS)
+
+
+def test_capa_que_vai_ao_ar_usa_a_foto_sem_as_letras_e_anota_no_registro(monkeypatch, tmp_path):
+    # A capa da grade e a do vídeo aberto saem da foto sem as letras (P160 2); a miniatura e o resto
+    # do vídeo continuam com a foto do anúncio. O registro diz o que houve com as letras, para o
+    # checkup contar.
+    import io
+
+    from PIL import Image
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "capa": "Leve e forte",
+                                  "lugar": "alto"})
+    sem_letras = io.BytesIO()
+    Image.new("RGB", (800, 680), (30, 90, 200)).save(sem_letras, "PNG")
+    pedidas = []
+    monkeypatch.setattr(edicao_video, "foto_sem_letras",
+                        lambda foto: pedidas.append(foto) or (sem_letras.getvalue(), edicao_video.LETRAS_CORTADAS))
+    aberturas, fotos = [], []
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False):
+        aberturas.append(capa)
+        fotos.append(foto)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa")
+    assert pedidas == [_foto_jpg()] and fotos == [_foto_jpg()]
+    assert aberturas[-1] == (edicao_video.capa_com_chamada(sem_letras.getvalue(), "Leve e forte"),
+                             edicao_video.capa_com_chamada(sem_letras.getvalue(), "Leve e forte", no_video=True))
+    linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LETRAS_DA_FOTO,
+                                                       "2000-01-01 00:00:00")
+    assert [r[2] for r in linhas] == [edicao_video.LETRAS_CORTADAS]
+    # Desligada, a capa não sai e a IA nem olha a foto.
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: False})
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa")
+    assert len(pedidas) == 1 and aberturas[-1] is None

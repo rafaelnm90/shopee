@@ -269,18 +269,25 @@ GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
 RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto da miniatura, dentro da moldura
 ESCALA_NA_MINIATURA = 0.5
 # A capa com a frase (vídeo do Rafael das 20:14 de 02/11, no lugar da moldura em volta da foto e
-# das laterais laranja encostadas nos lados da grade): a foto inteira, no maior tamanho do lugar
-# da foto da capa sem texto (FOTO_DA_CAPA), sem moldura dos lados; um fio laranja (FIO_DA_CAPA)
-# por cima da beirada de cima dela e, logo abaixo do pé dela, a faixa laranja com a frase, sempre
-# da altura de uma linha (FAIXA_DA_CHAMADA), onde ficaria o pé da foto na capa sem texto: a foto
-# sobe a altura da faixa e nada dela fica coberto, e a sacolinha da grade fica por cima do canto
-# de cima dela (vídeo do Rafael das 23:58 de 02/11, P139 2). A frase que não cabe numa linha vai
-# em duas, com a letra menor. Na capa da grade (o 1º quadro do vídeo), a foto tem a largura do vídeo
-# e o fio e a faixa vão de uma beirada à outra (a tela final do app mostra o vídeo de lado a lado);
-# no resto da abertura (o vídeo aberto, que corta mais dos lados, VISIVEL_NO_APP, P129), a foto
-# tem a largura do que o app mostra, inteira nele, e o fio e a faixa vão de um lado ao outro dela.
-# Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+# das laterais laranja encostadas nos lados da grade): a foto inteira, sem moldura dos lados; um
+# fio laranja (FIO_DA_CAPA) logo acima da beirada de cima dela e, logo abaixo do pé dela, a faixa
+# laranja com a frase, sempre da altura de uma linha (FAIXA_DA_CHAMADA), e a sacolinha da grade
+# fica por cima do canto de cima da foto (P139 2). A frase que não cabe numa linha vai em duas,
+# com a letra menor. Na capa da grade (o 1º quadro do vídeo), a faixa fica logo acima do número
+# de visualizações (PE_DA_FAIXA_NA_GRADE) e a foto entra inteira, sem corte, no maior tamanho que
+# cabe no que a grade mostra (LADOS_NA_GRADE e VISIVEL_NA_GRADE) acima da faixa; o fio e a faixa
+# vão de uma beirada à outra (a tela final do app mostra o vídeo de lado a lado). No resto da
+# abertura (o vídeo aberto, que corta mais dos lados, VISIVEL_NO_APP, P129), a faixa fica acima do
+# cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO) e a foto, inteira
+# entre a barra de pesquisa do app (TOPO_NO_VIDEO_ABERTO) e a faixa; o fio e a faixa vão de um
+# lado ao outro do que o app mostra. Pedidos do Rafael (P139 2 e P160 2): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
+PE_DA_FAIXA_NA_GRADE = FOTO_DA_CAPA[3]           # logo acima do número de visualizações (NUMERO_DA_GRADE)
+# Medidos no vídeo do Rafael de 06/11 (09:56, o Motorola com o vídeo aberto pelo Perfil): o
+# cartão "Comprar com cupom" cobre o vídeo de y 920 a 1094, e a barra de pesquisa, até y 140.
+CARTAO_NO_VIDEO_ABERTO = 920
+PE_DA_FAIXA_NO_VIDEO = CARTAO_NO_VIDEO_ABERTO - MARGEM_DA_FAIXA
+TOPO_NO_VIDEO_ABERTO = 140
 # As letras da frase ficam dentro do que o app mostra do vídeo aberto (no modo assistente, a capa
 # vai no começo do vídeo), com a margem da faixa de cada lado.
 LETRAS_DA_FAIXA = VISIVEL_NO_APP[1] - VISIVEL_NO_APP[0] - 2 * MARGEM_DA_FAIXA
@@ -351,8 +358,11 @@ def com_moldura(imagem, escala=1.0):
     return saida
 
 
-def _foto_que_cabe(foto, lado):
-    """A foto (bytes) no PIL, em RGB, no maior tamanho que cabe num quadrado de lado px, sem esticar; None se não abre."""
+def _foto_que_cabe(foto, lado, altura=None):
+    """
+    A foto (bytes) no PIL, em RGB, no maior tamanho que cabe num quadrado de lado px (ou num
+    retângulo de lado x altura px), sem esticar; None se não abre.
+    """
     import io
 
     from PIL import Image
@@ -360,7 +370,7 @@ def _foto_que_cabe(foto, lado):
         imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
     except Exception:
         return None
-    escala = min(lado / imagem.width, lado / imagem.height)
+    escala = min(lado / imagem.width, (altura or lado) / imagem.height)
     return imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
 
 
@@ -443,20 +453,32 @@ def foto_em_tela_cheia(foto):
 
 
 def lados_da_capa(no_video=False):
-    """De onde a onde (em x) vão a foto, o fio e a faixa da capa com a frase: o vídeo todo na da grade, o que o app mostra no vídeo aberto."""
+    """De onde a onde (em x) vão o fio e a faixa da capa com a frase: o vídeo todo na da grade, o que o app mostra no vídeo aberto."""
     return VISIVEL_NO_APP if no_video else (0, TELA[0])
+
+
+def lugar_da_foto(no_video=False):
+    """
+    (esquerda, cima, direita, pé da faixa) da capa com a frase: entre esquerda e direita, e entre
+    cima (com o fio) e a faixa, a foto entra inteira. Na da grade, o que a grade mostra, com a faixa
+    logo acima do número de visualizações; no vídeo aberto (P129), o que o app mostra, com a faixa
+    acima do cartão do produto (P160 2).
+    """
+    if no_video:
+        return VISIVEL_NO_APP[0], TOPO_NO_VIDEO_ABERTO, VISIVEL_NO_APP[1], PE_DA_FAIXA_NO_VIDEO
+    return LADOS_NA_GRADE[0], VISIVEL_NA_GRADE[0], LADOS_NA_GRADE[1], PE_DA_FAIXA_NA_GRADE
 
 
 def capa_com_chamada(foto, chamada, no_video=False):
     """
-    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) inteira, no maior tamanho
-    do lugar da foto da capa sem texto (FOTO_DA_CAPA) e da largura da capa (lados_da_capa), no
-    fundo preto, com o fio laranja por cima da beirada de cima dela e, logo abaixo dela, a chamada
-    em letras brancas numa faixa laranja, sempre da mesma altura, de um lado ao outro, logo acima
-    do número de visualizações. A faixa fica onde ficaria o pé da foto na capa sem texto, e a foto
-    sobe a altura da faixa: nada dela fica coberto (P139 2). Com no_video=True, a do resto da
-    abertura: da largura do que o app mostra do vídeo aberto (P129). None sem a chamada, com a foto
-    que não abre ou com a chamada que não cabe nem na menor letra.
+    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) inteira, sem corte, no
+    maior tamanho que cabe no lugar dela (lugar_da_foto), no fundo preto, com o fio laranja logo
+    acima da beirada de cima dela e, logo abaixo dela, a chamada em letras brancas numa faixa
+    laranja, sempre da mesma altura, de um lado ao outro (lados_da_capa): na da grade, logo acima
+    do número de visualizações; com no_video=True, a do resto da abertura (P129), acima do cartão
+    do produto que o app põe por cima do vídeo aberto (P160 2). Nada da foto fica coberto (P139
+    2). None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem na menor
+    letra.
     """
     import matplotlib
     from PIL import Image, ImageDraw
@@ -464,14 +486,13 @@ def capa_com_chamada(foto, chamada, no_video=False):
     if not chamada:
         return None
     esquerda, direita = lados_da_capa(no_video)
-    x1, y1, x2, y2 = FOTO_DA_CAPA
-    imagem = _foto_que_cabe(foto, min(direita - esquerda, y2 - y1))
+    x1, cima, x2, pe = lugar_da_foto(no_video)
+    imagem = _foto_que_cabe(foto, x2 - x1, pe - FAIXA_DA_CHAMADA - cima - FIO_DA_CAPA)
     if not imagem:
         return None
     capa = Image.new("RGB", TELA, "black")
-    # O pé da faixa é o pé da foto na capa sem texto; a foto fica inteira logo acima da faixa.
-    pe = y1 + (y2 - y1 - imagem.height) // 2 + imagem.height
-    x, y = (TELA[0] - imagem.width) // 2, pe - FAIXA_DA_CHAMADA - imagem.height
+    # A foto fica inteira logo acima da faixa, no meio do lugar dela.
+    x, y = x1 + (x2 - x1 - imagem.width) // 2, pe - FAIXA_DA_CHAMADA - imagem.height
     capa.paste(imagem, (x, y))
 
     desenho = ImageDraw.Draw(capa)
@@ -481,7 +502,7 @@ def capa_com_chamada(foto, chamada, no_video=False):
     if not quebra:
         return None
     fonte, linhas = quebra
-    desenho.rectangle((esquerda, y, direita - 1, y + FIO_DA_CAPA - 1), fill=LARANJA_DA_SHOPEE)
+    desenho.rectangle((esquerda, y - FIO_DA_CAPA, direita - 1, y - 1), fill=LARANJA_DA_SHOPEE)
     desenho.rectangle((esquerda, pe - FAIXA_DA_CHAMADA, direita - 1, pe - 1), fill=LARANJA_DA_SHOPEE)
     altura_da_linha = round(fonte.size * 1.2)
     meio = pe - FAIXA_DA_CHAMADA / 2
@@ -635,6 +656,77 @@ def _capa_da_vez(foto, vantagem, no_video=False):
         return capa_com_chamada(foto, vantagem, no_video)
     except Exception:
         return None
+
+
+# A foto da capa sem letras: na foto da capa não pode ter letra nenhuma, de outra língua nem em
+# português, para não se misturar com a frase da faixa. A IA diz se a foto do anúncio tem letras
+# (fora as impressas no próprio produto ou na embalagem) e o maior pedaço dela com o produto
+# inteiro e sem elas; com as letras fora do produto, a capa usa esse pedaço. Com as letras em cima
+# do produto, a foto vai como está, até a resposta da P164. Pedido do Rafael (06/11, P160 2):
+# DECISOES.md, Shopee Vídeo.
+PROMPT_DAS_LETRAS_DA_FOTO = """Esta é a foto do anúncio de um produto. Veja se há letras escritas na foto: legendas, frases, preços, selos ou etiquetas com texto, marcas-d'água, em qualquer língua (português também). Não conte as letras impressas no próprio produto ou na embalagem dele (a marca, o rótulo).
+
+Responda só com um JSON, sem mais nada:
+{"letras": true ou false, "sobre_o_produto": true ou false, "caixa": [y1, x1, y2, x2]}
+
+"sobre_o_produto": alguma dessas letras fica em cima do produto.
+"caixa": o maior retângulo da foto com o produto inteiro e sem nenhuma dessas letras, em milésimos da altura (y) e da largura (x) da foto. Sem letras, a foto toda: [0, 0, 1000, 1000]."""
+PROCESSO_DAS_LETRAS_DA_FOTO = "edição do vídeo: letras na foto da capa"
+# O que aconteceu com as letras da foto (textos fixos: o registro e o checkup contam por eles).
+SEM_LETRAS = "sem letras"
+LETRAS_CORTADAS = "letras cortadas"
+LETRAS_NO_PRODUTO = "letras em cima do produto"
+SEM_RESPOSTA_DAS_LETRAS = "a IA não respondeu"
+CAIXA_QUE_NAO_SERVE = "a caixa da IA não serve"
+# O pedaço sem letras fica com pelo menos esta parte da foto (na área) e tira pelo menos a outra:
+# menor, a IA errou a caixa (ou ela cortaria o produto); quase a foto toda, ela não tira as letras.
+MENOR_PEDACO_SEM_LETRAS = 0.4
+MAIOR_PEDACO_SEM_LETRAS = 0.98
+
+
+def foto_sem_letras(foto):
+    """
+    (foto, resultado): a foto do anúncio (bytes) sem o pedaço com as letras (PNG) quando elas
+    ficam fora do produto, ou a mesma foto (sem letras, com as letras em cima do produto, com a IA
+    sem resposta ou com a caixa dela que não serve); resultado é um dos textos fixos acima.
+    """
+    import asyncio
+    import io
+    import json
+    import re
+
+    import api_gemini
+    from PIL import Image
+    try:
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
+    except Exception:
+        return foto, SEM_RESPOSTA_DAS_LETRAS
+    tipo = "image/png" if (foto or b"").startswith(b"\x89PNG") else "image/jpeg"
+    try:
+        resposta = asyncio.run(api_gemini.gerar_texto_gemini(PROMPT_DAS_LETRAS_DA_FOTO, imagens=[(foto, tipo)]))
+    except Exception:
+        resposta = None
+    achado = re.search(r"\{.*\}", resposta or "", re.S)
+    try:
+        dados = json.loads(achado.group(0)) if achado else None
+    except ValueError:
+        dados = None
+    if not isinstance(dados, dict):
+        return foto, SEM_RESPOSTA_DAS_LETRAS
+    if not dados.get("letras"):
+        return foto, SEM_LETRAS
+    if dados.get("sobre_o_produto"):
+        return foto, LETRAS_NO_PRODUTO
+    try:
+        y1, x1, y2, x2 = (max(0, min(1000, int(valor))) for valor in dados.get("caixa"))
+    except (TypeError, ValueError):
+        return foto, CAIXA_QUE_NAO_SERVE
+    parte = max(0, y2 - y1) * max(0, x2 - x1) / 1_000_000
+    if not MENOR_PEDACO_SEM_LETRAS <= parte <= MAIOR_PEDACO_SEM_LETRAS:
+        return foto, CAIXA_QUE_NAO_SERVE
+    largura, altura = imagem.size
+    corte = imagem.crop((x1 * largura // 1000, y1 * altura // 1000, x2 * largura // 1000, y2 * altura // 1000))
+    return _png(corte), LETRAS_CORTADAS
 
 
 def recorte_do_video_aberto(capa):
@@ -2078,18 +2170,22 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     # dos avisos. A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre
     # com a capa dos avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
     frase = frase_da_capa(textos)
-    capa = _capa_da_vez(foto, frase) if capa_ligada() and not avisos else None
+    capa, foto_da_capa = None, foto
     if capa_ligada() and not avisos and frase:
         # Quantas capas saem com a frase curta (P122), quantas só na 2ª vez e quantas com o
         # nome (P131) ou a vantagem, por falta dela, e por quê.
         resultado, detalhe, ok = registro_da_frase(textos, frase)
         registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA, resultado, detalhe, ok=ok)
+        # A foto da capa sem as letras do anúncio (P160 2).
+        foto_da_capa, letras = foto_sem_letras(foto)
+        registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras,
+                                     ok={SEM_LETRAS: True, LETRAS_CORTADAS: True, LETRAS_NO_PRODUTO: None}.get(letras, False))
+        capa = _capa_da_vez(foto_da_capa, frase)
     abertura = capa
     if capa:
         # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
-        # abertura, com a moldura encostada nos lados do vídeo aberto (P129). Sem esta, a da
-        # grade fica na abertura toda.
-        no_video = _capa_da_vez(foto, frase, no_video=True)
+        # abertura, com a do vídeo aberto (P129). Sem esta, a da grade fica na abertura toda.
+        no_video = _capa_da_vez(foto_da_capa, frase, no_video=True)
         if no_video:
             abertura = (capa, no_video)
     chamada = COM_A_CHAMADA if capa else ""
@@ -2534,6 +2630,8 @@ def exemplo_capa():
         frase = frase_da_capa(textos)
         if not frase:
             return "a IA não escreveu a frase da capa, o nome nem a vantagem do produto deste vídeo", None
+        # A foto sem as letras do anúncio, como no vídeo que vai ao ar (P160 2).
+        foto = foto_sem_letras(foto)[0]
         capa = capa_com_chamada(foto, frase)
         if not capa:
             return "a capa com a chamada não saiu", None
