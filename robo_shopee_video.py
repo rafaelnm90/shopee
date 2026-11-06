@@ -1486,10 +1486,41 @@ def fechar_o_painel_do_android(d):
     return xml
 
 
+# A leitura da tela que traz só as barras do Android (a de cima e a de baixo) e nada do app: no
+# Motorola, em 06/11/2026, às 19:31, com uma live tocando no Para você, a leitura veio assim com o
+# app aberto na tela, e o feed parou sem "ver" a aba. A tela é lida de novo antes de seguir.
+RELEITURAS_SEM_O_APP, ESPERA_SEM_O_APP = 3, 2
+PROCESSO_DA_LEITURA_DA_TELA = "leitura da tela"
+
+
+def so_as_barras_do_android(xml):
+    """A leitura tem só o Android (as barras de cima e de baixo), sem nada do app na tela."""
+    return set(re.findall(r'package="([^"]*)"', str(xml or ""))) == {ps.PACOTE_SISTEMA}
+
+
+def _reler_sem_o_app(d, xml):
+    """
+    Com só as barras do Android na leitura (so_as_barras_do_android), relê a tela até
+    RELEITURAS_SEM_O_APP vezes; o registro diz se o app voltou à leitura.
+    """
+    vezes = 0
+    while so_as_barras_do_android(xml) and vezes < RELEITURAS_SEM_O_APP:
+        pausa(ESPERA_SEM_O_APP)
+        vezes += 1
+        xml = d.dump_hierarchy()
+    if vezes:
+        voltou = not so_as_barras_do_android(xml)
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, "só as barras do Android",
+                                     f"o app voltou na {vezes}ª releitura" if voltou
+                                     else f"sem o app em {vezes} releituras", ok=voltou)
+    return xml
+
+
 def tela(d, seguir=False):
     """
     A tela de agora; para na hora se for a Verificação. Com o painel do Android aberto por
-    cima do app, fecha o painel (fechar_o_painel_do_android). Com o aviso do Android de app que
+    cima do app, fecha o painel (fechar_o_painel_do_android); com só as barras do Android na
+    leitura, lê de novo (_reler_sem_o_app). Com o aviso do Android de app que
     não responde ("Shopee não está respondendo", com Fechar app e Aguardar), toca em
     Aguardar e dá um tempo ao app. Ainda travado depois de VEZES_DO_AGUARDAR toques,
     fecha e reabre a Shopee (fechar_e_reabrir). O passo que esperava outra tela não
@@ -1499,6 +1530,7 @@ def tela(d, seguir=False):
     xml = d.dump_hierarchy()
     if painel_do_android_aberto(xml):
         xml = fechar_o_painel_do_android(d)
+    xml = _reler_sem_o_app(d, xml)
     for vez in range(VEZES_DO_AGUARDAR + 1):
         if ps.eh_verificacao(xml):
             raise Verificacao()

@@ -2874,6 +2874,49 @@ def test_link_do_post_pula_o_quadro_de_rascunhos_e_os_fixados(monkeypatch):
     assert robo.link_do_post(app) == ""
 
 
+class CelularSoComAsBarras:
+    """
+    A leitura que traz só as barras do Android nas primeiras vezes, com o app na tela (Motorola,
+    06/11, às 19:31, com uma live tocando no Para você).
+    """
+
+    def __init__(self, leituras_sem_o_app):
+        self.leituras_sem_o_app, self.toques = leituras_sem_o_app, []
+
+    def dump_hierarchy(self):
+        if self.leituras_sem_o_app > 0:
+            self.leituras_sem_o_app -= 1
+            return _xml(_no_do_app(robo.ps.PACOTE_SISTEMA, "", (0, 0, 1080, 120)))
+        return _xml(_no_do_app(robo.ps.PACOTE, robo.ABA_PARA_VOCE, (640, 150, 760, 210)))
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+
+
+def _registro_da_leitura():
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_LEITURA_DA_TELA,
+                                                 "2000-01-01 00:00:00")
+    return [(r[2], r[3]) for r in registro]
+
+
+def test_leitura_so_com_as_barras_do_android_e_feita_de_novo(monkeypatch):
+    # No Motorola, em 06/11 às 19:31, a leitura veio só com as barras do Android, com o app na
+    # tela, e o feed parou ("não achei Para você na tela"). A tela é lida de novo antes de seguir.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularSoComAsBarras(2)
+    robo.tocar(celular, robo.ABA_PARA_VOCE, 0)
+    assert celular.toques == [(700, 180)]
+    assert _registro_da_leitura() == [("só as barras do Android", "o app voltou na 2ª releitura")]
+    # O app que não volta à leitura: a parada de sempre, e o registro diz quantas vezes leu.
+    with pytest.raises(robo.Parada):
+        robo.tocar(CelularSoComAsBarras(99), robo.ABA_PARA_VOCE, 0)
+    assert _registro_da_leitura()[-1] == ("só as barras do Android",
+                                          f"sem o app em {robo.RELEITURAS_SEM_O_APP} releituras")
+    # A leitura com o app não é refeita nem anotada.
+    robo.tocar(CelularSoComAsBarras(0), robo.ABA_PARA_VOCE, 0)
+    assert len(_registro_da_leitura()) == 2
+
+
 def test_o_compartilhar_do_perfil_nao_serve_para_o_link_do_post():
     perfil = _xml('<node text="" content-desc="profile share" class="android.view.View" clickable="true" '
                   'bounds="[860,140][940,200]"></node>')

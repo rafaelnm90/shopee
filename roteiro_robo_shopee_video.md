@@ -96,7 +96,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   coluna da direita (x≈1002), a foto ("… profile avatar icon"), o **coração** (~1645, desc
   "like …" sem curtir e "unlike …" curtido, com o número), o **balão de comentários**
   (~1806, com o número), compartilhar ("… video share icon", ~1982) e mais. O nome do
-  criador fica no "video caption user" e a legenda no "video caption …".
+  criador fica no "video caption user" e a legenda no "video caption …". Em 06/11/2026
+  (19:31), com uma live tocando no Para você, a leitura da tela veio só com as barras do
+  Android (nada do app), com a aba Para você na tela: o robô lê de novo (`_reler_sem_o_app`).
 - **Rascunhos:** tabela `shopee_video_rascunhos` (estados preparando → rascunho →
   aprovado → postado, ou recusado → apagado; pulado quando o problema é do vídeo). O
   vídeo e o print ficam em `~/shopee_video/rascunhos` (ID.mp4 e ID.png). Na galeria do
