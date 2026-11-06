@@ -220,8 +220,9 @@ def decidir_envio(config, agora=None):
 
 # As colunas que vieram depois entram na tabela que já existe no servidor. cobrindo: "1" no vídeo
 # mandado enquanto o robô estava pausado sozinho, sem o celular (o assistente cobrindo o robô);
-# postado_em: quando o Rafael tocou em Postei ✅ nele (P156 1).
-COLUNAS_NOVAS = ("cobrindo", "postado_em")
+# postado_em: quando o Rafael tocou em Postei ✅ nele (P156 1). item: o número (itemId) do produto do
+# vídeo mandado: o robô não repete o produto que o Rafael postou (P166 1).
+COLUNAS_NOVAS = ("cobrindo", "postado_em", "item")
 
 
 def _criar_tabela(con):
@@ -301,12 +302,21 @@ def proximo_video(fonte=FONTE_PADRAO):
     return None
 
 
-def registrar(id_unico, status, motivo="", agora=None, cobrindo=False):
+def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item=""):
     momento = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
     with db.conexao() as con:
         _criar_tabela(con)
-        con.execute("INSERT OR REPLACE INTO shopee_video_enviados (id_unico, enviado_em, status, motivo, cobrindo) "
-                    "VALUES (?, ?, ?, ?, ?)", (id_unico, momento, status, motivo, "1" if cobrindo else ""))
+        con.execute("INSERT OR REPLACE INTO shopee_video_enviados (id_unico, enviado_em, status, motivo, cobrindo, "
+                    "item) VALUES (?, ?, ?, ?, ?, ?)", (id_unico, momento, status, motivo, "1" if cobrindo else "", item))
+
+
+def itens_postados():
+    """Os números (itemId) dos produtos dos vídeos mandados que o Rafael marcou com Postei ✅ (P166 1)."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return [linha[0] for linha in con.execute(
+            "SELECT item FROM shopee_video_enviados WHERE status = 'enviado' AND COALESCE(postado_em, '') != '' "
+            "AND COALESCE(item, '') != ''")]
 
 
 # O botão Postei ✅ de cada vídeo mandado: o Rafael toca depois de postar. O vídeo mandado com o
@@ -380,7 +390,7 @@ def enviados_hoje(agora=None):
 
 async def produtos_do_link(link):
     """
-    (produtos, destino): produtos = lista de {nome, preco, comissao, link} na ordem de
+    (produtos, destino): produtos = lista de {nome, preco, comissao, imagem, item} na ordem de
     adicionar (menor preço; no empate, maior comissão), vazia quando o link é de um
     vídeo da Shopee Vídeo (os produtos ficam no próprio vídeo) ou a API não respondeu.
     destino = o endereço para o Rafael abrir.
@@ -393,7 +403,7 @@ async def produtos_do_link(link):
     dados = await _consultar_produto(loja, item)
     if not dados:
         return [], link
-    return ordenar_produtos([dados]), link
+    return ordenar_produtos([{**dados, "item": item}]), link
 
 
 async def _consultar_produto(loja, item):
@@ -797,5 +807,6 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo), parse_mode="HTML",
                            disable_web_page_preview=True, reply_markup=botao_postei(video["id"]))
-    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo)
+    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo,
+              item=str(produtos[0].get("item") or "") if produtos else "")
     return "postagem mandada no seu privado"

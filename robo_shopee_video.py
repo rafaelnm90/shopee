@@ -114,6 +114,10 @@ ESPERA_DO_TITULO = 45
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 VIDEOS_SEM_OFERTA_POR_RODADA = 5
 SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliado)"
+# O produto que já foi ao ar (ou vai) não se repete: o vídeo dele fica de lado antes do rascunho e o
+# robô passa ao próximo da fonte (produtos_ja_postados). Escolha do Rafael (06/11, P166 1):
+# DECISOES.md, Shopee Vídeo.
+PRODUTO_JA_POSTADO = "o produto deste vídeo já foi postado (pelo robô ou pelo assistente)"
 # Produtos do Ver Produtos que o robô confere num vídeo (cada um custa 2 conferências da IA).
 MAXIMO_PRODUTOS_DO_VIDEO = 6
 # O mesmo produto com mais comissão (P33): a busca da API por maior comissão traz até
@@ -924,7 +928,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado", "cor")
+           "achado", "cor", "itens_do_video")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -953,9 +957,11 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # medição de quais posts levam punição, P146 2, separa).
 # cor: o nome da cor do produto que a edição usou no vídeo (P159 2), para o post conferir a faixa da
 # capa nela; vazio com as cores de sempre (o laranja).
+# itens_do_video: os números (itemId) do produto do vídeo, o do link e o que foi ao post (o da troca ou
+# o achado pela IA), ou os do criador no Ver Produtos: o mesmo produto não se repete (P166 1).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "trocado", "comentarios_proprios", "achado", "cor")
+                 "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video")
 
 
 def _criar_tabela(con):
@@ -987,6 +993,7 @@ def _linha_para_dict(linha):
     rascunho["outra_cor"] = json.loads(rascunho["outra_cor"] or "[]")
     rascunho["tirar"] = json.loads(rascunho["tirar"] or "[]")
     rascunho["comentarios_proprios"] = json.loads(rascunho["comentarios_proprios"] or "[]")
+    rascunho["itens_do_video"] = json.loads(rascunho["itens_do_video"] or "[]")
     return rascunho
 
 
@@ -1010,7 +1017,7 @@ def pegar(ident):
 
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
-                   "recusadas", "outra_cor", "tirar", "comentarios_proprios"):
+                   "recusadas", "outra_cor", "tirar", "comentarios_proprios", "itens_do_video"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -1046,6 +1053,28 @@ def ids_usados(agora=None):
         linhas = con.execute("SELECT id_video, estado, motivo, criado_em FROM shopee_video_rascunhos").fetchall()
     return {id_video for id_video, estado, motivo, criado_em in linhas
             if not (estado == "pulado" and motivo == MOTIVO_EM_ANALISE and (criado_em or "") < hoje)}
+
+
+def produtos_ja_postados():
+    """
+    Os números (itemId) dos produtos que já foram ou vão ao ar: o produto do vídeo dos rascunhos do
+    robô esperando a aprovação, aprovados e postados (o do link e o que foi ao post) e os vídeos do
+    modo assistente marcados com Postei ✅. Os produtos a mais não contam. (P166 1)
+    """
+    itens = set(assistente.itens_postados())
+    for rascunho in listar("rascunho", "aprovado", "postado"):
+        itens.update(rascunho["itens_do_video"])
+        itens.update(item.get("item") for item in rascunho["itens"] if not item.get("a_mais"))
+    return {str(item) for item in itens if item}
+
+
+def item_do_video(video):
+    """O número (itemId) do produto do link do vídeo, pela API de afiliado; "" quando ela não diz."""
+    try:
+        produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
+    except Exception:
+        return ""
+    return str((produtos[0] if produtos else {}).get("item") or "")
 
 
 # --- Histórico das tentativas (tabela shopee_video_tentativas) ---
@@ -1101,6 +1130,7 @@ PASSOS = (
     ("sem o número do Ponto", "ler os pontos de penalidade"),
     ("em análise na Shopee", "vídeo em análise"),
     ("sem oferta de afiliado", "oferta de afiliado"),
+    ("já foi postado", "produto já postado"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
     ("não devolveu o título", "título da IA"),
@@ -2503,6 +2533,7 @@ def preparar_rascunho(d, config, agora=None):
     rodada, sem gastar a tentativa do horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     evitar = estado_do_dia(config, agora).get("evitar", [])
+    ja_postados = produtos_ja_postados()
     for _ in range(VIDEOS_SEM_OFERTA_POR_RODADA):
         video = proximo_video(config, evitar, agora)
         if not video:
@@ -2510,12 +2541,20 @@ def preparar_rascunho(d, config, agora=None):
             registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
             return resultado
         # No link de vídeo, os produtos vêm do Ver Produtos, no celular.
-        if video["de_video"] or ps.nome_do_produto(video):
+        if video["de_video"]:
             break
-        atualizar(criar(video["id"], agora), estado="pulado", motivo=SEM_OFERTA)
-        registrar_tentativa("rascunho", "pulado", SEM_OFERTA, agora=agora)
+        motivo = SEM_OFERTA
+        if ps.nome_do_produto(video):
+            # O produto do link que já foi ao ar não se repete (P166 1).
+            video["item_do_link"] = item_do_video(video)
+            if video["item_do_link"] not in ja_postados:
+                break
+            motivo = PRODUTO_JA_POSTADO
+        atualizar(criar(video["id"], agora), estado="pulado", motivo=motivo)
+        registrar_tentativa("rascunho", "pulado", motivo, agora=agora)
     else:
-        resultado = f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de afiliado"
+        resultado = (f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de "
+                     "afiliado ou já postados")
         registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
         return resultado
     ident = criar(video["id"], agora)
@@ -4423,6 +4462,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         do_ver_produtos = trocar_os_do_ver_produtos(d, video, nomes, fotos_da_pagina, vistos, curtidos, prazo,
                                                     {nome for nome, _foto in variacoes})
         nomes = [p["nome"] for p in do_ver_produtos]
+        # O 1º produto (o que dá a foto da edição) que já foi ao ar não se repete (P166 1).
+        atualizar(ident, itens_do_video=[p["item"] for p in do_ver_produtos if p.get("do_video") and p.get("item")])
+        if do_ver_produtos and do_ver_produtos[0].get("item") in produtos_ja_postados():
+            raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         links_trocados = {p["nome"]: p["link"] for p in do_ver_produtos if p["trocado"]}
         trocados = len(links_trocados)
         # A medição de quais posts levam punição (P146 2) cruza a troca com a Saúde.
@@ -4489,6 +4532,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                      "comissao": troca["comissao"] if troca else original.get("comissao", 0)}
         principal["valor"] = valor_por_venda(principal["preco"], principal["comissao"])
         principal["item"] = item_do_link(video["link"])
+        # O produto que vai ao post (o da troca ou o achado pela IA) também não pode já ter ido (P166 1).
+        atualizar(ident, itens_do_video=[i for i in dict.fromkeys((video.get("item_do_link"), principal["item"])) if i])
+        if principal["item"] and principal["item"] in produtos_ja_postados():
+            raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))

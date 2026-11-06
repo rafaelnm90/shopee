@@ -807,3 +807,17 @@ def test_tabela_dos_enviados_de_antes_ganha_as_colunas_do_postei():
     assert consultar("SELECT status, cobrindo FROM shopee_video_enviados WHERE id_unico = 'do_robo'") == ("robo", "")
     assert asv.marcar_postado(asv.chave_do_envio("velho"), _as("15:00")) == (asv.MARCADO, False)
     assert asv.marcar_postado(asv.chave_do_envio("do_robo"), _as("15:00")) == (asv.NAO_ACHADO, False)
+
+
+def test_video_mandado_guarda_o_produto_e_o_postei_o_conta_como_postado():
+    # Escolha do Rafael (06/11, P166 1): o robô não repete o produto que o Rafael postou pelo
+    # assistente; o envio guarda o número do produto, e só o marcado com Postei ✅ conta.
+    from datetime import datetime
+    agora = datetime(2026, 11, 5, 10, 0, tzinfo=asv.fuso_horario)
+    asv.registrar("v1", "enviado", "", agora, item="123")
+    asv.registrar("v2", "enviado", "", agora, item="456")
+    asv.registrar("v3", "enviado", "", agora)
+    assert asv.itens_postados() == []
+    assert asv.marcar_postado(asv.chave_do_envio("v1"), agora)[0] == asv.MARCADO
+    assert asv.marcar_postado(asv.chave_do_envio("v3"), agora)[0] == asv.MARCADO
+    assert asv.itens_postados() == ["123"]

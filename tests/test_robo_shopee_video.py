@@ -1340,6 +1340,63 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     assert robo.pegar(rascunho["id"])["trocado"] == "1"
 
 
+def test_video_de_produto_ja_postado_fica_de_lado_e_o_proximo_vira_rascunho(monkeypatch, avisos):
+    # Escolha do Rafael (06/11, P166 1): o mesmo produto não se repete. O vídeo do produto que o robô
+    # (ou o assistente, com Postei) já postou fica de lado antes do rascunho, sem gastar a IA nem o
+    # celular, e o próximo da fonte vira rascunho.
+    _fonte(monkeypatch)
+    with open("archive/copo.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "b2", "archive/copo.mp4",
+            "Copo 🥤\nhttps://s.shopee.com.br/repetido", "2026-10-22 10:00:00")
+
+    async def produtos_do_link(link):
+        return [{"nome": VESTIDO, "preco": 59.9, "comissao": 10.0, "item": "555" if "repetido" in link else "2"}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    _rascunho("postado", itens=[{"item": "555", "a_mais": False}])
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["id_video"] == "a1"
+    pulado = robo.listar("pulado")[0]
+    assert pulado["id_video"] == "b2" and pulado["motivo"] == robo.PRODUTO_JA_POSTADO
+    assert robo.passo_do_motivo(robo.PRODUTO_JA_POSTADO) == "produto já postado"
+    assert not any("Copo" in str(a) for a in avisos)                 # o robô nem começou o do copo
+    # O rascunho novo guarda o produto do vídeo: outro vídeo dele também fica de lado.
+    assert rascunho["itens_do_video"] == ["2"] and "2" in robo.produtos_ja_postados()
+
+
+def test_produto_da_troca_ja_postado_deixa_o_video_de_lado(monkeypatch, avisos):
+    # O produto que vai ao post (o da loja que paga mais, P33, ou o achado pela IA, P158 2) também
+    # não pode já ter ido ao ar: o produto do link era outro, mas o da troca já foi postado.
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo, "trocar_pela_maior_comissao",
+                        lambda video: {"nome": VESTIDO, "link": "https://s.shopee.com.br/mais", "comissao": 15.0,
+                                       "preco": 59.9, "valor": 8.99, "antes": 10.0, "valor_antes": 5.99,
+                                       "vistos": ["mesmo vestido"]})
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "77" if "mais" in link else "2")
+    _rascunho("aprovado", itens=[{"item": "77", "a_mais": False}])
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert [r["motivo"] for r in robo.listar("pulado")] == [robo.PRODUTO_JA_POSTADO]
+    assert len(robo.listar("rascunho")) == 0
+
+
+def test_produtos_ja_postados_pelo_robo_e_pelo_assistente():
+    # Contam os rascunhos esperando, aprovados e postados (o produto do vídeo, nunca os a mais) e os
+    # vídeos do assistente marcados com Postei ✅.
+    _rascunho("rascunho", itens_do_video=["10", "11"])
+    _rascunho("aprovado", itens=[{"item": "20", "a_mais": False}, {"item": "21", "a_mais": True}])
+    _rascunho("postado", itens=[{"item": "30", "a_mais": False}], itens_do_video=["31"])
+    _rascunho("recusado", itens_do_video=["40"])
+    _rascunho("pulado", itens_do_video=["50"])
+    robo.assistente.registrar("v1", "enviado", "", agora=momento("2026-11-05 10:00"), item="60")
+    assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v1"), momento("2026-11-05 11:00"))[0] == "marcado"
+    robo.assistente.registrar("v2", "enviado", "", agora=momento("2026-11-05 10:00"), item="70")   # sem o Postei
+    assert robo.produtos_ja_postados() == {"10", "11", "20", "30", "31", "60"}
+
+
 def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor=""):
     """
     O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado. Com a
@@ -2225,7 +2282,7 @@ def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, a
     monkeypatch.setattr(robo, "VIDEOS_SEM_OFERTA_POR_RODADA", 1)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     resultado = robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
-    assert resultado == "os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado"
+    assert resultado == "os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado ou já postados"
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
 
 
