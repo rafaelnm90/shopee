@@ -413,11 +413,18 @@ def feito_com(config, dia):
     return {"faixa": [config["robo_limite_min"], config["robo_limite_max"]], "pontos": pontos_do_dia(dia)}
 
 
+ESTADOS_SALVOS = ("rascunho", "aprovado", "postado", "recusado", "apagado")
+
+
+def _criados_hoje(estados, agora=None):
+    """Os rascunhos nesses estados criados hoje."""
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    return [r for r in listar(*estados) if (r["criado_em"] or "").startswith(hoje)]
+
+
 def rascunhos_de_hoje(agora=None):
     """Os rascunhos salvos hoje (o do Preparar 1 Agora também), para o aviso do teto pelos pontos."""
-    hoje = agora_br(agora).strftime("%Y-%m-%d")
-    return sum(1 for r in listar("rascunho", "aprovado", "postado", "recusado", "apagado")
-               if (r["criado_em"] or "").startswith(hoje))
+    return len(_criados_hoje(ESTADOS_SALVOS, agora))
 
 
 def postados_de_hoje(agora=None):
@@ -452,19 +459,6 @@ def planejar(config, dia):
             minuto = trechos[-1][1] - 1
         horarios.append(f"{minuto // 60:02d}:{minuto % 60:02d}")
     return sorted(horarios)
-
-
-def replanejar_hoje(config, agora=None):
-    """
-    O Horário das Interações, os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje
-    é refeito na hora com o que vale agora; os horários já feitos continuam contados, e os do plano
-    novo que já passaram saem na volta, como os perdidos (recuperar_horarios). Devolve o plano.
-    Escolha do Rafael (06/11, P157 1): DECISOES.md, Shopee Vídeo.
-    """
-    estado = estado_do_dia(config, agora)
-    estado.update(horarios=planejar(config, estado["data"]), feito_com=feito_com(config, estado["data"]))
-    db.salvar_config(CHAVE_DIA, estado)
-    return estado
 
 
 def estado_do_dia(config, agora=None):
@@ -546,6 +540,59 @@ def recuperar_horarios(config, estado, perdidos, agora=None):
         estado["horarios"] = sorted(passados[:len(passados) - recuperados]
                                     + _espalhar(trechos, len(futuros) + recuperados, sorteio))
     return recuperados, perdidos - recuperados
+
+
+# O Horário das Interações, os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje é
+# refeito na hora com o que vale agora (P157 1), e é o do dia inteiro: o que já saiu hoje entra na
+# conta, e só o que falta sai, espalhado no resto do dia como os perdidos. Já saíram: os rascunhos de
+# hoje (os do Preparar 1 Agora, os recusados e o que está no preparo também) e os vídeos do
+# assistente que cobriram o robô (P156 1). Pedido do Rafael (06/11): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_PLANO_REFEITO = "plano de hoje refeito"
+ESTADOS_QUE_SAIRAM = ("preparando",) + ESTADOS_SALVOS
+
+
+def replanejar_hoje(config, agora=None):
+    """
+    Refaz o plano de hoje com o número do dia que vale agora (quantos_hoje): os horários passados são
+    os que já saíram hoje, e os que faltam se espalham a partir de ESPACO_MINIMO depois de agora,
+    tantos quantos deixam ESPACO_MEDIO em média (nunca menos que o plano do dia inteiro teria daqui
+    ao fim); os que não cabem ficam de fora, como horários passados sem tentativa. O horário que
+    espera a nova tentativa é um dos que faltam; sem lugar no dia, ele acaba aqui, como o que está no
+    preparo. Devolve o plano, com "refeito" ({no_dia, saidos, faltam, de_fora, proximo}) para a
+    resposta do painel.
+    """
+    estado = estado_do_dia(config, agora)
+    momento = agora_br(agora)
+    hora, dia = momento.strftime("%H:%M"), estado["data"]
+    no_dia = quantos_hoje(config, dia)
+    rascunhos = sorted(r["criado_em"][11:16] for r in _criados_hoje(ESTADOS_QUE_SAIRAM, agora))
+    cobertos = assistente.postados_cobrindo_o_robo(dia)
+    saidos = len(rascunhos) + len(cobertos)
+    esperando = int(bool(estado.get("repetir")) and estado.get("tentativas", 0) > 0 and not estado.get("em_preparo"))
+    if saidos >= no_dia:
+        esperando = 0
+        estado.update(repetir=False, tentativas=0, videos=VIDEOS_POR_HORARIO, reposto=True)
+    inicio = momento.hour * 60 + momento.minute + ESPACO_MINIMO
+    trechos = [(max(a, inicio), b) for a, b in trechos_de_postar(config) if b > inicio]
+    cabem = max(int(sum(b - a for a, b in trechos) // ESPACO_MEDIO),
+                sum(1 for h in planejar(config, dia) if h > hora)) if trechos else 0
+    faltam = max(no_dia - saidos - esperando, 0)
+    novos = min(faltam, cabem)
+    de_fora = faltam - novos
+    futuros = _espalhar(trechos, novos, random.Random(f"{CHAVE_ESTADO}:{dia}:{hora}:refeito")) if novos else []
+    # Com mais saídos que o número novo, ficam os últimos: o plano tem sempre o número do dia.
+    passados = (rascunhos + [hora] * len(cobertos))[-no_dia:] if no_dia else []
+    passados += [hora] * (esperando + de_fora)
+    estado.update(horarios=sorted(passados) + futuros, feitos=len(passados), cobertos=cobertos,
+                  sem_tentar=min(len(cobertos), no_dia) + de_fora, repostos=[], volta_do_horario="",
+                  feito_com=feito_com(config, dia),
+                  refeito={"no_dia": no_dia, "saidos": saidos, "faltam": esperando + novos, "de_fora": de_fora,
+                           "proximo": futuros[0] if futuros and not esperando else ""})
+    db.salvar_config(CHAVE_DIA, estado)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_PLANO_REFEITO, f"{esperando + novos} de {no_dia} a fazer",
+                                 f"já saíram {saidos}; de fora por falta de espaço no dia: {de_fora}",
+                                 ok=None, agora=agora)
+    return estado
 
 
 # O horário do plano que acaba sem rascunho (os VIDEOS_POR_HORARIO vídeos não passaram, ou não havia

@@ -307,25 +307,35 @@ def test_rascunhos_por_dia_e_horario_do_robo(bm, Msg, Est):
     assert "⚠️" in msg.saidas[0]
 
 
-def test_mudar_rascunhos_por_dia_ou_o_horario_do_robo_refaz_o_plano_de_hoje(bm, Msg, Est):
-    # Escolha do Rafael (06/11, P157 1): a faixa e o Horário do Robô mudados valem já hoje, e os
-    # horários já feitos continuam contados.
+def test_mudar_rascunhos_por_dia_ou_o_horario_do_robo_refaz_o_plano_de_hoje(bm, Msg, Est, relogio):
+    # Escolha do Rafael (06/11, P157 1): a faixa e o Horário do Robô mudados valem já hoje. E o que
+    # já saiu hoje entra na conta (pedido dele logo depois): só sai o que falta, e a resposta diz.
     from datetime import datetime
     from fuso import fuso_horario
+    relogio("10:00")
     sv = _painel(bm)
     hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-    sv.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": ["21:03"], "feitos": 1})
+    sv.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": ["09:03", "21:03"], "feitos": 1})
+    sv.robo.atualizar(sv.robo.criar("video:1", None), estado="postado", criado_em=f"{hoje} 09:03:00")
     msg = Msg("Aprovar ✅")
-    rodar(sv.salvar_faixa_robo(msg, Est({"faixa": [8, 12]})))
+    rodar(sv.salvar_faixa_robo(msg, Est({"faixa": [8, 8]})))
     plano = sv.db.ler_config(sv.robo.CHAVE_DIA)
-    assert len(plano["horarios"]) == sv.robo.quantos_hoje(sv.ler_config(), hoje) >= 8
-    assert plano["feitos"] == 1 and plano["feito_com"]["faixa"] == [8, 12]
-    assert f"O plano de hoje foi refeito: <b>{len(plano['horarios'])}</b> rascunho(s) hoje." in msg.saidas[0]
+    futuros = [h for h in plano["horarios"] if h > "10:00"]
+    assert (len(plano["horarios"]), plano["feitos"], len(futuros)) == (8, 1, 7)
+    assert plano["feito_com"]["faixa"] == [8, 8]
+    assert (f"O plano de hoje foi refeito: <b>8</b> rascunho(s) no dia; já saíram <b>1</b> hoje; falta(m) <b>7</b>, "
+            f"o próximo às <b>{futuros[0]}</b>.") in msg.saidas[0]
     msg = Msg("Aprovar ✅")
     rodar(sv.salvar_janela_robo(msg, Est({"janela": [10, 14]})))
     plano = sv.db.ler_config(sv.robo.CHAVE_DIA)
-    assert plano["horarios"] and all("10:00" <= h < "14:00" for h in plano["horarios"]) and plano["feitos"] == 1
+    futuros = [h for h in plano["horarios"] if h > "10:00"]
+    assert futuros and all("10:30" <= h < "14:00" for h in futuros) and plano["feitos"] + len(futuros) == 8
     assert "O plano de hoje foi refeito" in msg.saidas[0]
+    # Com mais saídos que o número novo, a resposta diz que nenhum a mais sai hoje.
+    msg = Msg("Aprovar ✅")
+    rodar(sv.salvar_faixa_robo(msg, Est({"faixa": [1, 1]})))
+    assert "O plano de hoje foi refeito: <b>1</b> rascunho(s) no dia; já saíram <b>1</b> hoje; nenhum a mais hoje." \
+        in msg.saidas[0]
 
 
 def test_rascunhos_por_dia_com_os_botoes_faixa_e_fixo(bm, Msg, Est):
