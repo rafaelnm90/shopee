@@ -1087,6 +1087,33 @@ def test_depois_do_post_curte_o_video_comenta_e_curte_o_comentario(avisos, ia_do
             ("próprio post: curtir o comentário", "curtido")} <= set(_passos_do_proprio())
 
 
+class CelularQueNaoCurteOComentario(CelularDoPost):
+    """O coração do comentário não pega: o toque cai, e o comentário continua sem a curtida."""
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        textos = [el["texto"] or el["descricao"] for el in ps.elementos(self.dump_hierarchy())
+                  if ps._dentro((x, y), el["caixa"])]
+        if self.atual == "painel" and "button comment like" in textos:
+            self.toques.append("button comment like")
+            return
+        super().click(x, y)
+
+
+def test_curtida_do_comentario_que_nao_se_confirma_guarda_o_caso(avisos, ia_do_proprio, pelo_link, monkeypatch):
+    # Checkup de 05/11: no post antigo, a curtida no próprio comentário ficou "não confirmado", sem
+    # caso guardado. Sem a tela, não se sabe se o toque não pegou ou se a curtida não aparece.
+    casos = []
+    monkeypatch.setattr(robo.casos_robo, "guardar",
+                        lambda d, acao, resultado, motivo, *a, **k: casos.append((acao, resultado, motivo, a[2]["id"])))
+    ident = _postado()
+    app = CelularQueNaoCurteOComentario(comentarios=[TITULO_DO_POST])
+    assert robo.comentar_depois_do_post(app, ident, momento("2026-11-01 10:01")) == "comentado"
+    assert ("próprio post: curtir o comentário", "não confirmado") in set(_passos_do_proprio())
+    assert casos == [("comentar_post", "curtida não confirmada",
+                      "a curtida no comentário do próprio post não se confirmou (não confirmado)", ident)]
+
+
 def test_video_em_analise_volta_a_cada_30_min_e_na_3a_vez_o_comentario_vai_ao_rafael(avisos, ia_do_proprio,
                                                                                     pelo_link):
     ident = _postado()
