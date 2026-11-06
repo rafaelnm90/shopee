@@ -398,6 +398,7 @@ SEM_META = {
     ("shopee_video", "feed: "), ("shopee_video", "próprio post: "), ("shopee_video", "post antigo: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "leitura das respostas"),
     ("shopee_video", "fazer agora"),
+    ("shopee_video", "leitura da tela"),
     ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
