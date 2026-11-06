@@ -8027,6 +8027,16 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         
     return conversoes_totais
 
+def sem_pagamento(pedido):
+    """
+    O pedido que ficou sem pagamento: não pago (Pix ou boleto que venceu) ou cancelado antes de
+    pagar, que a Shopee manda com a comissão em R$ 0,00. No relatório, ele vai numa linha própria,
+    e o Canc fica só com os que tinham comissão (o que se perdeu). Escolha do Rafael (06/11,
+    P163 1): DECISOES.md, Financeiro.
+    """
+    return pedido.get("status") == "UNPAID" or not (pedido.get("comissao_total") or 0)
+
+
 def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     """
     Atualiza o banco de pedidos com as conversões da API e o saldo das comissões
@@ -8130,7 +8140,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
         st = p["status"]
         
         if d_str not in historico_limpo:
-            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "qtd_sem_pagamento": 0, "clicks": 0}
             
         if st == "COMPLETED":
             historico_limpo[d_str]["aprovado"] += p["comissao_total"]
@@ -8140,6 +8150,8 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
         elif st == "PENDING":
             historico_limpo[d_str]["pendente"] += p["comissao_total"]
             historico_limpo[d_str]["qtd_pendente"] += 1
+        elif sem_pagamento(p):
+            historico_limpo[d_str]["qtd_sem_pagamento"] += 1
         else:
             historico_limpo[d_str]["cancelado"] += p["comissao_total"]
             historico_limpo[d_str]["qtd_cancelado"] += 1
@@ -9233,14 +9245,15 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     hoje = datetime.now(fuso_horario)
     data_corte = (hoje - timedelta(days=30)).strftime("%Y-%m-%d")
     
-    pagos, pendentes, cancelados = 0, 0, 0
+    pagos, pendentes, cancelados, sem_pagar = 0, 0, 0, 0
     for k, v in historico_limpo.items():
         if k >= data_corte:
             pagos += v.get("qtd_aprovado", 0)
             pendentes += v.get("qtd_pendente", 0)
             cancelados += v.get("qtd_cancelado", 0)
+            sem_pagar += v.get("qtd_sem_pagamento", 0)
             
-    total_pedidos_geral = pagos + pendentes + cancelados
+    total_pedidos_geral = pagos + pendentes + cancelados + sem_pagar
     taxa_conversao = (pagos / total_pedidos_geral * 100) if total_pedidos_geral > 0 else 0.0
     
     MESES_PT = {
@@ -9267,15 +9280,23 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         ano_key = data_str[:4]
         
         if mes_key not in dados_por_mes:
-            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "qtd_sem_pagamento": 0, "clicks": 0}
         if ano_key not in dados_por_ano:
-            dados_por_ano[ano_key] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+            dados_por_ano[ano_key] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "qtd_sem_pagamento": 0, "clicks": 0}
             
-        for k in ["aprovado", "pendente", "cancelado", "qtd_aprovado", "qtd_pendente", "qtd_cancelado", "clicks"]:
+        for k in ["aprovado", "pendente", "cancelado", "qtd_aprovado", "qtd_pendente", "qtd_cancelado", "qtd_sem_pagamento", "clicks"]:
             dados_por_mes[mes_key][k] += dados_dia.get(k, 0)
             dados_por_ano[ano_key][k] += dados_dia.get(k, 0)
     
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def fim_do_bloco(valor_canc, q_canc, pct_canc, q_sem):
+        """O Canc e, quando há, os pedidos sem pagamento numa linha própria (P163 1)."""
+        canc = f"Canc: R$ {f_br(valor_canc)} ({q_canc} pedidos - {pct_canc:.1f}%)"
+        if not q_sem:
+            return f"  └ {canc}\n\n"
+        return (f"  ├ {canc}\n"
+                f"  └ Sem pagamento: {q_sem} pedido(s) (não pagos ou cancelados antes de pagar, sem comissão)\n\n")
     
     nome_mes_extenso = MESES_PT.get(hoje.strftime('%m'), "Atual").upper()
     
@@ -9354,7 +9375,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos - {pct_aprov_m:.1f}%)\n"
         texto += f"  ├ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} pedidos - {pct_pend_m:.1f}%)\n"
-        texto += f"  └ Canc: R$ {f_br(dados_m.get('cancelado', 0.0))} ({dados_m.get('qtd_cancelado', 0)} pedidos - {pct_canc_m:.1f}%)\n\n"
+        texto += fim_do_bloco(dados_m.get('cancelado', 0.0), dados_m.get('qtd_cancelado', 0), pct_canc_m,
+                              dados_m.get('qtd_sem_pagamento', 0))
 
     texto += "🗓️ <b>HISTÓRICO ANUAL E CRESCIMENTO</b>\n"
     anos_ordenados_desc = sorted(dados_por_ano.keys(), reverse=True)
@@ -9381,12 +9403,13 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += f"• <b>{ano}</b>: R$ {f_br(total_a)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_a['aprovado'])} ({dados_a['qtd_aprovado']} pedidos - {pct_aprov_a:.1f}%)\n"
         texto += f"  ├ Pend: R$ {f_br(dados_a['pendente'])} ({dados_a['qtd_pendente']} pedidos - {pct_pend_a:.1f}%)\n"
-        texto += f"  └ Canc: R$ {f_br(dados_a.get('cancelado', 0.0))} ({dados_a.get('qtd_cancelado', 0)} pedidos - {pct_canc_a:.1f}%)\n\n"
+        texto += fim_do_bloco(dados_a.get('cancelado', 0.0), dados_a.get('qtd_cancelado', 0), pct_canc_a,
+                              dados_a.get('qtd_sem_pagamento', 0))
 
     texto += (
         "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
-        f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel.\n"
+        f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel. | {sem_pagar} Sem pagamento\n"
         "<blockquote><i>A Taxa de Conversão indica a porcentagem de pedidos que foram efetivamente PAGOS (Confirmados) em relação ao volume total de pedidos gerados, ajudando a medir a qualidade e o poder de compra do seu tráfego atual.</i></blockquote>\n\n"
     )
 
@@ -9446,7 +9469,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += f"• <b>{d_br}</b>: R$ {f_br(v_tot)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(v_aprov)} ({q_aprov} pedidos - {pct_aprov_d:.1f}%)\n"
         texto += f"  ├ Pend: R$ {f_br(v_pend)} ({q_pend} pedidos - {pct_pend_d:.1f}%)\n"
-        texto += f"  └ Canc: R$ {f_br(v_canc)} ({q_canc} pedidos - {pct_canc_d:.1f}%)\n\n"
+        texto += fim_do_bloco(v_canc, q_canc, pct_canc_d, dados_dia.get("qtd_sem_pagamento", 0))
 
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
