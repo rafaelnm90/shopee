@@ -5281,7 +5281,7 @@ def publicar(d, rascunho, agora=None):
     pausa(15)
     atualizar(rascunho["id"], estado="postado", postado_em=_momento(agora),
               **(campos_que_ficam(no_post) if no_post is not rascunho else {}))
-    link = link_do_post(d, ident=rascunho["id"])
+    link = link_do_post(d, ident=rascunho["id"], agora=agora)
     if link:
         atualizar(rascunho["id"], link_post=link)
     sairam = len(rascunho["produtos"]) - len(no_post["produtos"])
@@ -5309,15 +5309,24 @@ def botao_de_compartilhar(xml):
     return None
 
 
-def link_do_post(d, ident=None):
+PROCESSO_DO_LINK_DO_POST = "link do post"
+
+
+def link_do_post(d, ident=None, agora=None):
     """
     O link do post que acabou de sair: Perfil em Shopee Vídeo → o vídeo mais novo → o
     ícone de compartilhar → Copiar link (mapeado no Motorola em 22/10/2026). Qualquer
     passo que não aparece: sem link (o post saiu do mesmo jeito, e a mensagem diz onde
     achar). Nada aqui desfaz a postagem: até a Verificação só abre a tela do celular no
     privado. Com o ident do rascunho, antes de abrir o vídeo guarda a marca da capa dele na
-    grade (a medição da capa com chamada, P76).
+    grade (a medição da capa com chamada, P76). O registro diz em que passo o link não saiu
+    (rótulos fixos): sem ele, o vídeo não vai ao Canal Afiliados nem ganha o comentário.
     """
+    def sem_o_link(porque):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_DO_POST, "sem o link", porque, ok=False,
+                                     agora=agora)
+        return ""
+
     try:
         ir_ao_perfil(d)
         # Na grade do Perfil vêm primeiro o quadro "Rascunhos: N" e os vídeos fixados; o
@@ -5325,28 +5334,32 @@ def link_do_post(d, ident=None):
         quadros = [q for q in quadros_da_lista(tela(d))
                    if not any(tem_texto_no_quadro(d, q, texto) for texto in ("Rascunhos", "Fixado"))]
         if not quadros:
-            return ""
+            return sem_o_link("nenhum vídeo na grade do Perfil")
         if ident:
             marcar_o_post(d, ident, quadros[0]["caixa"])
         d.click(*ps._centro(quadros[0]))
         pausa(8)
         compartilhar = botao_de_compartilhar(tela(d))
         if not compartilhar:
-            return ""
+            return sem_o_link("sem o botão de compartilhar no vídeo")
         d.click(*compartilhar)
         pausa(4)
         if not tem(tela(d), "Copiar link"):
-            return ""
+            return sem_o_link("sem o Copiar link")
         tocar(d, "Copiar link", 3)
-        return ps.link_copiado(d)
+        link = ps.link_copiado(d)
+        if not link:
+            return sem_o_link("o Copiar link não deixou o link copiado")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_DO_POST, "copiado", ok=True, agora=agora)
+        return link
     except Verificacao:
         av.abrir_tela(celular=True, verificacao=True)
-        return ""
-    except Parada:
-        return ""
+        return sem_o_link("verificação da Shopee")
+    except Parada as e:
+        return sem_o_link(f"parou em {passo_do_motivo(e.motivo)}")
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Link do post não saiu: {type(e).__name__}")
-        return ""
+        return sem_o_link(f"erro ({type(e).__name__})")
 
 
 def tem_texto_no_quadro(d, quadro, texto):

@@ -2872,6 +2872,26 @@ def test_link_do_post_pula_o_quadro_de_rascunhos_e_os_fixados(monkeypatch):
     assert app.toques == [(901, 1445), (1001, 1985), "Copiar link"]
     app.clipboard = "texto qualquer"
     assert robo.link_do_post(app) == ""
+    assert _registro_do_link() == [("copiado", ""), ("sem o link", "o Copiar link não deixou o link copiado")]
+
+
+def _registro_do_link():
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_LINK_DO_POST, "2000-01-01 00:00:00")
+    return [(r[2], r[3]) for r in registro]
+
+
+def test_link_do_post_que_nao_sai_diz_o_passo_no_registro(monkeypatch):
+    # Em 06/11, às 19:18, um post saiu sem o link, e nada dizia em que passo: sem o link, o vídeo
+    # não vai ao Canal Afiliados nem ganha o comentário no próprio post (P148 2).
+    def sem_o_eu(d):
+        raise robo.Parada("não achei Eu na tela")
+    monkeypatch.setattr(robo, "ir_ao_perfil", sem_o_eu)
+    assert robo.link_do_post(None) == ""
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: None)
+    monkeypatch.setattr(robo, "tela", lambda d, seguir=False: _xml())
+    assert robo.link_do_post(None) == ""
+    assert _registro_do_link() == [("sem o link", "parou em navegar no app"),
+                                   ("sem o link", "nenhum vídeo na grade do Perfil")]
 
 
 class CelularSoComAsBarras:
@@ -5413,7 +5433,7 @@ def _resultado_no_registro():
 def test_postado_vai_ao_canal_com_o_link_do_post(monkeypatch, avisos, caminho_do_rascunho):
     ident = _aprovado(monkeypatch)
     levados = []
-    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: LINK_DO_POST)
+    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None, agora=None: LINK_DO_POST)
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: levados.append((rascunho["id"], link_post)))
     app = AppComQuadros()
     app.legenda, app.com_produto = TITULO, True
@@ -5429,7 +5449,7 @@ def test_depois_do_post_o_video_nao_fica_rodando_no_celular(monkeypatch, avisos,
     _aprovado(monkeypatch)
     # O link do post deixa o vídeo aberto, como no Motorola.
     monkeypatch.setitem(TELAS, "player", [_no("Adicionar um comentário...", caixa=(200, 2300, 900, 2360))])
-    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: setattr(d, "atual", "player") or LINK_DO_POST)
+    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None, agora=None: setattr(d, "atual", "player") or LINK_DO_POST)
     app = AppComVoltar()
     app.legenda, app.com_produto = TITULO, True
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
@@ -6874,7 +6894,7 @@ def _post_com_os_passos(monkeypatch, tirar_da_fileira=None):
                         lambda d, video: passos.append(("conferir", video["produtos"])) or (True, "confere"))
     monkeypatch.setattr(robo.ps, "ajustar_rotulo_de_ia", lambda d, ligado: (True, "rótulo"))
     monkeypatch.setattr(robo.ps, "postar", lambda d, video: passos.append(("postar", video["produtos"])) or (True, "ok"))
-    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: LINK_DO_POST)
+    monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None, agora=None: LINK_DO_POST)
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: levados.append(rascunho))
     return passos, levados
 
