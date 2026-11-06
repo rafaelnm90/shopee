@@ -243,19 +243,6 @@ class Suspensa(Exception):
         self.ate = ate
 
 
-class AdiarPost(Exception):
-    """
-    O post do aprovado fica para a rodada seguinte: a capa com a frase (a figurinha dos rascunhos
-    de antes da P125) não voltou no rascunho reaberto (P124). Não é uma Parada: não gasta tentativa
-    do post. vez: o adiamento desta rodada (1, 2, ...).
-    """
-
-    def __init__(self, vez):
-        super().__init__(f"a capa com a frase não voltou no rascunho reaberto: post adiado ({vez} de "
-                         f"{ADIAMENTOS_DA_CAPA})")
-        self.vez = vez
-
-
 # --- Configuração e plano do dia ---
 
 def ler_config():
@@ -889,8 +876,8 @@ def suspensao_na_tela(xml, agora=None):
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
-           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos", "trocado",
-           "comentarios_proprios", "achado")
+           "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
+           "achado")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -912,8 +899,6 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # estampa, com a foto na miniatura que troca: o texto e o álbum do rascunho os marcam (02/11).
 # tirar: as posições (1, 2, ...) dos produtos que o Rafael marcou para sair do post (P123): o robô
 # os tira da tela final na hora de postar, e o rascunho postado fica só com os que ficaram.
-# adiamentos: quantas vezes o post do aprovado ficou para a rodada seguinte porque a capa com a
-# frase (a figurinha) não voltou no rascunho reaberto (P124); zera ao aprovar.
 # comentarios_proprios: os textos que o robô comentou no vídeo do post (P148 2), para o próximo
 # nunca sair igual.
 # achado: "1" quando o produto do link não era o do vídeo e o robô achou o do vídeo pela busca da
@@ -921,7 +906,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # medição de quais posts levam punição, P146 2, separa).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "adiamentos", "trocado", "comentarios_proprios", "achado")
+                 "trocado", "comentarios_proprios", "achado")
 
 
 def _criar_tabela(con):
@@ -1038,13 +1023,6 @@ PASSOS = (
     ("bebida alcoólica em espera", "bebida alcoólica em espera"),
     ("depois do Feito", "anexar o produto"),
     ("efeitos na edição", "efeitos na edição"),
-    ("figurinha", "capa pela figurinha"),
-    ("faixa laranja", "capa pela figurinha"),
-    ("do tamanho do desenho", "capa pela figurinha"),
-    ("tela da capa", "capa pela figurinha"),
-    ("✓ da capa", "capa pela figurinha"),
-    ("as Fotos não abriram", "capa pela figurinha"),
-    ("o recorte da foto não abriu", "capa pela figurinha"),
     # O caminho até o Perfil em Shopee Vídeo (CAMINHO_PERFIL), o mesmo do post, do rascunho, do
     # treino e da Saúde: antes do "Criadores & Afiliados" da limpeza dos favoritos.
     ("a tela não mostrou Criadores & Afiliados", "navegar no app"),
@@ -1105,8 +1083,7 @@ PASSOS = (
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
             "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
-            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "curtido": "👍", "descurtido": "💔",
-            "adiado": "⏳"}
+            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "curtido": "👍", "descurtido": "💔"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
                    "responder": "Resposta a comentário", "feed": "Feed (Para você)",
@@ -1364,8 +1341,7 @@ def postou_ha_pouco(agora=None):
 def aprovar(ident, agora=None):
     """O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora."""
     quando = proxima_postagem(ler_config(), agora)
-    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0",
-              adiamentos="0")
+    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0")
     return quando
 
 
@@ -4344,535 +4320,27 @@ def escrever_a_legenda(d, titulo):
     tocar(d, "@tv_right", 3)
 
 
-# --- A capa com a frase pela figurinha (P110, 31/10/2026; só nos rascunhos de antes da P125) ---
-# Desde a P125 (02/11), a capa com a frase abre o vídeo (o app usa o 1º quadro como capa da grade)
-# e nenhum rascunho novo leva a figurinha. Os feitos antes abrem com a foto do produto, sem a
-# frase, e a capa com a frase entrou por cima pelo Selecionar Capa da tela final: a figurinha com
-# foto é o miolo da capa (edicao_video.recorte_da_figurinha), que o robô deixa do tamanho do
-# desenho (a faixa logo acima do número de visualizações da grade, P76 e P107), medindo a faixa
-# laranja no print e ajustando com dois dedos. O app não a guarda no rascunho salvo, e no post o
-# robô a põe de novo (capa_de_novo_no_post). Mapa no roteiro; escolhas do Rafael (P110 e P125):
-# DECISOES.md, Shopee Vídeo.
-PROCESSO_DA_CAPA = "capa pela figurinha"
+# --- A capa com a frase no post ---
+# A capa com a frase abre o vídeo (P125), e o app usa o 1º quadro como capa da grade (P129): no
+# post, o registro diz se a faixa laranja da frase chegou à grade (marcar_o_post). Escolhas do
+# Rafael: DECISOES.md, Shopee Vídeo.
+PROCESSO_DA_CAPA = "capa no post"
 PROCESSO_DO_BOTAO = "preparar 1 agora"
-AJUSTES_DA_FIGURINHA = 5
-FOLGA_DA_ESCALA = 0.03                          # a altura da faixa pode errar 3% do desenho
-FOLGA_DA_POSICAO = 12                           # e o meio dela, 12 px
-FOLGA_DAS_PONTAS = 10                           # as pontas da faixa ficam nas bordas do quadro do vídeo
-DEDOS_DA_FIGURINHA = 400                        # a maior distância de partida dos dois dedos, em px
-MENOR_DISTANCIA_DOS_DEDOS = 40                  # a menor distância entre os dois dedos, em px
-MARGEM_DOS_DEDOS = 10                           # os dedos ficam a esta distância das bordas do quadro
-# Num ajuste, a figurinha muda no máximo 3 vezes (o app não a deixa crescer mais que isso
-# desde que entrou): uma medida errada da faixa não pede um gesto do tamanho da tela.
-RAZAO_MAXIMA_POR_AJUSTE = 3.0
-PROPORCAO_DO_VIDEO = 9 / 16
-# O app não segue os dois dedos à risca: em 31/10, os dedos 3 vezes mais abertos deixaram a
-# figurinha 2 vezes maior, e 1,5 vez mais abertos não a mudaram. O robô aprende com cada gesto
-# quanto a figurinha mudou pelos dedos (a figurinha muda pela razão dos dedos elevada ao ganho)
-# e pede os próximos dedos por ele; o gesto que não mudou nada (até SEM_EFEITO_DOS_DEDOS) diminui
-# o ganho, e o próximo abre ou fecha mais.
-GANHO_DOS_DEDOS = (0.3, 1.5)                    # o menor e o maior ganho que o robô aceita
-REDUCAO_SEM_EFEITO = 0.6
-SEM_EFEITO_DOS_DEDOS = 0.02
-# A figurinha que não fica certa não é descartada de cara: o robô sai da capa sem salvar e põe a
-# figurinha de novo, até TENTATIVAS_DA_FIGURINHA vezes, enquanto há tempo (nenhuma tentativa nova
-# depois do prazo de quem a pede). E a
-# figurinha entra sempre do mesmo tamanho e no mesmo lugar: os gestos da última que deu certo (a
-# receita, na chave CHAVE_FIGURINHA) são refeitos de uma vez no começo da próxima, que só confere
-# pela medida e ajusta o que faltar. A receita só serve no mesmo quadro e com a figurinha
-# entrando da mesma largura (FOLGA_DA_ENTRADA); a que não chegou ao desenho fica de lado nas
-# tentativas seguintes do rascunho, e a nova que der certo toma o lugar dela (até
-# GESTOS_DA_RECEITA gestos). Pedido do Rafael (01/11/2026): DECISOES.md, Shopee Vídeo.
-TENTATIVAS_DA_FIGURINHA = 3
-CHAVE_FIGURINHA = "shopee_video_figurinha"
-FOLGA_DA_ENTRADA = 0.1
-GESTOS_DA_RECEITA = 8
-# A faixa é medida só onde está a figurinha: o 1º quadro do vídeo, embaixo dela, é a foto do
-# anúncio, que pode ter laranja (a etiqueta de uma loja) maior que a faixa da figurinha recém-posta
-# (22:44 de 01/11: os dois dedos foram feitos na etiqueta, longe da figurinha, e nada mudou). O
-# robô guarda o print da tela da capa antes de pôr a figurinha, e o que mudou depois é ela
-# (caixa_da_figurinha): pontos com uma cor que mudou mais que MUDANCA_NO_PRINT, nas linhas e
-# colunas com pelo menos PONTOS_MUDADOS deles, no maior trecho seguido (buracos de até
-# BURACO_NA_FIGURINHA), com FOLGA_DA_CAIXA em volta.
-MUDANCA_NO_PRINT = 48
-PONTOS_MUDADOS = 6
-BURACO_NA_FIGURINHA = 60
-FOLGA_DA_CAIXA = 8
-# O rascunho guardado e reaberto para postar volta com a capa de sempre: o app não guarda nele a
-# figurinha da capa (o post das 14:55 de 01/11 foi à grade com o 1º quadro do vídeo, sem a faixa,
-# e continuava assim 2 horas depois). A capa com a frase do rascunho fica no servidor
-# ({id}_figurinha.png), e no post a miniatura da capa da tela final (PREVIA_DA_CAPA, em cima do
-# Selecionar Capa) diz se ela ainda está lá; sem a faixa, a figurinha vai de novo antes do Postar,
-# sem começar outra tentativa depois de MINUTOS_DA_CAPA_NO_POST. É a capa que o Rafael aprovou
-# (P110): DECISOES.md, Shopee Vídeo. A que não volta adia o post para a rodada seguinte, até
-# ADIAMENTOS_DA_CAPA vezes (o post a ESPERA_DO_ADIAMENTO dali, para a próxima rodada pegar), sem
-# gastar tentativa do post (P99); só depois o post vai com a capa de sempre. Escolha do Rafael
-# (02/11, P124): DECISOES.md, Shopee Vídeo.
-PREVIA_DA_CAPA = "iv_video_preview"
-MINUTOS_DA_CAPA_NO_POST = 8
-ADIAMENTOS_DA_CAPA = 3
-ESPERA_DO_ADIAMENTO = timedelta(minutes=10)
 # A faixa da capa com a frase vai de um lado ao outro da capa: o laranja mais estreito que isto da
-# largura da miniatura é outra coisa (o selo Fixado da grade, um produto laranja na foto).
+# largura do quadro é outra coisa (o selo Fixado da grade, um produto laranja na foto).
 LARGURA_DA_FAIXA_NA_CAPA = 0.6
-
-
-def quadro_da_capa(xml):
-    """
-    O quadro do vídeo na tela da capa (x1, y1, x2, y2): o vídeo 9:16 no meio do
-    @player_container, da altura dele. None sem o player na tela.
-    """
-    player = next((el for el in ps.elementos(xml) if el["id"] == "player_container"), None)
-    if not player:
-        return None
-    x1, y1, x2, y2 = player["caixa"]
-    largura = round((y2 - y1) * PROPORCAO_DO_VIDEO)
-    esquerda = x1 + (x2 - x1 - largura) // 2
-    return esquerda, y1, esquerda + largura, y2
-
-
-def faixa_esperada(capa, quadro):
-    """
-    Onde a faixa laranja da capa (PNG, bytes) fica no quadro do vídeo da tela da capa, com a capa
-    do tamanho do quadro: (cima, baixo, esquerda, direita). None sem a faixa na capa.
-    """
-    from PIL import Image
-    with Image.open(io.BytesIO(capa)) as imagem:
-        faixa = edicao_video.faixa_laranja(imagem)
-        largura = imagem.width
-    if not faixa:
-        return None
-    x1, y1, x2, _y2 = quadro
-    escala = (x2 - x1) / largura
-    cima, baixo, esquerda, direita = faixa
-    return (y1 + cima * escala, y1 + baixo * escala, x1 + esquerda * escala, x1 + direita * escala)
-
-
-def _maior_trecho(indices, pesos, buraco):
-    """
-    Dos índices em ordem (com o peso de cada um), o trecho seguido de mais peso, aceitando
-    buracos de até buraco índices: (primeiro, último). None sem índices.
-    """
-    melhor, peso_melhor, inicio, anterior, soma = None, -1, None, None, 0
-    for indice, peso in zip(indices, pesos):
-        if anterior is not None and indice - anterior > buraco + 1:
-            if soma > peso_melhor:
-                melhor, peso_melhor = (inicio, anterior), soma
-            inicio, soma = None, 0
-        inicio = indice if inicio is None else inicio
-        soma, anterior = soma + peso, indice
-    if inicio is not None and soma > peso_melhor:
-        melhor = (inicio, anterior)
-    return melhor
-
-
-def caixa_da_figurinha(imagem, fundo, quadro):
-    """
-    Onde está a figurinha no print da tela da capa (PIL): o que mudou desde o print da mesma tela
-    antes dela (fundo, PIL), dentro do quadro do vídeo, com FOLGA_DA_CAIXA em volta: (x1, y1, x2,
-    y2). O quadro inteiro sem o fundo, com o fundo de outro tamanho ou sem nada mudado.
-    """
-    import numpy
-    if fundo is None or fundo.size != imagem.size:
-        return quadro
-    x1, y1, x2, y2 = quadro
-    agora = numpy.asarray(imagem.convert("RGB").crop(quadro), dtype=numpy.int16)
-    antes = numpy.asarray(fundo.convert("RGB").crop(quadro), dtype=numpy.int16)
-    mudou = numpy.abs(agora - antes).max(axis=2) > MUDANCA_NO_PRINT
-    por_linha = mudou.sum(axis=1)
-    linhas = numpy.flatnonzero(por_linha >= PONTOS_MUDADOS)
-    trecho = _maior_trecho(linhas, por_linha[linhas], BURACO_NA_FIGURINHA)
-    if not trecho:
-        return quadro
-    cima, baixo = trecho
-    por_coluna = mudou[cima:baixo + 1].sum(axis=0)
-    colunas = numpy.flatnonzero(por_coluna >= PONTOS_MUDADOS)
-    trecho = _maior_trecho(colunas, por_coluna[colunas], BURACO_NA_FIGURINHA)
-    if not trecho:
-        return quadro
-    esquerda, direita = trecho
-    return (max(x1, x1 + int(esquerda) - FOLGA_DA_CAIXA), max(y1, y1 + int(cima) - FOLGA_DA_CAIXA),
-            min(x2, x1 + int(direita) + 1 + FOLGA_DA_CAIXA), min(y2, y1 + int(baixo) + 1 + FOLGA_DA_CAIXA))
-
-
-def ajustar_a_figurinha(d, capa, quadro, receita=None, aprendida=None, fundo=None):
-    """
-    Deixa a figurinha do tamanho e no lugar do desenho: mede a faixa laranja no print, aumenta ou
-    diminui com dois dedos em volta do meio dela (pelo ganho aprendido com os gestos de antes,
-    ganho_dos_dedos) e arrasta quando só o lugar está errado, até AJUSTES_DA_FIGURINHA vezes.
-    Com a receita da última que deu certo ({"quadro", "entrada", "gestos", "ganho"}) servindo
-    (receita_serve), o 1º ajuste refaz os gestos dela de uma vez, e o ganho começa do dela.
-    aprendida recebe a receita desta (o quadro, a largura e o alto da faixa ao entrar, os gestos
-    feitos e o ganho). Com o fundo (o print da tela da capa antes da figurinha, PIL), a faixa é
-    medida só na figurinha (caixa_da_figurinha). (ok, o que dizer no registro, só números)
-    """
-    esperada = faixa_esperada(capa, quadro)
-    if not esperada:
-        return False, "a capa não tem a faixa laranja"
-    e_cima, e_baixo, e_esquerda, e_direita = esperada
-    receita = receita or {}
-    medidas, ganho, gesto, gestos, refeitos, entrada = [], receita.get("ganho") or 1.0, None, [], 0, None
-    aprendida = {} if aprendida is None else aprendida
-    for ajuste in range(AJUSTES_DA_FIGURINHA + 1):
-        imagem = d.screenshot()
-        medida = edicao_video.faixa_laranja(imagem, caixa_da_figurinha(imagem, fundo, quadro))
-        if not medida:
-            return False, _com_as_medidas(f"a faixa laranja não apareceu na capa ({ajuste} ajuste(s))",
-                                          medidas, esperada)
-        cima, baixo, esquerda, direita = medida
-        entrada = entrada or [round(baixo - cima), round(direita - esquerda)]
-        if gesto:
-            dedos, alto_antes = gesto
-            ganho = ganho_dos_dedos(ganho, dedos, alto_antes, baixo - cima)
-            gesto = None
-        aprendida.update(quadro=list(quadro), entrada=entrada, gestos=gestos, ganho=round(ganho, 3))
-        medidas.append([round(baixo - cima), round(direita - esquerda), round((cima + baixo - e_cima - e_baixo) / 2), ""])
-        razao = (e_baixo - e_cima) / (baixo - cima)
-        centro_x, centro_y = (esquerda + direita) / 2, (cima + baixo) / 2
-        delta_y = (e_cima + e_baixo) / 2 - centro_y
-        delta_x = (e_esquerda + e_direita) / 2 - centro_x
-        tamanho_certo = abs(razao - 1) <= FOLGA_DA_ESCALA
-        lugar_certo = abs(delta_y) <= FOLGA_DA_POSICAO and abs(delta_x) <= FOLGA_DA_POSICAO
-        pontas_certas = (abs(esquerda - e_esquerda) <= FOLGA_DAS_PONTAS
-                         and abs(direita - e_direita) <= FOLGA_DAS_PONTAS)
-        if tamanho_certo and lugar_certo and pontas_certas:
-            return True, (f"a faixa do tamanho do desenho ({ajuste} ajuste(s)"
-                          + (f", o 1º com os {refeitos} gesto(s) da última que deu certo" if refeitos else "") + ")")
-        if ajuste == AJUSTES_DA_FIGURINHA:
-            break
-        x, y = round(centro_x), round(centro_y)
-        try:
-            if ajuste == 0 and receita_serve(receita, quadro, entrada):
-                medidas[-1][3] = f"receita de {len(receita['gestos'])}"
-                ok, motivo = refazer_os_gestos(d, receita["gestos"], gestos)
-                refeitos = len(receita["gestos"])
-            elif not tamanho_certo:
-                meio, de, ate = dedos_da_figurinha(x, quadro, direita - esquerda, razao ** (1 / ganho))
-                medidas[-1][3] = f"{de}→{ate}"
-                ok, motivo = ps.dois_dedos(d, meio, y, de, ate)
-                gesto = (ate / de, baixo - cima)
-                gestos.append(["dedos", meio, y, de, ate])
-            else:
-                medidas[-1][3] = f"arrasto {round(delta_y):+d}"
-                ok, motivo = ps.arrastar(d, x, y, round(x + delta_x), round(y + delta_y))
-                gestos.append(["arrasto", x, y, round(x + delta_x), round(y + delta_y)])
-        except Exception as e:
-            # O gesto recusado pelo celular (um ponto fora da tela, a conexão que caiu) descarta a
-            # figurinha, e o rascunho segue com a capa de sempre; o rastro fica no log.
-            logger.warning(f"⚠️ [Robô Shopee Vídeo] O gesto na figurinha deu erro: {type(e).__name__}", exc_info=True)
-            ok, motivo = False, f"erro {type(e).__name__} no gesto"
-        if not ok:
-            return False, _com_as_medidas(f"a figurinha não foi ajustada: {motivo}", medidas, esperada)
-        pausa(2)
-    return False, _com_as_medidas("a faixa não ficou do tamanho do desenho", medidas, esperada)
-
-
-def dedos_da_figurinha(x, quadro, largura, razao):
-    """
-    Onde e quanto os dois dedos abrem ou fecham para mudar a figurinha pela razão: (o x do meio
-    deles, a distância de partida, a de chegada). Os dedos começam dentro da faixa (a largura da
-    figurinha), em volta do meio dela, e os quatro pontos ficam dentro do quadro do vídeo (fora
-    dele ficam os botões da tela, e o celular recusa ponto fora da tela): perto da borda, o meio
-    dos dedos chega para dentro. A razão vai até RAZAO_MAXIMA_POR_AJUSTE; sem espaço para ela
-    inteira, as duas distâncias diminuem juntas.
-    """
-    razao = min(RAZAO_MAXIMA_POR_AJUSTE, max(1 / RAZAO_MAXIMA_POR_AJUSTE, razao))
-    espaco = quadro[2] - quadro[0] - 2 * MARGEM_DOS_DEDOS
-    # As duas distâncias com pelo menos MENOR_DISTANCIA_DOS_DEDOS (ao diminuir, a de chegada é a menor).
-    de = max(min(DEDOS_DA_FIGURINHA, round(largura * 0.6)), MENOR_DISTANCIA_DOS_DEDOS,
-             round(MENOR_DISTANCIA_DOS_DEDOS / razao))
-    if de * max(1, razao) > espaco:
-        de = round(espaco / max(1, razao))
-    ate = round(de * razao)
-    meia = max(de, ate) / 2
-    meio = min(max(x, quadro[0] + MARGEM_DOS_DEDOS + meia), quadro[2] - MARGEM_DOS_DEDOS - meia)
-    return round(meio), de, ate
-
-
-def ganho_dos_dedos(ganho, dedos, alto_antes, alto):
-    """
-    O ganho dos dois dedos depois de um gesto: a figurinha mudou pela razão dos dedos (dedos)
-    elevada a quanto? Pela altura da faixa antes e depois. O gesto que não mudou a figurinha
-    diminui o ganho (o próximo abre ou fecha mais os dedos); o que a mudou para o outro lado não
-    ensina nada. Sempre entre os limites de GANHO_DOS_DEDOS.
-    """
-    menor, maior = GANHO_DOS_DEDOS
-    mudou = alto / alto_antes
-    if abs(mudou - 1) <= SEM_EFEITO_DOS_DEDOS:
-        return max(menor, ganho * REDUCAO_SEM_EFEITO)
-    if abs(math.log(dedos)) < 0.01 or (mudou > 1) != (dedos > 1):
-        return ganho
-    return min(maior, max(menor, math.log(mudou) / math.log(dedos)))
-
-
-def receita_serve(receita, quadro, entrada):
-    """
-    A receita da última figurinha que deu certo serve nesta? Os gestos dela partem da figurinha
-    como ela entra: o mesmo quadro do vídeo na tela e a faixa entrando da mesma largura (até
-    FOLGA_DA_ENTRADA de diferença).
-    """
-    if not receita or not receita.get("gestos") or list(receita.get("quadro") or []) != list(quadro):
-        return False
-    largura = (receita.get("entrada") or [0, 0])[1]
-    return bool(largura) and abs(entrada[1] / largura - 1) <= FOLGA_DA_ENTRADA
-
-
-def refazer_os_gestos(d, gestos, feitos):
-    """
-    Refaz os gestos de uma receita, na ordem, com a pausa de sempre entre eles: ["dedos", meio, y,
-    de, ate] ou ["arrasto", x, y, x2, y2]. feitos recebe cada um que deu certo. (ok, motivo)
-    """
-    for gesto in gestos:
-        tipo, *numeros = gesto
-        if tipo == "dedos":
-            ok, motivo = ps.dois_dedos(d, *numeros)
-        else:
-            ok, motivo = ps.arrastar(d, *numeros)
-        if not ok:
-            return False, motivo
-        feitos.append(list(gesto))
-        pausa(2)
-    return True, ""
-
-
-def _com_as_medidas(motivo, medidas, esperada):
-    """
-    O motivo da figurinha que não chegou ao desenho, com a faixa medida no print antes de cada
-    ajuste (alto x largura e o meio dela, em px da tela, acima (-) ou abaixo (+) do meio do
-    desenho) e o gesto que veio depois dela: os dois dedos, de quanto a quanto abertos em px, ou
-    o arrasto, quanto para baixo (+) ou para cima (-). Mostra no checkup se os dois dedos mudaram
-    a figurinha (o app pode não deixar crescer mais) ou se a medida pegou outra coisa laranja da
-    tela. Só números.
-    """
-    if not medidas:
-        return motivo
-    e_cima, e_baixo, e_esquerda, e_direita = esperada
-    return (f"{motivo}; a cada medida, alto x largura, meio e o gesto (o desenho, "
-            f"{round(e_baixo - e_cima)}x{round(e_direita - e_esquerda)} e 0): "
-            + ", ".join(f"{alto}x{largura} {meio:+d}" + (f" {gesto}" if gesto else "")
-                        for alto, largura, meio, gesto in medidas))
-
-
-def aba_da_foto(xml):
-    """A aba da foto da figurinha: a 1ª aba, só um ícone (@image), na fileira das abas (@tab_layout). None sem ela."""
-    lista = ps.elementos(xml)
-    abas = next((el for el in lista if el["id"] == "tab_layout"), None)
-    icones = [el for el in lista if el["id"] == "image" and (not abas or ps._dentro(ps._centro(el), abas["caixa"]))]
-    return ps._centro(min(icones, key=lambda el: el["caixa"][0])) if icones else None
-
-
-def mais_da_figurinha(xml):
-    """
-    Onde tocar para pôr uma foto nova na figurinha: o Enviar (@btn_upload) quando nenhuma foto
-    foi usada antes; depois, o + (o 1º quadro da lista das já usadas). None sem nenhum.
-    """
-    enviar = ps.achar(xml, "@btn_upload")
-    if enviar:
-        return enviar
-    lista = ps.elementos(xml)
-    usadas = next((el for el in lista if el["id"] == "local_sticker_frame_layout"), None)
-    if not usadas:
-        return None
-    quadros = [el for el in lista if el["clicavel"] and el is not usadas and ps._dentro(ps._centro(el), usadas["caixa"])]
-    return ps._centro(min(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0]))) if quadros else None
-
-
-def sair_da_capa(d, vezes=5):
-    """
-    Volta da tela da capa (ou de uma tela dela: as figurinhas, as Fotos, o recorte) para a tela
-    final sem a capa nova: o X da capa e o Confirmar do "Descartar Alterações na Capa?". Na tela
-    final, nunca aperta voltar. Sem voltar a ela, para a rodada.
-    """
-    for _ in range(vezes):
-        xml = tela(d)
-        if tem(xml, "@et_caption") and not tem(xml, "@fl_add_sticker"):
-            return
-        if descartar_a_capa(xml):
-            tocar(d, "@tv_discard", 4)
-        elif tem(xml, "@cancel_btn"):
-            tocar(d, "@cancel_btn", 3)
-        else:
-            d.press("back")
-            pausa(3)
-    if not tem(tela(d), "@et_caption"):
-        raise Parada("a capa pela figurinha não deu certo, e o robô não voltou à tela final")
-
-
-def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
-    """
-    Põe a capa com a frase (PNG, bytes) pelo Selecionar Capa da tela final: o miolo dela na
-    galeria, a figurinha com foto, do tamanho do desenho (ajustar_a_figurinha, começando pela
-    receita da última que deu certo), e o ✓. Não dando certo, sai da capa sem salvar e tenta de
-    novo, até TENTATIVAS_DA_FIGURINHA vezes, sem começar outra depois do prazo (time.monotonic).
-    Na última que não dá certo, ao_falhar(motivo de todas) guarda o caso com a tela da capa ainda
-    aberta (o print mostra a figurinha como ficou), e a capa nova é descartada na volta à tela
-    final. A receita da que deu certo fica guardada; a foto sai da galeria no fim. (ok, o que
-    dizer no registro)
-    """
-    nome = ps.por_foto_na_galeria(d, edicao_video.recorte_da_figurinha(capa))
-    if not nome:
-        return False, "a capa não apareceu na galeria"
-    receita, motivos, ganho = db.ler_config(CHAVE_FIGURINHA, {}) or {}, [], None
-    try:
-        for tentativa in range(1, TENTATIVAS_DA_FIGURINHA + 1):
-            aprendida = {}
-            try:
-                ok, motivo = _figurinha_na_capa(d, capa, receita, aprendida)
-            except Parada as e:
-                ok, motivo = False, e.motivo
-            except (Verificacao, Suspensa):
-                raise
-            except Exception as e:
-                # A capa com a frase é um extra: faltando algum passo, a figurinha sai e o rascunho
-                # segue com a capa de sempre (P110); o rastro fica no log para o checkup.
-                logger.warning(f"⚠️ [Robô Shopee Vídeo] A capa pela figurinha deu erro: {type(e).__name__}", exc_info=True)
-                ok, motivo = False, f"a capa pela figurinha deu erro ({type(e).__name__})"
-            if ok:
-                if aprendida.get("gestos") is not None and len(aprendida["gestos"]) <= GESTOS_DA_RECEITA:
-                    db.salvar_config(CHAVE_FIGURINHA, dict(aprendida, em=_momento()))
-                return True, motivo + (f", na {tentativa}ª tentativa" if tentativa > 1 else "")
-            motivos.append(motivo)
-            ganho = aprendida.get("ganho") or ganho
-            if tentativa == TENTATIVAS_DA_FIGURINHA or (prazo and time.monotonic() > prazo):
-                break
-            # A próxima começa sem a receita (pode ser ela que não serve mais), com o ganho aprendido.
-            receita = {"ganho": aprendida["ganho"]} if aprendida.get("ganho") else {}
-            sair_da_capa(d)
-            fechar_a_edicao_da_legenda(d, tela(d))
-        # A capa que ficou de fora também ensina a próxima (pedido do Rafael, 01/11): o ganho dos
-        # dedos aprendido fica guardado, e a receita que não levou ao desenho sai.
-        if ganho:
-            db.salvar_config(CHAVE_FIGURINHA, {"ganho": ganho, "em": _momento()})
-        # O registro (até 240 letras) leva a última; o caso, todas.
-        if len(motivos) == 1:
-            resumo = todos = motivos[0]
-        else:
-            resumo = f"{len(motivos)} tentativas; a última: {motivos[-1]}"
-            todos = f"{len(motivos)} tentativas: " + "; ".join(f"{i}ª: {m}" for i, m in enumerate(motivos, 1))
-        if ao_falhar:
-            ao_falhar(todos)
-        return False, resumo
-    finally:
-        try:
-            sair_da_capa(d)
-        finally:
-            ps.tirar_foto_da_galeria(d, nome)
-
-
-def _figurinha_na_capa(d, capa, receita=None, aprendida=None):
-    """
-    Os toques da capa_pela_figurinha, da tela final até o ✓ (o miolo já na galeria), com a
-    receita e o que se aprendeu (ajustar_a_figurinha). (ok, motivo)
-    """
-    tocar(d, "@tv_select_cover", 6)
-    if not esperar_na_tela(d, "@fl_add_sticker", ESPERA_A_MAIS_NO_CAMINHO):
-        return False, "a tela da capa não abriu"
-    # A tela da capa sem a figurinha: o que mudar no print depois é ela (caixa_da_figurinha).
-    fundo = d.screenshot()
-    tocar(d, "@fl_add_sticker", 4)
-    aba = aba_da_foto(tela(d))
-    if not aba:
-        return False, "a aba da foto da figurinha não apareceu"
-    d.click(*aba)
-    pausa(3)
-    mais = mais_da_figurinha(tela(d))
-    if not mais:
-        return False, "nem o Enviar nem o + da figurinha apareceram"
-    d.click(*mais)
-    pausa(5)
-    if not esperar_na_tela(d, "@iv_picture", ESPERA_A_MAIS_NO_CAMINHO):
-        return False, "as Fotos não abriram"
-    tocar(d, "@iv_picture", 6)
-    if not esperar_na_tela(d, "@tv_next_full", ESPERA_A_MAIS_NO_CAMINHO):
-        return False, "o recorte da foto não abriu"
-    tocar(d, "@tv_next_full", 6)
-    xml = esperar_na_tela(d, "@save_btn", ESPERA_A_MAIS_NO_CAMINHO)
-    quadro = quadro_da_capa(xml) if xml else None
-    if not quadro:
-        return False, "a figurinha não voltou para a capa"
-    ok, motivo = ajustar_a_figurinha(d, capa, quadro, receita, aprendida, fundo)
-    if not ok:
-        return False, motivo
-    tocar(d, "@save_btn", 5)
-    if not esperar_na_tela(d, "@et_caption", ESPERA_A_MAIS_NO_CAMINHO):
-        return False, "o ✓ da capa não voltou à tela final"
-    return True, motivo
 
 
 def faixa_da_capa(imagem, caixa):
     """
-    A faixa laranja da capa com a frase na caixa (x1, y1, x2, y2) da imagem do PIL, a miniatura
-    da capa da tela final ou o quadro da grade: (cima, baixo, esquerda, direita), ou None. Só a
-    que vai de um lado ao outro da caixa (LARGURA_DA_FAIXA_NA_CAPA).
+    A faixa laranja da capa com a frase na caixa (x1, y1, x2, y2) da imagem do PIL, o quadro da
+    grade: (cima, baixo, esquerda, direita), ou None. Só a que vai de um lado ao outro da caixa
+    (LARGURA_DA_FAIXA_NA_CAPA).
     """
     faixa = edicao_video.faixa_laranja(imagem, caixa)
     if faixa and faixa[3] - faixa[2] >= (caixa[2] - caixa[0]) * LARGURA_DA_FAIXA_NA_CAPA:
         return faixa
     return None
-
-
-def arquivo_da_figurinha(ident):
-    """A capa com a frase (PNG) que foi pela figurinha no rascunho de antes da P125: a do post."""
-    return os.path.join(PASTA_RASCUNHOS, f"{ident}_figurinha.png")
-
-
-def faixa_na_previa(d):
-    """
-    A miniatura da capa na tela final (PREVIA_DA_CAPA) tem a faixa laranja? True ou False;
-    None sem a miniatura na tela.
-    """
-    previa = next((el for el in ps.elementos(tela(d)) if el["id"] == PREVIA_DA_CAPA), None)
-    if not previa:
-        return None
-    return faixa_da_capa(d.screenshot(), previa["caixa"]) is not None
-
-
-def capa_de_novo_no_post(d, rascunho, agora=None):
-    """
-    No rascunho reaberto para postar, com a capa pela figurinha no preparo (a capa que o Rafael
-    aprovou, nos rascunhos de antes da P125): confere a miniatura da capa e, sem a faixa, põe a
-    figurinha de novo pela capa guardada. O registro diz o que a miniatura mostrou e se a capa
-    voltou; a capa que não volta guarda o caso com a tela dela. Devolve True com a capa com a
-    frase na tela, False quando ela não voltou e None no rascunho sem a figurinha (a frase no
-    vídeo, P125, ou a capa de sempre).
-    """
-    caminho = arquivo_da_figurinha(rascunho["id"])
-    if not rascunho.get("chamada") or not os.path.exists(caminho):
-        return None
-    previa = faixa_na_previa(d)
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, {
-        True: "no rascunho reaberto com a faixa", False: "no rascunho reaberto sem a faixa",
-        None: "no rascunho reaberto sem a miniatura da capa"}[previa], ok=True if previa else None)
-    if previa:
-        return True
-    with open(caminho, "rb") as arquivo:
-        capa = arquivo.read()
-    ok, motivo = capa_pela_figurinha(
-        d, capa, lambda motivo: _guardar_caso(d, "postar", "capa de fora", motivo, video_do_rascunho(rascunho),
-                                              rascunho["id"], agora),
-        time.monotonic() + MINUTOS_DA_CAPA_NO_POST * 60)
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "posta de novo no post" if ok else "de fora no post",
-                                 motivo, ok=ok or None)
-    fechar_a_edicao_da_legenda(d, tela(d))
-    return ok
-
-
-def adiar_sem_a_capa(rascunho, agora=None):
-    """
-    A capa com a frase não voltou no rascunho reaberto: o post fica para a rodada seguinte
-    (AdiarPost), até ADIAMENTOS_DA_CAPA vezes; depois disso, segue com a capa de sempre. O
-    adiamento não gasta tentativa do post (P99). Escolha do Rafael (02/11, P124): DECISOES.md,
-    Shopee Vídeo.
-    """
-    feitos = int(rascunho.get("adiamentos") or 0)
-    if feitos >= ADIAMENTOS_DA_CAPA:
-        registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "no post com a capa de sempre",
-                                     f"depois de {feitos} adiamento(s)", ok=None)
-        return
-    atualizar(rascunho["id"], adiamentos=str(feitos + 1), postar_em=_momento(agora_br(agora) + ESPERA_DO_ADIAMENTO))
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA, "post adiado",
-                                 f"{feitos + 1} de {ADIAMENTOS_DA_CAPA}", ok=None)
-    raise AdiarPost(feitos + 1)
 
 
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
@@ -5024,8 +4492,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                                     for p in do_ver_produtos[1:]) if foto]
     # O link curto de cada produto do Ver Produtos que não é o do criador (o trocado, P57, e o a mais).
     links_conhecidos = {p["nome"]: p["link"] for p in do_ver_produtos or [] if p.get("link")}
-    # A capa com a frase abre o vídeo, e o app usa o 1º quadro como capa da grade: a frase vai ao
-    # ar sem a figurinha do Selecionar Capa. Escolha do Rafael (02/11, P125): DECISOES.md, Shopee Vídeo.
+    # A capa com a frase abre o vídeo, e o app usa o 1º quadro como capa da grade. Escolha do
+    # Rafael (02/11, P125): DECISOES.md, Shopee Vídeo.
     miniatura = {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
                                   outras=outras, miniatura=miniatura, rotulo_de_ia=bool(rotulo_ia),
@@ -5588,8 +5056,8 @@ def nome_na_galeria(ident):
 
 
 # O vídeo, o print, as fotos de capa (P75) e as dos recusados de cada rascunho: {id}.mp4, {id}.png,
-# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg; e a capa com a frase que foi pela figurinha, {id}_figurinha.png.
-ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado)_\d+\.(?:jpg|png|webp)|_figurinha\.png|\.(?:mp4|png))$")
+# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg.
+ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado)_\d+\.(?:jpg|png|webp)|\.(?:mp4|png))$")
 
 
 # --- Os rascunhos no app ---
@@ -5691,11 +5159,8 @@ def publicar(d, rascunho, agora=None):
     if ate:
         raise Suspensa(ate)
     # O rascunho reaberto tem todos os produtos: o app só guarda o rascunho pelo Salvar, e a
-    # volta da tela final do post que não saiu descarta o que o robô mudou nela. A capa vem antes
-    # de tirar os produtos: o post adiado sem ela (P124) não perde esse trabalho.
+    # volta da tela final do post que não saiu descarta o que o robô mudou nela.
     abrir_rascunho(d, rascunho)
-    if capa_de_novo_no_post(d, rascunho, agora) is False:
-        adiar_sem_a_capa(rascunho, agora)
     no_post = com_os_que_ficam(rascunho)
     if no_post is not rascunho:
         tirar_os_marcados(d, rascunho)
@@ -5807,8 +5272,8 @@ def marcar_o_post(d, ident, caixa):
     """
     Guarda no rascunho a marca da capa do vídeo que acabou de ir ao ar (o quadro da grade em
     caixa). Sem a marca (a capa não carregou, o print falhou), o vídeo fica fora da medição, e o
-    checkup conta. Com a capa pela figurinha (P110), o registro diz se a faixa laranja chegou ao
-    post (o rascunho guardado e reaberto). Nada aqui segura o post nem o link.
+    checkup conta. Com a capa com a frase (P125), o registro diz se a faixa laranja chegou à grade
+    e se a grade pegou o 1º quadro do vídeo (P129). Nada aqui segura o post nem o link.
     """
     try:
         for tentativa in range(TENTATIVAS_DA_MARCA):
@@ -7303,13 +6768,6 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         # A punição que levou à suspensão ganha o texto do recurso na mesma rodada.
         _ler_saude_junto(d, agora)
         return resultado
-    except AdiarPost as e:
-        registrar_tentativa(acao, "adiado", str(e), produto, agora)
-        avisar(f"⏳ Robô da Shopee Vídeo: a capa com a frase não voltou no rascunho aprovado (o app pode estar "
-               f"lento). Não postei agora: tento de novo na próxima rodada, daqui a uns 15 min (adiamento {e.vez} "
-               f"de {ADIAMENTOS_DA_CAPA}). Se depois do {ADIAMENTOS_DA_CAPA}º ela ainda não voltar, o post vai com a "
-               "capa de sempre.")
-        return _resposta(preparar, f"{acao}: adiado ({e})")
     except Verificacao:
         logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
         if acao != "rascunho":

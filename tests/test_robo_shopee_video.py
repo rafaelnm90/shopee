@@ -1,10 +1,8 @@
 """Robô automático da Shopee Vídeo (robo_shopee_video): plano do dia, aprovação espalhada, rodada e o caminho no app."""
 import io
 import json
-import math
 import os
 import random
-import re
 import time
 from datetime import datetime
 from xml.sax.saxutils import escape
@@ -1277,8 +1275,7 @@ def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None):
     capa (bytes), o vídeo abre com a capa com a frase, como na capa com chamada ligada (P125). Com
     rotulos (lista), guarda se o vídeo vai com o Rótulo de IA.
     """
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
-                           rotulo_de_ia=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
         chamadas.append((video, foto, produto, avisos))
         if rotulos is not None:
             rotulos.append(rotulo_de_ia)
@@ -1286,8 +1283,6 @@ def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None):
         if not motivo:
             with open(destino, "wb") as arquivo:
                 arquivo.write(b"com os avisos" if avisos else b"editado")
-        # O robô não pede mais a figurinha do Selecionar Capa (P125).
-        assert figurinha is None
         if capa and not motivo:
             como += robo.edicao_video.COM_A_CHAMADA
         return motivo, como + (robo.edicao_video.COM_OS_AVISOS if avisos else ""), detalhe
@@ -1338,10 +1333,9 @@ def test_video_com_o_rotulo_de_ia_vai_a_edicao_com_ele(monkeypatch, avisos, tmp_
     assert rotulos == [True, False]
 
 
-def test_rascunho_com_a_capa_com_chamada_abre_o_video_com_ela_sem_a_figurinha(monkeypatch, avisos):
+def test_rascunho_com_a_capa_com_chamada_abre_o_video_com_ela(monkeypatch, avisos):
     # Escolha do Rafael (02/11, P125): a capa com a frase abre o vídeo, no lugar da foto, e o app usa
-    # o 1º quadro como capa da grade: o robô não põe mais a figurinha pelo Selecionar Capa (P110), e
-    # o rascunho fica marcado para a medição (P76) desde o preparo.
+    # o 1º quadro como capa da grade; o rascunho fica marcado para a medição (P76) desde o preparo.
     _fonte(monkeypatch)
 
     async def analisar(arquivo, prompt, imagens=None):
@@ -1351,12 +1345,10 @@ def test_rascunho_com_a_capa_com_chamada_abre_o_video_com_ela_sem_a_figurinha(mo
                         lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
     monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
     monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar([], capa=b"a capa"))
-    monkeypatch.setattr(robo, "capa_pela_figurinha",
-                        lambda *a, **k: pytest.fail("a figurinha não vai mais no rascunho (P125)"))
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     rascunho = robo.esperando_aprovacao()[0]
-    assert rascunho["chamada"] == "1" and not os.path.exists(robo.arquivo_da_figurinha(rascunho["id"]))
+    assert rascunho["chamada"] == "1"
     assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_CAPA) == (0,)
 
 
@@ -1568,8 +1560,7 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
         arquivo.write(b"original")
     fotos, buscas = [], []
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
-                           rotulo_de_ia=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
         fotos.append((foto, produto))
         if not foto:
             return "a foto do anúncio não veio", robo.edicao_video.SO_COM_O_EDITOR_1, ""
@@ -3454,8 +3445,8 @@ def _copia_com_a_miniatura(monkeypatch, com_miniatura=True):
     """A edição de mentira: guarda os nomes e as outras fotos e diz as fotos da miniatura que troca."""
     edicao = {}
 
-    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), figurinha=None, miniatura=None,
-               rotulo_de_ia=False, link_do_1o=None):
+    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
+               link_do_1o=None):
         edicao.update(nomes=list(nomes), outras=list(outras))
         if com_miniatura and miniatura is not None:
             miniatura["fotos"] = [b"\xff\xd8primeira"] + list(outras)
@@ -6239,8 +6230,7 @@ def test_miniatura_troca_entre_as_fotos_diferentes_dos_produtos_do_post(monkeypa
         arquivo.write(b"v")
     chamadas, duracoes = [], [30.0, 7.0, 4.0, 0.0, RuntimeError("sem ffprobe")]
 
-    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
-                           rotulo_de_ia=False):
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
         chamadas.append(list(outras_fotos))
         with open(destino, "wb") as arquivo:
             arquivo.write(b"editado")
@@ -6561,7 +6551,7 @@ def test_sem_video_com_marca_nao_abre_o_perfil(monkeypatch):
     assert robo.anotar_visualizacoes(object(), momento("2026-10-30 09:00")) == (0, 0)
 
 
-# --- A capa com a frase pela figurinha (P110) ---
+# --- A capa com a frase no post (P125 e P129) ---
 
 def _foto_do_anuncio():
     """Uma foto com desenho (um degradê azul), para a marca da capa na grade sair."""
@@ -6573,574 +6563,8 @@ def _foto_do_anuncio():
     return saida.getvalue()
 
 
-def _capa_dos_rascunhos_de_antes(foto, frase):
-    """
-    A capa com a frase guardada para a figurinha nos rascunhos de antes da P125 (PNG, bytes), no
-    desenho daquela época: a foto menor no meio, com a moldura laranja de cantos retos em volta e
-    as laterais até a beirada do vídeo, e a faixa da frase no pé da foto. Só esses rascunhos vão
-    pela figurinha, com a capa guardada no servidor; a capa de hoje é outra (vídeo do Rafael das
-    20:14 de 02/11).
-    """
-    from PIL import Image, ImageDraw
-    ev = robo.edicao_video
-    hoje = Image.open(io.BytesIO(ev.capa_com_chamada(foto, frase))).convert("RGB")
-    capa = Image.new("RGB", ev.TELA, "black")
-    ImageDraw.Draw(capa).rectangle((0, 292, 719, 987), fill=ev.LARANJA_DA_SHOPEE)
-    capa.paste(hoje.crop(ev.FOTO_DA_CAPA).resize((668, 668)), (26, 306))
-    saida = io.BytesIO()
-    capa.save(saida, format="PNG")
-    return saida.getvalue()
-
-
-CAPA_DA_FIGURINHA = _capa_dos_rascunhos_de_antes(_foto_do_anuncio(), "Alivia a dor")
-QUADRO_DA_CAPA = (61, 267, 1018, 1969)
-ESCALA_DO_DESENHO = (QUADRO_DA_CAPA[2] - QUADRO_DA_CAPA[0]) / 720
-
-
-class CelularDaCapa:
-    """
-    A tela final, a Selecione sua capa e as telas da figurinha com foto, como no Motorola em
-    30 e 31/10. A figurinha (o miolo da capa) entra com a escala de entrada (px da tela por px
-    da capa) no meio do quadro; dois dedos a aumentam pela razão das distâncias vezes o ganho
-    (o app não segue os dedos à risca), até a escala máxima, e o arrastar a move.
-    """
-
-    def __init__(self, entrada=0.443, ganho=1.0, maxima=10.0, meio=(540, 1118), usadas=False, parado=1.0,
-                 letras_grossas=False, teimosas=0, fundo=None, jpeg=None, so_na_figurinha=False):
-        self.atual, self.figurinha, self.salva, self.usadas = "final", None, None, usadas
-        # so_na_figurinha: os dois dedos e o arrastar só mexem na figurinha quando começam em
-        # cima dela (como no Motorola em 01/11: os dedos longe dela não a mudaram).
-        self.so_na_figurinha = so_na_figurinha
-        # fundo: o 1º quadro do vídeo (PNG, bytes), que a tela da capa mostra embaixo da
-        # figurinha; jpeg: a qualidade do print, como o do celular (o uiautomator2 manda em JPEG).
-        self.fundo, self.jpeg = fundo, jpeg
-        # teimosas: as primeiras figurinhas que entram não mudam com os dois dedos.
-        self.teimosas, self.entradas = teimosas, 0
-        self.entrada, self.ganho, self.maxima, self.meio = entrada, ganho, maxima, meio
-        # parado: dedos que abrem ou fecham menos que essa razão não mudam a figurinha.
-        # letras_grossas: no print, as letras brancas da faixa mais grossas (como no Motorola).
-        self.parado, self.letras_grossas = parado, letras_grossas
-        self.galeria, self.toques, self.gestos, self.arrastos, self.teclas = set(), [], [], [], []
-        self.pontos = []
-
-    def _nos(self):
-        capa = [_no(ident="player_container", caixa=(0, 267, 1080, 1969), clicavel=False),
-                _no(ident="cancel_btn", caixa=(40, 150, 120, 240)), _no(ident="save_btn", caixa=(960, 150, 1040, 240)),
-                _no("Adicionar Texto", "fl_add_text", (40, 2260, 520, 2366)),
-                _no("Adicionar figurinha", "fl_add_sticker", (560, 2260, 1040, 2366))]
-        if self.atual == "final":
-            return _tela_final(TITULO, self.salva is not None) + [
-                _no("Selecionar Capa", "tv_select_cover", (42, 563, 305, 632))]
-        if self.atual == "capa":
-            return capa
-        if self.atual == "figurinhas":
-            painel = [_no(ident="tab_layout", caixa=(0, 1260, 1080, 1366), clicavel=False,
-                          filhos=_no(ident="image", caixa=(20, 1270, 110, 1342), clicavel=False)
-                          + _no("Texto", "text", (380, 1280, 470, 1332))),
-                      _no(ident="local_sticker_frame_layout", caixa=(0, 1400, 1080, 2366), clicavel=False)]
-            if self.usadas:
-                painel += [_no(caixa=(90, 1450, 200, 1560)), _no(caixa=(350, 1450, 470, 1560))]
-            else:
-                painel += [_no("Enviar", "btn_upload", (440, 1880, 640, 1956))]
-            return capa + painel
-        if self.atual == "fotos":
-            return [_no(ident="iv_picture", caixa=(60, 330, 206, 476)), _no(ident="iv_picture", caixa=(220, 330, 366, 476))]
-        if self.atual == "recorte":
-            return [_no("Próximo", "tv_next_full", (860, 2230, 1014, 2306))]
-        if self.atual == "descartar":
-            return capa + [_no("Descartar Alterações na Capa?", caixa=(200, 1100, 880, 1160), clicavel=False),
-                           _no("Cancelar", "tv_cancel", (200, 1300, 520, 1380)),
-                           _no("Confirmar", "tv_discard", (560, 1300, 880, 1380))]
-        return []
-
-    def dump_hierarchy(self):
-        return _xml(*self._nos())
-
-    def click(self, x, y):
-        tocados = [el for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])]
-        tocados.sort(key=lambda el: (el["caixa"][2] - el["caixa"][0]) * (el["caixa"][3] - el["caixa"][1]))
-        ids = {"@" + el["id"] for el in tocados if el["id"]}
-        # O menor elemento no ponto é o que o dedo tocou.
-        self.toques.append(next(("@" + el["id"] for el in tocados if el["id"]), (x, y)))
-        if self.atual == "final" and "@tv_select_cover" in ids:
-            self.atual = "capa"
-        elif self.atual == "capa" and "@fl_add_sticker" in ids:
-            self.atual = "figurinhas"
-        elif self.atual == "figurinhas" and ("@btn_upload" in ids or (self.usadas and 1450 <= y <= 1560 and x < 200)):
-            self.atual = "fotos"
-        elif self.atual == "fotos" and "@iv_picture" in ids:
-            self.atual = "recorte"
-        elif self.atual == "recorte" and "@tv_next_full" in ids:
-            self.atual, self.figurinha = "capa", {"escala": self.entrada, "x": self.meio[0], "y": self.meio[1]}
-            self.entradas += 1
-        elif self.atual == "capa" and "@save_btn" in ids:
-            self.atual, self.salva = "final", self.figurinha
-        elif self.atual == "capa" and "@cancel_btn" in ids:
-            self.atual = "descartar" if self.figurinha else "final"
-        elif self.atual == "descartar" and "@tv_discard" in ids:
-            self.atual, self.figurinha = "final", None
-
-    def press(self, tecla, meta=None):
-        self.teclas.append(tecla)
-        self.atual = {"figurinhas": "capa", "fotos": "figurinhas", "recorte": "fotos",
-                      "capa": "descartar" if self.figurinha else "final"}.get(self.atual, self.atual)
-
-    def __call__(self, **seletor):
-        celular = self
-
-        class Gesto:
-            def gesture(self, *dedos, steps=0):
-                # O uiautomator2 recusa ponto negativo com AssertionError (pos_rel2abs).
-                assert all(x >= 0 and y >= 0 for x, y in dedos)
-                celular.pontos.append(dedos)
-                (a, b, c, d) = dedos
-                de = math.dist(a, b)
-                ate = math.dist(c, d)
-                meio_x, meio_y = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-                celular.gestos.append((de, ate))
-                f = celular.figurinha
-                if 1 / celular.parado < ate / de < celular.parado or celular.entradas <= celular.teimosas:
-                    return
-                if celular.so_na_figurinha and not celular._em_cima(meio_x, meio_y):
-                    return
-                nova = min(celular.maxima, f["escala"] * (ate / de) ** celular.ganho)
-                razao = nova / f["escala"]
-                f.update(escala=nova, x=meio_x + (f["x"] - meio_x) * razao, y=meio_y + (f["y"] - meio_y) * razao)
-        return Gesto()
-
-    def _em_cima(self, x, y):
-        """O ponto está em cima da figurinha (o miolo da capa, 720x1080, na escala dela)?"""
-        f = self.figurinha
-        return abs(x - f["x"]) <= 360 * f["escala"] and abs(y - f["y"]) <= 540 * f["escala"]
-
-    def drag(self, x1, y1, x2, y2, duracao=0):
-        self.arrastos.append((x1, y1, x2, y2))
-        if self.figurinha and (not self.so_na_figurinha or self._em_cima(x1, y1)):
-            self.figurinha["x"] += x2 - x1
-            self.figurinha["y"] += y2 - y1
-
-    def screenshot(self, caminho=None):
-        from PIL import Image
-        tela = Image.new("RGB", (1080, 2400), (25, 25, 25))
-        x1, y1, x2, y2 = QUADRO_DA_CAPA
-        quadro = Image.new("RGB", (x2 - x1, y2 - y1), "black")
-        if self.atual == "capa" and self.fundo:
-            quadro = Image.open(io.BytesIO(self.fundo)).convert("RGB").resize(quadro.size)
-        if self.atual == "capa" and self.figurinha:
-            miolo = Image.open(io.BytesIO(robo.edicao_video.recorte_da_figurinha(CAPA_DA_FIGURINHA))).convert("RGB")
-            f = self.figurinha
-            largura, altura = round(miolo.width * f["escala"]), round(miolo.height * f["escala"])
-            quadro.paste(miolo.resize((largura, altura)), (round(f["x"] - largura / 2) - x1, round(f["y"] - altura / 2) - y1))
-        tela.paste(quadro, (x1, y1))
-        tela = _com_letras_grossas(tela) if self.letras_grossas else tela
-        if self.jpeg:
-            saida = io.BytesIO()
-            tela.save(saida, format="JPEG", quality=self.jpeg)
-            tela = Image.open(io.BytesIO(saida.getvalue())).convert("RGB")
-        return tela
-
-    def shell(self, partes):
-        if partes[0] == "find":
-            self.galeria = {n for n in self.galeria if not n.startswith(robo.ps.NOME_DA_FOTO)}
-        saida = "\n".join(sorted(self.galeria)) if partes[0] == "content" else ""
-        return type("R", (), {"output": saida})()
-
-    def push(self, origem, destino):
-        self.galeria.add(destino.rsplit("/", 1)[-1])
-
-
-def _com_letras_grossas(imagem, px=3):
-    """
-    O print com o branco px pontos mais largo para cada lado: as letras da faixa ficam como no
-    print do Motorola em 31/10, com mais branco que laranja nas linhas do meio delas.
-    """
-    import numpy
-    from PIL import Image, ImageFilter
-    pontos = numpy.asarray(imagem.convert("RGB")).copy()
-    branco = Image.fromarray(((pontos.min(axis=2) > 200) * 255).astype("uint8")).filter(ImageFilter.MaxFilter(2 * px + 1))
-    pontos[numpy.asarray(branco) > 0] = 255
-    return Image.fromarray(pontos)
-
-
-def _faixa_na_tela(celular):
-    return robo.edicao_video.faixa_laranja(celular.screenshot(), QUADRO_DA_CAPA)
-
-
-def _no_desenho(celular):
-    """
-    A figurinha salva deixa a faixa do tamanho e no lugar do desenho, de uma borda à outra do
-    quadro? (A medida do print erra uma ou duas linhas.)
-    """
-    atual, celular.atual, celular.figurinha = celular.atual, "capa", celular.salva
-    cima, baixo, esquerda, direita = _faixa_na_tela(celular)
-    celular.atual, celular.figurinha = atual, None
-    e_cima, e_baixo, e_esquerda, e_direita = robo.faixa_esperada(CAPA_DA_FIGURINHA, QUADRO_DA_CAPA)
-    return (abs((baixo - cima) / (e_baixo - e_cima) - 1) <= robo.FOLGA_DA_ESCALA + 0.01
-            and abs((cima + baixo) / 2 - (e_cima + e_baixo) / 2) <= robo.FOLGA_DA_POSICAO + 1
-            and abs(esquerda - e_esquerda) <= robo.FOLGA_DAS_PONTAS and abs(direita - e_direita) <= robo.FOLGA_DAS_PONTAS)
-
-
-def test_capa_pela_figurinha_fica_do_tamanho_do_desenho_e_volta_a_tela_final(monkeypatch):
-    # Escolha do Rafael (31/10, P110): a capa com a frase pela figurinha com foto, do tamanho do
-    # desenho da P107 (a faixa logo acima do número de visualizações da grade).
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa()
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and motivo.startswith("a faixa do tamanho do desenho")
-    assert celular.atual == "final" and _no_desenho(celular)
-    # A foto da capa saiu da galeria, e nada de voltar na tela final.
-    assert celular.galeria == set() and celular.teclas == []
-
-
-def test_capa_pela_figurinha_em_cima_da_moldura_do_video_no_print_do_celular(monkeypatch):
-    # 01/11, 20:07: a tela da capa mostra o 1º quadro do vídeo, com a moldura laranja (P115),
-    # embaixo da figurinha. Com ela recém-posta, pequena, as bordas dos lados da moldura e as
-    # letras borradas do print em JPEG do celular faziam a medida não achar a faixa, e as 3
-    # tentativas saíram sem a capa com a frase.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    from PIL import Image, ImageDraw
-    # O 1º quadro do vídeo daquela noite: a foto com a moldura laranja por dentro, dos lados.
-    fundo = Image.open(io.BytesIO(robo.edicao_video.capa_sem_chamada(_foto_do_anuncio()))).convert("RGB")
-    x1, y1, x2, y2 = robo.edicao_video.FOTO_DA_CAPA
-    ImageDraw.Draw(fundo).rounded_rectangle((x1 + 40, y1 + 40, x2 - 41, y2 - 41), robo.edicao_video.RAIO_DA_FOTO,
-                                            outline=robo.edicao_video.LARANJA_DA_SHOPEE, width=14)
-    saida = io.BytesIO()
-    fundo.save(saida, format="PNG")
-    celular = CelularDaCapa(fundo=saida.getvalue(), jpeg=80)
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and motivo.startswith("a faixa do tamanho do desenho"), motivo
-    assert celular.atual == "final" and _no_desenho(celular)
-
-
-def _fundo_com_etiqueta():
-    """
-    O 1º quadro do vídeo (PNG, bytes) com uma etiqueta laranja de loja, com letras brancas, no
-    alto à esquerda da foto do anúncio, fora de onde a figurinha entra: 66 linhas no print, mais
-    que a faixa da figurinha recém-posta.
-    """
-    from PIL import Image, ImageDraw
-    fundo = Image.open(io.BytesIO(robo.edicao_video.capa_sem_chamada(_foto_do_anuncio()))).convert("RGB")
-    desenho = ImageDraw.Draw(fundo)
-    desenho.rectangle((20, 330, 220, 380), fill=robo.edicao_video.LARANJA_DA_SHOPEE)
-    for x in range(40, 200, 30):
-        desenho.rectangle((x, 345, x + 6, 365), fill="white")
-    saida = io.BytesIO()
-    fundo.save(saida, format="PNG")
-    return saida.getvalue()
-
-
-def test_a_faixa_e_medida_so_onde_a_figurinha_mudou_o_print():
-    # 22:44 de 01/11: no quadro todo, a medida achava a etiqueta laranja da foto do anúncio (no
-    # 1º quadro do vídeo, embaixo da figurinha), maior que a faixa da figurinha recém-posta.
-    celular = CelularDaCapa(fundo=_fundo_com_etiqueta(), jpeg=80)
-    celular.atual = "capa"
-    antes = celular.screenshot()
-    celular.figurinha = {"escala": celular.entrada, "x": 540, "y": 1118}
-    depois = celular.screenshot()
-    lado, alto = 360 * celular.entrada, 540 * celular.entrada
-    cima, baixo, esquerda, direita = robo.edicao_video.faixa_laranja(depois, QUADRO_DA_CAPA)
-    assert direita < 540 - lado
-    caixa = robo.caixa_da_figurinha(depois, antes, QUADRO_DA_CAPA)
-    folga = robo.FOLGA_DA_CAIXA
-    assert abs(caixa[0] - (540 - lado - folga)) <= 3 and abs(caixa[2] - (540 + lado + folga)) <= 3
-    assert abs(caixa[1] - (1118 - alto - folga)) <= 3 and abs(caixa[3] - (1118 + alto + folga)) <= 3
-    cima, baixo, esquerda, direita = robo.edicao_video.faixa_laranja(depois, caixa)
-    assert 540 - lado <= esquerda < direita <= 540 + lado and 1118 < cima < baixo <= 1118 + alto
-    # Sem o print de antes (ou de outro tamanho), a medida vale no quadro todo, como antes.
-    assert robo.caixa_da_figurinha(depois, None, QUADRO_DA_CAPA) == QUADRO_DA_CAPA
-    assert robo.caixa_da_figurinha(depois, antes.resize((540, 1200)), QUADRO_DA_CAPA) == QUADRO_DA_CAPA
-    assert robo.caixa_da_figurinha(depois, depois, QUADRO_DA_CAPA) == QUADRO_DA_CAPA
-
-
-def test_capa_pela_figurinha_com_laranja_na_foto_embaixo_dela(monkeypatch):
-    # 22:44 de 01/11: os dois dedos foram feitos na etiqueta laranja da foto do anúncio, longe da
-    # figurinha, e nada mudou; as 3 tentativas saíram sem a capa com a frase. Com a faixa medida
-    # só na figurinha, ela fica do tamanho do desenho.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(fundo=_fundo_com_etiqueta(), jpeg=80, so_na_figurinha=True)
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and motivo.startswith("a faixa do tamanho do desenho"), motivo
-    assert celular.atual == "final" and _no_desenho(celular)
-
-
-def test_figurinha_que_cresce_mais_que_os_dedos_e_ajustada_ate_o_desenho(monkeypatch):
-    # No teste de 31/10, os dois dedos de 200 a 900 px deixaram a figurinha um terço maior que o
-    # desenho (a faixa caiu sobre o número de visualizações): o robô mede e corrige. A
-    # figurinha que entra fora do meio é arrastada para o lugar.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(ganho=1.25, meio=(540, 1000), usadas=True)
-    ok, _ = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and _no_desenho(celular)
-    assert len(celular.gestos) >= 2 and celular.arrastos
-    # Com fotos já usadas, a figurinha nova entra pelo + (o 1º quadro da lista).
-    assert "@btn_upload" not in celular.toques
-
-
-def test_figurinha_que_nao_chega_ao_desenho_e_descartada_e_vai_a_capa_de_sempre(monkeypatch, avisos):
-    # O app que não deixa a figurinha crescer até o desenho: o robô desiste, confirma o
-    # "Descartar Alterações na Capa?" e segue com a capa de sempre; o registro diz por quê.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(maxima=0.9)
-    ok, detalhe = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert not ok and celular.atual == "final" and celular.salva is None
-    # Antes de desistir, a figurinha foi posta e descartada TENTATIVAS_DA_FIGURINHA vezes (01/11).
-    assert celular.entradas == celular.toques.count("@tv_discard") == robo.TENTATIVAS_DA_FIGURINHA
-    assert celular.galeria == set()
-    assert detalhe.startswith("3 tentativas; a última: a faixa não ficou do tamanho do desenho")
-    # Nenhuma receita de gestos (nenhuma deu certo), mas o ganho dos dedos aprendido fica para a
-    # próxima capa: "invés de desistir, aprender para que na próxima dê certo" (Rafael, 01/11).
-    guardado = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
-    assert "gestos" not in guardado and robo.GANHO_DOS_DEDOS[0] <= guardado["ganho"] <= robo.GANHO_DOS_DEDOS[1]
-
-
-def test_figurinha_que_nao_chega_ao_desenho_anota_a_medida_de_cada_ajuste(monkeypatch, avisos):
-    # Na 1ª capa pela figurinha de verdade (31/10), a faixa parou em 2/3 do desenho, e o registro
-    # só tinha a última medida: não dava para saber se o app não deixou a figurinha crescer ou se
-    # a medida pegou outra coisa laranja. Agora o registro diz a faixa de cada medida, só números.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(maxima=0.9)
-    # Uma tentativa só (sem tempo para outra): o registro traz as medidas dela inteiras.
-    ok, detalhe = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, prazo=time.monotonic() - 1)
-    assert not ok
-    e_cima, e_baixo, e_esquerda, e_direita = robo.faixa_esperada(CAPA_DA_FIGURINHA, QUADRO_DA_CAPA)
-    inicio = ("a faixa não ficou do tamanho do desenho; a cada medida, alto x largura, meio e o gesto (o "
-              f"desenho, {round(e_baixo - e_cima)}x{round(e_direita - e_esquerda)} e 0): ")
-    assert detalhe.startswith(inicio)
-    medidas = [medida.split(" ") for medida in detalhe[len(inicio):].split(", ")]
-    assert len(medidas) == robo.AJUSTES_DA_FIGURINHA + 1
-    altos = [int(medida[0].split("x")[0]) for medida in medidas]
-    # Os dois dedos aumentaram a figurinha até o máximo do app, e ali ela parou, abaixo do desenho.
-    assert altos[0] < altos[-1] == altos[-2] < round(e_baixo - e_cima)
-    assert all(medida[1][0] in "+-" for medida in medidas)
-    # Depois de cada medida, menos a última, os dois dedos: de quanto a quanto abertos, em px.
-    assert all(len(medida) == 3 and re.fullmatch(r"\d+→\d+", medida[2]) for medida in medidas[:-1])
-    assert len(medidas[-1]) == 2
-    # Cabe inteiro no registro (os detalhes passam de 240 letras cortados).
-    assert len(detalhe) < robo.registro_processos.TAMANHO_DO_DETALHE
-
-
-def test_figurinha_com_letras_grossas_e_dedos_que_nao_mexem_chega_ao_desenho(monkeypatch):
-    # 31/10, 18:49, 19:02 e 19:37: no print do Motorola, as letras da faixa tinham mais branco que
-    # laranja nas linhas do meio, a medida pegava só o pedaço acima delas, e o robô aumentava a
-    # figurinha além do quadro; e os dedos 3 vezes mais abertos a deixaram 2 vezes maior, e os 1,5
-    # vez mais abertos não a mudaram. O robô mede a faixa inteira e aprende com cada gesto.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(ganho=0.66, parado=1.6, letras_grossas=True)
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and _no_desenho(celular), motivo
-    assert len(celular.gestos) >= 2
-
-
-def test_figurinha_que_nao_ficou_tenta_de_novo_e_fica_na_2a_vez(monkeypatch):
-    # Pedido do Rafael (01/11): a capa que não fica certa não é descartada de cara; o robô sai da
-    # capa sem salvar, põe a figurinha de novo e ajusta outra vez, e só desiste depois de
-    # TENTATIVAS_DA_FIGURINHA vezes.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(teimosas=1)
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and motivo.endswith(", na 2ª tentativa") and _no_desenho(celular), motivo
-    assert celular.entradas == 2 and celular.toques.count("@tv_discard") == 1
-    assert celular.atual == "final" and celular.galeria == set()
-    # A receita da que deu certo fica guardada para a próxima capa.
-    receita = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
-    assert receita["gestos"] and receita["quadro"] == list(QUADRO_DA_CAPA) and receita["entrada"][1] > 0
-
-
-def test_figurinha_comeca_pela_receita_da_ultima_que_deu_certo(monkeypatch):
-    # "a capa uma vez dando certo sempre vai dar dali pra frente" (Rafael, 01/11): a figurinha entra
-    # sempre do mesmo tamanho e no mesmo lugar, então os gestos da última que deu certo, refeitos de
-    # uma vez, a deixam no desenho, e a medida só confere.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    primeira = CelularDaCapa(ganho=0.66, parado=1.6)
-    ok, motivo = robo.capa_pela_figurinha(primeira, CAPA_DA_FIGURINHA)
-    assert ok and "da última que deu certo" not in motivo, motivo
-    receita = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
-    assert len(receita["gestos"]) == len(primeira.gestos) + len(primeira.arrastos) >= 2
-    segunda = CelularDaCapa(ganho=0.66, parado=1.6)
-    ok, motivo = robo.capa_pela_figurinha(segunda, CAPA_DA_FIGURINHA)
-    assert ok and _no_desenho(segunda), motivo
-    assert motivo == f"a faixa do tamanho do desenho (1 ajuste(s), o 1º com os {len(receita['gestos'])} gesto(s) da última que deu certo)"
-    # Os mesmos gestos, e nenhum a mais.
-    assert segunda.gestos == primeira.gestos and segunda.arrastos == primeira.arrastos
-    assert robo.db.ler_config(robo.CHAVE_FIGURINHA, {})["gestos"] == receita["gestos"]
-
-
-def test_receita_que_nao_chega_fica_de_lado_e_a_nova_toma_o_lugar(monkeypatch):
-    # A receita que não leva ao desenho (o app mudou, a figurinha não cresceu) não é refeita de
-    # novo no mesmo rascunho: a 2ª tentativa começa do zero, e a receita dela toma o lugar.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    robo.capa_pela_figurinha(CelularDaCapa(), CAPA_DA_FIGURINHA)
-    antiga = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
-    robo.db.salvar_config(robo.CHAVE_FIGURINHA, dict(antiga, gestos=[["arrasto", 540, 1118, 540, 900]]))
-    celular = CelularDaCapa(teimosas=1)
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and motivo.endswith(", na 2ª tentativa") and "da última que deu certo" not in motivo, motivo
-    assert celular.arrastos[0] == (540, 1118, 540, 900)
-    nova = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
-    assert ["arrasto", 540, 1118, 540, 900] not in nova["gestos"] and nova["gestos"]
-
-
-def test_capa_de_fora_ensina_a_proxima_pelo_ganho_dos_dedos(monkeypatch):
-    # Os dedos 3 vezes mais abertos deixam a figurinha só 2 vezes maior (31/10): a capa que ficou
-    # de fora guarda o ganho que aprendeu, e a próxima já começa com ele, sem a receita velha.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    robo.db.salvar_config(robo.CHAVE_FIGURINHA, {"quadro": list(QUADRO_DA_CAPA), "entrada": [46, 318],
-                                                 "gestos": [["arrasto", 540, 1118, 540, 900]], "ganho": 1.0})
-    ok, _ = robo.capa_pela_figurinha(CelularDaCapa(ganho=0.63, maxima=0.9), CAPA_DA_FIGURINHA)
-    guardado = robo.db.ler_config(robo.CHAVE_FIGURINHA, {})
-    assert not ok and "gestos" not in guardado and guardado["ganho"] < 1.0
-    vistos = []
-    real = robo.ajustar_a_figurinha
-
-    def ajustar(d, capa, quadro, receita=None, aprendida=None, fundo=None):
-        vistos.append(dict(receita or {}))
-        return real(d, capa, quadro, receita, aprendida, fundo)
-
-    monkeypatch.setattr(robo, "ajustar_a_figurinha", ajustar)
-    ok, motivo = robo.capa_pela_figurinha(CelularDaCapa(ganho=0.63), CAPA_DA_FIGURINHA)
-    assert ok and vistos[0]["ganho"] == guardado["ganho"] and "gestos" not in vistos[0], motivo
-
-
-def test_receita_so_serve_no_mesmo_quadro_e_com_a_figurinha_do_mesmo_tamanho():
-    receita = {"quadro": list(QUADRO_DA_CAPA), "entrada": [46, 318], "gestos": [["dedos", 540, 1118, 300, 900]]}
-    assert robo.receita_serve(receita, QUADRO_DA_CAPA, [46, 330])
-    assert not robo.receita_serve(receita, QUADRO_DA_CAPA, [46, 400])
-    assert not robo.receita_serve(receita, (0, 0, 10, 10), [46, 318])
-    assert not robo.receita_serve(dict(receita, gestos=[]), QUADRO_DA_CAPA, [46, 318])
-    assert not robo.receita_serve({}, QUADRO_DA_CAPA, [46, 318])
-
-
-def test_sem_tempo_no_rascunho_a_capa_nao_tenta_de_novo(monkeypatch):
-    # A rodada tem 30 min: depois do prazo (MINUTOS_PARA_A_CAPA do começo do rascunho), a figurinha
-    # que não ficou vai direto para a capa de sempre, sem outra tentativa.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular = CelularDaCapa(maxima=0.9)
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, prazo=time.monotonic() - 1)
-    assert not ok and motivo.startswith("a faixa não ficou do tamanho do desenho; a cada medida")
-    assert celular.entradas == 1 and celular.atual == "final" and celular.galeria == set()
-
-
-def test_ganho_dos_dedos_aprende_com_o_gesto():
-    menor, maior = robo.GANHO_DOS_DEDOS
-    # Os dedos 3 vezes mais abertos deixaram a figurinha 2 vezes maior: o ganho é log 2 / log 3.
-    assert robo.ganho_dos_dedos(1.0, 3.0, 50, 100) == pytest.approx(math.log(2) / math.log(3))
-    # Nada mudou: o ganho diminui, e o próximo gesto abre mais os dedos; nunca abaixo do menor.
-    assert robo.ganho_dos_dedos(1.0, 1.5, 93, 93) == pytest.approx(robo.REDUCAO_SEM_EFEITO)
-    assert robo.ganho_dos_dedos(menor, 1.5, 93, 94) == menor
-    # Mudou para o outro lado (a medida errou): nada se aprende. E o ganho fica nos limites.
-    assert robo.ganho_dos_dedos(0.8, 2.0, 100, 90) == 0.8
-    assert robo.ganho_dos_dedos(1.0, 1.1, 100, 300) == maior
-
-
-def test_capa_pela_figurinha_guarda_o_caso_com_a_tela_da_capa_antes_de_descartar(monkeypatch):
-    # O caso da capa que não deu certo sai com a figurinha ainda na tela da capa (o print mostra
-    # como ela ficou); só depois o robô descarta e volta à tela final. A capa que deu certo não
-    # guarda caso.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    celular, vistos = CelularDaCapa(maxima=0.9), []
-    ok, motivo = robo.capa_pela_figurinha(
-        celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append((celular.atual, celular.figurinha is not None, motivo)))
-    # Um caso só, o da última tentativa, com o motivo de todas.
-    assert not ok and [visto[:2] for visto in vistos] == [("capa", True)]
-    assert vistos[0][2].startswith("3 tentativas: 1ª: a faixa não ficou do tamanho do desenho")
-    assert "; 2ª: " in vistos[0][2] and "; 3ª: " in vistos[0][2]
-    assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
-    celular, vistos = CelularDaCapa(), []
-    ok, _ = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, vistos.append)
-    assert ok and vistos == []
-
-
-def test_dedos_da_figurinha_ficam_no_quadro_mesmo_com_a_faixa_medida_fina(monkeypatch, avisos):
-    # 31/10, 14:18 e 14:42: a faixa medida fina demais pediu um gesto maior que a tela, o celular
-    # recusou o ponto negativo (AssertionError do uiautomator2) e o rascunho se perdeu. Os dedos
-    # ficam sempre dentro do quadro do vídeo, e a figurinha muda no máximo 3 vezes por ajuste.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-    real, finas = robo.edicao_video.faixa_laranja, [(1300, 1306, 380, 700)]
-
-    def faixa_laranja(imagem, caixa=None):
-        # A 1ª medida no print pega só um fio da faixa; a do desenho (sem caixa) é a de sempre.
-        return finas.pop() if caixa is not None and finas else real(imagem, caixa)
-
-    monkeypatch.setattr(robo.edicao_video, "faixa_laranja", faixa_laranja)
-    celular = CelularDaCapa()
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA)
-    assert ok and _no_desenho(celular), motivo
-    x1, y1, x2, y2 = QUADRO_DA_CAPA
-    assert celular.pontos and all(x1 < x < x2 and y1 < y < y2 for gesto in celular.pontos for x, y in gesto)
-    assert all(ate / de <= robo.RAZAO_MAXIMA_POR_AJUSTE + 0.01 for de, ate in celular.gestos)
-
-
-def test_dedos_da_figurinha_perto_da_borda_chegam_para_dentro():
-    x1, _y1, x2, _y2 = QUADRO_DA_CAPA
-    for x, largura, razao in ((540, 319, 23), (100, 200, 2), (1000, 150, 0.2), (70, 956, 3), (540, 956, 0.01)):
-        meio, de, ate = robo.dedos_da_figurinha(x, QUADRO_DA_CAPA, largura, razao)
-        pontos = (meio - de / 2, meio + de / 2, meio - ate / 2, meio + ate / 2)
-        assert all(x1 + robo.MARGEM_DOS_DEDOS <= p <= x2 - robo.MARGEM_DOS_DEDOS for p in pontos), (x, razao)
-        assert min(de, ate) >= robo.MENOR_DISTANCIA_DOS_DEDOS
-        assert 1 / robo.RAZAO_MAXIMA_POR_AJUSTE - 0.01 <= ate / de <= robo.RAZAO_MAXIMA_POR_AJUSTE + 0.01
-
-
-def test_erro_no_gesto_da_figurinha_descarta_a_capa_e_o_rascunho_segue(monkeypatch, avisos):
-    # O gesto que o celular recusa não derruba o rascunho: a figurinha sai (de fora, com as
-    # medidas), o caso é guardado com a tela da capa ainda aberta e o rascunho segue com a capa
-    # de sempre.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-
-    def recusa(*args, **kwargs):
-        raise AssertionError()
-
-    monkeypatch.setattr(robo.ps, "dois_dedos", recusa)
-    celular, vistos = CelularDaCapa(), []
-    ok, detalhe = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA,
-                                           lambda motivo: vistos.append((celular.atual, motivo)))
-    assert not ok and [atual for atual, _motivo in vistos] == ["capa"]
-    assert vistos[0][1].startswith("3 tentativas: 1ª: a figurinha não foi ajustada: erro AssertionError no gesto; "
-                                   "a cada medida, alto x largura")
-    assert celular.atual == "final" and celular.salva is None and celular.galeria == set()
-    assert "AssertionError" in detalhe
-
-
-def test_erro_inesperado_na_capa_descarta_a_figurinha_mas_a_verificacao_para(monkeypatch):
-    # Faltando algum passo da capa, a figurinha sai e o rascunho segue (P110), também num erro
-    # que o robô não esperava; a Verificação da Shopee continua parando a rodada.
-    monkeypatch.setattr(robo, "pausa", lambda s: None)
-
-    def quebra(xml):
-        raise ValueError()
-
-    monkeypatch.setattr(robo, "quadro_da_capa", quebra)
-    celular, vistos = CelularDaCapa(), []
-    ok, motivo = robo.capa_pela_figurinha(celular, CAPA_DA_FIGURINHA, lambda motivo: vistos.append(celular.atual))
-    assert (ok, motivo) == (False, "3 tentativas; a última: a capa pela figurinha deu erro (ValueError)")
-    assert vistos == ["capa"]
-    assert celular.atual == "final" and celular.galeria == set()
-    assert robo.passo_do_motivo(motivo) == "capa pela figurinha"
-
-    def verificacao(xml):
-        raise robo.Verificacao()
-
-    monkeypatch.setattr(robo, "quadro_da_capa", verificacao)
-    with pytest.raises(robo.Verificacao):
-        robo.capa_pela_figurinha(CelularDaCapa(), CAPA_DA_FIGURINHA)
-
-
-def test_falhas_da_capa_pela_figurinha_ficam_no_passo_dela():
-    # O caso e o histórico dizem que a falha foi na capa pela figurinha, não num passo do rascunho.
-    for motivo in ("a faixa não ficou do tamanho do desenho; alto x largura e o meio da faixa a cada medida",
-                   "a faixa laranja não apareceu na capa (0 ajuste(s))", "a capa não tem a faixa laranja",
-                   "a tela da capa não abriu", "a aba da foto da figurinha não apareceu",
-                   "nem o Enviar nem o + da figurinha apareceram", "as Fotos não abriram",
-                   "o recorte da foto não abriu", "a figurinha não voltou para a capa",
-                   "o ✓ da capa não voltou à tela final", f"a figurinha não foi ajustada: {robo.ps.RECUSA}",
-                   "a capa pela figurinha não deu certo, e o robô não voltou à tela final"):
-        assert robo.passo_do_motivo(motivo) == "capa pela figurinha", motivo
-    # As outras fotos e vídeos da galeria continuam no passo da galeria.
-    assert robo.passo_do_motivo("a foto do anúncio não apareceu na galeria") == "escolher o vídeo na galeria"
-    assert robo.passo_do_motivo("o vídeo não apareceu na galeria do celular") == "escolher o vídeo na galeria"
-
-
-def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
-    # A capa vai no rascunho guardado e reaberto para postar: o registro diz se a faixa chegou ao post.
+def test_post_com_a_capa_com_a_frase_diz_se_a_faixa_chegou_a_grade():
+    # A capa com a frase abre o vídeo (P125): no post, o registro diz se a faixa chegou à grade.
     from PIL import Image
     caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
 
@@ -7150,13 +6574,14 @@ def test_post_com_a_capa_pela_figurinha_diz_se_a_faixa_chegou_a_grade():
         tela.paste(capa.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
         return type("Celular", (), {"screenshot": lambda self, caminho=None: tela})()
 
+    capa = robo.edicao_video.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor")
     com = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1")
-    assert robo.marcar_o_post(grade(CAPA_DA_FIGURINHA), com, caixa)
+    assert robo.marcar_o_post(grade(capa), com, caixa)
     sem = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
-    assert robo.marcar_o_post(grade(robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())), sem, caixa)
-    # Sem a capa pela figurinha, nada a dizer.
+    assert robo.marcar_o_post(grade(robo.edicao_video.foto_em_tela_cheia(_foto_do_anuncio())), sem, caixa)
+    # Sem a capa com a frase, nada a dizer.
     outro = _rascunho("postado", postado_em="2026-10-31 12:00:00")
-    assert robo.marcar_o_post(grade(CAPA_DA_FIGURINHA), outro, caixa)
+    assert robo.marcar_o_post(grade(capa), outro, caixa)
     linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
     assert [r[2] for r in linhas] == ["no post com a faixa", "no post sem a faixa"]
 
@@ -7186,109 +6611,6 @@ def test_post_diz_se_a_grade_usou_o_1o_quadro_com_a_faixa_de_lado_a_lado():
     linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
                                               ("no post com a faixa", robo.LADOS_DA_CAPA[False])]
-
-
-class TelaFinalReaberta:
-    """A tela final do rascunho reaberto para postar: a miniatura da capa em cima do Selecionar Capa."""
-    CAIXA = (78, 286, 268, 626)
-
-    def __init__(self, capa_png=None):
-        from PIL import Image
-        self.imagem = Image.new("RGB", (1080, 2400), (250, 250, 250))
-        if capa_png:
-            x1, y1, x2, y2 = self.CAIXA
-            capa = Image.open(io.BytesIO(capa_png)).convert("RGB").resize((x2 - x1, y2 - y1))
-            self.imagem.paste(capa, (x1, y1))
-        self.com_previa = capa_png is not None
-
-    def dump_hierarchy(self):
-        nos = [_no(ident="et_caption", caixa=(400, 300, 1040, 520)),
-               _no("Selecionar Capa", "tv_select_cover", (78, 575, 268, 620))]
-        if self.com_previa:
-            nos.append(_no(ident=robo.PREVIA_DA_CAPA, caixa=self.CAIXA, clicavel=False))
-        return _xml(*nos)
-
-    def screenshot(self, caminho=None):
-        return self.imagem
-
-    def click(self, x, y):
-        pass
-
-
-def _guardar_a_figurinha(ident, capa):
-    """A capa com a frase guardada no preparo dos rascunhos de antes da P125, para o post."""
-    os.makedirs(robo.PASTA_RASCUNHOS, exist_ok=True)
-    with open(robo.arquivo_da_figurinha(ident), "wb") as arquivo:
-        arquivo.write(capa)
-
-
-def _capa_no_post(monkeypatch, tela, chamada="1", guardada=True, volta=(True, "a faixa do tamanho do desenho")):
-    ident = _rascunho("aprovado", postar_em="2026-11-01 14:55:00", chamada=chamada)
-    if guardada:
-        _guardar_a_figurinha(ident, CAPA_DA_FIGURINHA)
-    pedidas = []
-
-    def capa_pela_figurinha(d, capa, ao_falhar=None, prazo=None):
-        pedidas.append(capa)
-        if not volta[0] and ao_falhar:
-            ao_falhar(volta[1])
-        return volta
-
-    casos = []
-    monkeypatch.setattr(robo, "capa_pela_figurinha", capa_pela_figurinha)
-    monkeypatch.setattr(robo, "_guardar_caso", lambda *a, **k: casos.append(a[1:3]))
-    voltou = robo.capa_de_novo_no_post(tela, robo.pegar(ident), momento("2026-11-01 14:55"))
-    # True com a capa com a frase na tela (já estava ou voltou), False quando ela não voltou, None
-    # sem a figurinha.
-    esperado = None if not (guardada and chamada) else True if not pedidas else volta[0]
-    assert voltou is esperado
-    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
-    return pedidas, [(r[2], r[3]) for r in linhas], casos
-
-
-def test_post_poe_a_capa_de_novo_quando_o_rascunho_reaberto_volta_sem_a_faixa(monkeypatch):
-    # O app não guarda a figurinha da capa no rascunho: o post das 14:55 de 01/11 foi à grade com o
-    # 1º quadro do vídeo. A capa que o Rafael aprovou (P110) vai de novo antes do Postar.
-    sem_a_faixa = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
-    pedidas, linhas, casos = _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa))
-    assert pedidas == [CAPA_DA_FIGURINHA] and casos == []
-    assert linhas == [("no rascunho reaberto sem a faixa", ""),
-                      ("posta de novo no post", "a faixa do tamanho do desenho")]
-
-
-def test_post_com_a_faixa_no_rascunho_reaberto_nao_mexe_na_capa(monkeypatch):
-    pedidas, linhas, _ = _capa_no_post(monkeypatch, TelaFinalReaberta(CAPA_DA_FIGURINHA))
-    assert pedidas == [] and linhas == [("no rascunho reaberto com a faixa", "")]
-
-
-def test_post_sem_a_miniatura_da_capa_poe_a_capa_de_novo(monkeypatch):
-    pedidas, linhas, _ = _capa_no_post(monkeypatch, TelaFinalReaberta())
-    assert pedidas == [CAPA_DA_FIGURINHA]
-    assert [r for r, _ in linhas] == ["no rascunho reaberto sem a miniatura da capa", "posta de novo no post"]
-
-
-def test_capa_que_nao_volta_no_post_guarda_o_caso_e_segue(monkeypatch):
-    sem_a_faixa = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
-    pedidas, linhas, casos = _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa),
-                                           volta=(False, "a tela da capa não abriu"))
-    assert pedidas == [CAPA_DA_FIGURINHA] and casos == [("postar", "capa de fora")]
-    assert linhas[-1] == ("de fora no post", "a tela da capa não abriu")
-
-
-def test_post_sem_a_capa_pela_figurinha_no_rascunho_nao_mexe_na_capa(monkeypatch):
-    # O rascunho que saiu com a capa de sempre vai assim (foi o que o Rafael aprovou); sem o
-    # arquivo da capa, também (nada para pôr de novo).
-    sem_a_faixa = robo.edicao_video.capa_sem_chamada(_foto_do_anuncio())
-    assert _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa), chamada="")[:2] == ([], [])
-    assert _capa_no_post(monkeypatch, TelaFinalReaberta(sem_a_faixa), guardada=False)[:2] == ([], [])
-
-
-def test_capa_com_a_frase_guardada_sai_na_faxina_com_o_rascunho():
-    _guardar_a_figurinha(7, CAPA_DA_FIGURINHA)
-    caminho = robo.arquivo_da_figurinha(7)
-    assert open(caminho, "rb").read() == CAPA_DA_FIGURINHA
-    assert robo.ARQUIVO_NO_SERVIDOR.match(os.path.basename(caminho)).group(1) == "7"
-    assert not robo.ARQUIVO_NO_SERVIDOR.match("7_figurinha.jpg")
 
 
 def test_laranja_estreito_nao_e_a_faixa_da_capa():
@@ -7327,7 +6649,6 @@ def _post_com_os_passos(monkeypatch, tirar_da_fileira=None):
         lambda d, nomes, indice: passos.append(("tirar", list(nomes), indice)) or (True, "saiu")))
     monkeypatch.setattr(robo.ps, "conferir_tela_final",
                         lambda d, video: passos.append(("conferir", video["produtos"])) or (True, "confere"))
-    monkeypatch.setattr(robo, "capa_de_novo_no_post", lambda d, rascunho, agora=None: passos.append("capa"))
     monkeypatch.setattr(robo.ps, "ajustar_rotulo_de_ia", lambda d, ligado: (True, "rótulo"))
     monkeypatch.setattr(robo.ps, "postar", lambda d, video: passos.append(("postar", video["produtos"])) or (True, "ok"))
     monkeypatch.setattr(robo, "link_do_post", lambda d, ident=None: LINK_DO_POST)
@@ -7344,7 +6665,7 @@ def test_post_tira_os_produtos_marcados_e_guarda_so_os_que_ficaram(monkeypatch, 
                                capas=["/x/9_capa_1.jpg", "/x/9_capa_3.jpg"])
     passos, levados = _post_com_os_passos(monkeypatch)
     assert robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 12:00")) == "rascunho aprovado postado"
-    assert passos == ["abrir", "capa", ("tirar", ["Cubo A", "Cubo B", "Cubo C"], 1), ("tirar", ["Cubo A", "Cubo C"], 0),
+    assert passos == ["abrir", ("tirar", ["Cubo A", "Cubo B", "Cubo C"], 1), ("tirar", ["Cubo A", "Cubo C"], 0),
                       ("conferir", ["Cubo C"]), ("postar", ["Cubo C"])]
     postado = robo.pegar(ident)
     assert (postado["estado"], postado["produtos"], postado["link"], postado["mais_produtos"]) == (
@@ -7362,7 +6683,7 @@ def test_post_sem_marca_vai_com_todos_os_produtos(monkeypatch, avisos):
     ident = _com_tres_produtos()
     passos, levados = _post_com_os_passos(monkeypatch)
     robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 12:00"))
-    assert passos == ["abrir", "capa", ("postar", ["Cubo A", "Cubo B", "Cubo C"])]
+    assert passos == ["abrir", ("postar", ["Cubo A", "Cubo B", "Cubo C"])]
     assert robo.pegar(ident)["produtos"] == ["Cubo A", "Cubo B", "Cubo C"] and levados[0]["link"] == LINK
     assert avisos[0].startswith("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou.\n\n")
 
@@ -7376,7 +6697,7 @@ def test_produto_marcado_que_nao_sai_para_o_post_sem_postar(monkeypatch, avisos)
         robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 12:00"))
     assert parou.value.motivo == ("não consegui tirar o 2º produto, que você marcou para sair do post: não achei o X "
                                   "do produto na fileira") and not parou.value.do_video
-    assert passos == ["abrir", "capa"] and robo.pegar(ident)["estado"] == "aprovado"
+    assert passos == ["abrir"] and robo.pegar(ident)["estado"] == "aprovado"
     assert robo.pegar(ident)["produtos"] == ["Cubo A", "Cubo B", "Cubo C"] and robo.pegar(ident)["tirar"] == [2]
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DE_TIRAR) == ("de fora", 0)
@@ -7399,50 +6720,6 @@ def test_com_os_que_ficam_no_ver_produtos_e_quando_nao_da_para_tirar():
     # O rascunho de link sem um link por produto não deixa tirar (não dá para saber qual sai).
     assert not robo.pode_tirar({"produtos": ["A", "B"], "mais_produtos": []})
     assert robo.pode_tirar({"produtos": ["A", "B"], "mais_produtos": [{"link": "b"}]})
-
-
-# --- O post sem a capa com a frase fica para a rodada seguinte (P124) ---
-
-def test_post_sem_a_capa_fica_para_a_rodada_seguinte_ate_3_vezes(monkeypatch, avisos):
-    # Escolha do Rafael (02/11, P124): nos rascunhos feitos com a figurinha (antes da P125), a capa
-    # com a frase que não volta no rascunho reaberto adia o post para a rodada seguinte, até 3
-    # vezes, sem gastar tentativa do post (P99) e sem tocar em mais nada; só depois o post vai com
-    # a capa de sempre.
-    ident = _com_tres_produtos(tirar=[3])
-    passos, levados = _post_com_os_passos(monkeypatch)
-    monkeypatch.setattr(robo, "capa_de_novo_no_post", lambda d, rascunho, agora=None: passos.append("capa") or False)
-    for vez in (1, 2, 3):
-        agora = momento(f"2026-10-22 12:{15 * vez:02d}")
-        with pytest.raises(robo.AdiarPost) as adiado:
-            robo.publicar(object(), robo.pegar(ident), agora)
-        assert adiado.value.vez == vez
-        rascunho = robo.pegar(ident)
-        assert (rascunho["estado"], rascunho["adiamentos"], int(rascunho["falhas_ao_postar"] or 0)) == (
-            "aprovado", str(vez), 0)
-        assert rascunho["postar_em"] == robo._momento(agora + robo.ESPERA_DO_ADIAMENTO)
-    assert passos == ["abrir", "capa"] * 3 and levados == []
-    # Na 4ª vez sem a capa, o post vai com a capa de sempre (e com os produtos marcados tirados).
-    assert robo.publicar(object(), robo.pegar(ident), momento("2026-10-22 13:00")) == "rascunho aprovado postado"
-    assert robo.pegar(ident)["estado"] == "postado" and [r["produtos"] for r in levados] == [["Cubo A", "Cubo B"]]
-    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
-    assert [(r[2], r[3]) for r in linhas] == [("post adiado", "1 de 3"), ("post adiado", "2 de 3"),
-                                             ("post adiado", "3 de 3"),
-                                             ("no post com a capa de sempre", "depois de 3 adiamento(s)")]
-    # Aprovado de novo, a conta dos adiamentos recomeça.
-    robo.atualizar(ident, estado="rascunho")
-    robo.aprovar(ident, agora=momento("2026-10-23 08:00"))
-    assert robo.pegar(ident)["adiamentos"] == "0"
-
-
-def test_rodada_com_o_post_adiado_avisa_e_nao_conta_como_falha(monkeypatch, avisos, caminho_do_rascunho):
-    ident = _aprovado(monkeypatch)
-    monkeypatch.setattr(robo, "publicar", lambda d, rascunho, agora=None: (_ for _ in ()).throw(robo.AdiarPost(2)))
-    resposta = robo.rodada(d=AppComQuadros(), agora=momento("2026-10-22 23:59"))
-    assert resposta.startswith("postar: adiado (a capa com a frase não voltou no rascunho reaberto")
-    rascunho = robo.pegar(ident)
-    assert rascunho["estado"] == "aprovado" and not int(rascunho["falhas_ao_postar"] or 0)
-    assert "Não postei agora" in avisos[-1] and "adiamento 2 de 3" in avisos[-1]
-    assert consultar("SELECT resultado FROM shopee_video_tentativas WHERE acao = 'postar'") == ("adiado",)
 
 
 def test_plano_do_dia_guarda_a_faixa_e_os_pontos_com_que_foi_feito():

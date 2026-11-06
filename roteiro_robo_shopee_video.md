@@ -410,7 +410,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   6. **Rascunhos** salva (barra de progresso "carregando, aguarde") e volta para a aba
      Live e Vídeo, sem pedir confirmação.
 
-  **Selecionar Capa (mapeado no Motorola em 30/10/2026, à noite, num vídeo de teste):**
+  **Selecionar Capa (mapeado no Motorola em 30/10/2026, à noite, num vídeo de teste):** desde a
+  P125 (02/11/2026), o robô não põe mais a figurinha: a capa com a frase abre o vídeo, e o app usa
+  o 1º quadro como capa da grade. O mapa fica para consulta.
   1. na tela final, **Selecionar Capa** (`@tv_select_cover`, ~173,597) abre **Selecione sua
      capa** (`SSZMediaCoverEditActivity`): a capa no meio (`@player_container`, de 0,267 a
      1080,1969; o quadro do vídeo vai de 61,267 a 1018,1969), a fileira de quadros embaixo
@@ -432,8 +434,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   6. dois dedos (o passo `aumentar`) aumentam a figurinha em volta do meio deles, só até 3
      vezes o tamanho com que ela entrou (mais que isso, nada muda): a capa inteira (9:16) para
      em 84% da largura; uma imagem 2:3 ou mais larga cobre a largura toda, e em cima e embaixo
-     sobra o quadro do vídeo (por isso vai à galeria o miolo 2:3 da capa,
-     `edicao_video.recorte_da_figurinha`);
+     sobra o quadro do vídeo;
   7. o **X** com alguma mudança pergunta **Descartar Alterações na Capa?** (`@tv_cancel`
      Cancelar, `@tv_discard` Confirmar); o voltar também a abre, e o voltar nela só a fecha
      (o robô confirma: `descartar_a_capa`); depois, a saída da tela final é a de sempre
@@ -443,18 +444,13 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      voltou à tela final com a capa nova na miniatura. Os dois dedos de 200 a 900 px deixaram a
      figurinha **um terço maior** que o desenho (a faixa de ~178 px de alto no print, contra ~138
      no desenho): a imagem passou da largura do quadro e a faixa desceu até o número de
-     visualizações. **O robô (P110):** mede a faixa laranja no print dentro do quadro do vídeo
-     (`edicao_video.faixa_laranja`), compara com a do desenho (`faixa_esperada`, a capa do tamanho
-     do quadro) e ajusta: dois dedos em volta do meio da faixa pela razão das alturas e, com o
-     tamanho certo, arrasta pelo que falta no lugar, até 5 vezes; só então o ✓.
+     visualizações; o app não segue os dedos à risca.
   9. **o rascunho salvo não guarda a figurinha da capa** (01/11/2026): o post das 14:55, de um
      rascunho em que a figurinha ficou, foi à grade do Perfil com o 1º quadro do vídeo, e
      continuava assim 2 horas depois (a grade vista pelo explorar, passo `caso`). Na tela final
      do rascunho reaberto, a miniatura da capa é o `@iv_video_preview` (~173,456, com o
-     Selecionar Capa por cima, embaixo dela): o robô mede a faixa nela e, sem a faixa, põe a
-     figurinha de novo antes do Postar (`capa_de_novo_no_post`, com a capa guardada no servidor).
-     Na grade, o selo **Fixado** é laranja: a faixa conta só quando vai de um lado ao outro do
-     quadro (`faixa_da_capa`).
+     Selecionar Capa por cima, embaixo dela). Na grade, o selo **Fixado** é laranja: a faixa
+     conta só quando vai de um lado ao outro do quadro (`faixa_da_capa`).
   10. **com a moldura laranja** (P115 e P119, 01/11/2026): só a capa com a frase (a figurinha)
      tem a moldura, em volta da foto toda; o 1º quadro do vídeo, embaixo da figurinha, é a foto
      grande sem moldura (P119). A faixa e a borda de baixo da moldura formam um retângulo laranja
@@ -462,14 +458,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      e as bordas finas da moldura não contam como faixa (`ALTURA_MINIMA_DA_FAIXA`, 2% da altura da
      caixa; a figurinha recém-posta fica em uns 3%). No print (JPEG), as letras partem as linhas
      da faixa: a medida fica, em cada linha, com o pedaço de mais laranja (`_laranja_do_pedaco`) e
-     junta os pedaços da mesma faixa (`_juntar_os_pedacos`). A faixa entra da largura da figurinha
-     toda, como antes da moldura da P115: a receita guardada com a faixa mais estreita dela não
-     serve (`receita_serve`), e a primeira figurinha que der certo guarda a nova.
+     junta os pedaços da mesma faixa (`_juntar_os_pedacos`).
   11. **o laranja da foto embaixo da figurinha** (01/11/2026, 22:44): o 1º quadro do vídeo é a
      foto do anúncio, e uma etiqueta laranja da loja nela tinha mais linhas que a faixa da
      figurinha recém-posta: a medida pegou a etiqueta, os dois dedos foram feitos nela, longe da
-     figurinha, e o app não mudou nada. O robô guarda o print da tela da capa antes de pôr a
-     figurinha e mede a faixa só onde o print mudou depois (`caixa_da_figurinha`).
+     figurinha, e o app não mudou nada.
 
   **Teste completo (18/10/2026)**, da tela final em diante:
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →

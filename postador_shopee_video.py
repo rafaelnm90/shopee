@@ -22,9 +22,9 @@ Passos, separados por ponto e vírgula:
     xy:X,Y           toca nesse ponto da tela
     voltar, inicio   as teclas do Android
     rolar:baixo      arrasta a tela (rolar:cima)
-    arrastar:X1,Y1,X2,Y2  arrasta de um ponto ao outro (mover um texto na tela da capa)
+    arrastar:X1,Y1,X2,Y2  arrasta de um ponto ao outro (mover um texto na tela de edição)
     aumentar:X,Y,DE,ATE   dois dedos na linha do ponto X,Y, afastando um do outro de DE a ATE
-                     px (aumentar a figurinha na tela da capa; ATE menor que DE diminui)
+                     px (aumentar o que está ali; ATE menor que DE diminui)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte;
@@ -34,9 +34,7 @@ Passos, separados por ponto e vírgula:
                      como capa, ficar como o dos posts; video:apagar tira da galeria o vídeo do teste
     foto             põe na galeria a foto do anúncio do produto do vídeo do teste (a da API de
                      afiliado), a mais nova da galeria, para a busca pela foto (a câmera da
-                     busca de Criadores & Afiliados); foto:capa, o miolo (2:3) da capa com a
-                     frase que a IA escreve vendo o vídeo do teste (a da edição), para a
-                     figurinha da capa; foto:apagar tira as duas
+                     busca de Criadores & Afiliados); foto:apagar a tira
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     curtir           na página que o link abriu, toca no nome do produto (abre a página
                      completa) e curte; já curtido, segue sem tocar no coração
@@ -51,8 +49,7 @@ Passos, separados por ponto e vírgula:
                      Rascunhos faz essa conferência antes, sozinho)
     postar           toca em Postar na tela final, com o produto conferido de novo na hora
     print            manda um print da tela no privado do Rafael (nunca no log); print:postar
-                     avisa que é a tela antes de postar; print:capa, que é o exemplo da capa
-                     com a frase para ele aprovar
+                     avisa que é a tela antes de postar
     legenda          compara a legenda da tela final com o título do passo titulo (só
                      tamanhos e códigos de caractere no log, nunca o texto), lida de três
                      jeitos: pela cópia do campo, pela acessibilidade e pelo retrato da tela;
@@ -126,11 +123,6 @@ HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo: a tela antes de salvar o rascunho."
 LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo: a tela antes de postar. Confira o vídeo, o título "
                         "e o produto: só posto com o seu OK.")
-# O exemplo da capa com a frase pela figurinha com foto do Selecionar Capa do app, para o
-# Rafael aprovar antes de o robô fazer assim (vídeo dele de 30/10, 20:07): DECISOES.md, Shopee Vídeo.
-LEGENDA_PRINT_CAPA = ("🖼️ Robô da Shopee Vídeo: exemplo da capa com a frase, posta pela figurinha com foto do "
-                      "Selecionar Capa, num vídeo de teste que não vai ao ar. Responda na conversa com o Claude "
-                      "se aprova.")
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado ao vídeo."
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
                     "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
@@ -2161,28 +2153,6 @@ def por_editado_na_galeria(d, video):
             os.remove(destino)
 
 
-def capa_na_galeria(d, video):
-    """
-    Põe na galeria, como a foto mais nova, o miolo da capa com chamada do vídeo do teste (a
-    foto do anúncio e a frase que a IA escreve vendo o vídeo, P106 e P107; o recorte_da_figurinha),
-    para a figurinha da tela da capa. O nome é o da foto da busca: o foto:apagar a tira. (ok, o
-    que dizer no log)
-    """
-    import edicao_video   # aqui dentro: o edicao_video importa este módulo
-    anuncio = anuncio_do_produto(video)
-    if not anuncio.get("foto"):
-        return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
-    frase = edicao_video.frase_da_capa(edicao_video.textos_da_tela(video["arquivo"], anuncio.get("nome") or ""))
-    if not frase:
-        return False, "a IA não escreveu a frase da capa, o nome nem a vantagem do produto"
-    capa = edicao_video.capa_com_chamada(anuncio["foto"], frase)
-    if not capa:
-        return False, "a capa com a chamada não saiu"
-    miolo = edicao_video.recorte_da_figurinha(capa)
-    return ((True, f"miolo da capa com a frase na galeria ({len(frase)} letras)") if por_foto_na_galeria(d, miolo)
-            else (False, "a capa não apareceu na galeria"))
-
-
 def extensao_da_foto(dados):
     """jpg, png ou webp pela assinatura dos bytes; None para o que não é foto."""
     for extensao, assinatura in EXTENSOES_DA_FOTO:
@@ -2224,7 +2194,7 @@ def por_foto_na_galeria(d, dados, nome=None):
 
 def arrastar(d, x1, y1, x2, y2):
     """
-    Arrasta de um ponto ao outro (mover a figurinha na tela da capa). O dedo sai da tela no fim
+    Arrasta de um ponto ao outro (mover um texto na tela de edição). O dedo sai da tela no fim
     do arrasto: nenhum dos dois pontos pode ser um botão proibido. (ok, o que dizer no log)
     """
     tela = d.dump_hierarchy()
@@ -2237,7 +2207,7 @@ def arrastar(d, x1, y1, x2, y2):
 def dois_dedos(d, x, y, de, ate):
     """
     Dois dedos na linha do ponto x,y, afastando um do outro de `de` a `ate` px (ate menor que de
-    aproxima): aumenta ou diminui a figurinha na tela da capa em volta desse ponto. Os dois
+    aproxima): aumenta ou diminui o que está em volta desse ponto. Os dois
     dedos tocam no começo e saem no fim: nenhum dos quatro pontos pode ser um botão proibido.
     (ok, o que dizer no log)
     """
@@ -2553,8 +2523,6 @@ def fazer_passo(d, nome, argumento):
         video = video_do_teste()
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
-        if argumento == "capa":
-            return capa_na_galeria(d, video)
         foto = anuncio_do_produto(video).get("foto")
         if not foto:
             return False, "sem a foto do anúncio: o link não diz o produto (link de vídeo) ou a API não deu a foto"
@@ -2606,7 +2574,7 @@ def fazer_passo(d, nome, argumento):
         return False, ("nada copiado, ou o Android não deixou ler" if not texto
                        else f"o copiado ({len(texto)} caracteres) não tem link da Shopee")
     if nome == "print":
-        legenda = {"postar": LEGENDA_PRINT_POSTAR, "capa": LEGENDA_PRINT_CAPA}.get(argumento, LEGENDA_PRINT)
+        legenda = LEGENDA_PRINT_POSTAR if argumento == "postar" else LEGENDA_PRINT
         return ((True, "print mandado no privado") if mandar_print(d, legenda)
                 else (False, "o Telegram recusou o print"))
     return True, "só a tela"

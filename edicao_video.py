@@ -245,13 +245,6 @@ NUMERO_DA_GRADE = (52, 1005, 228, 1055)         # x1, y1, x2, y2
 SACOLINHA_DA_GRADE = (587, 210, 667, 278)
 FIXADO_DA_GRADE = (36, 200, 252, 305)
 FOTO_DA_CAPA = (0, 280, 720, 1000)              # entre a sacolinha e o número: a foto quadrada, 720x720
-# A capa pelo Selecionar Capa do app (vídeo do Rafael de 30/10, 20:07): a imagem entra como
-# figurinha, que o app deixa crescer só até 3 vezes o tamanho com que ela entra (540 px de
-# altura, perto de um terço da capa, no Motorola em 30/10); no máximo, a imagem tem uns 1436 px
-# de alto na capa de 957x1702. Com a capa inteira (9:16), ela não passa de 84% da largura; com o miolo
-# em 2:3 (720x1080, só preto acima e abaixo da foto), ela fica com a largura da capa, na mesma
-# escala do vídeo, e cai em cima da mesma foto do 1º quadro. DECISOES.md, Shopee Vídeo.
-RECORTE_DA_FIGURINHA = (100, 1180)              # de cima a baixo, em y: o miolo 720x1080
 LARANJA_DA_SHOPEE = (238, 77, 45)
 # O vermelho do destaque: a caixa da última mensagem (a chamada para o produto), as setinhas e a
 # moldura do cartão do produto, para chamar mais a atenção que o laranja, que se mistura nos vídeos
@@ -427,23 +420,6 @@ def moldura_do_cartao(rotulo_de_ia=False):
     return _png(tela)
 
 
-def capa_sem_chamada(foto):
-    """
-    A abertura do vídeo quando a frase vai na capa pela figurinha (P110): a foto do anúncio
-    (bytes) do tamanho da capa sem texto (FOTO_DA_CAPA), no fundo preto, sem moldura e sem a faixa
-    (PNG, bytes, 720x1280; escolha do Rafael, P119). A figurinha com o miolo da capa cobre o que a
-    grade mostra; sem a figurinha, ela é a capa de sempre. None com a foto que não abre.
-    """
-    from PIL import Image
-    x1, y1, x2, y2 = FOTO_DA_CAPA
-    imagem = _foto_que_cabe(foto, min(x2 - x1, y2 - y1))
-    if not imagem:
-        return None
-    capa = Image.new("RGB", TELA, "black")
-    capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, y1 + (y2 - y1 - imagem.height) // 2))
-    return _png(capa)
-
-
 def foto_em_tela_cheia(foto):
     """
     A abertura do vídeo sem capa (PNG, bytes, 720x1280): a foto do anúncio (bytes) no maior
@@ -515,18 +491,17 @@ def capa_com_chamada(foto, chamada, no_video=False):
     return _png(capa)
 
 
-# A faixa laranja da capa com chamada num print (a tela da capa do app, o quadro da grade do
-# perfil): por ela o robô mede a figurinha, para a capa ficar do tamanho do desenho (P110), e
-# confere a capa do post. Laranja: até TOLERANCIA_DO_LARANJA de LARANJA_DA_SHOPEE (a soma das
+# A faixa laranja da capa com chamada num print (o quadro da grade do perfil): por ela o robô
+# confere a capa do post (marcar_o_post). Laranja: até TOLERANCIA_DO_LARANJA de LARANJA_DA_SHOPEE (a soma das
 # diferenças das três cores). A faixa são linhas seguidas com o laranja nas mesmas pontas (a
 # faixa é um retângulo), cheias (pelo menos LINHA_CHEIA entre as pontas) ou com as letras
 # brancas (pelo menos LINHA_COM_LETRAS), de pelo menos LARGURA_MINIMA_DA_FAIXA da caixa.
 # Nas linhas do meio das letras, o branco pode passar do laranja (letra grossa, o print em JPEG
-# borrando a borda delas) e, com a figurinha maior que o quadro, as letras chegam às pontas:
-# entre as pontas da faixa, essas linhas são só laranja, branco e a mistura dos dois (a borda
-# das letras), pelo menos LINHA_DA_FAIXA delas, com um pouco de laranja (LARANJA_COM_LETRAS: o
-# branco da foto, sem laranja nenhum, não é faixa). Sem isso, a medida pegava só o pedaço da
-# faixa acima das letras, e o robô aumentava a figurinha demais (casos de 31/10).
+# borrando a borda delas) e, com a faixa maior que a caixa, as letras chegam às pontas: entre as
+# pontas da faixa, essas linhas são só laranja, branco e a mistura dos dois (a borda das letras),
+# pelo menos LINHA_DA_FAIXA delas, com um pouco de laranja (LARANJA_COM_LETRAS: o branco da foto,
+# sem laranja nenhum, não é faixa). Sem isso, a medida pegaria só o pedaço da faixa acima das
+# letras.
 TOLERANCIA_DO_LARANJA = 60
 LINHA_CHEIA = 0.9
 LINHA_COM_LETRAS = 0.4
@@ -536,14 +511,14 @@ LARGURA_MINIMA_DA_FAIXA = 0.15
 PONTAS_DA_FAIXA = 4                             # em px: quanto as pontas variam de uma linha para a outra
 LINHAS_CHEIAS_DA_FAIXA = 2
 # A borda de cima e a de baixo da moldura laranja (P115) também são linhas laranja cheias, mas
-# finas: a faixa da chamada tem pelo menos esta fração da altura da caixa (a figurinha recém-posta
-# na tela da capa, a menor, fica em uns 3%; a borda da moldura, em uns 1%).
+# finas: a faixa da chamada tem pelo menos esta fração da altura da caixa (no quadro da grade, ela
+# fica em uns 11%; a borda da moldura, em uns 1%).
 ALTURA_MINIMA_DA_FAIXA = 0.02
 BRANCO_DAS_LETRAS = (255, 255, 255)
-# Na mesma linha da faixa, o laranja de fora dela (as bordas dos lados da moldura do 1º quadro do
-# vídeo, com a figurinha ainda pequena em cima, P115) fica separado dela por outras cores: as
-# pontas da faixa saem só do pedaço da linha nas cores dela, com fendas de até FENDA_NA_FAIXA px
-# (o borrado do JPEG em volta das letras).
+# Na mesma linha da faixa, o laranja de fora dela (a moldura laranja da miniatura, P115, um
+# produto laranja na foto) fica separado dela por outras cores: as pontas da faixa saem só do
+# pedaço da linha nas cores dela, com fendas de até FENDA_NA_FAIXA px (o borrado do JPEG em volta
+# das letras).
 FENDA_NA_FAIXA = 3
 # As linhas do meio das letras entre dois pedaços da mesma faixa (_juntar_os_pedacos).
 LINHA_ENTRE_PEDACOS = 0.75
@@ -583,10 +558,10 @@ def _laranja_do_pedaco(laranja, cores):
 
 def _juntar_os_pedacos(blocos, laranja, da_faixa):
     """
-    Os blocos (na ordem, de cima para baixo) com os pedaços da mesma faixa juntos: a figurinha
-    recém-posta é pequena, e no print em JPEG do celular as linhas do meio das letras dela ficam
-    com menos de LINHA_DA_FAIXA nas cores da faixa e cortam a faixa em dois, cada um mais baixo
-    que ALTURA_MINIMA_DA_FAIXA. Dois pedaços com as mesmas pontas, separados só por linhas com
+    Os blocos (na ordem, de cima para baixo) com os pedaços da mesma faixa juntos: na faixa
+    pequena do print em JPEG do celular, as linhas do meio das letras ficam com menos de
+    LINHA_DA_FAIXA nas cores da faixa e cortam a faixa em dois, cada um mais baixo que
+    ALTURA_MINIMA_DA_FAIXA. Dois pedaços com as mesmas pontas, separados só por linhas com
     pelo menos LINHA_ENTRE_PEDACOS nas cores da faixa e LARANJA_COM_LETRAS de laranja entre
     elas, são a mesma faixa.
     """
@@ -705,15 +680,6 @@ def faixa_nos_lados(imagem, caixa):
 def recorte_da_grade(capa):
     """O pedaço da capa (PNG, bytes) que a grade do perfil mostra (VISIVEL_NA_GRADE e LADOS_NA_GRADE), em PNG: o exemplo do painel."""
     return _faixa_da_capa(capa, VISIVEL_NA_GRADE, LADOS_NA_GRADE)
-
-
-def recorte_da_figurinha(capa):
-    """
-    O miolo da capa (PNG, bytes) que vai à galeria para a figurinha da tela da capa do app
-    (RECORTE_DA_FIGURINHA), em PNG: no maior tamanho que o app deixa, ele cobre a capa de lado
-    a lado, em cima da mesma foto do 1º quadro do vídeo.
-    """
-    return _faixa_da_capa(capa, RECORTE_DA_FIGURINHA)
 
 
 def _faixa_da_capa(capa, faixa, lados=None):
@@ -2071,9 +2037,6 @@ SEM_LEGENDAS_NA_TELA = "editado com o Editor 2, sem legendas na tela"
 SO_COM_O_EDITOR_1 = "editado sem legendas (Editor 1)"
 COM_OS_AVISOS = ", com os avisos"
 COM_A_CHAMADA = ", com a chamada na capa"
-# A frase vai na capa pela figurinha do Selecionar Capa (P110): o vídeo abre com a foto, sem ela.
-# Desde a P125 (02/11) o robô não pede mais a figurinha: a capa com a frase abre o vídeo.
-COM_A_CHAMADA_PARA_A_FIGURINHA = ", com a chamada para a figurinha da capa"
 COM_MUSICA = ", com música de fundo"
 SEM_A_MINIATURA = ", sem a nossa miniatura"
 COM_A_MINIATURA_MENOR = ", com a miniatura menor"
@@ -2085,8 +2048,7 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
-def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), figurinha=None,
-                       rotulo_de_ia=False):
+def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -2103,11 +2065,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     de todos os vídeos (P100), e o jeito leva COM_A_CHAMADA. Com as outras_fotos (bytes das
     outras fotos diferentes dos produtos do post, as que cabem: fotos_que_cabem), a miniatura
     troca entre a foto e cada uma delas (P103), e o jeito leva COM_A_MINIATURA_ALTERNADA.
-    Com figurinha (um dict), a capa com a frase fica em figurinha["capa"] para o Selecionar Capa
-    do app, e o vídeo abre com a foto no mesmo lugar, sem a frase (capa_sem_chamada); o jeito
-    leva COM_A_CHAMADA_PARA_A_FIGURINHA (P110). Desde a P125 (02/11), o rascunho do robô vai sem
-    ela, como o modo assistente: a capa com a frase abre o vídeo. Com rotulo_de_ia=True (o vídeo
-    vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a legenda da fala sobem com o
+    A capa com a frase abre o vídeo, no rascunho do robô e no modo assistente (P125). Com
+    rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a legenda da fala sobem com o
     cartão do app (SUBIDA_COM_O_ROTULO_DE_IA). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not foto:
@@ -2126,17 +2085,14 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         resultado, detalhe, ok = registro_da_frase(textos, frase)
         registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA, resultado, detalhe, ok=ok)
     abertura = capa
-    if capa and figurinha is not None:
-        abertura = capa_sem_chamada(foto)
-        figurinha["capa"] = capa
-    elif capa:
+    if capa:
         # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
         # abertura, com a moldura encostada nos lados do vídeo aberto (P129). Sem esta, a da
         # grade fica na abertura toda.
         no_video = _capa_da_vez(foto, frase, no_video=True)
         if no_video:
             abertura = (capa, no_video)
-    chamada = (COM_A_CHAMADA_PARA_A_FIGURINHA if figurinha is not None else COM_A_CHAMADA) if capa else ""
+    chamada = COM_A_CHAMADA if capa else ""
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97).
     miniatura = miniatura_no_video(textos)
