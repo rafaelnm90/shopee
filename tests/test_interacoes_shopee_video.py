@@ -44,8 +44,11 @@ def _notificacoes(*linhas, y=600):
     return _xml(*(nos + BARRA))
 
 
-def _comentario(nome, texto, y, resposta=False, criador=False, ver="", curtido=False):
-    """Um comentário do painel: foto, nome (e o selo), texto, coração, data, Responder (e o "Curtido pelo criador")."""
+def _comentario(nome, texto, y, resposta=False, criador=False, ver="", curtido=False, curtidas=0):
+    """
+    Um comentário do painel: foto, nome (e o selo), texto, coração (com o número de curtidas
+    dentro, quando há), data, Responder (e o "Curtido pelo criador").
+    """
     x = 178 if resposta else 84
     nos = [_el(desc="avatar comment item", classe="ImageView", caixa=(x - 40, y - 40, x + 40, y + 40)),
            _el(nome, caixa=(x + 80, y - 30, x + 400, y + 10))]
@@ -55,6 +58,8 @@ def _comentario(nome, texto, y, resposta=False, criador=False, ver="", curtido=F
             _el(desc="button comment like", classe="ViewGroup", caixa=(990, y, 1040, y + 50), clicavel=True),
             _el("há 2 horas", caixa=(x + 80, y + 100, x + 250, y + 140)),
             _el("Responder", caixa=(x + 280, y + 100, x + 420, y + 140))]
+    if curtidas:
+        nos.append(_el(str(curtidas), caixa=(1005, y + 15, 1025, y + 45)))
     if curtido:
         nos.append(_el("Curtido pelo criador", caixa=(x + 450, y + 100, x + 750, y + 140)))
     if ver:
@@ -1098,6 +1103,37 @@ class CelularQueNaoCurteOComentario(CelularDoPost):
             self.toques.append("button comment like")
             return
         super().click(x, y)
+
+
+class CelularQueSoMostraONumero(CelularDoPost):
+    """
+    Como no Motorola (casos de 06/11): curtido, o coração do comentário do próprio Rafael não
+    muda de descrição nem traz o "Curtido pelo criador"; só ganha o número de curtidas.
+    """
+
+    def dump_hierarchy(self):
+        if self.atual not in ("painel", "escrevendo"):
+            return super().dump_hierarchy()
+        feitos = [_comentario("Loja Rafa", texto, 1250 + 250 * k, criador=True,
+                              curtidas=int(texto in self.curtidos_no_painel))
+                  for k, texto in enumerate(self.comentarios)]
+        return _painel(*feitos, campo="" if self.atual == "escrevendo" else None)
+
+
+def test_curtida_do_proprio_comentario_se_confirma_pelo_numero_do_coracao(avisos, ia_do_proprio, pelo_link):
+    # Casos de 06/11: as 3 curtidas no próprio comentário saíram (o coração vermelho com o "1"), mas
+    # ficaram "não confirmado": o robô só olhava o "Curtido pelo criador" e a descrição do coração.
+    ident = _postado()
+    app = CelularQueSoMostraONumero(comentarios=[TITULO_DO_POST])
+    assert robo.comentar_depois_do_post(app, ident, momento("2026-11-01 10:01")) == "comentado"
+    assert ("próprio post: curtir o comentário", "curtido") in set(_passos_do_proprio())
+    assert app.toques.count("button comment like") == 1                     # um toque só: não descurte
+
+
+def test_numero_de_curtidas_do_coracao():
+    assert [it.numero_de_curtidas(t) for t in ("1", "12", "1.234", "1,2 mil", "", "Responder")] == [1, 12, 1234, 1200, 0, 0]
+    painel = it.comentarios_do_painel(_xml(*_painel(_comentario("Ana", "Lindo!", 1250, curtidas=3))))
+    assert painel[0]["curtidas"] == 3 and painel[0]["texto"] == "Lindo!"
 
 
 def test_curtida_do_comentario_que_nao_se_confirma_guarda_o_caso(avisos, ia_do_proprio, pelo_link, monkeypatch):

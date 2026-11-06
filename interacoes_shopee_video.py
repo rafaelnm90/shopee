@@ -76,6 +76,10 @@ HORA_DA_LINHA = re.compile(r"^(?:\S+\s+)?\d{1,2}:\d{2}$")
 # O coração de cada comentário do painel (desc "button comment like", na ponta direita da
 # linha) e o "Curtido pelo criador" que aparece embaixo do comentário curtido pelo Rafael.
 CORACAO_DO_COMENTARIO = "comment like"
+# O número de curtidas escrito dentro do coração do comentário ("1", "12", "1,2 mil"). No
+# comentário do próprio Rafael, a curtida não muda a descrição do coração nem traz o "Curtido pelo
+# criador": só esse número aparece (casos do comentário no próprio post, 06/11).
+NUMERO_DE_CURTIDAS = re.compile(r"^([\d.,]+)( ?mil)?$")
 CURTIDO_PELO_CRIADOR = re.compile(r"^curtido pel[oa] criador")
 # O que acompanha cada comentário no painel e não é o nome nem o texto.
 EM_VOLTA_DO_COMENTARIO = (
@@ -292,7 +296,8 @@ def comentarios_do_painel(xml):
     linha recuada, resposta a um comentário), "criador" (o selo Criador: é do dono do vídeo),
     "responder", "ver_respostas" e "curtir" (os pontos de tocar, ou None; "curtir" é o
     coração da linha), "curtido" (o "Curtido pelo criador" embaixo dele), "coracao_desc" (a
-    descrição do coração, que muda quando ele é curtido), "y"}. Cada
+    descrição do coração, que muda quando ele é curtido), "curtidas" (o número escrito dentro do
+    coração, 0 sem número), "y"}. Cada
     comentário começa na foto (x pequeno, com "comment" na descrição) e vai até a foto
     seguinte. Lista vazia se o painel não está aberto.
     """
@@ -316,6 +321,8 @@ def comentarios_do_painel(xml):
         ver = next((ps._centro(el) for el in dentro if VER_RESPOSTAS.match(ps._normal(el["texto"]))), None)
         coracao = next((el for el in elementos if CORACAO_DO_COMENTARIO in el["descricao"].casefold()
                         and comeco <= ps._centro(el)[1] < fim), None)
+        numero = next((el for el in elementos if NUMERO_DE_CURTIDAS.match(ps._normal(el["texto"]))
+                       and ps._dentro(ps._centro(el), coracao["caixa"])), None) if coracao else None
         comentarios.append({
             "nome": textos[0] if textos else "", "texto": " ".join(textos[1:2]),
             "resposta": ps._centro(foto)[0] >= 130,
@@ -323,9 +330,24 @@ def comentarios_do_painel(xml):
             "responder": responder, "ver_respostas": ver, "curtir": ps._centro(coracao) if coracao else None,
             "curtido": any(CURTIDO_PELO_CRIADOR.match(ps._normal(el["texto"])) for el in dentro),
             "coracao_desc": coracao["descricao"] if coracao else "",
+            "curtidas": numero_de_curtidas(numero["texto"]) if numero else 0,
             "y": ps._centro(foto)[1],
         })
     return comentarios
+
+
+def numero_de_curtidas(texto):
+    """O número de curtidas escrito no coração ("1", "1.234", "1,2 mil"); 0 sem número."""
+    achado = NUMERO_DE_CURTIDAS.match(ps._normal(texto))
+    if not achado:
+        return 0
+    valor = achado.group(1)
+    try:
+        if achado.group(2):
+            return int(float(valor.replace(".", "").replace(",", ".")) * 1000)
+        return int(valor.replace(".", "").replace(",", ""))
+    except ValueError:
+        return 0
 
 
 def alvo_no_painel(comentarios, nome, texto):
