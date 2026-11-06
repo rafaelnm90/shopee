@@ -103,6 +103,11 @@ SEM_EDICAO = "vídeo de lado: a edição não saiu (só vídeo editado vai)"
 # celular, o assistente não tem a foto do anúncio para a edição. Fica de lado, como o que não
 # sai editado, mas não é falha: o robô, com o celular, acha os produtos do Ver Produtos.
 SEM_PRODUTO_NO_LINK = "vídeo de lado: o link não diz o produto (link de vídeo ou sem oferta), sem a foto para a edição"
+# O produto que já foi ao ar não se repete: o do vídeo, pelo número do anúncio, conferido como o
+# robô confere (os rascunhos dele que esperam a aprovação, os aprovados e os postados, e os vídeos
+# daqui marcados com Postei ✅). Fica de lado, sem gastar a edição nem a IA, e vai o próximo da
+# fonte. Escolha do Rafael (06/11, P167 1): DECISOES.md, Shopee Vídeo.
+JA_POSTADO = "vídeo de lado: o produto já foi postado (pelo robô ou marcado com Postei ✅)"
 
 PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee. Analise \
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
@@ -308,6 +313,13 @@ def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item=""):
         _criar_tabela(con)
         con.execute("INSERT OR REPLACE INTO shopee_video_enviados (id_unico, enviado_em, status, motivo, cobrindo, "
                     "item) VALUES (?, ?, ?, ?, ?, ?)", (id_unico, momento, status, motivo, "1" if cobrindo else "", item))
+
+
+def produtos_ja_postados():
+    """Os números (itemId) dos produtos que já foram ao ar, os mesmos que o robô confere (P166 1 e P167 1)."""
+    # O robô importa este módulo: o import fica aqui dentro.
+    import robo_shopee_video
+    return robo_shopee_video.produtos_ja_postados()
 
 
 def itens_postados():
@@ -722,11 +734,12 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobri
             raise
         # As frases do resultado são fixas (_preparar_e_enviar).
         registro_processos.registrar("shopee_video", "assistente: envio", resultado,
-                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA)
+                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO)
                                      else resultado == "postagem mandada no seu privado")
-        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA):
+        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO):
             return resultado
-    return f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos saiu editado (só vídeo editado vai); tento de novo no próximo horário"
+    return (f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos deu para mandar (só vai o vídeo editado e de produto que "
+            "ainda não foi ao ar); tento de novo no próximo horário")
 
 
 def _editar(video, produtos, destino, avisos=False):
@@ -763,6 +776,11 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
 
     # Com a edição ligada, o vídeo que não sai editado fica de lado antes de gastar a IA.
     produtos, link = await produtos_do_link(video["link"])
+    # O produto já postado fica de lado antes da edição e da IA (P167 1).
+    item = str(produtos[0].get("item") or "") if produtos else ""
+    if item and item in produtos_ja_postados():
+        registrar(video["id"], "ja_postado", JA_POSTADO, agora, item=item)
+        return JA_POSTADO
     arquivo = video["arquivo"]
     if pasta and _edicao_ligada(fonte):
         if not produtos:

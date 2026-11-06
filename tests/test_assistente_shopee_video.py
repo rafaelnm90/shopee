@@ -514,12 +514,43 @@ def test_o_que_nao_sai_editado_fica_de_lado_e_vai_o_proximo_sem_gastar_a_ia(monk
                      "AND detalhe = 'a foto do anúncio não veio'") == (0,)
 
 
+def test_produto_ja_postado_fica_de_lado_e_vai_o_proximo_da_fonte(monkeypatch):
+    # Escolha do Rafael (06/11, P167 1): o assistente confere o produto como o robô (P166 1). O já
+    # postado (pelo robô ou marcado com Postei ✅) fica de lado, sem gastar a edição nem a IA.
+    import robo_shopee_video as robo
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+
+    async def produtos(link):
+        item = {"repetido": "22", "dorobo": "44"}.get(link.rsplit("/", 1)[-1], "33")
+        return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g",
+                 "item": item}], link
+
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 09:00"),
+          ("dorobo", LEGENDA.replace("/abc", "/dorobo"), "archive/dorobo.mp4", "2026-10-02 10:00"),
+          ("repetido", LEGENDA.replace("/abc", "/repetido"), "archive/repetido.mp4", "2026-10-02 11:00"))
+    asv.registrar("antes", "enviado", "", item="22")
+    asv.marcar_postado(asv.chave_do_envio("antes"))
+    postado = robo.criar("video:9", None)
+    robo.atualizar(postado, estado="postado", itens_do_video=["44"])
+    assert asv.produtos_ja_postados() == {"22", "44"}
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert set(ias) == {"archive/novo.mp4"} and len(conteudos) == 1
+    assert consultar("SELECT COUNT(*) FROM shopee_video_enviados WHERE status = 'ja_postado' AND motivo = ?",
+                     asv.JA_POSTADO) == (2,)
+    assert consultar("SELECT COUNT(*), MAX(ok) FROM registro_processos WHERE processo = 'assistente: envio' "
+                     "AND resultado = ?", asv.JA_POSTADO) == (2, None)
+    # O vídeo de lado não volta.
+    assert asv.proximo_video() is None
+
+
 def test_nenhum_editado_avisa_sem_mandar_nada(monkeypatch):
     conteudos, ias = [], []
     bot = _com_edicao(monkeypatch, conteudos, ias)
     _fila(*[(f"v{i}", LEGENDA_VIDEO, f"archive/v{i}.mp4", f"2026-10-02 1{i}:00") for i in range(6)])
     resultado = rodar(asv.preparar_e_enviar(bot, 42))
-    assert resultado.startswith(f"nenhum dos {asv.VIDEOS_POR_ENVIO} próximos vídeos saiu editado")
+    assert resultado.startswith(f"nenhum dos {asv.VIDEOS_POR_ENVIO} próximos vídeos deu para mandar")
     assert conteudos == [] and ias == [] and bot.mensagens == []
     # Tentou só VIDEOS_POR_ENVIO numa vez; o 6º fica para o próximo horário.
     assert asv.proximo_video()["id"] == "v0"
