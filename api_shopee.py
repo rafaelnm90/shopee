@@ -307,12 +307,29 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
 # registro de processos guarda só o código do erro da API e o programa que pediu, para o checkup
 # mostrar a causa, sem a palavra buscada nem a mensagem.
 PROCESSO_DA_BUSCA_NEGADA = "busca de ofertas negada"
+# O código 10000 é o erro de sistema da própria Shopee: passa sozinho, e a mesma busca, uns
+# segundos depois, costuma dar certo (o checkup de 05/11 mostrou o código da busca negada que
+# aparecia 1 vez por dia). A busca tenta mais uma vez antes de desistir, e o registro anota
+# quando a nova tentativa salvou a busca.
+CODIGO_DO_ERRO_DE_SISTEMA = "10000"
+TENTATIVAS_NO_ERRO_DE_SISTEMA = 2
+ESPERA_NO_ERRO_DE_SISTEMA = 3
+PROCESSO_DO_ERRO_DE_SISTEMA = "busca de ofertas: erro de sistema da Shopee"
+
+
+def _codigo_do_erro(erros):
+    """O código do 1º erro que a API devolveu, só os dígitos ("" sem código)."""
+    primeiro = erros[0] if isinstance(erros, list) and erros and isinstance(erros[0], dict) else {}
+    return re.sub(r"\D", "", str((primeiro.get("extensions") or {}).get("code") or ""))[:8]
+
+
+def _quem_pediu():
+    return os.path.splitext(os.path.basename(sys.argv[0] or ""))[0] or "?"
 
 
 def _registrar_busca_negada(erros):
-    primeiro = erros[0] if isinstance(erros, list) and erros and isinstance(erros[0], dict) else {}
-    codigo = re.sub(r"\D", "", str((primeiro.get("extensions") or {}).get("code") or ""))[:8]
-    quem = os.path.splitext(os.path.basename(sys.argv[0] or ""))[0] or "?"
+    codigo = _codigo_do_erro(erros)
+    quem = _quem_pediu()
     try:
         # Importado aqui, como o utils no link sem conversão: as ferramentas que só testam as
         # chaves não precisam do banco.
@@ -369,22 +386,41 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
         }
     }
 
-    headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                if response.status == 200:
-                    dados = await response.json()
-                    erros = dados.get("errors")
-                    if erros:
-                        logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
-                        _registrar_busca_negada(erros)
+    for tentativa in range(1, TENTATIVAS_NO_ERRO_DE_SISTEMA + 1):
+        # A assinatura leva a hora: cada tentativa assina de novo.
+        headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                    if response.status != 200:
                         return []
-                    return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
-    except Exception as e:
-        logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
+                    dados = await response.json()
+            erros = dados.get("errors")
+            if (erros and _codigo_do_erro(erros) == CODIGO_DO_ERRO_DE_SISTEMA
+                    and tentativa < TENTATIVAS_NO_ERRO_DE_SISTEMA):
+                logger.warning("⚠️ [API Shopee] Erro de sistema da Shopee na busca de ofertas: tento de novo.")
+                await asyncio.sleep(ESPERA_NO_ERRO_DE_SISTEMA)
+                continue
+            if erros:
+                logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
+                _registrar_busca_negada(erros)
+                return []
+            if tentativa > 1:
+                _registrar_nova_tentativa(tentativa)
+            return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
+        except Exception as e:
+            logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
+            return []
     return []
+
+
+def _registrar_nova_tentativa(tentativa):
+    try:
+        import registro_processos
+        registro_processos.registrar("api_shopee", PROCESSO_DO_ERRO_DE_SISTEMA, f"deu certo na {tentativa}ª tentativa",
+                                     _quem_pediu(), ok=True)
+    except Exception as e:
+        logger.error(f"❌ [API Shopee] Não anotou a nova tentativa da busca: {type(e).__name__}")
 
 async def produto_a_venda(loja, item):
     """

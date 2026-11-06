@@ -513,6 +513,34 @@ def test_busca_negada_anota_so_o_codigo_da_api_e_quem_pediu(monkeypatch):
                      "OR resultado LIKE '%garrafa%'") == (0,)
 
 
+def test_busca_com_erro_de_sistema_da_shopee_tenta_mais_uma_vez(monkeypatch):
+    # O checkup de 05/11 mostrou o código da busca negada que aparecia 1 vez por dia: 10000, o erro
+    # de sistema da própria Shopee, que passa sozinho. A busca tenta mais uma vez antes de desistir.
+    erro = {"errors": [{"message": "System error", "extensions": {"code": 10000}}]}
+    certo = {"data": {"productOfferV2": {"nodes": [{"itemId": 1}]}}}
+    _api_que_responde(monkeypatch)
+    sessao = api_shopee.aiohttp.ClientSession
+    corpos = [erro, certo]
+
+    def post(url, headers=None, data=None):
+        sessao.postados.append(json.loads(data))
+        return _Resposta(200, corpo=corpos.pop(0))
+    sessao.post = post
+    monkeypatch.setattr(api_shopee, "ESPERA_NO_ERRO_DE_SISTEMA", 0)
+    monkeypatch.setattr(api_shopee.sys, "argv", ["/home/x/shopee/bot_mestre.py"])
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [{"itemId": 1}]
+    assert len(sessao.postados) == 2
+    assert consultar("SELECT processo, resultado, detalhe, ok FROM registro_processos") == (
+        api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA, "deu certo na 2ª tentativa", "bot_mestre", 1)
+    # O erro de sistema duas vezes seguidas desiste e anota como antes; outro código não tenta de novo.
+    corpos[:] = [erro, erro]
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 4
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     api_shopee.PROCESSO_DA_BUSCA_NEGADA) == ("código 10.000",)
+    corpos[:] = [{"errors": [{"message": "limite", "extensions": {"code": 10030}}]}]
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 5
+
+
 def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):
     _api_que_responde(monkeypatch, erro=OSError("caiu"))
     assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == PRODUTO
