@@ -588,20 +588,25 @@ def _lista(valor):
     return lido if isinstance(lido, list) else []
 
 
-CARACTERISTICAS_DO_POST = ("produtos a mais", "troca de loja", "outra foto de capa", "outra cor",
-                           "chamada na capa", "rótulo de IA", "Ver Produtos")
+CARACTERISTICAS_DO_POST = ("produtos a mais", "troca de loja", "produto achado pela IA", "outra foto de capa",
+                           "outra cor", "chamada na capa", "rótulo de IA", "Ver Produtos")
+# Desde quando cada característica é anotada: os posts de antes ficam fora da conta dela.
+ANOTADA_DESDE = {"troca de loja": "03/11", "produto achado pela IA": "06/11"}
 
 
 def _tem(nome, r):
     """
     O post (rascunho postado) tem a característica? None = o rascunho não anotou (a troca de
-    loja é anotada desde 03/11 nos de link de produto e desde 05/11 nos de Ver Produtos): fica fora
-    da conta dessa linha.
+    loja é anotada desde 03/11 nos de link de produto e desde 05/11 nos de Ver Produtos; o produto
+    achado pela IA, desde 06/11, só nos de link de produto): fica fora da conta dessa linha.
     """
     if nome == "produtos a mais":
         return any(isinstance(i, dict) and i.get("a_mais") for i in _lista(r["itens"]))
     if nome == "troca de loja":
         return {"1": True, "0": False}.get(r["trocado"])
+    if nome == "produto achado pela IA":
+        # O produto do link não era o do vídeo, e o robô achou o do vídeo (P158 2).
+        return {"1": True, "0": False}.get(r["achado"])
     if nome == "outra foto de capa":
         return bool(_lista(r["outras_capas"]))
     if nome == "outra cor":
@@ -611,7 +616,7 @@ def _tem(nome, r):
     if nome == "rótulo de IA":
         return bool(r["rotulo_ia"])
     return bool(_lista(r["links_dos_produtos"]))  # Ver Produtos
-_COLUNAS_DO_POST = ("id", "postado_em", "fonte", "itens", "trocado", "outras_capas", "outra_cor", "chamada",
+_COLUNAS_DO_POST = ("id", "postado_em", "fonte", "itens", "trocado", "achado", "outras_capas", "outra_cor", "chamada",
                     "rotulo_ia", "links_dos_produtos")
 
 
@@ -676,7 +681,7 @@ def linhas_das_punicoes_por_post(medicao):
                   f"{desde[8:10]}/{desde[5:7]}; {medicao['punidos']} punidos)"]
     for nome, com, com_punidos, sem, sem_punidos in medicao["caracteristicas"]:
         if com:
-            nota = " (anotada desde 03/11)" if nome == "troca de loja" else ""
+            nota = f" (anotada desde {ANOTADA_DESDE[nome]})" if nome in ANOTADA_DESDE else ""
             linhas.append(f"• Com {nome}: {_parte(com_punidos, com)} · sem: {_parte(sem_punidos, sem)}{nota}")
     if medicao["fontes"]:
         linhas.append("• Por fonte: " + " · ".join(f"{html.escape(fonte)} {_parte(punidos, posts)}"

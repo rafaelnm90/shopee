@@ -29,6 +29,7 @@ def momento(texto):
 SAUDE_DO_DIA = robo.saude_do_dia_pendente
 # A busca do mesmo produto com mais comissão (P33) também: ela vai à API de afiliado.
 TROCAR = robo.trocar_pela_maior_comissao
+ACHAR = robo.achar_o_produto_do_video
 # E a troca de cada produto do Ver Produtos pelo da loja que paga mais (P57).
 TROCAR_OS_DO_VER_PRODUTOS = robo.trocar_os_do_ver_produtos
 # E o vídeo postado que vai à fila do Canal Afiliados (P62 a P64), com testes no fim.
@@ -44,6 +45,8 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
+    # A busca do produto do vídeo quando o do link é outro (P158 2) tem testes próprios.
+    monkeypatch.setattr(robo, "achar_o_produto_do_video", lambda video: None)
     # A troca do Ver Produtos (P57) tem testes próprios: aqui, cada produto fica o do criador, na ordem dele.
     monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", lambda d, video, nomes, *a, **k: [
         {"nome": nome, "link": "", "valor": 0, "trocado": "", "do_video": True} for nome in nomes])
@@ -1001,6 +1004,45 @@ def test_troca_pelo_mesmo_produto_que_paga_mais_conferido_pela_ia(monkeypatch):
     assert [r[2] for r in registro] == ["trocado"]
 
 
+def test_produto_do_video_achado_pela_busca_da_ia_do_que_paga_mais(monkeypatch):
+    # Escolha do Rafael (06/11, P158 2): o produto do link não é o do vídeo; a IA diz o que o vídeo
+    # mostra, a API busca por relevância, e os primeiros, sem o do link, do que paga mais por venda
+    # para o que paga menos, passam pela mesma conferência dupla com a foto do anúncio.
+    ofertas = [_oferta("Colar Trevo do Link", 0.30, 1),                          # o do link: a IA já recusou
+               _oferta("Colar Trevo Corações Magnético", 0.05, 2),
+               _oferta("Colar Trevo Corações Zircônia", 0.12, 3),
+               _oferta("Colar Sem Preço", 0.40, 4, preco=0)]                     # sem preço: fica de fora
+    pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=("https://s.shopee.com.br/2",))
+    monkeypatch.setattr(robo.ps, "ia_diz_o_produto_do_video", lambda video: "colar trevo corações")
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "1")
+    achado = ACHAR({"link": LINK, "arquivo": "video.mp4"})
+    assert pedidos["busca"] == [("colar trevo corações", robo.OFERTAS_NA_BUSCA, 1)]
+    # O que paga mais primeiro (a IA recusou), depois o confirmado; a conferência é a do produto do
+    # link, sem a capa da troca de loja.
+    assert pedidos["ia"] == ["https://s.shopee.com.br/3", "https://s.shopee.com.br/2"]
+    assert pedidos["capa"] == [None, None]
+    assert achado["link"] == "https://s.shopee.com.br/2" and achado["comissao"] == 5.0
+    assert achado["vistos"] == ["é o mesmo pacote"]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_PRODUTO_ACHADO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["achado"]
+
+
+def test_produto_do_video_que_a_ia_nao_confirma_deixa_o_video_de_lado(monkeypatch):
+    # Até ACHADOS_NA_IA anúncios vão à IA; sem confirmação, None (o vídeo fica de lado, como antes).
+    ofertas = [_oferta(f"Colar Trevo {n}", 0.05 + n / 100, 10 + n) for n in range(6)]
+    pedidos = _busca_de_comissao(monkeypatch, ofertas)
+    monkeypatch.setattr(robo.ps, "ia_diz_o_produto_do_video", lambda video: "colar trevo")
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "")
+    assert ACHAR({"link": LINK, "arquivo": "video.mp4"}) is None
+    assert len(pedidos["ia"]) == robo.ACHADOS_NA_IA
+    # A IA que não diz o produto: nem busca.
+    pedidos["busca"].clear()
+    monkeypatch.setattr(robo.ps, "ia_diz_o_produto_do_video", lambda video: "")
+    assert ACHAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["busca"] == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_PRODUTO_ACHADO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["não achado - a IA não confirmou nenhum", "não achado - a IA não disse o produto"]
+
+
 def test_troca_sem_a_foto_de_capa_do_post_fica_o_do_link(monkeypatch):
     # Escolha do Rafael (29/10, P74): só entra o anúncio com a mesma foto de capa; sem a capa
     # do post para comparar, não há troca, nem busca, nem IA.
@@ -1430,11 +1472,63 @@ def _ate_os_textos_da_ia(monkeypatch, alcool):
     async def produtos(link):
         return [{"nome": "Vinho Tinto Seco 750ml", "preco": 39.9, "comissao": 8.0}], link
     monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos)
-    monkeypatch.setattr(robo.ps, "ia_confere_produto", lambda video, vistos: (True, "confere"))
+    monkeypatch.setattr(robo.ps, "ia_confere_produto", lambda video, vistos, avisar=True: (True, "confere"))
     monkeypatch.setattr(robo, "item_do_link", lambda link: "123")
     monkeypatch.setattr(robo, "_textos_da_ia", lambda video, nomes=None: {
         "violacao": False, "motivo": "", "bebida_alcoolica": alcool, "titulo": "Vinho Tinto 🍷 #vinho",
         "comentario": "c"})
+
+
+def _ia_que_ve_outro_produto(monkeypatch):
+    def ia(video, vistos, avisar=True):
+        vistos.append("outro pingente")
+        return False, robo.ps.MOTIVO_OUTRO_PRODUTO + " (1ª vez)"
+    monkeypatch.setattr(robo.ps, "ia_confere_produto", ia)
+
+
+def test_produto_achado_pela_ia_toma_o_lugar_do_produto_do_link(monkeypatch, avisos):
+    # Escolha do Rafael (06/11, P158 2): no lugar de deixar o vídeo de lado, o robô segue com o
+    # produto do vídeo que achou: curtir, anexar e a régua dos produtos a mais usam o achado.
+    _ate_os_textos_da_ia(monkeypatch, alcool=False)
+    _ia_que_ve_outro_produto(monkeypatch)
+    achado = {"nome": "Colar Trevo", "link": "https://s.shopee.com.br/achado", "comissao": 12.0, "preco": 30.0,
+              "valor": 3.6, "vendas": 5, "imagem": "", "item": "2", "vistos": ["é o mesmo colar"]}
+    monkeypatch.setattr(robo, "achar_o_produto_do_video", lambda video: achado)
+    seguiu = []
+
+    def espacos_livres(d, video, principal, original, vistos, *a, **k):
+        seguiu.append((video["link"], principal, original, list(vistos)))
+        raise RuntimeError("seguiu para os produtos a mais")
+
+    monkeypatch.setattr(robo, "espacos_livres", espacos_livres)
+    ident = robo.criar("video:1")
+    with pytest.raises(RuntimeError, match="seguiu para os produtos a mais"):
+        robo._preparar(None, ident, {"id": "video:1", "arquivo": "v.mp4", "link": LINK}, "viral")
+    link, principal, original, vistos = seguiu[0]
+    assert link == principal["link"] == achado["link"] and principal["comissao"] == 12.0
+    assert original["preco"] == 30.0 and vistos == ["outro pingente", "é o mesmo colar"]
+    assert any("Achei o do vídeo na Shopee" in a and "12.0%" in a for a in avisos if isinstance(a, str))
+    assert consultar("SELECT achado FROM shopee_video_rascunhos WHERE id = ?", ident) == ("1",)
+
+
+def test_sem_o_produto_do_video_achado_o_video_fica_de_lado_com_o_aviso(monkeypatch, avisos):
+    _ate_os_textos_da_ia(monkeypatch, alcool=False)
+    _ia_que_ve_outro_produto(monkeypatch)
+    ident = robo.criar("video:1")
+    with pytest.raises(robo.Parada) as parada:
+        robo._preparar(None, ident, {"id": "video:1", "arquivo": "v.mp4", "link": LINK}, "viral")
+    assert parada.value.motivo.startswith(robo.ps.MOTIVO_OUTRO_PRODUTO) and parada.value.do_video
+    aviso = [a for a in avisos if isinstance(a, str) and robo.ps.AVISO_IA in a]
+    assert len(aviso) == 1 and "O que a IA viu: outro pingente" in aviso[0]
+    assert "Procurei o produto do vídeo na Shopee, e a IA não confirmou nenhum." in aviso[0]
+    # A IA que não respondeu não procura nem avisa: o vídeo fica de lado como antes.
+    procurou = []
+    monkeypatch.setattr(robo, "achar_o_produto_do_video", lambda video: procurou.append(video) or None)
+    monkeypatch.setattr(robo.ps, "ia_confere_produto",
+                        lambda video, vistos, avisar=True: (False, "a IA não respondeu à conferência (1ª vez): parado"))
+    with pytest.raises(robo.Parada):
+        robo._preparar(None, robo.criar("video:2"), {"id": "video:2", "arquivo": "v.mp4", "link": LINK}, "viral")
+    assert not procurou
 
 
 def test_bebida_alcoolica_em_espera_fica_de_lado_antes_dos_produtos_a_mais(monkeypatch, avisos):

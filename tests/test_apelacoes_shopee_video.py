@@ -207,6 +207,25 @@ def test_pontos_zeram_no_comeco_de_cada_trimestre():
     assert "até <b>2 por dia</b> (fica <b>2</b>)" in ap.rotulo_dos_pontos(9, novembro, 8, 12)
 
 
+def test_medicao_separa_os_posts_com_o_produto_achado_pela_ia():
+    # Escolha do Rafael (06/11, P158 2): o robô procura o produto do vídeo quando o do link é outro;
+    # a medição de quais posts levam punição (P146 2) separa os posts com o produto achado.
+    import robo_shopee_video as robo
+    agora = datetime(2026, 11, 6, 15, 0, tzinfo=fuso_horario)
+    achado = robo.criar("v1", agora)
+    robo.atualizar(achado, estado="postado", fonte="viral", postado_em="2026-11-06 10:00:00", achado="1")
+    sem = robo.criar("v2", agora)
+    robo.atualizar(sem, estado="postado", fonte="viral", postado_em="2026-11-06 11:00:00", achado="0")
+    antigo = robo.criar("v3", agora)                                       # de antes: não anotou
+    robo.atualizar(antigo, estado="postado", fonte="viral", postado_em="2026-11-05 11:00:00")
+    ap.guardar("Produto Irrelevante", "2026-11-06", "Em análise", rascunho=achado)
+    medicao = ap.punicoes_por_tipo_de_post()
+    contas = {c[0]: list(c[1:]) for c in medicao["caracteristicas"]}
+    assert contas["produto achado pela IA"] == [1, 1, 1, 0]
+    texto = "\n".join(ap.linhas_das_punicoes_por_post(medicao))
+    assert "• Com produto achado pela IA: 1 de 1 (100%) · sem: 0 de 1 (0%) (anotada desde 06/11)" in texto
+
+
 def test_saude_mostra_quais_posts_levaram_punicao():
     # P146 2: cada punição ligada ao post do robô é cruzada com o que o post tinha.
     import checkup
