@@ -417,12 +417,83 @@ def test_feed_se_espalha_pelo_horario_do_robo_e_nao_pela_janela():
 
 def test_mudar_a_janela_replaneja_o_que_falta_sem_perder_os_feitos():
     config = _com_interacoes(inicio=None, fim=None)
-    estado = robo.estado_do_dia(config, momento("2026-10-25 09:00"))
-    estado["feitos"] = 2
-    robo.db.salvar_config(robo.CHAVE_DIA, estado)
+    robo.estado_do_dia(config, momento("2026-10-25 09:00"))
+    _rascunho("postado", criado="2026-10-25 08:10:00")
+    _rascunho("aprovado", criado="2026-10-25 08:40:00")
     robo.replanejar_hoje(_com_interacoes(), momento("2026-10-25 09:00"))
     novo = robo.db.ler_config(robo.CHAVE_DIA)
-    assert novo["feitos"] == 2 and all(not "12:00" <= h < "15:00" for h in novo["horarios"])
+    assert novo["feitos"] == 2 and len(novo["horarios"]) == 6
+    assert all(not "12:00" <= h < "15:00" for h in novo["horarios"])
+
+
+def test_plano_refeito_conta_o_que_ja_saiu_hoje_e_so_faz_o_que_falta():
+    # Pedido do Rafael (06/11): "se eu postei 8 vídeos e depois mudar a faixa de 8-10 e o cálculo der
+    # 9 vídeos no dia , ele não deve postar mais nove vídeos e sim 1 somente". Já saíram: os rascunhos
+    # de hoje (os do Preparar 1 Agora e os recusados também) e os vídeos do assistente que cobriram o
+    # robô sem o celular (P156 1).
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_inicio": 8, "robo_fim": 22,
+              "robo_limite_min": 8, "robo_limite_max": 12}
+    agora = momento("2026-11-10 15:00")
+    estado = robo.estado_do_dia(config, agora)
+    estado["feitos"] = 5                                          # os horários do plano: 2 saíram no Preparar 1 Agora
+    robo.db.salvar_config(robo.CHAVE_DIA, estado)
+    for i, situacao in enumerate(["postado"] * 4 + ["aprovado", "recusado", "rascunho"]):
+        _rascunho(situacao, criado=f"2026-11-10 {8 + i:02d}:20:00")
+    _rascunho("postado", criado="2026-11-09 21:00:00")             # de ontem: não conta
+    _rascunho("pulado", criado="2026-11-10 14:10:00")              # o vídeo que ficou de lado: não conta
+    _postado_pelo_assistente("a1", "2026-11-10 07:50")
+    novo = {**config, "robo_limite_min": 9, "robo_limite_max": 9}
+    plano = robo.replanejar_hoje(novo, agora)
+    futuros = [h for h in plano["horarios"] if h > "15:00"]
+    assert len(plano["horarios"]) == 9 and plano["feitos"] == 8 and len(futuros) == 1 and futuros[0] >= "15:30"
+    assert plano["refeito"] == {"no_dia": 9, "saidos": 8, "faltam": 1, "de_fora": 0, "proximo": futuros[0]}
+    assert (plano["sem_tentar"], plano["cobertos"]) == (1, ["a1"])
+    # Até o fim do dia, só 1 rascunho a mais.
+    rodadas = [momento(f"2026-11-10 {h:02d}:{m:02d}") for h in range(15, 22) for m in (0, 15, 30, 45)]
+    assert sum(robo.consumir_horarios(novo, rodada) for rodada in rodadas) == 1
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_PLANO_REFEITO) == ("1 de 9 a fazer",
+                                                         "já saíram 8; de fora por falta de espaço no dia: 0")
+
+
+def test_plano_refeito_e_o_horario_que_espera_a_nova_tentativa():
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_inicio": 8, "robo_fim": 22}
+    agora = momento("2026-11-10 15:00")
+    _rascunho("postado", criado="2026-11-10 09:00:00")
+    # Com lugar no dia, o horário que falhou agora e espera a nova tentativa é um dos que faltam.
+    estado = robo.estado_do_dia(config, agora)
+    estado.update(feitos=2, repetir=True, tentativas=2)
+    robo.db.salvar_config(robo.CHAVE_DIA, estado)
+    plano = robo.replanejar_hoje({**config, "robo_limite_min": 4, "robo_limite_max": 4}, agora)
+    assert (len(plano["horarios"]), plano["feitos"]) == (4, 2)
+    assert plano["refeito"] == {"no_dia": 4, "saidos": 1, "faltam": 3, "de_fora": 0, "proximo": ""}
+    assert robo.repetir_o_que_falhou(config, agora)
+    # Sem lugar (já saíram mais que o número novo), ele acaba: nem tenta de novo, nem volta mais tarde.
+    for hora in ("10:00", "11:00", "12:00"):
+        _rascunho("postado", criado=f"2026-11-10 {hora}:00")
+    estado = robo.estado_do_dia(config, agora)
+    estado.update(repetir=True, tentativas=2)
+    robo.db.salvar_config(robo.CHAVE_DIA, estado)
+    novo = {**config, "robo_limite_min": 3, "robo_limite_max": 3}
+    plano = robo.replanejar_hoje(novo, agora)
+    assert len(plano["horarios"]) == 3 and plano["feitos"] == 3 and all(h <= "15:00" for h in plano["horarios"])
+    assert plano["refeito"] == {"no_dia": 3, "saidos": 4, "faltam": 0, "de_fora": 0, "proximo": ""}
+    assert not robo.repetir_o_que_falhou(novo, agora)
+    assert not any(robo.consumir_horarios(novo, momento(f"2026-11-10 {h}:00")) for h in range(15, 23))
+
+
+def test_plano_refeito_no_fim_do_dia_deixa_de_fora_o_que_nao_cabe():
+    # Como os perdidos (01/11): os que faltam e não cabem com 1 h em média ficam de fora, e o plano
+    # continua com o número do dia.
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_inicio": 8, "robo_fim": 22,
+              "robo_limite_min": 9, "robo_limite_max": 9}
+    agora = momento("2026-11-10 21:50")
+    _rascunho("postado", criado="2026-11-10 09:00:00")
+    _rascunho("postado", criado="2026-11-10 13:00:00")
+    plano = robo.replanejar_hoje(config, agora)
+    assert (len(plano["horarios"]), plano["feitos"], plano["sem_tentar"]) == (9, 9, 7)
+    assert plano["refeito"] == {"no_dia": 9, "saidos": 2, "faltam": 0, "de_fora": 7, "proximo": ""}
+    assert not robo.consumir_horarios(config, momento("2026-11-10 21:59"))
 
 
 # --- A hora do descurtir (escolha do Rafael, P25: fixa às 4h) ---

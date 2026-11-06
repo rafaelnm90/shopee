@@ -570,12 +570,23 @@ def videos_hoje(config, agora=None):
 
 def replanejar_hoje():
     """
-    Os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje do robô é refeito na hora
-    com o que vale agora, e os horários já feitos continuam contados. Devolve a frase da resposta.
-    Escolha do Rafael (06/11, P157 1): DECISOES.md, Shopee Vídeo.
+    Os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje do robô é refeito na hora com o
+    que vale agora, e o que já saiu hoje entra na conta. Devolve a frase da resposta, com o número do
+    dia, quantos já saíram, quantos faltam e a hora do próximo. Escolhas do Rafael (06/11, P157 1 e o
+    pedido de logo depois): DECISOES.md, Shopee Vídeo.
     """
-    plano = robo.replanejar_hoje(ler_config())
-    return f" O plano de hoje foi refeito: <b>{len(plano['horarios'])}</b> rascunho(s) hoje."
+    refeito = robo.replanejar_hoje(ler_config())["refeito"]
+    partes = [f"O plano de hoje foi refeito: <b>{refeito['no_dia']}</b> rascunho(s) no dia"]
+    if refeito["saidos"]:
+        partes.append(f"já saíram <b>{refeito['saidos']}</b> hoje")
+    if refeito["faltam"]:
+        proximo = f"às <b>{refeito['proximo']}</b>" if refeito["proximo"] else "na próxima rodada"
+        partes.append(f"falta(m) <b>{refeito['faltam']}</b>, o próximo {proximo}")
+    elif refeito["saidos"]:
+        partes.append("nenhum a mais hoje")
+    if refeito["de_fora"]:
+        partes.append(f"<b>{refeito['de_fora']}</b> não cabe(m) mais hoje (1 h em média entre um e outro)")
+    return " " + "; ".join(partes) + "."
 
 
 def linha_do_plano(no_plano, pela_faixa, coisa):
