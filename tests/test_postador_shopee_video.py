@@ -2359,17 +2359,16 @@ def test_video_editado_vai_para_a_galeria_no_lugar_do_video_do_teste(monkeypatch
     assert na_galeria == [(b"editado", ps.NOME_NA_GALERIA)]
 
 
-def test_print_da_capa_diz_que_e_o_exemplo_para_aprovar(monkeypatch):
+def test_print_diz_quando_e_a_tela_antes_de_postar(monkeypatch):
     legendas = []
     monkeypatch.setattr(ps, "mandar_print", lambda d, legenda=ps.LEGENDA_PRINT: legendas.append(legenda) or True)
-    for argumento in ("", "postar", "capa"):
+    for argumento in ("", "postar", "outro"):
         assert ps.fazer_passo(Aparelho(), "print", argumento) == (True, "print mandado no privado")
-    assert legendas == [ps.LEGENDA_PRINT, ps.LEGENDA_PRINT_POSTAR, ps.LEGENDA_PRINT_CAPA]
-    assert "aprova" in ps.LEGENDA_PRINT_CAPA and "não vai ao ar" in ps.LEGENDA_PRINT_CAPA
+    assert legendas == [ps.LEGENDA_PRINT, ps.LEGENDA_PRINT_POSTAR, ps.LEGENDA_PRINT]
 
 
 def test_aumentar_afasta_dois_dedos_na_mesma_linha_sem_tocar_em_botao_proibido():
-    # Para aumentar a figurinha com a capa na tela da capa (vídeo do Rafael de 30/10, 20:07).
+    # Dois dedos no explorar, para aumentar o que está na tela (uma foto, um texto).
     assert ps.separar_passos("aumentar:540,1100,200,600") == [("aumentar", "540,1100,200,600")]
     aparelho = AparelhoQueArrasta()
     assert ps.fazer_passo(aparelho, "aumentar", "300,600,200,400") == (True, "dois dedos de 200 a 400 px em (300,600)")
@@ -2379,29 +2378,6 @@ def test_aumentar_afasta_dois_dedos_na_mesma_linha_sem_tocar_em_botao_proibido()
     assert ps.fazer_passo(aparelho, "aumentar", "300,1230,100,400") == (False, ps.RECUSA)
     assert ps.fazer_passo(aparelho, "aumentar", "300,600") == (False, "aumentar pede X,Y,DE,ATE")
     assert len(aparelho.arrastos) == 1
-
-
-def test_foto_capa_poe_na_galeria_a_capa_com_a_frase_da_ia(monkeypatch):
-    import edicao_video
-    monkeypatch.setattr(ps, "video_do_teste", lambda novo=False, de_video=False: {
-        "arquivo": "teste.mp4", "link": "https://s.shopee.com.br/produto"})
-    monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {"foto": b"\xff\xd8\xfffoto", "nome": "Produto"})
-    pedidos, na_galeria = [], []
-    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: pedidos.append((video, nome)) or {
-        "capa": "Leve e prático", "vantagem": "Uma vantagem maior"})
-    monkeypatch.setattr(edicao_video, "capa_com_chamada", lambda foto, frase: b"\x89PNG" + frase.encode())
-    # Vai à galeria só o miolo da capa: a figurinha do app cresce só até 3 vezes (teste no
-    # Motorola em 30/10), e a capa inteira não cobriria a largura.
-    monkeypatch.setattr(edicao_video, "recorte_da_figurinha", lambda capa: b"miolo:" + capa)
-    monkeypatch.setattr(ps, "por_foto_na_galeria", lambda d, dados, nome=None: na_galeria.append(dados) or "x.png")
-    assert ps.fazer_passo(Aparelho(), "foto", "capa") == (True, "miolo da capa com a frase na galeria (14 letras)")
-    assert pedidos == [("teste.mp4", "Produto")] and na_galeria == [b"miolo:\x89PNG" + "Leve e prático".encode()]
-    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {})
-    assert ps.fazer_passo(Aparelho(), "foto", "capa") == (
-        False, "a IA não escreveu a frase da capa, o nome nem a vantagem do produto")
-    monkeypatch.setattr(ps, "anuncio_do_produto", lambda video: {})
-    assert not ps.fazer_passo(Aparelho(), "foto", "capa")[0]
-    assert len(na_galeria) == 1
 
 
 def test_pagina_inicial_pelo_link_e_a_pagina_presa_carregando(monkeypatch):
