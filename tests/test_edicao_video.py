@@ -2833,9 +2833,9 @@ def test_foto_da_capa_sem_as_letras_do_anuncio(monkeypatch):
     assert resultado == edicao_video.LETRAS_CORTADAS
     assert Image.open(io.BytesIO(cortada)).size == (800, 680)
     assert pedidos == [(edicao_video.PROMPT_DAS_LETRAS_DA_FOTO, ["image/jpeg"])]
-    # Sem letras, com as letras em cima do produto (até a resposta da P164), com a IA sem resposta
-    # ou com a caixa que não serve (pequena demais, a foto toda ou fora do formato), a foto vai
-    # como está.
+    # Sem letras, com as letras em cima do produto (aí a capa procura um quadro do vídeo, P164 1:
+    # foto_para_a_capa), com a IA sem resposta ou com a caixa que não serve (pequena demais, a foto
+    # toda ou fora do formato), a foto vai como está.
     for resposta, esperado in (
             ('{"letras": false}', edicao_video.SEM_LETRAS),
             ('```json\n{"letras": true, "sobre_o_produto": true, "caixa": [0, 0, 500, 500]}\n```',
@@ -3030,3 +3030,82 @@ def test_frase_do_video_aberto_acaba_antes_dos_icones_do_app():
     pe = edicao_video.PE_DA_FAIXA_NA_GRADE
     letras = [x for x in range(0, 720) for y in range(pe - faixa, pe, 2) if min(grade.getpixel((x, y))) > 200]
     assert abs((min(letras) + max(letras)) / 2 - 360) <= 3 and max(letras) > edicao_video.ICONES_NO_VIDEO_ABERTO
+
+
+def _quadro_jpg(largura=720, altura=1280):
+    """Um quadro do vídeo de mentira: o produto (um quadrado azul) no meio, num fundo cinza."""
+    import io
+
+    from PIL import Image, ImageDraw
+    imagem = Image.new("RGB", (largura, altura), (90, 90, 90))
+    ImageDraw.Draw(imagem).rectangle((160, 400, 560, 800), fill=(30, 90, 210))
+    saida = io.BytesIO()
+    imagem.save(saida, "JPEG", quality=95)
+    return saida.getvalue()
+
+
+def test_com_as_letras_em_cima_do_produto_a_capa_usa_um_quadro_do_video(monkeypatch):
+    # Escolha do Rafael (06/11, P164 1): com as letras em cima do produto, o corte não as tira; a IA
+    # escolhe no vídeo um momento com o produto inteiro e sem letras, e a capa usa esse quadro,
+    # recortado no produto e conferido sem letras. Sem um momento assim, vai a foto do anúncio.
+    import io
+
+    from PIL import Image
+    pedidos, conferidas = [], []
+    respostas = [{"momento": 2.5, "caixa": [250, 150, 700, 850]}]
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia", lambda video, prompt: pedidos.append((video, prompt))
+                        or respostas.pop(0))
+    monkeypatch.setattr(edicao_video.videos, "quadro_em", lambda video, segundos: _quadro_jpg())
+    letras_do_quadro = [edicao_video.SEM_LETRAS]
+    monkeypatch.setattr(edicao_video, "foto_sem_letras",
+                        lambda foto: conferidas.append(foto) or (foto, letras_do_quadro.pop(0)))
+    quadro, motivo = edicao_video.quadro_sem_letras("v.mp4", "Almofada de Gel")
+    assert motivo == edicao_video.QUADRO_DO_VIDEO and quadro == conferidas[0]
+    assert Image.open(io.BytesIO(quadro)).size == (504, 576)          # a caixa, em milésimos do quadro
+    assert pedidos == [("v.mp4", edicao_video.PROMPT_DO_QUADRO_DA_CAPA.format(nome="Almofada de Gel"))]
+    # Sem um momento assim, sem o quadro, ou com letras também no quadro: não entra.
+    for resposta, quadro_em, letras, esperado in (
+            ({"momento": None}, _quadro_jpg(), None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
+            ({}, _quadro_jpg(), None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
+            ({"momento": 1, "caixa": [0, 0, 100, 100]}, _quadro_jpg(), None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
+            ({"momento": 1, "caixa": [0, 0, 1000, 1000]}, None, None, edicao_video.QUADRO_QUE_NAO_SAIU),
+            ({"momento": 1, "caixa": [0, 0, 1000, 1000]}, _quadro_jpg(), edicao_video.LETRAS_NO_PRODUTO,
+             edicao_video.QUADRO_COM_LETRAS)):
+        respostas.append(resposta)
+        monkeypatch.setattr(edicao_video.videos, "quadro_em", lambda video, segundos, q=quadro_em: q)
+        letras_do_quadro[:] = [letras] if letras else []
+        assert edicao_video.quadro_sem_letras("v.mp4", "Almofada") == (None, esperado), resposta
+    # A foto da capa: a do anúncio sem letras ou cortada; com as letras em cima do produto, o quadro.
+    monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (b"cortada", edicao_video.LETRAS_CORTADAS))
+    assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"cortada", edicao_video.LETRAS_CORTADAS, "")
+    monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.LETRAS_NO_PRODUTO))
+    monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="": (b"quadro", edicao_video.QUADRO_DO_VIDEO))
+    assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"quadro", edicao_video.QUADRO_DO_VIDEO, "")
+    monkeypatch.setattr(edicao_video, "quadro_sem_letras",
+                        lambda video, nome="": (None, edicao_video.QUADRO_COM_LETRAS))
+    assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"foto", edicao_video.LETRAS_NO_PRODUTO,
+                                                               edicao_video.QUADRO_COM_LETRAS)
+
+
+def test_capa_que_vai_ao_ar_com_o_quadro_do_video_e_o_registro(monkeypatch, tmp_path):
+    # O vídeo que vai ao ar abre com a capa feita do quadro do vídeo, e o registro diz "quadro do
+    # vídeo"; sem o quadro, a foto do anúncio e o porquê.
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "capa": "Bolsa leve",
+                                  "lugar": "alto"})
+    monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.LETRAS_NO_PRODUTO))
+    quadros = [(_quadro_jpg(), edicao_video.QUADRO_DO_VIDEO), (None, edicao_video.SEM_MOMENTO_SEM_LETRAS)]
+    monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="": quadros.pop(0))
+    capas = []
+    monkeypatch.setattr(edicao_video, "capa_com_chamada",
+                        lambda foto, frase, no_video=False, cor=None: capas.append(foto) or b"capa")
+    monkeypatch.setattr(edicao_video, "editar_2", lambda *a, **k: ("", {"textos": ["Bolsa"], "legendas": 0}))
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa")
+    edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa")
+    assert capas == [_quadro_jpg(), _quadro_jpg(), _foto_jpg(), _foto_jpg()]
+    linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LETRAS_DA_FOTO,
+                                                       "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [(edicao_video.QUADRO_DO_VIDEO, ""),
+                                              (edicao_video.LETRAS_NO_PRODUTO, edicao_video.SEM_MOMENTO_SEM_LETRAS)]
