@@ -487,3 +487,36 @@ def test_copia_que_sumiu_sai_dos_pedidos_com_aviso(bm, canal):
     rodar(bm.levar_videos_do_robo_ao_canal())
     assert canal.pedidos.pendentes() == [] and "a cópia do vídeo sumiu" in canal.avisos[0]
     assert consultar("SELECT COUNT(*) FROM fila_postagens")[0] == 0 and bm.ler_contador() == 7
+
+
+def test_pedidos_sem_pagamento_ficam_numa_linha_propria_no_relatorio(bm, monkeypatch, Msg, Est):
+    # Escolha do Rafael (06/11, P163 1): o Canc fica só com os cancelados que tinham comissão (o que
+    # se perdeu); os não pagos e os cancelados antes de pagar (a Shopee manda R$ 0,00) vão numa
+    # linha própria, e a taxa de conversão continua contando todos os pedidos.
+    from datetime import datetime, timedelta
+
+    from fuso import fuso_horario
+    ontem = (datetime.now(fuso_horario) - timedelta(days=1)).strftime("%Y-%m-%d")
+    anteontem = (datetime.now(fuso_horario) - timedelta(days=2)).strftime("%Y-%m-%d")
+    pedidos = {"P1": (anteontem, "CANCELLED", 121.26), "P2": (ontem, "CANCELLED", 0.0), "P3": (ontem, "UNPAID", 0.0),
+               "P4": (ontem, "UNPAID", 5.0), "P5": (ontem, "COMPLETED", 3.0)}
+    bm.salvar_banco_pedidos({sn: {"data": data, "status": status, "comissao_total": valor, "comissao_shopee": valor,
+                                  "comissao_vendedor": 0.0} for sn, (data, status, valor) in pedidos.items()})
+    historico = bm.processar_e_salvar_pedidos_api([])
+    assert (historico[anteontem]["cancelado"], historico[anteontem]["qtd_cancelado"],
+            historico[anteontem]["qtd_sem_pagamento"]) == (pytest.approx(121.26), 1, 0)
+    assert (historico[ontem]["cancelado"], historico[ontem]["qtd_cancelado"], historico[ontem]["qtd_sem_pagamento"],
+            historico[ontem]["qtd_aprovado"]) == (0.0, 0, 3, 1)
+
+    async def sem_api(dias):
+        return []
+    monkeypatch.setattr(bm, "buscar_dados_financeiros_shopee", sem_api)
+    monkeypatch.setattr(bm, "ADMIN_ID", 1)
+    msg = Msg("Relatório Financeiro 💰", user_id=1)
+    rodar(bm.gerar_relatorio_financeiro(msg, Est()))
+    texto = next(t for t in msg.saidas if "DESEMPENHO DIÁRIO" in t)
+    dia = datetime.strptime(ontem, "%Y-%m-%d").strftime("%d/%m")
+    bloco = texto.split(f"<b>{dia}</b>")[1].split("\n\n")[0]
+    assert "├ Canc: R$ 0,00 (0 pedidos" in bloco
+    assert "└ Sem pagamento: 3 pedido(s) (não pagos ou cancelados antes de pagar, sem comissão)" in bloco
+    assert "1 Pagos | 0 Pendentes | 1 Cancel. | 3 Sem pagamento" in texto
