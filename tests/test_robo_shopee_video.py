@@ -6882,3 +6882,74 @@ def test_plano_do_dia_segue_a_escada_dos_pontos_e_so_vai_o_produto_do_video():
     robo.gravar_estado(saude_pontos=4, saude_lida_em=datetime.now(robo.fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
     assert robo.espacos_livres(None, {"link": LINK}, PRINCIPAL, {"preco": 50.0}, [], time.monotonic() + 600) == []
     assert _registro_dos_espacos() == ["nenhum - só o produto do vídeo pelos pontos"]
+
+
+# --- Fazer Agora (escolha do Rafael, P162 1) ---
+
+def test_fazer_agora_pede_so_o_que_ainda_nao_saiu_hoje_e_uma_vez():
+    agora = momento("2026-11-06 15:00")
+    assert robo.pedir_agora("saude", agora) == (True, 0, 1)
+    assert robo.pedir_agora("saude", agora) == (True, 0, 1)                   # já pedida: não pede de novo
+    assert [p["atividade"] for p in robo.pedidos_de_agora(agora)] == ["saude"]
+    linhas = [(r[2], r[3]) for r in robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_FAZER_AGORA,
+                                                                       "2000-01-01 00:00:00")]
+    assert linhas == [("pedido", "Saúde do Vídeo")]
+    # Já saiu hoje até o limite do dia: não pede.
+    robo.gravar_estado(saude_lida_em="2026-11-06 08:10:00", descurtir_em="2026-11-06 04:05:00",
+                       descurtir_continuar=False, respostas_leituras={"dia": "2026-11-06", "vezes": 3})
+    assert robo.pedir_agora("limpeza", agora) == (False, 1, 1)
+    assert robo.pedir_agora("respostas", agora) == (False, 3, 3)
+    robo.gravar_estado(respostas_leituras={"dia": "2026-11-06", "vezes": 1})
+    assert robo.pedir_agora("respostas", agora) == (True, 1, 3)
+    for n in range(robo.interacoes.VIDEOS_NO_FEED_POR_DIA):
+        robo.interacoes.guardar(f"video{n}", "video_feed", "comentado", agora)
+    assert robo.pedir_agora("feed", agora) == (False, 5, 5)
+    # O pedido de outro dia sai sem fazer.
+    assert robo.pedidos_de_agora(momento("2026-11-07 08:00")) == []
+
+
+def test_fazer_agora_roda_na_proxima_folga_mesmo_pausado_e_diz_como_foi(monkeypatch, avisos):
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22})   # pausado
+    feitas = []
+    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False:
+                        feitas.append((acao, ident, pedido)) or f"{acao} feito")
+    agora = momento("2026-11-06 23:10")                                          # fora do Horário do Robô
+    assert robo.rodada(d=AppDeMentira(), agora=agora, fazer=True) == "nada a fazer agora"
+    robo.pedir_agora("feed", agora)
+    robo.pedir_agora("saude", agora)
+    assert robo.rodada(d=AppDeMentira(), agora=agora, fazer=True) == "feed feito"
+    assert "⏩ Robô da Shopee Vídeo: Feed, do Fazer Agora: feed feito." in avisos
+    assert [p["atividade"] for p in robo.pedidos_de_agora(agora)] == ["saude"]
+    # A rodada agendada também atende o pedido que espera, antes de tudo; a Saúde manda o resumo dela.
+    assert robo.rodada(d=AppDeMentira(), agora=agora) == "saude feito"
+    assert feitas == [("feed", None, False), ("saude", None, True)] and robo.pedidos_de_agora(agora) == []
+    assert robo.rodada(d=AppDeMentira(), agora=agora) == "pausado"
+    # O pedido que saiu na vez dele antes da rodada, ou o post antigo sem post que possa ganhá-lo, não sai.
+    robo.pedir_agora("post_antigo", agora)
+    assert robo.rodada(d=AppDeMentira(), agora=agora, fazer=True) == (
+        "fazer agora: nenhum post dos últimos 30 dias pode ganhar o comentário agora")
+    assert "Comentário no Post Antigo, do Fazer Agora: não fiz, porque nenhum post" in avisos[-1]
+    robo.pedir_agora("limpeza", agora)
+    robo.gravar_estado(descurtir_em="2026-11-06 23:00:00", descurtir_continuar=False)
+    assert robo.rodada(d=AppDeMentira(), agora=agora, fazer=True) == "fazer agora: já tinha saído hoje, na vez dela"
+    assert len(feitas) == 2
+    linhas = [r[2] for r in robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_FAZER_AGORA,
+                                                               "2000-01-01 00:00:00")]
+    assert linhas == ["pedido", "pedido", "na rodada", "na rodada", "pedido", "não saiu", "pedido", "não saiu"]
+
+
+def test_fazer_agora_na_suspensao_roda_e_sem_o_celular_sai_com_o_aviso(monkeypatch, avisos):
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-11-10 00:00:00")
+    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False: f"{acao} feito")
+    agora = momento("2026-11-06 15:00")
+    robo.pedir_agora("respostas", agora)
+    # A suspensão não fecha nenhuma das atividades do Fazer Agora.
+    assert robo.rodada(d=AppDeMentira(), agora=agora, fazer=True) == "responder feito"
+    # Sem o celular não há folga para esperar: o pedido sai, com o aviso, e a Postagem não pausa por isso.
+    robo.pedir_agora("feed", agora)
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (False, "o celular não responde"))
+    assert "desconectado" in robo.rodada(agora=agora, fazer=True)
+    assert robo.pedidos_de_agora(agora) == [] and robo.ler_config()["robo_pausado"] is False
+    assert "não fiz o que você pediu no Fazer Agora (Feed): o celular do robô está desconectado" in avisos[-1]

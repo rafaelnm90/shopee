@@ -397,6 +397,7 @@ SEM_META = {
     ("shopee_video", "curtir o produto"), ("shopee_video", "descurtir no fim do rascunho"),
     ("shopee_video", "feed: "), ("shopee_video", "próprio post: "), ("shopee_video", "post antigo: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "leitura das respostas"),
+    ("shopee_video", "fazer agora"),
     ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
@@ -1234,9 +1235,11 @@ ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("post_antigo",), ("rascunho", "postar", 
 ACOES_EM_QUALQUER_HORARIO = ("apagar",)
 # O rascunho que o Rafael pede no Preparar 1 Agora vale a qualquer hora: o que o robô faz até
 # PREPARO_DO_BOTAO depois do pedido (o registro "preparar 1 agora") não é sobreposição. O post
-# pedido no Postar Agora 🚀 (P138, o registro "postar agora") também vale a qualquer hora.
+# pedido no Postar Agora 🚀 (P138, o registro "postar agora") e o que ele pede no Fazer Agora ⏩
+# (P162 1, o registro "fazer agora": o pedido e a rodada que o faz) também valem a qualquer hora.
 PROCESSO_DO_BOTAO = "preparar 1 agora"
 PROCESSO_DO_POSTAR_AGORA = "postar agora"
+PROCESSO_DO_FAZER_AGORA = "fazer agora"
 PREPARO_DO_BOTAO = timedelta(minutes=30)
 
 
@@ -1310,7 +1313,8 @@ def sobreposicoes(agora=None):
     # O último passo da limpeza na hora dela, em cada dia: o que veio antes dele na hora furou a vez dela.
     fim_da_limpeza = {momento[:10]: momento for momento, tipo, _o in atividades
                       if tipo == "descurtir" and int(momento[11:13]) == HORA_DO_DESCURTIR_SV}
-    botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S") for processo in (PROCESSO_DO_BOTAO, PROCESSO_DO_POSTAR_AGORA)
+    botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S")
+             for processo in (PROCESSO_DO_BOTAO, PROCESSO_DO_POSTAR_AGORA, PROCESSO_DO_FAZER_AGORA)
              for m, _p, _r, _d, _o in registro_processos.sequencia("shopee_video", processo, desde)]
 
     def pedido_no_botao(momento):

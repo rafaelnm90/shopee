@@ -481,6 +481,13 @@ def test_pedido_nos_botoes_nao_e_sobreposicao():
     r = checkup.sobreposicoes(AGORA)
     assert [hora for hora, _o in r["pedidos_no_botao"]] == ["04:11", "04:38"]
     assert [hora for hora, _o in r["no_descurtir"]] == ["04:35"]
+    # O que ele pede no Fazer Agora ⏩ (P162 1) também: a leitura pedida às 22:10 não é a do robô fora do dia.
+    assert checkup.PROCESSO_DO_FAZER_AGORA == robo.PROCESSO_DO_FAZER_AGORA
+    assert checkup.classificado("shopee_video", robo.PROCESSO_DO_FAZER_AGORA)
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DO_FAZER_AGORA, "pedido", "Responder Comentários",
+                                 ok=None, agora=em("22:05"))
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DA_LEITURA, "1ª de 3 hoje", agora=em("22:10"))
+    assert checkup.sobreposicoes(AGORA)["leituras_fora"] == []
 
 
 def test_pontos_de_atencao():
