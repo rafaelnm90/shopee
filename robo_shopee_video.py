@@ -469,12 +469,15 @@ def planejar(config, dia):
 
 def replanejar_hoje(config, agora=None):
     """
-    O Horário das Interações mudou: os horários de rascunho que faltam hoje saem do plano
-    novo, fora da janela nova; os já feitos continuam contados.
+    O Horário das Interações, os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje
+    é refeito na hora com o que vale agora; os horários já feitos continuam contados, e os do plano
+    novo que já passaram saem na volta, como os perdidos (recuperar_horarios). Devolve o plano.
+    Escolha do Rafael (06/11, P157 1): DECISOES.md, Shopee Vídeo.
     """
     estado = estado_do_dia(config, agora)
     estado.update(horarios=planejar(config, estado["data"]), feito_com=feito_com(config, estado["data"]))
     db.salvar_config(CHAVE_DIA, estado)
+    return estado
 
 
 def estado_do_dia(config, agora=None):

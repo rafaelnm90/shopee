@@ -307,6 +307,27 @@ def test_rascunhos_por_dia_e_horario_do_robo(bm, Msg, Est):
     assert "⚠️" in msg.saidas[0]
 
 
+def test_mudar_rascunhos_por_dia_ou_o_horario_do_robo_refaz_o_plano_de_hoje(bm, Msg, Est):
+    # Escolha do Rafael (06/11, P157 1): a faixa e o Horário do Robô mudados valem já hoje, e os
+    # horários já feitos continuam contados.
+    from datetime import datetime
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    sv.db.salvar_config(sv.robo.CHAVE_DIA, {"data": hoje, "horarios": ["21:03"], "feitos": 1})
+    msg = Msg("Aprovar ✅")
+    rodar(sv.salvar_faixa_robo(msg, Est({"faixa": [8, 12]})))
+    plano = sv.db.ler_config(sv.robo.CHAVE_DIA)
+    assert len(plano["horarios"]) == sv.robo.quantos_hoje(sv.ler_config(), hoje) >= 8
+    assert plano["feitos"] == 1 and plano["feito_com"]["faixa"] == [8, 12]
+    assert f"O plano de hoje foi refeito: <b>{len(plano['horarios'])}</b> rascunho(s) hoje." in msg.saidas[0]
+    msg = Msg("Aprovar ✅")
+    rodar(sv.salvar_janela_robo(msg, Est({"janela": [10, 14]})))
+    plano = sv.db.ler_config(sv.robo.CHAVE_DIA)
+    assert plano["horarios"] and all("10:00" <= h < "14:00" for h in plano["horarios"]) and plano["feitos"] == 1
+    assert "O plano de hoje foi refeito" in msg.saidas[0]
+
+
 def test_rascunhos_por_dia_com_os_botoes_faixa_e_fixo(bm, Msg, Est):
     # Pedido do Rafael (vídeo de 22/10): escolher Faixa ou Fixo num botão e só depois
     # digitar os números.
