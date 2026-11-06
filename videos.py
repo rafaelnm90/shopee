@@ -4,7 +4,8 @@ Arquivo de vídeo tratado do mesmo jeito em todos os robôs: medir a resolução
 reconhece o mesmo vídeo. Usado pelo Espião e pelo Espelhador (motor_userbot), pelos
 Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
 (downloader_bot, só a medição). Os quadros espalhados do vídeo (quadros) vão nos casos
-das falhas do robô da Shopee Vídeo (casos_robo). A foto do produto no começo, com a
+das falhas do robô da Shopee Vídeo (casos_robo), e o quadro de um momento (quadro_em), na capa
+dos vídeos dela quando a foto do anúncio tem letras em cima do produto (edicao_video). A foto do produto no começo, com a
 miniatura e a seta por cima (com_foto_e_miniatura), é a edição dos vídeos do Rafael
 (edicao_video); o vídeo remontado sem as partes paradas, com trechos acelerados ou em
 câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela. O vídeo
@@ -77,6 +78,25 @@ def quadros(caminho, pasta, quantos=4, largura=360, timeout=20):
             continue
         feitos += os.path.exists(destino)
     return feitos
+
+
+def quadro_em(caminho, segundos, timeout=20):
+    """O quadro do vídeo nesse segundo, no tamanho dele, em JPEG (bytes); None quando não sai."""
+    try:
+        momento = f"{max(0.0, float(segundos)):.2f}"
+    except (TypeError, ValueError):
+        return None
+    with tempfile.TemporaryDirectory() as pasta:
+        destino = os.path.join(pasta, "quadro.jpg")
+        try:
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", momento, "-i", caminho, "-frames:v", "1",
+                            "-q:v", "2", destino], capture_output=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if not os.path.exists(destino) or not os.path.getsize(destino):
+            return None
+        with open(destino, "rb") as arquivo:
+            return arquivo.read()
 
 
 async def verificar_e_otimizar_video(caminho_video, relatorio=None):
