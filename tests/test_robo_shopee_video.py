@@ -6852,7 +6852,8 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
     sem_a_cor = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
     assert robo.marcar_o_post(grade(capa), sem_a_cor, caixa)
     linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
-    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
+    # O registro diz quando a faixa procurada era a da cor do produto (a 1ª capa colorida na grade).
+    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", f"{robo.LADOS_DA_CAPA[True]}; {robo.COR_NA_CAPA}"),
                                               ("no post sem a faixa", "")]
 
 
