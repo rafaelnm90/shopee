@@ -869,9 +869,12 @@ def recorte_do_video_aberto(capa):
 # Na grade do perfil, a capa do post é o 1º quadro do vídeo quando a faixa da frase chega aos dois
 # lados do quadro (a capa da grade vai de uma beirada à outra); com a faixa só no meio e os lados
 # sem a cor dela, a grade pegou outro quadro da abertura (o do vídeo aberto, P129). Olha uma
-# tira fina de cada lado, perto da borda do quadro, e a do meio, de cima a baixo.
+# tira fina de cada lado, perto da borda do quadro, e as do meio, de cima a baixo: a mais
+# colorida delas, porque as letras da frase cruzam muitas (no vídeo aberto, a frase não fica no
+# meio da faixa e acaba antes dos ícones do app, P165 1; depois dela, a faixa vem sem letras).
 TIRA_DOS_LADOS = 0.008                          # da largura do quadro, a partir de cada borda
 PARTE_DOS_LADOS = 0.8                           # da altura da faixa, na cor dela, para dizer que ela está ali
+COLUNAS_DO_MEIO = tuple(i / 50 for i in range(5, 46))   # de 2% em 2% da largura do quadro, de 10% a 90%
 
 
 def faixa_nos_lados(imagem, caixa, cor=None):
@@ -897,7 +900,7 @@ def faixa_nos_lados(imagem, caixa, cor=None):
     lados = [laranjas(x) for x in (x1 + round(largura * TIRA_DOS_LADOS), x2 - 1 - round(largura * TIRA_DOS_LADOS))]
     if all(n >= minimo for n in lados):
         return True
-    if not any(lados) and laranjas((x1 + x2) // 2) >= minimo:
+    if not any(lados) and max(laranjas(x1 + round(largura * parte)) for parte in COLUNAS_DO_MEIO) >= minimo:
         return False
     return None
 

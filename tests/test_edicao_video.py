@@ -1629,6 +1629,24 @@ def test_faixa_nos_lados_diz_qual_capa_a_grade_mostrou():
     assert edicao_video.faixa_nos_lados(grade(edicao_video.foto_em_tela_cheia(_foto_jpg())), (0, 0, 20, 20)) is None
 
 
+def test_faixa_so_no_meio_com_uma_letra_bem_na_coluna_do_centro():
+    # No vídeo aberto, a frase acaba antes dos ícones do app e sai do meio da faixa (P165 1): uma
+    # letra pode cruzar bem a coluna do centro do quadro. A faixa só no meio continua reconhecida
+    # pelas outras colunas do meio.
+    from PIL import Image, ImageDraw
+    caixa = (100, 300, 454, 772)
+    tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+    desenho = ImageDraw.Draw(tela)
+    desenho.rectangle(caixa, fill=(0, 0, 0))
+    altura = round(edicao_video.FAIXA_DA_CHAMADA * (caixa[3] - caixa[1])
+                   / (edicao_video.VISIVEL_NA_GRADE[1] - edicao_video.VISIVEL_NA_GRADE[0]))
+    cima = caixa[3] - altura - 20
+    desenho.rectangle((caixa[0] + 20, cima, caixa[2] - 20, cima + altura), fill=edicao_video.LARANJA_DA_SHOPEE)
+    meio = (caixa[0] + caixa[2]) // 2
+    desenho.rectangle((meio - 4, cima + altura // 4, meio + 4, cima + altura * 3 // 4), fill=(255, 255, 255))
+    assert edicao_video.faixa_nos_lados(tela, caixa) is False
+
+
 def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path):
     # Com o ffmpeg de verdade (P129): o 1º quadro, que o app usa como capa da grade, tem a faixa de
     # uma beirada à outra do vídeo; do 2º em diante, a do vídeo aberto (preto onde a outra é laranja).
