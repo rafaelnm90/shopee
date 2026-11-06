@@ -19,9 +19,11 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --postar ID   # o aprovado na hora (botão Postar Agora 🚀, P138)
     python3 robo_shopee_video.py --print-do-rascunho [AAAA-MM-DDTHH:MM]   # o print do rascunho mais novo no privado
 
-Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
-0. às 4h, descurte tudo em Meus favoritos (Criadores & Afiliados), uma vez por dia (P25); a que
-   não termina na hora volta no mesmo dia, na 1ª rodada livre (P137);
+Cada rodada faz no máximo uma coisa, nesta ordem, sem hora marcada: cada uma sai na 1ª rodada em
+que pode (P161 1):
+0. às 4h, a 1ª coisa do dia, descurte tudo em Meus favoritos (Criadores & Afiliados), uma vez por
+   dia (P25): enquanto ela não acaba, a hora é só dela; acabada, fica livre. A que não termina na
+   hora volta no mesmo dia, na 1ª rodada livre (P137);
 1. o treino da semana, na primeira rodada de segunda-feira: percorre o caminho até a tela
    final sem salvar nem postar e confere cada tela com o mapa (os CAMINHOs abaixo);
 2. apaga no app um rascunho que o Rafael recusou;
@@ -29,9 +31,11 @@ Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
    intervalo sorteado entre eles, sempre dentro do Horário do Robô;
 4. prepara um rascunho novo quando um horário do plano do dia passou: cada dia sorteia
    quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô;
-5. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia (P70; Notificações →
-   Lives, Vídeos e ...; o texto é da IA e cada resposta é conferida embaixo do comentário);
-6. curte um vídeo de outro criador no feed Live e Vídeo → Para você e, quando a IA tem algo
+5. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia, das 8h às 22h, com pelo
+   menos 3 h entre uma leitura e outra (P70 e P161 1; Notificações → Lives, Vídeos e ...; o texto
+   é da IA e cada resposta é conferida embaixo do comentário);
+6. comenta num post antigo dele, 1 vez por dia, das 8h às 22h (P148 2);
+7. curte um vídeo de outro criador no feed Live e Vídeo → Para você e, quando a IA tem algo
    específico a dizer, comenta nele: até 5 por dia, um por rodada, espalhados pelo Horário do
    Robô; o que falha tenta de novo na rodada seguinte (P151 1 e P152; interacoes_shopee_video.py).
 Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celular aberta no
@@ -89,13 +93,12 @@ logger = logging.getLogger("RoboShopeeVideo")
 
 CHAVE_CONFIG = "shopee_video"  # a mesma chave do painel_shopee_video
 # Começa pausado: o Rafael retoma no painel. Rascunhos por dia em faixa (sorteada a cada
-# dia), o Horário do Robô e o Horário das Interações (None até o Rafael escolher), em
-# horas de Brasília.
+# dia) e o Horário do Robô, em horas de Brasília.
 # robo_produtos_a_mais: os espaços livres com o mesmo item de outras lojas (P59), ligados
 # até o Rafael desligar no painel ou uma punição por produto parar (P73).
 PADRAO = {"robo_pausado": True, "robo_limite_min": 1, "robo_limite_max": 2,
           "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1],
-          "robo_interacoes_inicio": None, "robo_interacoes_fim": None, "robo_produtos_a_mais": True}
+          "robo_produtos_a_mais": True}
 MAXIMO_POR_DIA = 20
 CHAVE_DIA = "shopee_video_robo_dia"
 # Rascunho do plano que não deu certo volta nas rodadas seguintes: até estas vezes a mais
@@ -257,15 +260,20 @@ def agora_br(agora=None):
     return agora or datetime.now(fuso_horario)
 
 
+def no_horario_do_robo(config, agora=None):
+    """Agora está no Horário do Robô do painel?"""
+    return config["robo_inicio"] <= agora_br(agora).hour < config["robo_fim"]
+
+
 def no_horario(config, agora=None):
-    """O robô pode rodar agora: no Horário do Robô, no Horário das Interações ou na hora do descurtir."""
-    return (config["robo_inicio"] <= agora_br(agora).hour < config["robo_fim"]
-            or na_hora_das_interacoes(config, agora) or na_hora_do_descurtir(agora))
+    """O robô pode rodar agora: no Horário do Robô ou na hora do descurtir."""
+    return no_horario_do_robo(config, agora) or na_hora_do_descurtir(agora)
 
 
-# Uma hora do dia só para descurtir tudo em Meus favoritos (os produtos curtidos para o
-# Adicionar Produto, a lista de afiliado): nela o robô não prepara, não posta e não interage. Fixa às 4h, de
-# madrugada. Escolha do Rafael (24/10, P25): DECISOES.md, Shopee Vídeo.
+# A limpeza de Meus favoritos (os produtos curtidos para o Adicionar Produto, a lista de afiliado) é a
+# 1ª coisa do dia, às 4h, de madrugada (P25): nessa hora, enquanto ela não acaba, o robô não prepara,
+# não posta e não interage. Acabada, o resto da hora fica livre como as outras do Horário do Robô.
+# Escolhas do Rafael (24/10, P25, e 06/11, P161 1): DECISOES.md, Shopee Vídeo.
 HORA_DO_DESCURTIR = 4
 # Com um aprovado indo ao ar nesse tempo (o das rodadas), a rodada não começa tarefa longa:
 # a seguinte já pega o post na hora. Escolha do Rafael (P30): DECISOES.md, Shopee Vídeo.
@@ -289,9 +297,9 @@ def descurtir_pendente(agora=None):
 
 
 # A limpeza de hoje que não terminou na hora dela (o celular fora às 4h, o app travado nas 4
-# rodadas da hora, as voltas que acabaram) roda de novo no mesmo dia, na 1ª rodada livre: fora do
-# Horário das Interações e sem segurar um post (o_que_fazer), até LIMPEZAS_FORA_DA_HORA vezes por
-# dia. Escolha do Rafael (02/11, P137 1): DECISOES.md, Shopee Vídeo.
+# rodadas da hora, as voltas que acabaram) roda de novo no mesmo dia, na 1ª rodada livre, sem
+# segurar um post (o_que_fazer), até LIMPEZAS_FORA_DA_HORA vezes por dia. Escolha do Rafael
+# (02/11, P137 1): DECISOES.md, Shopee Vídeo.
 LIMPEZAS_FORA_DA_HORA = 2
 FORA_DA_HORA = "fora da hora"
 
@@ -345,52 +353,14 @@ def anotar_rodada_sem_limpeza(motivo, agora=None):
         registro_processos.registrar(REGISTRO, PROCESSO_SEM_LIMPEZA, motivo, ok=None, agora=agora)
 
 
-# O Horário das Interações (responder os comentários dos vídeos do Rafael e comentar e
-# curtir no feed) fica separado do de preparar e postar: nele o robô só interage, e fora
-# dele, só prepara e posta. Sem ele escolhido, tudo segue no Horário do Robô, como antes.
-# Escolha do Rafael (24/10, P22 a P24): DECISOES.md, Shopee Vídeo.
-
-def janela_das_interacoes(config):
-    """(início, fim) do Horário das Interações, em horas; None enquanto o Rafael não escolheu."""
-    inicio, fim = config.get("robo_interacoes_inicio"), config.get("robo_interacoes_fim")
-    return (int(inicio), int(fim)) if inicio is not None and fim is not None else None
-
-
-def na_hora_das_interacoes(config, agora=None):
-    janela = janela_das_interacoes(config)
-    return bool(janela) and janela[0] <= agora_br(agora).hour < janela[1]
-
-
-# Um rascunho leva até uns 20 min (o registro "tempo do rascunho"): perto do começo do Horário
-# das Interações, o robô não começa outro, para o preparo não entrar nele (01/11: um rascunho
-# começado perto das 20h foi até 20:08, antes dos comentários do feed). O horário do plano espera
-# as interações do dia acabarem (P26) ou o fim da janela.
-MINUTOS_ANTES_DAS_INTERACOES = 20
-
-
-def perto_das_interacoes(config, agora=None):
-    """O Horário das Interações começa em até MINUTOS_ANTES_DAS_INTERACOES, com as interações do dia por fazer?"""
-    janela = janela_das_interacoes(config)
-    if not janela or interacoes_do_dia_feitas(agora):
-        return False
-    momento = agora_br(agora)
-    falta = momento.replace(hour=janela[0] % 24, minute=0, second=0, microsecond=0) - momento
-    return timedelta(0) < falta <= timedelta(minutes=MINUTOS_ANTES_DAS_INTERACOES)
-
-
 def trechos_de_postar(config):
     """
-    Os trechos do dia, em minutos (início, fim), em que o robô prepara e posta: o Horário
-    do Robô sem o Horário das Interações e sem a hora do descurtir.
+    Os trechos do dia, em minutos (início, fim), em que o robô prepara e posta: o Horário do Robô
+    inteiro. A hora do descurtir também entra: o horário que cai nela espera a limpeza acabar
+    (o_que_fazer). Escolha do Rafael (06/11, P161 1): DECISOES.md, Shopee Vídeo.
     """
-    trechos = [(config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1))]
-    cortes = [(HORA_DO_DESCURTIR * 60, (HORA_DO_DESCURTIR + 1) * 60)]
-    janela = janela_das_interacoes(config)
-    if janela:
-        cortes.append((janela[0] * 60, janela[1] * 60))
-    for corte_inicio, corte_fim in cortes:
-        trechos = [parte for a, b in trechos for parte in ((a, min(b, corte_inicio)), (max(a, corte_fim), b))]
-    return [(a, b) for a, b in trechos if b > a]
+    inicio, fim = config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1)
+    return [(inicio, fim)] if fim > inicio else []
 
 
 def pontos_do_dia(dia):
@@ -448,7 +418,6 @@ def planejar(config, dia):
     total = sum(b - a for a, b in trechos)
     if quantos <= 0 or total <= 0:
         return []
-    # As partes iguais correm pelos trechos de postar, pulando o Horário das Interações.
     parte = total / quantos
     sorteio = random.Random(f"{CHAVE_ESTADO}:{dia}")
     horarios = []
@@ -546,7 +515,7 @@ def recuperar_horarios(config, estado, perdidos, agora=None):
     return recuperados, perdidos - recuperados
 
 
-# O Horário das Interações, os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje é
+# Os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje é
 # refeito na hora com o que vale agora (P157 1), e é o do dia inteiro: o que já saiu hoje entra na
 # conta, e só o que falta sai, espalhado no resto do dia como os perdidos. Já saíram: os rascunhos de
 # hoje (os do Preparar 1 Agora, os recusados e o que está no preparo também) e os vídeos do
@@ -601,7 +570,7 @@ def replanejar_hoje(config, agora=None):
 
 # O horário do plano que acaba sem rascunho (os VIDEOS_POR_HORARIO vídeos não passaram, ou não havia
 # vídeo na fonte) volta uma vez, mais tarde no mesmo dia: no meio do maior vão livre dos trechos de
-# postar (fora do Horário das Interações e da hora do descurtir), a pelo menos ESPACO_MINIMO de agora
+# postar (o Horário do Robô), a pelo menos ESPACO_MINIMO de agora
 # e de cada um dos outros horários que faltam; sem um vão assim, fica de fora. O horário que já é a
 # volta de outro não volta de novo. Escolha do Rafael (02/11, P132): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_HORARIO_SEM_RASCUNHO = "horário sem rascunho"
@@ -1269,15 +1238,10 @@ def motivo_da_espera(config, agora=None):
         return "a Postagem está pausada"
     if suspensa(config, agora):
         return f"conta suspensa pela Shopee até {quando_acaba(suspenso_ate(config))}"
-    if na_hora_do_descurtir(agora):
-        return f"às {HORA_DO_DESCURTIR}h o robô só descurte"
-    if not no_horario(config, agora):
+    if na_hora_do_descurtir(agora) and descurtir_pendente(agora):
+        return f"às {HORA_DO_DESCURTIR}h a limpeza dos favoritos vem primeiro; acabada, ele posta"
+    if not no_horario_do_robo(config, agora):
         return "fora do Horário do Robô"
-    if na_hora_das_interacoes(config, agora) and not interacoes_do_dia_feitas(agora):
-        partes = (["as respostas aos comentários"] if respostas_pendentes(agora) else []) + (
-            ["o comentário no post antigo"] if post_antigo_pendente(agora) else [])
-        return (f"no Horário das Interações, esperando o robô terminar {' e '.join(partes) or 'as interações'} "
-                "do dia")
     return "sai numa das próximas rodadas (a cada 15 min)"
 
 
@@ -1375,10 +1339,9 @@ def proxima_postagem(config, agora=None, sorteio=random):
     """
     Quando postar um rascunho que o Rafael acabou de aprovar: depois do último aprovado
     (ou postado) com um intervalo sorteado, ou daqui a poucos minutos se nenhum está
-    marcado. Fora do Horário do Robô, vai para o começo do próximo horário, e no Horário
-    das Interações e na hora do descurtir, para o fim deles, com uns minutos sorteados: os
-    aprovados saem espalhados, nunca todos de uma vez.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    marcado. Fora do Horário do Robô, vai para o começo do próximo horário, com uns minutos
+    sorteados: os aprovados saem espalhados, nunca todos de uma vez. Na hora do descurtir, o
+    post espera a limpeza acabar (o_que_fazer, P161 1). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     momento = agora_br(agora)
     marcados = [r["postar_em"] for r in listar("aprovado") if r["postar_em"]]
@@ -1389,17 +1352,9 @@ def proxima_postagem(config, agora=None, sorteio=random):
         quando = max(base, momento) + timedelta(minutes=sorteio.randint(*INTERVALO_DAS_POSTAGENS))
     else:
         quando = momento + timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
-    janela = janela_das_interacoes(config)
-    # Ajusta até cair no horário de postar: fora do Horário do Robô, o começo do próximo; no
-    # Horário das Interações (P22) e na hora do descurtir (P25), o fim deles. Sempre com uns
-    # minutos sorteados.
+    # Ajusta até cair no Horário do Robô: fora dele, o começo do próximo, com uns minutos sorteados.
     for _ in range(6):
-        fim_do_corte = (janela[1] if janela and janela[0] <= quando.hour < janela[1]
-                        else HORA_DO_DESCURTIR + 1 if quando.hour == HORA_DO_DESCURTIR else None)
-        if fim_do_corte is not None:
-            quando = (datetime(quando.year, quando.month, quando.day, tzinfo=momento.tzinfo)
-                      + timedelta(hours=fim_do_corte, minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA)))
-        elif quando.hour >= config["robo_fim"] or (quando.date() > momento.date() and quando.hour < config["robo_inicio"]):
+        if quando.hour >= config["robo_fim"] or (quando.date() > momento.date() and quando.hour < config["robo_inicio"]):
             dia = quando.date() if quando.hour < config["robo_inicio"] else quando.date() + timedelta(days=1)
             quando = datetime(dia.year, dia.month, dia.day, config["robo_inicio"], tzinfo=momento.tzinfo)
             quando += timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
@@ -1431,18 +1386,23 @@ def recusar(ident, agora=None):
 
 def o_que_fazer(config, agora=None):
     """
-    A tarefa desta rodada: ("descurtir", None) (tudo em Meus Favoritos, às 4h, e nessa
-    hora só isso), ("treino", None), ("apagar", id), ("postar", id), ("saude",
-    None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
-    ("rascunho", None), ("responder", None) (os comentários dos vídeos, nas horas_das_respostas),
-    ("feed", None) (um vídeo do feed, espalhados pelo dia, P152), ("comentar_post", id) (o
-    comentário de depois do post que volta), ("post_antigo", id) (o comentário do dia num post antigo)
-    ou None. Gasta o horário do plano, ou
-    uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
+    A tarefa desta rodada: ("descurtir", None) (tudo em Meus Favoritos, a 1ª coisa do dia, às 4h:
+    enquanto ela não acaba, nessa hora só ela), ("treino", None), ("apagar", id), ("postar", id),
+    ("saude", None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
+    ("rascunho", None), ("responder", None) (os comentários dos vídeos, 3 vezes por dia,
+    respostas_pendentes), ("feed", None) (um vídeo do feed, espalhados pelo dia, P152),
+    ("comentar_post", id) (o comentário de depois do post que volta), ("post_antigo", id) (o
+    comentário do dia num post antigo) ou None. Sem hora marcada: cada uma sai na 1ª rodada em que
+    pode, e a seguinte vem na rodada depois (P161 1). Gasta o horário do plano, ou uma tentativa a
+    mais do rascunho que falhou, quando escolhe um rascunho.
     """
     if na_hora_do_descurtir(agora):
-        # A hora do descurtir é só dele (P25).
-        return ("descurtir", None) if descurtir_pendente(agora) else None
+        if descurtir_pendente(agora):
+            # A limpeza é a 1ª coisa do dia (P25); acabada, o resto da hora fica livre (P161 1).
+            return "descurtir", None
+        if not no_horario_do_robo(config, agora):
+            # Fora do Horário do Robô, a rodada das 4h só vem pela limpeza.
+            return None
     # Na suspensão a Shopee fecha o Postar vídeo: o treino, o preparo e a postagem, que
     # passam por ele, esperam o fim. O resto segue: a limpeza dos favoritos, apagar o
     # recusado, a Saúde do Vídeo, as respostas e o feed. Pedido do Rafael (25/10): DECISOES.md.
@@ -1452,14 +1412,7 @@ def o_que_fazer(config, agora=None):
     recusados = listar("recusado")
     if recusados:
         return "apagar", recusados[0]["id"]
-    # O comentário do post antigo só no Horário das Interações (sem ele escolhido, no Horário
-    # do Robô); preparar e postar fora dele, ou nele depois que as interações dele acabam. As
-    # respostas, nas horas_das_respostas, dentro ou fora dele. O feed se espalha pelo dia todo,
-    # dentro ou fora dele (P152). Escolhas do Rafael (P22 a P24, P26, P70 e P152). (A rodada
-    # já confere o horário: aqui só a separação entre os dois.)
-    na_janela = na_hora_das_interacoes(config, agora)
-    postar = (not na_janela or interacoes_do_dia_feitas(agora)) and not sem_postar
-    interagir = na_janela or not janela_das_interacoes(config)
+    postar = not sem_postar
     agora_txt = _momento(agora)
     aprovados = listar("aprovado")
     prontos = [r for r in aprovados if r["postar_em"] and r["postar_em"] <= agora_txt]
@@ -1481,18 +1434,17 @@ def o_que_fazer(config, agora=None):
     logo = _momento(agora_br(agora) + ANTES_DO_POST)
     if postar and any(r["postar_em"] and agora_txt < r["postar_em"] <= logo for r in aprovados):
         return None
-    # A limpeza das 4h que não terminou volta no mesmo dia, fora do Horário das Interações (P137).
-    if not na_janela and limpeza_fora_da_hora_pendente(agora):
+    # A limpeza das 4h que não terminou volta no mesmo dia (P137).
+    if limpeza_fora_da_hora_pendente(agora):
         return "descurtir", None
     if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
-    if postar and not perto_das_interacoes(config, agora) and (
-            consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
+    if postar and (consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
         return "rascunho", None
+    # As respostas e o comentário do dia num post antigo (P148 2), durante o dia (P161 1).
     if respostas_pendentes(agora):
         return "responder", None
-    # O comentário do dia num post antigo, uma interação como o feed (P148 2).
-    antigo = post_antigo_pendente(agora) if interagir else None
+    antigo = post_antigo_pendente(agora)
     if antigo:
         return "post_antigo", antigo["id"]
     if feed_pendente(agora):
@@ -5691,11 +5643,16 @@ def _sair_sem_salvar(d):
 
 # Quantas vezes o robô rola as Notificações procurando a linha do topo da vez anterior.
 ROLADAS_NAS_RESPOSTAS = 6
-# As respostas aos comentários dos vídeos do Rafael saem 3 vezes por dia: nestas horas e no
-# começo do Horário das Interações (sem ele escolhido, às 20h). O feed continua só na
-# janela. Escolha do Rafael (P70): DECISOES.md, Shopee Vídeo.
-HORAS_DAS_RESPOSTAS = (12, 17)
-HORA_DAS_RESPOSTAS_SEM_JANELA = 20
+# As respostas aos comentários dos vídeos do Rafael (P70) e o comentário do dia num post antigo
+# (P148 2) saem durante o dia (DURANTE_O_DIA), quando as pessoas comentam, sem hora marcada: na 1ª
+# rodada em que o celular está livre. As respostas, LEITURAS_DAS_RESPOSTAS vezes por dia, com pelo
+# menos ESPACO_DAS_RESPOSTAS entre uma leitura e outra; cada leitura espera o começo da parte dela
+# (o dia dividido em LEITURAS_DAS_RESPOSTAS partes iguais: das 8h, das 12h40 e das 17h20), para as
+# três não saírem todas de manhã. Escolha do Rafael (06/11, P161 1): DECISOES.md, Shopee Vídeo.
+DURANTE_O_DIA = (8, 22)
+LEITURAS_DAS_RESPOSTAS = 3
+ESPACO_DAS_RESPOSTAS = timedelta(hours=3)
+PROCESSO_DA_LEITURA = "leitura das respostas"
 # Respostas numa rodada (cada uma leva perto de 1 min); o resto fica para a rodada seguinte.
 RESPOSTAS_POR_RODADA = 8
 # O painel de comentários abre uns 8 s depois do vídeo (Motorola, 24/10/2026).
@@ -5715,27 +5672,50 @@ FOLGA_DO_FEED = timedelta(minutes=5)
 REGISTRO = "shopee_video"
 
 
-def horas_das_respostas(config):
-    """As horas de cada leitura das Notificações: HORAS_DAS_RESPOSTAS e o começo do Horário das Interações."""
-    janela = janela_das_interacoes(config)
-    return sorted(set(HORAS_DAS_RESPOSTAS) | {janela[0] if janela else HORA_DAS_RESPOSTAS_SEM_JANELA})
+def durante_o_dia(agora=None):
+    """Agora está na parte do dia das respostas e do post antigo (DURANTE_O_DIA)?"""
+    return DURANTE_O_DIA[0] <= agora_br(agora).hour < DURANTE_O_DIA[1]
+
+
+def leituras_de_hoje(agora=None):
+    """Quantas leituras das Notificações para responder o robô começou hoje (a continuação não conta)."""
+    leituras = ler_estado().get("respostas_leituras") or {}
+    return int(leituras.get("vezes") or 0) if leituras.get("dia") == agora_br(agora).strftime("%Y-%m-%d") else 0
+
+
+def comeco_da_leitura(vez, agora=None):
+    """Desde quando a leitura de número vez (0, 1, 2...) pode sair hoje: o começo da parte dela no dia."""
+    inicio, fim = DURANTE_O_DIA
+    comeco = agora_br(agora).replace(hour=inicio, minute=0, second=0, microsecond=0)
+    return comeco + timedelta(hours=fim - inicio) * vez / LEITURAS_DAS_RESPOSTAS
 
 
 def respostas_pendentes(agora=None):
     """
-    Hora de responder os comentários? Uma vez em cada uma das horas_das_respostas (a última
-    leitura foi antes do começo da vez de agora), e de novo na rodada seguinte quando a
-    anterior parou no limite de RESPOSTAS_POR_RODADA.
+    Hora de responder os comentários? Durante o dia, até LEITURAS_DAS_RESPOSTAS leituras, cada uma
+    a partir do começo da parte dela (comeco_da_leitura) e a ESPACO_DAS_RESPOSTAS ou mais da
+    anterior; e de novo na rodada seguinte quando a anterior parou no limite de
+    RESPOSTAS_POR_RODADA. Escolha do Rafael (06/11, P161 1): DECISOES.md, Shopee Vídeo.
     """
     estado = ler_estado()
     if estado.get("respostas_continuar"):
         return True
     momento = agora_br(agora)
-    vezes = [hora for hora in horas_das_respostas(ler_config()) if hora <= momento.hour]
-    if not vezes:
+    feitas = leituras_de_hoje(momento)
+    if not durante_o_dia(momento) or feitas >= LEITURAS_DAS_RESPOSTAS:
         return False
-    comeco = momento.replace(hour=max(vezes), minute=0, second=0, microsecond=0)
-    return (estado.get("respostas_em") or "") < _momento(comeco)
+    if (estado.get("respostas_em") or "") > _momento(momento - ESPACO_DAS_RESPOSTAS):
+        return False
+    return momento >= comeco_da_leitura(feitas, momento)
+
+
+def contar_leitura(agora=None):
+    """Mais uma leitura das respostas hoje (respostas_em e a conta do dia); fica no registro."""
+    vez = leituras_de_hoje(agora) + 1
+    gravar_estado(respostas_em=_momento(agora),
+                  respostas_leituras={"dia": agora_br(agora).strftime("%Y-%m-%d"), "vezes": vez})
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA, f"{vez}ª de {LEITURAS_DAS_RESPOSTAS} hoje",
+                                 ok=None, agora=agora)
 
 
 def videos_do_feed_que_faltam(agora=None):
@@ -5751,31 +5731,23 @@ def videos_do_feed_que_faltam(agora=None):
 def feed_pendente(agora=None):
     """
     Falta algum vídeo do feed hoje (até VIDEOS_NO_FEED_POR_DIA, sem meta), e o último que deu
-    certo foi há intervalo_do_feed ou mais? Um por rodada, em qualquer hora do robô, dentro ou
-    fora do Horário das Interações. O que falha não conta nem mexe no feed_em: a rodada seguinte
-    tenta de novo, até dar certo. Escolhas do Rafael (P151 1 e P152): DECISOES.md, Shopee Vídeo.
+    certo foi há intervalo_do_feed ou mais? Um por rodada, em qualquer hora do robô. O que falha
+    não conta nem mexe no feed_em: a rodada seguinte tenta de novo, até dar certo. Escolhas do Rafael (P151 1 e P152): DECISOES.md, Shopee Vídeo.
     """
     if not videos_do_feed_que_faltam(agora):
         return False
     return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config()))
 
 
-def interacoes_do_dia_feitas(agora=None):
-    """
-    As respostas e o comentário do post antigo de hoje já saíram? Aí o postar volta, mesmo no
-    Horário das Interações (P26). O feed se espalha pelo dia todo e não segura o postar (P152).
-    """
-    return not respostas_pendentes(agora) and not post_antigo_pendente(agora)
-
-
 def intervalo_do_feed(config):
     """
-    O espaço entre dois vídeos do feed que deram certo: as horas do Horário do Robô (sem a hora
-    do descurtir) divididas pelos do dia, no passo das rodadas, menos a FOLGA_DO_FEED. No Dia
-    Todo, com 5 por dia, 4h25; das 8h às 22h, 2h40. Escolha do Rafael (P152): DECISOES.md.
+    O espaço entre dois vídeos do feed que deram certo: as horas do Horário do Robô divididas
+    pelos do dia, no passo das rodadas, menos a FOLGA_DO_FEED. No Dia Todo, com 5 por dia, 4h40;
+    das 8h às 22h, 2h40. Escolha do Rafael (P152): DECISOES.md. A hora das 4h conta: acabada a
+    limpeza, ela fica livre (P161 1).
     """
     inicio, fim = int(config["robo_inicio"]), int(config["robo_fim"])
-    horas = max(1, fim - inicio - (1 if inicio <= HORA_DO_DESCURTIR < fim else 0))
+    horas = max(1, fim - inicio)
     espaco = timedelta(hours=horas) / interacoes.VIDEOS_NO_FEED_POR_DIA
     passos = max(1, int(espaco / INTERVALO_DAS_RODADAS))
     return passos * INTERVALO_DAS_RODADAS - FOLGA_DO_FEED
@@ -6321,7 +6293,7 @@ def _feito_no_feed(marca, estado, agora=None):
 # --- O comentário no próprio vídeo (P148 2) ---
 
 # Depois de cada post, o robô curte o vídeo, escreve um comentário (texto curto da IA, chamando
-# para comprar) e curte o comentário; 1 vez por dia, no Horário das Interações, faz o mesmo num
+# para comprar) e curte o comentário; 1 vez por dia, das 8h às 22h (P161 1), faz o mesmo num
 # post antigo dele. O vídeo abre pelo link do post, no mesmo player do feed. Escolha do Rafael
 # (P148 2, avisado da regra de Spam e Falso Engajamento): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_PROPRIO = "próprio post: comentar"
@@ -6594,11 +6566,13 @@ def _tentativas_do_antigo_hoje(momento):
 
 def post_antigo_pendente(agora=None):
     """
-    O post antigo que ganha o comentário do dia agora (P148 2), ou None: nenhum ainda hoje, menos
-    de TENTATIVAS_DO_PROPRIO tentativas hoje, a última há INTERVALO_DO_PROPRIO ou mais, e um post
-    que pode ganhá-lo (interacoes.escolher_post_antigo).
+    O post antigo que ganha o comentário do dia agora (P148 2), ou None: durante o dia (P161 1),
+    nenhum ainda hoje, menos de TENTATIVAS_DO_PROPRIO tentativas hoje, a última há
+    INTERVALO_DO_PROPRIO ou mais, e um post que pode ganhá-lo (interacoes.escolher_post_antigo).
     """
     momento = agora_br(agora)
+    if not durante_o_dia(momento):
+        return None
     if interacoes.antigos_hoje(momento) >= interacoes.POSTS_ANTIGOS_POR_DIA:
         return None
     if _tentativas_do_antigo_hoje(momento) >= interacoes.TENTATIVAS_DO_PROPRIO:
@@ -6755,8 +6729,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
         if not acao:
             return "nada a fazer agora"
         if preparar:
-            # O rascunho pedido no botão vale a qualquer hora, também no Horário das Interações: o
-            # checkup o separa do preparo do plano, que ali espera as respostas e o post antigo.
+            # O rascunho pedido no botão vale a qualquer hora: o checkup o separa do preparo do plano.
             registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "pedido", ok=None, agora=agora)
         # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
         d = casos_robo.com_historico(d or ps.conectar(celular=True))
@@ -6833,7 +6806,10 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             registrar_tentativa("descurtir", "descurtido", agora=agora)
             return resultado
         if acao == "responder":
-            gravar_estado(respostas_em=_momento(agora), respostas_continuar=False)
+            # A continuação da leitura que parou no limite da rodada não é uma leitura a mais (P161 1).
+            if not ler_estado().get("respostas_continuar"):
+                contar_leitura(agora)
+            gravar_estado(respostas_continuar=False)
             return responder_comentarios(d, agora)
         if acao == "feed":
             return interagir_no_feed(d, agora)
