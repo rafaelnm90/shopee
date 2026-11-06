@@ -134,7 +134,9 @@ LEGENDA_PRINT_CAPA = ("🖼️ Robô da Shopee Vídeo: exemplo da capa com a fra
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado ao vídeo."
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
                     "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
-AVISO_IA = "🤖 Robô da Shopee Vídeo: a IA viu que o produto do link não é o produto do vídeo. Parei aqui."
+# O vídeo com o produto do link que não é o do vídeo fica de lado, e o robô passa ao próximo (os
+# horários e o Preparar 1 Agora, P133): o aviso não diz que parou, porque ele segue.
+AVISO_IA = "🤖 Robô da Shopee Vídeo: a IA viu que o produto do link não é o produto do vídeo. Este vídeo fica de lado."
 AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo: na tela final, o produto anexado não é o do vídeo "
                     "(ou há produto a mais ou a menos). Não salvei nem postei; confira o celular.")
 PROMPT_PRODUTO_DO_VIDEO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
@@ -1236,7 +1238,7 @@ def ia_confere_produto(video, vistos=None, avisar=True, capa=None):
             if vistos is not None:
                 # O que a IA viu quando recusou: o rascunho pulado guarda, para o caso do checkup.
                 vistos.append(str(dados.get("motivo") or "").strip())
-            return False, f"a IA viu outro produto no vídeo ({vez}ª vez): parado (aviso no privado)"
+            return False, f"a IA viu outro produto no vídeo ({vez}ª vez; aviso no privado)"
         if vistos is not None:
             vistos.append(str(dados.get("motivo") or "").strip())
     registro_processos.registrar("shopee_video", "conferência da IA (produto × vídeo)", "confere",

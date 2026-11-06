@@ -1090,7 +1090,8 @@ def test_ia_sem_confirmacao_para(resposta, avisa, monkeypatch, capsys):
     assert not ps.explorar("ia", Aparelho())
     assert len(avisos) == (1 if avisa else 0)
     saida = capsys.readouterr().out
-    assert "parado" in saida and "fibra" not in saida and "Vestido" not in saida
+    # O passo para e mostra o motivo fixo, sem o produto (o recusado fica de lado, sem "parado").
+    assert "passo 1: ia → a IA" in saida and "fibra" not in saida and "Vestido" not in saida
 
 
 @pytest.mark.parametrize("texto, nome, igual", [
@@ -1873,6 +1874,23 @@ def test_ia_dos_produtos_a_mais_aceita_o_mesmo_produto_com_outra_foto_de_capa(mo
     assert recusas == {"outro produto": 2}
     assert "outra_capa" not in pedidos[0] and "mesma foto de capa" not in pedidos[0]
     assert ps.A_CAPA_PODE_SER_OUTRA in pedidos[0]
+
+
+def test_aviso_da_ia_diz_que_o_video_fica_de_lado_e_nao_que_parou(monkeypatch):
+    # Print do Rafael (06/11, 07:42): o Preparar 1 Agora passou ao 2º vídeo e salvou o rascunho, mas
+    # o aviso do 1º dizia "Parei aqui", e ele achou que o manual não conseguia preparar.
+    avisos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": false, "motivo": "outro pingente"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Colar de teste")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\xff\xd8foto")
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", avisos.append)
+    ok, motivo = ps.ia_confere_produto({"arquivo": "v.mp4", "link": "x"})
+    assert not ok and "parado" not in motivo and motivo.startswith("a IA viu outro produto no vídeo")
+    assert len(avisos) == 1 and "Parei aqui" not in avisos[0] and "Este vídeo fica de lado." in avisos[0]
 
 
 def test_outra_capacidade_ou_medida_e_outro_modelo_na_troca_e_nos_produtos_a_mais(monkeypatch):
