@@ -507,7 +507,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   celular lento, um rascunho de 3 produtos reaberto para postar mostrou a tela final sem a
   linha dos produtos (nem "Adicionar produto"); às 08:12 o mesmo rascunho abriu com a linha
   e os produtos na hora (`rv_product`, 2 nomes à vista): os produtos ficam salvos no
-  rascunho, a linha só demora. A conferência espera até 15 s por ela.
+  rascunho, a linha só demora. A conferência espera até 15 s por ela. No rascunho novo
+  (06/11/2026, 16:26), a tela final ainda não mostrava o "Adicionar produto"
+  (`ll_add_product_symbol`) 12 s depois do Próximo da edição: o caminho também espera até
+  15 s por ele, e pelo "Adicionar Mais", antes do toque (`DEMORAM_A_APARECER`).
 
   **Retomada (quinta, 22/10/2026, 15h):** o robô automático foi montado (seção Robô
   automático, no alto). O celular estava desconectado nessa hora (a porta da Depuração

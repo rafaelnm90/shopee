@@ -5957,6 +5957,54 @@ def test_passado_o_prazo_os_a_mais_que_faltam_anexar_ficam_de_fora(monkeypatch):
     assert _registro_dos_espacos() == ["produto a mais de fora", "produto a mais de fora"]
 
 
+class AppComOAdicionarQueDemora(AppDeMentira):
+    """A tela final que só mostra a linha do Adicionar produto depois de algumas leituras."""
+
+    def __init__(self, leituras_sem_a_linha):
+        super().__init__()
+        self.atual = "final"
+        self.leituras_sem_a_linha = leituras_sem_a_linha
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.atual == "final" and self.leituras_sem_a_linha > 0:
+            self.leituras_sem_a_linha -= 1
+            return [no for no in nos if "ll_add_product_symbol" not in no]
+        return nos
+
+
+def _registro_do_anexo():
+    registro = robo.registro_processos.sequencia("shopee_video", "anexar o produto", "2000-01-01 00:00:00")
+    return [(r[2], r[3]) for r in registro]
+
+
+def test_a_linha_do_adicionar_produto_que_demora_e_esperada_antes_do_toque(monkeypatch):
+    # No Motorola, em 06/11 às 16:26, a tela final ainda não mostrava a linha do Adicionar
+    # produto 12 s depois do Próximo da edição, e o rascunho parou. O caminho relê a tela por
+    # até ps.ESPERA_DA_FILEIRA s antes do toque, e o registro anota quanto ela demorou.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    app = AppComOAdicionarQueDemora(2)
+    robo.seguir(app, robo.CAMINHO_PRODUTO)
+    assert app.toques[0] == "@ll_add_product_symbol" and app.atual == "curtidas"
+    assert _registro_do_anexo() == [("o Adicionar produto demorou a aparecer", "mais 6 s")]
+    # A linha que aparece na hora não fica no registro.
+    robo.seguir(AppComOAdicionarQueDemora(0), robo.CAMINHO_PRODUTO)
+    assert len(_registro_do_anexo()) == 1
+
+
+def test_sem_a_linha_do_adicionar_produto_a_parada_e_no_passo_de_anexar(monkeypatch):
+    # A linha que não aparece nem depois da espera para a rodada sem tocar em nada, e a parada diz
+    # o passo de anexar o produto (não "navegar no app") e como estava a linha dos produtos.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    app = AppComOAdicionarQueDemora(100)
+    with pytest.raises(robo.Parada) as parada:
+        robo.seguir(app, robo.CAMINHO_PRODUTO)
+    assert not app.toques and not _registro_do_anexo()
+    assert parada.value.motivo == (f"a tela final não mostrou o Adicionar produto em {robo.ps.ESPERA_DA_FILEIRA} s "
+                                   "a mais (sem a linha dos produtos na tela)")
+    assert robo.passo_do_motivo(parada.value.motivo) == "anexar o produto"
+
+
 class AppQueReabreALegenda(AppDeMentira):
     """
     Como o Motorola em 31/10 (09:15 e 09:35): a legenda editada fica em foco, e o Feito volta à

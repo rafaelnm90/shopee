@@ -1591,9 +1591,12 @@ ESPERA_A_MAIS_NO_CAMINHO = 12
 def seguir(d, caminho):
     """
     Faz os toques do caminho e confere, depois de cada um, que a tela esperada abriu (a que
-    demora a carregar tem mais ESPERA_A_MAIS_NO_CAMINHO segundos).
+    demora a carregar tem mais ESPERA_A_MAIS_NO_CAMINHO segundos). O que demora a aparecer
+    na tela (DEMORAM_A_APARECER) é esperado antes do toque.
     """
     for alvo, espera, esperado in caminho:
+        if alvo in DEMORAM_A_APARECER:
+            esperar_o_que_demora(d, alvo)
         tocar(d, alvo, espera)
         xml = tela(d)
         if alvo == "@tv_pick_top_next" and tem(xml, "Dicas de Upload"):
@@ -1649,6 +1652,31 @@ CAMINHO_MAIS_UM_PRODUTO = [
     ("Minhas Curtidas", 5, "Mais Recente"),
     ("Mais Recente", 5, "Adicionar"),
 ]
+# A linha do Adicionar produto (e o Adicionar Mais) da tela final que acaba de abrir pode
+# aparecer só alguns segundos depois, como a fileira dos produtos (ps.ESPERA_DA_FILEIRA): no
+# Motorola, em 06/11/2026, às 16:26, ela ainda não estava na tela 12 s depois do Próximo da
+# edição. O caminho relê a tela por até ps.ESPERA_DA_FILEIRA s antes do toque (seguir).
+DEMORAM_A_APARECER = {"@ll_add_product_symbol": "Adicionar produto", "@tv_add_more": "Adicionar Mais"}
+
+
+def esperar_o_que_demora(d, alvo):
+    """
+    Relê a tela, de 3 em 3 s e por até ps.ESPERA_DA_FILEIRA s, até o alvo (um dos
+    DEMORAM_A_APARECER) aparecer. O registro anota quando ele demorou; sem ele, a rodada para
+    no passo de anexar o produto, com a linha dos produtos como a tela estava (rótulos fixos).
+    """
+    xml = tela(d)
+    voltas = 0
+    while not tem(xml, alvo) and voltas < ps.ESPERA_DA_FILEIRA // 3:
+        pausa(3)
+        voltas += 1
+        xml = tela(d)
+    nome = DEMORAM_A_APARECER[alvo]
+    if not tem(xml, alvo):
+        raise Parada(f"a tela final não mostrou o {nome} em {voltas * 3} s a mais ({ps.linha_dos_produtos(xml)})")
+    if voltas:
+        registro_processos.registrar(REGISTRO, "anexar o produto", f"o {nome} demorou a aparecer",
+                                     f"mais {voltas * 3} s", ok=True)
 
 
 def ligar_o_realce(d):
@@ -5594,7 +5622,8 @@ def treinar(d, agora=None):
         if efeitos != EFEITOS_COMPLETOS:
             raise Parada(f"efeitos na edição: ficou {efeitos}")
         seguir(d, CAMINHO_EDICAO[1:])
-        xml = tela(d)
+        # A linha do Adicionar produto pode aparecer só alguns segundos depois (DEMORAM_A_APARECER).
+        xml = esperar_na_tela(d, "@ll_add_product_symbol", ps.ESPERA_DA_FILEIRA) or tela(d)
         faltam = [alvo for alvo in ("@et_caption", "@ll_add_product_symbol", "@tv_drafts_box", "@btn_post")
                   if not tem(xml, alvo)]
         if faltam:
