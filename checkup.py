@@ -86,6 +86,11 @@ LUGARES_POR_ROBO = 5
 CHAVE_CONFIG_SV, CHAVE_DIA_SV = "shopee_video", "shopee_video_robo_dia"
 # A folga depois do fim da suspensão (a mesma do robo_shopee_video.FOLGA_DA_SUSPENSAO).
 FOLGA_DA_SUSPENSAO_SV = timedelta(minutes=15)
+# Os Rascunhos por Dia do robô e os Vídeos por Dia do assistente que valem enquanto o Rafael não
+# muda no painel (os PADRAO do robo_shopee_video e do painel_shopee_video; o tests/test_checkup.py
+# confere). O checkup mostra a faixa e com que faixa e pontos o plano do dia foi feito: em 06/11 o
+# plano saiu com 1 rascunho, e nada mostrava a faixa que o robô leu.
+FAIXA_PADRAO_DO_ROBO_SV, FAIXA_PADRAO_DO_ASSISTENTE_SV = (1, 2), (5, 10)
 # Resultados do robô da Shopee Vídeo que pedem investigação.
 RESULTADOS_RUINS = ("erro", "parou", "verificação", "treino parou")
 # O aprovado que passou da hora de ir ao ar há mais que isso (a rodada é a cada 15 min).
@@ -868,6 +873,41 @@ def celular_fora(agora=None):
     return int(fora.total_seconds() // 3600), dados.get("falha") or "?", falha_em[11:16]
 
 
+def _faixa_do_painel(config, chaves, padrao):
+    """(mínimo, máximo, padrão?) da faixa de posts por dia do painel; sem ela no banco, a padrão."""
+    piso, topo = (config.get(chave) for chave in chaves)
+    if piso is None or topo is None:
+        return (*padrao, True)
+    return piso, topo, False
+
+
+def _rotulo_da_faixa(piso, topo):
+    return f"{piso}" if piso == topo else f"{piso} a {topo}"
+
+
+def linha_das_faixas(robo_sv):
+    """
+    As faixas de posts por dia do painel (a do robô e a do assistente), com o que fica pelos pontos
+    de penalidade (P145) e, quando o plano de hoje foi feito com outra faixa ou outros pontos, com
+    quais: só números.
+    """
+    pontos = robo_sv.get("pontos") or 0
+    partes = []
+    for nome, (piso, topo, padrao) in (("Rascunhos por Dia do robô", robo_sv["faixa"]),
+                                       ("Vídeos por Dia do assistente", robo_sv["faixa_do_assistente"])):
+        texto = f"{nome}: {_rotulo_da_faixa(piso, topo)}" + (" (a padrão, nunca mudada no painel)" if padrao else "")
+        de, ate, _teto = apelacoes_shopee_video.faixa_pelos_pontos(piso, topo, pontos)
+        if (de, ate) != (piso, topo):
+            texto += f", pelos pontos {_rotulo_da_faixa(de, ate)}"
+        partes.append(texto)
+    feito = robo_sv.get("feito_com") or {}
+    faixa = feito.get("faixa") or []
+    if len(faixa) == 2 and (tuple(faixa) != tuple(robo_sv["faixa"][:2]) or feito.get("pontos") != pontos):
+        partes.append(f"o plano de hoje foi feito com a faixa {_rotulo_da_faixa(faixa[0], faixa[1])} e "
+                      f"{feito.get('pontos')} ponto(s)")
+    return " | ".join(partes)
+
+
 def robo_da_shopee_video(agora=None):
     """Plano de hoje, rascunhos salvos hoje e as tentativas ruins das últimas 24 h (ação, resultado, passo)."""
     agora = _agora(agora)
@@ -884,6 +924,11 @@ def robo_da_shopee_video(agora=None):
     plano = db.ler_config(CHAVE_DIA_SV, {}) or {}
     hoje = agora.strftime("%Y-%m-%d")
     horarios = plano.get("horarios", []) if plano.get("data") == hoje else []
+    # Os pontos de penalidade da última leitura da Saúde do Vídeo (0 se de antes do trimestre):
+    # com 4 ou mais, a escada da P145 diminui os rascunhos do dia.
+    pontos = apelacoes_shopee_video.pontos_de_agora(agora=agora)
+    faixa = _faixa_do_painel(config, ("robo_limite_min", "robo_limite_max"), FAIXA_PADRAO_DO_ROBO_SV)
+    faixa_do_assistente = _faixa_do_painel(config, ("limite_min", "limite_max"), FAIXA_PADRAO_DO_ASSISTENTE_SV)
     vencidos = sum(1 for h in horarios if h <= agora.strftime("%H:%M"))
     # Os que passaram sem tentativa: pulados na pausa do Rafael ou na suspensão, de fora na volta
     # do celular por falta de espaço no resto do dia, ou fechados pelos vídeos que o assistente
@@ -910,9 +955,8 @@ def robo_da_shopee_video(agora=None):
             "sem_tentar": sem_tentar, "cobertos": cobertos, "salvos": salvos or 0, "pulados": pulados or 0,
             "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
-            # Os pontos de penalidade da última leitura da Saúde do Vídeo (0 se de antes do
-            # trimestre): com 4 ou mais, a escada da P145 diminui os rascunhos do dia.
-            "pontos": apelacoes_shopee_video.pontos_de_agora(agora=agora),
+            "pontos": pontos, "faixa": faixa, "faixa_do_assistente": faixa_do_assistente,
+            "feito_com": plano.get("feito_com") if plano.get("data") == hoje else None,
             "postados": postados, "canal_parados": pedidos_do_canal.parados(ESPERA_DO_CANAL, agora),
             "do_canal_no_viral": do_canal, "celular_fora": celular_fora(agora)}
 
@@ -1844,6 +1888,7 @@ def main():
           + (f", fechados pelo assistente: {robo_sv['cobertos']}" if robo_sv.get("cobertos") else "") + ") | "
           f"rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")
+    print(linha_das_faixas(robo_sv))
     # O caso completo de cada falha fica cifrado para o Claude (casos_robo.yml exportar) e
     # sai depois de analisado (casos_robo.yml apagar).
     print(f"Casos guardados para o checkup do Claude: {len(casos_robo.casos())}")
