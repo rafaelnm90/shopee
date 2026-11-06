@@ -169,7 +169,8 @@ def test_produtos_de_um_link_de_produto_vem_da_api(monkeypatch):
     monkeypatch.setattr(asv.api_shopee, "link_para_converter", converter)
     monkeypatch.setattr(asv, "_consultar_produto", consultar)
     produtos, link = rodar(asv.produtos_do_link("https://s.shopee.com.br/abc"))
-    assert produtos == [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0}]
+    # O item vai junto: o vídeo mandado guarda o produto, e o Postei ✅ o conta como postado (P166 1).
+    assert produtos == [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "item": "22"}]
     assert link == "https://s.shopee.com.br/abc"
 
 
