@@ -952,7 +952,11 @@ def texto_edicao(config):
         "sem marca e sem preço: o preço e o desconto aparecem no cartão do produto, sempre atualizados), em letra "
         "média, no alto, logo abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto, o "
         "rosto nem os quadros que o criador pôs por cima; sem lugar livre, ou se o vídeo já tem legenda própria "
-        "(os quadros do criador com a foto do produto não contam), ele vai sem os nossos textos.\n\n"
+        "(os quadros do criador com a foto do produto não contam), ele vai sem os nossos textos.\n"
+        "🎨 <b>A cor de cada vídeo</b>: a caixa do nome e da vantagem, a moldura da miniatura e o fio e a faixa "
+        "da capa vão na cor principal do produto, que a IA diz vendo o vídeo, com a letra branca ou preta, a que "
+        "aparece mais; no produto vermelho ou de várias cores, ficam as de sempre (a caixa preta e o laranja). A "
+        "chamada final, as setinhas e a moldura do cartão continuam vermelhas.\n\n"
         "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
@@ -1015,8 +1019,9 @@ def texto_capa(config, medicao):
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
         "A capa é o que aparece na grade do seu perfil. Com a capa com chamada, a foto do anúncio fica inteira, do "
-        "mesmo tamanho da capa sem texto, com um fio laranja em cima, e o robô escreve logo abaixo dela, numa "
-        "faixa laranja da Shopee, em letras brancas e grandes, o que é o produto e a vantagem que o vídeo mostra, "
+        "mesmo tamanho da capa sem texto, com um fio em cima, e o robô escreve logo abaixo dela, numa faixa na cor "
+        "principal do produto (no produto vermelho ou de várias cores, o laranja da Shopee), em letras grandes, "
+        "brancas ou pretas, as que aparecem mais, o que é o produto e a vantagem que o vídeo mostra, "
         "em poucas palavras (a frase que a IA escreve vendo o vídeo), sem marca, sem preço e sem desconto: as "
         "diretrizes da Shopee punem promessa que o vídeo não mostra e desconto falso, e o preço muda. A frase que "
         "não cabe numa linha vai em duas, na mesma faixa, com a letra menor: a faixa não cresce e não cobre nada "
@@ -1281,7 +1286,7 @@ def legenda_do_exemplo_da_capa(nome, chamada):
             "1ª foto: a capa inteira, no 1º quadro do vídeo, que a grade usa. 2ª foto: o pedaço que a grade do "
             "seu perfil mostra. 3ª foto: o que aparece com o vídeo aberto, no resto dos 2 primeiros segundos.\n"
             f"✍️ Chamada (a vantagem que a IA viu no vídeo, em poucas palavras): “{html_escape(chamada)}”\n"
-            "🔢 O número de visualizações fica no preto, logo abaixo da faixa laranja, e a sacolinha da Shopee, "
+            "🔢 O número de visualizações fica no preto, logo abaixo da faixa, e a sacolinha da Shopee, "
             "logo acima da foto: nenhum deles cobre a chamada.\n"
             f"Toque de novo em {BOTAO_EXEMPLO_DA_CAPA} para ver outro vídeo.")
 

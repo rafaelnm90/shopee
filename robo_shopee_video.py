@@ -924,7 +924,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado")
+           "achado", "cor")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -951,9 +951,11 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # achado: "1" quando o produto do link não era o do vídeo e o robô achou o do vídeo pela busca da
 # IA (P158 2); "0" no de link de produto sem isso; vazio nos de antes e nos de Ver Produtos (a
 # medição de quais posts levam punição, P146 2, separa).
+# cor: o nome da cor do produto que a edição usou no vídeo (P159 2), para o post conferir a faixa da
+# capa nela; vazio com as cores de sempre (o laranja).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "trocado", "comentarios_proprios", "achado")
+                 "trocado", "comentarios_proprios", "achado", "cor")
 
 
 def _criar_tabela(con):
@@ -4369,22 +4371,22 @@ def escrever_a_legenda(d, titulo):
 
 # --- A capa com a frase no post ---
 # A capa com a frase abre o vídeo (P125), e o app usa o 1º quadro como capa da grade (P129): no
-# post, o registro diz se a faixa laranja da frase chegou à grade (marcar_o_post). Escolhas do
-# Rafael: DECISOES.md, Shopee Vídeo.
+# post, o registro diz se a faixa da frase (na cor do produto, P159 2) chegou à grade
+# (marcar_o_post). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
 PROCESSO_DA_CAPA = "capa no post"
 PROCESSO_DO_BOTAO = "preparar 1 agora"
-# A faixa da capa com a frase vai de um lado ao outro da capa: o laranja mais estreito que isto da
-# largura do quadro é outra coisa (o selo Fixado da grade, um produto laranja na foto).
+# A faixa da capa com a frase vai de um lado ao outro da capa: a cor dela mais estreita que isto da
+# largura do quadro é outra coisa (o selo Fixado da grade, um produto da mesma cor na foto).
 LARGURA_DA_FAIXA_NA_CAPA = 0.6
 
 
-def faixa_da_capa(imagem, caixa):
+def faixa_da_capa(imagem, caixa, cor=None):
     """
-    A faixa laranja da capa com a frase na caixa (x1, y1, x2, y2) da imagem do PIL, o quadro da
-    grade: (cima, baixo, esquerda, direita), ou None. Só a que vai de um lado ao outro da caixa
-    (LARGURA_DA_FAIXA_NA_CAPA).
+    A faixa da capa com a frase (laranja, ou na cor do produto, P159 2) na caixa (x1, y1, x2, y2)
+    da imagem do PIL, o quadro da grade: (cima, baixo, esquerda, direita), ou None. Só a que vai de
+    um lado ao outro da caixa (LARGURA_DA_FAIXA_NA_CAPA).
     """
-    faixa = edicao_video.faixa_laranja(imagem, caixa)
+    faixa = edicao_video.faixa_laranja(imagem, caixa, cor)
     if faixa and faixa[3] - faixa[2] >= (caixa[2] - caixa[0]) * LARGURA_DA_FAIXA_NA_CAPA:
         return faixa
     return None
@@ -4541,10 +4543,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     links_conhecidos = {p["nome"]: p["link"] for p in do_ver_produtos or [] if p.get("link")}
     # A capa com a frase abre o vídeo, e o app usa o 1º quadro como capa da grade. Escolha do
     # Rafael (02/11, P125): DECISOES.md, Shopee Vídeo.
-    miniatura = {}
+    miniatura, edicao = {}, {}
     como = copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False),
                                   outras=outras, miniatura=miniatura, rotulo_de_ia=bool(rotulo_ia),
-                                  link_do_1o=links_conhecidos.get(nomes[0]) if nomes else None)
+                                  link_do_1o=links_conhecidos.get(nomes[0]) if nomes else None, edicao=edicao)
     # O de outra cor só vai com a foto dele na miniatura que troca: sem ela (sem a nossa
     # miniatura, ou sem tempo para a foto dele), sai antes de anexar. Ele já foi curtido e fica no
     # alto de Minhas Curtidas até o descurtir do fim: o anexar procura os outros abaixo dele.
@@ -4566,7 +4568,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
-              chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "")
+              chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "", cor=edicao.get("cor", ""))
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
@@ -4645,7 +4647,7 @@ MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a ediç�
 
 
 def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
-                           link_do_1o=None):
+                           link_do_1o=None, edicao=None):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela vai com o Editor 2: o vídeo
     original, sem cortes, com a foto do produto no começo, a miniatura e a seta (todos os vídeos
@@ -4665,7 +4667,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a
     legenda da fala sobem com o cartão do app, que sobe com a linha do rótulo (03/11). link_do_1o:
     no Ver Produtos, o link curto do 1º produto trocado pelo da loja que paga mais (P57): a foto vem
-    do anúncio dele, como no link de produto.
+    do anúncio dele, como no link de produto. edicao (dict) recebe em "cor" a cor do produto que a
+    edição usou (P159 2; "" com as cores de sempre).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -4683,7 +4686,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
                                                             anuncio.get("nome", ""), avisos=alcool,
-                                                            outras_fotos=trocam, rotulo_de_ia=rotulo_de_ia)
+                                                            outras_fotos=trocam, rotulo_de_ia=rotulo_de_ia,
+                                                            anotar=edicao)
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -5308,7 +5312,7 @@ TENTATIVAS_DA_MARCA, PAUSA_DA_MARCA = 3, 4
 QUADRO_INTEIRO = 0.9
 PROCESSO_DAS_VISUALIZACOES = "visualizações na grade do perfil"
 # O 1º quadro do vídeo vai com a capa da grade, e o resto da abertura com a do vídeo aberto
-# (P129): na grade do post, a faixa laranja da frase de um lado ao outro do quadro diz que o app
+# (P129): na grade do post, a faixa da frase de um lado ao outro do quadro diz que o app
 # usou o 1º quadro; a faixa só no meio, que pegou outro quadro da abertura (aí a grade mostra a
 # do vídeo aberto, mais estreita).
 LADOS_DA_CAPA = {True: "o 1º quadro na grade (a faixa de lado a lado)",
@@ -5319,7 +5323,7 @@ def marcar_o_post(d, ident, caixa):
     """
     Guarda no rascunho a marca da capa do vídeo que acabou de ir ao ar (o quadro da grade em
     caixa). Sem a marca (a capa não carregou, o print falhou), o vídeo fica fora da medição, e o
-    checkup conta. Com a capa com a frase (P125), o registro diz se a faixa laranja chegou à grade
+    checkup conta. Com a capa com a frase (P125), o registro diz se a faixa da frase chegou à grade
     e se a grade pegou o 1º quadro do vídeo (P129). Nada aqui segura o post nem o link.
     """
     try:
@@ -5330,9 +5334,12 @@ def marcar_o_post(d, ident, caixa):
             marca = visualizacoes.marca_da_capa(imagem, caixa)
             if marca:
                 atualizar(ident, marca=marca)
-                if (pegar(ident) or {}).get("chamada"):
-                    faixa = faixa_da_capa(imagem, caixa)
-                    lados = edicao_video.faixa_nos_lados(imagem, caixa) if faixa else None
+                rascunho = pegar(ident) or {}
+                if rascunho.get("chamada"):
+                    # A faixa vai na cor do produto que a edição usou (P159 2).
+                    cor = edicao_video.cor_do_produto(rascunho.get("cor"))
+                    faixa = faixa_da_capa(imagem, caixa, cor)
+                    lados = edicao_video.faixa_nos_lados(imagem, caixa, cor) if faixa else None
                     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
                                                  "no post com a faixa" if faixa else "no post sem a faixa",
                                                  LADOS_DA_CAPA.get(lados, ""), ok=bool(faixa))
