@@ -164,6 +164,26 @@ def test_pacote_cifrado_abre_com_a_chave_e_apagar_tira_tudo(monkeypatch, tmp_pat
     assert casos_robo.apagar() == 1 and casos_robo.casos() == [] and not os.path.exists(casos_robo.PASTA)
 
 
+def test_apagar_tira_so_os_casos_ate_o_mais_novo_da_exportacao(capsys):
+    # Em 06/11, um caso guardado depois da exportação foi apagado sem o Claude ver: o apagar
+    # tira só até o mais novo do pacote (o nome vai no ramo), e o que chegou depois fica.
+    for minuto in range(3):
+        casos_robo.guardar(None, "rascunho", "parou", "x", agora=AGORA + timedelta(minutes=minuto))
+    exportado = casos_robo.ultimo()
+    assert exportado == casos_robo.casos()[-1] and exportado.startswith("20261025-1002")
+    casos_robo.guardar(None, "rascunho", "pulado", "x", agora=AGORA + timedelta(minutes=30))
+    novo = casos_robo.casos()[-1]
+    assert casos_robo.main(["apagar", exportado]) == 0
+    assert capsys.readouterr().out.strip() == ("3 caso(s) apagado(s) do servidor; 1 mais novo(s) que a "
+                                               "exportação ficam para a próxima.")
+    assert casos_robo.casos() == [novo]
+    assert casos_robo.apagar(novo) == 1 and casos_robo.casos() == [] and not os.path.exists(casos_robo.PASTA)
+    assert casos_robo.ultimo() == ""
+    # Só o nome de um caso: outra coisa no lugar dele não apaga nada.
+    casos_robo.guardar(None, "rascunho", "parou", "x", agora=AGORA)
+    assert casos_robo.main(["apagar", "../outra"]) == 2 and len(casos_robo.casos()) == 1
+
+
 def test_linha_de_comando(capsys, monkeypatch, tmp_path):
     import registro_privado
     chave = Fernet.generate_key()

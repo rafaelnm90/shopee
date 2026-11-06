@@ -8,9 +8,11 @@ as últimas ações no celular antes da falha (cada toque, com a tela de antes e
 
 O repositório e os logs do Actions são públicos: o workflow casos_robo.yml leva os casos
 cifrados ao ramo casos-robo (só abrem com a chave do registro_privado, que fica no
-servidor, no privado do Rafael e no ambiente do Claude). Depois de analisado e resolvido,
-o mesmo workflow apaga tudo, no servidor e no ramo. Nada se acumula: ficam no máximo
-MAXIMO_DE_CASOS casos, por até DIAS_DOS_CASOS dias, mesmo sem ninguém apagar.
+servidor, no privado do Rafael e no ambiente do Claude), com o nome do caso mais novo.
+Depois de analisado e resolvido, o mesmo workflow apaga o ramo e, no servidor, os casos
+até esse nome: o que chegou depois da exportação, que o Claude não viu, fica para a
+próxima. Nada se acumula: ficam no máximo MAXIMO_DE_CASOS casos, por até DIAS_DOS_CASOS
+dias, mesmo sem ninguém apagar.
 Pedido do Rafael: DECISOES.md, Shopee Vídeo.
 
 Quem usa:
@@ -18,10 +20,11 @@ Quem usa:
   tentativa que não deu certo;
 - postador_shopee_video: o passo caso do explorar guarda do mesmo jeito a tela do celular
   (o print e a forma), para o Claude ver a imagem de uma tela que está mapeando;
-- casos_robo.yml: "casos_robo.py contar", "casos_robo.py cifrado" e "casos_robo.py apagar";
+- casos_robo.yml: "casos_robo.py contar", "casos_robo.py ultimo", "casos_robo.py cifrado" e
+  "casos_robo.py apagar ULTIMO" (sem o ULTIMO, apaga todos);
 - Claude: "casos_robo.py ler ARQUIVO PASTA" abre no scratchpad o arquivo do ramo.
 
-    python3 casos_robo.py contar | cifrado | apagar | ler ARQUIVO PASTA
+    python3 casos_robo.py contar | ultimo | cifrado | apagar [ULTIMO] | ler ARQUIVO PASTA
 """
 import io
 import json
@@ -295,11 +298,32 @@ def cifrado():
     return Fernet(registro_privado.chave()).encrypt(pacote()).decode("ascii")
 
 
-def apagar():
-    """Apaga todos os casos do servidor. Devolve quantos eram."""
-    quantos = len(casos())
-    shutil.rmtree(PASTA, ignore_errors=True)
-    return quantos
+# O nome da pasta de um caso ("AAAAMMDD-HHMMSS-acao"): o que o apagar aceita como o último exportado.
+NOME_DO_CASO = re.compile(r"\d{8}-\d{6}-[a-z_]+")
+
+
+def ultimo():
+    """O nome do caso mais novo guardado ("" sem nenhum): a exportação o grava no ramo, para o apagar."""
+    lista = casos()
+    return lista[-1] if lista else ""
+
+
+def apagar(ate=None):
+    """
+    Apaga do servidor os casos até o caso `ate` (o mais novo da exportação, gravado no ramo): o que
+    chegou depois dela, que o Claude ainda não viu, fica para a próxima. Sem `ate`, apaga todos.
+    Devolve quantos saíram.
+    """
+    lista = casos()
+    if ate is None:
+        shutil.rmtree(PASTA, ignore_errors=True)
+        return len(lista)
+    saem = [nome for nome in lista if nome <= ate]
+    for nome in saem:
+        shutil.rmtree(os.path.join(PASTA, nome), ignore_errors=True)
+    if not casos():
+        shutil.rmtree(PASTA, ignore_errors=True)
+    return len(saem)
 
 
 def abrir(texto_cifrado, valor_chave, destino):
@@ -334,8 +358,15 @@ def main(argumentos):
         print(len(casos()))
     elif argumentos == ["cifrado"]:
         print(cifrado())
+    elif argumentos == ["ultimo"]:
+        print(ultimo())
     elif argumentos == ["apagar"]:
         print(f"{apagar()} caso(s) apagado(s) do servidor.")
+    elif len(argumentos) == 2 and argumentos[0] == "apagar" and NOME_DO_CASO.fullmatch(argumentos[1]):
+        saem = apagar(argumentos[1])
+        ficam = len(casos())
+        print(f"{saem} caso(s) apagado(s) do servidor"
+              + (f"; {ficam} mais novo(s) que a exportação ficam para a próxima." if ficam else "."))
     elif len(argumentos) == 3 and argumentos[0] == "ler":
         return _ler(argumentos[1], argumentos[2])
     else:
