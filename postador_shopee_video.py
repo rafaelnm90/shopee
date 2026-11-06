@@ -137,6 +137,18 @@ AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem
 # O vídeo com o produto do link que não é o do vídeo fica de lado, e o robô passa ao próximo (os
 # horários e o Preparar 1 Agora, P133): o aviso não diz que parou, porque ele segue.
 AVISO_IA = "🤖 Robô da Shopee Vídeo: a IA viu que o produto do link não é o produto do vídeo. Este vídeo fica de lado."
+# O começo do motivo da conferência que viu outro produto: o robô procura o do vídeo (P158 2).
+MOTIVO_OUTRO_PRODUTO = "a IA viu outro produto no vídeo"
+# O produto do link que não é o do vídeo: a IA diz qual é o do vídeo em palavras de busca, e o
+# robô o procura na Shopee. Só a busca: o achado passa pela mesma conferência dupla com a foto do
+# anúncio (ia_confere_produto). Escolha do Rafael (06/11, P158 2): DECISOES.md, Shopee Vídeo.
+PROMPT_QUAL_PRODUTO = """Você ajuda um afiliado da Shopee a achar o produto que um vídeo mostra.
+Assista ao vídeo inteiro e diga qual é o produto principal dele como alguém o buscaria na Shopee \
+para achar exatamente esse produto: de 3 a 8 palavras em português, com o tipo do produto e o que o \
+diferencia (formato, material, cor, desenho, a medida escrita), sem palavras de propaganda. Escreva \
+a marca só se ela aparece no vídeo. Se o vídeo não mostra um produto claro, deixe a busca vazia.
+Responda só com um JSON: {"busca": "as palavras de busca"}"""
+PALAVRAS_NA_BUSCA = 12
 AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo: na tela final, o produto anexado não é o do vídeo "
                     "(ou há produto a mais ou a menos). Não salvei nem postei; confira o celular.")
 PROMPT_PRODUTO_DO_VIDEO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
@@ -1238,13 +1250,23 @@ def ia_confere_produto(video, vistos=None, avisar=True, capa=None):
             if vistos is not None:
                 # O que a IA viu quando recusou: o rascunho pulado guarda, para o caso do checkup.
                 vistos.append(str(dados.get("motivo") or "").strip())
-            return False, f"a IA viu outro produto no vídeo ({vez}ª vez; aviso no privado)"
+            return False, f"{MOTIVO_OUTRO_PRODUTO} ({vez}ª vez" + ("; aviso no privado)" if avisar else ")")
         if vistos is not None:
             vistos.append(str(dados.get("motivo") or "").strip())
     registro_processos.registrar("shopee_video", "conferência da IA (produto × vídeo)", "confere",
                                  "com a foto do anúncio" if foto else "só pelo nome", ok=True)
     return True, (f"a IA confere {VEZES_DA_IA} vezes" + (" com a foto do anúncio" if foto else "")
                   + ": o produto do link é o do vídeo")
+
+
+def ia_diz_o_produto_do_video(video):
+    """
+    As palavras de busca do produto que o vídeo mostra, pela IA (até PALAVRAS_NA_BUSCA); "" quando
+    ela não diz. Para o robô procurar o produto do vídeo quando o do link é outro (P158 2).
+    """
+    dados = _json_da_ia(asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], PROMPT_QUAL_PRODUTO)))
+    busca = str(dados.get("busca") or "") if isinstance(dados, dict) else ""
+    return " ".join(busca.split()[:PALAVRAS_NA_BUSCA])
 
 
 def _confere_com_a_capa(video, nome, foto, capa, vistos):

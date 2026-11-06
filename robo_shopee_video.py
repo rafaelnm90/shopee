@@ -890,7 +890,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "adiamentos", "trocado",
-           "comentarios_proprios")
+           "comentarios_proprios", "achado")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -916,9 +916,12 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # frase (a figurinha) não voltou no rascunho reaberto (P124); zera ao aprovar.
 # comentarios_proprios: os textos que o robô comentou no vídeo do post (P148 2), para o próximo
 # nunca sair igual.
+# achado: "1" quando o produto do link não era o do vídeo e o robô achou o do vídeo pela busca da
+# IA (P158 2); "0" no de link de produto sem isso; vazio nos de antes e nos de Ver Produtos (a
+# medição de quais posts levam punição, P146 2, separa).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "adiamentos", "trocado", "comentarios_proprios")
+                 "adiamentos", "trocado", "comentarios_proprios", "achado")
 
 
 def _criar_tabela(con):
@@ -3269,6 +3272,90 @@ def _trocar_pela_maior_comissao(video):
     return None
 
 
+# --- O produto do vídeo quando o do link é outro (P158 2) ---
+
+# O produto do link que não é o do vídeo (a IA viu outro): a IA diz o que o vídeo mostra em
+# palavras de busca, a API busca por elas (por relevância), e dos RELEVANTES_DO_ACHADO primeiros,
+# do que paga mais por venda para o que paga menos, até ACHADOS_NA_IA passam pela mesma conferência
+# dupla da IA com a foto do anúncio. O primeiro confirmado toma o lugar do produto do link;
+# nenhum, o vídeo fica de lado como antes. Nos horários e no Preparar 1 Agora, com qualquer
+# número de pontos. Escolha do Rafael (06/11, P158 2): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_PRODUTO_ACHADO = "produto do vídeo: busca pela IA"
+RELEVANTES_DO_ACHADO = 5
+ACHADOS_NA_IA = 3
+
+
+def candidatos_do_achado(ofertas, fora=""):
+    """
+    Os RELEVANTES_DO_ACHADO primeiros da busca (a API já os dá por relevância) com nome, link e
+    preço, sem o item do link (fora: a IA já o recusou), do que paga mais por venda para o que paga
+    menos: [{nome, link, comissao, preco, valor, vendas, imagem, item}].
+    """
+    candidatos = []
+    for oferta in ofertas:
+        nome = (oferta.get("productName") or "").strip()
+        link = oferta.get("productLink") or ""
+        preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
+        numero = re.search(r"/product/\d+/(\d+)", link)
+        item = str(oferta.get("itemId") or "") or (numero.group(1) if numero else "")
+        if not nome or not link or not preco or (fora and item == fora):
+            continue
+        comissao = assistente._numero(oferta.get("commissionRate")) * 100
+        candidatos.append({"nome": nome, "link": link, "comissao": comissao, "preco": preco,
+                           "valor": valor_por_venda(preco, comissao),
+                           "vendas": int(assistente._numero(oferta.get("sales"))),
+                           "imagem": oferta.get("imageUrl") or "", "item": item})
+        if len(candidatos) >= RELEVANTES_DO_ACHADO:
+            break
+    return sorted(candidatos, key=lambda c: (-c["valor"], -c["vendas"]))
+
+
+def achar_o_produto_do_video(video):
+    """
+    O produto que o vídeo mostra, achado na Shopee e conferido pela IA como o produto do link é:
+    {nome, link, comissao, preco, valor, vendas, imagem, item, vistos}, com o link curto que o
+    celular abre; None quando não acha. Um erro aqui só deixa o vídeo de lado, como antes.
+    """
+    try:
+        return _achar_o_produto_do_video(video)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A busca do produto do vídeo deu erro: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_PRODUTO_ACHADO, f"não achado - erro ({type(e).__name__})")
+        return None
+
+
+def _achar_o_produto_do_video(video):
+    def anotar(resultado, detalhe="", ok=None):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_PRODUTO_ACHADO, resultado, detalhe, ok=ok)
+
+    busca = ps.ia_diz_o_produto_do_video(video)
+    if not busca:
+        anotar("não achado - a IA não disse o produto")
+        return None
+    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(busca, limite=OFERTAS_NA_BUSCA, sort_type=1))
+    candidatos = candidatos_do_achado(ofertas, fora=item_do_link(video["link"]))
+    if not candidatos:
+        anotar("não achado - a busca não trouxe nada")
+        return None
+    conferidos = 0
+    for candidato in candidatos:
+        if conferidos >= ACHADOS_NA_IA:
+            break
+        link = asyncio.run(api_shopee.converter_link_shopee(candidato["link"], api_shopee.ETIQUETA_SHOPEE_VIDEO,
+                                                            avisar_falha=False))
+        if not link or link == candidato["link"]:
+            # Sem o link curto, o celular não abre o produto (fica no esqueleto da página).
+            continue
+        conferidos += 1
+        vistos = []
+        ok, _ = ps.ia_confere_produto(dict(video, link=link), vistos, avisar=False)
+        if ok:
+            anotar("achado", f"{conferidos}º conferido, de {len(candidatos)} da busca", ok=True)
+            return {**candidato, "link": link, "vistos": vistos}
+    anotar("não achado - a IA não confirmou nenhum", f"{conferidos} conferido(s), de {len(candidatos)} da busca")
+    return None
+
+
 # --- O mesmo produto com mais comissão no Ver Produtos (P57) ---
 
 PROCESSO_DA_TROCA_DO_VER_PRODUTOS = "ver produtos: o mesmo produto que paga mais"
@@ -4853,13 +4940,33 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                   f"link pagava {troca['antes']:.1f}%, {assistente._reais(troca['valor_antes'])}: troquei pelo mesmo "
                   "produto de outra loja, conferido pela IA com o vídeo)\n" if troca else "")
                + f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
+        achado = None
         if not troca:
-            ok, motivo = ps.ia_confere_produto(video, vistos)
-            if not ok:
+            ok, motivo = ps.ia_confere_produto(video, vistos, avisar=False)
+            if not ok and motivo.startswith(ps.MOTIVO_OUTRO_PRODUTO):
+                # O produto do link não é o do vídeo: o robô procura o do vídeo na Shopee, com a
+                # mesma conferência dupla da IA (P158 2).
+                achado = achar_o_produto_do_video(video)
+                if not achado:
+                    avisar(f"{ps.AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: {vistos[-1] if vistos else ''}\n"
+                           "Procurei o produto do vídeo na Shopee, e a IA não confirmou nenhum.")
+            if not ok and not achado:
                 # O produto e o que a IA viu ficam no rascunho pulado: o caso do checkup do
                 # Claude (casos_robo) os lê dele.
                 atualizar(ident, fonte=fonte, produtos=[nome], conferencia=json.dumps(vistos, ensure_ascii=False))
                 raise Parada(motivo, do_video=True)
+        # A medição de quais posts levam punição (P146 2) separa o produto achado pela IA.
+        atualizar(ident, achado="1" if achado else "0")
+        if achado:
+            video["link"] = achado["link"]
+            nome = ps.nome_do_produto(video) or achado["nome"]
+            vistos.extend(achado["vistos"])
+            # O achado é o produto do post também para a régua dos produtos a mais (P58).
+            original = {"nome": nome, "preco": achado["preco"], "comissao": achado["comissao"],
+                        "imagem": achado["imagem"]}
+            avisar(f"🤖 Robô da Shopee Vídeo: o produto do link não era o do vídeo. Achei o do vídeo na Shopee, "
+                   f"conferido {ps.VEZES_DA_IA} vezes pela IA com a foto do anúncio:\n\nProduto: {nome}\n"
+                   f"Comissão: {achado['comissao']:.1f}%, {assistente._reais(achado['valor'])} por venda")
         principal = {"nome": nome, "link": video["link"], "do_video": True,
                      "preco": troca["preco"] if troca else original.get("preco", 0),
                      "comissao": troca["comissao"] if troca else original.get("comissao", 0)}
