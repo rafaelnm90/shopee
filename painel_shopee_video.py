@@ -568,10 +568,21 @@ def videos_hoje(config, agora=None):
     return len(horarios)
 
 
+def replanejar_hoje():
+    """
+    Os Rascunhos por Dia ou o Horário do Robô mudaram: o plano de hoje do robô é refeito na hora
+    com o que vale agora, e os horários já feitos continuam contados. Devolve a frase da resposta.
+    Escolha do Rafael (06/11, P157 1): DECISOES.md, Shopee Vídeo.
+    """
+    plano = robo.replanejar_hoje(ler_config())
+    return f" O plano de hoje foi refeito: <b>{len(plano['horarios'])}</b> rascunho(s) hoje."
+
+
 def linha_do_plano(no_plano, pela_faixa, coisa):
     """
-    O plano do dia é feito uma vez, à meia-noite: com a faixa ou os pontos mudados depois, o número
-    de hoje continua o do plano, e a linha diz isso ("" quando são o mesmo).
+    O plano do dia é feito à meia-noite, e a faixa e o Horário do Robô mudados o refazem na hora
+    (P157 1); com os pontos de penalidade lidos depois, o número de hoje continua o do plano, e a
+    linha diz isso ("" quando são o mesmo).
     """
     if no_plano == pela_faixa:
         return ""
@@ -2598,7 +2609,8 @@ async def salvar_faixa_robo(message: types.Message, state: FSMContext):
     alterar_config(robo_limite_min=piso, robo_limite_max=topo)
     exemplos.lembrar_faixa(FAIXA_DO_ROBO["nome"], piso, topo)
     logger.info(f"✅ Shopee Vídeo: robô com {piso} a {topo} rascunhos por dia.")
-    await message.answer(f"✅ Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>.", parse_mode="HTML")
+    await message.answer(f"✅ Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>.{replanejar_hoje()}",
+                         parse_mode="HTML")
     await mostrar_robo(message, state)
 
 
@@ -2674,7 +2686,8 @@ async def salvar_janela_robo(message: types.Message, state: FSMContext):
     alterar_config(robo_inicio=inicio, robo_fim=fim)
     exemplos.lembrar_janela("shopee_video_robo", inicio, fim)
     logger.info(f"✅ Shopee Vídeo: Horário do Robô {inicio}h-{fim}h.")
-    await message.answer(f"✅ Horário do robô: <b>{rotulo_janela(inicio, fim)}</b>.", parse_mode="HTML")
+    await message.answer(f"✅ Horário do robô: <b>{rotulo_janela(inicio, fim)}</b>.{replanejar_hoje()}",
+                         parse_mode="HTML")
     await mostrar_robo(message, state)
 
 
