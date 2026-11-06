@@ -882,6 +882,15 @@ def _fonte(monkeypatch, confere=True, violacao=False):
     monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
 
 
+def _outro_produto(monkeypatch, item="3"):
+    """O link da fonte passa a levar a outro produto: o que já tem rascunho não se repete (P166 1)."""
+    async def converter(link):
+        return f"https://shopee.com.br/product/1/{item}"
+
+    monkeypatch.setattr(robo, "link_para_converter", converter)
+    monkeypatch.setattr(robo.ps, "link_para_converter", converter)
+
+
 def test_robo_nao_pega_de_volta_o_video_que_levou_ao_canal(monkeypatch):
     # O loop do vídeo do Rafael (30/10, 22:28): o vídeo que o robô postou vai ao Canal Afiliados
     # e volta por uma fila (o Viral, pelo Espião); o mesmo arquivo não vira rascunho de novo.
@@ -1936,6 +1945,7 @@ def test_video_recusado_pelo_google_chega_no_privado_uma_vez_com_o_que_ele_disse
         return None
 
     monkeypatch.setattr(robo.assistente, "textos_do_video", recusado)
+    _outro_produto(monkeypatch)
     resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-23 00:30"))
     assert "o Google bloqueia o conteúdo deste vídeo" in resultado
     videos = [a[1] for a in avisos if isinstance(a, tuple) and a[0] == "video"]
@@ -5250,6 +5260,7 @@ def test_descurtir_que_falha_no_fim_suja_a_lista_e_o_proximo_rola(monkeypatch, a
     inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "a2", "archive/vestido.mp4",
             f"Vestido 👗\n{LINK}", "2026-10-25 09:30:00")
     chamadas = _anexar_espiao(monkeypatch)
+    _outro_produto(monkeypatch)
     assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-25 11:00")) == "rascunho salvo"
     assert chamadas == [True]
 
