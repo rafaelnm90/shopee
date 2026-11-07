@@ -2417,8 +2417,10 @@ def test_aprovado_e_postado_com_a_tela_final_conferida(monkeypatch, avisos, cami
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
     assert app.toques.count("@btn_post") == 1 and robo.pegar(ident)["estado"] == "postado"
     assert "postei o vídeo que você aprovou" in avisos[0]
-    # O comentário vem numa mensagem só dele, depois do lembrete.
-    assert avisos[1:] == [robo.ps.AVISO_COMENTARIO, "Amei! #achadinhos"]
+    # Sem o link do post (o celular de mentira não tem o Perfil), o comentário e o Canal Afiliados
+    # esperam a busca de novo nas rodadas seguintes (P148 2), e o aviso do post diz isso.
+    assert robo.AVISO_SEM_O_LINK_AGORA in avisos[0] and len(avisos) == 1
+    assert robo.pegar(ident)["busca_do_link"] == {"vezes": ["2026-10-22 23:59:00"], "fim": ""}
 
 
 def test_rascunho_aberto_com_outro_titulo_nao_e_postado(monkeypatch, avisos, caminho_do_rascunho):
@@ -2935,6 +2937,133 @@ def test_leitura_so_com_as_barras_do_android_e_feita_de_novo(monkeypatch):
     # A leitura com o app não é refeita nem anotada.
     robo.tocar(CelularSoComAsBarras(0), robo.ABA_PARA_VOCE, 0)
     assert len(_registro_da_leitura()) == 2
+
+
+def _post_sem_o_link(monkeypatch, ident, agora, links=()):
+    """
+    O publicar com o celular de mentira e o link do post que não sai na hora: cada busca devolve o
+    próximo de links ("" sem ele), e o canal e o comentário de depois do post ficam anotados.
+    """
+    buscas, levados, comentados = [], [], []
+    respostas = list(links)
+
+    def link_do_post(d, ident=None, agora=None, titulo=None, busca=1):
+        buscas.append((titulo, busca))
+        return respostas.pop(0) if respostas else ""
+
+    monkeypatch.setattr(robo, "ler_suspensao", lambda d, agora=None: None)
+    monkeypatch.setattr(robo, "abrir_rascunho", lambda d, rascunho: None)
+    monkeypatch.setattr(robo.ps, "conferir_tela_final", lambda d, video: (True, "confere"))
+    monkeypatch.setattr(robo.ps, "ajustar_rotulo_de_ia", lambda d, ligado: (True, "rótulo"))
+    monkeypatch.setattr(robo.ps, "postar", lambda d, video: (True, "ok"))
+    monkeypatch.setattr(robo, "link_do_post", link_do_post)
+    monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link: levados.append((rascunho["id"], link)))
+    monkeypatch.setattr(robo, "comentar_depois_do_post", lambda d, ident, agora=None: comentados.append(ident) or "comentado")
+    assert robo.publicar(object(), robo.pegar(ident), momento(agora)) == "rascunho aprovado postado"
+    return buscas, levados, comentados
+
+
+def test_post_sem_o_link_busca_de_novo_e_depois_comenta_e_leva_ao_canal(monkeypatch, avisos):
+    # Print do Rafael das 21:41 de 06/11: o vídeo do macacão, postado às 19:18, ficou sem
+    # comentário, porque logo depois do post o link não saiu (e sem ele o robô não comenta nem leva
+    # o vídeo ao Canal Afiliados). Como a falha antes de comentar (P148 2), o link é buscado de novo
+    # nas rodadas seguintes, a cada 30 min, conferindo pela legenda que o vídeo é o do post.
+    ident = _rascunho("aprovado", postar_em="2026-10-22 12:00:00")
+    buscas, levados, comentados = _post_sem_o_link(monkeypatch, ident, "2026-10-22 12:00", links=["", LINK_DO_POST])
+    assert (levados, comentados) == ([], [])
+    assert robo.AVISO_SEM_O_LINK_AGORA in avisos[0] and len(avisos) == 1
+    assert robo.link_do_post_pendente(momento("2026-10-22 12:20")) is None
+    pendente = robo.link_do_post_pendente(momento("2026-10-22 12:31"))
+    assert pendente["id"] == ident
+    resultado = robo.buscar_o_link_de_novo(object(), pendente, momento("2026-10-22 12:31"))
+    assert resultado == "link do post: copiado na 2ª busca; comentário: comentado"
+    assert buscas == [(None, 1), (TITULO, 2)]
+    postado = robo.pegar(ident)
+    assert postado["link_post"] == LINK_DO_POST and postado["busca_do_link"]["fim"] == "copiado"
+    assert (levados, comentados) == ([(ident, LINK_DO_POST)], [ident])
+    assert avisos[-1] == f"🔗 Robô da Shopee Vídeo: consegui o link do vídeo que foi ao ar às 12:00:\n\n{LINK_DO_POST}"
+    assert robo.link_do_post_pendente(momento("2026-10-22 13:30")) is None
+    # Na rodada, a busca de novo é a tarefa do comentário de depois do post.
+    assert robo.NOMES_DAS_ACOES["comentar_post"] == "Comentário no post"
+
+
+def test_link_que_nao_sai_em_tres_buscas_vai_ao_rafael_como_antes(monkeypatch, avisos):
+    ident = _rascunho("aprovado", postar_em="2026-10-22 12:00:00")
+    buscas, levados, comentados = _post_sem_o_link(monkeypatch, ident, "2026-10-22 12:00")
+    for hora, resultado in (("12:31", "link do post: não saiu na 2ª busca"),
+                            ("13:02", "link do post: não saiu em 3 buscas")):
+        pendente = robo.link_do_post_pendente(momento(f"2026-10-22 {hora}"))
+        assert robo.buscar_o_link_de_novo(object(), pendente, momento(f"2026-10-22 {hora}")) == resultado
+    assert [busca for _titulo, busca in buscas] == [1, 2, 3]
+    assert robo.link_do_post_pendente(momento("2026-10-22 14:00")) is None
+    # Na última, o comentário do Gem vai ao Rafael para ele fazer à mão, e o vídeo fica fora do canal.
+    assert avisos[1:] == [robo.ps.AVISO_COMENTARIO, "Amei! #achadinhos"]
+    assert (levados, comentados) == ([(ident, "")], [])
+    assert robo.pegar(ident)["busca_do_link"] == {"vezes": ["2026-10-22 12:00:00", "2026-10-22 12:31:00",
+                                                            "2026-10-22 13:02:00"], "fim": "desistiu"}
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_PROPRIO) == ("sem o link do post", "3 buscas")
+
+
+def test_outro_post_antes_do_link_desiste_do_anterior(monkeypatch, avisos):
+    # Outro vídeo do robô no ar vira o mais novo da grade: o link do anterior não é mais buscado.
+    primeiro = _rascunho("aprovado", postar_em="2026-10-22 12:00:00")
+    _post_sem_o_link(monkeypatch, primeiro, "2026-10-22 12:00")
+    segundo = _rascunho("aprovado", postar_em="2026-10-22 12:30:00")
+    _buscas, levados, comentados = _post_sem_o_link(monkeypatch, segundo, "2026-10-22 12:30", links=[LINK_DO_POST])
+    assert robo.pegar(primeiro)["busca_do_link"]["fim"] == "desistiu"
+    assert (levados, comentados) == ([(primeiro, ""), (segundo, LINK_DO_POST)], [segundo])
+    assert robo.link_do_post_pendente(momento("2026-10-22 13:30")) is None
+    assert consultar("SELECT detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_PROPRIO) == ("outro vídeo foi ao ar antes",)
+
+
+def test_legenda_do_post_confere_o_comeco_do_titulo():
+    titulo = "Macaquinho Verde Elegante #moda #achadinhos"
+    assert robo.legenda_do_post("Macaquinho Verde Elegante #m ... Veja mais", titulo)
+    assert robo.legenda_do_post("Macaquinho Verde  Elegante #m…", titulo)
+    assert not robo.legenda_do_post("Copo resistente que não quebra ... Veja mais", titulo)
+    # Curta demais para dizer, ou sem legenda: não confere.
+    assert not robo.legenda_do_post("Maca...", titulo) and not robo.legenda_do_post("", titulo)
+    # O emoji que a acessibilidade lê como "..".
+    com_emoji = "🔥 Macaquinho Verde Elegante #moda"
+    assert robo.legenda_do_post(robo.ps.como_o_android_le(com_emoji)[:20], com_emoji)
+
+
+def test_link_do_post_buscado_de_novo_confere_a_legenda_do_video(monkeypatch):
+    # Na busca de novo, o vídeo mais novo da grade só vale com a legenda do post: outro vídeo pode
+    # ter ido ao ar depois dele.
+    def player(legenda):
+        return [_no(ident="rn_vod_player_view_with_surface", caixa=(0, 0, 1080, 2260), clicavel=False),
+                _no(desc="video caption user", caixa=(40, 2030, 460, 2080)),
+                _no("TechPremium", caixa=(40, 2030, 460, 2080), clicavel=False),
+                _no(desc="video caption title", caixa=(40, 2100, 820, 2160)),
+                _no(legenda, caixa=(40, 2100, 820, 2160), clicavel=False),
+                _no(desc="avatar icon", caixa=(960, 1390, 1040, 1470)),
+                _no(desc="like icon", caixa=(960, 1600, 1040, 1680)),
+                _no(desc="comment video icon", caixa=(960, 1770, 1040, 1840)),
+                _no(desc="post video share icon", caixa=(950, 1935, 1052, 2035)),
+                _no("Adicionar um comentário...", caixa=(200, 2300, 900, 2360))]
+
+    monkeypatch.setitem(TELAS, "perfil", [_no(caixa=(0, 1210, 358, 1680))])
+    monkeypatch.setitem(CAMINHO, ("perfil", (179, 1445)), "player")
+    monkeypatch.setitem(CAMINHO, ("player", (1001, 1985)), "folha")
+    monkeypatch.setitem(TELAS, "folha", [_no("Copiar link", caixa=(280, 2200, 440, 2300))])
+    monkeypatch.setitem(CAMINHO, ("folha", "Copiar link"), "player")
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: setattr(d, "atual", "perfil"))
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    monkeypatch.setitem(TELAS, "player", player("Copo resistente que não quebra ... Veja mais"))
+    app = AppComQuadros()
+    app.clipboard = LINK_DO_POST
+    assert robo.link_do_post(app, titulo=TITULO, busca=2) == ""
+    assert "Copiar link" not in app.toques
+    # Com a legenda do post, o link sai, e o registro diz em que busca.
+    monkeypatch.setitem(TELAS, "player", player(TITULO[:30] + "... Veja mais"))
+    app = AppComQuadros()
+    app.clipboard = LINK_DO_POST
+    assert robo.link_do_post(app, titulo=TITULO, busca=2) == LINK_DO_POST
+    assert _registro_do_link() == [("sem o link", "o vídeo mais novo da grade não é o do post (na 2ª busca)"),
+                                   ("copiado", "na 2ª busca")]
 
 
 def test_o_compartilhar_do_perfil_nao_serve_para_o_link_do_post():

@@ -51,7 +51,8 @@ no horário de sempre, e com o celular fora da tomada só pula. No fim, os dois 
 sozinhos (painel_shopee_video), e o treino da segunda que caiu na suspensão roda primeiro.
 
 Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Depois de
-postar, curte o próprio vídeo, comenta nele e curte o comentário (P148 2). No log, só
+postar, curte o próprio vídeo, comenta nele e curte o comentário (P148 2); o que não sai (e o
+link do post que não saiu, buscar_o_link_de_novo) volta nas rodadas seguintes. No log, só
 estados e números: nada de nome de produto, título ou link.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
@@ -898,7 +899,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado", "cor", "itens_do_video")
+           "achado", "cor", "itens_do_video", "busca_do_link")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -929,9 +930,12 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # capa nela; vazio com as cores de sempre (o laranja).
 # itens_do_video: os números (itemId) do produto do vídeo, o do link e o que foi ao post (o da troca ou
 # o achado pela IA), ou os do criador no Ver Produtos: o mesmo produto não se repete (P166 1).
+# busca_do_link: no post que ficou sem o link logo depois de postar, {"vezes": [momento de cada busca
+# que não deu certo], "fim": "" enquanto o robô tenta de novo, "copiado" ou "desistiu"}
+# (buscar_o_link_de_novo, P148 2).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video")
+                 "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link")
 
 
 def _criar_tabela(con):
@@ -964,6 +968,7 @@ def _linha_para_dict(linha):
     rascunho["tirar"] = json.loads(rascunho["tirar"] or "[]")
     rascunho["comentarios_proprios"] = json.loads(rascunho["comentarios_proprios"] or "[]")
     rascunho["itens_do_video"] = json.loads(rascunho["itens_do_video"] or "[]")
+    rascunho["busca_do_link"] = json.loads(rascunho["busca_do_link"] or "{}")
     return rascunho
 
 
@@ -987,7 +992,7 @@ def pegar(ident):
 
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
-                   "recusadas", "outra_cor", "tirar", "comentarios_proprios", "itens_do_video"):
+                   "recusadas", "outra_cor", "tirar", "comentarios_proprios", "itens_do_video", "busca_do_link"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -1392,7 +1397,8 @@ def o_que_fazer(config, agora=None):
     ("saude", None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
     ("rascunho", None), ("responder", None) (os comentários dos vídeos, 3 vezes por dia,
     respostas_pendentes), ("feed", None) (um vídeo do feed, espalhados pelo dia, P152),
-    ("comentar_post", id) (o comentário de depois do post que volta), ("post_antigo", id) (o
+    ("comentar_post", id) (o comentário de depois do post que volta, ou o link do post que não
+    saiu e é buscado de novo, link_do_post_pendente), ("post_antigo", id) (o
     comentário do dia num post antigo) ou None. Sem hora marcada: cada uma sai na 1ª rodada em que
     pode, e a seguinte vem na rodada depois (P161 1). Gasta o horário do plano, ou uma tentativa a
     mais do rascunho que falhou, quando escolhe um rascunho.
@@ -1426,8 +1432,9 @@ def o_que_fazer(config, agora=None):
         prontos = [r for r in aprovados if r["postar_em"] and r["postar_em"] <= agora_txt]
     if postar and prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
-    # O comentário de depois do post que não saiu (o vídeo ainda em análise) volta com o post. (P148 2)
-    pendente = comentario_do_post_pendente(agora) if postar else None
+    # O comentário de depois do post que não saiu (o vídeo ainda em análise) volta com o post, e o
+    # link do post que não saiu também é buscado de novo (P148 2).
+    pendente = (link_do_post_pendente(agora) or comentario_do_post_pendente(agora)) if postar else None
     if pendente:
         return "comentar_post", pendente["id"]
     # Um aprovado vai ao ar antes da próxima rodada: nada de tarefa longa (Saúde, rascunho,
@@ -5281,16 +5288,24 @@ def publicar(d, rascunho, agora=None):
     pausa(15)
     atualizar(rascunho["id"], estado="postado", postado_em=_momento(agora),
               **(campos_que_ficam(no_post) if no_post is not rascunho else {}))
+    # O post anterior que ainda esperava o link deixa de ser o mais novo da grade: o robô não o
+    # acharia mais sem confundir com este.
+    for anterior in links_esperando(agora):
+        if anterior["id"] != rascunho["id"]:
+            desistir_do_link(anterior, "outro vídeo foi ao ar antes", agora)
     link = link_do_post(d, ident=rascunho["id"], agora=agora)
     if link:
         atualizar(rascunho["id"], link_post=link)
+    else:
+        atualizar(rascunho["id"], busca_do_link={"vezes": [_momento(agora)], "fim": ""})
     sairam = len(rascunho["produtos"]) - len(no_post["produtos"])
     avisar("✅ Robô da Shopee Vídeo: postei o vídeo que você aprovou"
            + (f", sem {'os produtos' if sairam > 1 else 'o produto'} que você marcou para sair "
               f"({sairam} de {len(rascunho['produtos'])})" if sairam else "")
-           + ".\n\n" + (f"🔗 {link}" if link else "O link do post está no seu Perfil em Shopee Vídeo."))
-    levar_ao_canal(no_post, link)
-    comentar_depois_do_post(d, rascunho["id"], agora)
+           + ".\n\n" + (f"🔗 {link}" if link else AVISO_SEM_O_LINK_AGORA))
+    if link:
+        levar_ao_canal(no_post, link)
+        comentar_depois_do_post(d, rascunho["id"], agora)
     return "rascunho aprovado postado"
 
 
@@ -5312,19 +5327,29 @@ def botao_de_compartilhar(xml):
 PROCESSO_DO_LINK_DO_POST = "link do post"
 
 
-def link_do_post(d, ident=None, agora=None):
+def link_do_post(d, ident=None, agora=None, titulo=None, busca=1):
     """
     O link do post que acabou de sair: Perfil em Shopee Vídeo → o vídeo mais novo → o
     ícone de compartilhar → Copiar link (mapeado no Motorola em 22/10/2026). Qualquer
-    passo que não aparece: sem link (o post saiu do mesmo jeito, e a mensagem diz onde
-    achar). Nada aqui desfaz a postagem: até a Verificação só abre a tela do celular no
-    privado. Com o ident do rascunho, antes de abrir o vídeo guarda a marca da capa dele na
-    grade (a medição da capa com chamada, P76). O registro diz em que passo o link não saiu
-    (rótulos fixos): sem ele, o vídeo não vai ao Canal Afiliados nem ganha o comentário.
+    passo que não aparece: sem link (o post saiu do mesmo jeito, e o robô busca de novo nas
+    rodadas seguintes, buscar_o_link_de_novo). Nada aqui desfaz a postagem: até a Verificação
+    só abre a tela do celular no privado. Com o ident do rascunho, antes de abrir o vídeo
+    guarda a marca da capa dele na grade (a medição da capa com chamada, P76). Com o titulo (a
+    busca de novo, busca > 1), o vídeo aberto só vale com a legenda do post (legenda_do_post):
+    outro vídeo pode ter ido ao ar depois. O registro diz em que passo o link não saiu (rótulos
+    fixos), e o caso do que não saiu fica para o checkup do Claude: sem o link, o vídeo não vai ao
+    Canal Afiliados nem ganha o comentário.
     """
-    def sem_o_link(porque):
-        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_DO_POST, "sem o link", porque, ok=False,
+    def sem_o_link(porque, caso=True):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_DO_POST, "sem o link",
+                                     f"{porque}{f' (na {busca}ª busca)' if busca > 1 else ''}", ok=False,
                                      agora=agora)
+        if caso:
+            try:
+                _guardar_caso(d, "postar" if busca == 1 else "comentar_post", "sem o link",
+                              f"link do post: {porque}", ident=ident, agora=agora)
+            except Exception as e:
+                logger.warning(f"⚠️ [Robô Shopee Vídeo] Caso do link do post não guardado: {type(e).__name__}")
         return ""
 
     try:
@@ -5335,13 +5360,21 @@ def link_do_post(d, ident=None, agora=None):
                    if not any(tem_texto_no_quadro(d, q, texto) for texto in ("Rascunhos", "Fixado"))]
         if not quadros:
             return sem_o_link("nenhum vídeo na grade do Perfil")
-        if ident:
+        if ident and not titulo:
             marcar_o_post(d, ident, quadros[0]["caixa"])
         d.click(*ps._centro(quadros[0]))
         pausa(8)
-        compartilhar = botao_de_compartilhar(tela(d))
+        xml = tela(d)
+        if titulo:
+            video = interacoes.video_do_feed(xml)
+            if not video:
+                return sem_o_link("o vídeo mais novo da grade não abriu no player")
+            if not legenda_do_post(video["legenda"], titulo):
+                return sem_o_link("o vídeo mais novo da grade não é o do post")
+        compartilhar = botao_de_compartilhar(xml)
         if not compartilhar:
-            return sem_o_link("sem o botão de compartilhar no vídeo")
+            return sem_o_link(MOTIVO_DO_POST_EM_ANALISE if ps.video_em_analise(xml)
+                              else "sem o botão de compartilhar no vídeo")
         d.click(*compartilhar)
         pausa(4)
         if not tem(tela(d), "Copiar link"):
@@ -5350,11 +5383,12 @@ def link_do_post(d, ident=None, agora=None):
         link = ps.link_copiado(d)
         if not link:
             return sem_o_link("o Copiar link não deixou o link copiado")
-        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_DO_POST, "copiado", ok=True, agora=agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_DO_POST, "copiado",
+                                     f"na {busca}ª busca" if busca > 1 else "", ok=True, agora=agora)
         return link
     except Verificacao:
         av.abrir_tela(celular=True, verificacao=True)
-        return sem_o_link("verificação da Shopee")
+        return sem_o_link("verificação da Shopee", caso=False)
     except Parada as e:
         return sem_o_link(f"parou em {passo_do_motivo(e.motivo)}")
     except Exception as e:
@@ -6638,6 +6672,92 @@ def comentario_do_post_pendente(agora=None):
     return None
 
 
+# O post que ficou sem o link logo depois de postar (o vídeo ainda em análise na Shopee, um passo
+# que não apareceu): sem o link, o robô não comenta nem leva o vídeo ao Canal Afiliados. Como a
+# falha antes de comentar (P148 2), ele busca o link de novo nas rodadas seguintes, a cada
+# INTERVALO_DO_PROPRIO, até TENTATIVAS_DO_LINK buscas contando a de logo depois do post, só
+# enquanto o post é o mais novo do robô, e confere pela legenda que o vídeo aberto é o do post.
+# Com o link, faz o que o post faria (o link no privado, o canal e o comentário); sem ele, o
+# comentário do Gem vai ao Rafael e o aviso do canal também, como antes. DECISOES.md, Shopee Vídeo.
+TENTATIVAS_DO_LINK = 3
+AVISO_SEM_O_LINK_AGORA = ("O link do post não saiu agora (ele está no seu Perfil em Shopee Vídeo). Tento de novo nas "
+                          "próximas rodadas: com ele, comento no vídeo e levo o vídeo ao Canal Afiliados.")
+# A legenda que o player mostra vem cortada no fim ("... Veja mais"): o começo dela, com pelo
+# menos estas letras, tem de ser o começo do título do post.
+LETRAS_DA_LEGENDA = 12
+
+
+def legenda_do_post(legenda, titulo):
+    """
+    A legenda do vídeo aberto no player (cortada no fim, com "..." e "Veja mais") é a do post com
+    esse título? Pelo começo, sem os espaços nem os caracteres invisíveis (ps.mesma_legenda), e
+    também como a acessibilidade lê os emojis (ps.como_o_android_le).
+    """
+    lida = ps._o_que_conta(re.split(r"\.\.\.|…|Veja mais", legenda or "")[0])
+    if len(lida) < LETRAS_DA_LEGENDA:
+        return False
+    return any(ps._o_que_conta(texto).startswith(lida) for texto in (titulo, ps.como_o_android_le(titulo)))
+
+
+def links_esperando(agora=None):
+    """Os posts do robô de menos de 1 dia que ficaram sem o link e ainda esperam a busca de novo."""
+    desde = _momento(agora_br(agora) - timedelta(days=1))
+    return [r for r in listar("postado") if not r["link_post"] and (r["postado_em"] or "") >= desde
+            and r["busca_do_link"].get("vezes") and not r["busca_do_link"].get("fim")]
+
+
+def link_do_post_pendente(agora=None):
+    """
+    O post sem o link que o robô busca de novo agora, ou None: o mais novo do robô (outro vídeo
+    depois dele seria o mais novo da grade), esperando a busca, a última há INTERVALO_DO_PROPRIO
+    ou mais.
+    """
+    postados = listar("postado")
+    if not postados:
+        return None
+    ultimo = max(postados, key=lambda r: (r["postado_em"] or "", r["id"]))
+    if ultimo["id"] not in {r["id"] for r in links_esperando(agora)}:
+        return None
+    limite = _momento(agora_br(agora) - interacoes.INTERVALO_DO_PROPRIO)
+    return ultimo if ultimo["busca_do_link"]["vezes"][-1] <= limite else None
+
+
+def desistir_do_link(rascunho, motivo, agora=None):
+    """
+    O post fica sem o link de vez: o comentário do Gem vai ao Rafael para ele comentar à mão
+    (P148 2), e o aviso diz que o vídeo não foi ao Canal Afiliados (P63).
+    """
+    busca = dict(rascunho["busca_do_link"] or {})
+    atualizar(rascunho["id"], busca_do_link={**busca, "fim": "desistiu"})
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "sem o link do post", motivo, ok=False, agora=agora)
+    _comentar_a_mao(rascunho)
+    levar_ao_canal(rascunho, "")
+
+
+def buscar_o_link_de_novo(d, rascunho, agora=None):
+    """
+    A busca de novo do link do post que não saiu logo depois de postar (link_do_post_pendente):
+    com o link, o robô manda o link no privado, leva o vídeo ao Canal Afiliados e comenta, como
+    no post; sem ele, conta a busca e, na última, desiste (desistir_do_link).
+    """
+    busca = dict(rascunho["busca_do_link"] or {})
+    vezes = list(busca.get("vezes") or [])
+    link = link_do_post(d, ident=rascunho["id"], agora=agora, titulo=rascunho["titulo"], busca=len(vezes) + 1)
+    if not link:
+        vezes.append(_momento(agora))
+        atualizar(rascunho["id"], busca_do_link={**busca, "vezes": vezes})
+        if len(vezes) >= TENTATIVAS_DO_LINK:
+            desistir_do_link(pegar(rascunho["id"]), f"{len(vezes)} buscas", agora)
+            return f"link do post: não saiu em {len(vezes)} buscas"
+        return f"link do post: não saiu na {len(vezes)}ª busca"
+    atualizar(rascunho["id"], link_post=link, busca_do_link={**busca, "fim": "copiado"})
+    postado = pegar(rascunho["id"])
+    hora = (postado["postado_em"] or "")[11:16]
+    avisar(f"🔗 Robô da Shopee Vídeo: consegui o link do vídeo que foi ao ar às {hora}:\n\n{link}")
+    levar_ao_canal(postado, link)
+    return f"link do post: copiado na {len(vezes) + 1}ª busca; comentário: {comentar_depois_do_post(d, postado['id'], agora)}"
+
+
 def _tentativas_do_antigo_hoje(momento):
     """Quantas vezes o robô tentou hoje o comentário do post antigo."""
     estado = ler_estado()
@@ -7017,6 +7137,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             return interagir_no_feed(d, agora)
         if acao in ("comentar_post", "post_antigo"):
             rascunho = pegar(ident)
+            if acao == "comentar_post" and rascunho and not rascunho["link_post"] and rascunho["busca_do_link"]:
+                return buscar_o_link_de_novo(d, rascunho, agora)
             if not rascunho or not rascunho["link_post"]:
                 return f"{acao}: o post não está mais no banco"
             if acao == "post_antigo":
