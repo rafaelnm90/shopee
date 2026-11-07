@@ -3201,6 +3201,100 @@ def test_faixa_da_capa_na_cor_do_produto_e_achada_no_print():
         assert edicao_video.faixa_nos_lados(grade(no_video), caixa, cor) is False, nome
 
 
+def _foto_de_fundo(fundo, produto=(200, 30, 40)):
+    """Uma foto de anúncio de mentira, 800x800: o produto (um retângulo) no meio do fundo, longe do pé da foto."""
+    import io
+
+    from PIL import Image, ImageDraw
+    imagem = Image.new("RGB", (800, 800), fundo)
+    ImageDraw.Draw(imagem).rectangle((200, 100, 600, 500), fill=produto)
+    saida = io.BytesIO()
+    imagem.save(saida, "JPEG", quality=95)
+    return saida.getvalue()
+
+
+def test_faixa_que_some_no_fundo_da_foto_vai_no_laranja_e_no_fundo_laranja_no_preto():
+    # Print do Rafael de 07/11, 04:15 (P173 1): o pote branco numa foto de fundo branco, com a faixa
+    # branca, sumia na foto. O fio e a faixa das duas capas vão no laranja da Shopee, com a letra
+    # branca, e o post confere a faixa nele; no fundo laranja, no grafite do preto. Na foto que não é
+    # da cor da faixa, ela continua na cor do produto.
+    import io
+
+    from PIL import Image
+    branco, preto = edicao_video.CORES_DO_PRODUTO["branco"], edicao_video.CORES_DO_PRODUTO["preto"]
+    laranja = edicao_video.LARANJA_DA_SHOPEE
+    fundo_branco, fundo_laranja = _foto_de_fundo((250, 250, 250)), _foto_de_fundo(laranja, produto=(30, 90, 210))
+    assert edicao_video.cor_da_faixa(fundo_branco, branco) == laranja
+    assert edicao_video.cor_da_faixa(fundo_branco) == laranja
+    assert edicao_video.cor_da_faixa(fundo_laranja) == preto
+    assert edicao_video.cor_da_faixa(fundo_laranja, edicao_video.CORES_DO_PRODUTO["laranja"]) == preto
+    assert edicao_video.cor_da_faixa(fundo_laranja, branco) == branco
+    assert edicao_video.cor_da_faixa(_foto_jpg(), branco) == branco
+    assert edicao_video.cor_da_faixa(b"", branco) == branco
+    assert [edicao_video.nome_da_cor(cor) for cor in (laranja, None, preto, branco)] == ["", "", "preto", "branco"]
+
+    frase = "Creme para cachos"
+    faixa, fio = edicao_video.lugar_da_foto()[3], edicao_video.FIO_DA_CAPA_NA_GRADE
+    topo = edicao_video.GRADE_NO_CELULAR[0] + fio
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco))).convert("RGB")
+    for ponto in [(360, 0), (0, topo - fio), (719, topo - 1), (0, faixa), (719, faixa + 5), (3, 1279)]:
+        assert _cor_de(capa, ponto, laranja), ponto
+    pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(faixa, 1280, 2)]
+    assert sum(1 for p in pontos if min(p) > 250) > 50 and not any(max(p) < 50 for p in pontos)
+    # O robô confere no post a faixa na cor que o rascunho guardou (o nome dela; "" no laranja).
+    cor_guardada = edicao_video.cor_do_produto(edicao_video.nome_da_cor(edicao_video.cor_da_faixa(fundo_branco, branco)))
+    assert edicao_video.faixa_laranja(capa, cor=cor_guardada) == (faixa, edicao_video.TELA[1], 0, edicao_video.TELA[0])
+    # A do vídeo aberto vai na mesma cor: o fio logo acima da foto e a faixa embaixo dela.
+    no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, no_video=True,
+                                                                   cor=branco))).convert("RGB")
+    pe, altura = edicao_video.PE_DA_FAIXA_NO_VIDEO, edicao_video.FAIXA_DA_CHAMADA
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    assert _cor_de(no_video, (esquerda + 2, pe - 3), laranja) and _cor_de(no_video, (direita - 2, pe - altura + 2), laranja)
+    alto_do_fio = next(y for y in range(1280) if max(no_video.getpixel((360, y))) > 60)
+    assert all(_cor_de(no_video, (360, y), laranja) for y in range(alto_do_fio, alto_do_fio + edicao_video.FIO_DA_CAPA))
+    # No fundo laranja, o grafite do preto, com a letra branca, nas duas.
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, "Bolsa espaçosa"))).convert("RGB")
+    assert _cor_de(capa, (360, 0), preto) and _cor_de(capa, (3, 1279), preto) and _cor_de(capa, (719, faixa), preto)
+    no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, "Bolsa espaçosa",
+                                                                   no_video=True))).convert("RGB")
+    assert _cor_de(no_video, (esquerda + 2, pe - 3), preto)
+    # Na foto que não é da cor da faixa, a faixa branca continua.
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, frase, cor=branco))).convert("RGB")
+    assert _cor_de(capa, (3, 1279), branco) and _cor_de(capa, (360, 0), branco)
+
+
+def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeypatch, tmp_path):
+    # P173 1: com a faixa no laranja no lugar do branco que sumia na foto, o rascunho guarda a cor em
+    # que ela saiu (o robô confere a faixa no post nela) e o registro conta; a capa recebe a cor do
+    # produto (e troca só o fio e a faixa), e a caixa do nome e da vantagem e a moldura da miniatura
+    # continuam nela.
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Creme de Cabelo", "vantagem": "Cachos definidos", "capa": "Creme para cachos",
+                                  "lugar": "alto", "cor": "branco"})
+    monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.SEM_LETRAS))
+    capas, editores = [], []
+    monkeypatch.setattr(edicao_video, "capa_com_chamada",
+                        lambda foto, frase, no_video=False, cor=None: capas.append(cor) or b"capa")
+
+    def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
+        editores.append(cor)
+        return "", {"textos": [nome], "legendas": 0}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    branco = edicao_video.CORES_DO_PRODUTO["branco"]
+    for foto, guardada in ((_foto_de_fundo((250, 250, 250)), ""), (_foto_jpg(), "branco")):
+        capas.clear()
+        editores.clear()
+        anotado = {}
+        edicao_video.editar_para_postar("v.mp4", foto, str(tmp_path / "r.mp4"), "Creme de Cabelo", anotar=anotado)
+        assert (capas, editores, anotado) == ([branco, branco], [branco], {"cor": guardada}), guardada
+    linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DA_FAIXA_QUE_SOME,
+                                                       "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("laranja", "branco")]
+
+
 def test_frase_do_video_aberto_acaba_antes_dos_icones_do_app():
     # Escolha do Rafael (06/11, P165 1): no vídeo aberto, o coração e os ícones da direita do app
     # ficavam por cima do fim da frase; ela acaba antes deles, e a faixa continua de um lado ao outro.
