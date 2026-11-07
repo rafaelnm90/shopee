@@ -1003,12 +1003,13 @@ def _linha_da_medicao(medicao):
 def texto_capa(config, medicao):
     """
     A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168; 07/11,
-    P171): DECISOES.md, Shopee Vídeo.
+    P169 1 e P171): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
         "A capa é o que aparece na grade do seu perfil. Com a capa com chamada, a foto do anúncio aumenta até tampar "
-        "a largura toda da capa (a foto quase quadrada, a maioria; a outra fica inteira, no maior tamanho que cabe), "
+        "a largura toda da capa (a foto quase quadrada, a maioria; a outra estica só até 15%, o que quase não se "
+        "nota, e o que ainda faltar fica com a própria foto desfocada), "
         "com um fio em cima, e o robô escreve logo abaixo dela, numa faixa na cor "
         "principal do produto (no produto vermelho ou de várias cores, o laranja da Shopee), em letras grandes "
         "(um pouco mais estreitas, para caberem maiores), brancas ou pretas, as que aparecem mais, o que é o "

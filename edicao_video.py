@@ -332,22 +332,24 @@ ESCALA_NA_MINIATURA = 0.5
 # o que precisar para acabar logo acima dele (NUMERO_DA_GRADE, com FOLGA_DO_NUMERO). A letra é a do
 # exemplo que o Rafael escolheu: a maior que cabe (LETRAS_NA_GRADE numa linha; a frase que não cabe
 # vai em duas, LETRAS_EM_DUAS_LINHAS_NA_GRADE), um pouco mais estreita (APERTO_DA_LETRA) para caber
-# maior. A foto quase quadrada aumenta, sem deformar, até tampar a largura toda, do fio, no alto do
-# que a grade do celular mostra (GRADE_NO_CELULAR), até a faixa, perdendo no máximo
-# CORTE_MAXIMO_AO_TAMPAR dela (a quadrada perde um pouco em cima e embaixo); a outra entra inteira,
-# sem corte, no maior tamanho que cabe em LADOS_NA_GRADE e VISIVEL_NA_GRADE acima da faixa, até a
-# resposta da P169.
+# maior. A foto tampa tudo o que a grade do celular mostra (GRADE_NO_CELULAR), do fio até a faixa,
+# de uma beirada à outra: a quase quadrada aumenta sem deformar, perdendo no máximo
+# CORTE_MAXIMO_AO_TAMPAR dela (a quadrada perde um pouco em cima e embaixo); a outra estica só até
+# ESTICAR_ATE na direção em que falta, o que quase não se nota, e o que ainda faltar fica com a
+# própria foto desfocada (DESFOQUE_DO_FUNDO) atrás dela, com a foto no pé e no meio da largura.
 # No resto da abertura (o vídeo aberto, que corta mais dos lados, VISIVEL_NO_APP, P129), a faixa,
 # da altura de uma linha (FAIXA_DA_CHAMADA; a frase que não cabe numa linha vai em duas, com a letra
 # menor), fica acima do cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO)
 # e a foto, inteira entre a barra de pesquisa do app (TOPO_NO_VIDEO_ABERTO) e a faixa; o fio e a
-# faixa vão de um lado ao outro do que o app mostra. Pedidos do Rafael (P139 2, P160 2, P168 e
-# P171, com a P170): DECISOES.md, Shopee Vídeo.
+# faixa vão de um lado ao outro do que o app mostra. Pedidos do Rafael (P139 2, P160 2, P168, P169
+# 1 e P171, com a P170): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
 # O que a grade do perfil mostra no Motorola do Rafael (print de 06/11, 21:09): o quadro em 3:4 com
 # a largura toda. Com a foto menor que isso, a grade mostra o preto em volta dela (P168).
 GRADE_NO_CELULAR = (160, 1120)                  # de cima a baixo, em y, de x 0 a 720
-CORTE_MAXIMO_AO_TAMPAR = 0.06                   # da foto aumentada; mais que isso, ela fica inteira
+CORTE_MAXIMO_AO_TAMPAR = 0.06                   # da foto aumentada; mais que isso, ela estica
+ESTICAR_ATE = 0.15                              # da altura ou da largura da foto
+DESFOQUE_DO_FUNDO = 24                          # o raio do desfoque da foto atrás, em px
 TOPO_DA_FAIXA_NA_GRADE = 846                    # a quadrada tampa do fio até aqui perdendo menos de 6%
 FOLGA_DO_NUMERO = 9                             # entre o pé das letras e o alto do número de visualizações
 LETRAS_NA_GRADE = (84, 48)                      # a maior e a menor numa linha
@@ -487,6 +489,31 @@ def _foto_que_tampa(foto, largura, altura):
     return ImageOps.fit(imagem, (largura, altura))
 
 
+def _foto_que_tampa_esticando(foto, largura, altura):
+    """
+    A foto (bytes) no PIL, em RGB, tampando um retângulo de largura x altura px sem cortar nada
+    dela (P169 1): no maior tamanho que cabe, esticada só até ESTICAR_ATE na direção em que falta;
+    o que ainda faltar fica com a própria foto desfocada, aumentada até tampar, atrás dela, com a
+    foto no pé e no meio da largura. None se não abre.
+    """
+    import io
+
+    from PIL import Image, ImageFilter, ImageOps
+    try:
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
+    except Exception:
+        return None
+    escala = min(largura / imagem.width, altura / imagem.height)
+    tamanho = (max(1, round(min(largura, imagem.width * escala * (1 + ESTICAR_ATE)))),
+               max(1, round(min(altura, imagem.height * escala * (1 + ESTICAR_ATE)))))
+    esticada = imagem.resize(tamanho, Image.LANCZOS)
+    if tamanho == (largura, altura):
+        return esticada
+    fundo = ImageOps.fit(imagem, (largura, altura)).filter(ImageFilter.GaussianBlur(DESFOQUE_DO_FUNDO))
+    fundo.paste(esticada, ((largura - tamanho[0]) // 2, altura - tamanho[1]))
+    return fundo
+
+
 def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA, cor=None):
     """
     A foto (bytes) da miniatura com a moldura (ESCALA_NA_MINIATURA da grossura da foto do
@@ -574,23 +601,24 @@ def lados_da_capa(no_video=False):
 def lugar_da_foto(no_video=False):
     """
     (esquerda, cima, direita, alto da faixa) da capa com a frase: entre esquerda e direita, e entre
-    cima (com o fio) e a faixa, a foto entra inteira. Na da grade, o que a grade mostra, até a faixa
-    (TOPO_DA_FAIXA_NA_GRADE; a foto quase quadrada aumenta além disso até tampar o que a grade do
-    celular mostra, _foto_que_tampa, P168); no vídeo aberto (P129), o que o app mostra, até a faixa,
-    acima do cartão do produto (P160 2).
+    cima (com o fio) e a faixa, fica a foto. Na da grade, o que a grade do celular mostra, de uma
+    beirada à outra, até a faixa (TOPO_DA_FAIXA_NA_GRADE), e a foto tampa tudo (P168 e P169 1); no
+    vídeo aberto (P129), o que o app mostra, até a faixa, acima do cartão do produto, e a foto entra
+    inteira (P160 2).
     """
     if no_video:
         return VISIVEL_NO_APP[0], TOPO_NO_VIDEO_ABERTO, VISIVEL_NO_APP[1], PE_DA_FAIXA_NO_VIDEO - FAIXA_DA_CHAMADA
-    return LADOS_NA_GRADE[0], VISIVEL_NA_GRADE[0], LADOS_NA_GRADE[1], TOPO_DA_FAIXA_NA_GRADE
+    return 0, GRADE_NO_CELULAR[0], TELA[0], TOPO_DA_FAIXA_NA_GRADE
 
 
 def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     """
     A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) no fundo preto, com o fio
     logo acima da beirada de cima dela e, logo abaixo dela, a chamada numa faixa, de um lado ao
-    outro (lados_da_capa). Na da grade, a foto quase quadrada aumenta sem deformar até tampar o que
-    a grade do celular mostra (_foto_que_tampa, P168), e a outra entra inteira, sem corte, no maior
-    tamanho que cabe no lugar dela (lugar_da_foto); a faixa desce até o fim do quadro na mesma cor,
+    outro (lados_da_capa). Na da grade, a foto tampa o que a grade do celular mostra (lugar_da_foto):
+    a quase quadrada aumenta sem deformar (_foto_que_tampa, P168), e a outra estica até ESTICAR_ATE,
+    com a própria foto desfocada no que ainda faltar (_foto_que_tampa_esticando, P169 1); a faixa
+    desce até o fim do quadro na mesma cor,
     com o número de visualizações por cima dela, e a frase, na letra maior e mais estreita, fica no
     meio da faixa, logo acima do número (P171). Com no_video=True, a do resto da abertura (P129): a
     foto inteira no lugar dela e a faixa da altura de uma linha acima do cartão do produto que o app
@@ -606,17 +634,17 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
         return None
     esquerda, direita = lados_da_capa(no_video)
     x1, cima, x2, faixa = lugar_da_foto(no_video)
-    # Na grade, a foto quase quadrada tampa tudo acima da faixa (P168); a outra fica inteira, no
-    # maior tamanho que cabe, como no vídeo aberto, até a resposta da P169.
-    imagem = None if no_video else _foto_que_tampa(foto, TELA[0], faixa - GRADE_NO_CELULAR[0] - FIO_DA_CAPA)
-    if imagem:
-        x, y = 0, GRADE_NO_CELULAR[0] + FIO_DA_CAPA
+    lado, altura = x2 - x1, faixa - cima - FIO_DA_CAPA
+    if no_video:
+        imagem = _foto_que_cabe(foto, lado, altura)
     else:
-        imagem = _foto_que_cabe(foto, x2 - x1, faixa - cima - FIO_DA_CAPA)
-        if not imagem:
-            return None
-        # A foto fica inteira logo acima da faixa, no meio do lugar dela.
-        x, y = x1 + (x2 - x1 - imagem.width) // 2, faixa - imagem.height
+        # Na grade, a foto tampa tudo acima da faixa: a quase quadrada aumentada (P168), a outra
+        # esticada até ESTICAR_ATE e com a própria foto desfocada no que ainda faltar (P169 1).
+        imagem = _foto_que_tampa(foto, lado, altura) or _foto_que_tampa_esticando(foto, lado, altura)
+    if not imagem:
+        return None
+    # A foto fica logo acima da faixa, no meio do lugar dela.
+    x, y = x1 + (x2 - x1 - imagem.width) // 2, faixa - imagem.height
     capa = Image.new("RGB", TELA, "black")
     capa.paste(imagem, (x, y))
 

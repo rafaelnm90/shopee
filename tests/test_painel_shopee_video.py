@@ -471,6 +471,8 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     # Escolha do Rafael (30/10, P107): a frase numa faixa, na cor principal do produto (P159 2); a
     # foto aumenta até tampar a largura toda da capa, e a faixa desce até o fim dela (06/11, P168).
     assert "aumenta até tampar a largura toda da capa" in texto and "faixa na cor principal do produto" in texto
+    # P169 1: a que não é quase quadrada estica só até 15%, e o resto fica com a foto desfocada.
+    assert "a outra estica só até 15%" in texto and "a própria foto desfocada" in texto
     assert "a faixa desce até o fim da capa, com o número por cima dela" in texto
     assert "um pouco menor" not in texto
     # Vídeo do Rafael das 20:14 de 02/11: o fio em cima. Vídeo das 23:29 de 06/11 (P171): a frase,

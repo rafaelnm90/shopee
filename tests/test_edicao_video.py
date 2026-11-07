@@ -1484,9 +1484,9 @@ def test_capa_da_grade_com_a_foto_quadrada_tampa_o_que_a_grade_mostra_e_a_faixa_
 
 
 def test_foto_quase_quadrada_tampa_e_a_outra_fica_inteira():
-    # P168: só a foto que perde no máximo CORTE_MAXIMO_AO_TAMPAR ao tampar aumenta (a quadrada, a
-    # um pouco mais alta ou mais larga); a outra fica inteira até a resposta da P169. A que não abre
-    # não tampa.
+    # P168: só a foto que perde no máximo CORTE_MAXIMO_AO_TAMPAR ao tampar aumenta cortando (a
+    # quadrada, a um pouco mais alta ou mais larga); a outra não é cortada (estica, P169 1). A que
+    # não abre não tampa.
     import io
 
     from PIL import Image
@@ -1516,25 +1516,50 @@ def test_foto_quase_quadrada_tampa_e_a_outra_fica_inteira():
     assert abs((min(brancos) + max(brancos)) / 2 - 359.5) <= 2
 
 
-def test_capa_da_grade_com_a_foto_de_pe_fica_inteira_e_no_meio():
-    # A foto que não é quadrada (de pé, 3:4) entra inteira, no maior tamanho que cabe acima da
-    # faixa, no meio, com o preto dos lados (P160 2), até a resposta da P169; a faixa desce até o
-    # fim do quadro, como na quadrada (P168).
+def test_capa_da_grade_com_a_foto_que_nao_e_quadrada_estica_ate_15_e_o_resto_fica_desfocado():
+    # P169 1 (vídeo do Rafael das 23:29 de 06/11): a foto que não é quase quadrada (a mais larga,
+    # quando o robô corta as letras do anúncio, ou a de pé) estica só até 15% na direção em que
+    # falta e, se ainda não tampar, o que faltar fica com a própria foto desfocada; nada de preto
+    # no que a grade mostra, e nada da foto é cortado. A faixa desce até o fim do quadro (P171).
     import io
 
     from PIL import Image
-    saida = io.BytesIO()
-    Image.new("RGB", (600, 800), (200, 120, 40)).save(saida, "JPEG")
-    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(saida.getvalue(), "Leve"))).convert("RGB")
-    esquerda, cima, direita, faixa = edicao_video.lugar_da_foto()
+
+    def listrada(largura, altura):
+        imagem = Image.new("RGB", (largura, altura), (200, 120, 40))
+        for x in range(0, largura, 40):
+            imagem.paste((40, 90, 200), (x, 0, x + 20, altura))
+        saida = io.BytesIO()
+        imagem.save(saida, "PNG")
+        return saida.getvalue(), imagem
+
+    x1, cima, x2, faixa = edicao_video.lugar_da_foto()
     fio = edicao_video.FIO_DA_CAPA
-    altura = faixa - cima - fio
-    largura = round(600 * altura / 800)
-    x = esquerda + (direita - esquerda - largura) // 2
-    assert _cor_de(capa, (x + 2, cima + fio + 2), (200, 120, 40)) and _cor_de(capa, (x + largura - 3, faixa - 3),
-                                                                             (200, 120, 40))
-    assert _pretos(capa, (esquerda, cima + fio, x - 1, faixa), passo=2)
-    assert _pretos(capa, (x + largura + 1, cima + fio, direita, faixa), passo=2)
+    alto, baixo = edicao_video.GRADE_NO_CELULAR
+    largura, altura = x2 - x1, faixa - cima - fio
+    assert (x1, x2, cima) == (0, edicao_video.TELA[0], alto)
+    for tamanho in ((800, 560), (800, 700), (600, 800)):
+        foto, imagem = listrada(*tamanho)
+        capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(foto, "Leve"))).convert("RGB")
+        # Nada de preto no que a grade mostra.
+        assert not any(max(capa.getpixel((x, y))) < 20 for x in range(0, 720, 3) for y in range(alto, baixo, 3)), tamanho
+        escala = min(largura / imagem.width, altura / imagem.height)
+        esticada = (round(min(largura, imagem.width * escala * 1.15)), round(min(altura, imagem.height * escala * 1.15)))
+        # A foto inteira, esticada no máximo 15%, no pé do lugar dela e no meio da largura.
+        x, y = (largura - esticada[0]) // 2, cima + fio + altura - esticada[1]
+        assert capa.crop((x, y, x + esticada[0], y + esticada[1])).tobytes() == imagem.resize(esticada,
+                                                                                             Image.LANCZOS).tobytes()
+        assert max(esticada[0] / (imagem.width * escala), esticada[1] / (imagem.height * escala)) <= 1.15 + 0.01
+        if esticada == (largura, altura):
+            continue
+        # O resto, a própria foto desfocada: as listras se misturam, sem o laranja nem o azul puros.
+        fora = (0, cima + fio, 720, y) if esticada[0] == largura else (0, cima + fio, x, faixa)
+        pontos = [capa.getpixel((px, py)) for px in range(fora[0], fora[2], 2) for py in range(fora[1], fora[3], 2)]
+        assert pontos and not any(p in ((200, 120, 40), (40, 90, 200)) for p in pontos), tamanho
+    # A foto um pouco mais larga estica até tampar, sem desfocado (no máximo 15%).
+    foto, imagem = listrada(800, 700)
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(foto, "Leve"))).convert("RGB")
+    assert capa.crop((0, cima + fio, 720, faixa)).tobytes() == imagem.resize((largura, altura), Image.LANCZOS).tobytes()
     assert _cor_de(capa, (360, cima + fio - 1), edicao_video.LARANJA_DA_SHOPEE)
     assert _cor_de(capa, (3, 1279), edicao_video.LARANJA_DA_SHOPEE)
 
