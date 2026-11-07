@@ -608,6 +608,32 @@ def test_viral_deixa_de_fora_o_que_veio_do_canal_afiliados_e_o_video_que_o_robo_
     assert asv.proximo_video("viral")["id"] == "viral:de_fora"
 
 
+def test_viral_deixa_de_fora_o_item_cujo_arquivo_e_de_outro_clone():
+    # 07/11, 15:57 e 16:11 (o Rafael: "vc está comparando 2 vídeos diferentes"): o Espião salvava o
+    # vídeo com o primeiro nome livre ("temp_clone_ (N)"). O vídeo do clone de 06/11 14:50 foi postado
+    # no Viral e saiu do disco, o clone de 07/11 11:13 pegou o mesmo nome, e o item antigo, que fica na
+    # fila até o fim do dia, apontava para o vídeo novo: o robô juntou o link de um com o arquivo do outro.
+    import db
+    antigo, novo = 1793987407, 1794060832
+    caminho = _arquivo("temp/temp_clone_ (17).mp4")
+    os.utime(caminho, (novo - 5, novo - 5))                      # escrito na captura do clone novo
+    proprio = _arquivo("temp/temp_clone_clone_1794079659_9443.mp4")   # o id no nome: o arquivo é dele
+    db.salvar_config("fila_clonagem", {"fila": [
+        {"id": f"clone_{antigo}_2982", "caminho_video": caminho, "link_original": "https://br.shp.ee/antigo",
+         "data_captura": "2026-11-06 14:50:07"},
+        {"id": f"clone_{novo}_5595", "caminho_video": caminho, "link_original": "https://s.shopee.com.br/novo",
+         "data_captura": "2026-11-07 11:13:52"},
+        {"id": "clone_1794079659_9443", "caminho_video": proprio, "link_original": "https://s.shopee.com.br/outro",
+         "data_captura": "2026-11-07 16:27:39"},
+    ]})
+    assert [c[0] for c in asv.candidatos_nao_usados("viral")] == [
+        "viral:clone_1794079659_9443", f"viral:clone_{novo}_5595"]
+    assert not asv.arquivo_do_proprio_clone({"id": f"clone_{antigo}_2982", "caminho_video": caminho})
+    # Sem a hora no id, ou sem o arquivo, não há o que comparar.
+    assert asv.arquivo_do_proprio_clone({"id": "c1", "caminho_video": caminho})
+    assert asv.arquivo_do_proprio_clone({"id": f"clone_{antigo}_2982", "caminho_video": "temp/sumiu.mp4"})
+
+
 def test_canal_afiliados_pula_imagem_e_usa_a_legenda():
     inserir("CREATE TABLE fila_postagens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_unico TEXT UNIQUE, "
             "caminho_video TEXT, legenda TEXT)")

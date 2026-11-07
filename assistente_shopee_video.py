@@ -249,13 +249,38 @@ CONSULTAS = {
 }
 
 
+# O arquivo escrito mais que isto depois da captura do clone (os segundos no id dele) é de outro clone.
+FOLGA_DO_ARQUIVO_DO_CLONE = 10 * 60
+
+
+def arquivo_do_proprio_clone(item):
+    """
+    Se o arquivo do item da fila do Espião é o vídeo dele. O arquivo com o id do clone no nome é
+    dele. O de nome antigo ("temp_clone_ (N)", o primeiro nome livre que o Telethon dava) pode ser de
+    outro clone: depois que o vídeo de um clone já postado no Viral sai do disco, o próximo baixado
+    pegava o nome, e o item antigo, que fica na fila até o fim do dia, apontava para o vídeo novo (o
+    robô juntava o link de um vídeo com o arquivo de outro; 07/11, 15:57 e 16:11). O id guarda a hora
+    da captura, depois do download: o arquivo escrito bem depois dela é de outro clone.
+    """
+    caminho, ident = str(item.get("caminho_video") or ""), str(item.get("id") or "")
+    if ident and ident in os.path.basename(caminho):
+        return True
+    try:
+        capturado = int(ident.split("_")[1])
+        return os.path.getmtime(caminho) <= capturado + FOLGA_DO_ARQUIVO_DO_CLONE
+    except (IndexError, ValueError, OSError):
+        # Sem a hora no id ou sem o arquivo, não há o que comparar (o que não existe já fica de fora).
+        return True
+
+
 def _candidatos(fonte):
     """(id, arquivo, link, legenda) dos vídeos da fonte, do mais novo para o mais velho."""
     if fonte == "viral":
         fila = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
         # O que o Espião trouxe do Canal Afiliados é nosso (o vídeo que o robô postou, os posts
         # do Rafael): pegar de volta daria loop. Pedido do Rafael (30/10): DECISOES.md, Shopee Vídeo.
-        fila = [item for item in fila if str(item.get("chat_origem")) != pedidos_do_canal.CANAL]
+        fila = [item for item in fila if str(item.get("chat_origem")) != pedidos_do_canal.CANAL
+                and arquivo_do_proprio_clone(item)]
         fila = sorted(fila, key=lambda item: item.get("data_captura") or "", reverse=True)
         return [(f"viral:{item.get('id')}", item.get("caminho_video"), item.get("link_original"), "")
                 for item in fila]
