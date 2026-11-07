@@ -1011,7 +1011,7 @@ def _linha_da_medicao(medicao):
 def texto_capa(config, medicao):
     """
     A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168; 07/11,
-    P169 1, P171 e os vídeos e prints das 01:04 às 02:49): DECISOES.md, Shopee Vídeo.
+    P169 1, P171, os vídeos e prints das 01:04 às 02:49 e P176 1): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
@@ -1039,6 +1039,10 @@ def texto_capa(config, medicao):
         f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, no lugar "
         "da foto do anúncio, nos rascunhos do robô e no modo assistente: o app usa o primeiro quadro do vídeo como "
         "capa da grade, e todo post sai com a frase, mesmo com o app lento.\n\n"
+        "<b>A foto sem letras</b>: com as letras do anúncio fora do produto, o robô corta o pedaço com elas, e a IA "
+        "confere, com a foto inteira ao lado, que o produto ficou inteiro no corte (escolha sua, P176). Se faltar um "
+        "pedaço do produto, ou com as letras em cima dele, a capa usa um momento do próprio vídeo, com o produto "
+        "inteiro e sem letras; sem esse momento, vai a foto do anúncio inteira.\n\n"
         "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Ligada, ela "
         "vai em todos os vídeos. Quando a frase da IA não serve nem na 2ª vez, a capa vai com o nome do produto. Na "
         "bebida alcoólica, a capa continua a dos três avisos, e o vídeo sem a frase, o nome e a vantagem da IA vai "

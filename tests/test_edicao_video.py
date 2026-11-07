@@ -3016,11 +3016,13 @@ def test_foto_da_capa_sem_as_letras_do_anuncio(monkeypatch):
         return respostas.pop(0)
     monkeypatch.setattr(api_gemini, "gerar_texto_gemini", ia)
     foto = _foto_jpg()
-    respostas.append('{"letras": true, "sobre_o_produto": false, "caixa": [150, 0, 1000, 1000]}')
+    respostas.extend(['{"letras": true, "sobre_o_produto": false, "caixa": [150, 0, 1000, 1000]}', '{"inteiro": true}'])
     cortada, resultado = edicao_video.foto_sem_letras(foto)
     assert resultado == edicao_video.LETRAS_CORTADAS
     assert Image.open(io.BytesIO(cortada)).size == (800, 680)
-    assert pedidos == [(edicao_video.PROMPT_DAS_LETRAS_DA_FOTO, ["image/jpeg"])]
+    # Depois do corte, a IA confere, com a foto inteira ao lado, que o produto ficou inteiro (P176 1).
+    assert pedidos == [(edicao_video.PROMPT_DAS_LETRAS_DA_FOTO, ["image/jpeg"]),
+                       (edicao_video.PROMPT_DO_CORTE_DAS_LETRAS, ["image/jpeg", "image/png"])]
     # Sem letras, com as letras em cima do produto (aí a capa procura um quadro do vídeo, P164 1:
     # foto_para_a_capa), com a IA sem resposta ou com a caixa que não serve (pequena demais, a foto
     # toda ou fora do formato), a foto vai como está.
@@ -3035,6 +3037,37 @@ def test_foto_da_capa_sem_as_letras_do_anuncio(monkeypatch):
         respostas.append(resposta)
         assert edicao_video.foto_sem_letras(foto) == (foto, esperado), resposta
     assert edicao_video.foto_sem_letras(b"nao e imagem") == (b"nao e imagem", edicao_video.SEM_RESPOSTA_DAS_LETRAS)
+
+
+def test_corte_das_letras_que_tiraria_parte_do_produto_nao_vai_a_capa(monkeypatch):
+    # Escolha do Rafael (07/11, P176 1): depois de cortar as letras, a IA compara o corte com a foto
+    # inteira e diz se o produto ficou inteiro. Faltando um pedaço (ou sem a conferência), a foto não
+    # é cortada, e a capa usa um momento do próprio vídeo sem letras (P164); sem ele, a foto inteira.
+    import api_gemini
+    respostas = []
+
+    async def ia(prompt, imagens=None):
+        return respostas.pop(0)
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", ia)
+    foto = _foto_jpg()
+    letras = '{"letras": true, "sobre_o_produto": false, "caixa": [0, 0, 850, 1000]}'
+    for conferencia, esperado in (('{"inteiro": false}', edicao_video.CORTE_TIRARIA_O_PRODUTO),
+                                  (None, edicao_video.CORTE_SEM_CONFERENCIA),
+                                  ('{"inteiro": "sim"}', edicao_video.CORTE_SEM_CONFERENCIA)):
+        respostas.extend([letras, conferencia])
+        assert edicao_video.foto_sem_letras(foto) == (foto, esperado), conferencia
+    # Sem poder cortar, a capa procura o quadro do vídeo, e o registro diz por que a foto não serviu;
+    # sem o quadro, vai a foto do anúncio inteira, e o detalhe diz por que o quadro não entrou.
+    for sem_o_corte in (edicao_video.CORTE_TIRARIA_O_PRODUTO, edicao_video.CORTE_SEM_CONFERENCIA):
+        monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto, r=sem_o_corte: (foto, r))
+        monkeypatch.setattr(edicao_video, "quadro_sem_letras",
+                            lambda video, nome="": (b"quadro", edicao_video.QUADRO_DO_VIDEO))
+        assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"quadro", edicao_video.QUADRO_DO_VIDEO,
+                                                                   sem_o_corte)
+        monkeypatch.setattr(edicao_video, "quadro_sem_letras",
+                            lambda video, nome="": (None, edicao_video.SEM_MOMENTO_SEM_LETRAS))
+        assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"foto", sem_o_corte,
+                                                                   edicao_video.SEM_MOMENTO_SEM_LETRAS)
 
 
 def test_capa_que_vai_ao_ar_usa_a_foto_sem_as_letras_e_anota_no_registro(monkeypatch, tmp_path):
@@ -3435,7 +3468,8 @@ def test_com_as_letras_em_cima_do_produto_a_capa_usa_um_quadro_do_video(monkeypa
     assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"cortada", edicao_video.LETRAS_CORTADAS, "")
     monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.LETRAS_NO_PRODUTO))
     monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="": (b"quadro", edicao_video.QUADRO_DO_VIDEO))
-    assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"quadro", edicao_video.QUADRO_DO_VIDEO, "")
+    assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"quadro", edicao_video.QUADRO_DO_VIDEO,
+                                                               edicao_video.LETRAS_NO_PRODUTO)
     monkeypatch.setattr(edicao_video, "quadro_sem_letras",
                         lambda video, nome="": (None, edicao_video.QUADRO_COM_LETRAS))
     assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"foto", edicao_video.LETRAS_NO_PRODUTO,
@@ -3462,5 +3496,5 @@ def test_capa_que_vai_ao_ar_com_o_quadro_do_video_e_o_registro(monkeypatch, tmp_
     assert capas == [_quadro_jpg(), _quadro_jpg(), _foto_jpg(), _foto_jpg()]
     linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LETRAS_DA_FOTO,
                                                        "2000-01-01 00:00:00")
-    assert [(r[2], r[3]) for r in linhas] == [(edicao_video.QUADRO_DO_VIDEO, ""),
+    assert [(r[2], r[3]) for r in linhas] == [(edicao_video.QUADRO_DO_VIDEO, edicao_video.LETRAS_NO_PRODUTO),
                                               (edicao_video.LETRAS_NO_PRODUTO, edicao_video.SEM_MOMENTO_SEM_LETRAS)]
