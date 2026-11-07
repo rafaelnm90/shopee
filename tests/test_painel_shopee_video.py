@@ -481,7 +481,7 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     # maior, na faixa, que vai na mesma cor até embaixo, também nas cores claras. Vídeos das 01:04 e
     # 01:31 de 07/11: a frase no meio do pedaço da faixa à direita do número, e nada no preto.
     assert "com um fio em cima" in texto and "no meio do pedaço da faixa à direita do número de visualizações" in texto
-    assert "a frase fica à direita do número de visualizações, embaixo à esquerda, com espaço para ele crescer" in texto
+    assert "a frase fica à direita do número de visualizações, embaixo à esquerda, com espaço para ele com até 2" in texto
     assert "numa linha ou, quando a letra fica maior assim, em duas" in texto
     assert "nada da capa fica no preto do fundo" in texto
     assert "com o número por cima dela, na mesma cor" in texto and "embaixo da frase fica o preto" not in texto

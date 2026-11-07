@@ -1027,7 +1027,7 @@ def texto_capa(config, medicao):
         "maior letra que cabe nele: numa linha ou, quando a letra fica maior assim, em duas. O fio e a faixa ficam "
         "na mesma cor, e nada da capa fica no preto do fundo. A faixa não cobre nada da foto.\n\n"
         "<b>Os números ficam livres</b>: a frase fica à direita do número de visualizações, embaixo à esquerda, com "
-        "espaço para ele crescer, e "
+        "espaço para ele com até 2 algarismos (de 100 visualizações para cima, ele encosta no começo da frase), e "
         "a faixa desce até o fim da capa, com o número por cima dela, na mesma cor (nas cores claras, o número, em "
         "branco, fica mais apagado); a sacolinha da Shopee fica por cima do canto de cima da foto. Com a foto quase "
         "quadrada, a foto e a faixa tampam todo o pedaço da capa que a grade mostra (a quadrada perde um pouco em "
