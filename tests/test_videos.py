@@ -211,3 +211,45 @@ def test_palavras_faladas_pelo_reconhecimento_de_voz(monkeypatch, tmp_path):
     assert videos.palavras_faladas(str(video)) is None
     monkeypatch.setitem(sys.modules, "faster_whisper", None)
     assert videos.palavras_faladas(str(video)) is None
+
+
+def test_abertura_do_exemplo_com_a_passagem_de_uma_capa_para_a_outra(tmp_path):
+    # P175 1: só a abertura, para o exemplo do painel; o 1º quadro é a capa da grade inteira e, em
+    # `passagem` segundos, ela se desfaz na do vídeo aberto.
+    import io
+    import shutil
+    import subprocess
+
+    from PIL import Image
+    if not shutil.which("ffmpeg"):
+        return
+
+    def png(cor):
+        saida = io.BytesIO()
+        Image.new("RGB", (720, 1280), cor).save(saida, "PNG")
+        return saida.getvalue()
+
+    destino = str(tmp_path / "abertura.mp4")
+    assert videos.abertura_com_passagem(png((220, 30, 30)), png((30, 30, 220)), destino, 2, 0.3) == ""
+    assert abs(videos.duracao(destino) - 2) < 0.1
+
+    def vermelho(numero):
+        saida = subprocess.run(["ffmpeg", "-v", "error", "-i", destino, "-vf", f"select=eq(n\\,{numero})",
+                                "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True).stdout
+        return Image.open(io.BytesIO(saida)).convert("RGB").getpixel((360, 640))[0]
+
+    assert vermelho(0) > 200 and 60 < vermelho(5) < 190 and vermelho(12) < 40 and vermelho(50) < 40
+    assert videos.abertura_com_passagem(b"nao e imagem", png((0, 0, 0)), destino) == "a capa não é uma imagem que abre"
+
+
+def test_passagem_entre_as_capas_so_com_o_tempo_dela():
+    # Sem a passagem, a capa do resto cobre a do 1º quadro do 2º quadro em diante (P129); com ela, a
+    # do resto entra aos poucos por cima (P175 1).
+    corte = videos.comando_foto_e_miniatura("f.jpg", "v.mp4", "d.mp4", 2, 180, (576, 128), False, capa="c.png",
+                                            capa_do_resto="r.png")
+    assert "enable='gte(n,1)'" in corte[corte.index("-filter_complex") + 1]
+    suave = videos.comando_foto_e_miniatura("f.jpg", "v.mp4", "d.mp4", 2, 180, (576, 128), False, capa="c.png",
+                                            capa_do_resto="r.png", passagem=0.3)
+    filtro = suave[suave.index("-filter_complex") + 1]
+    assert "fade=t=in:st=0.0167:d=0.300:alpha=1" in filtro and "gte(n,1)" not in filtro
+

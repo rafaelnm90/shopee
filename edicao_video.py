@@ -40,6 +40,14 @@ import videos
 FONTES_COM_EDICAO = tuple(assistente.FONTES)
 # A foto do produto sozinha antes do vídeo, em segundos.
 SEGUNDOS_DA_FOTO = 2
+# A passagem da capa da grade (o 1º quadro, que o app usa na grade) para a do vídeo aberto (P129):
+# em vez do pulo de um quadro para o outro, que o app mostra como uma piscada porque segura o 1º
+# quadro enquanto o vídeo começa, a da grade fica inteira no 1º quadro e se desfaz na do vídeo
+# aberto em PASSAGEM_DA_CAPA segundos. O exemplo do painel (Capa com Chamada) já mostra a passagem;
+# os vídeos que vão ao ar só a ganham com PASSAGEM_NOS_VIDEOS, depois de o Rafael ver o exemplo.
+# Escolha do Rafael (07/11, P175 1): DECISOES.md, Shopee Vídeo.
+PASSAGEM_DA_CAPA = 0.3
+PASSAGEM_NOS_VIDEOS = False
 # Nos rascunhos com produtos a mais, a miniatura troca entre as fotos diferentes dos produtos do
 # post, uma volta só, com o vídeo dividido igual entre elas e pelo menos este tanto de segundos
 # para cada: as que não cabem ficam de fora. Escolha do Rafael (30/10, P103): DECISOES.md, Shopee Vídeo.
@@ -1266,7 +1274,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura, centro_da_miniatura(largura),
                                        SETA, (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
                                        PULSO_DA_SETA, capa, musica, outras=outras_fotos,
-                                       moldura=moldura_do_cartao(rotulo_de_ia), espera_da_moldura=ESPERA_DA_MOLDURA)
+                                       moldura=moldura_do_cartao(rotulo_de_ia), espera_da_moldura=ESPERA_DA_MOLDURA,
+                                       passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0)
 
 
 def largura_da_miniatura(miniatura):
@@ -3117,13 +3126,28 @@ def exemplo_editor_2(destino):
         legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0], cor=cor_do_produto(textos.get("cor"))))
 
 
+def _abertura_do_exemplo(capa, no_video):
+    """
+    A abertura do vídeo (MP4, bytes) com a passagem da capa da grade para a do vídeo aberto (P175 1),
+    para o exemplo do painel; None quando ela não sai (o exemplo vai só com as fotos).
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as pasta:
+        destino = os.path.join(pasta, "abertura.mp4")
+        if videos.abertura_com_passagem(capa, no_video, destino, SEGUNDOS_DA_FOTO, PASSAGEM_DA_CAPA):
+            return None
+        with open(destino, "rb") as arquivo:
+            return arquivo.read()
+
+
 def exemplo_capa():
     """
     O exemplo da capa com chamada (P76), com o próximo vídeo que o robô pegaria: a frase curta
     que a IA escreve vendo o vídeo (P106; sem ela, a vantagem), na capa. Tem a lista própria dos
-    já mostrados. Devolve (nome do produto, "", {"capa", "grade", "video", "chamada"}) quando deu
-    certo (as imagens em PNG: a capa inteira do 1º quadro, o pedaço que a grade do perfil mostra e
-    o que o app mostra do vídeo aberto no resto da abertura, P129), ou (None, motivo, None).
+    já mostrados. Devolve (nome do produto, "", {"capa", "grade", "video", "abertura", "chamada"})
+    quando deu certo (as imagens em PNG: a capa inteira do 1º quadro, o pedaço que a grade do
+    perfil mostra e o que o app mostra do vídeo aberto no resto da abertura, P129; e a abertura em
+    MP4, com a passagem de uma capa para a outra, P175 1), ou (None, motivo, None).
     """
     def editar_um(arquivo, link, foto):
         produto = _produto_do_link(link)
@@ -3142,6 +3166,9 @@ def exemplo_capa():
         no_video = capa_com_chamada(foto, frase, no_video=True, cor=cor, segunda=segunda)
         if no_video:
             exemplo["video"] = recorte_do_video_aberto(no_video)
+            abertura = _abertura_do_exemplo(capa, no_video)
+            if abertura:
+                exemplo["abertura"] = abertura
         return "", exemplo
 
     return _exemplo("ids_capa", editar_um)

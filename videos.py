@@ -171,14 +171,33 @@ def tem_audio(caminho):
 
 
 QUADROS_POR_SEGUNDO = 30
+# Cada imagem e o vídeo da edição: em 720x1280, no fundo preto, no mesmo ritmo de quadros.
+TELA_DA_EDICAO = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
 # A música de fundo entra e sai devagar, em segundos.
 ENTRADA_DA_MUSICA = 0.3
 SAIDA_DA_MUSICA = 1.5
 
 
+def _capa_do_resto_na_abertura(indice, tela, passagem=0.0):
+    """
+    O filtro que põe a capa do resto da abertura (a entrada `indice`) sobre a do 1º quadro
+    ([primeiro]), saindo em [foto] (P129). Sem a `passagem`, ela cobre a do 1º quadro do 2º quadro
+    em diante; com a `passagem` (segundos), a do 1º quadro continua inteira no 1º quadro e se desfaz
+    na outra nesse tempo, sem o pulo de uma para a outra (P175 1). As duas têm o fundo preto
+    inteiro, sem transparência.
+    """
+    if passagem > 0:
+        # A passagem começa no meio do caminho entre o 1º e o 2º quadro: o 1º fica com a do 1º quadro inteira.
+        comeco = 0.5 / QUADROS_POR_SEGUNDO
+        return (f"[{indice}:v]{tela},format=rgba,fade=t=in:st={comeco:.4f}:d={passagem:.3f}:alpha=1[resto];"
+                "[primeiro][resto]overlay=shortest=1,format=yuv420p[foto]")
+    return f"[{indice}:v]{tela}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
+
+
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
-                             outras=(), troca=0.0, capa_do_resto=None, moldura=None, espera_da_moldura=0.0):
+                             outras=(), troca=0.0, capa_do_resto=None, moldura=None, espera_da_moldura=0.0,
+                             passagem=0.0):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -194,12 +213,13 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     fotos do produto, na ordem), a miniatura troca entre a `foto` e cada uma delas, uma volta
     só, `troca` segundos cada, no mesmo lugar: a `foto` primeiro, e a última fica até o fim.
     Com a `capa_do_resto` (o caminho de outra imagem), a `capa` fica só no 1º quadro, o que o app
-    usa como capa na grade do perfil, e a `capa_do_resto` no resto da abertura (P129). Com a
+    usa como capa na grade do perfil, e a `capa_do_resto` no resto da abertura (P129); com a
+    `passagem` (segundos), a `capa` se desfaz nela nesse tempo, sem o pulo (P175 1). Com a
     `moldura` (o caminho de uma imagem do tamanho da tela, com o fundo transparente), ela vai por
     cima do vídeo `espera_da_moldura` segundos depois da abertura, até o fim, por baixo da seta (a
     do cartão do produto, P128, que espera o cartão do app aparecer, P140 2).
     """
-    tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
+    tela = TELA_DA_EDICAO
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
     # Escolha do Rafael (29/10, P72): DECISOES.md, Shopee Vídeo.
@@ -257,11 +277,10 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
         for outra in outras:
             entradas += ["-loop", "1", "-i", outra]
     if capa_do_resto:
-        # Entra por último, para os números das outras entradas não mudarem; do 2º quadro em diante
-        # ela cobre a capa do 1º (as duas têm o fundo preto inteiro, sem transparência).
+        # Entra por último, para os números das outras entradas não mudarem.
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-t", str(segundos), "-i", capa_do_resto]
-        filtro += f";[{indice}:v]{tela}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
+        filtro += ";" + _capa_do_resto_na_abertura(indice, tela, passagem)
     if moldura:
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-i", moldura]
@@ -275,12 +294,13 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
                          centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=(),
-                         moldura=None, espera_da_moldura=0.0):
+                         moldura=None, espera_da_moldura=0.0, passagem=0.0):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
     uma imagem, ou o par (a do 1º quadro, a do resto da abertura), P129), ela abre o vídeo no
-    lugar da foto. Com a `musica` (caminho de um arquivo de
+    lugar da foto; com o par e a `passagem` (segundos), a do 1º quadro se desfaz na outra nesse
+    tempo (P175 1). Com a `musica` (caminho de um arquivo de
     áudio), ela é o som do vídeo inteiro. Com as `outras` (bytes de outras fotos do produto, na
     ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
     igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Com a `moldura`
@@ -335,7 +355,40 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
                                            musica if total > segundos else None, total,
                                            caminhos_das_outras if troca else (), troca, caminho_do_resto,
-                                           caminho_da_moldura, espera_da_moldura)
+                                           caminho_da_moldura, espera_da_moldura, passagem)
+        try:
+            feito = subprocess.run(comando, capture_output=True, timeout=espera)
+        except subprocess.TimeoutExpired:
+            return f"o ffmpeg passou de {espera // 60} min"
+        except OSError:
+            return "o ffmpeg não abriu"
+        if feito.returncode != 0 or not os.path.exists(temporario) or not os.path.getsize(temporario):
+            return f"o ffmpeg falhou (código {feito.returncode})"
+        os.replace(temporario, destino)
+    return ""
+
+
+def abertura_com_passagem(capa, resto, destino, segundos=2, passagem=0.3, espera=120):
+    """
+    Grava em destino só a abertura do vídeo, sem som: a `capa` (bytes, a do 1º quadro, que a grade
+    usa) e o `resto` (bytes, a do vídeo aberto) por `segundos`, com a passagem de uma para a outra
+    em `passagem` segundos, como no vídeo que vai ao ar (P175 1). O exemplo do painel. Devolve ""
+    quando deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
+    """
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
+        caminhos = []
+        for nome, imagem in (("capa.png", capa), ("resto.png", resto)):
+            caminhos.append(os.path.join(pasta, nome))
+            with open(caminhos[-1], "wb") as arquivo:
+                arquivo.write(imagem or b"")
+            if not imagem_abre(caminhos[-1]):
+                return "a capa não é uma imagem que abre"
+        temporario = os.path.join(pasta, "abertura.mp4")
+        filtro = f"[0:v]{TELA_DA_EDICAO}[primeiro];" + _capa_do_resto_na_abertura(1, TELA_DA_EDICAO, passagem)
+        comando = (["ffmpeg", "-v", "error", "-y", "-loop", "1", "-t", str(segundos), "-i", caminhos[0],
+                    "-loop", "1", "-t", str(segundos), "-i", caminhos[1], "-filter_complex", filtro,
+                    "-map", "[foto]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", temporario])
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

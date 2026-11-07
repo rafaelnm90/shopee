@@ -542,6 +542,16 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     tipo, caminhos, legenda = msg.midias[-1]
     assert [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png", "video.png"]
     assert "3ª foto: o que aparece com o vídeo aberto" in legenda
+    # Com o começo do vídeo (P175 1), ele vai depois das fotos, com a passagem de uma capa para a outra.
+    monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
+        "Copo Térmico", "", {"capa": b"capa", "grade": b"grade", "video": b"video", "abertura": b"mp4",
+                             "chamada": "Gelado"}))
+    msg = MsgComMidia(Msg, sv.BOTAO_EXEMPLO_DA_CAPA)
+    rodar(sv.exemplo_capa_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["album", "video"]
+    tipo, caminho, legenda = msg.midias[-1]
+    assert os.path.basename(caminho) == "abertura.mp4" and legenda == sv.LEGENDA_DA_ABERTURA
+    assert "em 0,3 s, ela se desfaz na capa do vídeo aberto" in legenda
     # Sem o exemplo, o motivo.
     monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
         None, "a IA não escreveu a vantagem do produto deste vídeo", None))
