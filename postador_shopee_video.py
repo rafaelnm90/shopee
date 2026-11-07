@@ -936,6 +936,23 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     return False, f"o produto do vídeo não está na lista, nem pela foto do 1º ({motivo}): nada adicionado (aviso no privado)"
 
 
+# Os sinais do nome do produto que o registro do anexar mostra, em rótulos fixos (o checkup é
+# público; o nome nunca vai): os 2 produtos que o app não deixou na tela final depois do Feito em
+# 07/11 (às 06:09 e às 16:46, sem aviso) tinham dois-pontos no nome; o anexado e o que não ficou
+# dizem os sinais, para o checkup comparar.
+SINAIS_DO_NOME = ((":", "dois-pontos"), ("'’", "apóstrofo"), ('"“”', "aspas"), ("/", "barra"), ("+", "sinal de mais"))
+LETRAS_DO_NOME_LONGO = 100
+
+
+def forma_do_nome(nome):
+    """Os sinais do nome do produto (SINAIS_DO_NOME e o nome longo), como "; o nome com dois-pontos"; "" sem nenhum."""
+    nome = str(nome or "")
+    sinais = [rotulo for letras, rotulo in SINAIS_DO_NOME if any(letra in nome for letra in letras)]
+    if len(nome) > LETRAS_DO_NOME_LONGO:
+        sinais.append(f"mais de {LETRAS_DO_NOME_LONGO} letras")
+    return f"; o nome com {', '.join(sinais)}" if sinais else ""
+
+
 def _tocar_em_adicionar(d, tela, botao, nome_na_janela, como, anexados):
     """Toca no Adicionar fora da bolinha da Motorola e confere a janela pelo nome que ela deve mostrar."""
     ponto = ponto_livre(botao, tela)
@@ -947,7 +964,8 @@ def _tocar_em_adicionar(d, tela, botao, nome_na_janela, como, anexados):
     d.click(x, y)
     ok, motivo = conferir_janela(d, nome_na_janela, ponto)
     if ok:
-        registro_processos.registrar("shopee_video", "anexar o produto", "anexado", como, ok=True)
+        registro_processos.registrar("shopee_video", "anexar o produto", "anexado", como + forma_do_nome(nome_na_janela),
+                                     ok=True)
         if anexados is not None:
             anexados.append(nome_na_janela)
     return ok, motivo
