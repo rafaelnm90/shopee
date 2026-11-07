@@ -229,6 +229,51 @@ async def chat_do_evento(event):
         return None
 
 
+# A última mensagem (qualquer uma) que chegou de cada grupo vigiado do Espião e de cada origem do
+# Espelhador, pelo apelido do grupo (registro_processos.apelido, o mesmo do registro): o checkup
+# diz, do grupo que parou de mandar vídeo com link, se ele continua mandando mensagem (a conta tem
+# acesso e o grupo só não postou vídeo com link) ou se nada chegou dele (o grupo ficou quieto ou a
+# conta perdeu o acesso). Fica na memória e vai ao banco a cada GRAVAR_ULTIMAS_A_CADA segundos;
+# "desde" diz quando a anotação começou. Checkup de 06/11/2026.
+CHAVE_DAS_ULTIMAS_MENSAGENS = "origens_ultima_mensagem"
+GRAVAR_ULTIMAS_A_CADA = 300
+_ultimas_mensagens = {"espiao": {}, "espelhador": {}}
+
+
+def anotar_mensagem_da_origem(sistema, origem):
+    """Anota (na memória) que chegou agora uma mensagem do grupo vigiado origem (como está na lista do painel)."""
+    apelido = registro_processos.apelido(str(origem).lower())
+    if apelido:
+        _ultimas_mensagens[sistema][apelido] = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def gravar_ultimas_mensagens():
+    """Junta no banco as últimas mensagens anotadas desde a última gravação (sem apagar as de antes)."""
+    novas = {sistema: dict(marcas) for sistema, marcas in _ultimas_mensagens.items() if marcas}
+
+    def juntar(dados):
+        dados.setdefault("desde", datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
+        for sistema, marcas in novas.items():
+            dados.setdefault(sistema, {}).update(marcas)
+        return True
+
+    if not db.atualizar_config(CHAVE_DAS_ULTIMAS_MENSAGENS, juntar):
+        return
+    for sistema, marcas in novas.items():
+        for apelido, momento in marcas.items():
+            if _ultimas_mensagens[sistema].get(apelido) == momento:
+                del _ultimas_mensagens[sistema][apelido]
+
+
+async def gravar_ultimas_mensagens_loop():
+    while True:
+        await asyncio.sleep(GRAVAR_ULTIMAS_A_CADA)
+        try:
+            gravar_ultimas_mensagens()
+        except Exception as e:
+            logger.warning(f"⚠️ [Origens] Não gravei a última mensagem dos grupos: {type(e).__name__}")
+
+
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
     """
@@ -308,6 +353,7 @@ async def interceptar_mensagem(event):
 
     if not eh_alvo_espiao:
         return
+    anotar_mensagem_da_origem("espiao", alvo_casado)
 
     texto_original = event.text or ""
     link_capturado = extrair_link_shopee(event)
@@ -801,6 +847,8 @@ async def motor_espelhador_userbot(event):
     
     if not rotas_ativas:
         return
+    for origem_casada in origens_casadas:
+        anotar_mensagem_da_origem("espelhador", origem_casada)
 
     # Só vídeo; foto é ignorada.
     if getattr(event, 'video', None) is None:
@@ -1399,6 +1447,7 @@ async def main():
     asyncio.create_task(monitorar_status_espelhos())
     asyncio.create_task(atualizar_links_todo_dia())
     asyncio.create_task(monitorar_topicos_submissao())
+    asyncio.create_task(gravar_ultimas_mensagens_loop())
     
     await client.run_until_disconnected()
 
