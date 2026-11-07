@@ -721,7 +721,7 @@ def test_captura_por_grupo_de_origem_mostra_quem_parou_pela_posicao():
                  agora=AGORA - timedelta(hours=1))
     c = checkup.captura_por_origem(AGORA)
     assert c["Espião"] == {"origens": 3, "com_video": 1, "sem_video": [2, 3], "pararam": [2], "pararam_todo_dia": [],
-                           "por_dia": (1, 1, 0)}
+                           "por_dia": (1, 1, 0), "ultima_dos_que_pararam": None, "anotacao_desde": None}
     assert c["Espelhador"]["sem_video"] == [1] and c["Espelhador"]["pararam"] == []
 
     def pontos():
@@ -736,6 +736,29 @@ def test_captura_por_grupo_de_origem_mostra_quem_parou_pela_posicao():
     c = checkup.captura_por_origem(AGORA)
     assert c["Espião"]["pararam_todo_dia"] == [2] and c["Espião"]["por_dia"] == (1, 1, 1)
     assert pontos() == ["Espião: pararam de mandar vídeo (mandavam todo dia nos 2 dias antes): nº 2 da lista do painel"]
+
+
+def test_grupo_que_parou_mostra_a_ultima_mensagem_que_chegou_dele():
+    # Checkup de 06/11/2026: o nº 17 do Espião e o nº 13 do Espelhador pararam de mandar vídeo, e
+    # não dava para saber se o grupo só não postou vídeo com link (mas manda mensagem) ou se nada
+    # chegou dele (quieto, ou a conta perdeu o acesso). O motor_userbot anota a última mensagem de
+    # cada grupo vigiado, e o checkup mostra a de cada grupo que parou.
+    import registro_processos as rp
+    db.salvar_config("alvos_espiao", {"alvos": ["@GrupoA", "@GrupoB", "@GrupoC"]})
+    for origem, horas in (("@grupoa", 30), ("@grupob", 30), ("@grupoc", 2)):
+        rp.registrar("espiao", "vídeo com link no grupo vigiado", "visto", origem=origem,
+                     agora=AGORA - timedelta(hours=horas))
+    db.salvar_config(checkup.CHAVE_DAS_ULTIMAS_MENSAGENS, {
+        "desde": (AGORA - timedelta(hours=40)).strftime("%Y-%m-%d %H:%M:%S"),
+        "espiao": {rp.apelido("@grupoa"): (AGORA - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")}})
+    c = checkup.captura_por_origem(AGORA)["Espião"]
+    assert c["pararam"] == [1, 2] and set(c["ultima_dos_que_pararam"]) == {1, 2}
+    desde = (AGORA - timedelta(hours=40)).strftime("%d/%m %H:%M")
+    assert checkup._ultimas_dos_que_pararam(c, AGORA) == f"nº 1 há 2 h | nº 2 nenhuma desde {desde}"
+    # Sem a anotação (o motor_userbot ainda não gravou), a linha não aparece.
+    db.salvar_config(checkup.CHAVE_DAS_ULTIMAS_MENSAGENS, {})
+    c = checkup.captura_por_origem(AGORA)["Espião"]
+    assert c["ultima_dos_que_pararam"] is None and checkup._ultimas_dos_que_pararam(c, AGORA) == ""
 
 
 def test_parceiros_produto_repetido_entre_parceiros_e_com_a_conta_principal():

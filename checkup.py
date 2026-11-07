@@ -677,24 +677,56 @@ def _por_origem(robo, prefixo, agora):
     return dias
 
 
-def _resumo_das_origens(origens, contagens):
+def _resumo_das_origens(origens, contagens, ultimas=None, desde=None):
     """
     Pela posição na lista do painel (1, 2, 3...): quantas origens, quantas mandaram vídeo nas
     24 h, as que não mandaram, as que pararam (mandaram nas 48 h antes), as que mandavam nos dois
     dias antes e pararam, e os vídeos de cada dia (para ver se o volume caiu). Só as que mandavam
     todo dia viram ponto de atenção: as que postam de vez em quando param e voltam a cada dia
-    (checkup de 04/11/2026: 7 por sistema num dia, outras 7 no seguinte).
+    (checkup de 04/11/2026: 7 por sistema num dia, outras 7 no seguinte). Com as últimas
+    mensagens que o motor_userbot anotou ({apelido: momento}, desde o momento desde), também a
+    última mensagem (qualquer uma) de cada grupo que parou: "ultima_dos_que_pararam", {posição:
+    momento ou None}, None sem a anotação, e "anotacao_desde".
     """
     recente, ontem, anteontem = contagens
     apelidos = [registro_processos.apelido(str(o).lower()) for o in origens]
+    pararam = [i + 1 for i, a in enumerate(apelidos) if not recente[a] and (ontem[a] or anteontem[a])]
     return {
         "origens": len(apelidos),
         "com_video": sum(1 for a in apelidos if recente[a]),
         "sem_video": [i + 1 for i, a in enumerate(apelidos) if not recente[a]],
-        "pararam": [i + 1 for i, a in enumerate(apelidos) if not recente[a] and (ontem[a] or anteontem[a])],
+        "pararam": pararam,
         "pararam_todo_dia": [i + 1 for i, a in enumerate(apelidos) if not recente[a] and ontem[a] and anteontem[a]],
         "por_dia": tuple(sum(dia[a] for a in apelidos) for dia in contagens),
+        "ultima_dos_que_pararam": ({n: ultimas.get(apelidos[n - 1]) for n in pararam}
+                                   if ultimas is not None else None),
+        "anotacao_desde": desde if ultimas is not None else None,
     }
+
+
+# A última mensagem de cada grupo vigiado, que o motor_userbot anota (checkup de 06/11/2026): do
+# grupo que parou de mandar vídeo, diz se ele continua mandando mensagem (a conta tem acesso e o
+# grupo só não postou vídeo com link) ou se nada chegou dele (quieto, ou a conta perdeu o acesso).
+CHAVE_DAS_ULTIMAS_MENSAGENS = "origens_ultima_mensagem"
+
+
+def _ultima_do_grupo(momento, desde, agora):
+    """A última mensagem de um grupo que parou, para o checkup: "há N h", ou nenhuma desde o começo da anotação."""
+    if momento:
+        horas = (agora.replace(tzinfo=None) - datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")).total_seconds() / 3600
+        return f"há {horas:.0f} h"
+    if desde:
+        return f"nenhuma desde {datetime.strptime(desde, '%Y-%m-%d %H:%M:%S'):%d/%m %H:%M}"
+    return "nenhuma anotada"
+
+
+def _ultimas_dos_que_pararam(c, agora):
+    """As últimas mensagens dos grupos que pararam, "nº 2 há 30 h | nº 5 nenhuma desde 06/11 23:30"."""
+    ultimas = c.get("ultima_dos_que_pararam")
+    if not ultimas:
+        return ""
+    return " | ".join(f"nº {n} {_ultima_do_grupo(ultimas.get(n), c.get('anotacao_desde'), agora)}"
+                      for n in sorted(ultimas))
 
 
 def captura_por_origem(agora=None):
@@ -704,6 +736,8 @@ def captura_por_origem(agora=None):
     """
     agora = _agora(agora)
     alvos = (db.ler_config("alvos_espiao", {}) or {}).get("alvos", [])
+    anotadas = db.ler_config(CHAVE_DAS_ULTIMAS_MENSAGENS, {}) or {}
+    ultimas = {sistema: anotadas.get(sistema, {}) if anotadas else None for sistema in ("espiao", "espelhador")}
     origens_das_rotas = []
     for rota in rotas_espelhador.ler().get("rotas", []):
         origens_das_rotas += [str(o) for o in rota.get("origens", [])]
@@ -716,9 +750,11 @@ def captura_por_origem(agora=None):
     except sqlite3.OperationalError:
         pass
     return {
-        "Espião": _resumo_das_origens(alvos, _por_origem("espiao", "vídeo com link no grupo vigiado", agora)),
+        "Espião": _resumo_das_origens(alvos, _por_origem("espiao", "vídeo com link no grupo vigiado", agora),
+                                      ultimas["espiao"], anotadas.get("desde")),
         "Espelhador": _resumo_das_origens(origens_das_rotas,
-                                          _por_origem("espelhador", "vídeo com link na origem da rota", agora)),
+                                          _por_origem("espelhador", "vídeo com link na origem da rota", agora),
+                                          ultimas["espelhador"], anotadas.get("desde")),
         "Parceiros": _resumo_das_origens(parceiros, _por_origem("autorais", "captura de parceiro", agora)),
     }
 
@@ -1859,6 +1895,11 @@ def main():
               + (f" | pararam: {', '.join(f'nº {n}' for n in c['pararam'])}" if c["pararam"] else "")
               + (f" (mandavam todo dia: {', '.join(f'nº {n}' for n in c['pararam_todo_dia'])})"
                  if c["pararam_todo_dia"] else ""))
+        ultimas = _ultimas_dos_que_pararam(c, _agora(agora))
+        if ultimas:
+            # A última mensagem (qualquer uma) de cada grupo que parou: recente, o grupo só não
+            # postou vídeo com link; nenhuma, ficou quieto ou a conta perdeu o acesso.
+            print(f"   última mensagem de cada grupo que parou: {ultimas}")
     repetidos = parceiros_repetidos(agora)
     print(f"Parceiros (3 dias): capturas com produto identificado {repetidos['capturas']} | mesmo produto em mais "
           f"de um parceiro {repetidos['entre_parceiros']} | também na conta principal {repetidos['com_a_conta']}")
