@@ -466,6 +466,9 @@ def test_pedido_nos_botoes_nao_e_sobreposicao():
         return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
 
     registro_processos.registrar("shopee_video", robo.PROCESSO_DO_BOTAO, "pedido", ok=None, agora=em("04:00"))
+    # O próximo vídeo do mesmo pedido (P133) é da mesma rodada: não estica a meia hora do pedido.
+    registro_processos.registrar("shopee_video", robo.PROCESSO_DO_BOTAO, "próximo vídeo",
+                                 "o 2º, aos 7,0 min da rodada", ok=None, agora=em("04:07"))
     robo.registrar_tentativa("rascunho", "salvo", agora=em("04:11"))                # o pedido no botão
     robo.registrar_tentativa("rascunho", "pulado", agora=em("04:35"))               # do plano, antes da limpeza
     robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:50"))

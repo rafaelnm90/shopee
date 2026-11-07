@@ -1350,9 +1350,11 @@ def sobreposicoes(agora=None):
     # O último passo da limpeza na hora dela, em cada dia: o que veio antes dele na hora furou a vez dela.
     fim_da_limpeza = {momento[:10]: momento for momento, tipo, _o in atividades
                       if tipo == "descurtir" and int(momento[11:13]) == HORA_DO_DESCURTIR_SV}
+    # Do Preparar 1 Agora vale só o pedido: o próximo vídeo do mesmo pedido é da mesma rodada.
     botao = [datetime.strptime(m, "%Y-%m-%d %H:%M:%S")
-             for processo in (PROCESSO_DO_BOTAO, PROCESSO_DO_POSTAR_AGORA, PROCESSO_DO_FAZER_AGORA)
-             for m, _p, _r, _d, _o in registro_processos.sequencia("shopee_video", processo, desde)]
+             for processo, resultado in ((PROCESSO_DO_BOTAO, "pedido"), (PROCESSO_DO_POSTAR_AGORA, None),
+                                         (PROCESSO_DO_FAZER_AGORA, None))
+             for m, _p, _r, _d, _o in registro_processos.sequencia("shopee_video", processo, desde, resultado)]
 
     def pedido_no_botao(momento):
         quando = datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")

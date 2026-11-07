@@ -2551,22 +2551,32 @@ def proximo_video(config, evitar=(), agora=None):
 # produto que a busca não acha, a IA que não confirma o produto) passa sozinho ao próximo vídeo,
 # até VIDEOS_DO_PEDIDO, como os horários do plano, com o aviso de cada um que fica de lado. O
 # próximo só começa com tempo para um rascunho inteiro na rodada: o painel a interrompe em
-# MAXIMO_DA_RODADA, e um rascunho leva até MINUTOS_DE_UM_RASCUNHO (os prazos dele, de
-# MINUTOS_PARA_ANEXAR_OS_A_MAIS, mais o fim). Escolha do Rafael (02/11, P133): DECISOES.md,
-# Shopee Vídeo.
+# MAXIMO_DA_RODADA, contados do começo dela, e um rascunho leva até MINUTOS_DE_UM_RASCUNHO com os
+# produtos a mais (os prazos deles, de MINUTOS_PARA_ANEXAR_OS_A_MAIS, mais o fim) e até
+# MINUTOS_DE_UM_RASCUNHO_SEM_OS_A_MAIS sem eles (desligados no painel ou pelos pontos, P145: os
+# tempos do registro "tempo do rascunho" ficam de 5 a 15 min). Escolha do Rafael (02/11, P133):
+# DECISOES.md, Shopee Vídeo.
 VIDEOS_DO_PEDIDO = VIDEOS_POR_HORARIO
 MINUTOS_DE_UM_RASCUNHO = 25
+MINUTOS_DE_UM_RASCUNHO_SEM_OS_A_MAIS = 15
 
 
-def preparar_o_pedido(d, config, agora=None):
+def minutos_de_um_rascunho():
+    """Quanto um rascunho pode levar agora: MINUTOS_DE_UM_RASCUNHO com os produtos a mais; sem eles, menos."""
+    return MINUTOS_DE_UM_RASCUNHO_SEM_OS_A_MAIS if sem_os_a_mais() else MINUTOS_DE_UM_RASCUNHO
+
+
+def preparar_o_pedido(d, config, agora=None, comeco=None):
     """
     O rascunho do Preparar 1 Agora: preparar_rascunho com o próximo vídeo a cada Parada do
     próprio vídeo, até VIDEOS_DO_PEDIDO vídeos, enquanto cabe outro rascunho na rodada e a fonte
     tem outro vídeo. O que não é do vídeo (o celular, a Verificação, a suspensão, o app) para
     tudo, como antes; a Parada do último vídeo sobe com o motivo dele, dizendo qual vídeo era e
-    por que não houve outro, para a resposta no privado.
+    por que não houve outro, para a resposta no privado. comeco: o time.monotonic() do começo
+    da rodada, de onde o painel conta MAXIMO_DA_RODADA (sem ele, agora). O registro diz em que
+    minuto da rodada cada próximo vídeo começou ou ficou sem tempo (só números).
     """
-    comeco = time.monotonic()
+    comeco = time.monotonic() if comeco is None else comeco
     for vez in range(1, VIDEOS_DO_PEDIDO + 1):
         try:
             return preparar_rascunho(d, config, agora)
@@ -2577,13 +2587,19 @@ def preparar_o_pedido(d, config, agora=None):
             if vez == VIDEOS_DO_PEDIDO:
                 e.motivo = qual + e.motivo
                 raise
-            if time.monotonic() - comeco > MAXIMO_DA_RODADA - MINUTOS_DE_UM_RASCUNHO * 60:
+            passados, minutos = time.monotonic() - comeco, minutos_de_um_rascunho()
+            if passados > MAXIMO_DA_RODADA - minutos * 60:
+                registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "sem tempo para outro vídeo",
+                                             f"aos {_minutos(passados)} min da rodada; um rascunho leva até "
+                                             f"{minutos} min", ok=None, agora=agora)
                 e.motivo = (f"{qual}{e.motivo}; não há tempo para outro vídeo nesta rodada, toque de novo em "
                             "Preparar 1 Agora ⚡")
                 raise
             if not proximo_video(config, estado_do_dia(config, agora).get("evitar", []), agora):
                 e.motivo = f"{qual if vez > 1 else ''}{e.motivo}; a fonte não tem outro vídeo para tentar"
                 raise
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "próximo vídeo",
+                                         f"o {vez + 1}º, aos {_minutos(passados)} min da rodada", ok=None, agora=agora)
             avisar(f"⚠️ Robô da Shopee Vídeo: o vídeo {vez} de {VIDEOS_DO_PEDIDO} do rascunho que você pediu ficou "
                    f"de lado ({e.motivo}). Vou para o próximo vídeo.")
 
@@ -3836,6 +3852,21 @@ def _fora_do_preco(fora):
     return f" ({'; '.join(partes)})" if partes else ""
 
 
+def sem_os_a_mais():
+    """
+    Por que o rascunho de agora vai sem os produtos a mais (P59), em (resultado, detalhe) para o
+    registro dos espaços livres: desligados no painel ou só o produto do vídeo pelos pontos.
+    None quando eles vão.
+    """
+    if not ler_config().get("robo_produtos_a_mais", True):
+        return "nenhum - desligados", ""
+    # Com 4 pontos de penalidade ou mais, só o produto do vídeo vai ao post (P145).
+    pontos = apelacoes.pontos_de_agora(ler_estado())
+    if pontos >= apelacoes.PONTOS_SO_O_PRODUTO_DO_VIDEO:
+        return "nenhum - só o produto do vídeo pelos pontos", f"{pontos} ponto(s) de penalidade"
+    return None
+
+
 def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, recusados=None,
                    espacos=ESPACOS_DO_VIDEO - 1):
     """
@@ -3864,14 +3895,9 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
         partes = [f"{parte} {_minutos(fim - comeco)} min" for (_, comeco), (parte, fim) in zip(marcas, marcas[1:])]
         return f"aos {_minutos(marcas[0][1] - inicio)} min do rascunho" + (": " + ", ".join(partes) if partes else "")
 
-    if not ler_config().get("robo_produtos_a_mais", True):
-        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "nenhum - desligados")
-        return []
-    # Com 4 pontos de penalidade ou mais, só o produto do vídeo vai ao post (P145).
-    pontos = apelacoes.pontos_de_agora(ler_estado())
-    if pontos >= apelacoes.PONTOS_SO_O_PRODUTO_DO_VIDEO:
-        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "nenhum - só o produto do vídeo pelos pontos",
-                                     f"{pontos} ponto(s) de penalidade")
+    motivo = sem_os_a_mais()
+    if motivo:
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, *motivo)
         return []
     if time.monotonic() > prazo:
         anotar("nenhum - sem tempo na rodada")
@@ -7029,6 +7055,9 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
     celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo botão). Devolve o que
     aconteceu, numa frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
+    # O painel interrompe a rodada em MAXIMO_DA_RODADA contados daqui (o Preparar 1 Agora mede o
+    # tempo que sobra para outro vídeo a partir deste começo).
+    comeco = time.monotonic()
     religar_a_pausa_sem_hora()
     config = ler_config()
     pedido_de_post = postar is not None
@@ -7135,7 +7164,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
         d = casos_robo.com_historico(d or ps.conectar(celular=True))
         try:
             resultado = _agir(d, acao, ident, preparar, config, agora,
-                              pedido=(saude or pedido_de_post or pedida == "saude") and na_hora)
+                              pedido=(saude or pedido_de_post or pedida == "saude") and na_hora, comeco=comeco)
             if pedida and pedida != "saude":
                 # A Saúde pedida já manda o resumo dela; as outras dizem aqui como foi.
                 avisar(f"⏩ Robô da Shopee Vídeo: {ATIVIDADES_DO_FAZER_AGORA[pedida][0]}, do Fazer Agora: "
@@ -7176,10 +7205,11 @@ def deixar_sem_video(d, agora=None):
                                      ok=False, agora=agora)
 
 
-def _agir(d, acao, ident, preparar, config, agora, pedido=False):
+def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
     """
     A ação da rodada no celular, já dentro da trava, com o que fazer quando ela para.
     pedido=True: o Rafael pediu a Saúde do Vídeo pelo botão Gerar Apelação ⚖️ e espera a resposta.
+    comeco: o time.monotonic() do começo da rodada (preparar_o_pedido).
     """
     # O rascunho entra no histórico pelo preparar_rascunho, que sabe qual vídeo tentou.
     produto = ", ".join((pegar(ident) or {}).get("produtos") or []) if ident else ""
@@ -7238,7 +7268,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         if not preparar:
             _em_preparo(config, agora, True)
         try:
-            resultado = preparar_o_pedido(d, config, agora) if preparar else preparar_rascunho(d, config, agora)
+            resultado = (preparar_o_pedido(d, config, agora, comeco) if preparar
+                         else preparar_rascunho(d, config, agora))
         finally:
             if not preparar:
                 _em_preparo(config, agora, False)
