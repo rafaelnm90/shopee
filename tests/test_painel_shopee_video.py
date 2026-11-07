@@ -468,9 +468,10 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     rodar(sv.capa_handler(msg, est))
     texto = msg.saidas[-1]
     assert "Os números ficam livres" in texto and "O que cada botão faz" in texto
-    # Escolha do Rafael (30/10, P107): a foto do tamanho da capa sem texto e a frase numa faixa, na cor
-    # principal do produto (P159 2).
-    assert "mesmo tamanho da capa sem texto" in texto and "faixa na cor principal do produto" in texto
+    # Escolha do Rafael (30/10, P107): a frase numa faixa, na cor principal do produto (P159 2); a
+    # foto aumenta até tampar a largura toda da capa, e a faixa desce até o fim dela (06/11, P168).
+    assert "aumenta até tampar a largura toda da capa" in texto and "faixa na cor principal do produto" in texto
+    assert "a faixa desce até o fim da capa, com o número por cima dela" in texto
     assert "um pouco menor" not in texto
     # Vídeo do Rafael das 20:14 de 02/11: a foto inteira, o fio em cima e a faixa que não cresce.
     assert "com um fio em cima" in texto and "a faixa não cresce" in texto
@@ -514,7 +515,7 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     tipo, caminhos, legenda = msg.midias[-1]
     assert tipo == "album" and [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png"]
     assert "Copo Térmico" in legenda and "“Gelado por 12 horas”" in legenda and "não foi postado" in legenda
-    assert "O número de visualizações fica no preto, logo abaixo da faixa" in legenda
+    assert "O número de visualizações fica em cima da faixa, logo abaixo da frase" in legenda
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      "edição do vídeo: exemplo da capa") == ("mandado",)
     # Com a capa do vídeo aberto (P129), ela vai como 3ª foto.
