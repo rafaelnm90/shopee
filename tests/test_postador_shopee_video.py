@@ -1650,6 +1650,90 @@ def test_a_ia_so_confirma_a_mesma_cor_da_foto(monkeypatch):
     assert "podem ser outra variação" not in ps.PROMPT_PRODUTO_COM_FOTO
 
 
+# A linha das ordens de Minhas Curtidas, como no Motorola (07/11/2026).
+ORDENS = ('<node text="Relevância" class="android.widget.TextView" bounds="[50,528][220,575]" />'
+          '<node text="Mais Recente" class="android.widget.TextView" bounds="[300,528][511,576]" />')
+RELEVANCIA, MAIS_RECENTE = (135, 551), (405, 552)
+
+
+def _com_as_ordens(tela):
+    return tela.replace('<node text="Minhas Curtidas"', ORDENS + '<node text="Minhas Curtidas"')
+
+
+def _no_topo(primeiro, segundo):
+    """A lista com estes dois produtos, nesta ordem (o _lista não põe o VESTIDO em 1º)."""
+    marca = "PRIMEIRO_DA_LISTA"
+    return TELA_CURTIDAS.replace(f'text="{FIBRA}"', f'text="{marca}"').replace(
+        f'text="{VESTIDO}"', f'text="{segundo}"').replace(f'text="{marca}"', f'text="{primeiro}"')
+
+
+class ListaQueChegaDepois(Aparelho):
+    """
+    Minhas Curtidas sem o curtido agora até a lista ser lida de novo `chega_na` vezes (Relevância e
+    Mais Recente); depois do toque num Adicionar, a janela de editar o nome.
+    """
+
+    def __init__(self, antes, depois, nome_na_janela, chega_na=1):
+        super().__init__(tela=antes)
+        self.depois, self.chega_na = depois, chega_na
+        self.janela = TELA_EDITAR_NOME.replace("NOME_NA_JANELA", nome_na_janela)
+
+    def dump_hierarchy(self):
+        if any(toque not in (RELEVANCIA, MAIS_RECENTE) for toque in self.toques):
+            return self.janela
+        return self.depois if self.toques.count(MAIS_RECENTE) >= self.chega_na else self.tela
+
+
+def test_curtido_que_demora_a_chegar_a_lista_e_achado_no_topo_lendo_a_lista_de_novo(monkeypatch):
+    # 07/11/2026, 13:19: o produto curtido às 13:15 não estava em Minhas Curtidas (o 1º era o curtido
+    # antes dele), e estava em Meus favoritos. A lista é lida de novo, depois de cada pausa, trocando
+    # a ordem e voltando a Mais Recente, antes de rolar a lista e da última chance pela foto.
+    _avisos(monkeypatch)
+    esperas = []
+    monkeypatch.setattr(ps.time, "sleep", esperas.append)
+    anexados = []
+    aparelho = ListaQueChegaDepois(_com_as_ordens(_lista(FIBRA, PANELA)), _com_as_ordens(_no_topo(VESTIDO, FIBRA)),
+                                   VESTIDO, chega_na=2)
+    ok, _ = ps.adicionar_produto(aparelho, {"produto": VESTIDO, "arquivo": "video.mp4"}, anexados)
+    assert ok and anexados == [VESTIDO]
+    assert aparelho.toques == [RELEVANCIA, MAIS_RECENTE, RELEVANCIA, MAIS_RECENTE, (925, 977)]
+    assert ps.ESPERAS_PARA_REABRIR_A_LISTA[0] in esperas and ps.ESPERAS_PARA_REABRIR_A_LISTA[1] in esperas
+    assert _anexar_linhas() == [("anexado", "no topo, pelo nome, com a lista lida de novo (2ª vez)"),
+                                ("lista lida de novo", "1ª vez, 0 s depois: ainda fora do topo"),
+                                ("lista lida de novo", "2ª vez, 30 s depois: o produto no topo")]
+
+
+def test_curtido_que_nao_chega_segue_para_a_rolagem_e_a_ultima_chance(monkeypatch):
+    avisos = _avisos(monkeypatch)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    monkeypatch.setattr(ps, "rolar", lambda d, para_cima=False: None)
+    _ia_da_foto(monkeypatch, confere=False)
+
+    class SemOProduto(ListaQueChegaDepois, AparelhoComPrint):
+        pass
+
+    lista = _com_as_ordens(_lista(FIBRA, PANELA))
+    aparelho = SemOProduto(lista, lista, FIBRA)
+    ok, _ = ps.adicionar_produto(aparelho, {"produto": VESTIDO, "arquivo": "video.mp4"}, [])
+    vezes = len(ps.ESPERAS_PARA_REABRIR_A_LISTA)
+    assert not ok and aparelho.toques == [RELEVANCIA, MAIS_RECENTE] * vezes and len(avisos) == 1
+    lidas = [linha for linha in _anexar_linhas() if linha[0] == "lista lida de novo"]
+    assert len(lidas) == vezes and all(linha[1].endswith("ainda fora do topo") for linha in lidas)
+    assert ("não anexado", "nem pelo nome nem pela foto do 1º da lista") in _anexar_linhas()
+
+
+def test_produto_a_mais_nao_espera_a_lista_de_novo(monkeypatch):
+    # O produto a mais (P59) que não está na lista só fica de fora, sem as pausas.
+    _avisos(monkeypatch)
+    esperas = []
+    monkeypatch.setattr(ps.time, "sleep", esperas.append)
+    monkeypatch.setattr(ps, "rolar", lambda d, para_cima=False: None)
+    lista = _com_as_ordens(_lista(FIBRA, PANELA))
+    aparelho = ListaQueChegaDepois(lista, lista, FIBRA)
+    ok, _ = ps.adicionar_produto(aparelho, {"produto": VESTIDO}, [], ultima_chance=False, avisar=False)
+    assert not ok and aparelho.toques == [] and not any(e in ps.ESPERAS_PARA_REABRIR_A_LISTA[1:] for e in esperas)
+
+
 def test_com_a_lista_limpa_o_anexar_nao_rola_a_lista(monkeypatch):
     # Escolha do Rafael (P27): com a limpeza anterior dada certo, os curtidos são só os de
     # agora; o produto não é procurado rolando a lista inteira, e o topo continua conferido.
