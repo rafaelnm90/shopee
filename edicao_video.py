@@ -1008,9 +1008,11 @@ def _capa_da_vez(foto, vantagem, no_video=False, cor=None, segunda=None):
 # A foto da capa sem letras: na foto da capa não pode ter letra nenhuma, de outra língua nem em
 # português, para não se misturar com a frase da faixa. A IA diz se a foto do anúncio tem letras
 # (fora as impressas no próprio produto ou na embalagem) e o maior pedaço dela com o produto
-# inteiro e sem elas; com as letras fora do produto, a capa usa esse pedaço. Com as letras em cima
-# do produto, um quadro do próprio vídeo (foto_para_a_capa, P164 1). Pedido do Rafael (06/11,
-# P160 2): DECISOES.md, Shopee Vídeo.
+# inteiro e sem elas; com as letras fora do produto, a capa usa esse pedaço, depois de a IA conferir,
+# com a foto inteira ao lado, que o produto ficou inteiro nele (P176 1). Com as letras em cima do
+# produto, ou com o corte tirando um pedaço do produto, um quadro do próprio vídeo
+# (foto_para_a_capa, P164 1). Pedidos do Rafael (06/11, P160 2; 07/11, P176 1): DECISOES.md,
+# Shopee Vídeo.
 PROMPT_DAS_LETRAS_DA_FOTO = """Esta é a foto do anúncio de um produto. Veja se há letras escritas na foto: legendas, frases, preços, selos ou etiquetas com texto, marcas-d'água, em qualquer língua (português também). Não conte as letras impressas no próprio produto ou na embalagem dele (a marca, o rótulo).
 
 Responda só com um JSON, sem mais nada:
@@ -1025,32 +1027,29 @@ LETRAS_CORTADAS = "letras cortadas"
 LETRAS_NO_PRODUTO = "letras em cima do produto"
 SEM_RESPOSTA_DAS_LETRAS = "a IA não respondeu"
 CAIXA_QUE_NAO_SERVE = "a caixa da IA não serve"
+CORTE_TIRARIA_O_PRODUTO = "o corte tiraria parte do produto"
+CORTE_SEM_CONFERENCIA = "a IA não conferiu o corte"
+# A foto que não pode ser cortada: a capa procura um quadro do próprio vídeo (foto_para_a_capa).
+SEM_O_CORTE = (LETRAS_NO_PRODUTO, CORTE_TIRARIA_O_PRODUTO, CORTE_SEM_CONFERENCIA)
+PROMPT_DO_CORTE_DAS_LETRAS = """A 1ª foto é a foto inteira do anúncio de um produto; a 2ª é um recorte dela, feito para tirar as letras escritas na foto. Compare as duas e diga se o produto aparece inteiro no recorte: nenhuma parte dele (nem peça, acessório ou embalagem que aparece com ele na foto inteira) ficou de fora do recorte ou cortada na beirada dele.
+
+Responda só com um JSON, sem mais nada:
+{"inteiro": true ou false}"""
 # O pedaço sem letras fica com pelo menos esta parte da foto (na área) e tira pelo menos a outra:
 # menor, a IA errou a caixa (ou ela cortaria o produto); quase a foto toda, ela não tira as letras.
 MENOR_PEDACO_SEM_LETRAS = 0.4
 MAIOR_PEDACO_SEM_LETRAS = 0.98
 
 
-def foto_sem_letras(foto):
-    """
-    (foto, resultado): a foto do anúncio (bytes) sem o pedaço com as letras (PNG) quando elas
-    ficam fora do produto, ou a mesma foto (sem letras, com as letras em cima do produto, com a IA
-    sem resposta ou com a caixa dela que não serve); resultado é um dos textos fixos acima.
-    """
+def _json_das_fotos(prompt, imagens):
+    """O JSON (dict) que a IA responde vendo as fotos [(bytes, tipo)], ou None sem resposta que sirva."""
     import asyncio
-    import io
     import json
     import re
 
     import api_gemini
-    from PIL import Image
     try:
-        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
-    except Exception:
-        return foto, SEM_RESPOSTA_DAS_LETRAS
-    tipo = "image/png" if (foto or b"").startswith(b"\x89PNG") else "image/jpeg"
-    try:
-        resposta = asyncio.run(api_gemini.gerar_texto_gemini(PROMPT_DAS_LETRAS_DA_FOTO, imagens=[(foto, tipo)]))
+        resposta = asyncio.run(api_gemini.gerar_texto_gemini(prompt, imagens=imagens))
     except Exception:
         resposta = None
     achado = re.search(r"\{.*\}", resposta or "", re.S)
@@ -1058,7 +1057,26 @@ def foto_sem_letras(foto):
         dados = json.loads(achado.group(0)) if achado else None
     except ValueError:
         dados = None
-    if not isinstance(dados, dict):
+    return dados if isinstance(dados, dict) else None
+
+
+def foto_sem_letras(foto):
+    """
+    (foto, resultado): a foto do anúncio (bytes) sem o pedaço com as letras (PNG) quando elas
+    ficam fora do produto e a IA confere que ele ficou inteiro no pedaço (P176 1), ou a mesma foto
+    (sem letras, com as letras em cima do produto, com o corte tirando um pedaço do produto, com a
+    IA sem resposta ou com a caixa dela que não serve); resultado é um dos textos fixos acima.
+    """
+    import io
+
+    from PIL import Image
+    try:
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
+    except Exception:
+        return foto, SEM_RESPOSTA_DAS_LETRAS
+    tipo = "image/png" if (foto or b"").startswith(b"\x89PNG") else "image/jpeg"
+    dados = _json_das_fotos(PROMPT_DAS_LETRAS_DA_FOTO, [(foto, tipo)])
+    if dados is None:
         return foto, SEM_RESPOSTA_DAS_LETRAS
     if not dados.get("letras"):
         return foto, SEM_LETRAS
@@ -1072,8 +1090,15 @@ def foto_sem_letras(foto):
     if not MENOR_PEDACO_SEM_LETRAS <= parte <= MAIOR_PEDACO_SEM_LETRAS:
         return foto, CAIXA_QUE_NAO_SERVE
     largura, altura = imagem.size
-    corte = imagem.crop((x1 * largura // 1000, y1 * altura // 1000, x2 * largura // 1000, y2 * altura // 1000))
-    return _png(corte), LETRAS_CORTADAS
+    corte = _png(imagem.crop((x1 * largura // 1000, y1 * altura // 1000, x2 * largura // 1000,
+                              y2 * altura // 1000)))
+    # A IA confere, com a foto inteira ao lado, que o corte não tirou nenhum pedaço do produto; sem a
+    # conferência, a foto também não é cortada (P176 1).
+    conferido = _json_das_fotos(PROMPT_DO_CORTE_DAS_LETRAS, [(foto, tipo), (corte, "image/png")])
+    inteiro = (conferido or {}).get("inteiro")
+    if not isinstance(inteiro, bool):
+        return foto, CORTE_SEM_CONFERENCIA
+    return (corte, LETRAS_CORTADAS) if inteiro else (foto, CORTE_TIRARIA_O_PRODUTO)
 
 
 # Com as letras em cima do próprio produto, o corte não as tira: a capa usa um quadro do próprio
@@ -1131,16 +1156,18 @@ def quadro_sem_letras(video, nome=""):
 def foto_para_a_capa(foto, video, nome=""):
     """
     (foto, resultado, detalhe): a foto da capa com a frase, sem letras (P160 2): a do anúncio, sem o
-    pedaço com as letras quando elas ficam fora do produto; com as letras em cima do produto, um
-    quadro do próprio vídeo (quadro_sem_letras, P164 1; sem ele, a do anúncio como está, e o detalhe
-    diz por quê). resultado é um dos textos fixos de foto_sem_letras ou QUADRO_DO_VIDEO.
+    pedaço com as letras quando elas ficam fora do produto e o produto fica inteiro nele (P176 1);
+    com as letras em cima do produto, ou sem poder cortar (SEM_O_CORTE), um quadro do próprio vídeo
+    (quadro_sem_letras, P164 1; o detalhe diz por que a foto não serviu), e sem ele a do anúncio
+    como está (o detalhe diz por que o quadro não entrou). resultado é um dos textos fixos de
+    foto_sem_letras ou QUADRO_DO_VIDEO.
     """
     foto_da_capa, letras = foto_sem_letras(foto)
-    if letras != LETRAS_NO_PRODUTO:
+    if letras not in SEM_O_CORTE:
         return foto_da_capa, letras, ""
     quadro, motivo = quadro_sem_letras(video, nome)
     if quadro:
-        return quadro, QUADRO_DO_VIDEO, ""
+        return quadro, QUADRO_DO_VIDEO, letras
     return foto_da_capa, letras, motivo
 
 
@@ -2635,7 +2662,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         foto_da_capa, letras, detalhe_das_letras = foto_para_a_capa(foto, video, produto)
         registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras, detalhe_das_letras,
                                      ok={SEM_LETRAS: True, LETRAS_CORTADAS: True, QUADRO_DO_VIDEO: True,
-                                         LETRAS_NO_PRODUTO: None}.get(letras, False))
+                                         LETRAS_NO_PRODUTO: None, CORTE_TIRARIA_O_PRODUTO: None}.get(letras, False))
         capa = _capa_da_vez(foto_da_capa, frase, cor=cor, segunda=segunda)
         faixa = cor_da_faixa(foto_da_capa, cor, segunda) if capa else None
         if faixa and faixa != (cor or LARANJA_DA_SHOPEE):
