@@ -4082,6 +4082,84 @@ def test_preparar_1_agora_so_passa_ao_proximo_com_tempo_na_rodada(monkeypatch, a
     assert "o vídeo 1 de 3 ficou de lado" in erro.value.motivo and not avisos
 
 
+def _relogio_da_rodada(monkeypatch, *segundos):
+    """time.monotonic() dando estes valores, um por chamada, e depois o último."""
+    valores = list(segundos)
+    monkeypatch.setattr(robo.time, "monotonic", lambda: valores.pop(0) if len(valores) > 1 else valores[0])
+
+
+def _linhas_do_botao():
+    return [(r[2], r[3]) for r in robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_BOTAO,
+                                                                     "2000-01-01 00:00:00")]
+
+
+def test_preparar_1_agora_sem_os_a_mais_conta_o_rascunho_pelo_tempo_medido(monkeypatch, avisos):
+    # No Preparar 1 Agora das 16:40 de 07/11, o 1º vídeo ficou de lado aos 7 min da rodada (o app
+    # não deixou o produto depois do Feito), e o robô não tentou o 2º: contava 25 min para um
+    # rascunho. Sem os produtos a mais (8 pontos, P145), os rascunhos levam de 5 a 15 min (registro
+    # "tempo do rascunho"): aos 7 min ainda cabe outro vídeo.
+    robo.gravar_estado(saude_pontos=8, saude_lida_em=datetime.now(robo.fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
+    assert robo.minutos_de_um_rascunho() == robo.MINUTOS_DE_UM_RASCUNHO_SEM_OS_A_MAIS == 15
+    _relogio_da_rodada(monkeypatch, 0, 7 * 60)
+    monkeypatch.setattr(robo, "proximo_video", lambda *a, **k: {"id": "a2"})
+    vezes = []
+
+    def preparar(d, config, agora=None):
+        vezes.append(1)
+        if len(vezes) == 1:
+            raise robo.Parada(robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU, do_video=True)
+        return "rascunho salvo"
+
+    monkeypatch.setattr(robo, "preparar_rascunho", preparar)
+    assert robo.preparar_o_pedido(None, robo.ler_config()) == "rascunho salvo"
+    assert len(vezes) == 2
+    assert sum(1 for a in avisos if isinstance(a, str) and "Vou para o próximo vídeo" in a) == 1
+    assert _linhas_do_botao() == [("próximo vídeo", "o 2º, aos 7,0 min da rodada")]
+
+
+def test_preparar_1_agora_com_os_a_mais_ainda_conta_25_min(monkeypatch, avisos):
+    # Com os produtos a mais (menos de 4 pontos), o rascunho pode levar até uns 25 min: aos 7 min da
+    # rodada não cabe outro, e o registro diz em que minuto parou.
+    assert robo.sem_os_a_mais() is None and robo.minutos_de_um_rascunho() == robo.MINUTOS_DE_UM_RASCUNHO == 25
+    _relogio_da_rodada(monkeypatch, 0, 7 * 60)
+
+    def preparar(d, config, agora=None):
+        raise robo.Parada(robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU, do_video=True)
+
+    monkeypatch.setattr(robo, "preparar_rascunho", preparar)
+    with pytest.raises(robo.Parada) as erro:
+        robo.preparar_o_pedido(None, robo.ler_config())
+    assert "não há tempo para outro vídeo nesta rodada" in erro.value.motivo and not avisos
+    assert _linhas_do_botao() == [("sem tempo para outro vídeo", "aos 7,0 min da rodada; um rascunho leva até 25 min")]
+
+
+def test_preparar_1_agora_conta_o_tempo_desde_o_comeco_da_rodada(monkeypatch, avisos):
+    # O painel interrompe a rodada em 30 min contados do começo dela, não do começo do pedido: com
+    # 11 min gastos antes (a volta do celular, a trava), o vídeo que fica de lado 5 min depois deixa
+    # só 14 min, e o rascunho sem os produtos a mais leva até 15.
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.ler_config(), "robo_produtos_a_mais": False})
+    assert robo.sem_os_a_mais() == ("nenhum - desligados", "")
+    _relogio_da_rodada(monkeypatch, 16 * 60)
+
+    def preparar(d, config, agora=None):
+        raise robo.Parada(robo.MOTIVO_EM_ANALISE, do_video=True)
+
+    monkeypatch.setattr(robo, "preparar_rascunho", preparar)
+    with pytest.raises(robo.Parada) as erro:
+        robo.preparar_o_pedido(None, robo.ler_config(), comeco=0)
+    assert "toque de novo em Preparar 1 Agora" in erro.value.motivo
+    assert _linhas_do_botao() == [("sem tempo para outro vídeo", "aos 16,0 min da rodada; um rascunho leva até 15 min")]
+
+
+def test_rodada_passa_o_comeco_dela_ao_preparar_1_agora(monkeypatch):
+    vistos = []
+    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False, comeco=None:
+                        vistos.append(comeco) or "rascunho salvo")
+    antes = time.monotonic()
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-11-07 16:39")) == "rascunho salvo"
+    assert len(vistos) == 1 and vistos[0] is not None and antes <= vistos[0] <= time.monotonic()
+
+
 def test_preparar_1_agora_sem_outro_video_na_fonte_diz_o_motivo_do_que_ficou_de_lado(monkeypatch, avisos):
     # Com um vídeo só na fonte, o motivo dele vai na resposta (e não "nenhum vídeo da fonte").
     _fonte_de_video(monkeypatch)
@@ -6387,6 +6465,7 @@ def test_produto_que_nao_fica_no_feito_diz_o_aviso_do_app(monkeypatch, avisos):
     assert _registro_do_anexar()[-2][1].endswith("; sem aviso do app" + LOGO_DEPOIS_DO_FEITO)
 
 
+
 def test_aviso_do_app_le_o_toast_como_o_uiautomator2_da(monkeypatch):
     # No uiautomator2 (3.7.0, requirements.txt) o last_toast é uma propriedade: chamado como
     # função, dava erro, e o robô nunca lia o aviso do app (o produto que não fica depois do Feito,
@@ -7260,7 +7339,7 @@ def test_fazer_agora_pede_so_o_que_ainda_nao_saiu_hoje_e_uma_vez():
 def test_fazer_agora_roda_na_proxima_folga_mesmo_pausado_e_diz_como_foi(monkeypatch, avisos):
     robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22})   # pausado
     feitas = []
-    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False:
+    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False, comeco=None:
                         feitas.append((acao, ident, pedido)) or f"{acao} feito")
     agora = momento("2026-11-06 23:10")                                          # fora do Horário do Robô
     assert robo.rodada(d=AppDeMentira(), agora=agora, fazer=True) == "nada a fazer agora"
@@ -7289,7 +7368,8 @@ def test_fazer_agora_roda_na_proxima_folga_mesmo_pausado_e_diz_como_foi(monkeypa
 
 def test_fazer_agora_na_suspensao_roda_e_sem_o_celular_sai_com_o_aviso(monkeypatch, avisos):
     ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-11-10 00:00:00")
-    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False: f"{acao} feito")
+    monkeypatch.setattr(robo, "_agir", lambda d, acao, ident, preparar, config, agora, pedido=False, comeco=None:
+                        f"{acao} feito")
     agora = momento("2026-11-06 15:00")
     robo.pedir_agora("respostas", agora)
     # A suspensão não fecha nenhuma das atividades do Fazer Agora.
