@@ -484,6 +484,8 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     assert "com um fio em cima" in texto and "fica no meio da faixa, de uma beirada à outra e do alto até embaixo" in texto
     assert "pode passar por cima do começo da frase" in texto and "num tamanho harmônico, em duas linhas" in texto
     assert "nada da capa fica no preto do fundo" in texto
+    # P173 1 (print de 07/11, 04:15): a cor do produto que sumiria no fundo da foto dá lugar ao laranja.
+    assert "a faixa sumiria nela, o fio e a faixa vão no laranja da Shopee (no fundo laranja, no preto)" in texto
     assert "com o número por cima dela, na mesma cor" in texto and "embaixo da frase fica o preto" not in texto
     assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto
     assert _textos(sv.teclado_capa(sv.ler_config())) == [

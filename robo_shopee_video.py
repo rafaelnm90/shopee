@@ -926,8 +926,9 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # achado: "1" quando o produto do link não era o do vídeo e o robô achou o do vídeo pela busca da
 # IA (P158 2); "0" no de link de produto sem isso; vazio nos de antes e nos de Ver Produtos (a
 # medição de quais posts levam punição, P146 2, separa).
-# cor: o nome da cor do produto que a edição usou no vídeo (P159 2), para o post conferir a faixa da
-# capa nela; vazio com as cores de sempre (o laranja).
+# cor: o nome da cor em que a faixa da capa saiu no vídeo, para o post conferir a faixa nela: a do
+# produto (P159 2) ou, quando ela some no fundo da foto, a que foi no lugar (P173 1); vazio com o
+# laranja (as cores de sempre).
 # itens_do_video: os números (itemId) do produto do vídeo, o do link e o que foi ao post (o da troca ou
 # o achado pela IA), ou os do criador no Ver Produtos: o mesmo produto não se repete (P166 1).
 # busca_do_link: no post que ficou sem o link logo depois de postar, {"vezes": [momento de cada busca
@@ -4767,8 +4768,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a
     legenda da fala sobem com o cartão do app, que sobe com a linha do rótulo (03/11). link_do_1o:
     no Ver Produtos, o link curto do 1º produto trocado pelo da loja que paga mais (P57): a foto vem
-    do anúncio dele, como no link de produto. edicao (dict) recebe em "cor" a cor do produto que a
-    edição usou (P159 2; "" com as cores de sempre).
+    do anúncio dele, como no link de produto. edicao (dict) recebe em "cor" a cor em que a faixa da
+    capa saiu (a do produto, P159 2, ou a que vai no lugar da que some na foto, P173 1; "" com o
+    laranja).
     Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43;
     28/10, Editor 2, P51): DECISOES.md, Shopee Vídeo.
     """
@@ -5477,7 +5479,7 @@ def marcar_o_post(d, ident, caixa):
                 atualizar(ident, marca=marca)
                 rascunho = pegar(ident) or {}
                 if rascunho.get("chamada"):
-                    # A faixa vai na cor do produto que a edição usou (P159 2).
+                    # A faixa vai na cor que a edição usou: a do produto (P159 2) ou a que foi no lugar dela (P173 1).
                     cor = edicao_video.cor_do_produto(rascunho.get("cor"))
                     faixa = faixa_da_capa(imagem, caixa, cor)
                     lados = edicao_video.faixa_nos_lados(imagem, caixa, cor) if faixa else None
