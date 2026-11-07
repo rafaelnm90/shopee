@@ -7024,6 +7024,25 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
                                               ("no post sem a faixa", "")]
 
 
+def test_post_confere_a_faixa_no_tom_que_o_rascunho_guardou():
+    # P174 3: sem a 2ª cor, a faixa vai num tom da cor do produto, e o rascunho guarda o #rrggbb
+    # dele; o post procura a faixa nesse tom, não no laranja.
+    from PIL import Image
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    ev = robo.edicao_video
+    tom = (176, 176, 176)
+    capa = Image.open(io.BytesIO(ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor", cor=tom))).convert("RGB")
+    esquerda, direita = ev.LADOS_NA_GRADE
+    cima, baixo = ev.VISIVEL_NA_GRADE
+    tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+    tela.paste(capa.crop((esquerda, cima, direita, baixo)).resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
+    celular = type("Celular", (), {"screenshot": lambda self, caminho=None: tela})()
+    rascunho = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1", cor=ev.nome_da_cor(tom))
+    assert robo.marcar_o_post(celular, rascunho, caixa)
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", f"{robo.LADOS_DA_CAPA[True]}; {robo.COR_NA_CAPA}")]
+
+
 def test_post_acha_a_faixa_que_desce_ate_embaixo_com_o_numero_por_cima():
     # P168: na grade do celular do Rafael (a largura toda, GRADE_NO_CELULAR), a faixa da capa desce
     # até o fim do quadro, e o número de visualizações do app fica por cima dela, em branco. O post

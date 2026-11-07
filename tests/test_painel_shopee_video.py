@@ -487,7 +487,9 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     # P173 (print de 07/11, 04:15): o fio e a faixa nunca ficam na cor do fundo da foto; a cor do produto
     # que sumiria nele dá lugar à 2ª cor do produto ou, sem ela, ao laranja.
     assert "O fio e a faixa nunca ficam na cor do fundo da foto (escolha sua)" in texto
-    assert "vão na 2ª cor que mais se destaca no produto (no vermelho, no laranja da Shopee) ou, sem ela, no laranja" in texto
+    assert "vão na 2ª cor que mais se destaca no produto (no vermelho, no laranja da Shopee) ou, sem ela, num tom" in texto
+    # P174 3: sem a 2ª cor, um tom mais escuro da cor do produto; no fundo escuro, um mais claro.
+    assert "num tom mais escuro da cor do produto (no branco, um cinza-claro; no fundo escuro, um tom mais claro)" in texto
     assert "com o número por cima dela, na mesma cor" in texto and "embaixo da frase fica o preto" not in texto
     assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto
     assert _textos(sv.teclado_capa(sv.ler_config())) == [
