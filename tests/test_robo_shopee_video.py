@@ -2723,6 +2723,53 @@ def test_voltar_que_nem_o_link_tira_da_pagina_carregando_para_e_diz_onde(monkeyp
     assert str(parada.value) == f"não consegui voltar até Eu ({onde})"
 
 
+class CelularNoFeedComVideo:
+    """
+    O app no Para você com um vídeo tocando (Motorola, 07/11, às 18:12 e às 18:56): a leitura traz só
+    as barras do Android, mesmo relida, e o voltar não muda nada; o link da página inicial a tira.
+    """
+
+    info = {"screenOn": True}
+
+    def __init__(self):
+        self.teclas, self.comandos, self.no_inicio = [], [], False
+
+    def dump_hierarchy(self):
+        if self.no_inicio:
+            return _xml(_no_do_app(robo.ps.PACOTE, "Eu", (860, 2250, 1080, 2400)))
+        return _xml(_no_do_app(robo.ps.PACOTE_SISTEMA, "", (0, 0, 1080, 120)))
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+    def shell(self, comando):
+        self.comandos.append(comando)
+        self.no_inicio = True
+
+    def app_current(self):
+        return {"package": robo.ps.PACOTE, "activity": "com.shopee.app.ui.home.HomeActivity_"}
+
+
+def test_voltar_ao_eu_sem_o_app_na_leitura_abre_a_pagina_inicial_pelo_link(monkeypatch):
+    # 07/11, 18:12 e 18:56: com um vídeo tocando no Para você, a leitura vinha só com as barras do
+    # Android, mesmo relida; o voltar apertava voltar em vão, a rodada parava em "não consegui
+    # voltar até Eu", e o vídeo seguia tocando em laço. No caminho até o Eu, a página inicial abre
+    # pelo link, sem fechar o app (P15).
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+    celular = CelularNoFeedComVideo()
+    robo.voltar(celular, "Eu")
+    assert celular.no_inicio and celular.teclas == []
+    assert celular.comandos == [["am", "start", "-a", "android.intent.action.VIEW", "-d",
+                                 robo.ps.LINK_DA_PAGINA_INICIAL, "-p", robo.ps.PACOTE]]
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'voltar no app'") == (
+        "leitura sem o app", "a página inicial aberta pelo link", None)
+    # No caminho até outra tela (a lista dos rascunhos), o link não abre: o voltar segue como antes.
+    celular = CelularNoFeedComVideo()
+    with pytest.raises(robo.Parada):
+        robo.voltar(celular, "Selecionar", vezes=3)
+    assert celular.comandos == [] and celular.teclas == ["back"] * 3
+
+
 class CelularComErroDoApp:
     """
     O app da Shopee no aviso de erro (Motorola, 31/10, 15:48 e 15:59): "Ops! Algo deu errado.
