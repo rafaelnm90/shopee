@@ -114,6 +114,17 @@ def com_historico(d):
     return d if isinstance(d, CelularComHistorico) else CelularComHistorico(d)
 
 
+def anotar_tela(d, descricao):
+    """
+    Anota entre as ações do caso a última tela lida, sem toque nenhum: o que o app mostrou logo
+    depois de um toque, que a tela de antes do próximo toque já não mostra (07/11, o Feito do
+    produto que não ficou na tela final: o caso só tinha a tela de 30 s depois). No celular sem
+    o histórico, nada.
+    """
+    if isinstance(d, CelularComHistorico):
+        d._anotar(descricao)
+
+
 def elemento_no_ponto(tela, x, y):
     """
     Em que o toque caiu: o menor elemento da tela que tem o ponto, com o app, o id, o texto e

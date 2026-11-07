@@ -130,6 +130,23 @@ def test_caso_guarda_as_ultimas_acoes_com_a_tela_de_antes_e_onde_o_toque_caiu():
     assert casos_robo.elemento_no_ponto("<quebrado", 1, 1) == "" and casos_robo.elemento_no_ponto(TELA, 50, 50) == ""
 
 
+def test_caso_guarda_a_tela_anotada_sem_toque():
+    # 07/11: o caso do produto que não ficou depois do Feito só tinha a tela de 30 s depois. A tela
+    # lida logo depois do toque entra entre as ações, com o arquivo dela e sem "caiu_em".
+    celular = Celular()
+    d = casos_robo.com_historico(celular)
+    d.dump_hierarchy()
+    d.click(10, 10)
+    d.dump_hierarchy()
+    casos_robo.anotar_tela(d, "tela logo depois do Feito")
+    casos_robo.anotar_tela(celular, "nada")                    # o celular sem o histórico: nada
+    assert celular.toques == [(10, 10)]
+    pasta = casos_robo.guardar(d, "rascunho", "pulado", "x", agora=AGORA)
+    antes = _caso(pasta)["antes_da_falha"]
+    assert [a["acao"] for a in antes] == ["toque em (10,10)", "tela logo depois do Feito"]
+    assert "caiu_em" not in antes[1] and open(os.path.join(pasta, antes[1]["tela"]), encoding="utf-8").read() == TELA
+
+
 def test_caso_sem_celular_ou_com_o_celular_caido_nao_derruba_a_rodada():
     pasta = casos_robo.guardar(Celular(quebrado=True), "rascunho", "erro", "erro inesperado (ConnectionError)",
                                agora=AGORA)
