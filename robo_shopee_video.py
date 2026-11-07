@@ -4367,7 +4367,7 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
             if not _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados) + curtidos_de_fora, limpa,
                               i in a_mais):
                 break
-            if not primeiro or primeiro_na_tela_final(d, vez):
+            if not primeiro or primeiro_na_tela_final(d, vez, anexados[0] if anexados else nome):
                 no_post.append(i)
                 break
             # O Feito não deixou o produto na tela final: ele sai da conta e vai de novo.
@@ -4421,12 +4421,13 @@ def como_ficou_logo_depois_do_feito(xml):
     return "outra tela"
 
 
-def primeiro_na_tela_final(d, vez=1):
+def primeiro_na_tela_final(d, vez=1, nome=""):
     """
     Depois do Feito do 1º produto, a tela final mostra o produto na fileira? Relê a tela por
     até ps.ESPERA_DA_FILEIRA s. Sem ele, ou quando ele só veio na 2ª vez, o registro diz como a
-    tela voltou (a linha dos produtos, a edição da legenda aberta por cima, a legenda em foco),
-    só com rótulos fixos: o próximo caso mostra a causa (pedido do Rafael de 30/10).
+    tela voltou (a linha dos produtos, a edição da legenda aberta por cima, a legenda em foco)
+    e os sinais do nome do produto (ps.forma_do_nome), só com rótulos fixos: o próximo caso
+    mostra a causa (pedido do Rafael de 30/10).
     """
     xml = tela(d)
     for _ in range(ps.ESPERA_DA_FILEIRA // 3):
@@ -4437,7 +4438,7 @@ def primeiro_na_tela_final(d, vez=1):
     if ps.produtos_na_fileira(xml):
         if vez > 1:
             registro_processos.registrar(REGISTRO, "anexar o produto", f"anexado na {vez}ª vez",
-                                         ps.como_esta_a_tela_final(xml), ok=True)
+                                         ps.como_esta_a_tela_final(xml) + ps.forma_do_nome(nome), ok=True)
         return True
     lido, aviso = aviso_do_app(d)
     _AVISO_DO_FEITO["texto"] = aviso
@@ -4446,7 +4447,8 @@ def primeiro_na_tela_final(d, vez=1):
     logo = _AVISO_DO_FEITO.get("logo")
     registro_processos.registrar(REGISTRO, "anexar o produto", "não ficou depois do Feito",
                                  f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}{sobre_o_aviso}"
-                                 + (f"; logo depois do Feito: {logo}" if logo else ""), ok=False)
+                                 + (f"; logo depois do Feito: {logo}" if logo else "") + ps.forma_do_nome(nome),
+                                 ok=False)
     fechar_a_edicao_da_legenda(d, xml)
     return False
 

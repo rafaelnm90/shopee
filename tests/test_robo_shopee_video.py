@@ -6200,7 +6200,7 @@ def test_anexa_na_ordem_e_o_a_mais_que_nao_anexa_fica_de_fora(monkeypatch):
     caminhos, voltas, chamadas = [], [], []
     monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append(caminho[0][0]))
     monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
-    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1: True)
+    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1, nome="": True)
     monkeypatch.setattr(robo, "voltar_a_tela_final", lambda d: voltas.append(True))
 
     def adicionar(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ultima_chance=True, avisar=True):
@@ -6228,7 +6228,7 @@ def test_passado_o_prazo_os_a_mais_que_faltam_anexar_ficam_de_fora(monkeypatch):
     caminhos, chamadas = [], []
     monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append(caminho[0][0]))
     monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
-    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1: True)
+    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1, nome="": True)
     # Cada anexar leva 250 s no relógio do teste.
     relogio = [0.0]
     monkeypatch.setattr(robo.time, "monotonic", lambda: relogio[0])
@@ -6464,6 +6464,19 @@ def test_produto_que_nao_fica_no_feito_diz_o_aviso_do_app(monkeypatch, avisos):
     _anexar_no_app(app)
     assert _registro_do_anexar()[-2][1].endswith("; sem aviso do app" + LOGO_DEPOIS_DO_FEITO)
 
+
+def test_produto_que_nao_fica_no_feito_diz_os_sinais_do_nome(monkeypatch, avisos):
+    # 07/11 (06:09 e 16:46): os 2 produtos que o app não deixou na tela final depois do Feito, sem
+    # aviso, tinham dois-pontos no nome. O registro diz os sinais do nome em rótulos fixos (o nome
+    # nunca vai ao registro, que sai no checkup público).
+    app = AppQueReabreALegenda()
+    app.atual = "final"
+    assert not robo.primeiro_na_tela_final(app, 1, "Kit Creme Facial Hidratante: 2 Unidades")
+    assert _registro_do_anexar()[-1][0] == "não ficou depois do Feito"
+    assert _registro_do_anexar()[-1][1].endswith("; o nome com dois-pontos")
+    app.com_produto = True
+    assert robo.primeiro_na_tela_final(app, 2, "Kit Creme Facial Hidratante: 2 Unidades")
+    assert _registro_do_anexar()[-1] == ("anexado na 2ª vez", "a linha dos produtos com produto; o nome com dois-pontos")
 
 
 def test_aviso_do_app_le_o_toast_como_o_uiautomator2_da(monkeypatch):

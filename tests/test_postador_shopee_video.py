@@ -1595,6 +1595,20 @@ def test_o_1o_da_lista_com_o_nome_parecido_e_anexado_com_o_nome_que_o_app_mostra
     assert _anexar_linhas() == [("anexado", "no topo, pelo nome")]
 
 
+def test_o_anexado_diz_os_sinais_do_nome_no_registro(monkeypatch):
+    # 07/11 (06:09 e 16:46): os 2 produtos que o app não deixou na tela final depois do Feito tinham
+    # dois-pontos no nome. O anexado também diz os sinais do nome (rótulos fixos, nunca o nome), para
+    # o checkup comparar com os que não ficaram.
+    _avisos(monkeypatch)
+    nome = "Kit Creme Facial Hidratante: 2 Unidades D'Ouro"
+    aparelho = AparelhoComJanela(tela=_no_topo(nome, PANELA), nome_na_janela=nome)
+    ok, _motivo = ps.adicionar_produto(aparelho, {"produto": nome}, [])
+    assert ok and _anexar_linhas() == [("anexado", "no topo, pelo nome; o nome com dois-pontos, apóstrofo")]
+    assert ps.forma_do_nome(VESTIDO) == "" and ps.forma_do_nome(None) == ""
+    assert ps.forma_do_nome("Garrafa 1/2 litro +brinde “nova”") == "; o nome com aspas, barra, sinal de mais"
+    assert ps.forma_do_nome("x" * 101) == "; o nome com mais de 100 letras"
+
+
 def test_o_2o_produto_do_video_procura_entre_os_que_sobraram_no_topo(monkeypatch):
     _avisos(monkeypatch)
     anexados = []
