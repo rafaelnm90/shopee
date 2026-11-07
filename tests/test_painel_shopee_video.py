@@ -473,8 +473,10 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     assert "aumenta até tampar a largura toda da capa" in texto and "faixa na cor principal do produto" in texto
     assert "a faixa desce até o fim da capa, com o número por cima dela" in texto
     assert "um pouco menor" not in texto
-    # Vídeo do Rafael das 20:14 de 02/11: a foto inteira, o fio em cima e a faixa que não cresce.
-    assert "com um fio em cima" in texto and "a faixa não cresce" in texto
+    # Vídeo do Rafael das 20:14 de 02/11: o fio em cima. Vídeo das 23:29 de 06/11 (P171): a frase,
+    # maior, no meio da faixa, que vai na mesma cor até embaixo, também nas cores claras.
+    assert "com um fio em cima" in texto and "A frase fica no meio da faixa" in texto
+    assert "com o número por cima dela, na mesma cor" in texto and "embaixo da frase fica o preto" not in texto
     assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto
     assert _textos(sv.teclado_capa(sv.ler_config())) == [
         "Ver Exemplo da Capa 👀", "Ligar Capa com Chamada ✅", "Voltar à Edição 🔙", "Voltar ao Robô 🔙"]

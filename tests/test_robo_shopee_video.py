@@ -6989,8 +6989,8 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
 def test_post_acha_a_faixa_que_desce_ate_embaixo_com_o_numero_por_cima():
     # P168: na grade do celular do Rafael (a largura toda, GRADE_NO_CELULAR), a faixa da capa desce
     # até o fim do quadro, e o número de visualizações do app fica por cima dela, em branco. O post
-    # continua achando a faixa de lado a lado, também na cor clara do produto (letra preta), em que
-    # o branco do número não é uma das cores da faixa.
+    # continua achando a faixa de lado a lado, também na cor clara do produto (letra preta), em que a
+    # faixa desce até embaixo na mesma cor (P171) e o branco do número não é uma das cores dela.
     from PIL import Image, ImageDraw
     caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
     ev = robo.edicao_video
