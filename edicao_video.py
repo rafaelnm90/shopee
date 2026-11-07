@@ -277,18 +277,25 @@ COM_AS_CORES_DE_SEMPRE = "as cores de sempre"
 # A faixa e o fio nunca ficam na cor do fundo da foto: na cor dele (o produto branco numa foto de
 # fundo branco), a faixa da frase some na foto (print do Rafael de 07/11, 04:15). Aí o fio e a faixa
 # das duas capas vão na 2ª cor que mais se destaca no produto, que a IA diz junto com a principal
-# ("cor_2"; no vermelho, o laranja da Shopee, como na P159 2); sem ela, ou com ela sumindo também, no
-# laranja da Shopee e, no fundo laranja, no grafite do preto (NO_LUGAR_DA_QUE_SOME). A caixa do nome
-# e da vantagem e a moldura da miniatura continuam na cor do produto. Some: PARTE_QUE_SOME ou mais
-# da tira do pé ou da do alto da foto (BEIRADA_DA_FOTO da altura dela, como ela fica na capa da
-# grade: o pé encosta na faixa, e o alto, no fio) a até TOLERANCIA_DO_FUNDO da cor (a soma das
-# diferenças das três cores). Escolha do Rafael (07/11, P173): DECISOES.md, Shopee Vídeo.
+# ("cor_2"; no vermelho, o laranja da Shopee, como na P159 2; P173); sem ela, ou com ela sumindo
+# também, num tom mais escuro da cor que some (no branco, um cinza-claro) e, no fundo escuro (a cor
+# que some é escura: a letra branca contrasta com ela), num mais claro, com a letra que contrasta
+# (P174 3), cada tom mais longe dela até não sumir (tons_da_cor). A caixa do nome e da vantagem e a
+# moldura da miniatura continuam na cor do produto. Some: PARTE_QUE_SOME ou mais da tira do pé ou da
+# do alto da foto (BEIRADA_DA_FOTO da altura dela, como ela fica na capa da grade: o pé encosta na
+# faixa, e o alto, no fio) a até TOLERANCIA_DO_FUNDO da cor (a soma das diferenças das três cores).
+# Escolhas do Rafael (07/11, P173 e P174 3): DECISOES.md, Shopee Vídeo.
 TOLERANCIA_DO_FUNDO = 60
 PARTE_QUE_SOME = 0.25
 BEIRADA_DA_FOTO = 0.03
+# Quanto fica da cor em cada tom: o mais escuro é a cor vezes o número; o mais claro anda até o
+# branco o que falta do número (0,72: 28% do caminho).
+TONS_DA_COR = (0.72, 0.5, 0.3)
+# Com todos os tons sumindo também (a beirada da foto com todos eles), o laranja e o grafite do preto.
 NO_LUGAR_DA_QUE_SOME = (LARANJA_DA_SHOPEE, CORES_DO_PRODUTO["preto"])
 PROCESSO_DA_FAIXA_QUE_SOME = "edição do vídeo: faixa que some na foto"
 A_2A_COR, SEM_A_2A_COR, A_2A_COR_SOME_TAMBEM = "a 2ª cor do produto", "sem a 2ª cor", "a 2ª cor some também"
+TOM_MAIS_ESCURO, TOM_MAIS_CLARO = "um tom mais escuro", "um tom mais claro"
 
 
 def cor_do_produto(nome):
@@ -714,28 +721,55 @@ def cor_da_segunda(nome):
     return cor_do_produto(nome) or (LARANJA_DA_SHOPEE if nome in CORES_DE_SEMPRE else None)
 
 
+def tons_da_cor(cor):
+    """
+    Os tons da cor (RGB) para o fio e a faixa no lugar dela (P174 3), na ordem de tentar: os mais
+    escuros (TONS_DA_COR) e depois os mais claros; na cor escura (a letra branca contrasta com ela,
+    como o fundo escuro em que ela some), os mais claros primeiro.
+    """
+    cor = tuple(cor[:3])
+    escuros = [tuple(round(canal * parte) for canal in cor) for parte in TONS_DA_COR]
+    claros = [tuple(round(canal + (255 - canal) * (1 - parte)) for canal in cor) for parte in TONS_DA_COR]
+    return claros + escuros if letra_que_contrasta(cor) == LETRA_BRANCA else escuros + claros
+
+
 def cor_da_faixa(foto, cor=None, segunda=None):
     """
     A cor (RGB) do fio e da faixa da capa com a frase, a mesma nas duas capas (a da grade e a do vídeo
     aberto, para a abertura não trocar de cor): a do produto (P159 2; sem ela, o laranja da Shopee)
     ou, quando ela some no fundo da foto (foto, bytes), a 2ª cor do produto (segunda, RGB:
-    cor_da_segunda) e, sem ela ou com ela sumindo também, a 1ª de NO_LUGAR_DA_QUE_SOME que não some
-    (P173).
+    cor_da_segunda, P173) e, sem ela ou com ela sumindo também, o 1º dos tons_da_cor que não some
+    (P174 3); com todos sumindo, a 1ª de NO_LUGAR_DA_QUE_SOME que não some.
     """
     cor = tuple(cor) if cor else LARANJA_DA_SHOPEE
     imagem = _foto_da_grade(foto)
     if imagem is None or not _some_na_foto(imagem, cor):
         return cor
-    outras = ([tuple(segunda)] if segunda else []) + list(NO_LUGAR_DA_QUE_SOME)
+    outras = ([tuple(segunda)] if segunda else []) + tons_da_cor(cor) + list(NO_LUGAR_DA_QUE_SOME)
     return next((outra for outra in outras if outra != cor and not _some_na_foto(imagem, outra)), cor)
 
 
 def nome_da_cor(cor):
-    """O nome da cor (RGB) no CORES_DO_PRODUTO, que o rascunho guarda: "" com o laranja da Shopee (o de sempre)."""
-    cor = tuple(cor or LARANJA_DA_SHOPEE)
+    """
+    Como o rascunho guarda a cor (RGB) da faixa, para o post conferir a faixa nela (cor_guardada): o
+    nome dela no CORES_DO_PRODUTO, o #rrggbb do tom de fora da lista (P174 3) e "" com o laranja da
+    Shopee (o de sempre).
+    """
+    cor = tuple(cor or LARANJA_DA_SHOPEE)[:3]
     if cor == LARANJA_DA_SHOPEE:
         return ""
-    return next((nome for nome, tom in CORES_DO_PRODUTO.items() if tom == cor), "")
+    return next((nome for nome, tom in CORES_DO_PRODUTO.items() if tom == cor), "#%02x%02x%02x" % cor)
+
+
+def cor_guardada(texto):
+    """O tom (RGB) da cor que o rascunho guardou (nome_da_cor): pelo nome da lista ou pelo #rrggbb; None com o laranja."""
+    texto = str(texto or "").strip()
+    if len(texto) == 7 and texto.startswith("#"):
+        try:
+            return tuple(int(texto[i:i + 2], 16) for i in (1, 3, 5))
+        except ValueError:
+            return None
+    return cor_do_produto(texto)
 
 
 def lugar_das_letras_na_grade():
@@ -763,7 +797,7 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
     no lugar dela e a faixa da altura de uma linha acima do cartão do produto que o app põe por cima
     do vídeo aberto (P160 2), com a frase acabando antes dos ícones do app (P165 1). O fio e a faixa
     vão na cor do produto (P159 2; sem ela, o laranja da Shopee) ou, quando ela some no fundo da
-    foto, na 2ª cor do produto (segunda, RGB) ou na que vai no lugar dela (cor_da_faixa, P173), com
+    foto, na 2ª cor do produto (segunda, RGB) ou num tom da cor (cor_da_faixa, P173 e P174 3), com
     a letra que contrasta. Nada da foto fica coberto (P139 2). None sem a chamada, com a foto que não
     abre ou com a chamada que não cabe nem na menor letra.
     """
@@ -2568,9 +2602,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     cartão do app (SUBIDA_COM_O_ROTULO_DE_IA). Com a cor principal do produto, que a IA diz com os
     textos (P159 2), o fio e a faixa da capa, a caixa do nome e da vantagem e a moldura da
     miniatura vão nela (o fio e a faixa, só quando ela não some no fundo da foto; senão, na 2ª cor
-    do produto ou no laranja: cor_da_faixa, P173); anotar (dict) recebe em "cor" o nome da cor da
-    faixa ("" com o laranja), que o robô guarda no rascunho para conferir a faixa no post. Escolhas
-    do Rafael: DECISOES.md, Shopee Vídeo.
+    do produto ou num tom da cor: cor_da_faixa, P173 e P174 3); anotar (dict) recebe em "cor" a cor
+    da faixa (nome_da_cor: o nome, o #rrggbb do tom ou "" com o laranja), que o robô guarda no
+    rascunho para conferir a faixa no post. Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -2605,14 +2639,19 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         capa = _capa_da_vez(foto_da_capa, frase, cor=cor, segunda=segunda)
         faixa = cor_da_faixa(foto_da_capa, cor, segunda) if capa else None
         if faixa and faixa != (cor or LARANJA_DA_SHOPEE):
-            # A faixa que some no fundo da foto vai na 2ª cor do produto ou, sem ela, no laranja
-            # (P173): o registro conta, e o robô confere no post a faixa na cor em que ela saiu.
-            de_onde = (A_2A_COR if segunda and faixa == tuple(segunda)
-                       else A_2A_COR_SOME_TAMBEM if segunda else SEM_A_2A_COR)
-            registro_processos.registrar("shopee_video", PROCESSO_DA_FAIXA_QUE_SOME, nome_da_cor(faixa) or "laranja",
-                                         de_onde, ok=None)
+            # A faixa que some no fundo da foto vai na 2ª cor do produto (P173) ou, sem ela, num tom
+            # da cor (P174 3): o registro conta de onde veio a cor, e o robô confere no post a faixa
+            # na cor em que ela saiu.
+            nome = nome_da_cor(faixa)
+            if segunda and faixa == tuple(segunda):
+                resultado, detalhe = A_2A_COR, nome or "laranja"
+            else:
+                detalhe = A_2A_COR_SOME_TAMBEM if segunda else SEM_A_2A_COR
+                resultado = ((TOM_MAIS_ESCURO if sum(faixa) < sum(cor or LARANJA_DA_SHOPEE) else TOM_MAIS_CLARO)
+                             if nome.startswith("#") else nome or "laranja")
+            registro_processos.registrar("shopee_video", PROCESSO_DA_FAIXA_QUE_SOME, resultado, detalhe, ok=None)
             if anotar is not None:
-                anotar["cor"] = nome_da_cor(faixa)
+                anotar["cor"] = nome
     abertura = capa
     if capa:
         # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
