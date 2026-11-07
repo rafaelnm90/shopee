@@ -1734,20 +1734,20 @@ CAMINHO_EDICAO = [
     ("@tv_pick_top_next", 10, "@tv_compress"),
     ("@tv_compress", 10, "@et_caption"),
 ]
-# Na edição, antes do Próximo, em todos os vídeos: o Realçar ligado e o efeito Giro no começo
-# (Efeitos → aba Transição → Giro → ✓). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+# Na edição, antes do Próximo, em todos os vídeos: o efeito Giro no começo (Efeitos → aba
+# Transição → Giro → ✓). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
 # A tela de Efeitos (SSZMultipleEffectActivity) tem o ✕ (@iv_close), o ✓ (@iv_done) e a
 # lista da aba Transição com o Giro primeiro; o efeito posto mostra o Desfazer (@ll_undo). Na
-# primeira vez num celular, o toque no Giro só baixa o efeito, e o seguinte o põe. O Realçar
-# não diz na tela se está ligado (o ON e o OFF ficam no desenho do botão): toda edição nova
-# começa com ele desligado, e o app avisa o que o toque fez ("Realce ativado"/"desativado").
-REALCAR = "Realçar"
+# primeira vez num celular, o toque no Giro só baixa o efeito, e o seguinte o põe.
+# O Realçar fica desligado, e o robô não toca nele (toda edição nova começa com ele desligado):
+# ele mudava a luz de cada quadro, e a faixa da capa da grade, toda preenchida, saía num laranja
+# mais escuro na grade que no vídeo aberto. Escolha do Rafael (07/11, P177 2): DECISOES.md, Shopee Vídeo.
 EFEITOS = "Efeitos"
 GIRO = "Giro"
 ABA_DO_GIRO = "Transição"
 VEZES_DO_GIRO = 3
 ESPERA_DO_GIRO = 6
-EFEITOS_COMPLETOS = "realce e giro"
+EFEITOS_COMPLETOS = "giro"
 CAMINHO_PRODUTO = [
     ("@ll_add_product_symbol", 8, "Minhas Curtidas"),
     ("Minhas Curtidas", 5, "Mais Recente"),
@@ -1785,22 +1785,6 @@ def esperar_o_que_demora(d, alvo):
     if voltas:
         registro_processos.registrar(REGISTRO, "anexar o produto", f"o {nome} demorou a aparecer",
                                      f"mais {voltas * 3} s", ok=True)
-
-
-def ligar_o_realce(d):
-    """
-    Liga o Realçar da edição. Com o aviso do app de que o toque desligou (já estava ligado),
-    toca de novo. Devolve como ficou, em palavras curtas, para o registro.
-    """
-    for _ in range(2):
-        limpar_aviso_do_app(d)
-        tocar(d, REALCAR, 2)
-        lido, aviso = aviso_do_app(d)
-        if not lido or not aviso:
-            return "tocado, sem o aviso do app"
-        if "desativ" not in aviso.casefold():
-            return "ligado"
-    return "o app avisou que desligou"
 
 
 def por_o_giro(d):
@@ -1844,25 +1828,17 @@ def voltar_para_a_edicao(d):
 
 def efeitos_na_edicao(d):
     """
-    O Realçar e o Giro na edição do vídeo, antes do Próximo (pedido do Rafael: DECISOES.md,
-    Shopee Vídeo). Um efeito que não dá certo não derruba o rascunho: o vídeo segue sem ele, e
-    o registro diz qual e por quê (o checkup mostra). Devolve o que ficou, para o treino.
+    O Giro na edição do vídeo, antes do Próximo, sem tocar no Realçar (pedidos do Rafael, 31/10 e
+    P177 2: DECISOES.md, Shopee Vídeo). O Giro que não dá certo não derruba o rascunho: o vídeo
+    segue sem ele, e o registro diz por quê (o checkup mostra). Devolve o que ficou, para o treino.
     """
-    try:
-        realce = ligar_o_realce(d)
-    except Parada as e:
-        realce = f"não: {e.motivo}"
     try:
         giro = "posto" if por_o_giro(d) else f"não ficou depois de {VEZES_DO_GIRO} toques"
     except Parada as e:
         giro = f"não: {e.motivo}"
     voltar_para_a_edicao(d)
-    com_realce = realce in ("ligado", "tocado, sem o aviso do app")
-    com_giro = giro == "posto"
-    ficou = (EFEITOS_COMPLETOS if com_realce and com_giro else "só o realce" if com_realce
-             else "só o giro" if com_giro else "nenhum")
-    registro_processos.registrar(REGISTRO, "efeitos na edição", ficou, f"realce: {realce}; giro: {giro}",
-                                 ok=ficou == EFEITOS_COMPLETOS)
+    ficou = EFEITOS_COMPLETOS if giro == "posto" else "nenhum"
+    registro_processos.registrar(REGISTRO, "efeitos na edição", ficou, f"giro: {giro}", ok=ficou == EFEITOS_COMPLETOS)
     return ficou
 
 

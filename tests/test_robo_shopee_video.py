@@ -876,10 +876,10 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert robo.assistente.proximo_video("autorais") is None
 
 
-# --- O Realçar e o Giro na edição (pedido do Rafael, vídeo de 31/10) ---
+# --- O Giro na edição (pedido do Rafael, vídeo de 31/10), sem o Realçar (P177 2) ---
 
 class ComAvisos(AppDeMentira):
-    """O app avisa num toast o que o toque no Realçar fez; o realce pode já vir ligado."""
+    """O app avisa num toast o que o toque no Realçar faria; o Giro pode só baixar no 1º toque."""
 
     def __init__(self, realce_ligado=False, giro_baixa_antes=0):
         super().__init__()
@@ -905,28 +905,31 @@ class ComAvisos(AppDeMentira):
             self.atual = antes
 
 
-def test_edicao_liga_o_realce_e_poe_o_giro_antes_do_proximo():
+def test_edicao_poe_o_giro_e_nao_toca_no_realcar():
+    # Escolha do Rafael (07/11, P177 2): o Realçar mudava a luz de cada quadro, e a faixa da capa
+    # da grade saía num laranja mais escuro na grade que no vídeo aberto. Ele fica desligado, como
+    # toda edição nova começa, e o Giro continua.
     app = ComAvisos()
-    assert robo.efeitos_na_edicao(app) == robo.EFEITOS_COMPLETOS
-    assert app.toques == ["Realçar", "Efeitos", "Giro", "@iv_done"] and app.realce and app.atual == "edicao"
+    assert robo.efeitos_na_edicao(app) == robo.EFEITOS_COMPLETOS == "giro"
+    assert app.toques == ["Efeitos", "Giro", "@iv_done"] and not app.realce and app.atual == "edicao"
     registro = robo.registro_processos.sequencia("shopee_video", "efeitos na edição", "2000-01-01 00:00:00")
-    assert [r[2] for r in registro] == ["realce e giro"] and "realce: ligado; giro: posto" in registro[0][3]
+    assert [r[2] for r in registro] == ["giro"] and registro[0][3] == "giro: posto"
 
 
-def test_realce_que_ja_estava_ligado_e_giro_que_so_baixa_no_primeiro_toque():
-    app = ComAvisos(realce_ligado=True, giro_baixa_antes=1)
+def test_giro_que_so_baixa_no_primeiro_toque():
+    app = ComAvisos(giro_baixa_antes=1)
     assert robo.efeitos_na_edicao(app) == robo.EFEITOS_COMPLETOS
-    # O 1º toque desligou o realce (o app avisou): tocou de novo. O 1º Giro só baixou o efeito.
-    assert app.toques == ["Realçar", "Realçar", "Efeitos", "Giro", "Giro", "@iv_done"] and app.realce
+    # O 1º Giro só baixou o efeito; o 2º o pôs.
+    assert app.toques == ["Efeitos", "Giro", "Giro", "@iv_done"] and "Realçar" not in app.toques
 
 
 def test_efeito_que_nao_fica_nao_derruba_o_rascunho():
     app = ComAvisos(giro_baixa_antes=robo.VEZES_DO_GIRO)
-    assert robo.efeitos_na_edicao(app) == "só o realce"
+    assert robo.efeitos_na_edicao(app) == "nenhum"
     # Sem o Desfazer, sai dos Efeitos pelo ✕, sem mudar nada, e a edição segue para o Próximo.
     assert app.toques[-1] == "@iv_close" and app.toques.count("Giro") == robo.VEZES_DO_GIRO and app.atual == "edicao"
     registro = robo.registro_processos.sequencia("shopee_video", "efeitos na edição", "2000-01-01 00:00:00")
-    assert registro[-1][2] == "só o realce" and "não ficou depois de 3 toques" in registro[-1][3]
+    assert registro[-1][2] == "nenhum" and "não ficou depois de 3 toques" in registro[-1][3]
 
 
 def test_edicao_sem_os_botoes_dos_efeitos_segue_sem_eles():
@@ -948,7 +951,7 @@ def test_rascunho_e_treino_passam_pelos_efeitos(monkeypatch, avisos):
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     app = AppDeMentira()
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
-    assert app.toques.index("Realçar") < app.toques.index("Giro") < app.toques.index("@tv_compress")
+    assert "Realçar" not in app.toques and app.toques.index("Giro") < app.toques.index("@tv_compress")
     app = AppDeMentira()
     assert robo.rodada(treino=True, d=app, agora=momento("2026-10-23 03:00")) == "treino: caminho OK"
     assert "Giro" in app.toques and "@tv_drafts_box" not in app.toques

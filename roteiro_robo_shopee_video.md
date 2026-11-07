@@ -540,7 +540,7 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
 1. Abrir o link do post e, em "Ver Produtos", curtir só os produtos que o criador
    vinculou (nunca os de "Você Também Pode Gostar").
 2. Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → Postar vídeo → o vídeo na
-   galeria → Próximo. Na edição, o Realçar e o Giro em todos os vídeos (31/10/2026).
+   galeria → Próximo. Na edição, o Giro em todos os vídeos (31/10/2026); o Realçar fica desligado desde 07/11/2026 (P177 2).
 3. Adicionar Produto → Minhas Curtidas → Mais Recente: os curtidos agora ficam em
    cima (curtiu 2, são os 2 primeiros). Entre eles, o de menor preço primeiro; no
    empate, o de maior comissão. O app pode mostrar o nome de outro jeito que a API (em
