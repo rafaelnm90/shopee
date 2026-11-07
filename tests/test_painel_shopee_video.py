@@ -469,7 +469,7 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     msg = Msg(sv.BOTAO_CAPA)
     rodar(sv.capa_handler(msg, est))
     texto = msg.saidas[-1]
-    assert "Os números ficam livres" in texto and "O que cada botão faz" in texto
+    assert "<b>O número de visualizações</b>" in texto and "O que cada botão faz" in texto
     # Escolha do Rafael (30/10, P107): a frase numa faixa, na cor principal do produto (P159 2); a
     # foto aumenta até tampar a largura toda da capa, e a faixa desce até o fim dela (06/11, P168).
     assert "aumenta até tampar a largura toda da capa" in texto and "faixa na cor principal do produto" in texto
@@ -479,10 +479,10 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     assert "um pouco menor" not in texto
     # Vídeo do Rafael das 20:14 de 02/11: o fio em cima. Vídeo das 23:29 de 06/11 (P171): a frase,
     # maior, na faixa, que vai na mesma cor até embaixo, também nas cores claras. Vídeos das 01:04 e
-    # 01:31 de 07/11: a frase no meio do pedaço da faixa à direita do número, e nada no preto.
-    assert "com um fio em cima" in texto and "no meio do pedaço da faixa à direita do número de visualizações" in texto
-    assert "a frase fica à direita do número de visualizações, embaixo à esquerda, com espaço para ele com até 2" in texto
-    assert "numa linha ou, quando a letra fica maior assim, em duas" in texto
+    # 01:31 de 07/11 e vídeo das 02:49: a frase no meio da faixa toda, num tamanho harmônico, sem se
+    # preocupar com o número, e nada no preto.
+    assert "com um fio em cima" in texto and "fica no meio da faixa, de uma beirada à outra e do alto até embaixo" in texto
+    assert "pode passar por cima do começo da frase" in texto and "num tamanho harmônico, em duas linhas" in texto
     assert "nada da capa fica no preto do fundo" in texto
     assert "com o número por cima dela, na mesma cor" in texto and "embaixo da frase fica o preto" not in texto
     assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto

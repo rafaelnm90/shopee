@@ -330,22 +330,22 @@ ESCALA_NA_MINIATURA = 0.5
 # até a foto, e a grade mostra FIO_DA_CAPA_NA_GRADE dele, mais grosso que o do vídeo aberto; a faixa
 # começa em TOPO_DA_FAIXA_NA_GRADE e desce até o fim do quadro na mesma cor, também nas cores claras
 # (com o número de visualizações, que o app escreve em branco, por cima dela). A frase, só o título,
-# fica no meio do retângulo da faixa à direita do número (lugar_das_letras_na_grade): do lugar do
-# número com até FIM_DO_NUMERO (com MARGEM_DA_FAIXA) até a beirada da grade (com MARGEM_DA_FAIXA), e
-# do alto da faixa até o pé do que a grade mostra (com FOLGA_DA_FAIXA), na maior letra que cabe nele
-# (LETRAS_NA_GRADE), numa linha ou em duas (ENTRELINHA_NA_GRADE), a que deixar a letra maior, e um
-# pouco mais estreita (APERTO_DA_LETRA) para caber maior. A foto tampa tudo o que a grade do celular
-# mostra (GRADE_NO_CELULAR), do fio até a faixa, de uma beirada à outra: a quase quadrada aumenta sem
-# deformar, perdendo no máximo CORTE_MAXIMO_AO_TAMPAR dela (a quadrada perde um pouco em cima e
-# embaixo); a outra estica só até ESTICAR_ATE na direção em que falta, o que quase não se nota, e o
-# que ainda faltar fica com a própria foto desfocada (DESFOQUE_DO_FUNDO) atrás dela, com a foto no pé
-# e no meio da largura.
+# fica no meio da faixa toda (lugar_das_letras_na_grade): de uma beirada à outra da grade (com
+# MARGEM_DA_FAIXA) e do alto da faixa até o pé do que a grade mostra (com FOLGA_DA_FAIXA), sem se
+# preocupar com o número, que pode passar por cima do começo dela; na maior letra que cabe, até um
+# teto que fica harmônico na faixa (LETRAS_NA_GRADE), em duas linhas (ENTRELINHA_NA_GRADE; a frase
+# de uma palavra só, numa), e um pouco mais estreita (APERTO_DA_LETRA) para caber maior. A foto
+# tampa tudo o que a grade do celular mostra (GRADE_NO_CELULAR), do fio até a faixa, de uma beirada
+# à outra: a quase quadrada aumenta sem deformar, perdendo no máximo CORTE_MAXIMO_AO_TAMPAR dela (a
+# quadrada perde um pouco em cima e embaixo); a outra estica só até ESTICAR_ATE na direção em que
+# falta, o que quase não se nota, e o que ainda faltar fica com a própria foto desfocada
+# (DESFOQUE_DO_FUNDO) atrás dela, com a foto no pé e no meio da largura.
 # No resto da abertura (o vídeo aberto, que corta mais dos lados, VISIVEL_NO_APP, P129), a faixa,
 # da altura de uma linha (FAIXA_DA_CHAMADA; a frase que não cabe numa linha vai em duas, com a letra
 # menor), fica acima do cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO)
 # e a foto, inteira entre a barra de pesquisa do app (TOPO_NO_VIDEO_ABERTO) e a faixa; o fio e a
 # faixa vão de um lado ao outro do que o app mostra. Pedidos do Rafael (P139 2, P160 2, P168, P169
-# 1, P171, com a P170, e os vídeos de 07/11, 01:04 e 01:31): DECISOES.md, Shopee Vídeo.
+# 1, P171, com a P170, e os vídeos e prints de 07/11, das 01:04 às 02:49): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
 FIO_DA_CAPA_NA_GRADE = 16                       # o que a grade mostra do fio, do alto dela até a foto
 # O que a grade do perfil mostra no Motorola do Rafael (print de 06/11, 21:09): o quadro em 3:4 com
@@ -355,12 +355,10 @@ CORTE_MAXIMO_AO_TAMPAR = 0.07                   # da foto aumentada; mais que is
 ESTICAR_ATE = 0.15                              # da altura ou da largura da foto
 DESFOQUE_DO_FUNDO = 24                          # o raio do desfoque da foto atrás, em px
 TOPO_DA_FAIXA_NA_GRADE = 846                    # a quadrada tampa do fio até aqui perdendo menos de 7%
-# O número de visualizações cresce para a direita com as visualizações: no Motorola do Rafael, "▷ 7"
-# acaba em x 122 do quadro e cada algarismo tem uns 42 px ("▷ 232,6mil" acaba em x 372). A frase
-# fica à direita do lugar do número com até 2 algarismos ("▷ 99"), como o Rafael desenhou: de 100
-# visualizações para cima, o número encosta no começo da frase. Escolha dele (07/11, P172 3).
-FIM_DO_NUMERO = 164
-LETRAS_NA_GRADE = (120, 36)                     # a maior e a menor, numa linha ou em duas
+# A maior e a menor letra da frase: a maior que cabe na faixa, mas não passa de 92, para ficar
+# harmônica (com até 120, as duas linhas enchiam a faixa toda). Pedido do Rafael (print de 07/11,
+# 02:49): DECISOES.md, Shopee Vídeo.
+LETRAS_NA_GRADE = (92, 36)
 APERTO_DA_LETRA = 0.8                           # da largura da letra
 ENTRELINHA_NA_GRADE = 1.1                       # mais junta, para as duas linhas caberem maiores
 # Medidos no vídeo do Rafael de 06/11 (09:56, o Motorola com o vídeo aberto pelo Perfil): o
@@ -451,14 +449,14 @@ def _letras_apertadas(linhas, fonte, cor_da_letra):
     return letras.resize((max(1, round(letras.width * APERTO_DA_LETRA)), letras.height), Image.LANCZOS)
 
 
-def _letras_da_grade(chamada, fonte_ttf, cor_da_letra, largura, altura):
+def _quebra_da_grade(chamada, fonte_ttf, largura, altura):
     """
-    As letras da frase da capa da grade (_letras_apertadas) na maior letra de LETRAS_NA_GRADE em
-    que ela cabe no retângulo de largura x altura px da faixa (lugar_das_letras_na_grade), numa
-    linha ou em duas, a que deixar a letra maior: com a mesma letra, a de uma linha; nas duas,
-    a quebra mais equilibrada, e a que termina a 1ª linha numa palavra de ligação vale como uma
-    letra PENALIDADE_DA_QUEBRA px menor. None se não cabe nem na menor letra. Pedido do Rafael
-    (vídeos de 07/11, 01:04 e 01:31): DECISOES.md, Shopee Vídeo.
+    (fonte, linhas) da frase da capa da grade: a maior letra de LETRAS_NA_GRADE em que ela cabe no
+    retângulo de largura x altura px da faixa (lugar_das_letras_na_grade), numa linha ou em duas, a
+    que deixar a letra maior: com a mesma letra, a de duas linhas, que ocupa mais a faixa (a palavra
+    só fica numa linha); nas duas, a quebra mais equilibrada, e a que termina a 1ª linha numa palavra
+    de ligação vale como uma letra PENALIDADE_DA_QUEBRA px menor. None se não cabe nem na menor letra.
+    Pedidos do Rafael (vídeos e prints de 07/11, das 01:04 às 02:49): DECISOES.md, Shopee Vídeo.
     """
     from PIL import ImageFont
     palavras = chamada.split(" ")
@@ -475,11 +473,17 @@ def _letras_da_grade(chamada, fonte_ttf, cor_da_letra, largura, altura):
             if medida[0] > largura or medida[1] > altura:
                 continue
             # A maior letra desta quebra.
-            nota = (tamanho - (PENALIDADE_DA_QUEBRA if ligacao else 0), -len(linhas), -medida[0])
+            nota = (tamanho - (PENALIDADE_DA_QUEBRA if ligacao else 0), len(linhas), -medida[0])
             if melhor is None or nota > melhor[0]:
                 melhor = (nota, linhas, fontes[tamanho])
             break
-    return _letras_apertadas(melhor[1], melhor[2], cor_da_letra) if melhor else None
+    return (melhor[2], melhor[1]) if melhor else None
+
+
+def _letras_da_grade(chamada, fonte_ttf, cor_da_letra, largura, altura):
+    """As letras da frase da capa da grade (_letras_apertadas) na letra e nas linhas de _quebra_da_grade."""
+    quebra = _quebra_da_grade(chamada, fonte_ttf, largura, altura)
+    return _letras_apertadas(quebra[1], quebra[0], cor_da_letra) if quebra else None
 
 
 def com_moldura(imagem, escala=1.0, cor=None):
@@ -666,12 +670,11 @@ def lugar_da_foto(no_video=False):
 
 def lugar_das_letras_na_grade():
     """
-    (esquerda, cima, direita, baixo) do retângulo da frase na capa da grade, onde o Rafael desenhou
-    (vídeos de 07/11, 01:04 e 01:31): na faixa, à direita do número de visualizações (até
-    FIM_DO_NUMERO, com a margem), até a beirada da grade (com a margem), e do alto da faixa até o pé
-    do que a grade mostra (com a folga).
+    (esquerda, cima, direita, baixo) do retângulo da frase na capa da grade: a faixa toda que a grade
+    mostra, de uma beirada à outra (com a margem) e do alto da faixa até o pé do que a grade mostra
+    (com a folga), sem se preocupar com o número de visualizações (vídeo do Rafael de 07/11, 02:49).
     """
-    return (FIM_DO_NUMERO + MARGEM_DA_FAIXA, TOPO_DA_FAIXA_NA_GRADE + FOLGA_DA_FAIXA, TELA[0] - MARGEM_DA_FAIXA,
+    return (MARGEM_DA_FAIXA, TOPO_DA_FAIXA_NA_GRADE + FOLGA_DA_FAIXA, TELA[0] - MARGEM_DA_FAIXA,
             GRADE_NO_CELULAR[1] - FOLGA_DA_FAIXA)
 
 
@@ -684,9 +687,9 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     esticada até ESTICAR_ATE, com a própria foto desfocada no que ainda faltar
     (_foto_que_tampa_esticando, P169 1); o fio, mais grosso, vem do alto do quadro até a foto, e a
     faixa desce até o fim do quadro na mesma cor, com o número de visualizações por cima dela (P171);
-    a frase fica no meio do retângulo da faixa à direita do número (lugar_das_letras_na_grade), na
-    maior letra que cabe nele, numa linha ou em duas (_letras_da_grade; vídeos do Rafael de 07/11,
-    01:04 e 01:31). Com no_video=True, a do resto da abertura (P129), no fundo preto: a foto inteira
+    a frase fica no meio da faixa toda (lugar_das_letras_na_grade), na maior letra que cabe, até um
+    teto harmônico, em duas linhas ou numa (_letras_da_grade; vídeos e prints do Rafael de 07/11, das
+    01:04 às 02:49). Com no_video=True, a do resto da abertura (P129), no fundo preto: a foto inteira
     no lugar dela e a faixa da altura de uma linha acima do cartão do produto que o app põe por cima
     do vídeo aberto (P160 2), com a frase acabando antes dos ícones do app (P165 1). O fio e a faixa
     vão na cor do produto (P159 2; sem ela, o laranja da Shopee), com a letra que contrasta. Nada da
@@ -733,9 +736,10 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
             desenho.text(((esquerda + fim_da_frase) / 2, meio + altura_da_linha * (i - (len(linhas) - 1) / 2)), linha,
                          font=fonte, fill=letra_que_contrasta(cor), anchor="mm")
         return _png(capa)
-    # Na grade, a frase no meio do retângulo da faixa à direita do número de visualizações, na maior
-    # letra que cabe nele (vídeos do Rafael de 07/11, 01:04 e 01:31); o fio, do alto do quadro até a
-    # foto, e a faixa, até o fim do quadro, em todas as cores (P171): nada fica no preto do fundo.
+    # Na grade, a frase no meio da faixa toda, sem se preocupar com o número de visualizações, na
+    # maior letra que cabe, até um teto harmônico (vídeos e prints do Rafael de 07/11, das 01:04 às
+    # 02:49); o fio, do alto do quadro até a foto, e a faixa, até o fim do quadro, em todas as cores
+    # (P171): nada fica no preto do fundo.
     x1_das_letras, y1_das_letras, x2_das_letras, y2_das_letras = lugar_das_letras_na_grade()
     letras = _letras_da_grade(chamada, fonte_ttf, letra_que_contrasta(cor), x2_das_letras - x1_das_letras,
                               y2_das_letras - y1_das_letras)
