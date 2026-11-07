@@ -532,13 +532,26 @@ def test_busca_com_erro_de_sistema_da_shopee_tenta_mais_uma_vez(monkeypatch):
     assert len(sessao.postados) == 2
     assert consultar("SELECT processo, resultado, detalhe, ok FROM registro_processos") == (
         api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA, "deu certo na 2ª tentativa", "bot_mestre", 1)
-    # O erro de sistema duas vezes seguidas desiste e anota como antes; outro código não tenta de novo.
-    corpos[:] = [erro, erro]
-    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 4
+    # O checkup de 06/11 mostrou uma busca que não passou nem na 2ª: ela tenta uma 3ª vez, depois
+    # de uma espera maior.
+    esperas = []
+
+    async def esperar(segundos):
+        esperas.append(segundos)
+    monkeypatch.setattr(api_shopee.asyncio, "sleep", esperar)
+    monkeypatch.setattr(api_shopee, "ESPERA_NO_ERRO_DE_SISTEMA", 3)
+    corpos[:] = [erro, erro, certo]
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [{"itemId": 1}] and len(sessao.postados) == 5
+    assert esperas == [3, 6]
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ? ORDER BY rowid DESC LIMIT 1",
+                     api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA) == ("deu certo na 3ª tentativa",)
+    # O erro de sistema três vezes seguidas desiste e anota como antes; outro código não tenta de novo.
+    corpos[:] = [erro, erro, erro]
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 8
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      api_shopee.PROCESSO_DA_BUSCA_NEGADA) == ("código 10.000",)
     corpos[:] = [{"errors": [{"message": "limite", "extensions": {"code": 10030}}]}]
-    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 5
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 9
 
 
 def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):

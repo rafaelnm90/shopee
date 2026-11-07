@@ -309,10 +309,11 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
 PROCESSO_DA_BUSCA_NEGADA = "busca de ofertas negada"
 # O código 10000 é o erro de sistema da própria Shopee: passa sozinho, e a mesma busca, uns
 # segundos depois, costuma dar certo (o checkup de 05/11 mostrou o código da busca negada que
-# aparecia 1 vez por dia). A busca tenta mais uma vez antes de desistir, e o registro anota
-# quando a nova tentativa salvou a busca.
+# aparecia 1 vez por dia; o de 06/11, uma que não passou nem na 2ª). A busca tenta de novo até
+# TENTATIVAS_NO_ERRO_DE_SISTEMA vezes, cada espera maior que a anterior (ESPERA_NO_ERRO_DE_SISTEMA
+# segundos vezes o número da tentativa), e o registro anota quando a nova tentativa salvou a busca.
 CODIGO_DO_ERRO_DE_SISTEMA = "10000"
-TENTATIVAS_NO_ERRO_DE_SISTEMA = 2
+TENTATIVAS_NO_ERRO_DE_SISTEMA = 3
 ESPERA_NO_ERRO_DE_SISTEMA = 3
 PROCESSO_DO_ERRO_DE_SISTEMA = "busca de ofertas: erro de sistema da Shopee"
 
@@ -399,7 +400,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
             if (erros and _codigo_do_erro(erros) == CODIGO_DO_ERRO_DE_SISTEMA
                     and tentativa < TENTATIVAS_NO_ERRO_DE_SISTEMA):
                 logger.warning("⚠️ [API Shopee] Erro de sistema da Shopee na busca de ofertas: tento de novo.")
-                await asyncio.sleep(ESPERA_NO_ERRO_DE_SISTEMA)
+                await asyncio.sleep(ESPERA_NO_ERRO_DE_SISTEMA * tentativa)
                 continue
             if erros:
                 logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
