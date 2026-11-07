@@ -2245,7 +2245,8 @@ def test_capa_vai_com_a_frase_curta_e_sem_ela_com_o_nome(monkeypatch, tmp_path):
     frases = []
     # A capa do vídeo aberto (P129) usa a mesma frase: conta só a da grade.
     monkeypatch.setattr(edicao_video, "_capa_da_vez",
-                        lambda foto, frase, no_video=False, cor=None: (None if no_video else frases.append(frase))
+                        lambda foto, frase, no_video=False, cor=None, segunda=None: (None if no_video else
+                                                                                     frases.append(frase))
                         or b"\x89PNG")
     monkeypatch.setattr(edicao_video, "editar", lambda *a, **k: "")
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
@@ -3149,7 +3150,7 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
     monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.SEM_LETRAS))
     capas, editores = [], []
     monkeypatch.setattr(edicao_video, "capa_com_chamada",
-                        lambda foto, frase, no_video=False, cor=None: capas.append(cor) or b"capa")
+                        lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append(cor) or b"capa")
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
@@ -3213,68 +3214,115 @@ def _foto_de_fundo(fundo, produto=(200, 30, 40)):
     return saida.getvalue()
 
 
-def test_faixa_que_some_no_fundo_da_foto_vai_no_laranja_e_no_fundo_laranja_no_preto():
-    # Print do Rafael de 07/11, 04:15 (P173 1): o pote branco numa foto de fundo branco, com a faixa
-    # branca, sumia na foto. O fio e a faixa das duas capas vão no laranja da Shopee, com a letra
-    # branca, e o post confere a faixa nele; no fundo laranja, no grafite do preto. Na foto que não é
-    # da cor da faixa, ela continua na cor do produto.
+def _foto_branca(desenhar=None):
+    """Uma foto de mentira, 800x800, de fundo branco, com o que desenhar (ImageDraw) põe nela."""
+    import io
+
+    from PIL import Image, ImageDraw
+    imagem = Image.new("RGB", (800, 800), (250, 250, 250))
+    if desenhar:
+        desenhar(ImageDraw.Draw(imagem))
+    saida = io.BytesIO()
+    imagem.save(saida, "JPEG", quality=95)
+    return saida.getvalue()
+
+
+def test_faixa_que_some_no_fundo_da_foto_vai_na_2a_cor_do_produto():
+    # Print do Rafael de 07/11, 04:15 (P173): o pote branco numa foto de fundo branco, com a faixa
+    # branca, sumia na foto, e isso tem de ser evitado daqui pra frente: o fio e a faixa das duas capas
+    # vão na 2ª cor que mais se destaca no produto (no vermelho, o laranja da Shopee, como na P159 2), e
+    # o post confere a faixa nela. Sem a 2ª cor, ou com ela sumindo também, vai o laranja da Shopee e,
+    # no fundo laranja, o grafite do preto. Na foto que não é da cor da faixa, ela continua na do produto.
     import io
 
     from PIL import Image
-    branco, preto = edicao_video.CORES_DO_PRODUTO["branco"], edicao_video.CORES_DO_PRODUTO["preto"]
-    laranja = edicao_video.LARANJA_DA_SHOPEE
-    fundo_branco, fundo_laranja = _foto_de_fundo((250, 250, 250)), _foto_de_fundo(laranja, produto=(30, 90, 210))
+    branco, azul = edicao_video.CORES_DO_PRODUTO["branco"], edicao_video.CORES_DO_PRODUTO["azul"]
+    preto, laranja = edicao_video.CORES_DO_PRODUTO["preto"], edicao_video.LARANJA_DA_SHOPEE
+    escuro = (60, 50, 40)
+    fundo_branco, fundo_laranja = _foto_de_fundo((250, 250, 250)), _foto_de_fundo(laranja, produto=azul)
+    assert [edicao_video.cor_da_segunda(nome) for nome in ("azul", " Vermelho ", "", None, "xadrez")] == [
+        azul, laranja, None, None, None]
+    assert edicao_video.cor_da_faixa(fundo_branco, branco, azul) == azul
+    assert edicao_video.cor_da_faixa(fundo_branco, branco, edicao_video.cor_da_segunda("vermelho")) == laranja
     assert edicao_video.cor_da_faixa(fundo_branco, branco) == laranja
     assert edicao_video.cor_da_faixa(fundo_branco) == laranja
     assert edicao_video.cor_da_faixa(fundo_laranja) == preto
+    assert edicao_video.cor_da_faixa(fundo_laranja, None, azul) == azul
     assert edicao_video.cor_da_faixa(fundo_laranja, edicao_video.CORES_DO_PRODUTO["laranja"]) == preto
-    assert edicao_video.cor_da_faixa(fundo_laranja, branco) == branco
-    assert edicao_video.cor_da_faixa(_foto_jpg(), branco) == branco
-    assert edicao_video.cor_da_faixa(b"", branco) == branco
-    assert [edicao_video.nome_da_cor(cor) for cor in (laranja, None, preto, branco)] == ["", "", "preto", "branco"]
+    assert edicao_video.cor_da_faixa(fundo_laranja, branco, azul) == branco
+    assert edicao_video.cor_da_faixa(_foto_jpg(), branco, azul) == branco
+    assert edicao_video.cor_da_faixa(b"", branco, azul) == branco
+    # Metade do pé da foto no azul: a 2ª cor sumiria também, e vai o laranja.
+    assert edicao_video.cor_da_faixa(_foto_branca(lambda d: d.rectangle((0, 700, 399, 799), fill=azul)),
+                                     branco, azul) == laranja
+    # Só o alto da foto no branco (um chão escuro embaixo): o fio sumiria nele, e os dois vão na 2ª cor.
+    assert edicao_video.cor_da_faixa(_foto_branca(lambda d: d.rectangle((0, 300, 799, 799), fill=escuro)),
+                                     branco, azul) == azul
+    # Menos de um quarto da beirada na cor da faixa não troca.
+    assert edicao_video.cor_da_faixa(_foto_branca(lambda d: d.rectangle((160, 0, 799, 799), fill=escuro)),
+                                     branco, azul) == branco
+    assert [edicao_video.nome_da_cor(cor) for cor in (laranja, None, preto, azul)] == ["", "", "preto", "azul"]
 
     frase = "Creme para cachos"
     faixa, fio = edicao_video.lugar_da_foto()[3], edicao_video.FIO_DA_CAPA_NA_GRADE
     topo = edicao_video.GRADE_NO_CELULAR[0] + fio
-    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco))).convert("RGB")
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco,
+                                                               segunda=azul))).convert("RGB")
     for ponto in [(360, 0), (0, topo - fio), (719, topo - 1), (0, faixa), (719, faixa + 5), (3, 1279)]:
-        assert _cor_de(capa, ponto, laranja), ponto
+        assert _cor_de(capa, ponto, azul), ponto
     pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(faixa, 1280, 2)]
     assert sum(1 for p in pontos if min(p) > 250) > 50 and not any(max(p) < 50 for p in pontos)
-    # O robô confere no post a faixa na cor que o rascunho guardou (o nome dela; "" no laranja).
-    cor_guardada = edicao_video.cor_do_produto(edicao_video.nome_da_cor(edicao_video.cor_da_faixa(fundo_branco, branco)))
+    # O robô confere no post a faixa na cor que o rascunho guardou (o nome dela).
+    cor_guardada = edicao_video.cor_do_produto(edicao_video.nome_da_cor(edicao_video.cor_da_faixa(fundo_branco, branco,
+                                                                                                azul)))
     assert edicao_video.faixa_laranja(capa, cor=cor_guardada) == (faixa, edicao_video.TELA[1], 0, edicao_video.TELA[0])
     # A do vídeo aberto vai na mesma cor: o fio logo acima da foto e a faixa embaixo dela.
-    no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, no_video=True,
-                                                                   cor=branco))).convert("RGB")
+    no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, no_video=True, cor=branco,
+                                                                   segunda=azul))).convert("RGB")
     pe, altura = edicao_video.PE_DA_FAIXA_NO_VIDEO, edicao_video.FAIXA_DA_CHAMADA
     esquerda, direita = edicao_video.VISIVEL_NO_APP
-    assert _cor_de(no_video, (esquerda + 2, pe - 3), laranja) and _cor_de(no_video, (direita - 2, pe - altura + 2), laranja)
+    assert _cor_de(no_video, (esquerda + 2, pe - 3), azul) and _cor_de(no_video, (direita - 2, pe - altura + 2), azul)
     alto_do_fio = next(y for y in range(1280) if max(no_video.getpixel((360, y))) > 60)
-    assert all(_cor_de(no_video, (360, y), laranja) for y in range(alto_do_fio, alto_do_fio + edicao_video.FIO_DA_CAPA))
-    # No fundo laranja, o grafite do preto, com a letra branca, nas duas.
+    assert all(_cor_de(no_video, (360, y), azul) for y in range(alto_do_fio, alto_do_fio + edicao_video.FIO_DA_CAPA))
+    # Sem a 2ª cor, o laranja; no fundo laranja, o grafite do preto, com a letra branca, nas duas.
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco))).convert("RGB")
+    assert _cor_de(capa, (360, 0), laranja) and _cor_de(capa, (3, 1279), laranja)
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, "Bolsa espaçosa"))).convert("RGB")
     assert _cor_de(capa, (360, 0), preto) and _cor_de(capa, (3, 1279), preto) and _cor_de(capa, (719, faixa), preto)
     no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, "Bolsa espaçosa",
                                                                    no_video=True))).convert("RGB")
     assert _cor_de(no_video, (esquerda + 2, pe - 3), preto)
     # Na foto que não é da cor da faixa, a faixa branca continua.
-    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, frase, cor=branco))).convert("RGB")
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, frase, cor=branco,
+                                                               segunda=azul))).convert("RGB")
     assert _cor_de(capa, (3, 1279), branco) and _cor_de(capa, (360, 0), branco)
 
 
+def test_ia_diz_a_2a_cor_do_produto():
+    # P173: a IA diz também a 2ª cor que mais se destaca no produto, da mesma lista, diferente da
+    # principal; o "colorido" e o nome fora da lista ficam de fora.
+    assert '"cor_2"' in edicao_video.PROMPT_DOS_TEXTOS.format(nome="Pote")
+    assert '"cor_2"' in edicao_video.PROMPT_DAS_VERSOES.format(nome="Pote")
+    for dados, segunda in (({"cor": "branco", "cor_2": " Azul "}, "azul"), ({"cor": "branco", "cor_2": "vermelho"}, "vermelho"),
+                           ({"cor": "branco", "cor_2": "branco"}, None), ({"cor": "branco", "cor_2": "colorido"}, None),
+                           ({"cor": "branco", "cor_2": "xadrez"}, None), ({"cor": "branco"}, None),
+                           ({"cor_2": "roxo"}, "roxo")):
+        assert edicao_video._nome_lugar_e_falas(dados).get("cor_2") == segunda, dados
+
+
 def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeypatch, tmp_path):
-    # P173 1: com a faixa no laranja no lugar do branco que sumia na foto, o rascunho guarda a cor em
-    # que ela saiu (o robô confere a faixa no post nela) e o registro conta; a capa recebe a cor do
-    # produto (e troca só o fio e a faixa), e a caixa do nome e da vantagem e a moldura da miniatura
-    # continuam nela.
+    # P173: com o fio e a faixa na 2ª cor do produto (ou, sem ela, no laranja) no lugar do branco que
+    # sumia na foto, o rascunho guarda a cor em que a faixa saiu (o robô confere a faixa no post nela)
+    # e o registro conta; a capa recebe a cor do produto e a 2ª (e troca só o fio e a faixa), e a caixa
+    # do nome e da vantagem e a moldura da miniatura continuam na cor do produto.
     _versoes_de_mentira(monkeypatch)
-    _textos_da_tela(monkeypatch, {"nome": "Creme de Cabelo", "vantagem": "Cachos definidos", "capa": "Creme para cachos",
-                                  "lugar": "alto", "cor": "branco"})
+    textos = {"nome": "Creme de Cabelo", "vantagem": "Cachos definidos", "capa": "Creme para cachos", "lugar": "alto",
+              "cor": "branco"}
     monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.SEM_LETRAS))
     capas, editores = [], []
     monkeypatch.setattr(edicao_video, "capa_com_chamada",
-                        lambda foto, frase, no_video=False, cor=None: capas.append(cor) or b"capa")
+                        lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append((cor, segunda))
+                        or b"capa")
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
@@ -3283,16 +3331,22 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
-    branco = edicao_video.CORES_DO_PRODUTO["branco"]
-    for foto, guardada in ((_foto_de_fundo((250, 250, 250)), ""), (_foto_jpg(), "branco")):
+    branco, azul = edicao_video.CORES_DO_PRODUTO["branco"], edicao_video.CORES_DO_PRODUTO["azul"]
+    pe_azul = _foto_branca(lambda d: d.rectangle((0, 700, 399, 799), fill=azul))
+    for foto, segunda, guardada in ((_foto_de_fundo((250, 250, 250)), "azul", "azul"),
+                                    (_foto_de_fundo((250, 250, 250)), None, ""), (pe_azul, "azul", ""),
+                                    (_foto_jpg(), "azul", "branco")):
+        _textos_da_tela(monkeypatch, dict(textos, cor_2=segunda) if segunda else textos)
         capas.clear()
         editores.clear()
         anotado = {}
         edicao_video.editar_para_postar("v.mp4", foto, str(tmp_path / "r.mp4"), "Creme de Cabelo", anotar=anotado)
-        assert (capas, editores, anotado) == ([branco, branco], [branco], {"cor": guardada}), guardada
+        tom = azul if segunda else None
+        assert (capas, editores, anotado) == ([(branco, tom), (branco, tom)], [branco], {"cor": guardada}), guardada
     linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DA_FAIXA_QUE_SOME,
                                                        "2000-01-01 00:00:00")
-    assert [(r[2], r[3]) for r in linhas] == [("laranja", "branco")]
+    assert [(r[2], r[3]) for r in linhas] == [("azul", edicao_video.A_2A_COR), ("laranja", edicao_video.SEM_A_2A_COR),
+                                              ("laranja", edicao_video.A_2A_COR_SOME_TAMBEM)]
 
 
 def test_frase_do_video_aberto_acaba_antes_dos_icones_do_app():
@@ -3384,7 +3438,7 @@ def test_capa_que_vai_ao_ar_com_o_quadro_do_video_e_o_registro(monkeypatch, tmp_
     monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="": quadros.pop(0))
     capas = []
     monkeypatch.setattr(edicao_video, "capa_com_chamada",
-                        lambda foto, frase, no_video=False, cor=None: capas.append(foto) or b"capa")
+                        lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append(foto) or b"capa")
     monkeypatch.setattr(edicao_video, "editar_2", lambda *a, **k: ("", {"textos": ["Bolsa"], "legendas": 0}))
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})

@@ -274,18 +274,21 @@ LETRA_BRANCA, LETRA_PRETA = (255, 255, 255), (0, 0, 0)
 ALFA_DA_CAIXA_DA_COR = 230
 PROCESSO_DA_COR = "edição do vídeo: cor do produto"
 COM_AS_CORES_DE_SEMPRE = "as cores de sempre"
-# A faixa que some na foto: na cor do fundo da foto logo acima dela (o produto branco numa foto de
-# fundo branco), a faixa da frase some nela (print do Rafael de 07/11, 04:15). Aí o fio e a faixa das
-# duas capas vão no laranja da Shopee, como nos produtos vermelhos e coloridos, e, no fundo laranja,
-# no grafite do preto (NO_LUGAR_DA_QUE_SOME); a caixa do nome e da vantagem e a moldura da miniatura
-# continuam na cor do produto. Some: mais de PARTE_QUE_SOME da tira do pé da foto (PE_DA_FOTO da
-# altura dela, como ela fica na capa da grade) a até TOLERANCIA_DO_FUNDO da cor (a soma das
-# diferenças das três cores). Escolha do Rafael (07/11, P173 1): DECISOES.md, Shopee Vídeo.
+# A faixa e o fio nunca ficam na cor do fundo da foto: na cor dele (o produto branco numa foto de
+# fundo branco), a faixa da frase some na foto (print do Rafael de 07/11, 04:15). Aí o fio e a faixa
+# das duas capas vão na 2ª cor que mais se destaca no produto, que a IA diz junto com a principal
+# ("cor_2"; no vermelho, o laranja da Shopee, como na P159 2); sem ela, ou com ela sumindo também, no
+# laranja da Shopee e, no fundo laranja, no grafite do preto (NO_LUGAR_DA_QUE_SOME). A caixa do nome
+# e da vantagem e a moldura da miniatura continuam na cor do produto. Some: PARTE_QUE_SOME ou mais
+# da tira do pé ou da do alto da foto (BEIRADA_DA_FOTO da altura dela, como ela fica na capa da
+# grade: o pé encosta na faixa, e o alto, no fio) a até TOLERANCIA_DO_FUNDO da cor (a soma das
+# diferenças das três cores). Escolha do Rafael (07/11, P173): DECISOES.md, Shopee Vídeo.
 TOLERANCIA_DO_FUNDO = 60
-PARTE_QUE_SOME = 0.5
-PE_DA_FOTO = 0.03
+PARTE_QUE_SOME = 0.25
+BEIRADA_DA_FOTO = 0.03
 NO_LUGAR_DA_QUE_SOME = (LARANJA_DA_SHOPEE, CORES_DO_PRODUTO["preto"])
 PROCESSO_DA_FAIXA_QUE_SOME = "edição do vídeo: faixa que some na foto"
+A_2A_COR, SEM_A_2A_COR, A_2A_COR_SOME_TAMBEM = "a 2ª cor do produto", "sem a 2ª cor", "a 2ª cor some também"
 
 
 def cor_do_produto(nome):
@@ -687,27 +690,44 @@ def _foto_da_grade(foto):
     return _foto_que_tampa(foto, largura, altura) or _foto_que_tampa_esticando(foto, largura, altura)
 
 
-def _some_no_pe(imagem, cor):
-    """True quando mais de PARTE_QUE_SOME da tira do pé da imagem (PIL, RGB) fica a até TOLERANCIA_DO_FUNDO da cor."""
+def _some_na_foto(imagem, cor):
+    """
+    True quando PARTE_QUE_SOME ou mais da tira do pé ou da do alto da imagem (PIL, RGB; BEIRADA_DA_FOTO
+    da altura dela) fica a até TOLERANCIA_DO_FUNDO da cor.
+    """
     import numpy
-    altura = max(1, round(imagem.height * PE_DA_FOTO))
-    pe = numpy.asarray(imagem.crop((0, imagem.height - altura, imagem.width, imagem.height)), dtype=numpy.int16)
-    iguais = numpy.abs(pe - numpy.array(cor[:3], dtype=numpy.int16)).sum(axis=2) <= TOLERANCIA_DO_FUNDO
-    return float(iguais.mean()) > PARTE_QUE_SOME
+    altura = max(1, round(imagem.height * BEIRADA_DA_FOTO))
+    for cima in (imagem.height - altura, 0):
+        tira = numpy.asarray(imagem.crop((0, cima, imagem.width, cima + altura)), dtype=numpy.int16)
+        iguais = numpy.abs(tira - numpy.array(cor[:3], dtype=numpy.int16)).sum(axis=2) <= TOLERANCIA_DO_FUNDO
+        if float(iguais.mean()) >= PARTE_QUE_SOME:
+            return True
+    return False
 
 
-def cor_da_faixa(foto, cor=None):
+def cor_da_segunda(nome):
+    """
+    O tom (RGB) da 2ª cor do produto pelo nome que a IA deu (P173): o vermelho vai no laranja da
+    Shopee, como na P159 2; None sem ela.
+    """
+    nome = " ".join(str(nome or "").lower().split())
+    return cor_do_produto(nome) or (LARANJA_DA_SHOPEE if nome in CORES_DE_SEMPRE else None)
+
+
+def cor_da_faixa(foto, cor=None, segunda=None):
     """
     A cor (RGB) do fio e da faixa da capa com a frase, a mesma nas duas capas (a da grade e a do vídeo
     aberto, para a abertura não trocar de cor): a do produto (P159 2; sem ela, o laranja da Shopee)
-    ou, quando ela some no fundo da foto (foto, bytes) logo acima da faixa, a 1ª de
-    NO_LUGAR_DA_QUE_SOME que não some (P173 1).
+    ou, quando ela some no fundo da foto (foto, bytes), a 2ª cor do produto (segunda, RGB:
+    cor_da_segunda) e, sem ela ou com ela sumindo também, a 1ª de NO_LUGAR_DA_QUE_SOME que não some
+    (P173).
     """
     cor = tuple(cor) if cor else LARANJA_DA_SHOPEE
     imagem = _foto_da_grade(foto)
-    if imagem is None or not _some_no_pe(imagem, cor):
+    if imagem is None or not _some_na_foto(imagem, cor):
         return cor
-    return next((outra for outra in NO_LUGAR_DA_QUE_SOME if outra != cor and not _some_no_pe(imagem, outra)), cor)
+    outras = ([tuple(segunda)] if segunda else []) + list(NO_LUGAR_DA_QUE_SOME)
+    return next((outra for outra in outras if outra != cor and not _some_na_foto(imagem, outra)), cor)
 
 
 def nome_da_cor(cor):
@@ -728,7 +748,7 @@ def lugar_das_letras_na_grade():
             GRADE_NO_CELULAR[1] - FOLGA_DA_FAIXA)
 
 
-def capa_com_chamada(foto, chamada, no_video=False, cor=None):
+def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
     """
     A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes), com o fio logo acima da
     beirada de cima dela e, logo abaixo dela, a chamada numa faixa, de um lado ao outro
@@ -743,9 +763,9 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     no lugar dela e a faixa da altura de uma linha acima do cartão do produto que o app põe por cima
     do vídeo aberto (P160 2), com a frase acabando antes dos ícones do app (P165 1). O fio e a faixa
     vão na cor do produto (P159 2; sem ela, o laranja da Shopee) ou, quando ela some no fundo da
-    foto, na que vai no lugar dela (cor_da_faixa, P173 1), com a letra que contrasta. Nada da foto
-    fica coberto (P139 2). None sem a chamada, com a foto que não abre ou com a chamada que não cabe
-    nem na menor letra.
+    foto, na 2ª cor do produto (segunda, RGB) ou na que vai no lugar dela (cor_da_faixa, P173), com
+    a letra que contrasta. Nada da foto fica coberto (P139 2). None sem a chamada, com a foto que não
+    abre ou com a chamada que não cabe nem na menor letra.
     """
     import matplotlib
     from PIL import Image, ImageDraw
@@ -770,7 +790,7 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
 
     desenho = ImageDraw.Draw(capa)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-    cor = cor_da_faixa(foto, cor)
+    cor = cor_da_faixa(foto, cor, segunda)
     if no_video:
         # No vídeo aberto, a frase acaba antes dos ícones do app (P165 1).
         fim_da_frase = min(direita, ICONES_NO_VIDEO_ABERTO)
@@ -943,10 +963,10 @@ def faixa_laranja(imagem, caixa=None, cor=None):
     return (y1 + melhor["cima"], y1 + melhor["baixo"], x1 + melhor["esquerda"], x1 + melhor["direita"] + 1)
 
 
-def _capa_da_vez(foto, vantagem, no_video=False, cor=None):
+def _capa_da_vez(foto, vantagem, no_video=False, cor=None, segunda=None):
     """A capa com chamada do vídeo que vai ao ar, ou None (a capa de sempre) quando ela não sai: o vídeo não para por ela."""
     try:
-        return capa_com_chamada(foto, vantagem, no_video, cor)
+        return capa_com_chamada(foto, vantagem, no_video, cor, segunda)
     except Exception:
         return None
 
@@ -1319,10 +1339,14 @@ _CAPA_NO_PROMPT = ("- \"capa\": para a capa do vídeo, uma frase curta que come�
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
-# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO.
+# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO. E
+# a 2ª cor que mais se destaca nele, para o fio e a faixa da capa quando a principal some no fundo da
+# foto (P173).
 _COR_NO_PROMPT = ("Diga também \"cor\", a cor principal do produto que o vídeo mostra, uma destas: "
                   + ", ".join(list(CORES_DO_PRODUTO) + list(CORES_DE_SEMPRE[:1]))
-                  + "; ou \"colorido\", quando ele tem várias cores e nenhuma é a principal.\n")
+                  + "; ou \"colorido\", quando ele tem várias cores e nenhuma é a principal. E \"cor_2\", a "
+                  "segunda cor que mais se destaca no produto, da mesma lista e diferente da \"cor\" (vazio "
+                  "quando ele é de uma cor só).\n")
 _REGRAS_NO_PROMPT = ("Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; "
                      "sem preço, desconto, promoção, emoji ou hashtag. Escreva com a ortografia e a acentuação "
                      "certas do português do Brasil e confira cada palavra antes de responder.\n")
@@ -1415,7 +1439,7 @@ PROMPT_DOS_TEXTOS = (
     + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
     + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
-    "\"cor\": \"...\", \"lugar\": \"alto\", \"textos_do_video\": [], \"canto_ocupado\": false, "
+    "\"cor\": \"...\", \"cor_2\": \"...\", \"lugar\": \"alto\", \"textos_do_video\": [], \"canto_ocupado\": false, "
     "\"por_cima_no_alto\": [], \"legendas\": [], \"legenda_no_video\": false}}"
 )
 
@@ -1745,7 +1769,7 @@ def _resposta_da_ia(video, prompt):
 
 def _nome_lugar_e_falas(dados, duracao=0.0):
     """
-    O nome, o lugar, a cor do produto (P159 2), as falas, se o vídeo já tem texto próprio na tela
+    O nome, o lugar, a cor do produto (P159 2) e a 2ª cor (P173), as falas, se o vídeo já tem texto próprio na tela
     na maior parte do tempo (pelos trechos que a IA deu e a duracao do vídeo, em segundos; com a
     parte do tempo em "parte_com_texto") e se o canto da nossa miniatura tem coisa do criador, da
     resposta da IA, só os que vieram certos.
@@ -1759,6 +1783,10 @@ def _nome_lugar_e_falas(dados, duracao=0.0):
     cor = " ".join(str(dados.get("cor") or "").lower().split())
     if cor in CORES_DO_PRODUTO or cor in CORES_DE_SEMPRE:
         textos["cor"] = cor
+    # A 2ª cor (P173): da lista, sem o "colorido", e diferente da principal.
+    segunda = " ".join(str(dados.get("cor_2") or "").lower().split())
+    if segunda != textos.get("cor") and (segunda in CORES_DO_PRODUTO or segunda == CORES_DE_SEMPRE[0]):
+        textos["cor_2"] = segunda
     if isinstance(dados.get("canto_ocupado"), bool):
         textos["canto_ocupado"] = dados["canto_ocupado"]
     trechos = _trechos_com_texto(dados.get("textos_do_video"))
@@ -2539,9 +2567,10 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a legenda da fala sobem com o
     cartão do app (SUBIDA_COM_O_ROTULO_DE_IA). Com a cor principal do produto, que a IA diz com os
     textos (P159 2), o fio e a faixa da capa, a caixa do nome e da vantagem e a moldura da
-    miniatura vão nela (o fio e a faixa, só quando ela não some no fundo da foto: cor_da_faixa,
-    P173 1); anotar (dict) recebe em "cor" o nome da cor da faixa ("" com o laranja), que o robô
-    guarda no rascunho para conferir a faixa no post. Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+    miniatura vão nela (o fio e a faixa, só quando ela não some no fundo da foto; senão, na 2ª cor
+    do produto ou no laranja: cor_da_faixa, P173); anotar (dict) recebe em "cor" o nome da cor da
+    faixa ("" com o laranja), que o robô guarda no rascunho para conferir a faixa no post. Escolhas
+    do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -2550,6 +2579,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     textos = textos_da_tela(video, produto) if produto else {}
     # A cor do produto no lugar do laranja e do preto (P159 2); o registro conta cada uma.
     cor = cor_do_produto(textos.get("cor"))
+    # A 2ª cor do produto, para o fio e a faixa da capa quando a principal some no fundo da foto (P173).
+    segunda = cor_da_segunda(textos.get("cor_2"))
     if textos:
         registro_processos.registrar("shopee_video", PROCESSO_DA_COR, textos.get("cor") if cor else COM_AS_CORES_DE_SEMPRE,
                                      "" if cor else (textos.get("cor") or "a IA não disse a cor"), ok=None)
@@ -2571,20 +2602,22 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras, detalhe_das_letras,
                                      ok={SEM_LETRAS: True, LETRAS_CORTADAS: True, QUADRO_DO_VIDEO: True,
                                          LETRAS_NO_PRODUTO: None}.get(letras, False))
-        capa = _capa_da_vez(foto_da_capa, frase, cor=cor)
-        faixa = cor_da_faixa(foto_da_capa, cor) if capa else None
+        capa = _capa_da_vez(foto_da_capa, frase, cor=cor, segunda=segunda)
+        faixa = cor_da_faixa(foto_da_capa, cor, segunda) if capa else None
         if faixa and faixa != (cor or LARANJA_DA_SHOPEE):
-            # A faixa que some no fundo da foto vai em outra cor (P173 1): o registro conta, e o robô
-            # confere no post a faixa na cor em que ela saiu.
+            # A faixa que some no fundo da foto vai na 2ª cor do produto ou, sem ela, no laranja
+            # (P173): o registro conta, e o robô confere no post a faixa na cor em que ela saiu.
+            de_onde = (A_2A_COR if segunda and faixa == tuple(segunda)
+                       else A_2A_COR_SOME_TAMBEM if segunda else SEM_A_2A_COR)
             registro_processos.registrar("shopee_video", PROCESSO_DA_FAIXA_QUE_SOME, nome_da_cor(faixa) or "laranja",
-                                         textos.get("cor") if cor else COM_AS_CORES_DE_SEMPRE, ok=None)
+                                         de_onde, ok=None)
             if anotar is not None:
                 anotar["cor"] = nome_da_cor(faixa)
     abertura = capa
     if capa:
         # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
         # abertura, com a do vídeo aberto (P129). Sem esta, a da grade fica na abertura toda.
-        no_video = _capa_da_vez(foto_da_capa, frase, no_video=True, cor=cor)
+        no_video = _capa_da_vez(foto_da_capa, frase, no_video=True, cor=cor, segunda=segunda)
         if no_video:
             abertura = (capa, no_video)
     chamada = COM_A_CHAMADA if capa else ""
@@ -2765,6 +2798,7 @@ PROMPT_DAS_VERSOES = (
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
     + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", \"cor\": \"...\", "
+    "\"cor_2\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], \"lugar\": \"alto\", "
     "\"textos_do_video\": [], \"canto_ocupado\": false, \"por_cima_no_alto\": [], \"legendas\": [], "
@@ -3034,12 +3068,12 @@ def exemplo_capa():
         # A foto sem as letras do anúncio (ou o quadro do vídeo, P164 1) e a cor do produto, como no
         # vídeo que vai ao ar (P160 2 e P159 2).
         foto = foto_para_a_capa(foto, arquivo, produto.get("nome", ""))[0]
-        cor = cor_do_produto(textos.get("cor"))
-        capa = capa_com_chamada(foto, frase, cor=cor)
+        cor, segunda = cor_do_produto(textos.get("cor")), cor_da_segunda(textos.get("cor_2"))
+        capa = capa_com_chamada(foto, frase, cor=cor, segunda=segunda)
         if not capa:
             return "a capa com a chamada não saiu", None
         exemplo = {"capa": capa, "grade": recorte_da_grade(capa), "chamada": frase}
-        no_video = capa_com_chamada(foto, frase, no_video=True, cor=cor)
+        no_video = capa_com_chamada(foto, frase, no_video=True, cor=cor, segunda=segunda)
         if no_video:
             exemplo["video"] = recorte_do_video_aberto(no_video)
         return "", exemplo
