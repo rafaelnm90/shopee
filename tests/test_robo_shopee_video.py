@@ -1320,6 +1320,9 @@ def test_video_de_produto_ja_postado_fica_de_lado_e_o_proximo_vira_rascunho(monk
     assert not any("Copo" in str(a) for a in avisos)                 # o robô nem começou o do copo
     # O rascunho novo guarda o produto do vídeo: outro vídeo dele também fica de lado.
     assert rascunho["itens_do_video"] == ["2"] and "2" in robo.produtos_ja_postados()
+    # O registro diz onde estava o produto do vídeo de lado, para o checkup conferir.
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_JA_POSTADO) == (robo.ONDE_JA_FOI["postado"], "robô", None)
 
 
 def test_produto_da_troca_ja_postado_deixa_o_video_de_lado(monkeypatch, avisos):
@@ -1336,6 +1339,8 @@ def test_produto_da_troca_ja_postado_deixa_o_video_de_lado(monkeypatch, avisos):
     robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
     assert [r["motivo"] for r in robo.listar("pulado")] == [robo.PRODUTO_JA_POSTADO]
     assert len(robo.listar("rascunho")) == 0
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_JA_POSTADO) == (robo.ONDE_JA_FOI["aprovado"], "robô")
 
 
 def test_produtos_ja_postados_pelo_robo_e_pelo_assistente():
@@ -1350,6 +1355,18 @@ def test_produtos_ja_postados_pelo_robo_e_pelo_assistente():
     assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v1"), momento("2026-11-05 11:00"))[0] == "marcado"
     robo.assistente.registrar("v2", "enviado", "", agora=momento("2026-11-05 10:00"), item="70")   # sem o Postei
     assert robo.produtos_ja_postados() == {"10", "11", "20", "30", "31", "60"}
+    # Onde estava cada um: o lugar mais adiantado (o post do robô vale mais que o Postei ✅, que vale
+    # mais que o aprovado e o rascunho).
+    _rascunho("postado", itens_do_video=["10"])
+    robo.assistente.registrar("v3", "enviado", "", agora=momento("2026-11-05 10:00"), item="20")
+    assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v3"), momento("2026-11-05 11:00"))[0] == "marcado"
+    onde = robo.onde_os_produtos_foram()
+    assert onde == {"10": robo.ONDE_JA_FOI["postado"], "11": robo.ONDE_JA_FOI["rascunho"],
+                    "20": robo.POSTEI_NO_ASSISTENTE, "30": robo.ONDE_JA_FOI["postado"],
+                    "31": robo.ONDE_JA_FOI["postado"], "60": robo.POSTEI_NO_ASSISTENTE}
+    robo.anotar_onde_ja_foi("99", "robô")
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_JA_POSTADO) == (robo.EM_NENHUM,)
 
 
 def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor=""):

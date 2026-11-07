@@ -123,6 +123,13 @@ SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliad
 # robô passa ao próximo da fonte (produtos_ja_postados). Escolha do Rafael (06/11, P166 1):
 # DECISOES.md, Shopee Vídeo.
 PRODUTO_JA_POSTADO = "o produto deste vídeo já foi postado (pelo robô ou pelo assistente)"
+# Onde estava o produto do vídeo que ficou de lado por já ter sido postado: o registro diz só o
+# rótulo fixo e quem deixou de lado, para o checkup conferir que o produto foi ou vai mesmo ao ar
+# (anotar_onde_ja_foi; P166 1 e P167 1).
+PROCESSO_DO_JA_POSTADO = "produto do vídeo: já postado, onde estava"
+ONDE_JA_FOI = {"rascunho": "rascunho do robô esperando a aprovação", "aprovado": "aprovado no robô",
+               "postado": "postado pelo robô"}
+POSTEI_NO_ASSISTENTE, EM_NENHUM = "marcado com Postei ✅ no assistente", "em nenhum"
 # Produtos do Ver Produtos que o robô confere num vídeo (cada um custa 2 conferências da IA).
 MAXIMO_PRODUTOS_DO_VIDEO = 6
 # O mesmo produto com mais comissão (P33): a busca da API por maior comissão traz até
@@ -1034,17 +1041,45 @@ def ids_usados(agora=None):
             if not (estado == "pulado" and motivo == MOTIVO_EM_ANALISE and (criado_em or "") < hoje)}
 
 
+def onde_os_produtos_foram():
+    """
+    {itemId: onde} dos produtos que já foram ou vão ao ar: o produto do vídeo dos rascunhos do robô
+    esperando a aprovação, aprovados e postados (o do link e o que foi ao post) e os vídeos do modo
+    assistente marcados com Postei ✅. Os produtos a mais não contam. onde é o rótulo do lugar mais
+    adiantado: o post do robô vale mais que o Postei ✅, que vale mais que o aprovado e o rascunho. (P166 1)
+    """
+    rascunhos = listar("rascunho", "aprovado", "postado")
+
+    def do_robo(estado):
+        return (ONDE_JA_FOI[estado], [item for rascunho in rascunhos if rascunho["estado"] == estado
+                                      for item in _itens_do_post(rascunho)])
+
+    lugares = [do_robo("rascunho"), do_robo("aprovado"), (POSTEI_NO_ASSISTENTE, assistente.itens_postados()),
+               do_robo("postado")]
+    return {str(item): onde for onde, itens in lugares for item in itens if item}
+
+
+def _itens_do_post(rascunho):
+    """O produto do vídeo de um rascunho (o do link e o que foi ao post), sem os produtos a mais."""
+    return list(rascunho["itens_do_video"]) + [item.get("item") for item in rascunho["itens"] if not item.get("a_mais")]
+
+
 def produtos_ja_postados():
+    """Os números (itemId) dos produtos que já foram ou vão ao ar (onde_os_produtos_foram). (P166 1)"""
+    return set(onde_os_produtos_foram())
+
+
+def anotar_onde_ja_foi(item, quem):
     """
-    Os números (itemId) dos produtos que já foram ou vão ao ar: o produto do vídeo dos rascunhos do
-    robô esperando a aprovação, aprovados e postados (o do link e o que foi ao post) e os vídeos do
-    modo assistente marcados com Postei ✅. Os produtos a mais não contam. (P166 1)
+    Anota no registro onde estava o produto do vídeo que ficou de lado por já ter sido postado: só o
+    rótulo fixo (ONDE_JA_FOI, o Postei ✅ do assistente ou "em nenhum") e quem deixou o vídeo de lado
+    ("robô" ou "assistente"). Nada aqui segura o robô.
     """
-    itens = set(assistente.itens_postados())
-    for rascunho in listar("rascunho", "aprovado", "postado"):
-        itens.update(rascunho["itens_do_video"])
-        itens.update(item.get("item") for item in rascunho["itens"] if not item.get("a_mais"))
-    return {str(item) for item in itens if item}
+    try:
+        onde = onde_os_produtos_foram().get(str(item or ""), EM_NENHUM)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_JA_POSTADO, onde, quem, ok=None)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Onde estava o produto já postado não foi anotado: {type(e).__name__}")
 
 
 def item_do_video(video):
@@ -2604,6 +2639,7 @@ def preparar_rascunho(d, config, agora=None):
             if video["item_do_link"] not in ja_postados:
                 break
             motivo = PRODUTO_JA_POSTADO
+            anotar_onde_ja_foi(video["item_do_link"], "robô")
         atualizar(criar(video["id"], agora), estado="pulado", motivo=motivo)
         registrar_tentativa("rascunho", "pulado", motivo, agora=agora)
     else:
@@ -4553,6 +4589,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # O 1º produto (o que dá a foto da edição) que já foi ao ar não se repete (P166 1).
         atualizar(ident, itens_do_video=[p["item"] for p in do_ver_produtos if p.get("do_video") and p.get("item")])
         if do_ver_produtos and do_ver_produtos[0].get("item") in produtos_ja_postados():
+            anotar_onde_ja_foi(do_ver_produtos[0]["item"], "robô")
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         links_trocados = {p["nome"]: p["link"] for p in do_ver_produtos if p["trocado"]}
         trocados = len(links_trocados)
@@ -4623,6 +4660,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # O produto que vai ao post (o da troca ou o achado pela IA) também não pode já ter ido (P166 1).
         atualizar(ident, itens_do_video=[i for i in dict.fromkeys((video.get("item_do_link"), principal["item"])) if i])
         if principal["item"] and principal["item"] in produtos_ja_postados():
+            anotar_onde_ja_foi(principal["item"], "robô")
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.

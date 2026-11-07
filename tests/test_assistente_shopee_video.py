@@ -541,6 +541,10 @@ def test_produto_ja_postado_fica_de_lado_e_vai_o_proximo_da_fonte(monkeypatch):
                      asv.JA_POSTADO) == (2,)
     assert consultar("SELECT COUNT(*), MAX(ok) FROM registro_processos WHERE processo = 'assistente: envio' "
                      "AND resultado = ?", asv.JA_POSTADO) == (2, None)
+    # O registro diz onde estava o produto de cada vídeo de lado, como no robô.
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_JA_POSTADO, "2000-01-01 00:00:00")
+    assert sorted((r[2], r[3]) for r in linhas) == sorted([(robo.ONDE_JA_FOI["postado"], "assistente"),
+                                                         (robo.POSTEI_NO_ASSISTENTE, "assistente")])
     # O vídeo de lado não volta.
     assert asv.proximo_video() is None
 
