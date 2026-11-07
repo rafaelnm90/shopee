@@ -6857,6 +6857,37 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
                                               ("no post sem a faixa", "")]
 
 
+def test_post_acha_a_faixa_que_desce_ate_embaixo_com_o_numero_por_cima():
+    # P168: na grade do celular do Rafael (a largura toda, GRADE_NO_CELULAR), a faixa da capa desce
+    # até o fim do quadro, e o número de visualizações do app fica por cima dela, em branco. O post
+    # continua achando a faixa de lado a lado, também na cor clara do produto (letra preta), em que
+    # o branco do número não é uma das cores da faixa.
+    from PIL import Image, ImageDraw
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    ev = robo.edicao_video
+    alto, baixo = ev.GRADE_NO_CELULAR
+    x1, y1, x2, y2 = ev.NUMERO_DA_GRADE
+
+    def grade(capa_png):
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((0, alto, 720, baixo))
+        desenho = ImageDraw.Draw(capa)
+        desenho.polygon([(x1, y1 - alto + 8), (x1, y2 - alto - 8), (x1 + 34, (y1 + y2) // 2 - alto)],
+                        outline=(255, 255, 255), width=5)
+        desenho.rectangle((x1 + 60, y1 - alto + 8, x1 + 140, y2 - alto - 8), fill=(255, 255, 255))
+        tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        tela.paste(capa.resize((caixa[2] - caixa[0], caixa[3] - caixa[1])), caixa[:2])
+        return type("Celular", (), {"screenshot": lambda self, caminho=None: tela})()
+
+    for n, nome in enumerate((None, "amarelo")):
+        cor = ev.CORES_DO_PRODUTO.get(nome)
+        capa = ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor", cor=cor)
+        rascunho = _rascunho("postado", postado_em=f"2026-10-31 1{n}:00:00", chamada="1", cor=nome or "")
+        assert robo.marcar_o_post(grade(capa), rascunho, caixa), nome
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
+                                              ("no post com a faixa", f"{robo.LADOS_DA_CAPA[True]}; {robo.COR_NA_CAPA}")]
+
+
 def test_laranja_estreito_nao_e_a_faixa_da_capa():
     # O selo Fixado da grade (laranja, no canto) e um produto laranja na foto não são a faixa,
     # que vai de um lado ao outro da capa.

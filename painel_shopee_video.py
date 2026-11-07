@@ -1002,22 +1002,24 @@ def _linha_da_medicao(medicao):
 
 def texto_capa(config, medicao):
     """
-    A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125): DECISOES.md,
-    Shopee Vídeo.
+    A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168):
+    DECISOES.md, Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
-        "A capa é o que aparece na grade do seu perfil. Com a capa com chamada, a foto do anúncio fica inteira, do "
-        "mesmo tamanho da capa sem texto, com um fio em cima, e o robô escreve logo abaixo dela, numa faixa na cor "
+        "A capa é o que aparece na grade do seu perfil. Com a capa com chamada, a foto do anúncio aumenta até tampar "
+        "a largura toda da capa (a foto quase quadrada, a maioria; a outra fica inteira, no maior tamanho que cabe), "
+        "com um fio em cima, e o robô escreve logo abaixo dela, numa faixa na cor "
         "principal do produto (no produto vermelho ou de várias cores, o laranja da Shopee), em letras grandes, "
         "brancas ou pretas, as que aparecem mais, o que é o produto e a vantagem que o vídeo mostra, "
         "em poucas palavras (a frase que a IA escreve vendo o vídeo), sem marca, sem preço e sem desconto: as "
         "diretrizes da Shopee punem promessa que o vídeo não mostra e desconto falso, e o preço muda. A frase que "
-        "não cabe numa linha vai em duas, na mesma faixa, com a letra menor: a faixa não cresce e não cobre nada "
-        "da foto.\n\n"
-        "<b>Os números ficam livres</b>: a faixa acaba logo acima do número de visualizações, embaixo à esquerda, "
-        "e a foto sobe até acima da sacolinha da Shopee, que fica por cima do canto dela. Tudo cabe no pedaço da "
-        "capa que a grade mostra.\n\n"
+        "não cabe numa linha vai em duas, na mesma faixa, com a letra menor: a faixa não cresce para cima e não "
+        "cobre nada da foto.\n\n"
+        "<b>Os números ficam livres</b>: a frase fica logo acima do número de visualizações, embaixo à esquerda, e "
+        "a faixa desce até o fim da capa, com o número por cima dela (nas cores claras, em que o número em branco "
+        "não se leria, embaixo da frase fica o preto); a sacolinha da Shopee fica por cima do canto de cima da foto. "
+        "Com a foto quase quadrada, a foto e a faixa tampam todo o pedaço da capa que a grade mostra.\n\n"
         f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, no lugar "
         "da foto do anúncio, nos rascunhos do robô e no modo assistente: o app usa o primeiro quadro do vídeo como "
         "capa da grade, e todo post sai com a frase, mesmo com o app lento.\n\n"
@@ -1274,8 +1276,8 @@ def legenda_do_exemplo_da_capa(nome, chamada):
             "1ª foto: a capa inteira, no 1º quadro do vídeo, que a grade usa. 2ª foto: o pedaço que a grade do "
             "seu perfil mostra. 3ª foto: o que aparece com o vídeo aberto, no resto dos 2 primeiros segundos.\n"
             f"✍️ Chamada (a vantagem que a IA viu no vídeo, em poucas palavras): “{html_escape(chamada)}”\n"
-            "🔢 O número de visualizações fica no preto, logo abaixo da faixa, e a sacolinha da Shopee, "
-            "logo acima da foto: nenhum deles cobre a chamada.\n"
+            "🔢 O número de visualizações fica em cima da faixa, logo abaixo da frase (nas cores claras, no preto), e "
+            "a sacolinha da Shopee, no canto de cima da foto: nenhum deles cobre a chamada.\n"
             f"Toque de novo em {BOTAO_EXEMPLO_DA_CAPA} para ver outro vídeo.")
 
 

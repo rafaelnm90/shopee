@@ -231,11 +231,12 @@ def capa_com_avisos(foto):
 # Tudo dentro do que a grade do perfil mostra da capa (o corte do meio, medido no print do
 # Rafael de 29/10: de y 196 a 1116 da tela de 720x1280; na largura, a grade mostra o quadro em
 # 3:4, os 690 px do meio, de x 15 a 705, e o que fica na borda da tela some: vídeo do Rafael de
-# 02/11, 12:36) e longe do que a grade põe por cima: o número de visualizações, embaixo à
-# esquerda (NUMERO_DA_GRADE), fica logo abaixo da faixa, no preto, e a sacolinha da Shopee, em
-# cima à direita (SACOLINHA_DA_GRADE), logo acima da foto; o selo "Fixado" dos vídeos fixados no
-# perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10), pega só a ponta de
-# cima da foto: pedido do Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
+# 02/11, 12:36; no Motorola do Rafael, a grade mostra mais, GRADE_NO_CELULAR) e longe do que a
+# grade põe por cima: o número de visualizações, embaixo à esquerda (NUMERO_DA_GRADE), fica logo
+# abaixo da frase, em cima da faixa (P168; na cor clara, no preto), e a sacolinha da Shopee, em
+# cima à direita (SACOLINHA_DA_GRADE), por cima do canto de cima da foto (P139 2); o selo "Fixado"
+# dos vídeos fixados no perfil, em cima à esquerda (FIXADO_DA_GRADE, medido no Motorola em 29/10),
+# pega só a ponta de cima da foto: pedido do Rafael, não atrapalhar os números. Começa desligada (chave capa_com_chamada de
 # shopee_video): ele vê o exemplo no privado e liga no painel. A bebida alcoólica fica com a
 # capa dos avisos. Escolhas do Rafael (29/10, P76; 30/10, P107): DECISOES.md, Shopee Vídeo.
 CHAVE_DA_CAPA = "capa_com_chamada"
@@ -319,20 +320,29 @@ GROSSURA_DA_MOLDURA = sum(grossura for _cor, grossura in CAMADAS_DA_MOLDURA)
 RAIO_DA_FOTO = 34                               # o arredondado dos cantos da foto da miniatura, dentro da moldura
 ESCALA_NA_MINIATURA = 0.5
 # A capa com a frase (vídeo do Rafael das 20:14 de 02/11, no lugar da moldura em volta da foto e
-# das laterais laranja encostadas nos lados da grade): a foto inteira, sem moldura dos lados; um
-# fio (FIO_DA_CAPA) logo acima da beirada de cima dela e, logo abaixo do pé dela, a faixa com a
-# frase (os dois no laranja ou na cor do produto, P159 2), sempre da altura de uma linha
+# das laterais laranja encostadas nos lados da grade): a foto sem moldura dos lados; um fio
+# (FIO_DA_CAPA) logo acima da beirada de cima dela e, logo abaixo do pé dela, a faixa com a frase
+# (os dois no laranja ou na cor do produto, P159 2), com a frase sempre na altura de uma linha
 # (FAIXA_DA_CHAMADA), e a sacolinha da grade fica por cima do canto de cima da foto (P139 2). A
-# frase que não cabe numa linha vai em duas, com a letra menor. Na capa da grade (o 1º quadro do vídeo), a faixa fica logo acima do número
-# de visualizações (PE_DA_FAIXA_NA_GRADE) e a foto entra inteira, sem corte, no maior tamanho que
-# cabe no que a grade mostra (LADOS_NA_GRADE e VISIVEL_NA_GRADE) acima da faixa; o fio e a faixa
-# vão de uma beirada à outra (a tela final do app mostra o vídeo de lado a lado). No resto da
-# abertura (o vídeo aberto, que corta mais dos lados, VISIVEL_NO_APP, P129), a faixa fica acima do
-# cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO) e a foto, inteira
-# entre a barra de pesquisa do app (TOPO_NO_VIDEO_ABERTO) e a faixa; o fio e a faixa vão de um
-# lado ao outro do que o app mostra. Pedidos do Rafael (P139 2 e P160 2): DECISOES.md, Shopee Vídeo.
+# frase que não cabe numa linha vai em duas, com a letra menor. Na capa da grade (o 1º quadro do
+# vídeo), a frase fica logo acima do número de visualizações (PE_DA_FAIXA_NA_GRADE) e a faixa
+# desce até o fim do quadro, com o número por cima dela (na cor clara, o preto embaixo da frase,
+# para o número em branco se ler, faixa_ate_embaixo); a foto quase quadrada aumenta, sem
+# deformar, até tampar a largura toda, do fio, no alto do que a grade do celular mostra
+# (GRADE_NO_CELULAR), até a faixa, perdendo no máximo CORTE_MAXIMO_AO_TAMPAR dela; a outra entra
+# inteira, sem corte, no maior tamanho que cabe em LADOS_NA_GRADE e VISIVEL_NA_GRADE acima da
+# faixa, até a resposta da P169. O fio e a faixa vão de uma beirada à outra (a tela final do app
+# mostra o vídeo de lado a lado). No resto da abertura (o vídeo aberto, que corta mais dos lados,
+# VISIVEL_NO_APP, P129), a faixa, da altura de uma linha, fica acima do cartão do produto que o
+# app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO) e a foto, inteira entre a barra de pesquisa
+# do app (TOPO_NO_VIDEO_ABERTO) e a faixa; o fio e a faixa vão de um lado ao outro do que o app
+# mostra. Pedidos do Rafael (P139 2, P160 2 e P168): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
 PE_DA_FAIXA_NA_GRADE = FOTO_DA_CAPA[3]           # logo acima do número de visualizações (NUMERO_DA_GRADE)
+# O que a grade do perfil mostra no Motorola do Rafael (print de 06/11, 21:09): o quadro em 3:4 com
+# a largura toda. Com a foto menor que isso, a grade mostra o preto em volta dela (P168).
+GRADE_NO_CELULAR = (160, 1120)                  # de cima a baixo, em y, de x 0 a 720
+CORTE_MAXIMO_AO_TAMPAR = 0.06                   # da foto aumentada; mais que isso, ela fica inteira
 # Medidos no vídeo do Rafael de 06/11 (09:56, o Motorola com o vídeo aberto pelo Perfil): o
 # cartão "Comprar com cupom" cobre o vídeo de y 920 a 1094, e a barra de pesquisa, até y 140.
 CARTAO_NO_VIDEO_ABERTO = 920
@@ -431,6 +441,25 @@ def _foto_que_cabe(foto, lado, altura=None):
     return imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
 
 
+def _foto_que_tampa(foto, largura, altura):
+    """
+    A foto (bytes) no PIL, em RGB, aumentada sem deformar até tampar um retângulo de largura x
+    altura px, com o que passa dele cortado por igual dos dois lados (P168); None se não abre ou
+    se o corte passa de CORTE_MAXIMO_AO_TAMPAR da foto aumentada (a foto que não é quase quadrada).
+    """
+    import io
+
+    from PIL import Image, ImageOps
+    try:
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
+    except Exception:
+        return None
+    proporcao = (imagem.width / imagem.height) / (largura / altura)
+    if 1 - min(proporcao, 1 / proporcao) > CORTE_MAXIMO_AO_TAMPAR:
+        return None
+    return ImageOps.fit(imagem, (largura, altura))
+
+
 def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA, cor=None):
     """
     A foto (bytes) da miniatura com a moldura (ESCALA_NA_MINIATURA da grossura da foto do
@@ -519,25 +548,38 @@ def lugar_da_foto(no_video=False):
     """
     (esquerda, cima, direita, pé da faixa) da capa com a frase: entre esquerda e direita, e entre
     cima (com o fio) e a faixa, a foto entra inteira. Na da grade, o que a grade mostra, com a faixa
-    logo acima do número de visualizações; no vídeo aberto (P129), o que o app mostra, com a faixa
-    acima do cartão do produto (P160 2).
+    logo acima do número de visualizações (a foto quase quadrada aumenta além disso até tampar o
+    que a grade do celular mostra, _foto_que_tampa, P168); no vídeo aberto (P129), o que o app
+    mostra, com a faixa acima do cartão do produto (P160 2).
     """
     if no_video:
         return VISIVEL_NO_APP[0], TOPO_NO_VIDEO_ABERTO, VISIVEL_NO_APP[1], PE_DA_FAIXA_NO_VIDEO
     return LADOS_NA_GRADE[0], VISIVEL_NA_GRADE[0], LADOS_NA_GRADE[1], PE_DA_FAIXA_NA_GRADE
 
 
+def faixa_ate_embaixo(cor, no_video=False):
+    """
+    Se a faixa da capa desce até o fim do quadro: só na capa da grade (P168) e na cor de letra
+    branca. Na cor clara (letra preta), o número de visualizações, que o app escreve em branco
+    embaixo da frase, sumiria na faixa (P72): embaixo dela fica o preto, até a resposta da P170.
+    """
+    return not no_video and letra_que_contrasta(tuple(cor) if cor else LARANJA_DA_SHOPEE) == LETRA_BRANCA
+
+
 def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     """
-    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) inteira, sem corte, no
-    maior tamanho que cabe no lugar dela (lugar_da_foto), no fundo preto, com o fio logo acima da
-    beirada de cima dela e, logo abaixo dela, a chamada numa faixa sempre da mesma altura, de um
-    lado ao outro (lados_da_capa): na da grade, logo acima do número de visualizações; com
-    no_video=True, a do resto da abertura (P129), acima do cartão do produto que o app põe por cima
-    do vídeo aberto (P160 2), com a frase acabando antes dos ícones do app (P165 1). O fio e a faixa
-    vão na cor do produto (P159 2; sem ela, o laranja da Shopee), com a letra que contrasta. Nada da
-    foto fica coberto (P139 2). None sem a chamada, com
-    a foto que não abre ou com a chamada que não cabe nem na menor letra.
+    A capa com chamada (PNG, bytes, 720x1280): a foto do anúncio (bytes) no fundo preto, com o fio
+    logo acima da beirada de cima dela e, logo abaixo dela, a chamada numa faixa, de um lado ao
+    outro (lados_da_capa). Na da grade, a foto quase quadrada aumenta sem deformar até tampar o que
+    a grade do celular mostra (_foto_que_tampa, P168), e a outra entra inteira, sem corte, no maior
+    tamanho que cabe no lugar dela (lugar_da_foto); a frase fica logo acima do número de
+    visualizações, e a faixa desce até o fim do quadro, com o número por cima dela
+    (faixa_ate_embaixo: na cor clara, embaixo da frase fica o preto). Com
+    no_video=True, a do resto da abertura (P129): a foto inteira no lugar dela e a faixa da altura de
+    uma linha acima do cartão do produto que o app põe por cima do vídeo aberto (P160 2), com a
+    frase acabando antes dos ícones do app (P165 1). O fio e a faixa vão na cor do produto (P159 2;
+    sem ela, o laranja da Shopee), com a letra que contrasta. Nada da foto fica coberto (P139 2).
+    None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem na menor letra.
     """
     import matplotlib
     from PIL import Image, ImageDraw
@@ -546,12 +588,19 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
         return None
     esquerda, direita = lados_da_capa(no_video)
     x1, cima, x2, pe = lugar_da_foto(no_video)
-    imagem = _foto_que_cabe(foto, x2 - x1, pe - FAIXA_DA_CHAMADA - cima - FIO_DA_CAPA)
-    if not imagem:
-        return None
+    # Na grade, a foto quase quadrada tampa tudo acima da faixa (P168); a outra fica inteira, no
+    # maior tamanho que cabe, como no vídeo aberto, até a resposta da P169.
+    imagem = None if no_video else _foto_que_tampa(
+        foto, TELA[0], pe - FAIXA_DA_CHAMADA - GRADE_NO_CELULAR[0] - FIO_DA_CAPA)
+    if imagem:
+        x, y = 0, GRADE_NO_CELULAR[0] + FIO_DA_CAPA
+    else:
+        imagem = _foto_que_cabe(foto, x2 - x1, pe - FAIXA_DA_CHAMADA - cima - FIO_DA_CAPA)
+        if not imagem:
+            return None
+        # A foto fica inteira logo acima da faixa, no meio do lugar dela.
+        x, y = x1 + (x2 - x1 - imagem.width) // 2, pe - FAIXA_DA_CHAMADA - imagem.height
     capa = Image.new("RGB", TELA, "black")
-    # A foto fica inteira logo acima da faixa, no meio do lugar dela.
-    x, y = x1 + (x2 - x1 - imagem.width) // 2, pe - FAIXA_DA_CHAMADA - imagem.height
     capa.paste(imagem, (x, y))
 
     desenho = ImageDraw.Draw(capa)
@@ -565,7 +614,8 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None):
     fonte, linhas = quebra
     cor = tuple(cor) if cor else LARANJA_DA_SHOPEE
     desenho.rectangle((esquerda, y - FIO_DA_CAPA, direita - 1, y - 1), fill=cor)
-    desenho.rectangle((esquerda, pe - FAIXA_DA_CHAMADA, direita - 1, pe - 1), fill=cor)
+    desenho.rectangle((esquerda, pe - FAIXA_DA_CHAMADA, direita - 1, (TELA[1] if faixa_ate_embaixo(cor, no_video)
+                                                                       else pe) - 1), fill=cor)
     altura_da_linha = round(fonte.size * 1.2)
     meio = pe - FAIXA_DA_CHAMADA / 2
     for i, linha in enumerate(linhas):
@@ -906,8 +956,8 @@ def faixa_nos_lados(imagem, caixa, cor=None):
 
 
 def recorte_da_grade(capa):
-    """O pedaço da capa (PNG, bytes) que a grade do perfil mostra (VISIVEL_NA_GRADE e LADOS_NA_GRADE), em PNG: o exemplo do painel."""
-    return _faixa_da_capa(capa, VISIVEL_NA_GRADE, LADOS_NA_GRADE)
+    """O pedaço da capa (PNG, bytes) que a grade do perfil mostra no celular do Rafael (GRADE_NO_CELULAR, na largura toda), em PNG: o exemplo do painel."""
+    return _faixa_da_capa(capa, GRADE_NO_CELULAR)
 
 
 def _faixa_da_capa(capa, faixa, lados=None):
