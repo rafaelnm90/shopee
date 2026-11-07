@@ -608,7 +608,10 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
    - Meus favoritos de afiliado (o Rafael ensinou em vídeo, 25/10/2026): aba **Eu** →
      **Criadores & Afiliados** (no bloco "Mais atividades") → área de afiliado (abas Oferta,
      Conversão e Conta embaixo) → **Meus favoritos** (o coração, ~746,722). É a lista
-     `AN_MyLikesListPage`, a mesma do Minhas Curtidas do Adicionar Produto. O título diz
+     `AN_MyLikesListPage`, a mesma do Minhas Curtidas do Adicionar Produto (em 07/11/2026,
+     Meus favoritos tinha 3 produtos e o Minhas Curtidas do Adicionar Produto, dezenas de
+     produtos já descurtidos, sem o curtido 4 min antes: a lista do Adicionar Produto guarda
+     os descurtidos e pode demorar a mostrar o curtido agora). O título diz
      quantos há ("Meus favoritos(1000)", até 1000), com os filtros Ordenar e Melhor Oferta e,
      às vezes, um aviso com **Substituir Tudo** (nunca tocar). Cada produto tem uma caixa de
      marcar à esquerda (`AN_Checkbox_CheckedIconUnCheckIcon_Img`, ~84) e os ícones de mais e

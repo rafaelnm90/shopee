@@ -293,6 +293,13 @@ AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo: a janela de editar o nome a
 ROLAGENS_DO_PRODUTO = 8
 # Segundos que a lista de Minhas Curtidas tem para carregar antes da busca do produto.
 ESPERA_DA_LISTA = 9
+# O curtido agora pode demorar minutos a chegar a Minhas Curtidas do Adicionar Produto: no
+# Motorola, em 07/11/2026, o produto curtido às 13:15 não estava nela às 13:19 (o 1º era o
+# curtido antes dele), e estava em Meus favoritos, de Criadores & Afiliados. Sem ele no topo,
+# o produto do vídeo espera cada uma destas pausas (segundos) e lê a lista de novo, trocando a
+# ordem (Relevância e de volta a Mais Recente), antes de rolar a lista e da última chance.
+ESPERAS_PARA_REABRIR_A_LISTA = (0, 30, 60)
+ORDEM_PARA_REABRIR, ORDEM_DA_LISTA = "Relevância", "Mais Recente"
 # Quantas vezes o passo curtir rola a página completa do produto atrás do coração.
 ROLAGENS_DO_CORACAO = 2
 # Quantas vezes a IA confere o produto do link com o vídeo: ela já recusou um vídeo que
@@ -828,7 +835,9 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     agora ficam em cima (curtiu 2, são os 2 primeiros: no_topo). Escolha do Rafael (P18),
     nesta ordem:
     1. entre os no_topo primeiros, o que tem o nome do produto (igual, cortado ou com
-       PARECIDO_NO_TOPO% das palavras): o app pode mostrar o nome de outro jeito que a API;
+       PARECIDO_NO_TOPO% das palavras): o app pode mostrar o nome de outro jeito que a API; sem
+       ele, o topo de novo, com a lista lida outra vez depois de cada pausa de
+       ESPERAS_PARA_REABRIR_A_LISTA (o curtido agora pode demorar a chegar à lista);
     2. o nome do produto mais embaixo, rolando a lista (o curtido de outro dia cujo
        descurtir não pegou fica lá); com a lista limpa (rolar_a_lista=False: a limpeza
        anterior deu certo), só o que está na tela, sem rolar (P27);
@@ -858,6 +867,22 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     escolhido = no_topo_pelo_nome(topo, nome)
     if escolhido:
         return _tocar_em_adicionar(d, tela, escolhido["botao"], escolhido["nome"], "no topo, pelo nome", anexados)
+    # O curtido agora que ainda não chegou ao topo: a lista é lida de novo, depois de cada pausa.
+    # O produto a mais (sem a última chance) não espera: o que não anexa só fica de fora.
+    for vez, espera in enumerate(ESPERAS_PARA_REABRIR_A_LISTA if ultima_chance else (), 1):
+        nova = reabrir_a_lista(d, espera)
+        if not nova:
+            break
+        tela = nova
+        na_lista = produtos_da_lista(tela)
+        topo = na_lista[:max(no_topo, 1)]
+        escolhido = no_topo_pelo_nome(topo, nome)
+        registro_processos.registrar("shopee_video", "anexar o produto", "lista lida de novo",
+                                     f"{vez}ª vez, {espera} s depois: "
+                                     + ("o produto no topo" if escolhido else "ainda fora do topo"), ok=None)
+        if escolhido:
+            return _tocar_em_adicionar(d, tela, escolhido["botao"], escolhido["nome"],
+                                       f"no topo, pelo nome, com a lista lida de novo ({vez}ª vez)", anexados)
     melhor, anterior, rolagens, acabou = (0, -1, ""), None, 0, False
     primeiro = topo[0]["nome"] if topo else ""
     maximo = ROLAGENS_DO_PRODUTO if rolar_a_lista else 0
@@ -1124,6 +1149,30 @@ def _json_da_ia(resposta):
         return json.loads(achado.group(0)) if achado else None
     except ValueError:
         return None
+
+
+def reabrir_a_lista(d, espera):
+    """
+    Lê Minhas Curtidas de novo depois de `espera` segundos: toca em Relevância e de volta em Mais
+    Recente, e a lista vem outra vez. Devolve a tela com a lista nova, ou "" sem as duas ordens na
+    tela (nada tocado nem esperado).
+    """
+    tela = d.dump_hierarchy()
+    if not (achar(tela, ORDEM_PARA_REABRIR) and achar(tela, ORDEM_DA_LISTA)):
+        return ""
+    time.sleep(espera)
+    for alvo in (ORDEM_PARA_REABRIR, ORDEM_DA_LISTA):
+        tela = d.dump_hierarchy()
+        ponto = achar(tela, alvo)
+        if not ponto:
+            return ""
+        x, y = ponto
+        if proibido_no_ponto(tela, x, y):
+            return ""
+        d.click(x, y)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    esperar_a_lista(d)
+    return d.dump_hierarchy()
 
 
 def esperar_a_lista(d):
