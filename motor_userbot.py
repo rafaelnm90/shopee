@@ -175,9 +175,15 @@ def ler_fila_clonagem():
 def salvar_fila_clonagem(dados):
     db.salvar_config("fila_clonagem", dados)
 
-def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None, msg_id=None):
+def novo_id_de_clone():
+    """O id de um clone da fila: clone_<segundos de agora>_<4 dígitos>. O arquivo do vídeo leva o mesmo id."""
+    return f"clone_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
+
+
+def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None, msg_id=None,
+                            id_unico=None):
     """Acrescenta um vídeo capturado pelo Espião à fila de clonagem, ainda não processado."""
-    id_unico = f"clone_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
+    id_unico = id_unico or novo_id_de_clone()
     data_captura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     nome_origem_str = str(nome_origem) if nome_origem else str(chat_origem)
     
@@ -381,7 +387,12 @@ async def interceptar_mensagem(event):
             logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
         
         logger.info("📥 Iniciando download do vídeo em segundo plano...")
-        caminho_salvo = await event.download_media(file="temp/temp_clone_")
+        # O arquivo leva o id do clone. Com um prefixo só, o Telethon dava o primeiro nome livre
+        # ("temp_clone_ (N)"), que volta a ficar livre quando o vídeo de um clone já postado no Viral
+        # sai do disco: o item dele, que fica na fila até o fim do dia, passava a apontar para o
+        # vídeo novo, e o robô da Shopee Vídeo juntava o link de um vídeo com o arquivo de outro.
+        id_unico = novo_id_de_clone()
+        caminho_salvo = await event.download_media(file=f"temp/temp_clone_{id_unico}")
 
         # Vídeo abaixo de 720p é re-renderizado antes de entrar na fila.
         caminho_salvo = await verificar_e_otimizar_video(caminho_salvo)
@@ -400,7 +411,8 @@ async def interceptar_mensagem(event):
             
         nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
 
-        salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat, msg_id=event.id)
+        salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat,
+                                msg_id=event.id, id_unico=id_unico)
         
         registrar_historico_espiao(nome_chat)
 

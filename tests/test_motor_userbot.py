@@ -56,3 +56,52 @@ def test_ultima_mensagem_de_cada_grupo_vigiado_vai_ao_banco(monkeypatch):
     mu.gravar_ultimas_mensagens()
     assert set(mu._ultimas_mensagens["espiao"]) == {rp.apelido("@grupoc")}
     mu._ultimas_mensagens["espiao"].clear()
+
+
+def test_cada_clone_baixa_num_arquivo_com_o_proprio_id(monkeypatch):
+    # 07/11 (15:57 e 16:11): com o prefixo "temp/temp_clone_", o Telethon dava o primeiro nome livre
+    # ("temp_clone_ (N)"), que volta a ficar livre quando o vídeo de um clone já postado no Viral sai
+    # do disco: o item antigo, que fica na fila até o fim do dia, passava a apontar para o vídeo novo,
+    # e o robô da Shopee Vídeo juntava o link de um vídeo com o arquivo de outro. Cada clone baixa no
+    # arquivo com o próprio id.
+    import os
+    from types import SimpleNamespace
+    from conftest import inserir
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    os.makedirs("temp", exist_ok=True)
+    pedidos = []
+
+    class Evento:
+        sender_id, out, id, text, video = 999, False, 55, "olha o achado", object()
+        message = SimpleNamespace(reply_to=None)
+
+        async def download_media(self, file):
+            pedidos.append(file)
+            with open(file + ".mp4", "wb") as f:
+                f.write(b"video")
+            return file + ".mp4"
+
+    async def chat(_evento):
+        return SimpleNamespace(id=123, username="GrupoA", title="Grupo A")
+
+    async def eu():
+        return SimpleNamespace(id=1)
+
+    async def otimizar(caminho, *_a):
+        return caminho
+
+    monkeypatch.setattr(mu, "carregar_alvos", lambda: ["@grupoa"])
+    monkeypatch.setattr(mu, "ler_excecao_ponte", lambda: "")
+    monkeypatch.setattr(mu, "chat_do_evento", chat)
+    monkeypatch.setattr(mu.client, "get_me", eu)
+    monkeypatch.setattr(mu, "extrair_link_shopee", lambda _evento: "https://s.shopee.com.br/achado")
+    monkeypatch.setattr(mu, "verificar_e_registrar_espelho", lambda _link, contexto=None: False)
+    monkeypatch.setattr(mu, "verificar_e_otimizar_video", otimizar)
+    monkeypatch.setattr(mu, "verificar_e_registrar_hash", lambda _h, contexto=None: False)
+    monkeypatch.setattr(mu, "registrar_historico_espiao", lambda _nome: None)
+    for _ in range(2):
+        rodar(mu.interceptar_mensagem(Evento()))
+    mu._ultimas_mensagens["espiao"].clear()
+    fila = mu.ler_fila_clonagem()["fila"]
+    assert pedidos == [f"temp/temp_clone_{item['id']}" for item in fila] and len(set(pedidos)) == 2
+    assert [item["caminho_video"] for item in fila] == [f"temp/temp_clone_{item['id']}.mp4" for item in fila]
