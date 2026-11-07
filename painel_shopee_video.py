@@ -1011,7 +1011,7 @@ def _linha_da_medicao(medicao):
 def texto_capa(config, medicao):
     """
     A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168; 07/11,
-    P169 1 e P171): DECISOES.md, Shopee Vídeo.
+    P169 1, P171 e os vídeos das 01:04 e 01:31): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
@@ -1023,9 +1023,11 @@ def texto_capa(config, medicao):
         "(um pouco mais estreitas, para caberem maiores), brancas ou pretas, as que aparecem mais, o que é o "
         "produto, em poucas palavras (a frase que a IA escreve vendo o vídeo), sem marca, sem preço e sem desconto: "
         "as diretrizes da Shopee punem promessa que o vídeo não mostra e desconto falso, e o preço muda. A frase "
-        "fica no meio da faixa; a que não cabe numa linha vai em duas, com a letra menor. A faixa não cobre nada "
-        "da foto.\n\n"
-        "<b>Os números ficam livres</b>: a frase acaba logo acima do número de visualizações, embaixo à esquerda, e "
+        "fica no meio do pedaço da faixa à direita do número de visualizações, do alto da faixa até embaixo, na "
+        "maior letra que cabe nele: numa linha ou, quando a letra fica maior assim, em duas. O fio e a faixa ficam "
+        "na mesma cor, e nada da capa fica no preto do fundo. A faixa não cobre nada da foto.\n\n"
+        "<b>Os números ficam livres</b>: a frase fica à direita do número de visualizações, embaixo à esquerda, com "
+        "espaço para ele crescer, e "
         "a faixa desce até o fim da capa, com o número por cima dela, na mesma cor (nas cores claras, o número, em "
         "branco, fica mais apagado); a sacolinha da Shopee fica por cima do canto de cima da foto. Com a foto quase "
         "quadrada, a foto e a faixa tampam todo o pedaço da capa que a grade mostra (a quadrada perde um pouco em "
