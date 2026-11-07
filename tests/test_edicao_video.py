@@ -1474,7 +1474,7 @@ def test_capa_da_grade_com_a_foto_quadrada_tampa_o_que_a_grade_mostra_e_a_faixa_
     # na maior letra que cabe nele, e o número fica livre (vídeos do Rafael de 07/11, 01:04 e 01:31).
     x1, y1, x2, y2 = edicao_video.NUMERO_DA_GRADE
     esquerda, cima_das_letras, direita, pe_das_letras = edicao_video.lugar_das_letras_na_grade()
-    assert x2 < edicao_video.FIM_DO_NUMERO < esquerda and faixa < cima_das_letras and y2 < pe_das_letras <= baixo
+    assert x1 < edicao_video.FIM_DO_NUMERO < esquerda and faixa < cima_das_letras and y2 < pe_das_letras <= baixo
     letras = [(x, y) for x in range(720) for y in range(faixa, 1280) if min(capa.getpixel((x, y))) > 200]
     assert letras and _claros(capa, (0, 0, 720, faixa)) == 0
     xs, ys = [x for x, _y in letras], [y for _x, y in letras]
@@ -1485,7 +1485,9 @@ def test_capa_da_grade_com_a_foto_quadrada_tampa_o_que_a_grade_mostra_e_a_faixa_
             max(ys) - min(ys) + 1 >= 0.9 * (pe_das_letras - cima_das_letras))
     assert _claros(capa, (0, faixa, edicao_video.FIM_DO_NUMERO + 1, 1280), passo=1) == 0
     assert faixa < y1 and y2 < baixo
-    assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE) for x in range(x1, x2, 4) for y in range(y1, y2, 4))
+    # O número com até 2 algarismos fica livre (P172 3).
+    assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE)
+               for x in range(x1, edicao_video.FIM_DO_NUMERO, 4) for y in range(y1, y2, 4))
     # A sacolinha da Shopee fica por cima do canto de cima da foto (P139 2).
     assert topo < edicao_video.SACOLINHA_DA_GRADE[1] and not _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
 
@@ -1518,7 +1520,7 @@ def test_capa_da_grade_sem_preto_com_o_fio_mais_grosso_e_a_frase_grande_a_direit
         assert _cor_de(capa, (360, alto + 17), (128, 128, 128)), tamanho
     # A frase em duas linhas grandes no retângulo à direita do número: nada dela no lugar do número.
     esquerda, cima, direita, baixo = edicao_video.lugar_das_letras_na_grade()
-    assert edicao_video.NUMERO_DA_GRADE[2] < edicao_video.FIM_DO_NUMERO < esquerda < direita <= 720
+    assert edicao_video.NUMERO_DA_GRADE[0] < edicao_video.FIM_DO_NUMERO < esquerda < direita <= 720
     assert faixa < cima < edicao_video.NUMERO_DA_GRADE[1] < edicao_video.NUMERO_DA_GRADE[3] < baixo
     letras = [(x, y) for x in range(720) for y in range(faixa, 1280) if min(capa.getpixel((x, y))) > 200]
     xs, ys = [x for x, _y in letras], [y for _x, y in letras]
@@ -3086,7 +3088,7 @@ def test_capa_com_a_cor_do_produto_no_fio_e_na_faixa_com_a_letra_que_contrasta()
         # de visualizações por cima dela (P171, que respondeu a P170).
         assert _cor_de(capa, (3, 1279), cor) and _cor_de(capa, (360, 1279), cor)
         assert all(_cor_de(capa, (x, y), cor) for x in range(edicao_video.NUMERO_DA_GRADE[0],
-                                                            edicao_video.NUMERO_DA_GRADE[2], 6)
+                                                            edicao_video.FIM_DO_NUMERO, 6)
                    for y in range(edicao_video.NUMERO_DA_GRADE[1], edicao_video.NUMERO_DA_GRADE[3], 6)), nome
         pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(faixa, 1280, 2)]
         brancos = sum(1 for p in pontos if min(p) > 250)

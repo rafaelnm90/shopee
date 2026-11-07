@@ -357,8 +357,9 @@ DESFOQUE_DO_FUNDO = 24                          # o raio do desfoque da foto atr
 TOPO_DA_FAIXA_NA_GRADE = 846                    # a quadrada tampa do fio até aqui perdendo menos de 7%
 # O número de visualizações cresce para a direita com as visualizações: no Motorola do Rafael, "▷ 7"
 # acaba em x 122 do quadro e cada algarismo tem uns 42 px ("▷ 232,6mil" acaba em x 372). A frase
-# fica à direita do lugar do número até "▷ 9,9mil" (P172).
-FIM_DO_NUMERO = 281
+# fica à direita do lugar do número com até 2 algarismos ("▷ 99"), como o Rafael desenhou: de 100
+# visualizações para cima, o número encosta no começo da frase. Escolha dele (07/11, P172 3).
+FIM_DO_NUMERO = 164
 LETRAS_NA_GRADE = (120, 36)                     # a maior e a menor, numa linha ou em duas
 APERTO_DA_LETRA = 0.8                           # da largura da letra
 ENTRELINHA_NA_GRADE = 1.1                       # mais junta, para as duas linhas caberem maiores
