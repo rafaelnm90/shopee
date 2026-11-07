@@ -1011,7 +1011,7 @@ def _linha_da_medicao(medicao):
 def texto_capa(config, medicao):
     """
     A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168; 07/11,
-    P169 1, P171, os vídeos e prints das 01:04 às 02:49 e P176 1): DECISOES.md, Shopee Vídeo.
+    P169 1, P171, os vídeos e prints das 01:04 às 02:49, P175 1 e P176 1): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
@@ -1038,7 +1038,11 @@ def texto_capa(config, medicao):
         "cima e embaixo).\n\n"
         f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, no lugar "
         "da foto do anúncio, nos rascunhos do robô e no modo assistente: o app usa o primeiro quadro do vídeo como "
-        "capa da grade, e todo post sai com a frase, mesmo com o app lento.\n\n"
+        "capa da grade, e todo post sai com a frase, mesmo com o app lento. Logo depois do 1º quadro, ela dá lugar "
+        "à capa do vídeo aberto, com a faixa acima do cartão do produto. A passagem suave (escolha sua, P175), em "
+        "que uma capa se desfaz na outra em "
+        f"{str(edicao_video.PASSAGEM_DA_CAPA).replace('.', ',')} s, sem o pulo, já aparece no exemplo; nos vídeos, "
+        + ("ela já vale" if edicao_video.PASSAGEM_NOS_VIDEOS else "ela entra quando você aprovar o exemplo") + ".\n\n"
         "<b>A foto sem letras</b>: com as letras do anúncio fora do produto, o robô corta o pedaço com elas, e a IA "
         "confere, com a foto inteira ao lado, que o produto ficou inteiro no corte (escolha sua, P176). Se faltar um "
         "pedaço do produto, ou com as letras em cima dele, a capa usa um momento do próprio vídeo, com o produto "
@@ -1052,8 +1056,8 @@ def texto_capa(config, medicao):
         f"postou. {_linha_da_medicao(medicao)}\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EXEMPLO_DA_CAPA}</b>: manda no seu privado, sem postar, a capa com chamada do próximo vídeo "
-        "que o robô pegaria: a capa inteira e o pedaço que aparece na grade do perfil. Cada toque mostra um vídeo "
-        "novo.\n"
+        "que o robô pegaria: a capa inteira, o pedaço que aparece na grade do perfil, a capa do vídeo aberto e o "
+        "começo do vídeo, com a passagem de uma capa para a outra. Cada toque mostra um vídeo novo.\n"
         f"✅ <b>{BOTAO_LIGAR_CAPA}</b> / ⏸️ <b>{BOTAO_DESLIGAR_CAPA}</b>: liga ou desliga a capa com chamada nos "
         "próximos vídeos editados (os rascunhos já salvos ficam como estão).\n"
         f"🔙 <b>{BOTAO_VOLTAR_EDICAO}</b>: volta à tela da Edição dos Vídeos."
@@ -1292,6 +1296,12 @@ async def ligar_capa_handler(message: types.Message, state: FSMContext):
     await mostrar_capa(message, state)
 
 
+LEGENDA_DA_ABERTURA = (
+    "🎬 <b>O começo do vídeo</b> (os 2 primeiros segundos, sem o app por cima): o 1º quadro é a capa da grade "
+    f"e, em {str(edicao_video.PASSAGEM_DA_CAPA).replace('.', ',')} s, ela se desfaz na capa do vídeo aberto, "
+    "sem o pulo de uma para a outra (P175). O Giro, que o robô põe no app, continua.")
+
+
 def legenda_do_exemplo_da_capa(nome, chamada):
     return (f"🏷️ <b>Exemplo da capa com chamada</b> (não foi postado): {html_escape(nome)}.\n"
             "1ª foto: a capa inteira, no 1º quadro do vídeo, que a grade usa. 2ª foto: o pedaço que a grade do "
@@ -1335,6 +1345,12 @@ async def exemplo_capa_handler(message: types.Message, state: FSMContext):
                 InputMediaPhoto(media=FSInputFile(caminhos[0]), parse_mode="HTML",
                                 caption=legenda_do_exemplo_da_capa(nome, exemplo["chamada"]))]
                 + [InputMediaPhoto(media=FSInputFile(caminho)) for caminho in caminhos[1:]])
+            if exemplo.get("abertura"):
+                # O começo do vídeo, com a passagem de uma capa para a outra (P175 1).
+                caminho = os.path.join(pasta, "abertura.mp4")
+                with open(caminho, "wb") as arquivo:
+                    arquivo.write(exemplo["abertura"])
+                await message.answer_video(FSInputFile(caminho), caption=LEGENDA_DA_ABERTURA, parse_mode="HTML")
     await state.set_state(ShopeeVideoFluxo.menu_robo)
 
 

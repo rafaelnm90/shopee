@@ -1825,6 +1825,38 @@ def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path):
         assert max(quadro(numero).getpixel(ponto)) < 40, numero
 
 
+def test_abertura_de_verdade_com_a_passagem_suave_entre_as_capas(tmp_path, monkeypatch):
+    # Escolha do Rafael (07/11, P175 1): o 1º quadro continua a capa da grade, inteira, e ela se desfaz
+    # na do vídeo aberto em PASSAGEM_DA_CAPA segundos, sem o pulo de um quadro para o outro. Nos vídeos
+    # que vão ao ar, só depois de o Rafael ver o exemplo (PASSAGEM_NOS_VIDEOS).
+    from PIL import Image
+    if not shutil.which("ffmpeg"):
+        return
+    monkeypatch.setattr(edicao_video, "PASSAGEM_NOS_VIDEOS", True)
+    video, foto = tmp_path / "v.mp4", _foto_jpg()
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x808080:size=360x640:rate=30:duration=3",
+                    str(video)], check=True)
+    capas = (edicao_video.capa_com_chamada(foto, "Leve"), edicao_video.capa_com_chamada(foto, "Leve", no_video=True))
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), foto, str(destino), capa=capas) == ""
+
+    def quadro(numero):
+        saida = tmp_path / f"q{numero}.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(destino), "-vf", f"select=eq(n\\,{numero})",
+                        "-frames:v", "1", str(saida)], check=True)
+        with Image.open(saida) as imagem:
+            return imagem.convert("RGB")
+
+    # No ponto em que a capa da grade tem a faixa e a do vídeo aberto tem o preto do fundo.
+    ponto = (edicao_video.VISIVEL_NO_APP[0] // 2, edicao_video.FOTO_DA_CAPA[3] - edicao_video.FAIXA_DA_CHAMADA // 2)
+    assert _cor_de(quadro(0), ponto, edicao_video.LARANJA_DA_SHOPEE)
+    vermelho = [quadro(numero).getpixel(ponto)[0] for numero in (2, 5, 8)]
+    assert vermelho[0] > vermelho[1] > vermelho[2] > 40, vermelho          # a faixa vai sumindo aos poucos
+    fim = round(edicao_video.PASSAGEM_DA_CAPA * 30) + 2
+    for numero in (fim, 30, 58):
+        assert max(quadro(numero).getpixel(ponto)) < 40, numero
+
+
 def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa():
     import io
     import os
@@ -2073,6 +2105,9 @@ def test_exemplo_da_capa_usa_o_proximo_video_e_a_vantagem_da_ia(monkeypatch):
     # E o que o app mostra do vídeo aberto no resto da abertura (P129).
     assert exemplo["video"] == edicao_video.recorte_do_video_aberto(
         edicao_video.capa_com_chamada(_foto_jpg(), "Gelado por 12 horas", no_video=True))
+    # E o começo do vídeo, em MP4, com a passagem de uma capa para a outra (P175 1).
+    if shutil.which("ffmpeg"):
+        assert exemplo["abertura"][4:8] == b"ftyp"
     # Com a frase curta da IA para a capa (P106), é ela que vai.
     _textos_da_tela(monkeypatch, {"nome": "Copo Térmico", "vantagem": "Gelado por 12 horas", "capa": "Gelado 12 horas"})
     assert edicao_video.exemplo_capa()[2]["chamada"] == "Gelado 12 horas"
