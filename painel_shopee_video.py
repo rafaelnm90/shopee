@@ -620,6 +620,9 @@ BOTAO_PASSO_A_PASSO = "Passo a Passo 📖"
 BOTAO_TELA = "Ver Tela do Celular 🖥️"
 
 BOTAO_RASCUNHOS = "Rascunhos do Robô 📝"
+# Os aprovados que esperam a hora de ir ao ar, com o Postar Agora 🚀, num botão à parte dos que
+# esperam a aprovação. Pedido do Rafael (vídeo de 07/11, 00:59): DECISOES.md, Shopee Vídeo.
+BOTAO_APROVADOS = "Aprovados para Postar ⏳"
 BOTAO_FAIXA_ROBO = "Rascunhos por Dia 📦"
 BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
 # O Horário das Interações saiu do painel (P161 1), mas o botão ainda pode estar no teclado do Rafael.
@@ -679,7 +682,7 @@ BOTAO_VOLTAR_ROBO = "Voltar ao Robô 🔙"
 
 def teclado_painel(config):
     return montar_teclado([
-        [KeyboardButton(text=BOTAO_RASCUNHOS)],
+        [KeyboardButton(text=BOTAO_RASCUNHOS), KeyboardButton(text=BOTAO_APROVADOS)],
         [KeyboardButton(text=BOTAO_MENU_ROBO), KeyboardButton(text=BOTAO_MENU_ASSISTENTE)],
         [KeyboardButton(text="Fonte dos Vídeos 🎞️"), KeyboardButton(text=BOTAO_COMO_FUNCIONA)],
         [KeyboardButton(text="Voltar aos Canais 🔙")],
@@ -689,7 +692,8 @@ def teclado_painel(config):
 def teclado_robo(config):
     pausa_robo = "Retomar Postagem ▶️" if config["robo_pausado"] else "Pausar Postagem ⏸️"
     return montar_teclado([
-        [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
+        [KeyboardButton(text=pausa_robo)],
+        [KeyboardButton(text=BOTAO_RASCUNHOS), KeyboardButton(text=BOTAO_APROVADOS)],
         [KeyboardButton(text=BOTAO_FILA), KeyboardButton(text=BOTAO_PREPARAR)],
         [KeyboardButton(text=BOTAO_HISTORICO), KeyboardButton(text=BOTAO_EDICAO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
@@ -787,11 +791,14 @@ def texto_painel(config, agora=None):
         "🎬 <b>Shopee Vídeo</b>\n\n"
         f"Quem posta agora: {quem_posta(config)}\n"
         f"📝 Rascunhos esperando você: <b>{len(robo.esperando_aprovacao())}</b>\n"
+        f"⏳ Aprovados esperando a hora de ir ao ar: <b>{len(robo.aprovados_na_fila())}</b>\n"
         f"🎞️ Fonte dos vídeos: <b>{assistente.FONTES.get(config['fonte'], config['fonte'])}</b>\n\n"
         "<b>O que cada botão faz</b>\n"
         f"📝 <b>{BOTAO_RASCUNHOS}</b>: os vídeos que o robô deixou prontos no Motorola, um por um, "
-        f"para você aprovar ou recusar; depois deles, os aprovados que ainda não foram ao ar, com o "
-        f"{BOTAO_POSTAR_AGORA} para postar na hora.\n"
+        "para você aprovar ou recusar.\n"
+        f"⏳ <b>{BOTAO_APROVADOS}</b>: os que você aprovou e ainda não foram ao ar, um por um, com a hora "
+        f"prevista e o {BOTAO_POSTAR_AGORA} para postar na hora; o que você mandou postar agora sai da lista "
+        "até ir ao ar.\n"
         f"🤖 <b>{BOTAO_MENU_ROBO}</b>: ligar ou pausar o robô, quantos rascunhos por dia, o horário dele, "
         "o teste do caminho e o celular.\n"
         f"📲 <b>{BOTAO_MENU_ASSISTENTE}</b>: ligar ou pausar os envios no seu privado, quantos por dia, o "
@@ -854,8 +861,9 @@ def texto_robo(config, agora=None, celular=None):
         "<b>O que cada botão faz</b>\n"
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
         "pausado, o assistente volta a mandar no seu privado.\n"
-        f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um; nos aprovados que ainda não "
-        f"foram ao ar, o {BOTAO_POSTAR_AGORA} posta na hora.\n"
+        f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um.\n"
+        f"⏳ <b>{BOTAO_APROVADOS}</b>: os aprovados que ainda não foram ao ar, com o {BOTAO_POSTAR_AGORA}, que "
+        "posta na hora.\n"
         f"🗂️ <b>{BOTAO_FILA}</b>: a lista dos rascunhos esperando a sua aprovação e dos aprovados, com a hora "
         "prevista de cada post e, se algum passou da hora, por que ainda não saiu.\n"
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado); se o vídeo "
@@ -1084,8 +1092,9 @@ COMO_FUNCIONA = (
     "2️⃣ <b>Um cobre o outro.</b> Com o robô ligado, o assistente fica em espera. Pausou o robô (ou o "
     "Motorola desconectou), o assistente volta a mandar. Nunca os dois juntos.\n\n"
     "3️⃣ <b>No dia a dia.</b> O robô avisa quando deixa um rascunho pronto. Toque em Rascunhos do Robô 📝 "
-    "e aprove ✅ ou recuse ❌. Os aprovados saem espalhados no horário do robô, e você recebe o link do "
-    "post. Depois de postar, o robô curte o vídeo, comenta nele (um texto curto chamando para comprar) e "
+    "e aprove ✅ ou recuse ❌. Os aprovados ficam em Aprovados para Postar ⏳ (lá, o Postar Agora 🚀 posta na "
+    "hora) e saem espalhados no horário do robô, e você recebe o link do post. Depois de postar, o robô curte "
+    "o vídeo, comenta nele (um texto curto chamando para comprar) e "
     "curte o comentário; 1 vez por dia, faz o mesmo num post dos últimos 30 dias.\n\n"
     "4️⃣ <b>Motorola desconectou?</b> Chega um aviso. No Motorola: Configurações → Sistema → Opções do "
     "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b>. Depois: Robô Automático 🤖 → <b>Retomar "
@@ -1832,12 +1841,26 @@ def teclado_do_rascunho(rascunho, anterior=False, proximo=False):
     return teclado_rascunho(anterior, proximo, robo.pode_tirar(rascunho))
 
 
-def rascunhos_da_tela():
+LISTA_DOS_RASCUNHOS, LISTA_DOS_APROVADOS = "rascunhos", "aprovados"
+
+
+def rascunhos_da_tela(lista=LISTA_DOS_RASCUNHOS):
     """
-    Os rascunhos de Rascunhos do Robô 📝, na ordem: os que esperam a aprovação do Rafael e,
-    depois deles, os aprovados que ainda não foram ao ar, pela hora de postar (P138).
+    Os rascunhos de uma das duas telas, na ordem: em Rascunhos do Robô 📝, os que esperam a
+    aprovação do Rafael; em Aprovados para Postar ⏳, os aprovados que ainda não foram ao ar, pela
+    hora de postar, fora o que o Postar Agora 🚀 está postando (P138 e o pedido do Rafael de 07/11).
     """
-    return robo.esperando_aprovacao() + sorted(robo.listar("aprovado"), key=lambda r: r["postar_em"] or "")
+    return robo.aprovados_na_fila() if lista == LISTA_DOS_APROVADOS else robo.esperando_aprovacao()
+
+
+async def _lista_da_tela(state):
+    """A lista que o Rafael está vendo (a dos rascunhos ou a dos aprovados), guardada no passo do fluxo."""
+    return (await state.get_data()).get("lista") or LISTA_DOS_RASCUNHOS
+
+
+def _nome_na_tela(rascunho):
+    """Como o rascunho aparece na tela: "Aprovado" na lista dos aprovados, "Rascunho" na outra."""
+    return "Aprovado" if rascunho.get("estado") == "aprovado" else "Rascunho"
 
 
 def linhas_da_origem(fonte):
@@ -1939,18 +1962,22 @@ def texto_rascunho(rascunho, posicao, total):
     if rascunho.get("estado") == "aprovado":
         aviso = (f"✅ <b>Aprovado</b>: vai ao ar por volta de <b>{_data_curta(rascunho['postar_em'])}</b>. Para postar "
                  f"já, toque em <b>{BOTAO_POSTAR_AGORA}</b>.\n\n" + aviso)
-    return (f"📝 <b>Rascunho {posicao} de {total}</b> (salvo em {_data_curta(rascunho['criado_em'])})\n\n"
+    return (f"📝 <b>{_nome_na_tela(rascunho)} {posicao} de {total}</b> (salvo em "
+            f"{_data_curta(rascunho['criado_em'])})\n\n"
             "📝 <b>Título</b> (o que está na legenda):\n"
             f"<code>{html_escape(rascunho['titulo'] or '')}</code>\n\n"
             f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n"
             f"{linhas_dos_produtos(rascunho)}\n"
             f"{linhas_da_origem(rascunho.get('fonte'))}"
             f"{linhas_da_conferencia(rascunho.get('conferencia'))}{linha_do_rotulo_de_ia(rascunho.get('rotulo_ia'))}"
-            f"{aviso}"
-            f"<b>{BOTAO_APROVAR}</b>: o robô posta, um de cada vez, dentro do Horário do Robô.\n"
-            f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta."
-            + (f"\n<b>{BOTAO_TIRAR}</b>: marque os produtos que saem do post; o robô os tira no celular na hora "
-               "de postar." if robo.pode_tirar(rascunho) else ""))
+            f"{aviso}" + (
+                f"<b>{BOTAO_POSTAR_AGORA}</b>: o robô posta este vídeo agora, a qualquer hora. Ele sai desta lista "
+                "até ir ao ar e, se algo impedir, o robô diz o quê e ele volta para ela."
+                if rascunho.get("estado") == "aprovado" else
+                f"<b>{BOTAO_APROVAR}</b>: o robô posta, um de cada vez, dentro do Horário do Robô.\n"
+                f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta."
+                + (f"\n<b>{BOTAO_TIRAR}</b>: marque os produtos que saem do post; o robô os tira no celular na hora "
+                   "de postar." if robo.pode_tirar(rascunho) else "")))
 
 
 # O Telegram manda até 10 fotos num álbum; o post tem até 6 produtos.
@@ -1997,34 +2024,47 @@ def _rascunho_a_mostrar(pendentes, depois_de=None, antes_de=None):
     return (seguintes or pendentes)[0]
 
 
-async def mostrar_rascunho(message, state, depois_de=None, antes_de=None, so_os_que_esperam=False):
+def _nenhum_na_lista(lista, depois_de_resolver=False):
+    """
+    A frase da lista vazia. Depois de aprovar ou recusar, só a frase (pedido do Rafael: o texto do
+    painel inteiro repetia o que ele já sabe); ao abrir a lista, ela diz onde está o resto.
+    """
+    if lista == LISTA_DOS_APROVADOS:
+        postando = sum(1 for r in robo.listar("aprovado") if robo.postando_agora(r))
+        return ("⏳ Nenhum aprovado esperando a hora de ir ao ar." +
+                (f"\n🚀 {postando} sendo postado(s) agora pelo {BOTAO_POSTAR_AGORA}: o robô manda aqui o link do post "
+                 "quando sair." if postando else ""))
+    aprovados = len(robo.aprovados_na_fila())
+    return ("📝 Nenhum rascunho esperando a sua aprovação." +
+            (f"\n⏳ {aprovados} aprovado(s) esperando a hora de ir ao ar: toque em {BOTAO_APROVADOS}."
+             if aprovados and not depois_de_resolver else ""))
+
+
+async def mostrar_rascunho(message, state, depois_de=None, antes_de=None, depois_de_resolver=False, lista=None):
     """
     Um rascunho por vez, com o vídeo, o print da tela final, o título e o link do produto:
     o Rafael é o validador, e o print prova que o que ele aprova é o que vai ao ar.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo. Depois de aprovar ou recusar
-    (so_os_que_esperam), vem o próximo que espera a aprovação; os aprovados aparecem ao abrir
-    a tela e na navegação (P138).
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo. Duas listas, cada uma no seu botão: a dos que
+    esperam a aprovação e a dos aprovados que esperam a hora de ir ao ar (lista; sem ela, a que está
+    na tela). Depois de aprovar ou recusar (depois_de_resolver), vem o próximo que espera a aprovação.
     """
-    pendentes = rascunhos_da_tela()
-    escolha = robo.esperando_aprovacao() if so_os_que_esperam else pendentes
-    if not escolha:
-        # Só a frase, já com o teclado do painel: o texto do painel inteiro depois de cada
-        # aprovação ou recusa repetia o que o Rafael já sabe. Pedido dele: DECISOES.md, Shopee Vídeo.
+    lista = lista or await _lista_da_tela(state)
+    pendentes = rascunhos_da_tela(lista)
+    if not pendentes:
         await state.set_state(ShopeeVideoFluxo.menu)
-        await message.answer("📝 Nenhum rascunho esperando a sua aprovação." if so_os_que_esperam else
-                             "📝 Nenhum rascunho esperando a sua aprovação nem aprovado esperando a hora de ir ao ar.",
-                             reply_markup=teclado_painel(ler_config()))
+        await message.answer(_nenhum_na_lista(lista, depois_de_resolver), reply_markup=teclado_painel(ler_config()))
         return
-    rascunho = _rascunho_a_mostrar(escolha, depois_de, antes_de)
+    rascunho = _rascunho_a_mostrar(pendentes, depois_de, antes_de)
     posicao = [r["id"] for r in pendentes].index(rascunho["id"]) + 1
+    nome = _nome_na_tela(rascunho)
     await state.set_state(ShopeeVideoFluxo.rascunho)
-    await state.update_data(rascunho_id=rascunho["id"])
+    await state.update_data(rascunho_id=rascunho["id"], lista=lista)
     if rascunho["arquivo"] and os.path.exists(rascunho["arquivo"]):
         await message.answer_video(FSInputFile(rascunho["arquivo"]), supports_streaming=True,
-                                   caption=f"🎬 Rascunho {posicao}: o vídeo.")
+                                   caption=f"🎬 {nome} {posicao}: o vídeo.")
     if rascunho["print"] and os.path.exists(rascunho["print"]):
         await message.answer_photo(FSInputFile(rascunho["print"]),
-                                   caption=f"📱 Rascunho {posicao}: a tela final no celular, como vai ao ar.")
+                                   caption=f"📱 {nome} {posicao}: a tela final no celular, como vai ao ar.")
     # Com produtos a mais, a tela final mostra só os 2 primeiros: as fotos de capa de todos, na
     # ordem do post, para o Rafael conferir o mesmo item, modelo e foto. Escolha dele (29/10,
     # P75): DECISOES.md, Shopee Vídeo.
@@ -2058,11 +2098,11 @@ async def mostrar_texto_do_rascunho(message, state, rascunho):
     pendentes = rascunhos_da_tela()
     ids = [r["id"] for r in pendentes]
     if rascunho["id"] not in ids:
-        await mostrar_rascunho(message, state)
+        await mostrar_rascunho(message, state, lista=LISTA_DOS_RASCUNHOS)
         return
     posicao = ids.index(rascunho["id"]) + 1
     await state.set_state(ShopeeVideoFluxo.rascunho)
-    await state.update_data(rascunho_id=rascunho["id"])
+    await state.update_data(rascunho_id=rascunho["id"], lista=LISTA_DOS_RASCUNHOS)
     await message.answer(texto_rascunho(rascunho, posicao, len(pendentes)), parse_mode="HTML",
                          disable_web_page_preview=True,
                          reply_markup=teclado_do_rascunho(rascunho, posicao > 1, posicao < len(pendentes)))
@@ -2072,7 +2112,14 @@ async def mostrar_texto_do_rascunho(message, state, rascunho):
 async def rascunhos_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     logger.info("📝 Shopee Vídeo: Rascunhos do Robô.")
-    await mostrar_rascunho(message, state)
+    await mostrar_rascunho(message, state, lista=LISTA_DOS_RASCUNHOS)
+
+
+@router.message(F.text == BOTAO_APROVADOS, StateFilter("*"))
+async def aprovados_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    logger.info("⏳ Shopee Vídeo: Aprovados para Postar.")
+    await mostrar_rascunho(message, state, lista=LISTA_DOS_APROVADOS)
 
 
 async def _rascunho_da_vez(message, state):
@@ -2081,7 +2128,7 @@ async def _rascunho_da_vez(message, state):
     rascunho = robo.pegar(ident) if ident else None
     if not rascunho or rascunho["estado"] != "rascunho":
         await message.answer("Esse rascunho já foi resolvido. Mostro o próximo.")
-        await mostrar_rascunho(message, state)
+        await mostrar_rascunho(message, state, lista=LISTA_DOS_RASCUNHOS)
         return None
     return rascunho
 
@@ -2098,8 +2145,10 @@ async def aprovar_handler(message: types.Message, state: FSMContext):
     sem_eles = (f" Na hora de postar, ele tira {numeros_por_extenso(tirar)} "
                 f"{'produtos' if len(tirar) > 1 else 'produto'}, como você marcou." if tirar else "")
     await message.answer(f"✅ Aprovado. O robô posta por volta de <b>{_data_curta(quando)}</b> e manda aqui o "
-                         f"link do post e o comentário.{sem_eles}", parse_mode="HTML")
-    await mostrar_rascunho(message, state, depois_de=rascunho["id"], so_os_que_esperam=True)
+                         f"link do post e o comentário.{sem_eles} Até lá, ele fica em <b>{BOTAO_APROVADOS}</b>, "
+                         f"onde o {BOTAO_POSTAR_AGORA} posta na hora.", parse_mode="HTML")
+    await mostrar_rascunho(message, state, depois_de=rascunho["id"], depois_de_resolver=True,
+                           lista=LISTA_DOS_RASCUNHOS)
 
 
 @router.message(F.text == BOTAO_RECUSAR, StateFilter("*"))
@@ -2116,10 +2165,10 @@ async def pedir_recusa(message: types.Message, state: FSMContext):
 async def proximo_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     ident = (await state.get_data()).get("rascunho_id")
-    ids = [r["id"] for r in rascunhos_da_tela()]
+    ids = [r["id"] for r in rascunhos_da_tela(await _lista_da_tela(state))]
     # O botão de um teclado antigo no último rascunho: só avisa, sem mandar o mesmo de novo.
     if ident in ids and ids.index(ident) == len(ids) - 1:
-        await message.answer("📝 Este é o último rascunho: não há próximo.",
+        await message.answer(f"📝 Este é o último {_nome_na_tela(robo.pegar(ident)).lower()}: não há próximo.",
                              reply_markup=teclado_do_rascunho(robo.pegar(ident), len(ids) > 1, False))
         return
     await mostrar_rascunho(message, state, depois_de=ident)
@@ -2129,9 +2178,9 @@ async def proximo_handler(message: types.Message, state: FSMContext):
 async def anterior_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     ident = (await state.get_data()).get("rascunho_id")
-    ids = [r["id"] for r in rascunhos_da_tela()]
+    ids = [r["id"] for r in rascunhos_da_tela(await _lista_da_tela(state))]
     if ident in ids and ids.index(ident) == 0:
-        await message.answer("📝 Este é o primeiro rascunho: não há anterior.",
+        await message.answer(f"📝 Este é o primeiro {_nome_na_tela(robo.pegar(ident)).lower()}: não há anterior.",
                              reply_markup=teclado_do_rascunho(robo.pegar(ident), False, len(ids) > 1))
         return
     await mostrar_rascunho(message, state, antes_de=ident)
@@ -2149,20 +2198,42 @@ async def postar_agora_handler(message: types.Message, state: FSMContext):
     rascunho = robo.pegar(ident) if ident else None
     if not rascunho or rascunho["estado"] != "aprovado":
         await message.answer("Esse rascunho não está mais esperando a hora de ir ao ar. Mostro os que estão.")
-        await mostrar_rascunho(message, state)
+        await mostrar_rascunho(message, state, lista=LISTA_DOS_APROVADOS)
+        return
+    if robo.postando_agora(rascunho):
+        # O vídeo já pedido sai da lista até ir ao ar: o 2º toque só repetiria o pedido (07/11).
+        await message.answer(f"🚀 Este vídeo já está sendo postado agora. O robô manda aqui o link do post quando "
+                             f"sair; se algo impedir, ele diz o quê, e o vídeo volta para {BOTAO_APROVADOS}.",
+                             reply_markup=teclado_painel(ler_config()))
+        await state.set_state(ShopeeVideoFluxo.menu)
         return
     if robo_ocupado():
         await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
         return
     logger.info("🚀 Shopee Vídeo: Postar Agora.")
+    robo.atualizar(rascunho["id"], postar_agora_em=robo._momento())
     await state.set_state(ShopeeVideoFluxo.menu)
     # Acima do teto pelos pontos de penalidade, o botão continua valendo, com o aviso (P145).
     aviso = apelacoes.aviso_acima_do_teto(robo.postados_de_hoje(), rascunhos_hoje(ler_config()),
                                           apelacoes.pontos_de_agora(robo.ler_estado()), "posts")
     await message.answer("🚀 Postando agora no Motorola. Em uns 5 min o robô manda aqui o link do post e o "
-                         "comentário; se algo impedir, ele diz o quê, e o rascunho continua aprovado." + aviso,
-                         parse_mode="HTML", reply_markup=teclado_painel(ler_config()))
-    asyncio.create_task(rodar_robo("--postar", str(rascunho["id"])))
+                         f"comentário; até lá, o vídeo sai de {BOTAO_APROVADOS}. Se algo impedir, o robô diz o quê, e "
+                         "ele volta para lá, aprovado." + aviso, parse_mode="HTML",
+                         reply_markup=teclado_painel(ler_config()))
+    asyncio.create_task(_postar_agora(rascunho["id"]))
+
+
+async def _postar_agora(ident):
+    """
+    A rodada do Postar Agora 🚀. Acabada sem o post (o robô não postou e o rascunho continua
+    aprovado), a marca sai, e o vídeo volta para Aprovados para Postar ⏳.
+    """
+    try:
+        await rodar_robo("--postar", str(ident))
+    finally:
+        rascunho = robo.pegar(ident)
+        if rascunho and rascunho["estado"] == "aprovado" and rascunho.get("postar_agora_em"):
+            robo.atualizar(ident, postar_agora_em=None)
 
 
 # --- Tirar Produto ➖ (P123): marcar os produtos que saem do post ---
@@ -2808,7 +2879,7 @@ async def salvar_recusa(message: types.Message, state: FSMContext):
         robo.recusar(ident)
         logger.info("❌ Shopee Vídeo: rascunho recusado.")
         await message.answer("❌ Recusado. O robô apaga o rascunho do celular na próxima rodada.")
-    await mostrar_rascunho(message, state, depois_de=ident, so_os_que_esperam=True)
+    await mostrar_rascunho(message, state, depois_de=ident, depois_de_resolver=True, lista=LISTA_DOS_RASCUNHOS)
 
 
 @router.message(StateFilter(ShopeeVideoFluxo.aguardando_confirmacao_faixa,

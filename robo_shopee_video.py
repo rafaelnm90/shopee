@@ -899,7 +899,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado", "cor", "itens_do_video", "busca_do_link")
+           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -933,9 +933,12 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # busca_do_link: no post que ficou sem o link logo depois de postar, {"vezes": [momento de cada busca
 # que não deu certo], "fim": "" enquanto o robô tenta de novo, "copiado" ou "desistiu"}
 # (buscar_o_link_de_novo, P148 2).
+# postar_agora_em: quando o Rafael tocou em Postar Agora 🚀 neste aprovado; vazio quando o pedido acabou
+# sem o post (postando_agora).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
-                 "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link")
+                 "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
+                 "postar_agora_em")
 
 
 def _criar_tabela(con):
@@ -1277,6 +1280,8 @@ def texto_da_fila(config=None, agora=None):
     espera = motivo_da_espera(config, agora)
     for r in aprovados:
         linhas.append(f"• {produto(r)}\n   posta por volta de {curta(r['postar_em'])}")
+        if postando_agora(r, agora):
+            linhas.append(f"   🚀 postando agora (você pediu às {r['postar_agora_em'][11:16]})")
         falhas = int(r.get("falhas_ao_postar") or 0)
         if falhas:
             # O post que não saiu e vai ser tentado de novo (P99).
@@ -1286,8 +1291,12 @@ def texto_da_fila(config=None, agora=None):
             linhas.append(f"   ⏳ já passou da hora: {html.escape(espera)}")
     if not aprovados:
         linhas.append("nenhum")
+    if pendentes or aprovados:
+        linhas.append("")
     if pendentes:
-        linhas += ["", "Para aprovar ou recusar: Rascunhos do Robô 📝."]
+        linhas.append("Para aprovar ou recusar: Rascunhos do Robô 📝.")
+    if aprovados:
+        linhas.append("Para postar já um aprovado: Aprovados para Postar ⏳.")
     return "\n".join(linhas)
 
 
@@ -1341,6 +1350,29 @@ def esperando_aprovacao():
     return listar("rascunho")
 
 
+# O aprovado que o Rafael mandou postar no Postar Agora 🚀 sai de Aprovados para Postar ⏳ enquanto o
+# robô o posta: tocar de novo nele só repetiria o pedido. O pedido que acaba sem o post limpa a marca
+# (o robô e o painel), e ele volta à lista; a marca vale no máximo ESPERA_DO_POSTAR_AGORA, para o
+# aprovado não sumir de vez se a rodada morrer. Pedido do Rafael (vídeo de 07/11, 00:59): DECISOES.md,
+# Shopee Vídeo.
+ESPERA_DO_POSTAR_AGORA = timedelta(seconds=MAXIMO_DA_RODADA + 10 * 60)
+
+
+def postando_agora(rascunho, agora=None):
+    """Se o aprovado está sendo postado agora pelo Postar Agora 🚀 (postar_agora_em recente)."""
+    marca = (rascunho or {}).get("postar_agora_em")
+    return bool(marca) and marca > _momento(agora_br(agora) - ESPERA_DO_POSTAR_AGORA)
+
+
+def aprovados_na_fila(agora=None):
+    """
+    Os aprovados que ainda não foram ao ar, pela hora de postar, fora os que o Postar Agora 🚀 está
+    postando: a lista de Aprovados para Postar ⏳.
+    """
+    return sorted((r for r in listar("aprovado") if not postando_agora(r, agora)),
+                  key=lambda r: (r["postar_em"] or "", r["id"]))
+
+
 def proxima_postagem(config, agora=None, sorteio=random):
     """
     Quando postar um rascunho que o Rafael acabou de aprovar: depois do último aprovado
@@ -1381,7 +1413,8 @@ def postou_ha_pouco(agora=None):
 def aprovar(ident, agora=None):
     """O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora."""
     quando = proxima_postagem(ler_config(), agora)
-    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0")
+    atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0",
+              postar_agora_em=None)
     return quando
 
 
@@ -6940,7 +6973,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
     """
     Uma rodada. treino=True é o botão Testar Caminho 🧭, preparar=True o Preparar 1
     Agora ⚡, saude=True o Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee
-    Vídeo 🩺), postar=ID o Postar Agora 🚀 (Rascunhos do Robô 📝, P138) e o pedido do Fazer
+    Vídeo 🩺), postar=ID o Postar Agora 🚀 (Aprovados para Postar ⏳, P138) e o pedido do Fazer
     Agora ⏩ que espera (P162 1; fazer=True: só ele): rodam na hora, mesmo pausado ou fora do
     horário (o Rafael pediu agora), e o rascunho do Preparar 1 Agora é a mais do plano do dia. Com a conta suspensa, a única coisa que o robô faz no
     celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo botão). Devolve o que
@@ -7228,7 +7261,7 @@ def _limpeza_de_novo(acao):
 TENTATIVAS_DE_POSTAR = 3
 
 
-# O Postar Agora 🚀 (Rascunhos do Robô 📝): o aprovado vai ao ar na hora, a qualquer hora e sem
+# O Postar Agora 🚀 (Aprovados para Postar ⏳): o aprovado vai ao ar na hora, a qualquer hora e sem
 # esperar os 30 min do último post; o que não sai continua aprovado, sem gastar nenhuma das
 # TENTATIVAS_DE_POSTAR das rodadas. Escolha do Rafael (03/11, P138): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_POSTAR_AGORA = "postar agora"
@@ -7240,10 +7273,11 @@ def _nao_saiu_o_post(ident, motivo, pedido=False):
     O pedido no Postar Agora 🚀 não conta: o aprovado fica como estava.
     """
     if pedido:
-        atualizar(ident, motivo=motivo)
+        # Volta para Aprovados para Postar ⏳ (postando_agora).
+        atualizar(ident, motivo=motivo, postar_agora_em=None)
         avisar(f"⚠️ Robô da Shopee Vídeo: não consegui postar agora o rascunho que você pediu ({motivo}). Não "
-               "toquei em mais nada. Ele continua aprovado: vai ao ar na hora marcada, ou toque de novo em "
-               "Postar Agora 🚀.")
+               "toquei em mais nada. Ele continua aprovado, em Aprovados para Postar ⏳: vai ao ar na hora "
+               "marcada, ou toque de novo em Postar Agora 🚀.")
         return
     falhas = int((pegar(ident) or {}).get("falhas_ao_postar") or 0) + 1
     if falhas < TENTATIVAS_DE_POSTAR:
@@ -7328,7 +7362,8 @@ def _resposta(preparar, resultado, postar=False):
         avisar(f"⚠️ Robô da Shopee Vídeo: não preparei o rascunho que você pediu ({resultado}).")
     elif postar:
         avisar(f"⚠️ Robô da Shopee Vídeo: não postei agora o rascunho que você pediu ({resultado}). Se ele "
-               "continua aprovado, vai ao ar na hora marcada, ou toque de novo em Postar Agora 🚀.")
+               "continua aprovado, ele volta para Aprovados para Postar ⏳: vai ao ar na hora marcada, ou toque de "
+               "novo em Postar Agora 🚀.")
     return resultado
 
 
