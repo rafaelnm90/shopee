@@ -489,10 +489,10 @@ def test_copia_que_sumiu_sai_dos_pedidos_com_aviso(bm, canal):
     assert consultar("SELECT COUNT(*) FROM fila_postagens")[0] == 0 and bm.ler_contador() == 7
 
 
-def test_pedidos_sem_pagamento_ficam_numa_linha_propria_no_relatorio(bm, monkeypatch, Msg, Est):
-    # Escolha do Rafael (06/11, P163 1): o Canc fica só com os cancelados que tinham comissão (o que
-    # se perdeu); os não pagos e os cancelados antes de pagar (a Shopee manda R$ 0,00) vão numa
-    # linha própria, e a taxa de conversão continua contando todos os pedidos.
+def test_cancelados_e_nao_pagos_ficam_no_canc_com_o_valor_e_a_quantidade(bm, monkeypatch, Msg, Est):
+    # Escolha do Rafael (07/11): como era antes da P163 1, os cancelados e os não pagos ficam todos
+    # no Canc, com a quantidade e a comissão que o bot guardou de cada um, e entram no total do dia;
+    # não há a linha Sem pagamento.
     from datetime import datetime, timedelta
 
     from fuso import fuso_horario
@@ -503,10 +503,9 @@ def test_pedidos_sem_pagamento_ficam_numa_linha_propria_no_relatorio(bm, monkeyp
     bm.salvar_banco_pedidos({sn: {"data": data, "status": status, "comissao_total": valor, "comissao_shopee": valor,
                                   "comissao_vendedor": 0.0} for sn, (data, status, valor) in pedidos.items()})
     historico = bm.processar_e_salvar_pedidos_api([])
-    assert (historico[anteontem]["cancelado"], historico[anteontem]["qtd_cancelado"],
-            historico[anteontem]["qtd_sem_pagamento"]) == (pytest.approx(121.26), 1, 0)
-    assert (historico[ontem]["cancelado"], historico[ontem]["qtd_cancelado"], historico[ontem]["qtd_sem_pagamento"],
-            historico[ontem]["qtd_aprovado"]) == (0.0, 0, 3, 1)
+    assert (historico[anteontem]["cancelado"], historico[anteontem]["qtd_cancelado"]) == (pytest.approx(121.26), 1)
+    assert (historico[ontem]["cancelado"], historico[ontem]["qtd_cancelado"],
+            historico[ontem]["qtd_aprovado"]) == (pytest.approx(5.0), 3, 1)
 
     async def sem_api(dias):
         return []
@@ -517,6 +516,8 @@ def test_pedidos_sem_pagamento_ficam_numa_linha_propria_no_relatorio(bm, monkeyp
     texto = next(t for t in msg.saidas if "DESEMPENHO DIÁRIO" in t)
     dia = datetime.strptime(ontem, "%Y-%m-%d").strftime("%d/%m")
     bloco = texto.split(f"<b>{dia}</b>")[1].split("\n\n")[0]
-    assert "├ Canc: R$ 0,00 (0 pedidos" in bloco
-    assert "└ Sem pagamento: 3 pedido(s) (não pagos ou cancelados antes de pagar, sem comissão)" in bloco
-    assert "1 Pagos | 0 Pendentes | 1 Cancel. | 3 Sem pagamento" in texto
+    assert bloco.startswith(": R$ 8,00")
+    assert "└ Canc: R$ 5,00 (3 pedidos - 62.5%)" in bloco
+    assert "Sem pagamento" not in texto
+    assert "Taxa de Conversão: <b>20.0%</b>" in texto
+    assert "• Pedidos Totais: 1 Pagos | 0 Pendentes | 4 Cancel.\n" in texto
