@@ -4293,10 +4293,16 @@ def itens_postados():
 # em 31/10 (09:15 e 09:35), o 1º produto não ficou: a tela final voltou com a edição da legenda
 # aberta por cima (a legenda já escrita, em foco e com o texto marcado pela cópia) e a linha dos
 # produtos vazia. Por isso os produtos vão antes da legenda, e o 1º anexado é conferido na tela
-# final: sem ele, o robô o anexa de novo, uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
+# final: sem ele, o robô o anexa de novo, uma vez (VEZES_DO_PRIMEIRO_PRODUTO). O que não fica
+# nem na 2ª vez é do produto, não da hora: em 07/11 (06:09 e 06:52) o mesmo produto não ficou nas
+# 4 vezes, e os 13 outros do dia anterior ficaram de primeira. O vídeo fica de lado, como o do
+# produto que não aparece, e não volta na rodada seguinte (a regra de 23/10:
+# DECISOES.md, Shopee Vídeo). A tela de logo depois do Feito (ESPERA_LOGO_DEPOIS_DO_FEITO) vai
+# para o caso e, em rótulos fixos, para o registro: um aviso do app na tela some antes da conferência.
 VEZES_DO_PRIMEIRO_PRODUTO = 2
 MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU = ("o produto anexado pelo Adicionar não ficou na tela final depois do Feito, "
                                     "nem na 2ª vez")
+ESPERA_LOGO_DEPOIS_DO_FEITO, ESPERA_DEPOIS_DO_FEITO = 1, 6
 
 
 def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
@@ -4312,7 +4318,7 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
     sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
     """
     anexados, no_post = [], []
-    _AVISO_DO_FEITO["texto"] = ""
+    _AVISO_DO_FEITO.update(texto="", logo="")
     for i, nome in enumerate(nomes):
         if i in a_mais and prazo is not None and time.monotonic() > prazo:
             registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora",
@@ -4329,8 +4335,10 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
             # O Feito não deixou o produto na tela final: ele sai da conta e vai de novo.
             anexados.clear()
         else:
+            # O produto que o app não deixa na tela final nem na 2ª vez: o vídeo fica de lado.
             aviso = _AVISO_DO_FEITO["texto"]
-            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU + (f"; o app avisou: {aviso}" if aviso else ""))
+            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU + (f"; o app avisou: {aviso}" if aviso else ""),
+                         do_video=True)
     return anexados, no_post
 
 
@@ -4348,8 +4356,31 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais):
         return False
     _conferir((ok, motivo))
     limpar_aviso_do_app(d)
-    tocar(d, "Feito", 6)
+    # A tela de logo depois do Feito vai para o caso e, em rótulos fixos, para o registro do produto
+    # que não ficou; a espera de depois do Feito continua a mesma.
+    tocar(d, "Feito", ESPERA_LOGO_DEPOIS_DO_FEITO)
+    try:
+        _AVISO_DO_FEITO["logo"] = como_ficou_logo_depois_do_feito(tela(d))
+        casos_robo.anotar_tela(d, "tela logo depois do Feito")
+    except (Verificacao, Parada):
+        raise
+    except Exception:
+        # Só anota: a leitura que falha não para o rascunho (a conferência da tela final relê).
+        _AVISO_DO_FEITO["logo"] = ""
+    time.sleep(ESPERA_DEPOIS_DO_FEITO - ESPERA_LOGO_DEPOIS_DO_FEITO)
     return True
+
+
+def como_ficou_logo_depois_do_feito(xml):
+    """
+    Como estava a tela logo depois do Feito, em rótulos fixos (o registro é público): a janela do
+    produto ainda aberta, a tela final (como ela voltou: ps.como_esta_a_tela_final) ou outra tela.
+    """
+    if ps.janela_de_editar_aberta(ps.elementos(xml)):
+        return "a janela do produto ainda aberta"
+    if tem(xml, "@et_caption"):
+        return "a tela final, " + ps.como_esta_a_tela_final(xml)
+    return "outra tela"
 
 
 def primeiro_na_tela_final(d, vez=1):
@@ -4374,8 +4405,10 @@ def primeiro_na_tela_final(d, vez=1):
     _AVISO_DO_FEITO["texto"] = aviso
     # O texto do aviso pode trazer o nome do produto: no registro (o checkup é público), só se houve.
     sobre_o_aviso = ("; o app mostrou um aviso" if aviso else "; sem aviso do app") if lido else ""
+    logo = _AVISO_DO_FEITO.get("logo")
     registro_processos.registrar(REGISTRO, "anexar o produto", "não ficou depois do Feito",
-                                 f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}{sobre_o_aviso}", ok=False)
+                                 f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}{sobre_o_aviso}"
+                                 + (f"; logo depois do Feito: {logo}" if logo else ""), ok=False)
     fechar_a_edicao_da_legenda(d, xml)
     return False
 
@@ -4383,7 +4416,8 @@ def primeiro_na_tela_final(d, vez=1):
 # O último aviso curto (toast) do app depois do Feito do produto que não ficou, para a parada dizer
 # o que o app respondeu (31/10/2026, 15:21 e 15:35: o mesmo produto não ficou duas vezes, e a tela
 # não dizia por quê).
-_AVISO_DO_FEITO = {"texto": ""}
+# Com ele, logo: como estava a tela logo depois do último Feito (como_ficou_logo_depois_do_feito).
+_AVISO_DO_FEITO = {"texto": "", "logo": ""}
 
 
 def limpar_aviso_do_app(d):

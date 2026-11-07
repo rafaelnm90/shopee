@@ -6249,6 +6249,41 @@ def _registro_do_anexar():
     return [(r[2], r[3]) for r in registro if r[2] != "anexado"]
 
 
+LOGO_DEPOIS_DO_FEITO = "; logo depois do Feito: a tela final, a linha dos produtos vazia; a edição da legenda aberta por cima"
+
+
+def test_video_do_produto_que_nao_fica_na_tela_final_fica_de_lado(monkeypatch, avisos):
+    # 07/11, 06:09 e 06:52: o mesmo produto não ficou na tela final depois do Feito nas 4 vezes (2
+    # rodadas), e os outros 13 do dia anterior ficaram de primeira. O vídeo fica de lado na 1ª
+    # rodada, como o do produto que não aparece (regra de 23/10), e não volta.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = AppQueReabreALegenda(perdidos=5)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU in resultado and robo.esperando_aprovacao() == []
+    assert [r["id_video"] for r in robo.listar("pulado")] == ["a1"]
+    assert app.toques.count("Feito") == robo.VEZES_DO_PRIMEIRO_PRODUTO
+    assert robo.proximo_video(robo.ler_config()) is None
+
+
+def test_tela_de_logo_depois_do_feito_vai_para_o_caso(monkeypatch, avisos):
+    # O caso de 07/11 só tinha a tela de 30 s depois do Feito: um aviso do app na tela já tinha
+    # sumido. A tela lida logo depois do Feito entra entre as ações do caso.
+    _fonte(monkeypatch)
+    app = robo.casos_robo.com_historico(AppQueReabreALegenda(perdidos=5))
+    with pytest.raises(robo.Parada):
+        _anexar_no_app(app)
+    # O caso guarda as últimas ações: o Feito, a tela de logo depois dele e o toque que fecha a
+    # edição da legenda aberta por cima.
+    acoes = list(app.acoes)
+    assert [a["acao"] for a in acoes[-2:]][0] == "tela logo depois do Feito"
+    assert acoes[-3]["ponto"] == robo.ps.achar(acoes[-3]["tela"], "Feito")
+    logo = acoes[-2]
+    assert logo["ponto"] is None and "rl_overlay" in logo["tela"]
+    assert robo.como_ficou_logo_depois_do_feito(logo["tela"]) == LOGO_DEPOIS_DO_FEITO.split(": ", 1)[1]
+    assert robo.como_ficou_logo_depois_do_feito("<hierarchy/>") == "outra tela"
+
+
 def test_produto_vai_antes_da_legenda_e_fica_na_tela_final(monkeypatch, avisos):
     # No Motorola (31/10, 09:15 e 09:35), com a legenda escrita antes, o Feito voltava com a edição
     # da legenda aberta e sem o produto: o rascunho parou e foi pulado. Os produtos vão antes.
@@ -6270,8 +6305,10 @@ def test_primeiro_produto_que_nao_ficou_depois_do_feito_e_anexado_de_novo(monkey
     # vai de novo pelo mesmo caminho.
     assert app.toques.count("Feito") == 2 and "@tv_add_product_title" in app.toques
     assert app.toques.index("@tv_add_product_title") < len(app.toques) - app.toques[::-1].index("Feito") - 1
+    # A tela de logo depois do Feito também vai para o registro, em rótulos fixos (07/11).
     assert _registro_do_anexar() == [
-        ("não ficou depois do Feito", "1ª vez; a linha dos produtos vazia; a edição da legenda aberta por cima"),
+        ("não ficou depois do Feito", "1ª vez; a linha dos produtos vazia; a edição da legenda aberta por cima"
+                                      + LOGO_DEPOIS_DO_FEITO),
         ("anexado na 2ª vez", "a linha dos produtos com produto")]
 
 
@@ -6280,8 +6317,9 @@ def test_primeiro_produto_que_nao_fica_nem_na_segunda_vez_para_o_rascunho(monkey
     app = AppQueReabreALegenda(perdidos=5)
     with pytest.raises(robo.Parada) as parada:
         _anexar_no_app(app)
-    # Não é culpa do vídeo (o app não guardou o produto): ele pode ir numa próxima vez.
-    assert parada.value.motivo == robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU and not parada.value.do_video
+    # O produto que não fica nem na 2ª vez é do produto, não da hora (07/11, 06:09 e 06:52: o mesmo
+    # produto nas 4 vezes): o vídeo fica de lado, como o do produto que não aparece.
+    assert parada.value.motivo == robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU and parada.value.do_video
     assert robo.passo_do_motivo(parada.value.motivo) == "anexar o produto"
     assert app.toques.count("Feito") == robo.VEZES_DO_PRIMEIRO_PRODUTO and "@et_caption" not in app.toques
     assert [r[0] for r in _registro_do_anexar()] == ["não ficou depois do Feito"] * robo.VEZES_DO_PRIMEIRO_PRODUTO
@@ -6322,11 +6360,11 @@ def test_produto_que_nao_fica_no_feito_diz_o_aviso_do_app(monkeypatch, avisos):
     assert robo.passo_do_motivo(parada.value.motivo) == "anexar o produto"
     assert [d for _r, d in _registro_do_anexar()] == [
         f"{vez}ª vez; a linha dos produtos vazia; a edição da legenda aberta por cima; o app mostrou um aviso"
-        for vez in range(1, robo.VEZES_DO_PRIMEIRO_PRODUTO + 1)]
+        + LOGO_DEPOIS_DO_FEITO for vez in range(1, robo.VEZES_DO_PRIMEIRO_PRODUTO + 1)]
     # Sem aviso nenhum depois do Feito, o registro também diz.
     app = AppQueAvisaNoFeito(perdidos=1, aviso=None)
     _anexar_no_app(app)
-    assert _registro_do_anexar()[-2][1].endswith("; sem aviso do app")
+    assert _registro_do_anexar()[-2][1].endswith("; sem aviso do app" + LOGO_DEPOIS_DO_FEITO)
 
 
 def test_aviso_do_app_le_o_toast_como_o_uiautomator2_da(monkeypatch):
