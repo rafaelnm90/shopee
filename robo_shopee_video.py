@@ -1906,6 +1906,11 @@ def fora_da_shopee(xml):
 # inicial pelo link, uma vez, sem fechar o app (P15: DECISOES.md, Shopee Vídeo).
 VOLTAS_NA_PAGINA_CARREGANDO = 3
 ESPERA_DA_PAGINA_INICIAL = 8
+# Com um vídeo tocando no Para você (Motorola, 07/11/2026, às 18:12 e às 18:56), a leitura vinha só
+# com as barras do Android, mesmo relida (_reler_sem_o_app): o voltar não via o Eu, apertava voltar
+# em vão, a rodada parava, e o vídeo seguia tocando em laço. No caminho até a barra de baixo, a
+# página inicial abre pelo link, como na página presa carregando (uma vez por voltar).
+ATE_PELA_PAGINA_INICIAL = ("Eu",)
 
 
 def voltar(d, ate, vezes=15):
@@ -1914,13 +1919,21 @@ def voltar(d, ate, vezes=15):
     exato. Nunca fecha o app à força (fechar e reabrir em seguida chama a Verificação),
     fora o aviso do Android de app que não responde (tela). Fora da Shopee, não aperta
     voltar: traz a Shopee de volta para a frente. Na página presa carregando, abre a
-    página inicial pelo link (VOLTAS_NA_PAGINA_CARREGANDO).
+    página inicial pelo link (VOLTAS_NA_PAGINA_CARREGANDO); no caminho até o Eu, também com a
+    leitura sem o app, só com as barras do Android (ATE_PELA_PAGINA_INICIAL).
     """
     carregando, abriu_o_inicio = 0, False
     for _ in range(vezes):
         xml = tela(d, seguir=True)
         if tem_exato(xml, ate) and not tem(xml, "@et_caption"):
             return
+        if so_as_barras_do_android(xml) and ate in ATE_PELA_PAGINA_INICIAL and not abriu_o_inicio:
+            abriu_o_inicio = True
+            registro_processos.registrar(REGISTRO, "voltar no app", "leitura sem o app",
+                                         "a página inicial aberta pelo link", ok=None)
+            ps.abrir_pagina_inicial(d)
+            pausa(ESPERA_DA_PAGINA_INICIAL)
+            continue
         if fora_da_shopee(xml):
             # Nunca apertar voltar em outro app: a Shopee volta para a frente.
             logger.warning("⚠️ [Robô Shopee Vídeo] O voltar saiu da Shopee: trazendo a Shopee de volta.")
