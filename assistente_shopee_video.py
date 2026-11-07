@@ -322,6 +322,12 @@ def produtos_ja_postados():
     return robo_shopee_video.produtos_ja_postados()
 
 
+def _anotar_onde_ja_foi(item):
+    """O registro diz onde estava o produto do vídeo deixado de lado, como no robô (P167 1)."""
+    import robo_shopee_video
+    robo_shopee_video.anotar_onde_ja_foi(item, "assistente")
+
+
 def itens_postados():
     """Os números (itemId) dos produtos dos vídeos mandados que o Rafael marcou com Postei ✅ (P166 1)."""
     with db.conexao() as con:
@@ -780,6 +786,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     item = str(produtos[0].get("item") or "") if produtos else ""
     if item and item in produtos_ja_postados():
         registrar(video["id"], "ja_postado", JA_POSTADO, agora, item=item)
+        _anotar_onde_ja_foi(item)
         return JA_POSTADO
     arquivo = video["arquivo"]
     if pasta and _edicao_ligada(fonte):
