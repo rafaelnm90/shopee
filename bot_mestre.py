@@ -866,6 +866,22 @@ def salvar_fila_postagens(dados):
         logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
 
 
+def proxima_vez_do_job(job, agora=None):
+    """
+    A próxima vez do job, no fuso de Brasília; None sem job ou com ele pausado. Na subida do
+    bot, o main() monta a grade do dia antes do scheduler.start(), e o job ainda pendente não
+    tem next_run_time: a próxima vez sai do gatilho dele. Sem ela, a grade cairia no padrão da
+    config (a Boa Noite às 21:59) no lugar da hora sorteada.
+    """
+    if not job:
+        return None
+    if hasattr(job, "next_run_time"):
+        quando = job.next_run_time
+    else:
+        quando = job.trigger.get_next_fire_time(None, agora or datetime.now(fuso_horario))
+    return quando.astimezone(fuso_horario) if quando else None
+
+
 def agendar_fila_postagens():
     """
     Refaz os agendamentos de hoje: espalha os vídeos pendentes entre o Bom Dia e a
@@ -909,17 +925,13 @@ def agendar_fila_postagens():
         return
     
     # Janela do dia: do próximo Bom Dia até a Boa Noite (horário dos jobs ou o padrão da config).
-    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
-    if job_bd and getattr(job_bd, 'next_run_time', None):
-        limite_inicio = job_bd.next_run_time.astimezone(fuso_horario)
-    else:
+    limite_inicio = proxima_vez_do_job(scheduler.get_job('job_rotina_bom_dia_0'), agora)
+    if not limite_inicio:
         hora_inicio = dados_rotina.get("bom_dia", {}).get("inicio", 6)
         limite_inicio = agora.replace(hour=hora_inicio, minute=0, second=0, microsecond=0)
 
-    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
-    if job_bn and getattr(job_bn, 'next_run_time', None):
-        limite_fim = job_bn.next_run_time.astimezone(fuso_horario)
-    else:
+    limite_fim = proxima_vez_do_job(scheduler.get_job('job_rotina_boa_noite_0'), agora)
+    if not limite_fim:
         hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
         limite_fim = agora.replace(hour=hora_fim, minute=59, second=59, microsecond=0)
 
@@ -2400,10 +2412,9 @@ def janela_de_hoje(config, agora):
 
 def boa_noite_de_hoje(agora):
     """Quando sai o Boa Noite de hoje (o job marcado); None se não sai mais hoje."""
-    job = scheduler.get_job('job_rotina_boa_noite_0')
-    quando = getattr(job, 'next_run_time', None) if job else None
-    if quando and quando.astimezone(fuso_horario).date() == agora.date():
-        return quando.astimezone(fuso_horario)
+    quando = proxima_vez_do_job(scheduler.get_job('job_rotina_boa_noite_0'), agora)
+    if quando and quando.date() == agora.date():
+        return quando
     return None
 
 
@@ -2454,9 +2465,9 @@ def proxima_de_outro_assunto(tipo, canal, agora):
         if (not outro or outro == tipo or outro in ("bom_dia", "boa_noite") or not rotinas.conhecida(outro)
                 or rotinas.canal_da_rotina(outro) != canal):
             continue
-        quando = getattr(job, "next_run_time", None)
-        if quando and quando > agora and quando.astimezone(fuso_horario).date() == agora.date():
-            horarios.append(quando.astimezone(fuso_horario))
+        quando = proxima_vez_do_job(job, agora)
+        if quando and quando > agora and quando.date() == agora.date():
+            horarios.append(quando)
     return min(horarios, default=None)
 
 
@@ -3022,22 +3033,21 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
     eventos_fixos = []
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_bom_dia') or job.id.startswith('job_rotina_boa_noite') or job.id.startswith('job_fila_postagem_'):
-            if getattr(job, 'next_run_time', None):
-                tempo_evento = job.next_run_time.astimezone(fuso_horario)
-                if tempo_evento.date() == agora.date():
-                    eventos_fixos.append(tempo_evento)
+            tempo_evento = proxima_vez_do_job(job, agora)
+            if tempo_evento and tempo_evento.date() == agora.date():
+                eventos_fixos.append(tempo_evento)
                     
     ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
-    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
+    proximo_bd = proxima_vez_do_job(scheduler.get_job('job_rotina_bom_dia_0'), agora)
     if ultimo_bd == hoje_str: fronteira_inicial = agora
-    elif job_bd and getattr(job_bd, 'next_run_time', None): fronteira_inicial = job_bd.next_run_time.astimezone(fuso_horario)
+    elif proximo_bd: fronteira_inicial = proximo_bd
     else: fronteira_inicial = max(agora, agora.replace(hour=dados_rotina.get("bom_dia", {}).get("inicio", 6), minute=0, second=0, microsecond=0))
     eventos_fixos.append(fronteira_inicial)
     
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
-    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
+    proximo_bn = proxima_vez_do_job(scheduler.get_job('job_rotina_boa_noite_0'), agora)
     if ultimo_bn == hoje_str: fronteira_final = agora
-    elif job_bn and getattr(job_bn, 'next_run_time', None): fronteira_final = job_bn.next_run_time.astimezone(fuso_horario)
+    elif proximo_bn: fronteira_final = proximo_bn
     else: fronteira_final = agora.replace(hour=max(0, dados_rotina.get("boa_noite", {}).get("fim", 23) - 1), minute=59, second=59, microsecond=0)
     eventos_fixos.append(fronteira_final)
     
@@ -3234,8 +3244,9 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
                 
             conflito_geral = False
             for job_existente in scheduler.get_jobs():
-                if getattr(job_existente, 'next_run_time', None) and _escopo_do_job(job_existente.id) == "viral":
-                    if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
+                quando_existente = proxima_vez_do_job(job_existente, agora)
+                if quando_existente and _escopo_do_job(job_existente.id) == "viral":
+                    if abs((horario_candidato - quando_existente).total_seconds()) < 120:
                         conflito_geral = True
                         break
             if conflito_geral: horario_candidato += timedelta(minutes=random.randint(3, 8))
@@ -3331,8 +3342,9 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
 
             # Anti-colisão só contra as rotinas do próprio Público.
             for job_existente in scheduler.get_jobs():
-                if getattr(job_existente, 'next_run_time', None) and _escopo_do_job(job_existente.id) == "publico":
-                    if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
+                quando_existente = proxima_vez_do_job(job_existente, agora)
+                if quando_existente and _escopo_do_job(job_existente.id) == "publico":
+                    if abs((horario_candidato - quando_existente).total_seconds()) < 120:
                         horario_candidato += timedelta(minutes=random.randint(3, 8))
                         break
 

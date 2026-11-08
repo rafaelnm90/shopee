@@ -100,6 +100,66 @@ def test_video_nao_sai_depois_da_boa_noite_e_fica_para_o_dia_seguinte(bm, telegr
     assert status("n1") == "CONCLUIDO" and len(telegram.enviados) == 1
 
 
+def _horario_pendente(bm, job):
+    """Quando sai um job do agendador ainda parado (na subida do bot), pelo gatilho dele."""
+    return job.trigger.get_next_fire_time(None, datetime.now(bm.fuso_horario)).astimezone(bm.fuso_horario)
+
+
+def _videos_na_grade(bm):
+    return sorted(_horario_pendente(bm, j) for j in bm.scheduler.get_jobs() if j.id.startswith("job_fila_postagem_"))
+
+
+def test_grade_da_subida_do_bot_fica_entre_o_bom_dia_e_a_boa_noite_sorteados(bm, relogio):
+    # Na subida do bot (o deploy das 20:40 de 07/11), o main() monta a grade antes do
+    # scheduler.start(), com os jobs ainda sem next_run_time: a janela do canal caía no padrão da
+    # config (a Boa Noite às 21:59, o Bom Dia às 06:00), e 3 vídeos ficaram para depois da Boa
+    # Noite sorteada (21:05). A grade usa a hora sorteada dos dois.
+    relogio("20:20")
+    agora = datetime.now(bm.fuso_horario)
+    r = bm.ler_config_rotina()
+    r.update({"ultimo_bom_dia": agora.strftime("%Y-%m-%d"), "ultimo_boa_noite": "2000-01-01"})
+    bm.salvar_config_rotina(r)
+    for i in range(3):
+        video(bm, f"s{i}")
+    bm.scheduler.add_job(bm.disparar_mensagem, 'cron', hour=21, minute=5, timezone=bm.FUSO_STR,
+                         args=["boa_noite"], id="job_rotina_boa_noite_0")
+    assert not bm.scheduler.running
+    bm.agendar_fila_postagens()
+    boa_noite = agora.replace(hour=21, minute=5, second=0, microsecond=0)
+    assert len(_videos_na_grade(bm)) == 3 and all(h < boa_noite for h in _videos_na_grade(bm))
+
+    # De madrugada, com o Bom Dia sorteado para as 08:30, nenhum vídeo sai antes dele.
+    relogio("05:00")
+    r.update({"ultimo_bom_dia": "2000-01-01"})
+    bm.salvar_config_rotina(r)
+    bm.scheduler.add_job(bm.disparar_mensagem, 'cron', hour=8, minute=30, timezone=bm.FUSO_STR,
+                         args=["bom_dia"], id="job_rotina_bom_dia_0")
+    bm.agendar_fila_postagens()
+    bom_dia = agora.replace(hour=8, minute=30, second=0, microsecond=0)
+    assert len(_videos_na_grade(bm)) == 3 and all(bom_dia < h < boa_noite for h in _videos_na_grade(bm))
+
+
+def test_subida_do_bot_nao_marca_video_nem_rotina_do_canal_depois_da_boa_noite(bm, relogio):
+    # Como o main(): agendar_tarefas_diarias(manter_horarios=True) com o agendador ainda parado.
+    relogio("20:20")
+    agora = datetime.now(bm.fuso_horario)
+    r = bm.ler_config_rotina()
+    r.update({"boa_noite": {"inicio": 21, "fim": 22, "frequencia": 1}, "ultimo_bom_dia": agora.strftime("%Y-%m-%d"),
+              "ultimo_boa_noite": "2000-01-01", "historico_diario": {"data": agora.strftime("%Y-%m-%d"), "contagem": {}}})
+    bm.salvar_config_rotina(r)
+    for i in range(3):
+        video(bm, f"s{i}")
+    bm.agendar_tarefas_diarias(manter_horarios=True)
+    assert not bm.scheduler.running
+    boa_noite = _horario_pendente(bm, bm.scheduler.get_job("job_rotina_boa_noite_0"))
+    assert boa_noite.date() == agora.date()
+    assert len(_videos_na_grade(bm)) == 3 and all(h < boa_noite for h in _videos_na_grade(bm))
+    rotinas_do_canal = [_horario_pendente(bm, j) for j in bm.scheduler.get_jobs()
+                        if j.id.startswith("job_rotina_") and j.args and j.args[0] not in ("bom_dia", "boa_noite")
+                        and bm.rotinas.canal_da_rotina(j.args[0]) == "canal principal"]
+    assert rotinas_do_canal and all(h < boa_noite for h in rotinas_do_canal if h.date() == agora.date())
+
+
 def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatch, relogio):
     relogio("15:00")    # meio do dia: o Bom Dia já passou e a Boa Noite ainda não
     agora = datetime.now(bm.fuso_horario)
