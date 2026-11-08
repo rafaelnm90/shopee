@@ -184,8 +184,11 @@ def test_processo_que_mais_falha_que_acerta_vira_ponto_de_atencao():
     assert processos[("baixador", "pedido TikTok")]["neutros"] == 5
     pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
                                        {}, ("x", 1.0, 1), AGORA, processos)
+    # A hora da última falha (checkup de 07/11/2026): diz se a falha continuou depois de uma correção.
+    assert processos[("baixador", "pedido Shopee (vídeo)")]["ultima_falha"] == "20:20"
+    assert processos[("baixador", "pedido TikTok")]["ultima_falha"] == "22:20"
     assert pontos == ["baixador: pedido Shopee (vídeo): 4 falha(s) e 1 acerto(s) "
-                      "(mais comum: não entregue - a Shopee demorou, 4x)"]
+                      "(mais comum: não entregue - a Shopee demorou, 4x; a última às 20:20)"]
 
 
 def _filas_de_teste():
