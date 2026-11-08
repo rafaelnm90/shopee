@@ -226,6 +226,29 @@ def test_postagens_de_hoje_por_fila():
     assert filas["Autorais"]["postados"] == 0 and filas["Autorais"]["media"] == 1 / 7
 
 
+def test_canal_principal_aponta_o_video_depois_da_boa_noite():
+    # Vídeo do Rafael (07/11, 22:03): a Boa Noite saiu às 21:05 no Canal Afiliados, e 3 vídeos
+    # saíram depois (21:14, 21:34 e 21:47). O checkup mostra a hora de cada um, se veio de uma nova
+    # tentativa de envio, e cobra o ponto.
+    with db.conexao() as c:
+        c.execute("CREATE TABLE fila_postagens (id_unico TEXT, data_alvo TEXT, status TEXT, data_postagem TEXT, "
+                  "horario_postagem TEXT, tentativas INTEGER)")
+    _filas_de_teste()
+    hoje = "2026-10-23"
+    for ident, hora, vezes in (("a", "20:40", 0), ("b", "21:14", 0), ("c", "21:34", 1), ("d", "21:47", 0)):
+        inserir("INSERT INTO fila_postagens VALUES (?, ?, 'CONCLUIDO', ?, ?, ?)", ident, hoje, hoje, hora, vezes)
+    db.salvar_config("config_rotina", {"ultimo_boa_noite": hoje, "hora_ultimo_boa_noite": "21:05"})
+    principal = checkup.postagens_de_hoje(AGORA)["Canal principal"]
+    assert principal["boa_noite"] == "21:05"
+    assert principal["depois_da_boa_noite"] == [("21:14", 0), ("21:34", 1), ("21:47", 0)]
+    parado = {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []}
+    pontos = checkup.pontos_de_atencao([], {}, checkup.postagens_de_hoje(AGORA), parado, {}, ("x", 5.0, 1), AGORA)
+    assert "Canal principal: 3 vídeo(s) depois da Boa Noite (21:05)" in pontos
+    # A Boa Noite de outro dia não conta.
+    db.salvar_config("config_rotina", {"ultimo_boa_noite": "2026-10-22", "hora_ultimo_boa_noite": "21:05"})
+    assert checkup.postagens_de_hoje(AGORA)["Canal principal"]["depois_da_boa_noite"] == []
+
+
 def test_canal_principal_pausado_nao_cobra_o_atraso_nem_o_dia_sem_post():
     # A pausa da suspensão da Shopee Vídeo para o canal por dias: o pendente de ontem espera a
     # volta, que refaz as datas, e o checkup não cobra o que a pausa explica.
