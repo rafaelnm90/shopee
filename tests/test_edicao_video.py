@@ -3099,11 +3099,11 @@ def test_corte_das_letras_que_tiraria_parte_do_produto_nao_vai_a_capa(monkeypatc
     for sem_o_corte in (edicao_video.CORTE_TIRARIA_O_PRODUTO, edicao_video.CORTE_SEM_CONFERENCIA):
         monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto, r=sem_o_corte: (foto, r))
         monkeypatch.setattr(edicao_video, "quadro_sem_letras",
-                            lambda video, nome="": (b"quadro", edicao_video.QUADRO_DO_VIDEO))
+                            lambda video, nome="", foto=None: (b"quadro", edicao_video.QUADRO_DO_VIDEO))
         assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"quadro", edicao_video.QUADRO_DO_VIDEO,
                                                                    sem_o_corte)
         monkeypatch.setattr(edicao_video, "quadro_sem_letras",
-                            lambda video, nome="": (None, edicao_video.SEM_MOMENTO_SEM_LETRAS))
+                            lambda video, nome="", foto=None: (None, edicao_video.SEM_MOMENTO_SEM_LETRAS))
         assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"foto", sem_o_corte,
                                                                    edicao_video.SEM_MOMENTO_SEM_LETRAS)
 
@@ -3486,46 +3486,106 @@ def _quadro_jpg(largura=720, altura=1280):
 
 def test_com_as_letras_em_cima_do_produto_a_capa_usa_um_quadro_do_video(monkeypatch):
     # Escolha do Rafael (06/11, P164 1): com as letras em cima do produto, o corte não as tira; a IA
-    # escolhe no vídeo um momento com o produto inteiro e sem letras, e a capa usa esse quadro,
-    # recortado no produto e conferido sem letras. Sem um momento assim, vai a foto do anúncio.
+    # escolhe no vídeo momentos com o produto inteiro e sem letras, e a capa usa o quadro do 1º em que
+    # a IA, vendo o quadro como imagem ao lado da foto do anúncio, confirma o produto inteiro,
+    # recortado na caixa dele (com a folga) e conferido sem letras. Sem um momento assim, vai a foto
+    # do anúncio.
     import io
 
     from PIL import Image
-    pedidos, conferidas = [], []
-    respostas = [{"momento": 2.5, "caixa": [250, 150, 700, 850]}]
+    pedidos, conferidas, imagens = [], [], []
+    respostas = [{"momentos": [2.5]}]
     monkeypatch.setattr(edicao_video, "_resposta_da_ia", lambda video, prompt: pedidos.append((video, prompt))
                         or respostas.pop(0))
     monkeypatch.setattr(edicao_video.videos, "quadro_em", lambda video, segundos: _quadro_jpg())
+    no_quadro = [{"inteiro": True, "caixa": [250, 150, 700, 850]}]
+    monkeypatch.setattr(edicao_video, "_json_das_fotos",
+                        lambda prompt, fotos: imagens.append((prompt, [tipo for _, tipo in fotos]))
+                        or no_quadro.pop(0))
     letras_do_quadro = [edicao_video.SEM_LETRAS]
     monkeypatch.setattr(edicao_video, "foto_sem_letras",
                         lambda foto: conferidas.append(foto) or (foto, letras_do_quadro.pop(0)))
-    quadro, motivo = edicao_video.quadro_sem_letras("v.mp4", "Almofada de Gel")
+    quadro, motivo = edicao_video.quadro_sem_letras("v.mp4", "Almofada de Gel", _foto_jpg())
     assert motivo == edicao_video.QUADRO_DO_VIDEO and quadro == conferidas[0]
-    assert Image.open(io.BytesIO(quadro)).size == (504, 576)          # a caixa, em milésimos do quadro
+    # A caixa que a IA deu vendo o quadro, em milésimos dele, com a folga de 8% dela de cada lado.
+    assert Image.open(io.BytesIO(quadro)).size == (584, 668)
     assert pedidos == [("v.mp4", edicao_video.PROMPT_DO_QUADRO_DA_CAPA.format(nome="Almofada de Gel"))]
-    # Sem um momento assim, sem o quadro, ou com letras também no quadro: não entra.
-    for resposta, quadro_em, letras, esperado in (
-            ({"momento": None}, _quadro_jpg(), None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
-            ({}, _quadro_jpg(), None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
-            ({"momento": 1, "caixa": [0, 0, 100, 100]}, _quadro_jpg(), None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
-            ({"momento": 1, "caixa": [0, 0, 1000, 1000]}, None, None, edicao_video.QUADRO_QUE_NAO_SAIU),
-            ({"momento": 1, "caixa": [0, 0, 1000, 1000]}, _quadro_jpg(), edicao_video.LETRAS_NO_PRODUTO,
+    assert imagens == [(edicao_video.PROMPT_DO_PRODUTO_NO_QUADRO.format(nome="Almofada de Gel"),
+                        ["image/jpeg", "image/jpeg"])]
+    # Sem um momento assim, sem o quadro, sem a conferência dele, sem o produto inteiro nele, com a
+    # caixa que não serve ou com letras também no quadro: não entra.
+    caixa = [0, 0, 1000, 1000]
+    for resposta, quadro_em, visto, letras, esperado in (
+            ({"momentos": []}, _quadro_jpg(), None, None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
+            ({}, _quadro_jpg(), None, None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
+            ({"momentos": ["já", -1]}, _quadro_jpg(), None, None, edicao_video.SEM_MOMENTO_SEM_LETRAS),
+            ({"momentos": [1]}, None, None, None, edicao_video.QUADRO_QUE_NAO_SAIU),
+            ({"momentos": [1]}, _quadro_jpg(), None, None, edicao_video.QUADRO_SEM_CONFERENCIA),
+            ({"momentos": [1]}, _quadro_jpg(), {"caixa": caixa}, None, edicao_video.QUADRO_SEM_CONFERENCIA),
+            ({"momentos": [1]}, _quadro_jpg(), {"inteiro": False, "caixa": caixa}, None,
+             edicao_video.QUADRO_SEM_O_PRODUTO_INTEIRO),
+            ({"momentos": [1]}, _quadro_jpg(), {"inteiro": True, "caixa": [0, 0, 100, 100]}, None,
+             edicao_video.CAIXA_DO_QUADRO_QUE_NAO_SERVE),
+            ({"momentos": [1]}, _quadro_jpg(), {"inteiro": True}, None, edicao_video.CAIXA_DO_QUADRO_QUE_NAO_SERVE),
+            ({"momentos": [1]}, _quadro_jpg(), {"inteiro": True, "caixa": caixa}, edicao_video.LETRAS_NO_PRODUTO,
              edicao_video.QUADRO_COM_LETRAS)):
         respostas.append(resposta)
         monkeypatch.setattr(edicao_video.videos, "quadro_em", lambda video, segundos, q=quadro_em: q)
+        monkeypatch.setattr(edicao_video, "_json_das_fotos", lambda prompt, fotos, v=visto: v)
         letras_do_quadro[:] = [letras] if letras else []
         assert edicao_video.quadro_sem_letras("v.mp4", "Almofada") == (None, esperado), resposta
-    # A foto da capa: a do anúncio sem letras ou cortada; com as letras em cima do produto, o quadro.
+    # A foto da capa: a do anúncio sem letras ou cortada; com as letras em cima do produto, o quadro,
+    # procurado com a foto do anúncio ao lado.
     monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (b"cortada", edicao_video.LETRAS_CORTADAS))
     assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"cortada", edicao_video.LETRAS_CORTADAS, "")
     monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.LETRAS_NO_PRODUTO))
-    monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="": (b"quadro", edicao_video.QUADRO_DO_VIDEO))
+    com_a_foto = []
+    monkeypatch.setattr(edicao_video, "quadro_sem_letras",
+                        lambda video, nome="", foto=None: com_a_foto.append(foto)
+                        or (b"quadro", edicao_video.QUADRO_DO_VIDEO))
     assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"quadro", edicao_video.QUADRO_DO_VIDEO,
                                                                edicao_video.LETRAS_NO_PRODUTO)
+    assert com_a_foto == [b"foto"]
     monkeypatch.setattr(edicao_video, "quadro_sem_letras",
-                        lambda video, nome="": (None, edicao_video.QUADRO_COM_LETRAS))
+                        lambda video, nome="", foto=None: (None, edicao_video.QUADRO_COM_LETRAS))
     assert edicao_video.foto_para_a_capa(b"foto", "v.mp4") == (b"foto", edicao_video.LETRAS_NO_PRODUTO,
                                                                edicao_video.QUADRO_COM_LETRAS)
+
+
+def test_quadro_do_video_com_o_produto_cortado_nao_vai_a_capa(monkeypatch):
+    # Vídeo do Rafael de 08/11, 15:42: o segundo que a IA deu vendo o vídeo caiu perto de uma troca de
+    # cena, e a caixa que ela deu cortou o produto no quadro que saiu; a capa ficou com o produto pela
+    # metade. O quadro vai à IA também como imagem: sem o produto inteiro nele, não entra, e o
+    # recorte usa a caixa que ela dá vendo o próprio quadro, não a que deu vendo o vídeo.
+    import io
+
+    from PIL import Image
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia",
+                        lambda video, prompt: {"momento": 18, "caixa": [314, 492, 822, 908]})
+    monkeypatch.setattr(edicao_video.videos, "quadro_em", lambda video, segundos: _quadro_jpg())
+    monkeypatch.setattr(edicao_video, "_json_das_fotos",
+                        lambda prompt, fotos: {"inteiro": False, "caixa": [270, 0, 970, 950]})
+    monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.SEM_LETRAS))
+    quadro, motivo = edicao_video.quadro_sem_letras("v.mp4", "Forno")
+    assert quadro is None, "o quadro com o produto cortado foi à capa"
+    assert motivo == edicao_video.QUADRO_SEM_O_PRODUTO_INTEIRO
+    # Até 3 momentos, do melhor para o pior: o 1º com o produto cortado fica de fora, e o 2º entra,
+    # recortado na caixa do produto nesse quadro.
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia", lambda video, prompt: {"momentos": [18, 4.5, 9, 12]})
+    pedidos = []
+    monkeypatch.setattr(edicao_video.videos, "quadro_em",
+                        lambda video, segundos: pedidos.append(segundos) or _quadro_jpg())
+    vistos = [{"inteiro": False, "caixa": [270, 0, 970, 950]}, {"inteiro": True, "caixa": [0, 0, 1000, 1000]}]
+    monkeypatch.setattr(edicao_video, "_json_das_fotos", lambda prompt, fotos: vistos.pop(0))
+    quadro, motivo = edicao_video.quadro_sem_letras("v.mp4", "Forno", _foto_jpg())
+    assert motivo == edicao_video.QUADRO_DO_VIDEO and pedidos == [18.0, 4.5]
+    assert Image.open(io.BytesIO(quadro)).size == (720, 1280)
+    # Nenhum dos 3 com o produto inteiro: a foto do anúncio fica, com os porquês de cada um.
+    pedidos.clear()
+    vistos[:] = [{"inteiro": False, "caixa": [0, 0, 1000, 1000]}, None, {"inteiro": False}]
+    assert edicao_video.quadro_sem_letras("v.mp4", "Forno", _foto_jpg()) == (
+        None, edicao_video.QUADRO_SEM_O_PRODUTO_INTEIRO + "; " + edicao_video.QUADRO_SEM_CONFERENCIA)
+    assert pedidos == [18.0, 4.5, 9.0]
 
 
 def test_capa_que_vai_ao_ar_com_o_quadro_do_video_e_o_registro(monkeypatch, tmp_path):
@@ -3536,7 +3596,7 @@ def test_capa_que_vai_ao_ar_com_o_quadro_do_video_e_o_registro(monkeypatch, tmp_
                                   "lugar": "alto"})
     monkeypatch.setattr(edicao_video, "foto_sem_letras", lambda foto: (foto, edicao_video.LETRAS_NO_PRODUTO))
     quadros = [(_quadro_jpg(), edicao_video.QUADRO_DO_VIDEO), (None, edicao_video.SEM_MOMENTO_SEM_LETRAS)]
-    monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="": quadros.pop(0))
+    monkeypatch.setattr(edicao_video, "quadro_sem_letras", lambda video, nome="", foto=None: quadros.pop(0))
     capas = []
     monkeypatch.setattr(edicao_video, "capa_com_chamada",
                         lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append(foto) or b"capa")
