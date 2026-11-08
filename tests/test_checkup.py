@@ -750,7 +750,8 @@ def test_captura_por_grupo_de_origem_mostra_quem_parou_pela_posicao():
                  agora=AGORA - timedelta(hours=1))
     c = checkup.captura_por_origem(AGORA)
     assert c["Espião"] == {"origens": 3, "com_video": 1, "sem_video": [2, 3], "pararam": [2], "pararam_todo_dia": [],
-                           "por_dia": (1, 1, 0), "ultima_dos_que_pararam": None, "anotacao_desde": None}
+                           "por_dia": (1, 1, 0), "ultima_dos_que_pararam": None, "anotacao_desde": None,
+                           "sem_link_dos_que_pararam": {2: 0}}
     assert c["Espelhador"]["sem_video"] == [1] and c["Espelhador"]["pararam"] == []
 
     def pontos():
@@ -780,10 +781,16 @@ def test_grupo_que_parou_mostra_a_ultima_mensagem_que_chegou_dele():
     db.salvar_config(checkup.CHAVE_DAS_ULTIMAS_MENSAGENS, {
         "desde": (AGORA - timedelta(hours=40)).strftime("%Y-%m-%d %H:%M:%S"),
         "espiao": {rp.apelido("@grupoa"): (AGORA - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")}})
+    # Checkup de 07/11/2026: e quantos vídeos sem link reconhecido cada grupo que parou mandou em 24 h.
+    for horas in (1, 3, 30):
+        rp.registrar("espiao", "vídeo sem link no grupo vigiado", "visto", origem="@grupoa",
+                     agora=AGORA - timedelta(hours=horas))
     c = checkup.captura_por_origem(AGORA)["Espião"]
     assert c["pararam"] == [1, 2] and set(c["ultima_dos_que_pararam"]) == {1, 2}
+    assert c["sem_link_dos_que_pararam"] == {1: 2, 2: 0}
     desde = (AGORA - timedelta(hours=40)).strftime("%d/%m %H:%M")
-    assert checkup._ultimas_dos_que_pararam(c, AGORA) == f"nº 1 há 2 h | nº 2 nenhuma desde {desde}"
+    assert checkup._ultimas_dos_que_pararam(c, AGORA) == (f"nº 1 há 2 h (2 vídeo(s) sem link em 24 h) | "
+                                                          f"nº 2 nenhuma desde {desde} (0 vídeo(s) sem link em 24 h)")
     # Sem a anotação (o motor_userbot ainda não gravou), a linha não aparece.
     db.salvar_config(checkup.CHAVE_DAS_ULTIMAS_MENSAGENS, {})
     c = checkup.captura_por_origem(AGORA)["Espião"]

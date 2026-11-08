@@ -243,6 +243,10 @@ async def chat_do_evento(event):
 # "desde" diz quando a anotação começou. Checkup de 06/11/2026.
 CHAVE_DAS_ULTIMAS_MENSAGENS = "origens_ultima_mensagem"
 GRAVAR_ULTIMAS_A_CADA = 300
+# O vídeo que chega de um grupo vigiado sem link da Shopee reconhecido, por grupo (o apelido):
+# o checkup diz quantos chegaram de cada grupo que parou de mandar vídeo com link.
+PROCESSO_DO_VIDEO_SEM_LINK_ESPIAO = "vídeo sem link no grupo vigiado"
+PROCESSO_DO_VIDEO_SEM_LINK_ESPELHADOR = "vídeo sem link na origem da rota"
 _ultimas_mensagens = {"espiao": {}, "espelhador": {}}
 
 
@@ -415,6 +419,11 @@ async def interceptar_mensagem(event):
                                 msg_id=event.id, id_unico=id_unico)
         
         registrar_historico_espiao(nome_chat)
+    elif getattr(event, 'video', None) is not None:
+        # O vídeo sem link da Shopee reconhecido conta por grupo (só o apelido): do grupo que parou
+        # de mandar vídeo com link, o checkup diz se ele ainda manda vídeo (o link num jeito que o
+        # robô não reconhece, ou em outra mensagem) ou se parou de mandar vídeo.
+        registro_processos.registrar("espiao", PROCESSO_DO_VIDEO_SEM_LINK_ESPIAO, "visto", origem=alvo_casado)
 
 # ---------------- Espelhador ----------------
 def ler_espelhos_config():
@@ -871,6 +880,10 @@ async def motor_espelhador_userbot(event):
     
     if not link_capturado:
         logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
+        # Como no Espião: o checkup conta o vídeo sem link de cada origem que parou.
+        for origem_casada in origens_casadas:
+            registro_processos.registrar("espelhador", PROCESSO_DO_VIDEO_SEM_LINK_ESPELHADOR, "visto",
+                                         origem=origem_casada)
         return
     
     logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
