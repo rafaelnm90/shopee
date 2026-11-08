@@ -43,11 +43,12 @@ SEGUNDOS_DA_FOTO = 2
 # A passagem da capa da grade (o 1º quadro, que o app usa na grade) para a do vídeo aberto (P129):
 # em vez do pulo de um quadro para o outro, que o app mostra como uma piscada porque segura o 1º
 # quadro enquanto o vídeo começa, a da grade fica inteira no 1º quadro e se desfaz na do vídeo
-# aberto em PASSAGEM_DA_CAPA segundos. O exemplo do painel (Capa com Chamada) já mostra a passagem;
-# os vídeos que vão ao ar só a ganham com PASSAGEM_NOS_VIDEOS, depois de o Rafael ver o exemplo.
-# Escolha do Rafael (07/11, P175 1): DECISOES.md, Shopee Vídeo.
+# aberto em PASSAGEM_DA_CAPA segundos. O exemplo do painel (Capa com Chamada) mostra a passagem, e
+# PASSAGEM_NOS_VIDEOS a liga nos vídeos que vão ao ar (rascunhos do robô e modo assistente): o Rafael
+# viu o exemplo e escolheu as duas capas com a passagem. Escolha do Rafael (07/11, P175 1, e 08/11,
+# P178 1): DECISOES.md, Shopee Vídeo.
 PASSAGEM_DA_CAPA = 0.3
-PASSAGEM_NOS_VIDEOS = False
+PASSAGEM_NOS_VIDEOS = True
 # Nos rascunhos com produtos a mais, a miniatura troca entre as fotos diferentes dos produtos do
 # post, uma volta só, com o vídeo dividido igual entre elas e pelo menos este tanto de segundos
 # para cada: as que não cabem ficam de fora. Escolha do Rafael (30/10, P103): DECISOES.md, Shopee Vídeo.
