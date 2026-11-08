@@ -105,3 +105,43 @@ def test_cada_clone_baixa_num_arquivo_com_o_proprio_id(monkeypatch):
     fila = mu.ler_fila_clonagem()["fila"]
     assert pedidos == [f"temp/temp_clone_{item['id']}" for item in fila] and len(set(pedidos)) == 2
     assert [item["caminho_video"] for item in fila] == [f"temp/temp_clone_{item['id']}.mp4" for item in fila]
+
+
+def test_video_sem_link_de_um_grupo_vigiado_conta_no_registro(monkeypatch):
+    # Checkup de 07/11/2026: o nº 5 do Espião e do Espelhador parou de mandar vídeo com link, mas a
+    # última mensagem dele era de pouco antes; não dava para saber se ele ainda manda vídeo (com o
+    # link num jeito que o robô não reconhece, ou em outra mensagem) ou se parou de mandar vídeo.
+    # O vídeo sem link reconhecido conta por grupo (só o apelido), no Espião e no Espelhador.
+    from types import SimpleNamespace
+    import registro_processos as rp
+    from conftest import inserir
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+
+    class Evento:
+        sender_id, out, id, text, video = 999, False, 56, "olha o achado", object()
+        message = SimpleNamespace(reply_to=None)
+
+    async def chat(_evento):
+        return SimpleNamespace(id=123, username="GrupoA", title="Grupo A")
+
+    async def eu():
+        return SimpleNamespace(id=1)
+
+    monkeypatch.setattr(mu, "carregar_alvos", lambda: ["@grupoa"])
+    monkeypatch.setattr(mu, "ler_excecao_ponte", lambda: "")
+    monkeypatch.setattr(mu, "chat_do_evento", chat)
+    monkeypatch.setattr(mu.client, "get_me", eu)
+    monkeypatch.setattr(mu, "extrair_link_shopee", lambda _evento: None)
+    monkeypatch.setattr(mu, "ler_espelhos_config", lambda: {"rotas": [{"nome": "r1", "origens": ["@grupoa"]}]})
+    rodar(mu.interceptar_mensagem(Evento()))
+    rodar(mu.motor_espelhador_userbot(Evento()))
+    # Mensagem só de texto, sem vídeo, não conta.
+    Evento.video = None
+    rodar(mu.interceptar_mensagem(Evento()))
+    mu._ultimas_mensagens["espiao"].clear()
+    mu._ultimas_mensagens["espelhador"].clear()
+    linhas = [(robo, processo, origem) for robo, processo in (("espiao", mu.PROCESSO_DO_VIDEO_SEM_LINK_ESPIAO),
+                                                              ("espelhador", mu.PROCESSO_DO_VIDEO_SEM_LINK_ESPELHADOR))
+              for _m, _p, _r, _d, origem in rp.sequencia(robo, processo, "2000-01-01 00:00:00")]
+    assert linhas == [("espiao", "vídeo sem link no grupo vigiado", rp.apelido("@grupoa")),
+                      ("espelhador", "vídeo sem link na origem da rota", rp.apelido("@grupoa"))]

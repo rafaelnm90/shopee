@@ -398,6 +398,7 @@ SEM_META = {
     ("espelhador", "captura da rota"), ("espelhador", "envio da rota"),
     ("espelhador", "vídeo com link na origem da rota"),
     ("espiao", "captura de vídeo"), ("espiao", "vídeo com link no grupo vigiado"), ("espiao", "IA: nome do produto"),
+    ("espiao", "vídeo sem link no grupo vigiado"), ("espelhador", "vídeo sem link na origem da rota"),
     ("notas", "envio de nota fiscal"),
     ("shopee_video", "anexar o produto"), ("shopee_video", "assistente: envio"),
     ("shopee_video", "canal afiliados: "),
@@ -686,7 +687,7 @@ def _por_origem(robo, prefixo, agora):
     return dias
 
 
-def _resumo_das_origens(origens, contagens, ultimas=None, desde=None):
+def _resumo_das_origens(origens, contagens, ultimas=None, desde=None, sem_link=None):
     """
     Pela posição na lista do painel (1, 2, 3...): quantas origens, quantas mandaram vídeo nas
     24 h, as que não mandaram, as que pararam (mandaram nas 48 h antes), as que mandavam nos dois
@@ -695,7 +696,9 @@ def _resumo_das_origens(origens, contagens, ultimas=None, desde=None):
     (checkup de 04/11/2026: 7 por sistema num dia, outras 7 no seguinte). Com as últimas
     mensagens que o motor_userbot anotou ({apelido: momento}, desde o momento desde), também a
     última mensagem (qualquer uma) de cada grupo que parou: "ultima_dos_que_pararam", {posição:
-    momento ou None}, None sem a anotação, e "anotacao_desde".
+    momento ou None}, None sem a anotação, e "anotacao_desde". Com sem_link (os vídeos sem link
+    das últimas 24 h, {apelido: quantos}), "sem_link_dos_que_pararam", {posição: quantos}: o grupo
+    que parou ainda manda vídeo, sem o link que o robô reconhece?
     """
     recente, ontem, anteontem = contagens
     apelidos = [registro_processos.apelido(str(o).lower()) for o in origens]
@@ -710,6 +713,8 @@ def _resumo_das_origens(origens, contagens, ultimas=None, desde=None):
         "ultima_dos_que_pararam": ({n: ultimas.get(apelidos[n - 1]) for n in pararam}
                                    if ultimas is not None else None),
         "anotacao_desde": desde if ultimas is not None else None,
+        "sem_link_dos_que_pararam": ({n: sem_link[apelidos[n - 1]] for n in pararam}
+                                     if sem_link is not None else None),
     }
 
 
@@ -734,7 +739,11 @@ def _ultimas_dos_que_pararam(c, agora):
     ultimas = c.get("ultima_dos_que_pararam")
     if not ultimas:
         return ""
-    return " | ".join(f"nº {n} {_ultima_do_grupo(ultimas.get(n), c.get('anotacao_desde'), agora)}"
+    sem_link = c.get("sem_link_dos_que_pararam")
+
+    def videos_sem_link(n):
+        return f" ({sem_link.get(n, 0)} vídeo(s) sem link em 24 h)" if sem_link is not None else ""
+    return " | ".join(f"nº {n} {_ultima_do_grupo(ultimas.get(n), c.get('anotacao_desde'), agora)}{videos_sem_link(n)}"
                       for n in sorted(ultimas))
 
 
@@ -760,10 +769,12 @@ def captura_por_origem(agora=None):
         pass
     return {
         "Espião": _resumo_das_origens(alvos, _por_origem("espiao", "vídeo com link no grupo vigiado", agora),
-                                      ultimas["espiao"], anotadas.get("desde")),
+                                      ultimas["espiao"], anotadas.get("desde"),
+                                      _por_origem("espiao", "vídeo sem link no grupo vigiado", agora)[0]),
         "Espelhador": _resumo_das_origens(origens_das_rotas,
                                           _por_origem("espelhador", "vídeo com link na origem da rota", agora),
-                                          ultimas["espelhador"], anotadas.get("desde")),
+                                          ultimas["espelhador"], anotadas.get("desde"),
+                                          _por_origem("espelhador", "vídeo sem link na origem da rota", agora)[0]),
         "Parceiros": _resumo_das_origens(parceiros, _por_origem("autorais", "captura de parceiro", agora)),
     }
 
