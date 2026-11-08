@@ -1012,7 +1012,7 @@ def _linha_da_medicao(medicao):
 def texto_capa(config, medicao):
     """
     A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168; 07/11,
-    P169 1, P171, os vídeos e prints das 01:04 às 02:49, P175 1 e P176 1): DECISOES.md, Shopee Vídeo.
+    P169 1, P171, os vídeos e prints das 01:04 às 02:49 e P175 1; 08/11, P181 2): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
@@ -1045,10 +1045,9 @@ def texto_capa(config, medicao):
         "que uma capa se desfaz na outra em "
         f"{str(edicao_video.PASSAGEM_DA_CAPA).replace('.', ',')} s, sem o pulo, já aparece no exemplo; nos vídeos, "
         + ("ela já vale" if edicao_video.PASSAGEM_NOS_VIDEOS else "ela entra quando você aprovar o exemplo") + ".\n\n"
-        "<b>A foto sem letras</b>: com as letras do anúncio fora do produto, o robô corta o pedaço com elas, e a IA "
-        "confere, com a foto inteira ao lado, que o produto ficou inteiro no corte (escolha sua, P176). Se faltar um "
-        "pedaço do produto, ou com as letras em cima dele, a capa usa um momento do próprio vídeo, com o produto "
-        "inteiro e sem letras; sem esse momento, vai a foto do anúncio inteira.\n\n"
+        "<b>A foto do anúncio</b>: vai inteira, como ela é, com as letras que tiver (selos, frases), sem corte e "
+        "sem print do vídeo (escolha sua, P181). A IA só confere se ela tem letras, para a medição de quais posts "
+        "levam punição (Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺) separar as capas com e sem elas.\n\n"
         "Vale nos vídeos editados (rascunhos do robô e modo assistente), com a Edição dos Vídeos ligada. Ligada, ela "
         "vai em todos os vídeos. Quando a frase da IA não serve nem na 2ª vez, a capa vai com o nome do produto. Na "
         "bebida alcoólica, a capa continua a dos três avisos, e o vídeo sem a frase, o nome e a vantagem da IA vai "

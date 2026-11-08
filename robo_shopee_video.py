@@ -906,7 +906,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em")
+           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -943,10 +943,13 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # (buscar_o_link_de_novo, P148 2).
 # postar_agora_em: quando o Rafael tocou em Postar Agora 🚀 neste aprovado; vazio quando o pedido acabou
 # sem o post (postando_agora).
+# letras: "1" quando a foto do anúncio, que vai inteira à capa (P181 2), tem letras escritas, pela IA
+# (edicao_video.letras_da_foto); "0" sem elas; vazio nos de antes e quando a IA não respondeu (a
+# medição de quais posts levam punição, P146 2, separa).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
-                 "postar_agora_em")
+                 "postar_agora_em", "letras")
 
 
 def _criar_tabela(con):
@@ -4758,7 +4761,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
-              chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "", cor=edicao.get("cor", ""))
+              chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "", cor=edicao.get("cor", ""),
+              letras=edicao.get("letras", ""))
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
