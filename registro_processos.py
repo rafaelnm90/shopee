@@ -88,6 +88,21 @@ def contagem(desde):
         return []
 
 
+def ultimas_falhas(desde):
+    """
+    {(robo, processo): momento da última falha} desde o momento ("AAAA-MM-DD HH:MM:SS"): o
+    checkup diz a hora da última, para ver se a falha continuou depois de uma correção.
+    """
+    try:
+        with db.conexao() as con:
+            _criar_tabela(con)
+            return {(robo, processo): momento for robo, processo, momento in con.execute(
+                "SELECT robo, processo, MAX(momento) FROM registro_processos WHERE ok = 0 AND momento >= ? "
+                "GROUP BY 1, 2", (desde,))}
+    except Exception:
+        return {}
+
+
 def sequencia(robo, prefixo_do_processo, desde, resultado=None):
     """
     As linhas do robô cujo processo começa pelo prefixo, desde o momento, em ordem de

@@ -333,7 +333,8 @@ def resumo_do_log(linhas, modelos):
 def processos_do_dia(agora=None):
     """
     O registro dos processos das últimas 24 h por robô e processo: acertos, falhas,
-    neutros e cada resultado com o detalhe (textos fixos do código).
+    neutros, cada resultado com o detalhe (textos fixos do código) e a hora da última falha
+    ("ultima_falha", HH:MM), para ver se ela continuou depois de uma correção.
     """
     desde = _momento(_agora(agora) - timedelta(hours=24))
     processos = {}
@@ -341,7 +342,15 @@ def processos_do_dia(agora=None):
         p = processos.setdefault((robo, processo), {"ok": 0, "falhas": 0, "neutros": 0, "resultados": []})
         p["ok" if ok == 1 else "falhas" if ok == 0 else "neutros"] += qtd
         p["resultados"].append((resultado, detalhe, ok, qtd))
+    for chave, momento in registro_processos.ultimas_falhas(desde).items():
+        if chave in processos and momento:
+            processos[chave]["ultima_falha"] = momento[11:16]
     return processos
+
+
+def _a_ultima_falha(p, antes=" (", depois=")"):
+    """A hora da última falha do processo nas 24 h ("a última às HH:MM", entre antes e depois); vazio sem ela."""
+    return f"{antes}a última às {p['ultima_falha']}{depois}" if p.get("ultima_falha") else ""
 
 
 # --- Metas: o que cada job devia fazer em 24 h ---
@@ -1772,7 +1781,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
         if p["falhas"] >= FALHAS_PARA_COBRAR and p["falhas"] >= p["ok"]:
             resultado, detalhe, _ok, qtd = max((r for r in p["resultados"] if r[2] == 0), key=lambda r: r[3])
             pontos.append(f"{robo}: {processo}: {p['falhas']} falha(s) e {p['ok']} acerto(s) "
-                          f"(mais comum: {resultado}{f' - {detalhe}' if detalhe else ''}, {qtd}x)")
+                          f"(mais comum: {resultado}{f' - {detalhe}' if detalhe else ''}, {qtd}x"
+                          f"{_a_ultima_falha(p, '; ', '')})")
     for canal, r in (rotinas_hoje or {}).items():
         if r["curtos"]:
             pontos.append(f"Rotinas do {canal}: {r['curtos']} intervalo(s) abaixo de {INTERVALO_CURTO_ROTINA} min "
@@ -1869,7 +1879,8 @@ def main():
     print("\n== Processos dos robôs (registro, últimas 24 h)")
     processos = processos_do_dia(agora)
     for (robo, processo), p in processos.items():
-        print(f"{robo}: {processo}: acertos {p['ok']} | falhas {p['falhas']} | outros {p['neutros']}")
+        print(f"{robo}: {processo}: acertos {p['ok']} | falhas {p['falhas']}{_a_ultima_falha(p)} | "
+              f"outros {p['neutros']}")
         for resultado, detalhe, _ok, qtd in p["resultados"]:
             print(f"   {qtd:5}x {resultado}{f' - {detalhe}' if detalhe else ''}")
     if not processos:
