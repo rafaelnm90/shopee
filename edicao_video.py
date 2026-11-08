@@ -266,10 +266,12 @@ VERMELHO_DO_DESTAQUE = (214, 24, 38)
 # lugar do laranja do fio e da faixa da capa e da moldura da miniatura, e do preto da caixa do nome
 # e da vantagem, com a letra branca ou preta, a de mais contraste (CONTRASTE_DA_LETRA_BRANCA: com o
 # laranja da Shopee, a branca de sempre). As setinhas, a moldura do cartão e a chamada final
-# continuam no vermelho do destaque. O produto vermelho (para a chamada final continuar se
-# destacando) ou de várias cores, e o vídeo sem a cor da IA, ficam com as cores de sempre. Cada
+# continuam no vermelho do destaque. No produto de várias cores, a principal é a que mais aparece
+# nele (P179 1). O produto vermelho (para a chamada final continuar se destacando) e o vídeo sem a
+# cor da IA ficam com as cores de sempre, como o "colorido", que a IA não deve mais dizer. Cada
 # nome tem um tom fixo, para o vídeo não sair com um tom estranho; o preto é um grafite, para a
-# faixa aparecer no fundo preto da capa. Escolha do Rafael (06/11, P159 2): DECISOES.md, Shopee Vídeo.
+# faixa aparecer no fundo preto da capa. Escolhas do Rafael (06/11, P159 2, e 08/11, P179 1):
+# DECISOES.md, Shopee Vídeo.
 CORES_DO_PRODUTO = {
     "preto": (45, 45, 45), "branco": (245, 245, 245), "cinza": (120, 120, 120), "prata": (180, 184, 190),
     "azul": (30, 90, 210), "azul-claro": (80, 170, 235), "azul-marinho": (25, 45, 105), "verde": (35, 150, 75),
@@ -1410,12 +1412,12 @@ _CAPA_NO_PROMPT = ("- \"capa\": para a capa do vídeo, uma frase curta que come�
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
-# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO. E
-# a 2ª cor que mais se destaca nele, para o fio e a faixa da capa quando a principal some no fundo da
-# foto (P173).
-_COR_NO_PROMPT = ("Diga também \"cor\", a cor principal do produto que o vídeo mostra, uma destas: "
+# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO.
+# No produto de várias cores, a que mais aparece nele, sem o "colorido" (P179 1). E a 2ª cor que mais
+# se destaca nele, para o fio e a faixa da capa quando a principal some no fundo da foto (P173).
+_COR_NO_PROMPT = ("Diga também \"cor\", a cor que mais aparece no produto que o vídeo mostra, uma destas: "
                   + ", ".join(list(CORES_DO_PRODUTO) + list(CORES_DE_SEMPRE[:1]))
-                  + "; ou \"colorido\", quando ele tem várias cores e nenhuma é a principal. E \"cor_2\", a "
+                  + "; mesmo quando ele tem várias cores, diga a que mais aparece nele. E \"cor_2\", a "
                   "segunda cor que mais se destaca no produto, da mesma lista e diferente da \"cor\" (vazio "
                   "quando ele é de uma cor só).\n")
 _REGRAS_NO_PROMPT = ("Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; "

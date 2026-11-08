@@ -3150,8 +3150,8 @@ def test_capa_que_vai_ao_ar_usa_a_foto_sem_as_letras_e_anota_no_registro(monkeyp
 
 def test_cada_cor_do_produto_tem_um_tom_e_a_letra_que_contrasta():
     # Escolha do Rafael (06/11, P159 2): a cor principal do produto no lugar do laranja e do preto,
-    # com a letra branca ou preta, a de mais contraste. O vermelho (a cor da chamada final), o de
-    # várias cores e o sem a cor da IA ficam com as cores de sempre.
+    # com a letra branca ou preta, a de mais contraste. O vermelho (a cor da chamada final), o
+    # "colorido" (que a IA não deve mais dizer, P179 1) e o sem a cor da IA ficam com as cores de sempre.
     assert edicao_video.cor_do_produto("Azul") == edicao_video.CORES_DO_PRODUTO["azul"]
     assert edicao_video.cor_do_produto(" azul-claro ") == edicao_video.CORES_DO_PRODUTO["azul-claro"]
     for nome in ("vermelho", "colorido", "", None, "fúcsia"):
@@ -3169,6 +3169,20 @@ def test_cada_cor_do_produto_tem_um_tom_e_a_letra_que_contrasta():
     assert "cor" not in edicao_video._nome_lugar_e_falas({"cor": "fúcsia"})
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
         assert '"cor"' in prompt and all(nome in prompt for nome in edicao_video.CORES_DO_PRODUTO)
+
+
+def test_produto_de_varias_cores_vai_na_cor_que_mais_aparece_nele():
+    # Escolha do Rafael (08/11, P179 1): no produto de várias cores, a IA diz a cor da lista que mais
+    # aparece nele, e o "colorido" (que deixava o vídeo no laranja de sempre) sai dos dois pedidos; o
+    # vermelho continua na lista, para ficar com as cores de sempre.
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        pedido = prompt.format(nome="Pote")
+        assert "colorido" not in pedido
+        assert "várias cores, diga a que mais aparece nele" in pedido
+        assert "vermelho" in pedido
+    # Se a IA ainda disser "colorido", o vídeo fica com as cores de sempre, e o registro conta.
+    assert edicao_video._nome_lugar_e_falas({"cor": "Colorido"})["cor"] == "colorido"
+    assert edicao_video.cor_do_produto("colorido") is None
 
 
 def test_capa_com_a_cor_do_produto_no_fio_e_na_faixa_com_a_letra_que_contrasta():
