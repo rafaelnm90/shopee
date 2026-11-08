@@ -1799,12 +1799,15 @@ def test_faixa_so_no_meio_com_uma_letra_bem_na_coluna_do_centro():
     assert edicao_video.faixa_nos_lados(tela, caixa) is False
 
 
-def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path):
-    # Com o ffmpeg de verdade (P129): o 1º quadro, que o app usa como capa da grade, tem a faixa de
-    # uma beirada à outra do vídeo; do 2º em diante, a do vídeo aberto (preto onde a outra é laranja).
+def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path, monkeypatch):
+    # Com o ffmpeg de verdade (P129) e a passagem desligada (PASSAGEM_NOS_VIDEOS): o 1º quadro, que o
+    # app usa como capa da grade, tem a faixa de uma beirada à outra do vídeo; do 2º em diante, a do
+    # vídeo aberto (preto onde a outra é laranja). Com a passagem, que vale nos vídeos (P178 1), o
+    # teste seguinte.
     from PIL import Image
     if not shutil.which("ffmpeg"):
         return
+    monkeypatch.setattr(edicao_video, "PASSAGEM_NOS_VIDEOS", False)
     video, foto = tmp_path / "v.mp4", _foto_jpg()
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x808080:size=360x640:rate=30:duration=3",
                     str(video)], check=True)
@@ -1825,14 +1828,14 @@ def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path):
         assert max(quadro(numero).getpixel(ponto)) < 40, numero
 
 
-def test_abertura_de_verdade_com_a_passagem_suave_entre_as_capas(tmp_path, monkeypatch):
+def test_abertura_de_verdade_com_a_passagem_suave_entre_as_capas(tmp_path):
     # Escolha do Rafael (07/11, P175 1): o 1º quadro continua a capa da grade, inteira, e ela se desfaz
-    # na do vídeo aberto em PASSAGEM_DA_CAPA segundos, sem o pulo de um quadro para o outro. Nos vídeos
-    # que vão ao ar, só depois de o Rafael ver o exemplo (PASSAGEM_NOS_VIDEOS).
+    # na do vídeo aberto em PASSAGEM_DA_CAPA segundos, sem o pulo de um quadro para o outro. Ele viu o
+    # exemplo e a passagem vale também nos vídeos que vão ao ar (08/11, P178 1).
     from PIL import Image
     if not shutil.which("ffmpeg"):
         return
-    monkeypatch.setattr(edicao_video, "PASSAGEM_NOS_VIDEOS", True)
+    assert edicao_video.PASSAGEM_NOS_VIDEOS
     video, foto = tmp_path / "v.mp4", _foto_jpg()
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x808080:size=360x640:rate=30:duration=3",
                     str(video)], check=True)
