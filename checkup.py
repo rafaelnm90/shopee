@@ -848,6 +848,27 @@ def _media_da_tabela(tabela, hoje):
     return None if total is None else total / 7
 
 
+def _depois_da_boa_noite(hoje):
+    """
+    Os vídeos do canal principal postados hoje depois da Boa Noite (o vídeo só sai entre o Bom
+    Dia e a Boa Noite; DECISOES.md, Canal principal): {"boa_noite": a hora dela ou None,
+    "depois_da_boa_noite": [(hora do post, tentativas antes dele)]}. Só horas e números.
+    """
+    rotina = db.ler_config("config_rotina", {}) or {}
+    boa_noite = rotina.get("hora_ultimo_boa_noite") if rotina.get("ultimo_boa_noite") == hoje else None
+    depois = []
+    if boa_noite:
+        try:
+            with db.conexao() as conexao:
+                depois = conexao.execute(
+                    "SELECT horario_postagem, COALESCE(tentativas, 0) FROM fila_postagens WHERE status = 'CONCLUIDO' "
+                    "AND data_postagem = ? AND horario_postagem > ? ORDER BY horario_postagem",
+                    (hoje, boa_noite)).fetchall()
+        except sqlite3.OperationalError:
+            depois = []
+    return {"boa_noite": boa_noite, "depois_da_boa_noite": [(hora, int(vezes or 0)) for hora, vezes in depois]}
+
+
 def postagens_de_hoje(agora=None):
     """
     Por fila: postados hoje, ainda na fila para hoje, atrasados (horário vencido há mais
@@ -869,6 +890,7 @@ def postagens_de_hoje(agora=None):
                              "AND data_alvo < ? AND data_alvo != '2000-01-01'", hoje),
         "media": _media_da_metrica("posts_dia_principal", hoje),
     }
+    filas["Canal principal"].update(_depois_da_boa_noite(hoje))
 
     fila_viral = (db.ler_config("fila_clonagem", {}) or {}).get("fila", [])
     pendentes = [i for i in fila_viral if not i.get("processado")]
@@ -1670,6 +1692,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             continue
         if f["atrasados"]:
             pontos.append(f"{nome}: {f['atrasados']} item(ns) atrasado(s) na fila")
+        if f.get("depois_da_boa_noite"):
+            pontos.append(f"{nome}: {len(f['depois_da_boa_noite'])} vídeo(s) depois da Boa Noite ({f['boa_noite']})")
         if (f["postados"] == 0 and (f["media"] or 0) >= MEDIA_PARA_COBRAR and agora.hour >= HORA_PARA_COBRAR):
             pontos.append(f"{nome}: nenhum post hoje (média de {f['media']:.1f} por dia)")
     tentados = robo_sv["vencidos"] - robo_sv.get("sem_tentar", 0)
@@ -1923,8 +1947,12 @@ def main():
     for nome, f in filas.items():
         media = "?" if f["media"] is None else f"{f['media']:.1f}"
         pausa = f" | pausado até {f['pausado']} (a volta refaz as datas)" if f.get("pausado") else ""
+        depois = f.get("depois_da_boa_noite") or []
+        boa_noite = (f" | depois da Boa Noite ({f['boa_noite']}): {len(depois)} ("
+                     + ", ".join(hora for hora, _v in depois)
+                     + f"; com nova tentativa: {sum(1 for _h, vezes in depois if vezes)})") if depois else ""
         print(f"{nome}: postados {_num(f['postados'])} | ainda para hoje {_num(f['para_hoje'])} | "
-              f"atrasados {_num(f['atrasados'])} | média dos 7 dias anteriores {media}/dia{pausa}")
+              f"atrasados {_num(f['atrasados'])} | média dos 7 dias anteriores {media}/dia{pausa}{boa_noite}")
 
     print("\n== Robô da Shopee Vídeo")
     robo_sv = robo_da_shopee_video(agora)

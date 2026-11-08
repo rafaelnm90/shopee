@@ -901,6 +901,12 @@ def agendar_fila_postagens():
         return
 
     dados_rotina = ler_config_rotina()
+    # Vídeo só entre o Bom Dia e a Boa Noite: depois da Boa Noite de hoje, o expediente acabou e
+    # os pendentes ficam para a grade do dia seguinte (sem o job dela, a janela ia até as 21:59).
+    # Decisão do Rafael: DECISOES.md, Canal principal.
+    if dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        logger.info("🌙 A Boa Noite de hoje já saiu: os vídeos pendentes ficam para amanhã.")
+        return
     
     # Janela do dia: do próximo Bom Dia até a Boa Noite (horário dos jobs ou o padrão da config).
     job_bd = scheduler.get_job('job_rotina_bom_dia_0')
@@ -1157,6 +1163,15 @@ async def executar_postagem_fila(item_id):
     # Job agendado antes de a pausa começar: o vídeo fica pendente para depois dela.
     if ler_pausa_programada().get("ativa"):
         logger.info(f"⏸️ Pausa programada ativa: vídeo {item_id} continua na fila.")
+        return
+
+    # Vídeo só entre o Bom Dia e a Boa Noite: o job que chega depois da Boa Noite de hoje (a nova
+    # tentativa de um envio que falhou, a grade feita antes de ela mudar) não posta; o vídeo
+    # continua pendente e sai na grade do dia seguinte. Decisão do Rafael: DECISOES.md, Canal principal.
+    if ler_config_rotina().get("ultimo_boa_noite") == hoje_str:
+        logger.info(f"🌙 A Boa Noite de hoje já saiu: o vídeo {item_id} fica para amanhã.")
+        registro_processos.registrar("bot_mestre", "postagem canal principal", "para amanhã (depois da Boa Noite)",
+                                     ok=None)
         return
 
     sucesso = False

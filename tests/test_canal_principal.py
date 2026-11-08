@@ -75,6 +75,31 @@ def test_falha_de_envio_tenta_de_novo_ate_3_vezes(bm, telegram):
     assert sorted(resultados) == sorted(["falhou, tenta de novo"] * 4 + ["postado", "desistiu"])
 
 
+def test_video_nao_sai_depois_da_boa_noite_e_fica_para_o_dia_seguinte(bm, telegram, relogio):
+    # Vídeo do Rafael (07/11, 22:03): a Boa Noite saiu às 21:05 no Canal Afiliados, e 3 vídeos ainda
+    # saíram depois (21:14, 21:34 e 21:47). Vídeo só entre o Bom Dia e a Boa Noite: o job que chega
+    # depois dela (a nova tentativa de um envio que falhou, inclusive) não posta, a grade de hoje não
+    # marca mais nada, e o vídeo fica pendente para a grade do dia seguinte.
+    relogio("21:10")
+    hoje = datetime.now(bm.fuso_horario).strftime("%Y-%m-%d")
+    r = bm.ler_config_rotina()
+    r.update({"ultimo_bom_dia": hoje, "ultimo_boa_noite": hoje, "hora_ultimo_boa_noite": "21:05"})
+    bm.salvar_config_rotina(r)
+    video(bm, "n1")
+    rodar(bm.executar_postagem_fila("n1"))
+    assert telegram.enviados == [] and status("n1") == "PENDENTE"
+    resultados = [r[2] for r in bm.registro_processos.contagem("2000-01-01 00:00:00")
+                  if r[1] == "postagem canal principal"]
+    assert resultados == ["para amanhã (depois da Boa Noite)"]
+    bm.agendar_fila_postagens()
+    assert not [j for j in bm.scheduler.get_jobs() if j.id.startswith("job_fila_postagem_")]
+    # Antes da Boa Noite, posta como sempre.
+    r.update({"ultimo_boa_noite": "2000-01-01"})
+    bm.salvar_config_rotina(r)
+    rodar(bm.executar_postagem_fila("n1"))
+    assert status("n1") == "CONCLUIDO" and len(telegram.enviados) == 1
+
+
 def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatch, relogio):
     relogio("15:00")    # meio do dia: o Bom Dia já passou e a Boa Noite ainda não
     agora = datetime.now(bm.fuso_horario)
