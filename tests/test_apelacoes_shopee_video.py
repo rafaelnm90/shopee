@@ -226,6 +226,29 @@ def test_medicao_separa_os_posts_com_o_produto_achado_pela_ia():
     assert "• Com produto achado pela IA: 1 de 1 (100%) · sem: 0 de 1 (0%) (anotada desde 06/11)" in texto
 
 
+def test_medicao_separa_as_capas_com_letras_na_foto_do_anuncio():
+    # Escolha do Rafael (08/11, P181 2): a foto do anúncio vai inteira à capa, com as letras que
+    # tiver; a medição de quais posts levam punição (P146 2) separa as capas com e sem letras.
+    import checkup
+    import robo_shopee_video as robo
+    agora = datetime(2026, 11, 8, 21, 0, tzinfo=fuso_horario)
+    com = robo.criar("v1", agora)
+    robo.atualizar(com, estado="postado", fonte="viral", postado_em="2026-11-08 21:00:00", letras="1")
+    sem = robo.criar("v2", agora)
+    robo.atualizar(sem, estado="postado", fonte="viral", postado_em="2026-11-08 22:00:00", letras="0")
+    sem_resposta = robo.criar("v3", agora)                     # a IA não respondeu: não anotou
+    robo.atualizar(sem_resposta, estado="postado", fonte="viral", postado_em="2026-11-08 23:00:00", letras="")
+    antigo = robo.criar("v4", agora)                           # de antes: não anotou
+    robo.atualizar(antigo, estado="postado", fonte="viral", postado_em="2026-11-07 11:00:00")
+    ap.guardar("Produto Irrelevante", "2026-11-08", "Em análise", rascunho=com)
+    medicao = ap.punicoes_por_tipo_de_post()
+    contas = {c[0]: list(c[1:]) for c in medicao["caracteristicas"]}
+    assert contas["letras na capa"] == [1, 1, 1, 0]
+    texto = "\n".join(ap.linhas_das_punicoes_por_post(medicao))
+    assert "• Com letras na capa: 1 de 1 (100%) · sem: 0 de 1 (0%) (anotada desde 08/11)" in texto
+    assert "letras na capa: com 1/1, sem 0/1" in checkup.linha_das_punicoes_por_post(medicao)
+
+
 def test_saude_mostra_quais_posts_levaram_punicao():
     # P146 2: cada punição ligada ao post do robô é cruzada com o que o post tinha.
     import checkup

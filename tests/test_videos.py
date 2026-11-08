@@ -139,26 +139,6 @@ def test_quadros_espalhados_do_video(tmp_path):
     assert videos.quadros(str(lixo), str(tmp_path / "x")) == 0
 
 
-def test_quadro_de_um_momento_do_video(tmp_path):
-    # A capa da Shopee Vídeo usa um quadro do vídeo quando a foto do anúncio tem letras em cima do
-    # produto (P164 1): o quadro do momento, no tamanho do vídeo.
-    import io
-    import shutil
-    import subprocess
-
-    from PIL import Image
-    if not shutil.which("ffmpeg"):
-        assert videos.quadro_em("nao_existe.mp4", 1.0) is None
-        return
-    video = tmp_path / "v.mp4"
-    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
-                    str(video)], check=True)
-    quadro = videos.quadro_em(str(video), 1.5)
-    assert quadro[:2] == b"\xff\xd8" and Image.open(io.BytesIO(quadro)).size == (320, 240)
-    assert videos.quadro_em(str(tmp_path / "nao_existe.mp4"), 1.0) is None
-    assert videos.quadro_em(str(video), "agora") is None
-
-
 def test_video_mudo_sem_trilha_ou_em_silencio(tmp_path):
     # Escolha do Rafael (P48): o vídeo sem som nenhum ganha uma música da Shopee na postagem.
     import shutil

@@ -589,16 +589,17 @@ def _lista(valor):
 
 
 CARACTERISTICAS_DO_POST = ("produtos a mais", "troca de loja", "produto achado pela IA", "outra foto de capa",
-                           "outra cor", "chamada na capa", "rótulo de IA", "Ver Produtos")
+                           "outra cor", "chamada na capa", "letras na capa", "rótulo de IA", "Ver Produtos")
 # Desde quando cada característica é anotada: os posts de antes ficam fora da conta dela.
-ANOTADA_DESDE = {"troca de loja": "03/11", "produto achado pela IA": "06/11"}
+ANOTADA_DESDE = {"troca de loja": "03/11", "produto achado pela IA": "06/11", "letras na capa": "08/11"}
 
 
 def _tem(nome, r):
     """
     O post (rascunho postado) tem a característica? None = o rascunho não anotou (a troca de
     loja é anotada desde 03/11 nos de link de produto e desde 05/11 nos de Ver Produtos; o produto
-    achado pela IA, desde 06/11, só nos de link de produto): fica fora da conta dessa linha.
+    achado pela IA, desde 06/11, só nos de link de produto; as letras na foto do anúncio da capa,
+    desde 08/11, P181 2, menos quando a IA não respondeu): fica fora da conta dessa linha.
     """
     if nome == "produtos a mais":
         return any(isinstance(i, dict) and i.get("a_mais") for i in _lista(r["itens"]))
@@ -613,11 +614,13 @@ def _tem(nome, r):
         return bool(_lista(r["outra_cor"]))
     if nome == "chamada na capa":
         return r["chamada"] == "1"
+    if nome == "letras na capa":
+        return {"1": True, "0": False}.get(r["letras"])
     if nome == "rótulo de IA":
         return bool(r["rotulo_ia"])
     return bool(_lista(r["links_dos_produtos"]))  # Ver Produtos
 _COLUNAS_DO_POST = ("id", "postado_em", "fonte", "itens", "trocado", "achado", "outras_capas", "outra_cor", "chamada",
-                    "rotulo_ia", "links_dos_produtos")
+                    "letras", "rotulo_ia", "links_dos_produtos")
 
 
 def punicoes_por_tipo_de_post():

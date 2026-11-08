@@ -1016,40 +1016,22 @@ def _capa_da_vez(foto, vantagem, no_video=False, cor=None, segunda=None):
         return None
 
 
-# A foto da capa sem letras: na foto da capa não pode ter letra nenhuma, de outra língua nem em
-# português, para não se misturar com a frase da faixa. A IA diz se a foto do anúncio tem letras
-# (fora as impressas no próprio produto ou na embalagem) e o maior pedaço dela com o produto
-# inteiro e sem elas; com as letras fora do produto, a capa usa esse pedaço, depois de a IA conferir,
-# com a foto inteira ao lado, que o produto ficou inteiro nele (P176 1). Com as letras em cima do
-# produto, ou com o corte tirando um pedaço do produto, um quadro do próprio vídeo
-# (foto_para_a_capa, P164 1). Pedidos do Rafael (06/11, P160 2; 07/11, P176 1): DECISOES.md,
-# Shopee Vídeo.
+# As letras da foto da capa: a capa usa sempre a foto do anúncio inteira, como ela é, com as letras
+# que tiver, sem corte e sem quadro do vídeo. A IA só diz se a foto tem letras escritas (fora as
+# impressas no próprio produto ou na embalagem), para o rascunho anotar (coluna letras) e a medição
+# de quais posts levam punição (P146 2) separar as capas com e sem elas. Escolha do Rafael (08/11,
+# P181 2): DECISOES.md, Shopee Vídeo.
 PROMPT_DAS_LETRAS_DA_FOTO = """Esta é a foto do anúncio de um produto. Veja se há letras escritas na foto: legendas, frases, preços, selos ou etiquetas com texto, marcas-d'água, em qualquer língua (português também). Não conte as letras impressas no próprio produto ou na embalagem dele (a marca, o rótulo).
 
 Responda só com um JSON, sem mais nada:
-{"letras": true ou false, "sobre_o_produto": true ou false, "caixa": [y1, x1, y2, x2]}
-
-"sobre_o_produto": alguma dessas letras fica em cima do produto.
-"caixa": o maior retângulo da foto com o produto inteiro e sem nenhuma dessas letras, em milésimos da altura (y) e da largura (x) da foto. Sem letras, a foto toda: [0, 0, 1000, 1000]."""
+{"letras": true ou false}"""
 PROCESSO_DAS_LETRAS_DA_FOTO = "edição do vídeo: letras na foto da capa"
-# O que aconteceu com as letras da foto (textos fixos: o registro e o checkup contam por eles).
+# O que a IA viu na foto (textos fixos: o registro e o checkup contam por eles).
+COM_LETRAS = "com letras"
 SEM_LETRAS = "sem letras"
-LETRAS_CORTADAS = "letras cortadas"
-LETRAS_NO_PRODUTO = "letras em cima do produto"
 SEM_RESPOSTA_DAS_LETRAS = "a IA não respondeu"
-CAIXA_QUE_NAO_SERVE = "a caixa da IA não serve"
-CORTE_TIRARIA_O_PRODUTO = "o corte tiraria parte do produto"
-CORTE_SEM_CONFERENCIA = "a IA não conferiu o corte"
-# A foto que não pode ser cortada: a capa procura um quadro do próprio vídeo (foto_para_a_capa).
-SEM_O_CORTE = (LETRAS_NO_PRODUTO, CORTE_TIRARIA_O_PRODUTO, CORTE_SEM_CONFERENCIA)
-PROMPT_DO_CORTE_DAS_LETRAS = """A 1ª foto é a foto inteira do anúncio de um produto; a 2ª é um recorte dela, feito para tirar as letras escritas na foto. Compare as duas e diga se o produto aparece inteiro no recorte: nenhuma parte dele (nem peça, acessório ou embalagem que aparece com ele na foto inteira) ficou de fora do recorte ou cortada na beirada dele.
-
-Responda só com um JSON, sem mais nada:
-{"inteiro": true ou false}"""
-# O pedaço sem letras fica com pelo menos esta parte da foto (na área) e tira pelo menos a outra:
-# menor, a IA errou a caixa (ou ela cortaria o produto); quase a foto toda, ela não tira as letras.
-MENOR_PEDACO_SEM_LETRAS = 0.4
-MAIOR_PEDACO_SEM_LETRAS = 0.98
+# O que o rascunho anota na coluna letras: vazio quando a IA não respondeu (fica fora da medição).
+LETRAS_ANOTADAS = {COM_LETRAS: "1", SEM_LETRAS: "0"}
 
 
 def _json_das_fotos(prompt, imagens):
@@ -1071,180 +1053,24 @@ def _json_das_fotos(prompt, imagens):
     return dados if isinstance(dados, dict) else None
 
 
-def foto_sem_letras(foto):
+def letras_da_foto(foto):
     """
-    (foto, resultado): a foto do anúncio (bytes) sem o pedaço com as letras (PNG) quando elas
-    ficam fora do produto e a IA confere que ele ficou inteiro no pedaço (P176 1), ou a mesma foto
-    (sem letras, com as letras em cima do produto, com o corte tirando um pedaço do produto, com a
-    IA sem resposta ou com a caixa dela que não serve); resultado é um dos textos fixos acima.
-    """
-    import io
-
-    from PIL import Image
-    try:
-        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
-    except Exception:
-        return foto, SEM_RESPOSTA_DAS_LETRAS
-    tipo = "image/png" if (foto or b"").startswith(b"\x89PNG") else "image/jpeg"
-    dados = _json_das_fotos(PROMPT_DAS_LETRAS_DA_FOTO, [(foto, tipo)])
-    if dados is None:
-        return foto, SEM_RESPOSTA_DAS_LETRAS
-    if not dados.get("letras"):
-        return foto, SEM_LETRAS
-    if dados.get("sobre_o_produto"):
-        return foto, LETRAS_NO_PRODUTO
-    try:
-        y1, x1, y2, x2 = (max(0, min(1000, int(valor))) for valor in dados.get("caixa"))
-    except (TypeError, ValueError):
-        return foto, CAIXA_QUE_NAO_SERVE
-    parte = max(0, y2 - y1) * max(0, x2 - x1) / 1_000_000
-    if not MENOR_PEDACO_SEM_LETRAS <= parte <= MAIOR_PEDACO_SEM_LETRAS:
-        return foto, CAIXA_QUE_NAO_SERVE
-    largura, altura = imagem.size
-    corte = _png(imagem.crop((x1 * largura // 1000, y1 * altura // 1000, x2 * largura // 1000,
-                              y2 * altura // 1000)))
-    # A IA confere, com a foto inteira ao lado, que o corte não tirou nenhum pedaço do produto; sem a
-    # conferência, a foto também não é cortada (P176 1).
-    conferido = _json_das_fotos(PROMPT_DO_CORTE_DAS_LETRAS, [(foto, tipo), (corte, "image/png")])
-    inteiro = (conferido or {}).get("inteiro")
-    if not isinstance(inteiro, bool):
-        return foto, CORTE_SEM_CONFERENCIA
-    return (corte, LETRAS_CORTADAS) if inteiro else (foto, CORTE_TIRARIA_O_PRODUTO)
-
-
-# Com as letras em cima do próprio produto, o corte não as tira: a capa usa um quadro do próprio
-# vídeo, num momento com o produto inteiro e sem letras na tela, recortado no produto e conferido sem
-# letras como a foto (foto_sem_letras). A IA escolhe no vídeo até MOMENTOS_DO_QUADRO momentos, do
-# melhor para o pior, mas o segundo que ela dá vendo o vídeo é aproximado: o quadro que sai nele pode
-# ser de outra cena, com o produto em outro lugar ou cortado na beirada (vídeo do Rafael de 08/11,
-# 15:42: o produto saiu pela metade na capa, com a mão na frente). Por isso cada quadro vai à IA
-# também como imagem, ao lado da foto do anúncio: ela diz se o produto aparece inteiro nele (sem
-# pedaço cortado na beirada nem coberto) e onde ele está, e o recorte sai dessa caixa, com a folga
-# FOLGA_DO_PRODUTO_NO_QUADRO. O 1º quadro que passa vai à capa; sem nenhum, vai a foto do anúncio,
-# como antes. Escolha do Rafael (06/11, P164 1): DECISOES.md, Shopee Vídeo.
-PROMPT_DO_QUADRO_DA_CAPA = (
-    "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
-    "Escolha até 3 momentos do vídeo para a capa, do melhor para o pior: o produto aparece inteiro, bem "
-    "visível e nítido, sem nenhuma letra na tela (legendas, frases, preços, selos, marcas-d'água, em qualquer "
-    "língua; as letras impressas no próprio produto ou na embalagem não contam) e sem mão, rosto ou outra coisa "
-    "cobrindo o produto. Prefira momentos longe de uma troca de cena.\n"
-    "Responda só com o JSON: {{\"momentos\": [segundos, ...]}}\n"
-    "Sem um momento assim: {{\"momentos\": []}}."
-)
-PROMPT_DO_PRODUTO_NO_QUADRO = (
-    "A 1ª imagem é um quadro do vídeo de um produto vendido na Shopee: {nome}. A 2ª, quando vem, é a foto do "
-    "anúncio, para você saber qual é o produto.\n"
-    "Diga se o produto aparece inteiro no quadro (a 1ª imagem): nenhum pedaço dele cortado na beirada do "
-    "quadro ou de fora dele, nem coberto por mão, rosto ou outra coisa, e bem visível e nítido. E onde ele "
-    "está no quadro.\n"
-    "Responda só com um JSON, sem mais nada:\n"
-    "{{\"inteiro\": true ou false, \"caixa\": [y1, x1, y2, x2]}}\n"
-    "\"caixa\": o retângulo justo em volta do produto inteiro no quadro, em milésimos da altura (y) e da "
-    "largura (x) do quadro."
-)
-QUADRO_DO_VIDEO = "quadro do vídeo"
-MOMENTOS_DO_QUADRO = 3
-# A folga em volta do produto no recorte, de cada lado, numa parte do tamanho da caixa dele.
-FOLGA_DO_PRODUTO_NO_QUADRO = 0.08
-# Por que o quadro do vídeo não entrou (textos fixos: o registro e o checkup contam por eles).
-SEM_MOMENTO_SEM_LETRAS = "a IA não achou no vídeo um momento sem letras"
-QUADRO_QUE_NAO_SAIU = "o quadro do vídeo não saiu"
-QUADRO_COM_LETRAS = "o quadro do vídeo também tem letras"
-QUADRO_SEM_CONFERENCIA = "a IA não conferiu o quadro do vídeo"
-QUADRO_SEM_O_PRODUTO_INTEIRO = "o produto não aparece inteiro no quadro do vídeo"
-CAIXA_DO_QUADRO_QUE_NAO_SERVE = "a caixa do produto no quadro não serve"
-# A caixa do produto no quadro: pelo menos esta parte dele (na área); menor, a IA errou a caixa.
-MENOR_PRODUTO_NO_QUADRO = 0.1
-
-
-def _momentos_do_quadro(dados):
-    """Os segundos (float) que a IA escolheu no vídeo para a capa, do melhor para o pior, até MOMENTOS_DO_QUADRO."""
-    escolhidos = dados.get("momentos")
-    if not isinstance(escolhidos, list):
-        escolhidos = [dados.get("momento")]
-    momentos = []
-    for valor in escolhidos:
-        try:
-            momento = float(valor)
-        except (TypeError, ValueError):
-            continue
-        if momento >= 0 and momento not in momentos:
-            momentos.append(momento)
-    return momentos[:MOMENTOS_DO_QUADRO]
-
-
-def _produto_no_quadro(quadro, foto, nome):
-    """
-    (recorte, motivo): o quadro do vídeo (bytes) recortado no produto, com a folga, quando a IA, vendo o
-    quadro como imagem ao lado da foto do anúncio, diz que o produto aparece inteiro nele; senão
-    (None, o porquê fixo).
+    COM_LETRAS, SEM_LETRAS ou SEM_RESPOSTA_DAS_LETRAS (a foto que não abre também): se a foto do
+    anúncio (bytes) tem letras escritas, pela IA. Só para a medição: a foto vai à capa como está
+    (P181 2).
     """
     import io
 
     from PIL import Image
     try:
-        imagem = Image.open(io.BytesIO(quadro or b"")).convert("RGB")
+        Image.open(io.BytesIO(foto or b"")).convert("RGB")
     except Exception:
-        return None, QUADRO_QUE_NAO_SAIU
-    imagens = [(quadro, "image/jpeg")]
-    if foto:
-        imagens.append((foto, "image/png" if foto.startswith(b"\x89PNG") else "image/jpeg"))
-    dados = _json_das_fotos(PROMPT_DO_PRODUTO_NO_QUADRO.format(nome=nome or "o produto"), imagens)
-    if dados is None or not isinstance(dados.get("inteiro"), bool):
-        return None, QUADRO_SEM_CONFERENCIA
-    if not dados["inteiro"]:
-        return None, QUADRO_SEM_O_PRODUTO_INTEIRO
-    try:
-        y1, x1, y2, x2 = (max(0, min(1000, int(valor))) for valor in dados.get("caixa"))
-    except (TypeError, ValueError):
-        return None, CAIXA_DO_QUADRO_QUE_NAO_SERVE
-    if max(0, y2 - y1) * max(0, x2 - x1) / 1_000_000 < MENOR_PRODUTO_NO_QUADRO:
-        return None, CAIXA_DO_QUADRO_QUE_NAO_SERVE
-    folga_y, folga_x = (y2 - y1) * FOLGA_DO_PRODUTO_NO_QUADRO, (x2 - x1) * FOLGA_DO_PRODUTO_NO_QUADRO
-    y1, y2 = max(0, y1 - folga_y), min(1000, y2 + folga_y)
-    x1, x2 = max(0, x1 - folga_x), min(1000, x2 + folga_x)
-    largura, altura = imagem.size
-    return _png(imagem.crop((round(x1 * largura / 1000), round(y1 * altura / 1000), round(x2 * largura / 1000),
-                             round(y2 * altura / 1000)))), ""
-
-
-def quadro_sem_letras(video, nome="", foto=None):
-    """
-    (foto, motivo): o quadro do vídeo para a capa (PNG), do 1º momento que a IA escolheu em que o
-    produto aparece inteiro no quadro (_produto_no_quadro, recortado nele) e a conferência da foto
-    (foto_sem_letras) não vê letras no recorte ou as tira pelo corte; senão (None, os porquês fixos de
-    cada momento). foto é a do anúncio, que mostra à IA qual é o produto.
-    """
-    momentos = _momentos_do_quadro(_resposta_da_ia(video, PROMPT_DO_QUADRO_DA_CAPA.format(nome=nome or "o produto")))
-    motivos = []
-    for momento in momentos:
-        recorte, motivo = _produto_no_quadro(videos.quadro_em(video, momento), foto, nome)
-        if recorte is not None:
-            conferido, letras = foto_sem_letras(recorte)
-            if letras in (SEM_LETRAS, LETRAS_CORTADAS):
-                return conferido, QUADRO_DO_VIDEO
-            motivo = QUADRO_COM_LETRAS
-        if motivo not in motivos:
-            motivos.append(motivo)
-    return None, "; ".join(motivos) or SEM_MOMENTO_SEM_LETRAS
-
-
-def foto_para_a_capa(foto, video, nome=""):
-    """
-    (foto, resultado, detalhe): a foto da capa com a frase, sem letras (P160 2): a do anúncio, sem o
-    pedaço com as letras quando elas ficam fora do produto e o produto fica inteiro nele (P176 1);
-    com as letras em cima do produto, ou sem poder cortar (SEM_O_CORTE), um quadro do próprio vídeo
-    (quadro_sem_letras, P164 1; o detalhe diz por que a foto não serviu), e sem ele a do anúncio
-    como está (o detalhe diz por que o quadro não entrou). resultado é um dos textos fixos de
-    foto_sem_letras ou QUADRO_DO_VIDEO.
-    """
-    foto_da_capa, letras = foto_sem_letras(foto)
-    if letras not in SEM_O_CORTE:
-        return foto_da_capa, letras, ""
-    quadro, motivo = quadro_sem_letras(video, nome, foto)
-    if quadro:
-        return quadro, QUADRO_DO_VIDEO, letras
-    return foto_da_capa, letras, motivo
+        return SEM_RESPOSTA_DAS_LETRAS
+    tipo = "image/png" if foto.startswith(b"\x89PNG") else "image/jpeg"
+    letras = (_json_das_fotos(PROMPT_DAS_LETRAS_DA_FOTO, [(foto, tipo)]) or {}).get("letras")
+    if not isinstance(letras, bool):
+        return SEM_RESPOSTA_DAS_LETRAS
+    return COM_LETRAS if letras else SEM_LETRAS
 
 
 def recorte_do_video_aberto(capa):
@@ -2708,7 +2534,10 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     miniatura vão nela (o fio e a faixa, só quando ela não some no fundo da foto; senão, na 2ª cor
     do produto ou num tom da cor: cor_da_faixa, P173 e P174 3); anotar (dict) recebe em "cor" a cor
     da faixa (nome_da_cor: o nome, o #rrggbb do tom ou "" com o laranja), que o robô guarda no
-    rascunho para conferir a faixa no post. Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+    rascunho para conferir a faixa no post. A foto do anúncio vai à capa inteira, com as letras que
+    tiver (P181 2); com a capa, anotar recebe em "letras" "1" ou "0" (se ela tem letras, pela IA:
+    letras_da_foto; "" sem a resposta), para a medição de quais posts levam punição. Escolhas do
+    Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -2728,20 +2557,22 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     # dos avisos. A capa com chamada vai em todos os vídeos, menos na bebida alcoólica, que abre
     # com a capa dos avisos. Escolha do Rafael (30/10, P100): DECISOES.md, Shopee Vídeo.
     frase = frase_da_capa(textos)
-    capa, foto_da_capa = None, foto
+    capa = None
     if capa_ligada() and not avisos and frase:
         # Quantas capas saem com a frase curta (P122), quantas só na 2ª vez e quantas com o
         # nome (P131) ou a vantagem, por falta dela, e por quê.
         resultado, detalhe, ok = registro_da_frase(textos, frase)
         registro_processos.registrar("shopee_video", PROCESSO_DA_FRASE_DA_CAPA, resultado, detalhe, ok=ok)
-        # A foto da capa sem as letras do anúncio (P160 2) ou, com elas em cima do produto, um quadro
-        # do próprio vídeo (P164 1).
-        foto_da_capa, letras, detalhe_das_letras = foto_para_a_capa(foto, video, produto)
-        registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras, detalhe_das_letras,
-                                     ok={SEM_LETRAS: True, LETRAS_CORTADAS: True, QUADRO_DO_VIDEO: True,
-                                         LETRAS_NO_PRODUTO: None, CORTE_TIRARIA_O_PRODUTO: None}.get(letras, False))
-        capa = _capa_da_vez(foto_da_capa, frase, cor=cor, segunda=segunda)
-        faixa = cor_da_faixa(foto_da_capa, cor, segunda) if capa else None
+        # A foto do anúncio vai à capa inteira, com as letras que tiver (P181 2). No rascunho do robô
+        # (anotar), a IA diz se ela tem letras, para a medição de quais posts levam punição (P146 2);
+        # o modo assistente fica fora da medição e não gasta a pergunta.
+        if anotar is not None:
+            letras = letras_da_foto(foto)
+            registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras, "",
+                                         ok=letras != SEM_RESPOSTA_DAS_LETRAS)
+            anotar["letras"] = LETRAS_ANOTADAS.get(letras, "")
+        capa = _capa_da_vez(foto, frase, cor=cor, segunda=segunda)
+        faixa = cor_da_faixa(foto, cor, segunda) if capa else None
         if faixa and faixa != (cor or LARANJA_DA_SHOPEE):
             # A faixa que some no fundo da foto vai na 2ª cor do produto (P173) ou, sem ela, num tom
             # da cor (P174 3): o registro conta de onde veio a cor, e o robô confere no post a faixa
@@ -2760,7 +2591,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     if capa:
         # O 1º quadro, que o app usa como capa da grade, vai com a capa da grade; o resto da
         # abertura, com a do vídeo aberto (P129). Sem esta, a da grade fica na abertura toda.
-        no_video = _capa_da_vez(foto_da_capa, frase, no_video=True, cor=cor, segunda=segunda)
+        no_video = _capa_da_vez(foto, frase, no_video=True, cor=cor, segunda=segunda)
         if no_video:
             abertura = (capa, no_video)
     chamada = COM_A_CHAMADA if capa else ""
@@ -3223,9 +3054,7 @@ def exemplo_capa():
         frase = frase_da_capa(textos)
         if not frase:
             return "a IA não escreveu a frase da capa, o nome nem a vantagem do produto deste vídeo", None
-        # A foto sem as letras do anúncio (ou o quadro do vídeo, P164 1) e a cor do produto, como no
-        # vídeo que vai ao ar (P160 2 e P159 2).
-        foto = foto_para_a_capa(foto, arquivo, produto.get("nome", ""))[0]
+        # A foto do anúncio inteira (P181 2) e a cor do produto, como no vídeo que vai ao ar (P159 2).
         cor, segunda = cor_do_produto(textos.get("cor")), cor_da_segunda(textos.get("cor_2"))
         capa = capa_com_chamada(foto, frase, cor=cor, segunda=segunda)
         if not capa:
