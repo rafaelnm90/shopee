@@ -26,6 +26,10 @@ class Celular:
     def app_current(self):
         return {"package": "com.shopee.br", "activity": "ReactActivity_"}
 
+    def shell(self, partes):
+        # Só a leitura de há quanto tempo o app está aberto (pidof e ps do Android).
+        return type("R", (), {"output": {"pidof": "4321", "ps": "ELAPSED\n  02:03:04"}.get(partes[0], "")})()
+
     def screenshot(self, caminho):
         if self.quebrado:
             raise ConnectionError("caiu")
@@ -53,6 +57,8 @@ def test_caso_guarda_o_motivo_o_titulo_os_produtos_o_print_e_a_tela():
     assert caso["motivo"] == "o produto do vídeo não está na lista" and caso["momento"] == "2026-10-25 10:00:00"
     assert caso["rascunho"]["titulo"] == "Vestido lindo 👗" and caso["rascunho"]["produtos"] == ["Vestido Gatinho"]
     assert caso["video"]["produto"] == "Vestido Gatinho" and caso["app"]["tela"] == "ReactActivity_"
+    # Há quantos minutos o app está aberto (08/11: o app instável no começo da noite).
+    assert caso["app"]["aberto_ha_min"] == 123
     # O print vai menor, em JPEG, e a forma da tela inteira; nada é tocado no celular.
     from PIL import Image
     with Image.open(os.path.join(pasta, "tela.jpg")) as imagem:

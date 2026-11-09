@@ -4348,10 +4348,10 @@ def itens_postados():
 # aberta por cima (a legenda já escrita, em foco e com o texto marcado pela cópia) e a linha dos
 # produtos vazia. Por isso os produtos vão antes da legenda, e o 1º anexado é conferido na tela
 # final: sem ele, o robô o anexa de novo, uma vez (VEZES_DO_PRIMEIRO_PRODUTO). O que não fica
-# nem na 2ª vez é do produto, não da hora: em 07/11 (06:09 e 06:52) o mesmo produto não ficou nas
+# nem na 2ª vez conta como do produto: em 07/11 (06:09 e 06:52) o mesmo produto não ficou nas
 # 4 vezes, e os 13 outros do dia anterior ficaram de primeira. O vídeo fica de lado, como o do
 # produto que não aparece, e não volta na rodada seguinte (a regra de 23/10:
-# DECISOES.md, Shopee Vídeo). A tela de logo depois do Feito (ESPERA_LOGO_DEPOIS_DO_FEITO) vai
+# DECISOES.md, Shopee Vídeo). Em 08/11, com o app instável, foi da hora (sinais_do_app). A tela de logo depois do Feito (ESPERA_LOGO_DEPOIS_DO_FEITO) vai
 # para o caso e, em rótulos fixos, para o registro: um aviso do app na tela some antes da conferência.
 VEZES_DO_PRIMEIRO_PRODUTO = 2
 MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU = ("o produto anexado pelo Adicionar não ficou na tela final depois do Feito, "
@@ -4465,8 +4465,32 @@ def primeiro_na_tela_final(d, vez=1, nome=""):
                                  f"{vez}ª vez; {ps.como_esta_a_tela_final(xml)}{sobre_o_aviso}"
                                  + (f"; logo depois do Feito: {logo}" if logo else "") + ps.forma_do_nome(nome),
                                  ok=False)
+    registro_processos.registrar(REGISTRO, PROCESSO_DOS_SINAIS_DO_APP, f"{vez}ª vez", sinais_do_app(d), ok=None)
     fechar_a_edicao_da_legenda(d, xml)
     return False
+
+
+# Os sinais de que o app da Shopee estava instável perto do produto que não ficou: em 08/11 (das
+# 19:04 às 19:31), no começo da noite em que o app travou 3 vezes e a leitura da tela veio sem ele
+# 4 vezes, 2 produtos diferentes não ficaram seguidos (nem na 2ª vez) e 1 só ficou na 2ª vez,
+# depois de um dia em que todos ficaram de primeira. A cada produto que não fica, o registro
+# (PROCESSO_DOS_SINAIS_DO_APP, numa linha à parte: a do anexar já chega perto do tamanho que o
+# registro guarda) diz quantas vezes o app travou e a leitura veio sem ele nesta janela, e há
+# quantos minutos o app está aberto, para separar o produto da hora (só números e rótulos fixos:
+# o registro sai no checkup público).
+PROCESSO_DOS_SINAIS_DO_APP = "sinais do app no anexar"
+JANELA_DOS_SINAIS_DO_APP = timedelta(hours=1)
+
+
+def sinais_do_app(d, agora=None):
+    """Os sinais do app em rótulos fixos, como "na última hora: app travado 1, leitura sem o app 0; ..."."""
+    desde = (agora_br(agora) - JANELA_DOS_SINAIS_DO_APP).strftime("%Y-%m-%d %H:%M:%S")
+    travado = len(registro_processos.sequencia(REGISTRO, "app travado", desde))
+    sem_o_app = sum(1 for linha in registro_processos.sequencia(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, desde)
+                    if str(linha[3]).startswith("sem o app"))
+    minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
+    return (f"na última hora: app travado {travado}, leitura sem o app {sem_o_app}"
+            + (f"; o app aberto há {minutos} min" if minutos is not None else ""))
 
 
 # O último aviso curto (toast) do app depois do Feito do produto que não ficou, para a parada dizer
