@@ -4468,7 +4468,8 @@ def primeiro_na_tela_final(d, vez=1, nome=""):
     até ps.ESPERA_DA_FILEIRA s. Sem ele, ou quando ele só veio na 2ª vez, o registro diz como a
     tela voltou (a linha dos produtos, a edição da legenda aberta por cima, a legenda em foco)
     e os sinais do nome do produto (ps.forma_do_nome), só com rótulos fixos: o próximo caso
-    mostra a causa (pedido do Rafael de 30/10).
+    mostra a causa (pedido do Rafael de 30/10). O que fica de primeira anota os sinais dele
+    (sinais_de_quem_ficou), para o checkup comparar com os que não ficam.
     """
     xml = tela(d)
     for _ in range(ps.ESPERA_DA_FILEIRA // 3):
@@ -4480,6 +4481,9 @@ def primeiro_na_tela_final(d, vez=1, nome=""):
         if vez > 1:
             registro_processos.registrar(REGISTRO, "anexar o produto", f"anexado na {vez}ª vez",
                                          ps.como_esta_a_tela_final(xml) + ps.forma_do_nome(nome), ok=True)
+        else:
+            registro_processos.registrar(REGISTRO, PROCESSO_DOS_SINAIS_DO_APP, FICOU_DE_PRIMEIRA,
+                                         sinais_de_quem_ficou(d), ok=None)
         return True
     lido, aviso = aviso_do_app(d)
     _AVISO_DO_FEITO["texto"] = aviso
@@ -4505,17 +4509,57 @@ def primeiro_na_tela_final(d, vez=1, nome=""):
 # o registro sai no checkup público).
 PROCESSO_DOS_SINAIS_DO_APP = "sinais do app no anexar"
 JANELA_DOS_SINAIS_DO_APP = timedelta(hours=1)
+# Em 09/11, das 13:08 às 13:37, 4 produtos diferentes seguidos não ficaram (nem na 2ª vez), sem o
+# app travar nem a leitura vir sem ele, com o app aberto havia 16 h; na mesma hora, a busca de
+# ofertas da API de afiliado deu o erro de sistema da própria Shopee (api_shopee), e às 14:03 o
+# produto seguinte ficou de primeira. A linha dos sinais diz também quantas buscas da API deram
+# esse erro nesta janela, e o produto que fica de primeira ganha a mesma linha (FICOU_DE_PRIMEIRA,
+# com o app aberto em faixas de horas, para o checkup agrupar): o checkup compara os que ficam com
+# os que não ficam, e separa a falha da Shopee da do app aberto há muito tempo.
+FICOU_DE_PRIMEIRA = "ficou de primeira"
+FAIXAS_DO_APP_ABERTO = ((1, "menos de 1 h"), (6, "1 a 6 h"), (12, "6 a 12 h"), (24, "12 a 24 h"))
 
 
 def sinais_do_app(d, agora=None):
-    """Os sinais do app em rótulos fixos, como "na última hora: app travado 1, leitura sem o app 0; ..."."""
+    """
+    Os sinais do app em rótulos fixos, como "na última hora: app travado 1, leitura sem o app 0,
+    erro de sistema da Shopee na API 2; o app aberto há 95 min".
+    """
     desde = (agora_br(agora) - JANELA_DOS_SINAIS_DO_APP).strftime("%Y-%m-%d %H:%M:%S")
     travado = len(registro_processos.sequencia(REGISTRO, "app travado", desde))
     sem_o_app = sum(1 for linha in registro_processos.sequencia(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, desde)
                     if str(linha[3]).startswith("sem o app"))
     minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
-    return (f"na última hora: app travado {travado}, leitura sem o app {sem_o_app}"
+    return (f"na última hora: app travado {travado}, leitura sem o app {sem_o_app}, "
+            f"erro de sistema da Shopee na API {erros_da_api_da_shopee(desde)}"
             + (f"; o app aberto há {minutos} min" if minutos is not None else ""))
+
+
+def sinais_de_quem_ficou(d, agora=None):
+    """
+    Os sinais do produto que ficou de primeira, em faixas que o checkup agrupa: "na última hora:
+    erro de sistema da Shopee na API 0; o app aberto há 12 a 24 h".
+    """
+    desde = (agora_br(agora) - JANELA_DOS_SINAIS_DO_APP).strftime("%Y-%m-%d %H:%M:%S")
+    minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
+    return (f"na última hora: erro de sistema da Shopee na API {erros_da_api_da_shopee(desde)}"
+            + (f"; o app aberto há {faixa_do_app_aberto(minutos)}" if minutos is not None else ""))
+
+
+def faixa_do_app_aberto(minutos):
+    """Há quanto tempo o app está aberto, na faixa de FAIXAS_DO_APP_ABERTO ("mais de 1 dia" depois da última)."""
+    return next((rotulo for horas, rotulo in FAIXAS_DO_APP_ABERTO if minutos < horas * 60), "mais de 1 dia")
+
+
+def erros_da_api_da_shopee(desde):
+    """
+    Quantas buscas da API de afiliado deram o erro de sistema da própria Shopee desde o momento
+    ("AAAA-MM-DD HH:MM:SS"), em qualquer robô: as que a nova tentativa salvou e as negadas por ele.
+    """
+    salvas = registro_processos.sequencia(api_shopee.ROBO_DO_REGISTRO, api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA, desde)
+    negadas = registro_processos.sequencia(api_shopee.ROBO_DO_REGISTRO, api_shopee.PROCESSO_DA_BUSCA_NEGADA, desde,
+                                           resultado=api_shopee.RESULTADO_DO_ERRO_DE_SISTEMA)
+    return len(salvas) + len(negadas)
 
 
 # O último aviso curto (toast) do app depois do Feito do produto que não ficou, para a parada dizer

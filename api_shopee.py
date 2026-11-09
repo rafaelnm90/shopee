@@ -305,7 +305,9 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
 
 # A busca de ofertas que a API nega (o garimpo, o buscador e o robô da Shopee Vídeo a usam): o
 # registro de processos guarda só o código do erro da API e o programa que pediu, para o checkup
-# mostrar a causa, sem a palavra buscada nem a mensagem.
+# mostrar a causa, sem a palavra buscada nem a mensagem. O robô da Shopee Vídeo conta essas linhas
+# perto do produto que o app não deixa na tela final (robo_shopee_video.erros_da_api_da_shopee).
+ROBO_DO_REGISTRO = "api_shopee"
 PROCESSO_DA_BUSCA_NEGADA = "busca de ofertas negada"
 # O código 10000 é o erro de sistema da própria Shopee: passa sozinho, e a mesma busca, uns
 # segundos depois, costuma dar certo (o checkup de 05/11 mostrou o código da busca negada que
@@ -316,6 +318,18 @@ CODIGO_DO_ERRO_DE_SISTEMA = "10000"
 TENTATIVAS_NO_ERRO_DE_SISTEMA = 3
 ESPERA_NO_ERRO_DE_SISTEMA = 3
 PROCESSO_DO_ERRO_DE_SISTEMA = "busca de ofertas: erro de sistema da Shopee"
+
+
+def rotulo_do_codigo(codigo):
+    """
+    O código do erro da API como o registro guarda: com o ponto do milhar ("código 10.000"), porque
+    o registro troca os números de 5 dígitos por #, como ids; "sem código" sem ele.
+    """
+    return f"código {int(codigo):,}".replace(",", ".") if codigo else "sem código"
+
+
+# A busca negada pelo erro de sistema da Shopee, como o registro a guarda.
+RESULTADO_DO_ERRO_DE_SISTEMA = rotulo_do_codigo(CODIGO_DO_ERRO_DE_SISTEMA)
 
 
 def _codigo_do_erro(erros):
@@ -335,10 +349,7 @@ def _registrar_busca_negada(erros):
         # Importado aqui, como o utils no link sem conversão: as ferramentas que só testam as
         # chaves não precisam do banco.
         import registro_processos
-        # Com o ponto do milhar (10.030): o registro troca os números de 5 dígitos por #, como ids.
-        registro_processos.registrar("api_shopee", PROCESSO_DA_BUSCA_NEGADA,
-                                     f"código {int(codigo):,}".replace(",", ".") if codigo else "sem código",
-                                     quem, ok=False)
+        registro_processos.registrar(ROBO_DO_REGISTRO, PROCESSO_DA_BUSCA_NEGADA, rotulo_do_codigo(codigo), quem, ok=False)
     except Exception as e:
         logger.error(f"❌ [API Shopee] Não anotou a busca negada: {type(e).__name__}")
 
@@ -418,7 +429,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
 def _registrar_nova_tentativa(tentativa):
     try:
         import registro_processos
-        registro_processos.registrar("api_shopee", PROCESSO_DO_ERRO_DE_SISTEMA, f"deu certo na {tentativa}ª tentativa",
+        registro_processos.registrar(ROBO_DO_REGISTRO, PROCESSO_DO_ERRO_DE_SISTEMA, f"deu certo na {tentativa}ª tentativa",
                                      _quem_pediu(), ok=True)
     except Exception as e:
         logger.error(f"❌ [API Shopee] Não anotou a nova tentativa da busca: {type(e).__name__}")
