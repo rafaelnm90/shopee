@@ -3,8 +3,9 @@
 Os casos das falhas do robô da Shopee Vídeo, para o Claude fazer o checkup completo de
 cada uma. Em toda tentativa que não dá certo, o robô guarda numa pasta do servidor o que
 viu: o motivo inteiro e o passo, o vídeo em alguns quadros, o título e o comentário da IA,
-os produtos do link e o que a IA conferiu, o print e a forma da tela do celular na hora, e
-as últimas ações no celular antes da falha (cada toque, com a tela de antes e em que ele caiu).
+os produtos do link e o que a IA conferiu, o print e a forma da tela do celular na hora, o log
+do app dos últimos minutos, e as últimas ações no celular antes da falha (cada toque, com a
+tela de antes e em que ele caiu).
 
 O repositório e os logs do Actions são públicos: o workflow casos_robo.yml leva os casos
 cifrados ao ramo casos-robo (só abrem com a chave do registro_privado, que fica no
@@ -224,7 +225,7 @@ def guardar(d, acao, resultado, motivo, passo="", video=None, rascunho=None, ago
         # ordem do que aconteceu antes da falha, como o produto curtido antes do anexar.
         caso["registro"] = registro_do_caso(rascunho.get("criado_em"), momento)
         if d is not None:
-            caso["app"] = _tela_do_celular(d, pasta)
+            caso["app"] = _tela_do_celular(d, pasta, momento)
         if isinstance(d, CelularComHistorico):
             caso["antes_da_falha"] = _acoes_antes(d, pasta)
         arquivo = rascunho.get("arquivo") or video.get("arquivo")
@@ -260,6 +261,52 @@ def _acoes_antes(d, pasta):
     return lista
 
 
+# O log do Android (logcat) do app que estava na tela, para o caso: as linhas dos processos dele e
+# as do Android que falam dele (a tela que abriu, o processo que morreu) dos últimos
+# MINUTOS_DO_LOG_DO_APP minutos, no máximo LINHAS_DO_LOG_DO_APP (as mais novas), entre as
+# LINHAS_LIDAS_DO_LOG mais novas do log do celular. Em 09/11, das 13:08 às 13:37, o app não deixou o
+# produto na tela final depois do Feito em 4 vídeos seguidos, sem aviso na tela: o que ele recebeu
+# da Shopee só o log dele pode dizer. Fica só no caso (cifrado na exportação): o log pode ter
+# dados da conta. Com ele, a versão do app (a falha que começa com uma versão nova).
+MINUTOS_DO_LOG_DO_APP = 3
+LINHAS_DO_LOG_DO_APP = 400
+LINHAS_LIDAS_DO_LOG = 6000
+ARQUIVO_DO_LOG = "log_do_app.txt"
+# A linha do logcat no formato threadtime: "MM-DD HH:MM:SS.mmm  PID  TID N Etiqueta: texto".
+LINHA_DO_LOG = re.compile(r"(\d\d-\d\d \d\d:\d\d:\d\d)\.\d+\s+(\d+)\s+\d+\s")
+
+
+def log_do_app(d, pacote, agora=None):
+    """
+    As linhas do log do Android dos últimos MINUTOS_DO_LOG_DO_APP minutos que são dos processos do
+    app (o principal e os "pacote:nome") ou que citam o pacote, como texto; "" sem a leitura. Só lê.
+    """
+    try:
+        processos = getattr(d.shell(["ps", "-A", "-o", "PID,NAME"]), "output", "") or ""
+        log = getattr(d.shell(["logcat", "-d", "-v", "threadtime", "-t", str(LINHAS_LIDAS_DO_LOG)]), "output", "") or ""
+    except Exception:
+        return ""
+    pids = {partes[0] for partes in (linha.split() for linha in processos.splitlines())
+            if len(partes) >= 2 and partes[0].isdigit() and (partes[1] == pacote or partes[1].startswith(pacote + ":"))}
+    desde = (_agora(agora) - timedelta(minutes=MINUTOS_DO_LOG_DO_APP)).strftime("%m-%d %H:%M:%S")
+    linhas = []
+    for linha in log.splitlines():
+        achado = LINHA_DO_LOG.match(linha)
+        if achado and achado.group(1) >= desde and (achado.group(2) in pids or pacote in linha):
+            linhas.append(linha)
+    return "\n".join(linhas[-LINHAS_DO_LOG_DO_APP:])
+
+
+def versao_do_app(d, pacote):
+    """A versão do app instalado no celular (o versionName do Android), ou None sem a leitura."""
+    try:
+        saida = getattr(d.shell(["dumpsys", "package", pacote]), "output", "") or ""
+    except Exception:
+        return None
+    achado = re.search(r"versionName=(\S+)", saida)
+    return achado.group(1) if achado else None
+
+
 def minutos_do_app(d, pacote):
     """
     Há quantos minutos o processo do app roda no celular (o ELAPSED do ps do Android), ou None
@@ -285,10 +332,10 @@ def _minutos_do_elapsed(elapsed):
     return dias * 24 * 60 + horas * 60 + minutos
 
 
-def _tela_do_celular(d, pasta):
+def _tela_do_celular(d, pasta, agora=None):
     """
-    O app e a tela de agora (com há quantos minutos o app está aberto), o print (menor, em JPEG)
-    e a forma da tela (o XML do uiautomator).
+    O app e a tela de agora (com há quantos minutos o app está aberto, a versão dele e o log dele
+    dos últimos minutos), o print (menor, em JPEG) e a forma da tela (o XML do uiautomator).
     """
     app = {}
     try:
@@ -309,6 +356,14 @@ def _tela_do_celular(d, pasta):
         _diminuir(caminho, os.path.join(pasta, "tela.jpg"), LARGURA_DO_PRINT)
     except Exception as e:
         app["sem_print"] = type(e).__name__
+    # Depois da tela e do print, para eles ficarem o mais perto possível da falha.
+    if app.get("pacote"):
+        app["versao"] = versao_do_app(d, app["pacote"])
+        log = log_do_app(d, app["pacote"], agora)
+        if log:
+            with open(os.path.join(pasta, ARQUIVO_DO_LOG), "w", encoding="utf-8") as f:
+                f.write(log + "\n")
+            app["log"] = ARQUIVO_DO_LOG
     return app
 
 
