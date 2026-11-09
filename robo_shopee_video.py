@@ -1124,6 +1124,7 @@ PASSOS = (
     ("a tela não mostrou Conta", "navegar no app"),
     ("a tela não mostrou Perfil em Shopee Vídeo", "navegar no app"),
     ("a tela não mostrou Postar vídeo", "navegar no app"),
+    ("não casaram com a grade", "visualizações na grade"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
     ("busca pela foto", "busca pela foto"),
     ("câmera da busca", "busca pela foto"),
@@ -5594,6 +5595,10 @@ TENTATIVAS_DA_MARCA, PAUSA_DA_MARCA = 3, 4
 # Quadro cortado pela beirada da tela (mais baixo que isto do mais alto) fica para a próxima rolada.
 QUADRO_INTEIRO = 0.9
 PROCESSO_DAS_VISUALIZACOES = "visualizações na grade do perfil"
+# Nenhum vídeo do robô casou com a grade (00:39 de 09/11: 0 de 36, com 31 de 32 na véspera): o
+# registro diz o que a grade mostrou (os quadros, os com o número, os com a capa carregada e a
+# marca mais perto) e o caso guarda a tela, para achar a causa.
+MOTIVO_DAS_VISUALIZACOES = "as capas dos posts não casaram com a grade do Perfil"
 # O 1º quadro do vídeo vai com a capa da grade, e o resto da abertura com a do vídeo aberto
 # (P129): na grade do post, a faixa da frase de um lado ao outro do quadro diz que o app
 # usou o 1º quadro; a faixa só no meio, que pegou outro quadro da abertura (aí a grade mostra a
@@ -5675,8 +5680,16 @@ def anotar_visualizacoes(d, agora=None):
         if rolada:
             ps.rolar(d)
             pausa(4)
-        imagem = d.screenshot()
-        quadros = [(visualizacoes.marca_da_capa(imagem, q["caixa"]), q["vistas"]) for q in quadros_da_grade(tela(d))]
+        caixas = quadros_da_grade(tela(d))
+        # Sem nenhuma capa carregada na tela (os quadros ainda cinza), espera e tira o print de
+        # novo, como no post (marcar_o_post).
+        for tentativa in range(TENTATIVAS_DA_MARCA):
+            if tentativa:
+                pausa(PAUSA_DA_MARCA)
+            imagem = d.screenshot()
+            quadros = [(visualizacoes.marca_da_capa(imagem, q["caixa"]), q["vistas"]) for q in caixas]
+            if not quadros or any(marca for marca, _vistas in quadros):
+                break
         # O quadro que já apareceu antes da rolada não conta de novo.
         novos = [q for q in quadros if q not in vistos]
         vistos.update(quadros)
@@ -5690,9 +5703,27 @@ def anotar_visualizacoes(d, agora=None):
         if rascunho["id"] in achados:
             leituras = (rascunho.get("vistas") or []) + [[momento, achados[rascunho["id"]]]]
             atualizar(rascunho["id"], vistas=leituras[-LEITURAS_POR_VIDEO:])
-    registro_processos.registrar(REGISTRO, PROCESSO_DAS_VISUALIZACOES, "lidas",
-                                 f"{len(achados)} de {len(procurados)} vídeo(s)", ok=bool(achados))
+    detalhe = f"{len(achados)} de {len(procurados)} vídeo(s)"
+    if not achados:
+        detalhe += _o_que_a_grade_mostrou(vistos, procurados)
+        _guardar_caso(d, "visualizacoes", "nenhum achado", MOTIVO_DAS_VISUALIZACOES, agora=agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DAS_VISUALIZACOES, "lidas", detalhe, ok=bool(achados))
     return len(achados), len(procurados)
+
+
+def _o_que_a_grade_mostrou(vistos, procurados):
+    """
+    Para o registro da leitura que não achou nenhum vídeo (MOTIVO_DAS_VISUALIZACOES): quantos
+    quadros a grade mostrou, quantos com o número, quantos com a capa carregada e a marca mais
+    perto de uma dos posts (casa até visualizacoes.MARCA_PARECIDA). Só números.
+    """
+    com_numero = sum(1 for _marca, vistas in vistos if vistas is not None)
+    com_capa = [marca for marca, _vistas in vistos if marca]
+    distancias = [visualizacoes.diferenca(marca, r["marca"]) for marca in com_capa for r in procurados]
+    perto = (f", a marca mais perto: {min(distancias)} (casa até {visualizacoes.MARCA_PARECIDA})"
+             if distancias else "")
+    return (f"; na grade: {len(vistos)} quadro(s), {com_numero} com o número, {len(com_capa)} com a capa"
+            + perto)
 
 
 def _anotar_visualizacoes_junto(d, agora=None):
