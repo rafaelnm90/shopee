@@ -41,18 +41,20 @@ MODELOS_CASCATA_GEMINI = [
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
-    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
 ]
 
 # Os que o Google descontinuou e saíram da cascata (P36). A chave ainda os enxerga (o Google
 # redireciona ou atende por um tempo), e o modelos_ia.yml os mostra à parte para nenhum
-# voltar à cascata como se fosse novo (o 3.7 Flash vai para o 3.8, o 3.5 Flash para o 3.6
-# e o 3.1 Flash-Lite preview foi desligado pelo Google).
+# voltar à cascata como se fosse novo (o 3.7 Flash vai para o 3.8, o 3.5 Flash para o 3.6,
+# o 3.1 Flash-Lite preview foi desligado pelo Google, e em 01/12/2026 o 2.5 Flash vai para o
+# 3.5 Flash-Lite e o 2.5 Pro para o 3.8 Flash).
 DESCONTINUADOS = (
     "gemini-3.7-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
 )
 
 logger = logging.getLogger("API_Gemini")
