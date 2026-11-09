@@ -7,7 +7,9 @@ forma: por que tipos de página ele passou, se chegou a um produto ou a um víde
 Produtos), se a API de afiliado devolve a oferta do produto e, nos próximos, se a busca
 acha o mesmo produto pagando mais por venda (P33 e P58, sem a IA). No fim, as contagens.
 Antes, cada tentativa das últimas 24 h que não deu certo, com a hora, o passo e a forma
-do motivo (o texto fixo do código, com "…" no que muda de um vídeo para outro).
+do motivo (o texto fixo do código, com "…" no que muda de um vídeo para outro), e, por hora
+dos 3 dias do registro, os produtos anexados, os que não ficaram depois do Feito e os erros
+de sistema da Shopee na API de afiliado.
 
 Usado pelo workflow investigar_robo.yml (só à mão). O log do Actions é público: nunca
 imprime links, nomes de produto ou textos; só tipos de página, contagens e o motivo do
@@ -155,6 +157,38 @@ def tentativas_que_nao_deram_certo():
             for momento, acao, resultado, passo, motivo in linhas]
 
 
+def anexar_e_erros_da_api(dias=3):
+    """
+    Por hora dos últimos dias (o registro guarda 3), só nas horas com algum deles: quantos produtos
+    o robô anexou pelo Adicionar (o Feito tocado), quantos não ficaram na tela final depois do Feito
+    e quantas buscas da API de afiliado deram o erro de sistema da Shopee (as salvas pela nova
+    tentativa e as negadas por ele): [(hora, anexados, não ficaram, erros da API)]. Em 09/11, os 4
+    produtos seguidos que não ficaram foram na mesma hora desses erros: separa a falha da Shopee
+    naquela hora da do app.
+    """
+    import registro_processos
+    import robo_shopee_video as robo   # aqui dentro: o robô traz a IA e o celular junto
+    desde = robo._momento(robo.agora_br() - timedelta(days=dias))
+    horas = {}
+
+    def somar(momento, posicao):
+        hora = f"{momento[8:10]}/{momento[5:7]} {momento[11:13]}h"
+        horas.setdefault((momento[:13], hora), [0, 0, 0])[posicao] += 1
+
+    for momento, _processo, resultado, _detalhe, _origem in registro_processos.sequencia(
+            robo.REGISTRO, "anexar o produto", desde):
+        if resultado == "anexado":
+            somar(momento, 0)
+        elif resultado.startswith("não ficou"):
+            somar(momento, 1)
+    erros = (registro_processos.sequencia(api_shopee.ROBO_DO_REGISTRO, api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA, desde)
+             + registro_processos.sequencia(api_shopee.ROBO_DO_REGISTRO, api_shopee.PROCESSO_DA_BUSCA_NEGADA, desde,
+                                            resultado=api_shopee.RESULTADO_DO_ERRO_DE_SISTEMA))
+    for linha in erros:
+        somar(linha[0], 2)
+    return [(hora, *contas) for (_ordem, hora), contas in sorted(horas.items())]
+
+
 def pulados():
     """
     (id do vídeo, passo em que parou, motivo) dos vídeos que o robô pulou. O passo é o
@@ -187,6 +221,10 @@ async def investigar(quantos):
     print(f"== Tentativas das últimas 24 h que não deram certo: {len(ruins)}")
     for quando, acao, resultado, passo, forma in ruins:
         print(f"   {quando} {acao} → {resultado} em {passo}" + (f": {forma}" if forma else ""))
+    print("== Anexar × erro de sistema da Shopee na API (3 dias, por hora: anexados | não ficaram depois do Feito "
+          "| erros da API)")
+    for hora, anexados, nao_ficaram, erros in anexar_e_erros_da_api():
+        print(f"   {hora}: {anexados} | {nao_ficaram} | {erros}")
     links = links_das_fontes()
     lista = pulados()
     print(f"== Vídeos que o robô pulou: {len(lista)}")

@@ -111,3 +111,30 @@ def test_comissao_mostra_so_numeros(monkeypatch):
     # Sem o preço do produto do link, não há com o que comparar.
     precos["preco"] = 0.0
     assert rodar(ir.comissao(LINK)) == ("comissão: a API não diz o preço do produto", False)
+
+
+def test_anexar_e_erros_da_api_por_hora_so_com_numeros():
+    # 09/11, das 13:08 às 13:37: 4 produtos seguidos não ficaram depois do Feito, na mesma hora em que
+    # a busca da API deu o erro de sistema da Shopee. Por hora dos 3 dias do registro: os anexados,
+    # os que não ficaram e os erros da API (os salvos pela nova tentativa e os negados com o código
+    # dele; outro código não conta), só nas horas com algum.
+    import robo_shopee_video as robo
+    from datetime import timedelta
+    api, registrar = ir.api_shopee, robo.registro_processos.registrar
+    agora = robo.agora_br().replace(minute=30)
+    hora = agora - timedelta(hours=2)
+    for minutos, resultado in ((8, "anexado"), (9, "não ficou depois do Feito"), (10, "anexado"),
+                               (11, "não ficou depois do Feito"), (12, "anexado na 2ª vez")):
+        registrar("shopee_video", "anexar o produto", resultado, "no topo, pelo nome", ok=None,
+                  agora=hora.replace(minute=minutos))
+    registrar("shopee_video", "anexar o produto", "anexado", "no topo, pelo nome", ok=True, agora=agora)
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DO_ERRO_DE_SISTEMA, "deu certo na 2ª tentativa", "robo_shopee_video",
+              ok=True, agora=hora.replace(minute=4))
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DA_BUSCA_NEGADA, api.RESULTADO_DO_ERRO_DE_SISTEMA, "robo_shopee_video",
+              ok=False, agora=hora.replace(minute=30))
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DA_BUSCA_NEGADA, api.rotulo_do_codigo("10030"), "bot_mestre",
+              ok=False, agora=hora.replace(minute=40))                       # outro código
+    registrar("shopee_video", "anexar o produto", "não ficou depois do Feito", "", ok=False,
+              agora=agora - timedelta(days=4))                                # fora dos 3 dias
+    rotulo = lambda momento: momento.strftime("%d/%m %Hh")
+    assert ir.anexar_e_erros_da_api() == [(rotulo(hora), 2, 2, 2), (rotulo(agora), 1, 0, 0)]
