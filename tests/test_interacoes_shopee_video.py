@@ -968,8 +968,8 @@ class CelularDoPost:
     link abre o aviso de vídeo em análise, sem o player.
     """
 
-    def __init__(self, comentarios=(), curtido=False, em_analise=False):
-        self.atual, self.curtido, self.em_analise = "inicio", curtido, em_analise
+    def __init__(self, comentarios=(), curtido=False, em_analise=False, removido=False):
+        self.atual, self.curtido, self.em_analise, self.removido = "inicio", curtido, em_analise, removido
         self.comentarios, self.curtidos_no_painel = list(comentarios), set()
         self.em_foco, self.escrito, self.toques = False, "", []
 
@@ -977,6 +977,8 @@ class CelularDoPost:
         if self.atual == "inicio":
             return _xml(*BARRA)
         if self.atual == "player":
+            if self.removido:
+                return _xml(_el("Este vídeo foi removido", caixa=(300, 1000, 780, 1060)), *BARRA)
             if self.em_analise:
                 return _xml(_el("Vídeo em Análise", caixa=(300, 1000, 780, 1060)),
                             _el("em breve estará disponível ao público", caixa=(200, 1080, 880, 1130)), *BARRA)
@@ -1215,6 +1217,28 @@ def test_post_antigo_sai_durante_o_dia_uma_vez_por_dia(monkeypatch, avisos, ia_d
     # No dia seguinte, o mesmo post não volta antes de 7 dias.
     assert robo.post_antigo_pendente(momento("2026-11-02 20:05")) is None
     assert robo.post_antigo_pendente(momento("2026-11-08 20:10"))["id"] == ident
+
+
+def test_post_antigo_removido_sai_da_escolha_e_o_proximo_ganha_o_comentario(monkeypatch, avisos, ia_do_proprio,
+                                                                            pelo_link):
+    # 09/11, 08:22: o link do post antigo abriu "Este vídeo foi removido", e nada marcava o post:
+    # ele seria escolhido de novo em toda tentativa, todo dia. Marcado, a escolha passa ao próximo.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: False)
+    config = {**robo.PADRAO, "robo_pausado": False}
+    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
+    removido = _postado(link="https://exemplo.com/removido", quando="2026-10-28 10:00:00")
+    outro = _postado(link="https://exemplo.com/outro", quando="2026-10-27 10:00:00")
+    agora = momento("2026-11-01 20:05")
+    robo.gravar_estado(treino_semana=robo.semana(agora))
+    assert robo.post_antigo_pendente(agora)["id"] == removido      # o mais novo dos nunca comentados
+    with pytest.raises(robo.Parada) as parada:
+        robo.comentar_post_antigo(CelularDoPost(removido=True), robo.pegar(removido), agora)
+    assert parada.value.motivo == robo.MOTIVO_DO_POST_REMOVIDO
+    assert it.resultado_de(it.marca_do_post("https://exemplo.com/removido"), it.TIPO_DO_REMOVIDO) == "removido"
+    assert robo.post_antigo_pendente(momento("2026-11-01 20:40"))["id"] == outro
+    assert robo.post_antigo_pendente(momento("2026-11-09 20:40"))["id"] == outro
 
 
 def test_erro_no_comentario_nunca_desfaz_o_post_e_o_aviso_diz_so_a_curtida_que_saiu(monkeypatch, avisos):

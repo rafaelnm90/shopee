@@ -6589,6 +6589,7 @@ def _feito_no_feed(marca, estado, agora=None):
 PROCESSO_DO_PROPRIO = "próprio post: comentar"
 PROCESSO_DO_ANTIGO = "post antigo: comentar"
 MOTIVO_DO_POST_EM_ANALISE = "o vídeo do post ainda está em análise na Shopee"
+MOTIVO_DO_POST_REMOVIDO = "o vídeo do post foi removido"
 # Quantos textos do robô, de todos os posts, a IA recebe para não repetir nenhum.
 TEXTOS_GUARDADOS_DO_PROPRIO = 20
 
@@ -6605,7 +6606,9 @@ def _abrir_o_video_do_post(d, link):
         xml = tela(d)
         video = interacoes.video_do_feed(xml)
     if ps.video_removido(xml):
-        raise Parada("o vídeo do post foi removido")
+        # Marcado, o post sai da escolha do post antigo (interacoes.TIPO_DO_REMOVIDO).
+        interacoes.guardar(interacoes.marca_do_post(link), interacoes.TIPO_DO_REMOVIDO, "removido")
+        raise Parada(MOTIVO_DO_POST_REMOVIDO)
     if ps.video_em_analise(xml):
         raise Parada(MOTIVO_DO_POST_EM_ANALISE)
     if not video:

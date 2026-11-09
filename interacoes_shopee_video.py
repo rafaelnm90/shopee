@@ -55,6 +55,10 @@ TENTATIVAS_DO_PROPRIO = 3
 INTERVALO_DO_PROPRIO = timedelta(minutes=30)
 # As marcas do comentário no próprio vídeo, pelo link do post: o de depois do post e o de post antigo.
 TIPO_DO_POST, TIPO_DO_ANTIGO = "proprio_post", "post_antigo"
+# O post que o link abriu como removido ("Este vídeo foi removido"): não há onde comentar, e a
+# escolha do post antigo o deixa de fora. Sem a marca, às 08:22 de 09/11, ele voltaria em toda
+# tentativa, todo dia, e o comentário do dia nunca sairia.
+TIPO_DO_REMOVIDO = "post_removido"
 # O comentário do próprio vídeo que conta como feito: o que apareceu e o enviado sem aparecer
 # (pode ter saído; não é repetido).
 COMENTADOS_NO_PROPRIO = ("comentado", "não confirmado")
@@ -191,9 +195,10 @@ def antigos_hoje(agora=None):
 def escolher_post_antigo(postados, agora=None):
     """
     O post do robô que ganha o comentário do dia, entre os postados nos últimos
-    DIAS_DOS_POSTS_ANTIGOS dias, com o link, que o robô não comenta há DIAS_ENTRE_COMENTARIOS
-    dias (contando o de depois do post): primeiro o que nunca ganhou comentário do robô,
-    depois o comentado há mais tempo; no empate, o mais novo. None sem nenhum.
+    DIAS_DOS_POSTS_ANTIGOS dias, com o link e não removido (TIPO_DO_REMOVIDO), que o robô não
+    comenta há DIAS_ENTRE_COMENTARIOS dias (contando o de depois do post): primeiro o que nunca
+    ganhou comentário do robô, depois o comentado há mais tempo; no empate, o mais novo. None
+    sem nenhum.
     """
     agora = _agora(agora)
     desde = (agora - timedelta(days=DIAS_DOS_POSTS_ANTIGOS)).strftime("%Y-%m-%d %H:%M:%S")
@@ -201,6 +206,8 @@ def escolher_post_antigo(postados, agora=None):
     candidatos = []
     for post in postados:
         if not post.get("link_post") or (post.get("postado_em") or "") < desde:
+            continue
+        if resultado_de(marca_do_post(post["link_post"]), TIPO_DO_REMOVIDO):
             continue
         ultimo = ultimo_comentario(post["link_post"])
         if ultimo and ultimo > corte:
