@@ -139,6 +139,10 @@ def test_descontinuado_nao_fica_na_cascata():
     # ainda responda redirecionado para o modelo novo.
     assert not set(ia.DESCONTINUADOS) & set(ia.MODELOS_CASCATA_GEMINI)
     assert {"gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite-preview"} <= set(ia.DESCONTINUADOS)
+    # Página de descontinuação do Google, 09/11/2026: o 2.5 Flash vai para o 3.5 Flash-Lite e o
+    # 2.5 Pro para o 3.8 Flash em 01/12/2026; o 2.5 Flash-Lite segue sem data.
+    assert {"gemini-2.5-flash", "gemini-2.5-pro"} <= set(ia.DESCONTINUADOS)
+    assert "gemini-2.5-flash-lite" in ia.MODELOS_CASCATA_GEMINI
 
 
 BLOQUEADO = "block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>"
