@@ -7203,6 +7203,49 @@ def test_visualizacoes_achadas_pela_marca_na_grade_rolando_ate_o_fim(monkeypatch
     assert (medicao["com"]["videos"], medicao["sem"]["videos"], medicao["sem_marca"]) == (1, 4, 1)
 
 
+class GradeQueCarrega(AppDaGrade):
+    """A grade cujas capas carregam depois de uns prints (os de antes, quadros de uma cor só)."""
+
+    def __init__(self, telas, prints):
+        super().__init__(telas)
+        self.prints = list(prints)
+
+    def screenshot(self, caminho=None):
+        return self.prints.pop(0) if len(self.prints) > 1 else self.prints[0]
+
+
+def test_visualizacoes_sem_nenhum_achado_dizem_o_que_a_grade_mostrou_e_guardam_o_caso(monkeypatch):
+    # 09/11, 00:39: 0 de 36 achados (31 de 32 na véspera), e nada dizia por quê. Sem nenhuma capa
+    # carregada na tela, o print vai de novo, como no post; sem nenhum achado, o registro diz o
+    # que a grade mostrou e o caso guarda a tela.
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: None)
+    casos = []
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: casos.append((acao, motivo)))
+    agora = momento("2026-10-30 09:00")
+    r = _rascunho("postado", postado_em="2026-10-29 10:00:00", marca=_marca(11))
+    cinza = _tela_da_grade([(361, 1210, None, ["57"]), (722, 1210, None, ["980"])])
+    carregada = _tela_da_grade([(361, 1210, 11, ["57"]), (722, 1210, 12, ["980"])])
+    app = GradeQueCarrega([cinza], [cinza[1], cinza[1], carregada[1]])
+    assert robo.anotar_visualizacoes(app, agora) == (1, 1)                 # achado no 3º print
+    assert robo.pegar(r)["vistas"] == [["2026-10-30 09:00:00", 57]] and not casos
+
+    def registro():
+        return consultar("SELECT detalhe, ok FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
+                         robo.PROCESSO_DAS_VISUALIZACOES)
+
+    # Capas carregadas, mas de outros vídeos: a marca mais perto diz o quanto faltou.
+    outra = _tela_da_grade([(361, 1210, 13, ["57"]), (722, 1210, 14, [])])
+    assert robo.anotar_visualizacoes(AppDaGrade([outra]), agora) == (0, 1)
+    detalhe, ok = registro()
+    assert not ok and detalhe.startswith("0 de 1 vídeo(s); na grade: 2 quadro(s), 1 com o número, 2 com a capa, "
+                                         "a marca mais perto: ")
+    assert casos == [("visualizacoes", robo.MOTIVO_DAS_VISUALIZACOES)]
+    assert robo.passo_do_motivo(robo.MOTIVO_DAS_VISUALIZACOES) == "visualizações na grade"
+    # Nenhuma capa carregou nem depois das esperas.
+    assert robo.anotar_visualizacoes(AppDaGrade([cinza]), agora) == (0, 1)
+    assert registro() == ("0 de 1 vídeo(s); na grade: 2 quadro(s), 2 com o número, 0 com a capa", 0)
+
+
 def test_sem_video_com_marca_nao_abre_o_perfil(monkeypatch):
     monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: pytest.fail("não precisava abrir o Perfil"))
     _rascunho("postado", postado_em="2026-10-29 10:00:00")
