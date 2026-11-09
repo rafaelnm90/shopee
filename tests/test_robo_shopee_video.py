@@ -6548,6 +6548,63 @@ def test_produto_que_nao_fica_no_feito_diz_os_sinais_do_nome(monkeypatch, avisos
     assert _registro_do_anexar()[-1] == ("anexado na 2ª vez", "a linha dos produtos com produto; o nome com dois-pontos")
 
 
+def test_produto_que_nao_fica_no_feito_diz_os_sinais_do_app(monkeypatch, avisos):
+    # 08/11, das 19:04 às 19:31: no começo da noite em que o app travou e a leitura da tela veio sem
+    # ele, 2 produtos diferentes não ficaram seguidos (nem na 2ª vez) e 1 só ficou na 2ª vez. O
+    # registro diz, numa linha à parte de cada um que não fica, quantas vezes o app travou e a leitura
+    # veio sem ele na última hora, e há quantos minutos o app está aberto (só números: o checkup é
+    # público).
+    from datetime import timedelta as intervalo
+    agora = robo.agora_br()
+    registrar = robo.registro_processos.registrar
+    registrar("shopee_video", "app travado", "voltou depois do Aguardar", "1 toque(s)", ok=True,
+              agora=agora - intervalo(minutes=20))
+    registrar("shopee_video", "app travado", "voltou depois do Aguardar", "1 toque(s)", ok=True,
+              agora=agora - intervalo(hours=2))                                # fora da janela
+    registrar("shopee_video", robo.PROCESSO_DA_LEITURA_DA_TELA, "só as barras do Android", "sem o app em 3 releituras",
+              ok=False, agora=agora - intervalo(minutes=10))
+    registrar("shopee_video", robo.PROCESSO_DA_LEITURA_DA_TELA, "só as barras do Android",
+              "o app voltou na 2ª releitura", ok=True, agora=agora - intervalo(minutes=5))
+    app = AppQueReabreALegenda()
+    app.atual = "final"
+
+    def shell(partes):
+        app.comandos.append(partes)
+        saida = {"pidof": "4321", "ps": "     ELAPSED\n  1-02:03:04"}.get(partes[0], "")
+        return type("R", (), {"output": saida})()
+    monkeypatch.setattr(app, "shell", shell)
+    assert not robo.primeiro_na_tela_final(app, 1, "Bolsa de Palha")
+    assert _registro_do_anexar()[-1][0] == "não ficou depois do Feito"
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in sinais] == [
+        ("1ª vez", "na última hora: app travado 1, leitura sem o app 1; o app aberto há 1563 min")]
+    assert ["pidof", robo.ps.PACOTE] in app.comandos and ["ps", "-o", "ETIME", "-p", "4321"] in app.comandos
+    # Sem a leitura do celular, só os números do registro.
+    monkeypatch.setattr(app, "shell", lambda partes: type("R", (), {"output": ""})())
+    assert not robo.primeiro_na_tela_final(app, 2, "Bolsa de Palha")
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert (sinais[-1][2], sinais[-1][3]) == ("2ª vez", "na última hora: app travado 1, leitura sem o app 1")
+
+
+def test_minutos_do_app_pelo_ps_do_android():
+    # O ELAPSED do ps do Android: [[dias-]horas:]minutos:segundos; sem a leitura, None.
+    minutos = robo.casos_robo._minutos_do_elapsed
+    assert (minutos("05:06"), minutos("02:03:04"), minutos("1-00:00:10"), minutos("  12:00:59 ")) == (5, 123, 1440, 720)
+    assert minutos("") is None and minutos("ELAPSED") is None and minutos(None) is None
+
+    class Celular:
+        def __init__(self, pids, saida):
+            self.respostas = {"pidof": pids, "ps": saida}
+
+        def shell(self, partes):
+            return type("R", (), {"output": self.respostas[partes[0]]})()
+
+    assert robo.casos_robo.minutos_do_app(Celular("4321\n", "ELAPSED\n 10:00"), "com.shopee.br") == 10
+    assert robo.casos_robo.minutos_do_app(Celular("", "ELAPSED\n 10:00"), "com.shopee.br") is None
+    assert robo.casos_robo.minutos_do_app(Celular("4321", ""), "com.shopee.br") is None
+    assert robo.casos_robo.minutos_do_app(object(), "com.shopee.br") is None
+
+
 def test_aviso_do_app_le_o_toast_como_o_uiautomator2_da(monkeypatch):
     # No uiautomator2 (3.7.0, requirements.txt) o last_toast é uma propriedade: chamado como
     # função, dava erro, e o robô nunca lia o aviso do app (o produto que não fica depois do Feito,

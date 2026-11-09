@@ -243,14 +243,44 @@ def _acoes_antes(d, pasta):
     return lista
 
 
+def minutos_do_app(d, pacote):
+    """
+    Há quantos minutos o processo do app roda no celular (o ELAPSED do ps do Android), ou None
+    sem a leitura: separa a falha do app aberto há dias da do app recém-aberto.
+    """
+    try:
+        pids = (getattr(d.shell(["pidof", pacote]), "output", "") or "").split()
+        if not pids:
+            return None
+        saida = getattr(d.shell(["ps", "-o", "ETIME", "-p", pids[0]]), "output", "") or ""
+    except Exception:
+        return None
+    linhas = [linha.strip() for linha in saida.splitlines() if linha.strip()]
+    return _minutos_do_elapsed(linhas[-1]) if linhas else None
+
+
+def _minutos_do_elapsed(elapsed):
+    """O ELAPSED do ps ([[dias-]horas:]minutos:segundos) em minutos inteiros; None fora do formato."""
+    achado = re.fullmatch(r"(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)", str(elapsed or "").strip())
+    if not achado:
+        return None
+    dias, horas, minutos, _segundos = (int(parte or 0) for parte in achado.groups())
+    return dias * 24 * 60 + horas * 60 + minutos
+
+
 def _tela_do_celular(d, pasta):
-    """O app e a tela de agora, o print (menor, em JPEG) e a forma da tela (o XML do uiautomator)."""
+    """
+    O app e a tela de agora (com há quantos minutos o app está aberto), o print (menor, em JPEG)
+    e a forma da tela (o XML do uiautomator).
+    """
     app = {}
     try:
         atual = d.app_current() or {}
         app = {"pacote": atual.get("package"), "tela": atual.get("activity")}
     except Exception:
         pass
+    if app.get("pacote"):
+        app["aberto_ha_min"] = minutos_do_app(d, app["pacote"])
     try:
         with open(os.path.join(pasta, "tela.xml"), "w", encoding="utf-8") as f:
             f.write(d.dump_hierarchy())
