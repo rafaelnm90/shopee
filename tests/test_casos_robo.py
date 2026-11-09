@@ -153,6 +153,43 @@ def test_caso_guarda_a_tela_anotada_sem_toque():
     assert "caiu_em" not in antes[1] and open(os.path.join(pasta, antes[1]["tela"]), encoding="utf-8").read() == TELA
 
 
+def test_a_leitura_que_a_conexao_derruba_e_feita_mais_uma_vez(monkeypatch):
+    # 09/11, 04:22: o servidor do uiautomator2 fechou a conexão no meio da leitura da tela
+    # (RemoteDisconnected), e o feed acabou em erro inesperado. A leitura vai mais uma vez e
+    # fica no registro; caída de novo, o erro segue para a rodada. O toque nunca se repete.
+    from http.client import RemoteDisconnected
+
+    import pytest
+    import registro_processos
+    monkeypatch.setattr(casos_robo, "ESPERA_DA_RELEITURA", 0)
+
+    class Instavel(Celular):
+        quedas = 1
+
+        def dump_hierarchy(self):
+            if self.quedas:
+                self.quedas -= 1
+                raise RemoteDisconnected("Remote end closed connection without response")
+            return TELA
+
+        def click(self, *ponto):
+            self.toques.append(ponto)
+            raise RemoteDisconnected("caiu")
+
+    celular = Instavel()
+    d = casos_robo.com_historico(celular)
+    assert d.dump_hierarchy() == TELA
+    linhas = registro_processos.sequencia("shopee_video", "leitura da tela", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas] == [
+        ("a conexão com o celular caiu", "lida de novo (RemoteDisconnected)")]
+    celular.quedas = 2
+    with pytest.raises(RemoteDisconnected):
+        d.dump_hierarchy()
+    with pytest.raises(RemoteDisconnected):
+        d.click(5, 5)
+    assert celular.toques == [(5, 5)]
+
+
 def test_caso_sem_celular_ou_com_o_celular_caido_nao_derruba_a_rodada():
     pasta = casos_robo.guardar(Celular(quebrado=True), "rascunho", "erro", "erro inesperado (ConnectionError)",
                                agora=AGORA)
