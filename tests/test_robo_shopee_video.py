@@ -6612,13 +6612,70 @@ def test_produto_que_nao_fica_no_feito_diz_os_sinais_do_app(monkeypatch, avisos)
     assert _registro_do_anexar()[-1][0] == "não ficou depois do Feito"
     sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in sinais] == [
-        ("1ª vez", "na última hora: app travado 1, leitura sem o app 1; o app aberto há 1563 min")]
+        ("1ª vez", "na última hora: app travado 1, leitura sem o app 1, erro de sistema da Shopee na API 0; "
+                   "o app aberto há 1563 min")]
     assert ["pidof", robo.ps.PACOTE] in app.comandos and ["ps", "-o", "ETIME", "-p", "4321"] in app.comandos
     # Sem a leitura do celular, só os números do registro.
     monkeypatch.setattr(app, "shell", lambda partes: type("R", (), {"output": ""})())
     assert not robo.primeiro_na_tela_final(app, 2, "Bolsa de Palha")
     sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
-    assert (sinais[-1][2], sinais[-1][3]) == ("2ª vez", "na última hora: app travado 1, leitura sem o app 1")
+    assert (sinais[-1][2], sinais[-1][3]) == (
+        "2ª vez", "na última hora: app travado 1, leitura sem o app 1, erro de sistema da Shopee na API 0")
+
+
+def test_sinais_do_anexar_contam_o_erro_de_sistema_da_shopee_e_o_produto_que_fica(monkeypatch, avisos):
+    # 09/11, das 13:08 às 13:37: 4 produtos diferentes seguidos não ficaram, sem o app travar, e na
+    # mesma hora a busca de ofertas da API deu o erro de sistema da própria Shopee; às 14:03 o
+    # seguinte ficou de primeira. A linha dos sinais conta esses erros da API na última hora (os que
+    # a nova tentativa salvou e os negados por ele, de qualquer robô; outro código não conta), e o
+    # produto que fica de primeira ganha a mesma linha, com o app aberto em faixas, para o checkup
+    # comparar os que ficam com os que não ficam.
+    from datetime import timedelta as intervalo
+    agora = robo.agora_br()
+    registrar, api = robo.registro_processos.registrar, robo.api_shopee
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DO_ERRO_DE_SISTEMA, "deu certo na 2ª tentativa", "robo_shopee_video",
+              ok=True, agora=agora - intervalo(minutes=40))
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DA_BUSCA_NEGADA, api.rotulo_do_codigo("10000"), "bot_mestre",
+              ok=False, agora=agora - intervalo(minutes=15))
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DA_BUSCA_NEGADA, api.rotulo_do_codigo("10030"), "bot_mestre",
+              ok=False, agora=agora - intervalo(minutes=10))                  # outro código
+    registrar(api.ROBO_DO_REGISTRO, api.PROCESSO_DA_BUSCA_NEGADA, api.rotulo_do_codigo("10000"), "robo_shopee_video",
+              ok=False, agora=agora - intervalo(hours=2))                     # fora da janela
+    assert api.RESULTADO_DO_ERRO_DE_SISTEMA == "código 10.000" and api.rotulo_do_codigo("") == "sem código"
+    app = AppQueReabreALegenda()
+    app.atual = "final"
+    elapsed = {"ps": "     ELAPSED\n  16:57:04"}
+
+    def shell(partes):
+        return type("R", (), {"output": {"pidof": "4321"}.get(partes[0], elapsed.get(partes[0], ""))})()
+    monkeypatch.setattr(app, "shell", shell)
+    assert not robo.primeiro_na_tela_final(app, 1, "Mala de Bordo")
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert (sinais[-1][2], sinais[-1][3]) == (
+        "1ª vez", "na última hora: app travado 0, leitura sem o app 0, erro de sistema da Shopee na API 2; "
+                  "o app aberto há 1017 min")
+    # O que fica de primeira: a mesma contagem, e o app aberto na faixa de horas.
+    app.com_produto = True
+    assert robo.primeiro_na_tela_final(app, 1, "Mala de Bordo")
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert (sinais[-1][2], sinais[-1][3]) == (
+        robo.FICOU_DE_PRIMEIRA, "na última hora: erro de sistema da Shopee na API 2; o app aberto há 12 a 24 h")
+    # Na 2ª vez, o registro do anexar já diz que ficou; a linha dos sinais não se repete.
+    assert robo.primeiro_na_tela_final(app, 2, "Mala de Bordo")
+    assert len(robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP,
+                                                 "2000-01-01 00:00:00")) == 2
+    # Sem a leitura do celular, só a contagem da API.
+    monkeypatch.setattr(app, "shell", lambda partes: type("R", (), {"output": ""})())
+    assert robo.primeiro_na_tela_final(app, 1, "Mala de Bordo")
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert sinais[-1][3] == "na última hora: erro de sistema da Shopee na API 2"
+
+
+def test_faixas_do_app_aberto():
+    faixa = robo.faixa_do_app_aberto
+    assert [faixa(m) for m in (0, 59, 60, 359, 360, 719, 720, 1439, 1440, 5000)] == [
+        "menos de 1 h", "menos de 1 h", "1 a 6 h", "1 a 6 h", "6 a 12 h", "6 a 12 h", "12 a 24 h", "12 a 24 h",
+        "mais de 1 dia", "mais de 1 dia"]
 
 
 def test_minutos_do_app_pelo_ps_do_android():
