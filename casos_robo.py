@@ -33,6 +33,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import zipfile
 from collections import deque
 from datetime import datetime, timedelta
@@ -63,13 +64,23 @@ MINUTOS_DO_REGISTRO = 30
 # Feito abriu, o aviso do Telegram que pegou um toque). Pedido do Rafael (30/10): o que
 # dificulta achar a causa vira registro. DECISOES.md, Trabalho com o Claude.
 ACOES_DO_CASO = 8
+# A leitura da tela que o servidor do uiautomator2 no celular derruba no meio (a conexão fecha
+# sem resposta, RemoteDisconnected: às 04:22 de 09/11, e o feed acabou em erro inesperado). A
+# biblioteca só religa o servidor dela no erro de HTTP, e esta queda passava direto. A leitura
+# não mexe em nada no celular: é feita mais uma vez depois de ESPERA_DA_RELEITURA segundos (a
+# conexão nova religa o servidor, se ele caiu), e fica no registro. O toque nunca se repete: não
+# dá para saber se ele saiu antes da queda.
+ESPERA_DA_RELEITURA = 3
+ROBO_DO_REGISTRO = "shopee_video"
+PROCESSO_DA_LEITURA = "leitura da tela"
 
 
 class CelularComHistorico:
     """
     O celular do uiautomator2 com as últimas ACOES_DO_CASO ações anotadas (toque, tecla e
     arrasto, com a última tela lida antes de cada uma); todo o resto passa direto para ele.
-    Só anota: não toca, não espera e não lê a tela a mais.
+    Só anota, sem tocar a mais; a leitura da tela que a conexão derruba é feita mais uma vez
+    (ESPERA_DA_RELEITURA).
     """
 
     def __init__(self, d):
@@ -87,7 +98,13 @@ class CelularComHistorico:
         return self._d(*args, **kwargs)
 
     def dump_hierarchy(self, *args, **kwargs):
-        tela = self._d.dump_hierarchy(*args, **kwargs)
+        try:
+            tela = self._d.dump_hierarchy(*args, **kwargs)
+        except ConnectionError as e:
+            time.sleep(ESPERA_DA_RELEITURA)
+            tela = self._d.dump_hierarchy(*args, **kwargs)
+            registro_processos.registrar(ROBO_DO_REGISTRO, PROCESSO_DA_LEITURA, "a conexão com o celular caiu",
+                                         f"lida de novo ({type(e).__name__})", ok=True)
         object.__setattr__(self, "_tela", tela)
         return tela
 
