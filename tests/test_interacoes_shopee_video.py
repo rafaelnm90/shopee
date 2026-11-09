@@ -846,10 +846,16 @@ def test_comentario_do_feed_que_nao_aparece_conta_no_dia_e_o_video_nao_volta(mon
             app.comentarios.clear()
 
     monkeypatch.setattr(app, "click", envia_e_some)
+    # 08/11, 23:38: sem o caso, não deu para ver por que o comentário não apareceu. O caso guarda
+    # o painel logo depois do envio, antes de o robô sair dele.
+    casos = []
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: casos.append(
+        (acao, resultado, motivo, d.atual)))
     assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: comentário enviado sem aparecer na lista"
     marca = it.marca("Loja da Bia", "Mini saia linda")
     assert it.resultado_de(marca, "video_feed") == "não confirmado"
     assert it.quantos_desde("video_feed", it.FEITOS_NO_FEED, "2026-10-24 00:00:00") == 1
+    assert casos == [("feed", "parou", robo.MOTIVO_DO_FEED_SEM_O_COMENTARIO, "painel")]
 
 
 class CelularDoFeedSemComentarios(CelularDoFeed):
