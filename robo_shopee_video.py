@@ -6530,6 +6530,9 @@ def _tela_do_video(d):
         return None
 
 
+MOTIVO_DO_FEED_SEM_O_COMENTARIO = "o comentário não apareceu no vídeo do feed"
+
+
 def _interagir_com(d, video, marca, anteriores, agora=None):
     texto = asyncio.run(interacoes.gerar_comentario(video["legenda"], anteriores, _tela_do_video(d)))
     if texto is None:
@@ -6558,11 +6561,14 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
         raise
     gravar_estado(feed_textos=(anteriores + [texto])[-10:])
     if not apareceu:
-        # Enviado sem aparecer: pode ter saído, então o vídeo não volta e conta no dia.
+        # Enviado sem aparecer: pode ter saído, então o vídeo não volta e conta no dia. O caso
+        # guarda o painel logo depois do envio e os toques até ele: às 23:38 de 08/11, sem o
+        # caso, não deu para ver por que o comentário não apareceu.
         _feito_no_feed(marca, "não confirmado", agora)
         registro_processos.registrar(REGISTRO, "feed: comentar", "não confirmado", "enviado sem aparecer na lista",
                                      ok=False, origem=marca)
-        registrar_tentativa("feed", "parou", "o comentário não apareceu no vídeo do feed", agora=agora)
+        registrar_tentativa("feed", "parou", MOTIVO_DO_FEED_SEM_O_COMENTARIO, agora=agora)
+        _guardar_caso(d, "feed", "parou", MOTIVO_DO_FEED_SEM_O_COMENTARIO, agora=agora)
         return "feed: comentário enviado sem aparecer na lista"
     _feito_no_feed(marca, "comentado", agora)
     registro_processos.registrar(REGISTRO, "feed: comentar", "comentado", ok=True, origem=marca)
