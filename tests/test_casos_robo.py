@@ -68,6 +68,53 @@ def test_caso_guarda_o_motivo_o_titulo_os_produtos_o_print_e_a_tela():
     assert casos_robo.casos() == [os.path.basename(pasta)]
 
 
+class CelularComLog(Celular):
+    """O celular com os processos, o log do Android (logcat) e a versão do app."""
+
+    LOG = [
+        "--------- beginning of main",
+        "10-25 09:56:00.100  4321  4330 I ReactNativeJS: velho demais",
+        "10-25 09:58:10.200  4321  4330 W ReactNativeJS: o produto não entrou",
+        "10-25 09:58:11.300  4400  4410 I Push: recebido",
+        "10-25 09:58:12.000  5000  5010 I Gmail: outro app",
+        "10-25 09:58:13.000  1500  1600 I ActivityTaskManager: START u0 {cmp=com.shopee.br/.Publicar}",
+        "linha sem o formato",
+    ]
+
+    def shell(self, partes):
+        if partes[:2] == ["ps", "-A"]:
+            saida = "  PID NAME\n 4321 com.shopee.br\n 4400 com.shopee.br:push\n 5000 com.google.android.gm\n"
+        elif partes[0] == "logcat":
+            saida = "\n".join(self.LOG)
+        elif partes[0] == "dumpsys":
+            saida = "Packages:\n  Package [com.shopee.br]\n    versionCode=1 minSdk=24\n    versionName=3.61.20\n"
+        else:
+            return super().shell(partes)
+        return type("R", (), {"output": saida})()
+
+
+def test_caso_guarda_o_log_do_app_dos_ultimos_minutos_e_a_versao(monkeypatch):
+    # 09/11, das 13:08 às 13:37: o app não deixou o produto na tela final depois do Feito em 4 vídeos
+    # seguidos, sem aviso na tela. O caso guarda o log do Android dos processos do app e as linhas
+    # do Android que citam o pacote, dos últimos minutos (nada de outro app nem de antes), e a
+    # versão do app.
+    pasta = casos_robo.guardar(CelularComLog(), "rascunho", "pulado", "não ficou", "anexar o produto", agora=AGORA)
+    caso = _caso(pasta)
+    assert caso["app"]["versao"] == "3.61.20" and caso["app"]["log"] == casos_robo.ARQUIVO_DO_LOG
+    with open(os.path.join(pasta, casos_robo.ARQUIVO_DO_LOG), encoding="utf-8") as f:
+        assert f.read().splitlines() == [CelularComLog.LOG[2], CelularComLog.LOG[3], CelularComLog.LOG[5]]
+    # No máximo LINHAS_DO_LOG_DO_APP, as mais novas.
+    monkeypatch.setattr(casos_robo, "LINHAS_DO_LOG_DO_APP", 1)
+    assert casos_robo.log_do_app(CelularComLog(), "com.shopee.br", AGORA) == CelularComLog.LOG[5]
+    # Sem a leitura, o caso fica sem o log e sem a versão.
+    pasta = casos_robo.guardar(Celular(), "rascunho", "pulado", "não ficou", "anexar o produto", agora=AGORA)
+    caso = _caso(pasta)
+    assert caso["app"]["versao"] is None and "log" not in caso["app"]
+    assert not os.path.exists(os.path.join(pasta, casos_robo.ARQUIVO_DO_LOG))
+    assert casos_robo.log_do_app(object(), "com.shopee.br", AGORA) == ""
+    assert casos_robo.versao_do_app(object(), "com.shopee.br") is None
+
+
 def test_caso_leva_os_passos_do_registro_desde_o_comeco_do_rascunho():
     # 29/10, 22:41: o produto curtido não estava em Minhas Curtidas, e o caso não dizia o que o
     # curtir anotou antes. Os passos do registro do rascunho vão junto (textos fixos e números).
