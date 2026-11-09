@@ -107,3 +107,115 @@ def test_respondida_sai_do_privado_com_os_lembretes(monkeypatch):
     assert pr.main(["respondida", "P1"]) == 1 and len(mandadas) == 1          # a segunda vez não mexe em nada
     assert "apaguei daqui a pergunta e os lembretes dela" in pr.texto_da_confirmacao("P2", 3, 3)
     assert pr.texto_da_confirmacao("P2", 0, 0).endswith("Parei de lembrar.")
+
+
+# --- Informações importantes do Claude (pedido do Rafael, 09/11) ---
+
+def test_informacao_lembrada_de_hora_em_hora_ate_o_vi():
+    # "tudo q vc for trazer para mim seja persistente, até eu responder ok": a informação
+    # importante é lembrada como as perguntas, com o próprio código e o botão Vi ✅.
+    pr.nova("Pergunta?", OPCOES, LINK, AGORA)
+    assert pr.nova_informacao("Vendas da semana: 0.\nSeguidores: +3 <subiu>", LINK, AGORA) == "I1"
+    enviados = []
+
+    async def enviar(texto, teclado):
+        enviados.append((texto, teclado))
+        return 900 + len(enviados)
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA)) == 1
+    texto, teclado = enviados[0]
+    assert "Informação importante do Claude" in texto and "(I1)" in texto and LINK in texto
+    assert "Vendas da semana: 0.\nSeguidores: +3 &lt;subiu&gt;" in texto and len(texto) < 4096
+    assert teclado == {"inline_keyboard": [[{"text": "Vi ✅", "callback_data": "info_vi:1"}]]}
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(minutes=59))) == 0
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=1))) == 1 and "Lembrete 2" in enviados[-1][0]
+    assert pr.mensagens_da_informacao("i1") == [901, 902]
+    # A pergunta P1 e a informação I1 não se misturam.
+    assert not pr.marcar_vista("P1") and pr.abertas()[0]["codigo"] == "P1"
+    assert pr.marcar_vista("i1", AGORA) and not pr.marcar_vista("I1")
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=5))) == 0 and pr.informacoes_abertas() == []
+    assert pr.abertas()[0]["codigo"] == "P1"
+
+
+def test_informacao_cifrada_chega_ao_servidor_com_o_vi(monkeypatch):
+    # O repositório e os logs do Actions são públicos: a informação viaja cifrada, como a pergunta.
+    from cryptography.fernet import Fernet
+    import avisar_rafael
+    import registro_privado
+    chave = Fernet.generate_key()
+    monkeypatch.setattr(registro_privado, "chave", lambda: chave)
+    mandados = []
+    monkeypatch.setattr(avisar_rafael, "mandar_texto_com_id",
+                        lambda texto, html=False, teclado=None: mandados.append((texto, html, teclado)) or 601)
+    cifrado = pr.cifrar({"informacao": "Resultado secreto da conferência.", "link": LINK}, chave)
+    assert "secreto" not in cifrado
+    assert pr.main(["informacao", cifrado]) == 0
+    texto, html, teclado = mandados[0]
+    assert html is True and "Resultado secreto da conferência." in texto
+    assert teclado["inline_keyboard"][0][0]["callback_data"] == "info_vi:1"
+    assert pr.informacoes_vencidas(AGORA.replace(year=2000)) == [] and pr.mensagens_da_informacao("I1") == [601]
+
+
+def test_vista_pela_conversa_tira_os_lembretes_e_deixa_o_aviso(monkeypatch):
+    # O "ok" na conversa com o Claude (avisar.yml, vista): os lembretes saem do privado, e o
+    # aviso de onde a informação veio fica, sem o botão, para consulta.
+    import avisar_rafael
+    pr.nova_informacao("Informação.", LINK, AGORA)
+    ids = iter([41, 42, 43])
+
+    async def enviar(texto, teclado):
+        return next(ids)
+    for horas in range(3):
+        rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=horas)))
+    apagadas, editadas, sem_botao = [], [], []
+    # A de 42 passou das 48 h: o Telegram não deixa apagar, e o texto dela vira "vista".
+    monkeypatch.setattr(avisar_rafael, "apagar_mensagem", lambda ident: ident != 42 and not apagadas.append(ident))
+    monkeypatch.setattr(avisar_rafael, "editar_texto", lambda ident, texto: editadas.append((ident, texto)) or True)
+    monkeypatch.setattr(avisar_rafael, "tirar_botoes", lambda ident: sem_botao.append(ident) or True)
+    assert pr.main(["vista", "i1"]) == 0
+    assert apagadas == [43] and editadas == [(42, pr.texto_da_vista("I1"))] and sem_botao == [41]
+    assert pr.main(["vista", "I1"]) == 1 and pr.main(["vista", "P1"]) == 1
+
+
+def test_robo_lembra_a_informacao_e_o_vi_tira_os_lembretes(bm, monkeypatch):
+    pr.nova_informacao("Informação.", LINK)
+    enviados, apagadas = [], []
+
+    async def send_message(chat_id, texto, **k):
+        enviados.append((chat_id, texto, k.get("reply_markup")))
+        return SimpleNamespace(message_id=800 + len(enviados))
+
+    async def delete_message(chat_id, mensagem):
+        apagadas.append(mensagem)
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm.bot, "delete_message", delete_message)
+    rodar(bm.lembrar_perguntas_do_claude())
+    assert enviados[0][0] == bm.ADMIN_ID and "(I1)" in enviados[0][1]
+    botao = enviados[0][2].inline_keyboard[0][0]
+    assert botao.text == "Vi ✅" and botao.callback_data == "info_vi:1"
+    with pr.db.conexao() as con:
+        con.execute("UPDATE informacoes_rafael SET ultimo_aviso = '2000-01-01 00:00:00'")
+    rodar(bm.lembrar_perguntas_do_claude())
+    assert pr.mensagens_da_informacao("I1") == [801, 802]
+    # O Vi ✅ no lembrete 802: a informação fica vista, o 801 sai e o 802 fica, sem o botão.
+    avisos, teclados = [], []
+    mensagem = SimpleNamespace(message_id=802)
+
+    async def tirar(reply_markup=None):
+        teclados.append(reply_markup)
+    mensagem.edit_reply_markup = tirar
+
+    async def responder(texto, **k):
+        avisos.append(texto)
+    clique = SimpleNamespace(data=botao.callback_data, from_user=SimpleNamespace(id=bm.ADMIN_ID), message=mensagem,
+                             answer=responder)
+    rodar(bm.informacao_vista(clique))
+    assert "você viu" in avisos[0] and teclados == [None] and apagadas == [801]
+    assert pr.informacoes_abertas() == []
+    rodar(bm.lembrar_perguntas_do_claude())
+    assert len(enviados) == 2
+    # Outra pessoa não marca.
+    pr.nova_informacao("Outra.", LINK)
+    estranho = SimpleNamespace(data="info_vi:2", from_user=SimpleNamespace(id=bm.ADMIN_ID + 1), message=mensagem,
+                               answer=responder)
+    rodar(bm.informacao_vista(estranho))
+    assert [i["codigo"] for i in pr.informacoes_abertas()] == ["I2"]
