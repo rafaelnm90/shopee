@@ -336,6 +336,10 @@ async def decisao_da_apelacao(callback: types.CallbackQuery):
                 if recorri
                 else "🚫 Anotado: você não vai recorrer. Parei de lembrar desta punição.")
     await callback.answer(resposta if mudou else "Esta punição já estava resolvida.")
+    # O vídeo marcado como Produto Irrelevante pode ser apagado já (P185 1), com o pedido da
+    # gravação (DECISOES.md, Shopee Vídeo). Só na mensagem: o aviso do toque cabe 200 caracteres.
+    punicao = apelacoes.pegar(int(ident)) if mudou and not recorri else None
+    apagar = apelacoes.pedido_para_apagar(punicao["tipo"]) if punicao else ""
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
@@ -343,7 +347,7 @@ async def decisao_da_apelacao(callback: types.CallbackQuery):
     if ident.isdigit():
         await limpar_lembretes(int(ident), getattr(callback.message, "message_id", None))
     if mudou:
-        await callback.message.answer(resposta)
+        await callback.message.answer(resposta + (f"\n\n{apagar}" if apagar else ""))
 
 
 async def limpar_lembretes(ident, tocada):

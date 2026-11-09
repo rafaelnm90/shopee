@@ -1,4 +1,5 @@
 """apelacoes_shopee_video.py: cada punição da Shopee Vídeo ganha o texto do recurso e é lembrada de hora em hora até o Rafael decidir."""
+import html
 from datetime import datetime, timedelta
 
 import apelacoes_shopee_video as ap
@@ -34,6 +35,20 @@ def test_punicao_e_lembrada_de_hora_em_hora_ate_um_dos_botoes():
     assert rodar(ap.lembrar(enviar, AGORA + timedelta(hours=1))) == 1 and "Lembrete 2" in enviados[-1][0]
     assert ap.marcar(ident, ap.NAO_VAI) and not ap.marcar(ident, ap.RECORRIDA)
     assert rodar(ap.lembrar(enviar, AGORA + timedelta(hours=5))) == 0
+
+
+def test_aviso_do_produto_irrelevante_pede_para_apagar_e_gravar_a_tela():
+    # A Central de Ajuda pede que o vídeo marcado como Produto Irrelevante seja apagado (P183), e o
+    # Rafael pediu (09/11) para lembrar de gravar a tela apagando, até o robô aprender (P183 2).
+    aviso = ap.montar_aviso(ap.pegar(_punicao()))
+    assert "seja apagado" in aviso and "só se a Shopee recusar o recurso" in aviso
+    assert html.escape(ap.PEDIDO_DA_GRAVACAO) in aviso and len(aviso) < 4096
+    assert "pode apagar agora" in ap.pedido_para_apagar("Produto Irrelevante")
+    # As outras punições não pedem para apagar.
+    outra = ap.montar_aviso(ap.pegar(ap.guardar("Violação de Propriedade Intelectual", "22/10/2026 10:00:00",
+                                                "Não Recorrido", titulo="Garrafa", agora=AGORA)))
+    assert "seja apagado" not in outra and ap.PEDIDO_DA_GRAVACAO not in outra
+    assert ap.pedido_para_apagar("Violação de Propriedade Intelectual") == ""
 
 
 def test_recorrida_no_app_para_o_lembrete_e_a_mesma_punicao_nao_duplica():

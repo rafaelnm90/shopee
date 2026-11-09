@@ -5186,7 +5186,10 @@ def test_depois_do_ja_recorri_a_saude_e_lida_de_hora_em_hora_ate_o_resultado(mon
                         + original[9:])
     robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 11:40"))
     assert ap.pegar(ident)["situacao"] == "recusada" and not ap.esperando_resultado(momento("2026-10-24 12:00"))
-    assert any("não aceitou o recurso" in a for a in avisos)
+    recusado = next(a for a in avisos if "não aceitou o recurso" in a)
+    # O vídeo do produto irrelevante pode ser apagado já, com o pedido da gravação (pedido do
+    # Rafael, 09/11: até o robô aprender a apagar, P183 2).
+    assert "pode apagar agora" in recusado and ap.PEDIDO_DA_GRAVACAO in recusado
     # Já recorri de mais de 7 dias sem resultado: para de olhar.
     outra = ap.guardar("Contrafeito", "20/10/2026 10:00:00", "Não Recorrido", agora=momento("2026-10-20 11:00"))
     ap.marcar(outra, ap.RECORRIDA, momento("2026-10-20 12:00"))
@@ -6863,8 +6866,8 @@ def test_punicao_de_outro_tipo_nao_mexe_nos_produtos_a_mais(avisos):
     robo.parar_os_produtos_a_mais({"tipo": "Produto Irrelevante", "data": "23/10/2026 19:04:25"})
     assert "O vídeo punido" not in avisos[-1] and "Não achei o rascunho do robô desse vídeo." in avisos[-1]
     robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(robo_produtos_a_mais=True))
-    assert robo.PUNICAO_DE_PRODUTO not in "Violação de Propriedade Intelectual".casefold()
-    assert robo.PUNICAO_DE_PRODUTO in "Produto Irrelevante".casefold()
+    assert not robo.apelacoes.de_produto("Violação de Propriedade Intelectual")
+    assert robo.apelacoes.de_produto("Produto Irrelevante")
 
 
 def test_rascunho_guarda_as_fotos_de_capa_para_o_album(monkeypatch, tmp_path):

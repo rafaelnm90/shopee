@@ -84,6 +84,15 @@ CHAVE_DA_SAUDE = "shopee_video_robo"
 # Fontes que são vídeos do próprio Rafael: só nelas o texto pode dizer que o vídeo é dele.
 FONTES_PROPRIAS = ("autorais",)
 CALLBACK_RECORRI, CALLBACK_NAO_VAI = "apel_ok:", "apel_nao:"
+# A punição por produto que não é o do vídeo: o app escreve "Produto Irrelevante" (a regra 2
+# das diretrizes, conteúdo irrelevante). A Central de Ajuda pede que o vídeo marcado assim seja
+# apagado; senão, a conta pode ser banida.
+PUNICAO_DE_PRODUTO = "irrelevante"
+# Enquanto o robô não sabe apagar o vídeo marcado (P183 2: ele aprende o caminho pelo vídeo do
+# Rafael apagando um), o aviso da punição, o Não vou recorrer e o recurso recusado lembram de
+# gravar a tela na hora de apagar. Pedido do Rafael (09/11): DECISOES.md, Shopee Vídeo.
+PEDIDO_DA_GRAVACAO = ("📹 Pedido do Claude (P183): na hora de apagar este vídeo, grave a tela do celular apagando "
+                      "ele e mande na conversa com o Claude. Assim o robô aprende a apagar sozinho.")
 
 
 def _momento(agora=None):
@@ -408,6 +417,22 @@ def texto_para_copiar(p):
     return ""
 
 
+def de_produto(tipo):
+    """A punição é a do produto irrelevante, cujo vídeo precisa ser apagado?"""
+    return PUNICAO_DE_PRODUTO in (tipo or "").casefold()
+
+
+def pedido_para_apagar(tipo):
+    """
+    Texto simples para a hora em que o vídeo pode ser apagado (Não vou recorrer ou o recurso
+    recusado): só na punição de produto irrelevante, com o pedido da gravação; nas outras, nada.
+    """
+    if not de_produto(tipo):
+        return ""
+    return ("🗑️ A Shopee pede que o vídeo marcado como Produto Irrelevante seja apagado: pode apagar agora.\n\n"
+            + PEDIDO_DA_GRAVACAO)
+
+
 def montar_aviso(p):
     """O aviso em HTML: a punição, o vídeo, o texto para copiar com um toque e onde colar."""
     avisos = p.get("avisos") or 0
@@ -426,8 +451,12 @@ def montar_aviso(p):
                    f"<code>{html.escape(texto)}</code>"]
     linhas += ["", "📲 No app: Notificações (ou Eu → Criadores &amp; Afiliados → Saúde do Vídeo) → o vídeo → "
                    "<b>Apelar aqui</b> → cole em Razão para apelar → <b>Enviar</b>. Não apague o vídeo enquanto o "
-                   "recurso estiver em análise.",
-               "", "Lembro de hora em hora até você tocar num dos botões abaixo."]
+                   "recurso estiver em análise."]
+    if de_produto(p["tipo"]):
+        linhas += ["", "🗑️ A Shopee pede que o vídeo marcado como Produto Irrelevante seja apagado: se não for "
+                       "recorrer, pode apagar logo; se recorrer, só se a Shopee recusar o recurso (eu aviso aqui).",
+                   "", html.escape(PEDIDO_DA_GRAVACAO)]
+    linhas += ["", "Lembro de hora em hora até você tocar num dos botões abaixo."]
     return "\n".join(linhas)
 
 
