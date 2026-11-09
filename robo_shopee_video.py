@@ -4373,10 +4373,11 @@ def itens_postados():
 # aberta por cima (a legenda já escrita, em foco e com o texto marcado pela cópia) e a linha dos
 # produtos vazia. Por isso os produtos vão antes da legenda, e o 1º anexado é conferido na tela
 # final: sem ele, o robô o anexa de novo, uma vez (VEZES_DO_PRIMEIRO_PRODUTO). O que não fica
-# nem na 2ª vez conta como do produto: em 07/11 (06:09 e 06:52) o mesmo produto não ficou nas
-# 4 vezes, e os 13 outros do dia anterior ficaram de primeira. O vídeo fica de lado, como o do
-# produto que não aparece, e não volta na rodada seguinte (a regra de 23/10:
-# DECISOES.md, Shopee Vídeo). Em 08/11, com o app instável, foi da hora (sinais_do_app). A tela de logo depois do Feito (ESPERA_LOGO_DEPOIS_DO_FEITO) vai
+# nem na 2ª vez não é problema do vídeo: a falha vem em rajadas (07/11 às 6h e das 16h às 17h,
+# 08/11 às 19h, 09/11 às 13h, com 4 produtos diferentes seguidos), e fora delas todos ficam. O
+# vídeo volta como nas outras falhas que não são dele: o mesmo vídeo nas rodadas seguintes, até
+# TENTATIVAS_A_MAIS vezes, e depois fica de lado só no dia (escolha do Rafael, P182 1:
+# DECISOES.md, Shopee Vídeo). A tela de logo depois do Feito (ESPERA_LOGO_DEPOIS_DO_FEITO) vai
 # para o caso e, em rótulos fixos, para o registro: um aviso do app na tela some antes da conferência.
 VEZES_DO_PRIMEIRO_PRODUTO = 2
 MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU = ("o produto anexado pelo Adicionar não ficou na tela final depois do Feito, "
@@ -4414,10 +4415,10 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
             # O Feito não deixou o produto na tela final: ele sai da conta e vai de novo.
             anexados.clear()
         else:
-            # O produto que o app não deixa na tela final nem na 2ª vez: o vídeo fica de lado.
+            # O produto que o app não deixa na tela final nem na 2ª vez: a falha é da hora, e o
+            # vídeo volta mais tarde (P182 1).
             aviso = _AVISO_DO_FEITO["texto"]
-            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU + (f"; o app avisou: {aviso}" if aviso else ""),
-                         do_video=True)
+            raise Parada(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU + (f"; o app avisou: {aviso}" if aviso else ""))
     return anexados, no_post
 
 

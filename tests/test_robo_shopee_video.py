@@ -4198,10 +4198,10 @@ def _linhas_do_botao():
 
 
 def test_preparar_1_agora_sem_os_a_mais_conta_o_rascunho_pelo_tempo_medido(monkeypatch, avisos):
-    # No Preparar 1 Agora das 16:40 de 07/11, o 1º vídeo ficou de lado aos 7 min da rodada (o app
-    # não deixou o produto depois do Feito), e o robô não tentou o 2º: contava 25 min para um
-    # rascunho. Sem os produtos a mais (8 pontos, P145), os rascunhos levam de 5 a 15 min (registro
-    # "tempo do rascunho"): aos 7 min ainda cabe outro vídeo.
+    # No Preparar 1 Agora das 16:40 de 07/11, o 1º vídeo ficou de lado aos 7 min da rodada, e o robô
+    # não tentou o 2º: contava 25 min para um rascunho. Sem os produtos a mais (8 pontos, P145), os
+    # rascunhos levam de 5 a 15 min (registro "tempo do rascunho"): aos 7 min ainda cabe outro vídeo
+    # quando a parada é do vídeo (aqui, a IA viu outro produto nele).
     robo.gravar_estado(saude_pontos=8, saude_lida_em=datetime.now(robo.fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
     assert robo.minutos_de_um_rascunho() == robo.MINUTOS_DE_UM_RASCUNHO_SEM_OS_A_MAIS == 15
     _relogio_da_rodada(monkeypatch, 0, 7 * 60)
@@ -4211,7 +4211,7 @@ def test_preparar_1_agora_sem_os_a_mais_conta_o_rascunho_pelo_tempo_medido(monke
     def preparar(d, config, agora=None):
         vezes.append(1)
         if len(vezes) == 1:
-            raise robo.Parada(robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU, do_video=True)
+            raise robo.Parada(robo.ps.MOTIVO_OUTRO_PRODUTO, do_video=True)
         return "rascunho salvo"
 
     monkeypatch.setattr(robo, "preparar_rascunho", preparar)
@@ -4228,7 +4228,7 @@ def test_preparar_1_agora_com_os_a_mais_ainda_conta_25_min(monkeypatch, avisos):
     _relogio_da_rodada(monkeypatch, 0, 7 * 60)
 
     def preparar(d, config, agora=None):
-        raise robo.Parada(robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU, do_video=True)
+        raise robo.Parada(robo.ps.MOTIVO_OUTRO_PRODUTO, do_video=True)
 
     monkeypatch.setattr(robo, "preparar_rascunho", preparar)
     with pytest.raises(robo.Parada) as erro:
@@ -6454,18 +6454,22 @@ def _registro_do_anexar():
 LOGO_DEPOIS_DO_FEITO = "; logo depois do Feito: a tela final, a linha dos produtos vazia; a edição da legenda aberta por cima"
 
 
-def test_video_do_produto_que_nao_fica_na_tela_final_fica_de_lado(monkeypatch, avisos):
-    # 07/11, 06:09 e 06:52: o mesmo produto não ficou na tela final depois do Feito nas 4 vezes (2
-    # rodadas), e os outros 13 do dia anterior ficaram de primeira. O vídeo fica de lado na 1ª
-    # rodada, como o do produto que não aparece (regra de 23/10), e não volta.
+def test_video_do_produto_que_nao_fica_na_tela_final_volta_mais_tarde(monkeypatch, avisos):
+    # P182 1 (09/11): o produto que o app não deixa na tela final depois do Feito, nem na 2ª vez, vem
+    # em rajadas (das 13:08 às 13:37 de 09/11, 4 produtos diferentes seguidos; às 14:03 o seguinte
+    # ficou de primeira): a falha é da hora, não do vídeo. Ele volta como nas outras falhas que não
+    # são do vídeo: o mesmo vídeo na rodada seguinte, sem ficar de lado.
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
     app = AppQueReabreALegenda(perdidos=5)
-    resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    resultado = robo.rodada(d=app, agora=agora)
     assert robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU in resultado and robo.esperando_aprovacao() == []
-    assert [r["id_video"] for r in robo.listar("pulado")] == ["a1"]
-    assert app.toques.count("Feito") == robo.VEZES_DO_PRIMEIRO_PRODUTO
-    assert robo.proximo_video(robo.ler_config()) is None
+    assert robo.listar("pulado") == [] and app.toques.count("Feito") == robo.VEZES_DO_PRIMEIRO_PRODUTO
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    # Na rodada seguinte, com o app de volta ao normal, o mesmo vídeo vira rascunho.
+    assert robo.rodada(d=AppQueReabreALegenda(), agora=agora) == "rascunho salvo"
+    assert [r["id_video"] for r in robo.listar("rascunho")] == ["a1"]
 
 
 def test_tela_de_logo_depois_do_feito_vai_para_o_caso(monkeypatch, avisos):
@@ -6519,9 +6523,9 @@ def test_primeiro_produto_que_nao_fica_nem_na_segunda_vez_para_o_rascunho(monkey
     app = AppQueReabreALegenda(perdidos=5)
     with pytest.raises(robo.Parada) as parada:
         _anexar_no_app(app)
-    # O produto que não fica nem na 2ª vez é do produto, não da hora (07/11, 06:09 e 06:52: o mesmo
-    # produto nas 4 vezes): o vídeo fica de lado, como o do produto que não aparece.
-    assert parada.value.motivo == robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU and parada.value.do_video
+    # O produto que não fica nem na 2ª vez é falha da hora, não do vídeo (P182 1): o vídeo volta
+    # mais tarde, como nas outras falhas que não são dele.
+    assert parada.value.motivo == robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU and not parada.value.do_video
     assert robo.passo_do_motivo(parada.value.motivo) == "anexar o produto"
     assert app.toques.count("Feito") == robo.VEZES_DO_PRIMEIRO_PRODUTO and "@et_caption" not in app.toques
     assert [r[0] for r in _registro_do_anexar()] == ["não ficou depois do Feito"] * robo.VEZES_DO_PRIMEIRO_PRODUTO
