@@ -1,8 +1,9 @@
 """
 Manda um aviso curto no privado do Rafael pelo bot principal. Usado pelo
 workflow avisar.yml para o lembrete diário das pendências e os pedidos de ajuda
-do Claude (as perguntas do Claude vão pelo perguntas_rafael.py, que usa o
-mandar_texto). O tela_android.py
+do Claude (as perguntas e as informações importantes do Claude vão pelo
+perguntas_rafael.py, que usa o mandar_texto_com_id, o apagar_mensagem, o editar_texto e
+o tirar_botoes). O tela_android.py
 usa o mandar_texto para levar o link da tela do Android, o
 postador_shopee_video.py usa o mandar_foto para o print do rascunho, e o
 robo_shopee_video.py usa o mandar_video para o vídeo que o Google recusou.
@@ -65,15 +66,18 @@ def _chamar(metodo, campos):
         return json.loads(r.read().decode())
 
 
-def mandar_texto_com_id(texto, html=False):
+def mandar_texto_com_id(texto, html=False, teclado=None):
     """
     Manda um texto no privado do Rafael e devolve o id da mensagem, para apagar depois
     (True se o Telegram aceitou sem dizer o id; None se recusou). html=True: o texto vem
-    em HTML (negrito, o <code> que copia com um toque).
+    em HTML (negrito, o <code> que copia com um toque). teclado: os botões embaixo da
+    mensagem, no formato do Bot API (ex.: o Vi ✅ das informações do perguntas_rafael).
     """
     campos = {"text": texto, "disable_web_page_preview": "true"}
     if html:
         campos["parse_mode"] = "HTML"
+    if teclado:
+        campos["reply_markup"] = json.dumps(teclado, ensure_ascii=False)
     resposta = _chamar("sendMessage", campos)
     if not resposta.get("ok"):
         return None
@@ -97,6 +101,14 @@ def editar_texto(ident, texto):
     """Troca o texto de uma mensagem do bot no privado (o que já não dá para apagar)."""
     try:
         return bool(_chamar("editMessageText", {"message_id": ident, "text": texto}).get("ok"))
+    except Exception:
+        return False
+
+
+def tirar_botoes(ident):
+    """Tira os botões de uma mensagem do bot no privado (o texto fica)."""
+    try:
+        return bool(_chamar("editMessageReplyMarkup", {"message_id": ident}).get("ok"))
     except Exception:
         return False
 

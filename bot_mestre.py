@@ -17720,6 +17720,50 @@ async def lembrar_perguntas_do_claude():
         logger.info(f"❓ [Perguntas do Claude] {enviados} lembrete(s) no privado.")
         registro_processos.registrar("bot_mestre", "lembrete de pergunta do Claude", "enviado", str(enviados), ok=True)
 
+    # As informações importantes do Claude, do mesmo jeito, até o Vi ✅ (pedido do Rafael, 09/11).
+    async def enviar_com_botao(texto, teclado):
+        botoes = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(**botao) for botao in linha]
+                                                       for linha in teclado["inline_keyboard"]])
+        mensagem = await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True,
+                                          reply_markup=botoes)
+        return mensagem.message_id
+    informacoes = await perguntas_rafael.lembrar_informacoes(enviar_com_botao)
+    if informacoes:
+        logger.info(f"📌 [Informações do Claude] {informacoes} lembrete(s) no privado.")
+        registro_processos.registrar("bot_mestre", "lembrete de informação do Claude", "enviado", str(informacoes),
+                                     ok=True)
+
+
+@dp.callback_query(F.data.startswith(perguntas_rafael.CALLBACK_VI))
+async def informacao_vista(callback: types.CallbackQuery):
+    """
+    O Vi ✅ da informação importante do Claude: os lembretes param e saem do privado; fica a
+    mensagem tocada, sem o botão. Pedido do Rafael (09/11): DECISOES.md, Trabalho com o Claude.
+    """
+    if callback.from_user is None or callback.from_user.id != ADMIN_ID:
+        return
+    ident = callback.data.split(":", 1)[1]
+    cod = perguntas_rafael.codigo_da_informacao(ident) if ident.isdigit() else ""
+    mudou = bool(cod) and perguntas_rafael.marcar_vista(cod)
+    await callback.answer("✅ Anotado: você viu. Parei de lembrar." if mudou else "Esta informação já estava vista.")
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if not cod:
+        return
+    _fica, sair = perguntas_rafael.lembretes_para_tirar(cod, getattr(callback.message, "message_id", None))
+    for mensagem in sair:
+        try:
+            await bot.delete_message(ADMIN_ID, mensagem)
+        except Exception:
+            # Mais de 48 h: o Telegram não deixa apagar; o texto vira "vista".
+            try:
+                await bot.edit_message_text(perguntas_rafael.texto_da_vista(cod), chat_id=ADMIN_ID,
+                                            message_id=mensagem)
+            except Exception:
+                pass
+
 
 # --- Monitor de saúde ---
 # Checa a cada hora e só fala quando há problema; cada tipo de alerta repete no

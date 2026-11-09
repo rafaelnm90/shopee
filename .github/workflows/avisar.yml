@@ -7,6 +7,12 @@ name: Avisar o Rafael
 #               o servidor guarda, manda na hora e o bot_mestre lembra de hora em hora
 #               até ela ser respondida; o log mostra só o código (P1, P2...);
 #   respondida  o código da pergunta em "dados": os lembretes param.
+#   informacao  uma informação importante do Claude, cifrada em "dados" (perguntas_rafael.py cifrar,
+#               o JSON com "informacao"): o servidor guarda, manda na hora com o botão Vi ✅ e o
+#               bot_mestre lembra de hora em hora até o Rafael dizer que viu; o log mostra só o
+#               código (I1, I2...);
+#   vista       o código da informação em "dados" (o "ok" do Rafael na conversa): os lembretes
+#               param e saem do privado.
 #   print       o print da tela final e o 1º quadro do vídeo do rascunho mais novo esperando a
 #               aprovação, feito desde "dados" (AAAA-MM-DDTHH:MM, opcional), para o Rafael conferir a
 #               capa (robo_shopee_video.py --print-do-rascunho); o log mostra só o horário do rascunho.
@@ -16,15 +22,16 @@ name: Avisar o Rafael
 # Só roda à mão (run_workflow).
 #
 # O repositório é público, e os logs e as entradas do Actions também: o assunto vai
-# em poucas palavras, sem dado privado, e a pergunta e o acesso vão cifrados com a chave do servidor.
+# em poucas palavras, sem dado privado, e a pergunta, a informação e o acesso vão cifrados com a
+# chave do servidor.
 on:
   workflow_dispatch:
     inputs:
       acao:
-        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada), respondida, print (do rascunho mais novo) ou acesso (cifrado)"
+        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada), respondida, informacao (cifrada), vista, print (do rascunho mais novo) ou acesso (cifrado)"
         required: false
         type: choice
-        options: [aviso, pergunta, respondida, print, acesso]
+        options: [aviso, pergunta, respondida, informacao, vista, print, acesso]
         default: aviso
       assunto:
         description: "Só no aviso: assunto em poucas palavras e sem dado privado"
@@ -35,7 +42,7 @@ on:
         required: false
         type: string
       dados:
-        description: "pergunta e acesso: o texto cifrado; respondida: o código (ex.: P3); print: desde quando (AAAA-MM-DDTHH:MM)"
+        description: "pergunta, informacao e acesso: o texto cifrado; respondida e vista: o código (ex.: P3, I3); print: desde quando (AAAA-MM-DDTHH:MM)"
         required: false
         type: string
 
@@ -65,6 +72,8 @@ jobs:
             case "$ACAO" in
               pergunta) venv/bin/python3 perguntas_rafael.py nova "$DADOS" ;;
               respondida) venv/bin/python3 perguntas_rafael.py respondida "$DADOS" ;;
+              informacao) venv/bin/python3 perguntas_rafael.py informacao "$DADOS" ;;
+              vista) venv/bin/python3 perguntas_rafael.py vista "$DADOS" ;;
               print) venv/bin/python3 robo_shopee_video.py --print-do-rascunho "$DADOS" ;;
               acesso) venv/bin/python3 painel_acessos.py guardar "$DADOS" ;;
               *) venv/bin/python3 avisar_rafael.py "$ASSUNTO" "$LINK" ;;
