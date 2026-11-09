@@ -1391,6 +1391,45 @@ def test_saude_em_relatorio_geral_lembra_as_punicoes_e_os_botoes_param(bm, Msg, 
     assert len(enviados) == 3
 
 
+def test_nao_vou_recorrer_no_produto_irrelevante_pede_para_apagar_e_gravar(bm, Msg, monkeypatch):
+    # P185 1: sem recurso, o vídeo marcado como Produto Irrelevante pode ser apagado já; até o
+    # robô aprender (P183 2), o Rafael apaga gravando a tela (pedido dele, 09/11).
+    from types import SimpleNamespace
+    sv = _painel(bm)
+
+    class Bot:
+        async def delete_message(self, chat, mensagem):
+            pass
+    monkeypatch.setattr(sv, "bot_instance", Bot())
+
+    def tocar(ident):
+        avisos, mensagens = [], []
+        mensagem = Msg()
+        mensagem.message_id = 1
+
+        async def editar(reply_markup=None):
+            pass
+        mensagem.edit_reply_markup = editar
+
+        async def responder(texto, **k):
+            mensagens.append(texto)
+        mensagem.answer = responder
+
+        async def avisar(texto, **k):
+            avisos.append(texto)
+        clique = SimpleNamespace(data=f"{sv.apelacoes.CALLBACK_NAO_VAI}{ident}", message=mensagem, answer=avisar,
+                                 from_user=SimpleNamespace(id=bm.ADMIN_ID))
+        rodar(sv.decisao_da_apelacao(clique))
+        # O aviso do toque cabe nos 200 caracteres do Telegram; o pedido vai só na mensagem.
+        assert len(avisos[0]) <= 200 and "não vai recorrer" in mensagens[0]
+        return mensagens[0]
+    irrelevante = sv.apelacoes.guardar("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido", titulo="Garrafa")
+    texto = tocar(irrelevante)
+    assert "pode apagar agora" in texto and sv.apelacoes.PEDIDO_DA_GRAVACAO in texto
+    outra = sv.apelacoes.guardar("Contrafeito", "22/10/2026 10:00:00", "Não Recorrido", titulo="Caneca")
+    assert "apagar" not in tocar(outra)
+
+
 def _comandos(sv, monkeypatch, criada=0, voltas_ativa=1):
     """O systemd falso: o systemd-run devolve `criada`; a unidade fica ativa por `voltas_ativa` consultas."""
     pedidos = []

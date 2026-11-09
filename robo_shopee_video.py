@@ -2416,7 +2416,7 @@ def ler_saude(d, agora=None):
                               (rascunho or {}).get("fonte") or "", texto, observacao,
                               pode_apelar=detalhe["pode_apelar"], agora=agora)
             novas += 1
-            if PUNICAO_DE_PRODUTO in punicao["tipo"].casefold():
+            if apelacoes.de_produto(punicao["tipo"]):
                 parar_os_produtos_a_mais(punicao, rascunho)
         if not andou:
             completa = True
@@ -2429,8 +2429,9 @@ def ler_saude(d, agora=None):
         avisar(f"🎉 Robô da Shopee Vídeo: o recurso da punição {p['tipo']} ({p['data_punicao']}) deu certo: a Shopee "
                "a tirou ou marcou como aceita na Saúde do Vídeo. Parei de lembrar dela.")
     for p in recusadas:
+        apagar = apelacoes.pedido_para_apagar(p["tipo"])
         avisar(f"❌ Robô da Shopee Vídeo: a Shopee não aceitou o recurso da punição {p['tipo']} ({p['data_punicao']}). "
-               "Os pontos dela continuam na Saúde do Vídeo.")
+               "Os pontos dela continuam na Saúde do Vídeo." + (f"\n\n{apagar}" if apagar else ""))
     gravar_estado(saude_lida_em=_momento(agora), saude_pontos=pontos, saude_punicoes=len(vistas))
     _sair_sem_salvar(d)
     return novas, len(vistas), pontos
@@ -4122,9 +4123,6 @@ def _curtir_os_produtos(d, video, produtos, curtidos):
     return feitos[::-1]
 
 
-# A punição por produto que não é o do vídeo: o app escreve "Produto Irrelevante" (a regra 2
-# das diretrizes, conteúdo irrelevante).
-PUNICAO_DE_PRODUTO = "irrelevante"
 CAMINHO_DOS_PRODUTOS_A_MAIS = "Shopee Vídeo 🎬 → Robô Automático 🤖 → Produtos a Mais 🛍️"
 
 
