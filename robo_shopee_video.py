@@ -1567,7 +1567,10 @@ def fechar_o_painel_do_android(d):
 
 # A leitura da tela que traz só as barras do Android (a de cima e a de baixo) e nada do app: no
 # Motorola, em 06/11/2026, às 19:31, com uma live tocando no Para você, a leitura veio assim com o
-# app aberto na tela, e o feed parou sem "ver" a aba. A tela é lida de novo antes de seguir.
+# app aberto na tela, e o feed parou sem "ver" a aba. A tela é lida de novo antes de seguir. A
+# leitura que nem assim traz o app não conta como falha no registro: o passo que precisava dela é
+# que para, e conta lá (no checkup de 08/11, 4 leituras assim, com vídeo tocando no feed e no
+# próprio post, e nenhuma parada); o registro diz que app estava na frente (_quem_esta_na_frente).
 RELEITURAS_SEM_O_APP, ESPERA_SEM_O_APP = 3, 2
 PROCESSO_DA_LEITURA_DA_TELA = "leitura da tela"
 
@@ -1588,11 +1591,32 @@ def _reler_sem_o_app(d, xml):
         vezes += 1
         xml = d.dump_hierarchy()
     if vezes:
-        voltou = not so_as_barras_do_android(xml)
-        registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, "só as barras do Android",
-                                     f"o app voltou na {vezes}ª releitura" if voltou
-                                     else f"sem o app em {vezes} releituras", ok=voltou)
+        if not so_as_barras_do_android(xml):
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, "só as barras do Android",
+                                         f"o app voltou na {vezes}ª releitura", ok=True)
+        else:
+            frente = _quem_esta_na_frente(d)
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, "só as barras do Android",
+                                         f"sem o app em {vezes} releituras" + (f"; na frente: {frente}" if frente else ""),
+                                         ok=None)
     return xml
+
+
+def _quem_esta_na_frente(d):
+    """
+    O app na frente do celular, em rótulos fixos (o registro é público): "a Shopee (a tela dela)",
+    "o Android" ou "outro app"; "" sem a leitura.
+    """
+    try:
+        atual = d.app_current() or {}
+    except Exception:
+        return ""
+    pacote, atividade = atual.get("package") or "", atual.get("activity") or ""
+    if pacote == ps.PACOTE:
+        return f"a Shopee ({atividade.rsplit('.', 1)[-1]})" if atividade else "a Shopee"
+    if pacote == ps.PACOTE_SISTEMA:
+        return "o Android"
+    return "outro app" if pacote else ""
 
 
 def tela(d, seguir=False):

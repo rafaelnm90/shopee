@@ -3028,6 +3028,41 @@ def test_leitura_so_com_as_barras_do_android_e_feita_de_novo(monkeypatch):
     assert len(_registro_da_leitura()) == 2
 
 
+def test_leitura_que_nao_traz_o_app_nao_conta_como_falha_e_diz_quem_esta_na_frente(monkeypatch):
+    # Checkup de 08/11: 4 leituras sem o app nem relidas, com vídeo tocando no feed e no próprio
+    # post, e nenhuma parada; o checkup as contava como falha 2 dias seguidos. A leitura sem o app
+    # não é falha (o passo que precisava dela é que para, e conta lá), e o registro diz que app
+    # estava na frente, para conferir que era o vídeo tocando.
+    monkeypatch.setattr(robo, "pausa", lambda s: None)
+
+    class Celular(CelularSoComAsBarras):
+        def __init__(self, atual):
+            super().__init__(99)
+            self.atual = atual
+
+        def app_current(self):
+            if self.atual is None:
+                raise ConnectionError("caiu")
+            return self.atual
+
+    for atual, frente in (({"package": robo.ps.PACOTE, "activity": "com.shopee.sz.video.VideoActivity"},
+                           "; na frente: a Shopee (VideoActivity)"),
+                          ({"package": robo.ps.PACOTE_SISTEMA, "activity": ""}, "; na frente: o Android"),
+                          ({"package": "com.outro.app", "activity": "x.Tela"}, "; na frente: outro app"),
+                          (None, "")):
+        with pytest.raises(robo.Parada):
+            robo.tocar(Celular(atual), robo.ABA_PARA_VOCE, 0)
+        assert _registro_da_leitura()[-1] == ("só as barras do Android",
+                                              f"sem o app em {robo.RELEITURAS_SEM_O_APP} releituras{frente}")
+    oks = consultar("SELECT COUNT(*), SUM(ok IS NULL) FROM registro_processos WHERE processo = ?",
+                    robo.PROCESSO_DA_LEITURA_DA_TELA)
+    assert oks == (4, 4)
+    # A que volta continua contando como acerto.
+    robo.tocar(CelularSoComAsBarras(1), robo.ABA_PARA_VOCE, 0)
+    assert consultar("SELECT ok FROM registro_processos WHERE processo = ? ORDER BY id DESC",
+                     robo.PROCESSO_DA_LEITURA_DA_TELA) == (1,)
+
+
 def _post_sem_o_link(monkeypatch, ident, agora, links=()):
     """
     O publicar com o celular de mentira e o link do post que não sai na hora: cada busca devolve o
