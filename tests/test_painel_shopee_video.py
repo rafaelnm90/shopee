@@ -473,21 +473,26 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     # Escolha do Rafael (30/10, P107): a frase numa faixa, na cor principal do produto (P159 2); a
     # foto aumenta até tampar a largura toda da capa (06/11, P168).
     assert "aumenta até tampar a largura toda da capa" in texto and "faixa na cor principal do produto" in texto
-    # P169 1: a quadrada (a maioria, com a frase em cima) estica até 15%, e o resto fica com a foto desfocada.
-    assert "a foto quadrada, a maioria, estica até 15% na largura" in texto and "a própria foto desfocada" in texto
+    # P169 1 e P196 1: com só o fio fino embaixo, a quadrada (a maioria) perde só uns 1% de cada lado; a de
+    # outro formato estica até 15%, e o resto fica com a foto desfocada.
+    assert "a foto quadrada, a maioria, perde só uns 1% de cada lado" in texto and "a própria foto desfocada" in texto
+    assert "estica até 15% na largura" not in texto
     assert "um pouco menor" not in texto
-    # Escolhas do Rafael (10/11, P188 2 e P189 B): a frase numa faixa no alto da capa, à esquerda da
-    # sacolinha, num tamanho harmônico (print de 07/11, 02:49), e o número na faixa de baixo, longe
-    # dela, até o fim da capa; no vídeo aberto, a mesma faixa, com a frase parada. Nada no preto.
+    # Escolhas do Rafael (10/11, P188 2, P189 B e P196 1): a frase numa faixa no alto da capa, à esquerda
+    # da sacolinha, num tamanho harmônico (print de 07/11, 02:49), e embaixo só um fio fino, como no
+    # vídeo aberto, com o número em cima da foto, longe da frase; no vídeo aberto, a mesma faixa, com a
+    # frase parada. Nada no preto.
     assert "o robô escreve no alto da capa" in texto and "fica à esquerda da sacolinha da Shopee" in texto
-    assert "outra faixa na mesma cor, até o fim da capa" in texto and "num tamanho harmônico, em duas linhas" in texto
-    assert "fica na faixa de baixo, longe da frase (escolha sua, P188), na mesma cor dela" in texto
+    assert "só um fio fino na mesma cor, como no vídeo aberto (escolha sua, P196)" in texto
+    assert "num tamanho harmônico, em duas linhas" in texto
+    assert "fica embaixo, em cima da foto, como nos outros posts do perfil, longe da frase" in texto
+    assert "outra faixa na mesma cor" not in texto and "faixa de baixo" not in texto
     assert "a mesma faixa, com a frase parada no alto (escolha sua, P189)" in texto
     assert "o selo Fixado cobre o começo da frase" in texto and "Nada da capa fica no preto do fundo" in texto
     assert "com um fio em cima" not in texto and "pode passar por cima do começo da frase" not in texto
     # P173 (print de 07/11, 04:15): as faixas nunca ficam na cor do fundo da foto; a cor do produto
     # que sumiria nele dá lugar à 2ª cor do produto ou, sem ela, ao laranja.
-    assert "As faixas nunca ficam na cor do fundo da foto (escolha sua)" in texto
+    assert "A faixa e o fio nunca ficam na cor do fundo da foto (escolha sua)" in texto
     assert "vão na 2ª cor que mais se destaca no produto (no vermelho, no laranja da Shopee) ou, sem ela, num tom" in texto
     # P174 3: sem a 2ª cor, um tom mais escuro da cor do produto; no fundo escuro, um mais claro.
     assert "num tom mais escuro da cor do produto (no branco, um cinza-claro; no fundo escuro, um tom mais claro)" in texto
@@ -532,7 +537,8 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     tipo, caminhos, legenda = msg.midias[-1]
     assert tipo == "album" and [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png"]
     assert "Copo Térmico" in legenda and "“Gelado por 12 horas”" in legenda and "não foi postado" in legenda
-    assert "O número de visualizações fica na faixa de baixo, longe da frase" in legenda
+    assert "O número de visualizações fica embaixo, em cima da foto, longe da frase (embaixo, só o fio fino)" in legenda
+    assert "faixa de baixo" not in legenda
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      "edição do vídeo: exemplo da capa") == ("mandado",)
     # Com a capa do vídeo aberto (P129), ela vai como 3ª foto.
