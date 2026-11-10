@@ -1,0 +1,81 @@
+name: Vendas para o Claude (cifrado)
+
+# O relatório das vendas por canal, etiqueta, semana, dia da semana, hora e produto, com a
+# comparação da tendência dos vídeos da fonte (P13 e P135), montado e cifrado pelo servidor
+# (vendas.py cifrado) com a chave do registro_privado. Só abre com a chave do ambiente do
+# Claude (registro_privado.py ler ARQUIVO).
+#   exportar: grava o vendas.md.cifrado no ramo vendas-cifradas (um commit só);
+#   apagar: tira o ramo depois de lido.
+#
+# O repositório e os logs do Actions são públicos: aqui não sai nada do conteúdo, nem
+# cifrado; só se deu certo.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer"
+        type: choice
+        options: [exportar, apagar]
+        default: exportar
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vendas-cifradas
+
+jobs:
+  vendas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exportar ou apagar o relatório cifrado
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USUARIO: ${{ secrets.ORACLE_USER }}
+          CHAVE_SSH: ${{ secrets.ORACLE_SSH_KEY }}
+          TOKEN: ${{ github.token }}
+          REPOSITORIO: ${{ github.repository }}
+          ACAO: ${{ inputs.acao }}
+        run: |
+          set -euo pipefail
+          git init -q ramo
+          cd ramo
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPOSITORIO}.git"
+
+          if [ "$ACAO" = "apagar" ]; then
+            if git ls-remote --exit-code --heads origin vendas-cifradas >/dev/null 2>&1; then
+              git push -q origin --delete vendas-cifradas
+              echo "✅ Ramo vendas-cifradas apagado."
+            else
+              echo "✅ O ramo vendas-cifradas já não existia."
+            fi
+            exit 0
+          fi
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CHAVE_SSH" > ~/.ssh/servidor
+          chmod 600 ~/.ssh/servidor
+          ssh -i ~/.ssh/servidor -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+            -o LogLevel=ERROR "$USUARIO@$HOST" \
+            'cd ~/shopee && venv/bin/python3 vendas.py cifrado' > ../novo
+          if ! grep -q '^gAAAAA' ../novo; then
+            echo "❌ O servidor não devolveu o relatório cifrado."
+            exit 1
+          fi
+
+          git checkout -q --orphan vendas-cifradas
+          mv ../novo vendas.md.cifrado
+          cat > README.md <<'FIM'
+          # Vendas (cifrado)
+
+          Este ramo guarda só o `vendas.md.cifrado`, montado pelo servidor dos robôs
+          (`vendas.py cifrado`) e gravado pelo workflow `vendas.yml`. Sem a chave do
+          servidor, o arquivo não abre. Não é ramo de código.
+          FIM
+          git add README.md vendas.md.cifrado
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898173+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Vendas (cifrado)"
+          git push -q -f origin vendas-cifradas
+          echo "✅ Relatório cifrado no ramo vendas-cifradas."

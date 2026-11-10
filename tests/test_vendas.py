@@ -183,6 +183,35 @@ def test_relatorio_da_semana_mostra_os_produtos_a_mais_so_quando_ha():
     assert "Produtos a mais" not in vendas.texto_semanal(pedidos, AGORA)
 
 
+def test_relatorio_privado_por_canal_etiqueta_semana_dia_hora_e_produto():
+    # P13: o Claude propõe o que cada robô prioriza com a comissão por canal, etiqueta, semana,
+    # dia da semana, hora e produto, desde as etiquetas e até ontem, sem os cancelados (contados
+    # à parte). O relatório tem nomes e valores: só sai cifrado.
+    pedidos = {
+        "1": {"data": "2026-10-27", "hora": "20:15", "status": "COMPLETED", "comissao_total": 4.0, "etiqueta": "viral",
+              "itens": [{"id": "9", "nome": "Copo Térmico", "qtd": 2, "comissao": 4.0}]},
+        "2": {"data": "2026-10-28", "status": "PENDING", "comissao_total": 2.0, "etiqueta": "achadinhos-casa",
+              "itens": [{"id": "8", "nome": "Panela", "qtd": 1, "comissao": 2.0}]},
+        "3": {"data": "2026-10-29", "status": "CANCELLED", "comissao_total": 9.0, "etiqueta": "viral", "itens": []},
+        "4": {"data": "2026-11-01", "hora": "20:50", "status": "PENDING", "comissao_total": 1.0, "etiqueta": "viral",
+              "itens": [{"id": "9", "nome": "Copo Térmico", "qtd": 1, "comissao": 1.0}]},
+        "5": {"data": "2026-10-30", "status": "COMPLETED", "comissao_total": 5.0},      # de antes das etiquetas
+        "6": {"data": "2026-11-02", "status": "COMPLETED", "comissao_total": 7.0, "etiqueta": "viral"},  # hoje
+    }
+    texto = vendas.relatorio_privado(pedidos, AGORA)
+    assert "até 01/11 (sem os de hoje). Pedidos de antes das etiquetas, fora da conta: 1." in texto
+    assert "De 27/10 a 01/11: 3 pedido(s) valendo, R$ 7,00 de comissão (R$ 4,00 confirmada); 1 cancelado(s)" in texto
+    assert "| Viral (Espião) | 2 | R$ 5,00 | 71% | R$ 4,00 | 1 |" in texto
+    assert "| Achadinhos (garimpo de ofertas) | 1 | R$ 2,00 | 29% | R$ 0,00 | 0 |" in texto
+    assert "| achadinhos-casa | 1 | R$ 2,00 |" in texto
+    assert "| 26/10 | 3 | R$ 7,00 | Viral (Espião) R$ 5,00, Achadinhos (garimpo de ofertas) R$ 2,00 |" in texto
+    assert "| terça | 1 | R$ 4,00 |" in texto and "| domingo | 1 | R$ 1,00 |" in texto
+    assert "## Por hora da compra (2 de 3 pedido(s) com a hora guardada)" in texto and "| 20h | 2 | R$ 5,00 |" in texto
+    assert "| Copo Térmico | 2 | 3 | R$ 5,00 | Viral (Espião) |" in texto
+    assert "| 29/10 | 0 | R$ 0,00 | 1 |" in texto
+    assert "Nenhum pedido com etiqueta ainda." in vendas.relatorio_privado({}, AGORA)
+
+
 def test_pedido_guarda_a_hora_da_compra(bm):
     # P13: a conta por hora precisa da hora da compra, que a API manda (purchaseTime). O pedido
     # novo a guarda, e o que já estava no banco sem ela ganha a hora quando a Shopee o manda de novo.
@@ -197,3 +226,19 @@ def test_pedido_guarda_a_hora_da_compra(bm):
     bm.salvar_banco_pedidos(banco)
     bm.processar_e_salvar_pedidos_api(conversoes)
     assert bm.ler_banco_pedidos()["H1"]["hora"] == "21:07"
+
+
+def test_relatorio_cifrado_so_abre_com_a_chave_do_registro_privado(monkeypatch, tmp_path):
+    # O relatório privado sai do servidor só cifrado (vendas.yml), com a chave que o Claude tem.
+    import db
+    import registro_privado
+    from conftest import inserir
+    monkeypatch.setattr(registro_privado, "CHAVE_ARQUIVO", str(tmp_path / "chave"))
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("banco_pedidos", {"1": {"data": "2026-10-27", "status": "COMPLETED", "comissao_total": 4.0,
+                                             "etiqueta": "viral", "itens": [{"nome": "Copo Térmico", "comissao": 4.0}]}})
+    texto = vendas.cifrado()
+    assert texto.startswith("gAAAAA") and "Copo" not in texto
+    aberto = registro_privado.abrir(texto, registro_privado.chave().decode("ascii"))
+    assert "# Vendas por canal (P13)" in aberto and "Copo Térmico" in aberto
+    assert "# Tendência dos vídeos da fonte (P135)" in aberto

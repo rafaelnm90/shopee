@@ -6,7 +6,12 @@ O bot_mestre puxa o relatório de vendas da API de afiliado de hora em hora (con
 conversoes) e guarda em cada pedido a etiqueta e os produtos (etiqueta_do_utm e
 itens_do_pedido); toda segunda o relatório semanal (texto_semanal) chega no privado do
 Rafael. Nomes de produto e valores ficam só no banco e no privado, nunca no log.
+
+Para o Claude (P13 e P135), o relatório privado (relatorio_privado, com a comparação da
+tendência dos vídeos da fonte) sai só cifrado com a chave do registro_privado: "python3
+vendas.py cifrado" no servidor, que o workflow vendas.yml grava no ramo vendas-cifradas.
 """
+import sys
 from datetime import datetime, timedelta
 
 # Os campos do relatório de vendas. A etiqueta (utmContent) e os produtos são o que diz
@@ -180,3 +185,152 @@ def _linhas_dos_produtos_a_mais(pedidos, postados, desde, ate):
     return ["", "🛍️ <b>Produtos a mais da Shopee Vídeo</b> (o mesmo item de outras lojas, nos vídeos do robô)",
             f"• Dos produtos a mais: {n_mais} venda(s), {_reais(v_mais)}",
             f"• Do produto do vídeo: {n_video} venda(s), {_reais(v_video)}"]
+
+
+# O relatório privado (P13): os produtos que mais renderam e os dias da semana.
+PRODUTOS_NO_RELATORIO_PRIVADO = 25
+DIAS_DA_SEMANA = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
+
+
+def _celula(texto):
+    return ("" if texto is None else str(texto)).replace("|", "/").replace("\n", " ")
+
+
+def _tabela(cabecalho, linhas):
+    """Uma tabela em Markdown; sem linhas, só o aviso."""
+    if not linhas:
+        return ["(nenhum)"]
+    return (["| " + " | ".join(cabecalho) + " |", "|" + "---|" * len(cabecalho)]
+            + ["| " + " | ".join(_celula(c) for c in linha) + " |" for linha in linhas])
+
+
+def _somar(grupos, chave, pedido):
+    conta = grupos.setdefault(chave, {"pedidos": 0, "comissao": 0.0})
+    conta["pedidos"] += 1
+    conta["comissao"] += float(pedido.get("comissao_total") or 0)
+
+
+def _ordenados(grupos):
+    return sorted(grupos.items(), key=lambda x: (-x[1]["comissao"], -x[1]["pedidos"], str(x[0])))
+
+
+def relatorio_privado(pedidos, agora):
+    """
+    As vendas para o Claude propor o que cada robô prioriza (P13), em Markdown: dos pedidos com
+    etiqueta até ontem, sem os cancelados (contados à parte), a comissão por canal, por etiqueta,
+    por semana, por dia da semana, por hora da compra (só os pedidos com a hora guardada) e por
+    dia, e os produtos que mais renderam, com os canais de cada um. Tem nomes e valores: só sai
+    cifrado (cifrado()).
+    """
+    ate = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
+    com_etiqueta = {sn: p for sn, p in pedidos.items() if "etiqueta" in p and (p.get("data") or "") <= ate}
+    validos = {sn: p for sn, p in com_etiqueta.items() if _vale(p)}
+    linhas = ["# Vendas por canal (P13)", "",
+              f"Montado em {agora:%d/%m/%Y %H:%M}, com os pedidos que têm a etiqueta do link até {ate[8:10]}/{ate[5:7]} "
+              f"(sem os de hoje). Pedidos de antes das etiquetas, fora da conta: "
+              f"{sum(1 for p in pedidos.values() if 'etiqueta' not in p)}."]
+    if not com_etiqueta:
+        return "\n".join(linhas + ["", "Nenhum pedido com etiqueta ainda."]) + "\n"
+    dias = sorted(p["data"] for p in com_etiqueta.values())
+    total = sum(float(p.get("comissao_total") or 0) for p in validos.values())
+    confirmada = sum(float(p.get("comissao_total") or 0) for p in validos.values()
+                     if str(p.get("status") or "").upper() == "COMPLETED")
+    cancelados = len(com_etiqueta) - len(validos)
+    linhas += [f"De {dias[0][8:10]}/{dias[0][5:7]} a {dias[-1][8:10]}/{dias[-1][5:7]}: {len(validos)} pedido(s) "
+               f"valendo, {_reais(total)} de comissão ({_reais(confirmada)} confirmada); {cancelados} cancelado(s) "
+               "ou sem pagamento.", ""]
+
+    canais, etiquetas, semanas, dias_da_semana, horas, por_dia = {}, {}, {}, {}, {}, {}
+    cancelados_por_canal, confirmada_por_canal, canais_da_semana = {}, {}, {}
+    for p in com_etiqueta.values():
+        nome = canal(p["etiqueta"])
+        if not _vale(p):
+            cancelados_por_canal[nome] = cancelados_por_canal.get(nome, 0) + 1
+            por_dia.setdefault(p["data"], {"pedidos": 0, "comissao": 0.0, "cancelados": 0})["cancelados"] += 1
+            continue
+        data = datetime.strptime(p["data"], "%Y-%m-%d")
+        valor = float(p.get("comissao_total") or 0)
+        _somar(canais, nome, p)
+        _somar(etiquetas, p["etiqueta"] or "(sem etiqueta)", p)
+        semana = (data - timedelta(days=data.weekday())).strftime("%Y-%m-%d")
+        _somar(semanas, semana, p)
+        canais_da_semana.setdefault(semana, {}).setdefault(nome, 0.0)
+        canais_da_semana[semana][nome] += valor
+        _somar(dias_da_semana, data.weekday(), p)
+        if p.get("hora"):
+            _somar(horas, int(str(p["hora"])[:2]), p)
+        dia = por_dia.setdefault(p["data"], {"pedidos": 0, "comissao": 0.0, "cancelados": 0})
+        dia["pedidos"] += 1
+        dia["comissao"] += valor
+        if str(p.get("status") or "").upper() == "COMPLETED":
+            confirmada_por_canal[nome] = confirmada_por_canal.get(nome, 0.0) + valor
+
+    linhas += ["## Por canal (a 1ª etiqueta)", ""] + _tabela(
+        ("canal", "pedidos", "comissão", "% da comissão", "confirmada", "cancelados"),
+        [(NOMES_DOS_CANAIS.get(nome, nome), c["pedidos"], _reais(c["comissao"]),
+          f"{c['comissao'] * 100 / total:.0f}%" if total else "-", _reais(confirmada_por_canal.get(nome, 0.0)),
+          cancelados_por_canal.get(nome, 0)) for nome, c in _ordenados(canais)]
+        + [(NOMES_DOS_CANAIS.get(nome, nome), 0, _reais(0), "0%", _reais(0), n)
+           for nome, n in sorted(cancelados_por_canal.items()) if nome not in canais])
+    linhas += ["", "## Por etiqueta completa", ""] + _tabela(
+        ("etiqueta", "pedidos", "comissão"), [(nome, c["pedidos"], _reais(c["comissao"]))
+                                               for nome, c in _ordenados(etiquetas)])
+    linhas += ["", "## Por semana (de segunda)", ""] + _tabela(
+        ("semana", "pedidos", "comissão", "por canal"),
+        [(f"{semana[8:10]}/{semana[5:7]}", c["pedidos"], _reais(c["comissao"]),
+          ", ".join(f"{NOMES_DOS_CANAIS.get(nome, nome)} {_reais(valor)}" for nome, valor in
+                    sorted(canais_da_semana[semana].items(), key=lambda x: -x[1])))
+         for semana, c in sorted(semanas.items())])
+    linhas += ["", "## Por dia da semana (do pedido)", ""] + _tabela(
+        ("dia", "pedidos", "comissão"),
+        [(DIAS_DA_SEMANA[d], dias_da_semana[d]["pedidos"], _reais(dias_da_semana[d]["comissao"]))
+         for d in sorted(dias_da_semana)])
+    com_hora = sum(c["pedidos"] for c in horas.values())
+    linhas += ["", f"## Por hora da compra ({com_hora} de {len(validos)} pedido(s) com a hora guardada)", ""]
+    linhas += _tabela(("hora", "pedidos", "comissão"),
+                      [(f"{h:02d}h", horas[h]["pedidos"], _reais(horas[h]["comissao"])) for h in sorted(horas)])
+
+    produtos = {}
+    for p in validos.values():
+        for item in p.get("itens") or []:
+            nome = (item.get("nome") or item.get("id") or "?")[:80]
+            conta = produtos.setdefault(nome, {"pedidos": 0, "qtd": 0, "comissao": 0.0, "canais": set()})
+            conta["pedidos"] += 1
+            conta["qtd"] += int(item.get("qtd") or 1)
+            conta["comissao"] += float(item.get("comissao") or 0)
+            conta["canais"].add(NOMES_DOS_CANAIS.get(canal(p["etiqueta"]), canal(p["etiqueta"])))
+    mais = sorted(produtos.items(), key=lambda x: (-x[1]["comissao"], -x[1]["pedidos"], x[0]))
+    linhas += ["", f"## Produtos que mais renderam ({min(len(mais), PRODUTOS_NO_RELATORIO_PRIVADO)} de {len(mais)})",
+               ""] + _tabela(("produto", "pedidos", "unidades", "comissão", "canais"),
+                             [(nome, c["pedidos"], c["qtd"], _reais(c["comissao"]), ", ".join(sorted(c["canais"])))
+                              for nome, c in mais[:PRODUTOS_NO_RELATORIO_PRIVADO]])
+    linhas += ["", "## Por dia", ""] + _tabela(
+        ("dia", "pedidos", "comissão", "cancelados"),
+        [(f"{dia[8:10]}/{dia[5:7]}", c["pedidos"], _reais(c["comissao"]), c["cancelados"])
+         for dia, c in sorted(por_dia.items())])
+    return "\n".join(linhas) + "\n"
+
+
+def cifrado():
+    """
+    O relatório privado (as vendas e a comparação da tendência da P135), cifrado com a chave do
+    registro_privado, a que o Claude tem no ambiente. Só o texto cifrado sai do servidor.
+    """
+    from cryptography.fernet import Fernet
+
+    import db
+    import registro_privado
+    import tendencia_shopee_video
+    from fuso import fuso_horario
+    pedidos = db.ler_config("banco_pedidos", {}) or {}
+    agora = datetime.now(fuso_horario)
+    texto = relatorio_privado(pedidos, agora) + "\n" + tendencia_shopee_video.comparacao(pedidos)
+    return Fernet(registro_privado.chave()).encrypt(texto.encode("utf-8")).decode("ascii")
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["cifrado"]:
+        print(cifrado())
+    else:
+        print("Uso: vendas.py cifrado (o relatório privado, cifrado; para ler: registro_privado.py ler ARQUIVO)")
+        sys.exit(2)
