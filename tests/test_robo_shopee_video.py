@@ -7912,3 +7912,223 @@ def test_fazer_agora_na_suspensao_roda_e_sem_o_celular_sai_com_o_aviso(monkeypat
     assert "desconectado" in robo.rodada(agora=agora, fazer=True)
     assert robo.pedidos_de_agora(agora) == [] and robo.ler_config()["robo_pausado"] is False
     assert "não fiz o que você pediu no Fazer Agora (Feed): o celular do robô está desconectado" in avisos[-1]
+
+
+# --- Editar ✏️ (P191 1 e P192 1) ---
+
+def _editavel(monkeypatch, tmp_path=None, **campos):
+    """Um rascunho de link de produto com o que o Editar ✏️ precisa guardado (o original, a foto, a edição)."""
+    os.makedirs(robo.PASTA_RASCUNHOS, exist_ok=True)
+    ident = _rascunho(**campos)
+    copia = os.path.join(robo.PASTA_RASCUNHOS, f"{ident}.mp4")
+    original = os.path.join(robo.PASTA_RASCUNHOS, f"fonte_{ident}.mp4")
+    for arquivo in (copia, original):
+        with open(arquivo, "wb") as f:
+            f.write(b"video")
+    refazer = {"textos": {"nome": "Vestido"}, "frase": "", "musica": "", "avisos": False, "rotulo_de_ia": False,
+               "escolhas": dict(robo.edicao_video.ESCOLHAS_PADRAO)}
+    guardado = robo.guardar_para_o_editar(copia, original, b"\xff\xd8\xfffoto", [b"\xff\xd8\xffoutra"], refazer)
+    robo.atualizar(ident, arquivo=copia, edicao=guardado)
+    return ident
+
+
+def test_o_rascunho_guarda_o_que_o_editar_precisa_e_so_o_de_link_de_produto_edita(monkeypatch):
+    ident = _editavel(monkeypatch)
+    guardado = robo.pegar(ident)["edicao"]
+    base = os.path.join(robo.PASTA_RASCUNHOS, str(ident))
+    assert guardado["original"] == base + "_original.mp4" and guardado["foto"] == base + "_foto.jpg"
+    assert guardado["outras"] == [base + "_outra_1.jpg"] and guardado["versoes"] == 1
+    assert open(guardado["original"], "rb").read() == b"video"
+    # A faxina conhece os arquivos novos (saem com o rascunho).
+    for nome in (f"{ident}_original.mp4", f"{ident}_foto.jpg", f"{ident}_outra_1.jpg", f"{ident}_nova_2.mp4",
+                 f"{ident}_nova_2.png"):
+        assert robo.ARQUIVO_NO_SERVIDOR.match(nome), nome
+    assert robo.pode_editar(robo.pegar(ident))
+    # O de Ver Produtos (um link por produto), o aprovado, a versão de antes e o sem os arquivos não editam.
+    assert not robo.pode_editar(dict(robo.pegar(ident), links_dos_produtos=["https://s.shopee.com.br/a"]))
+    assert not robo.pode_editar(dict(robo.pegar(ident), estado="aprovado"))
+    assert not robo.pode_editar(dict(robo.pegar(ident), versao_de="3"))
+    assert not robo.pode_editar(dict(robo.pegar(ident), edicao={}))
+    # Sem o que a edição guardou, nada é guardado e o rascunho só fica sem o Editar.
+    assert robo.guardar_para_o_editar(base + ".mp4", guardado["original"], b"foto", [], None) == {}
+
+
+def test_editar_faz_a_nova_versao_e_o_aprovar_refaz_o_rascunho_no_app(monkeypatch):
+    ident = _editavel(monkeypatch)
+    pedidos = []
+
+    def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=None, legenda=None):
+        pedidos.append((video, foto, outras_fotos, lado, legenda))
+        with open(destino, "wb") as f:
+            f.write(b"nova")
+        return "", robo.edicao_video.COM_LEGENDAS
+    monkeypatch.setattr(robo.edicao_video, "refazer_para_postar", refazer_para_postar)
+    assert robo.escolhas_do_rascunho(robo.pegar(ident)) == ("direita", True)
+    ok, como = robo.reeditar(ident, "esquerda", False)
+    nova = robo.pegar(ident)["nova_versao"]
+    assert ok and nova["arquivo"].endswith(f"{ident}_nova_2.mp4") and nova["versao"] == 2
+    assert (nova["miniatura"], nova["legenda"]) == ("esquerda", False)
+    assert pedidos[0][1:] == (b"\xff\xd8\xfffoto", [b"\xff\xd8\xffoutra"], "esquerda", False)
+    assert robo.escolhas_do_rascunho(robo.pegar(ident)) == ("esquerda", False)
+    # O Aprovar com a nova versão: o robô refaz no app antes de marcar a hora de ir ao ar.
+    ativar(robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 15:00")
+    robo.gravar_estado(treino_semana=robo.semana(agora))
+    assert robo.aprovar(ident, agora) is None and robo.pegar(ident)["estado"] == "refazer"
+    assert robo.pegar(ident)["postar_em"] is None
+    assert robo.o_que_fazer(robo.ler_config(), agora) == ("refazer", ident)
+    # O que não sai não muda nada.
+    monkeypatch.setattr(robo.edicao_video, "refazer_para_postar", lambda *a, **k: ("o ffmpeg falhou", ""))
+    outro = _editavel(monkeypatch)
+    assert robo.reeditar(outro, "sem", True) == (False, "o ffmpeg falhou") and not robo.pegar(outro)["nova_versao"]
+    # Manter o de antes tira a nova versão.
+    robo.atualizar(ident, estado="rascunho")
+    robo.manter_a_versao_de_antes(ident)
+    assert robo.pegar(ident)["nova_versao"] == {} and not os.path.exists(nova["arquivo"])
+    assert robo.aprovar(ident, agora) is not None and robo.pegar(ident)["estado"] == "aprovado"
+
+
+def _celular_do_refazer(monkeypatch, passos, anexados=None):
+    """O celular de mentira do refazer: cada passo anotado em passos, sem tocar em tela."""
+    def curtir(d, video, produtos, curtidos):
+        passos.append(("curtir", [(p["nome"], p["link"], p["do_video"]) for p in produtos]))
+        curtidos.extend((p["link"], p["nome"]) for p in produtos)
+        return list(produtos)
+    monkeypatch.setattr(robo, "_curtir_os_produtos", curtir)
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: None)
+    monkeypatch.setattr(robo.ps, "por_na_galeria", lambda d, arquivo, nome: passos.append(("galeria", nome)) or True)
+    for nome in ("abrir_galeria", "marcar_so_o_mais_novo", "efeitos_na_edicao"):
+        monkeypatch.setattr(robo, nome, lambda *a, **k: None)
+    monkeypatch.setattr(robo, "seguir", lambda d, caminho: None)
+
+    def anexar(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+        passos.append(("anexar", list(nomes), tuple(a_mais)))
+        feitos = list(range(len(nomes))) if anexados is None else anexados
+        return [nomes[i] for i in feitos], feitos
+    monkeypatch.setattr(robo, "anexar_os_produtos", anexar)
+    monkeypatch.setattr(robo, "escrever_a_legenda", lambda d, titulo: passos.append(("título", titulo)))
+    monkeypatch.setattr(robo.ps, "conferir_tela_final", lambda d, video: (True, "tela final confere"))
+    monkeypatch.setattr(robo.ps, "ajustar_rotulo_de_ia", lambda d, ligado: (True, "rótulo"))
+    monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera=0: passos.append(("tocar", alvo)))
+    monkeypatch.setattr(robo, "tela", lambda d: "")
+
+    def apagar(d, rascunho):
+        passos.append(("apagar", rascunho["id"], robo.posicao_no_app(rascunho)))
+        robo.atualizar(rascunho["id"], estado="apagado")
+        return "rascunho recusado apagado"
+    monkeypatch.setattr(robo, "apagar_do_app", apagar)
+    monkeypatch.setattr(robo, "descurtir_no_fim", lambda d, video, curtidos: passos.append(("descurtir", len(curtidos))))
+
+
+class _Tela:
+    def screenshot(self, caminho):
+        with open(caminho, "wb") as f:
+            f.write(b"print")
+
+
+def test_o_rascunho_editado_e_refeito_no_app_e_so_depois_a_versao_de_antes_sai(monkeypatch, avisos):
+    # P192 1: com o Aprovar, o robô refaz o rascunho no app com a nova versão (os mesmos produtos, na mesma
+    # ordem, e o mesmo título) e só depois de o novo ficar salvo apaga o de antes, conferindo-o.
+    ativar(robo_inicio=0, robo_fim=24)
+    mais = [{"nome": "Vestido de Outra Loja", "link": "https://s.shopee.com.br/outra", "endereco": ""}]
+    antes = _rascunho("aprovado", criado="2026-10-22 08:00:00", postar_em="2026-10-23 09:00:00")
+    ident = _editavel(monkeypatch, criado="2026-10-22 09:00:00")
+    robo.atualizar(ident, produtos=[VESTIDO, mais[0]["nome"]], mais_produtos=mais)
+    depois = _rascunho("rascunho", criado="2026-10-22 10:00:00")
+    nova = os.path.join(robo.PASTA_RASCUNHOS, f"{ident}_nova_2.mp4")
+    with open(nova, "wb") as f:
+        f.write(b"nova")
+    robo.atualizar(ident, estado="refazer", nova_versao={"arquivo": nova, "versao": 2, "miniatura": "esquerda",
+                                                          "legenda": False})
+    # Na lista do app, do mais novo para o mais velho: o depois, o editado e o antes.
+    assert [robo.posicao_no_app(robo.pegar(i)) for i in (depois, ident, antes)] == [0, 1, 2]
+    passos = []
+    _celular_do_refazer(monkeypatch, passos)
+    agora = momento("2026-10-22 15:00")
+    assert robo.refazer_no_app(_Tela(), robo.pegar(ident), agora) == "rascunho editado refeito no app"
+    assert passos[0] == ("curtir", [(VESTIDO, LINK, True), (mais[0]["nome"], mais[0]["link"], False)])
+    assert passos[1] == ("galeria", robo.nome_na_galeria(ident, 2)) == ("galeria", f"robo_shopee_video_{ident}_v2.mp4")
+    # Todos os produtos, nenhum como "a mais": o que não anexa para tudo.
+    assert passos[2] == ("anexar", [VESTIDO, mais[0]["nome"]], ())
+    assert passos[3] == ("título", TITULO) and passos[4] == ("tocar", "@tv_drafts_box")
+    # A versão de antes ganhou um registro recusado, no lugar dela na lista (o novo agora é o 1º), e saiu.
+    antigo = [r for r in robo.listar("apagado") if r["versao_de"] == str(ident)][0]
+    assert passos[5] == ("apagar", antigo["id"], 2) and passos[-1] == ("descurtir", 2)
+    assert antigo["titulo"] == TITULO and antigo["produtos"] == [VESTIDO, mais[0]["nome"]]
+    assert antigo["criado_em"] == "2026-10-22 09:00:00" and antigo["arquivo"].endswith(f"{ident}.mp4")
+    refeito = robo.pegar(ident)
+    assert refeito["estado"] == "aprovado" and refeito["postar_em"] and refeito["arquivo"] == nova
+    assert refeito["no_app_em"] == "2026-10-22 15:00:00" and refeito["criado_em"] == "2026-10-22 09:00:00"
+    assert refeito["nova_versao"] == {} and refeito["print"].endswith(f"{ident}_nova_2.png")
+    assert refeito["edicao"]["versoes"] == 2 and refeito["edicao"]["escolhas"]["miniatura"] == "esquerda"
+    assert not refeito["edicao"]["escolhas"]["legenda"]
+    assert robo.posicao_no_app(refeito) == 0 and robo.posicao_no_app(robo.pegar(depois)) == 1
+    # A versão de antes não conta como rascunho do dia.
+    assert robo.rascunhos_de_hoje(agora) == 3
+    assert "refiz no celular o rascunho que você editou e apaguei a versão de antes" in avisos[-1]
+
+
+def test_rascunho_editado_que_nao_e_refeito_fica_como_estava_e_tenta_de_novo(monkeypatch, avisos):
+    ativar(robo_inicio=0, robo_fim=24)
+    ident = _editavel(monkeypatch)
+    nova = os.path.join(robo.PASTA_RASCUNHOS, f"{ident}_nova_2.mp4")
+    with open(nova, "wb") as f:
+        f.write(b"nova")
+    robo.atualizar(ident, estado="refazer", nova_versao={"arquivo": nova, "versao": 2})
+    passos = []
+    _celular_do_refazer(monkeypatch, passos, anexados=[])
+    with pytest.raises(robo.Parada):
+        robo.refazer_no_app(_Tela(), robo.pegar(ident), momento("2026-10-22 15:00"))
+    # Nada foi salvo nem apagado, e o que curtiu sai no fim.
+    assert ("tocar", "@tv_drafts_box") not in passos and not any(p[0] == "apagar" for p in passos)
+    assert passos[-1][0] == "descurtir" and robo.listar("recusado", "apagado") == []
+    for vez in range(1, robo.TENTATIVAS_DE_POSTAR):
+        robo._nao_saiu_o_refazer(ident, "o produto não ficou")
+        assert robo.pegar(ident)["estado"] == "refazer" and f"tentativa {vez + 1} de" in avisos[-1]
+    robo._nao_saiu_o_refazer(ident, "o produto não ficou")
+    voltou = robo.pegar(ident)
+    assert voltou["estado"] == "rascunho" and voltou["nova_versao"]["arquivo"] == nova
+    assert "O de antes continua no celular" in avisos[-1]
+
+
+def test_faxina_tira_da_galeria_cada_versao_do_editar(avisos):
+    ident = _rascunho("postado")
+    app = AppDeMentira()
+    arquivos = _arquivos_do_rascunho(ident, app)
+    robo.atualizar(ident, edicao={"versoes": 2})
+    app.galeria.update({robo.nome_na_galeria(ident, 2), robo.nome_na_galeria(ident, 3)})
+    robo.faxina_dos_arquivos(app)
+    assert app.galeria == set() and not any(os.path.exists(arquivo) for arquivo in arquivos)
+
+
+def test_editado_que_espera_o_refazer_aparece_na_fila_e_o_produto_dele_conta_como_postado(monkeypatch):
+    # O produto do editado que o robô refaz no app não volta noutro rascunho (P166 1), e a Fila de
+    # Rascunhos 🗂️ mostra que ele espera o robô refazer no celular (P192 1).
+    ativar(robo_inicio=8, robo_fim=22)
+    ident = _rascunho("refazer", itens_do_video=["77"])
+    assert robo.onde_os_produtos_foram()["77"] == robo.ONDE_JA_FOI["aprovado"]
+    robo.atualizar(ident, falhas_ao_postar="1", motivo="o produto não ficou")
+    texto = robo.texto_da_fila(agora=momento("2026-10-25 10:30"))
+    assert "Editados, esperando o robô refazer no celular (1)" in texto
+    assert "não saiu 1 vez(es) (o produto não ficou); tento de novo" in texto
+
+
+def test_verificacao_no_refazer_para_sem_descurtir(monkeypatch, avisos):
+    # Na Verificação da Shopee o robô para sem tocar em mais nada, também no refazer do editado (P192 1).
+    ativar(robo_inicio=0, robo_fim=24)
+    ident = _editavel(monkeypatch)
+    nova = os.path.join(robo.PASTA_RASCUNHOS, f"{ident}_nova_2.mp4")
+    with open(nova, "wb") as f:
+        f.write(b"nova")
+    robo.atualizar(ident, estado="refazer", nova_versao={"arquivo": nova, "versao": 2})
+    passos = []
+    _celular_do_refazer(monkeypatch, passos)
+
+    def galeria(d, arquivo, nome):
+        raise robo.Verificacao()
+    monkeypatch.setattr(robo.ps, "por_na_galeria", galeria)
+    robo.gravar_estado(favoritos_limpos=True)
+    with pytest.raises(robo.Verificacao):
+        robo.refazer_no_app(_Tela(), robo.pegar(ident), momento("2026-10-22 15:00"))
+    assert not any(p[0] == "descurtir" for p in passos) and robo.ler_estado()["favoritos_limpos"] is False
+    assert robo.pegar(ident)["estado"] == "refazer"

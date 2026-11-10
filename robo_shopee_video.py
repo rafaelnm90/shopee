@@ -167,8 +167,10 @@ ESPERA_DA_PRIMEIRA = (5, 40)
 DIA_DO_TREINO = 0
 MAXIMO_DA_RODADA = 30 * 60  # segundos; o painel mata a rodada que passa disso
 
-# Estados de um rascunho: o que ainda está no app do celular e o que já saiu dele.
-NO_APP = ("rascunho", "aprovado", "recusado")
+# Estados de um rascunho: o que ainda está no app do celular e o que já saiu dele. "refazer": o
+# rascunho editado (Editar ✏️) e aprovado, que o robô refaz no app com a nova versão do vídeo antes de
+# ir ao ar (P192 1).
+NO_APP = ("rascunho", "aprovado", "recusado", "refazer")
 
 # A suspensão da conta de Shopee Vídeo, como a Shopee avisa (Motorola, 23/10/2026): nas
 # Notificações (filtro "Lives, Vídeos e ..."), "Sua conta foi banida temporariamente até
@@ -406,9 +408,9 @@ ESTADOS_SALVOS = ("rascunho", "aprovado", "postado", "recusado", "apagado")
 
 
 def _criados_hoje(estados, agora=None):
-    """Os rascunhos nesses estados criados hoje."""
+    """Os rascunhos nesses estados criados hoje; a versão de antes de um rascunho refeito no app não conta."""
     hoje = agora_br(agora).strftime("%Y-%m-%d")
-    return [r for r in listar(*estados) if (r["criado_em"] or "").startswith(hoje)]
+    return [r for r in listar(*estados) if (r["criado_em"] or "").startswith(hoje) and not r["versao_de"]]
 
 
 def rascunhos_de_hoje(agora=None):
@@ -912,7 +914,8 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor")
+           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor", "edicao",
+           "nova_versao", "versao_de", "no_app_em")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -952,10 +955,20 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # letras: "1" quando a foto do anúncio, que vai inteira à capa (P181 2), tem letras escritas, pela IA
 # (edicao_video.letras_da_foto); "0" sem elas; vazio nos de antes e quando a IA não respondeu (a
 # medição de quais posts levam punição, P146 2, separa).
+# edicao: o que o Editar ✏️ precisa para refazer a edição sem a IA (P192 1): o que editar_para_postar
+# guardou (os textos da IA, a frase da capa, a música, as escolhas do painel) e os arquivos do vídeo
+# original, da foto do anúncio e das fotos da miniatura que troca, ao lado do vídeo do rascunho, e
+# "versoes", quantas versões do vídeo já foram ao app (a galeria do celular tem uma de cada).
+# nova_versao: a versão refeita pelo Editar ✏️ que espera o Aprovar ✅ (o arquivo, o número, a
+# miniatura, a legenda e o jeito); vazio sem ela.
+# versao_de: no registro da versão de antes de um rascunho refeito no app, o id do rascunho; ela é
+# apagada do app como um recusado e não conta como rascunho do dia.
+# no_app_em: quando o rascunho foi salvo no app pela última vez (refeito pelo Editar ✏️); vazio é o
+# criado_em. A lista do app vem por ele (posicao_no_app).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
-                 "postar_agora_em", "letras", "valor")
+                 "postar_agora_em", "letras", "valor", "edicao", "nova_versao", "versao_de", "no_app_em")
 
 
 def _criar_tabela(con):
@@ -989,6 +1002,8 @@ def _linha_para_dict(linha):
     rascunho["comentarios_proprios"] = json.loads(rascunho["comentarios_proprios"] or "[]")
     rascunho["itens_do_video"] = json.loads(rascunho["itens_do_video"] or "[]")
     rascunho["busca_do_link"] = json.loads(rascunho["busca_do_link"] or "{}")
+    rascunho["edicao"] = json.loads(rascunho["edicao"] or "{}")
+    rascunho["nova_versao"] = json.loads(rascunho["nova_versao"] or "{}")
     return rascunho
 
 
@@ -1012,7 +1027,8 @@ def pegar(ident):
 
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
-                   "recusadas", "outra_cor", "tirar", "comentarios_proprios", "itens_do_video", "busca_do_link"):
+                   "recusadas", "outra_cor", "tirar", "comentarios_proprios", "itens_do_video", "busca_do_link",
+                   "edicao", "nova_versao"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -1057,10 +1073,12 @@ def onde_os_produtos_foram():
     assistente marcados com Postei ✅. Os produtos a mais não contam. onde é o rótulo do lugar mais
     adiantado: o post do robô vale mais que o Postei ✅, que vale mais que o aprovado e o rascunho. (P166 1)
     """
-    rascunhos = listar("rascunho", "aprovado", "postado")
+    rascunhos = listar("rascunho", "aprovado", "refazer", "postado")
 
     def do_robo(estado):
-        return (ONDE_JA_FOI[estado], [item for rascunho in rascunhos if rascunho["estado"] == estado
+        # O editado que o robô refaz no app (P192 1) conta como aprovado.
+        estados = (estado, "refazer") if estado == "aprovado" else (estado,)
+        return (ONDE_JA_FOI[estado], [item for rascunho in rascunhos if rascunho["estado"] in estados
                                       for item in _itens_do_post(rascunho)])
 
     lugares = [do_robo("rascunho"), do_robo("aprovado"), (POSTEI_NO_ASSISTENTE, assistente.itens_postados()),
@@ -1187,8 +1205,10 @@ PASSOS = (
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
             "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
-            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "curtido": "👍", "descurtido": "💔"}
+            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "curtido": "👍", "descurtido": "💔",
+            "refeito": "✏️"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
+                   "refazer": "Refazer rascunho editado",
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
                    "responder": "Resposta a comentário", "feed": "Feed (Para você)",
                    "comentar_post": "Comentário no post", "post_antigo": "Comentário em post antigo",
@@ -1338,6 +1358,13 @@ def texto_da_fila(config=None, agora=None):
             linhas.append(f"   ⏳ já passou da hora: {html.escape(espera)}")
     if not aprovados:
         linhas.append("nenhum")
+    # Os editados (Editar ✏️) e aprovados que o robô refaz no celular antes de ganhar a hora (P192 1).
+    refazer = listar("refazer")
+    if refazer:
+        linhas += ["", f"✏️ <b>Editados, esperando o robô refazer no celular ({len(refazer)})</b>"]
+        linhas += [f"• {produto(r)}" + (f"\n   🔁 não saiu {r['falhas_ao_postar']} vez(es) "
+                                        f"({html.escape(r['motivo'] or '?')}); tento de novo"
+                                        if int(r.get("falhas_ao_postar") or 0) else "") for r in refazer]
     if pendentes or aprovados:
         linhas.append("")
     if pendentes:
@@ -1458,7 +1485,17 @@ def postou_ha_pouco(agora=None):
 
 
 def aprovar(ident, agora=None):
-    """O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora."""
+    """
+    O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora. Com a nova versão do
+    Editar ✏️, o robô primeiro refaz o rascunho no app com ela ("refazer", P192 1), e a hora de ir ao ar sai
+    quando ele estiver refeito: devolve None.
+    """
+    rascunho = pegar(ident)
+    arquivo = ((rascunho or {}).get("nova_versao") or {}).get("arquivo")
+    if arquivo and os.path.exists(arquivo):
+        atualizar(ident, estado="refazer", aprovado_em=_momento(agora), postar_em=None, falhas_ao_postar="0",
+                  postar_agora_em=None, motivo="")
+        return None
     quando = proxima_postagem(ler_config(), agora)
     atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0",
               postar_agora_em=None)
@@ -1522,6 +1559,10 @@ def o_que_fazer(config, agora=None):
     logo = _momento(agora_br(agora) + ANTES_DO_POST)
     if postar and any(r["postar_em"] and agora_txt < r["postar_em"] <= logo for r in aprovados):
         return None
+    # O rascunho editado (Editar ✏️) e aprovado é refeito no app antes de ganhar a hora de ir ao ar (P192 1).
+    refazer = listar("refazer")
+    if postar and refazer:
+        return "refazer", refazer[0]["id"]
     # A limpeza das 4h que não terminou volta no mesmo dia (P137).
     if limpeza_fora_da_hora_pendente(agora):
         return "descurtir", None
@@ -5039,7 +5080,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
               chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "", cor=edicao.get("cor", ""),
-              letras=edicao.get("letras", ""))
+              letras=edicao.get("letras", ""), edicao=edicao.get("guardado") or {})
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
@@ -5168,7 +5209,128 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
         raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))
     if miniatura is not None and anuncio.get("foto") and edicao_video.SEM_A_MINIATURA not in como:
         miniatura["fotos"] = [anuncio["foto"]] + list(trocam)
+    if edicao is not None and not video.get("de_video"):
+        # O que o Editar ✏️ do rascunho precisa (P192 1); o de Ver Produtos fica sem ele (pode_editar).
+        edicao["guardado"] = guardar_para_o_editar(copia, video["arquivo"], anuncio.get("foto"), trocam,
+                                                   edicao.get("refazer"))
     return como
+
+
+# --- Editar ✏️ (P191 1 e P192 1) ---
+# Em Rascunhos do Robô 📝, o Editar ✏️ muda a miniatura (à direita, à esquerda ou sem) e a legenda da fala
+# (com ou sem) de um rascunho: o servidor refaz a edição do vídeo original com as escolhas da IA guardadas no
+# rascunho, sem o celular, e manda a nova versão ao Rafael. Com o Aprovar ✅, o robô refaz o rascunho no app
+# com ela (o app não deixa trocar o vídeo de um rascunho: o vídeo, os produtos e o título vão de novo), e a
+# versão de antes só sai do app depois de o novo ficar salvo. Escolhas do Rafael (10/11, P191 1 e P192 1):
+# DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_EDITAR = "editar o rascunho"
+PROCESSO_DO_REFAZER = "refazer o rascunho editado"
+SEM_O_QUE_EDITAR = "este rascunho não guardou o que a edição precisa (é de antes do Editar ✏️ ou de Ver Produtos)"
+
+
+def guardar_para_o_editar(copia, original, foto, outras, refazer):
+    """
+    O que o Editar ✏️ do rascunho precisa para refazer a edição sem a IA, ao lado do vídeo do rascunho (copia,
+    {id}.mp4): o vídeo original ({id}_original.mp4; uma ligação no disco quando dá, para não ocupar o dobro), a
+    foto do anúncio ({id}_foto.jpg) e as fotos da miniatura que troca ({id}_outra_{n}.jpg), com o que o
+    edicao_video.editar_para_postar guardou (refazer). Devolve o que vai à coluna edicao, ou {} quando algo
+    falta: o rascunho fica sem o Editar ✏️, nunca deixa de sair.
+    """
+    if not refazer or not foto or not original or not os.path.exists(original):
+        return {}
+    base = os.path.splitext(copia)[0]
+    try:
+        guardado = base + "_original.mp4"
+        if os.path.exists(guardado):
+            os.remove(guardado)
+        try:
+            os.link(original, guardado)
+        except OSError:
+            shutil.copyfile(original, guardado)
+        caminho_da_foto = f"{base}_foto.{ps.extensao_da_foto(foto) or 'jpg'}"
+        with open(caminho_da_foto, "wb") as arquivo:
+            arquivo.write(foto)
+        caminhos = []
+        for n, outra in enumerate(outras or (), 1):
+            caminho = f"{base}_outra_{n}.{ps.extensao_da_foto(outra) or 'jpg'}"
+            with open(caminho, "wb") as arquivo:
+                arquivo.write(outra)
+            caminhos.append(caminho)
+    except OSError as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O que o Editar precisa não foi guardado: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_EDITAR, "sem o Editar",
+                                     f"os arquivos não foram guardados ({type(e).__name__})", ok=False)
+        return {}
+    return dict(refazer, original=guardado, foto=caminho_da_foto, outras=caminhos, versoes=1)
+
+
+def pode_editar(rascunho):
+    """
+    O rascunho que espera a aprovação deixa o Editar ✏️? Com o que a edição precisa guardado e, no vídeo de link
+    de produto, o link de cada produto anexado (o robô curte cada um de novo para refazer o rascunho no app). A
+    versão de antes de um rascunho refeito não.
+    """
+    guardado = (rascunho or {}).get("edicao") or {}
+    nomes = (rascunho or {}).get("produtos") or []
+    return bool(rascunho and rascunho.get("estado") == "rascunho" and not rascunho.get("versao_de")
+                and guardado.get("original") and os.path.exists(guardado["original"])
+                and guardado.get("foto") and os.path.exists(guardado["foto"])
+                and nomes and not rascunho.get("links_dos_produtos") and rascunho.get("link")
+                and len(rascunho.get("mais_produtos") or []) + 1 == len(nomes))
+
+
+def escolhas_do_rascunho(rascunho):
+    """O lado da miniatura e a legenda da fala do vídeo do rascunho: os da nova versão ou os da edição."""
+    nova = (rascunho or {}).get("nova_versao") or {}
+    if nova.get("arquivo"):
+        return nova.get("miniatura") or edicao_video.MINIATURA_A_DIREITA, bool(nova.get("legenda"))
+    escolhas = edicao_video.escolhas_certas(((rascunho or {}).get("edicao") or {}).get("escolhas"))
+    return escolhas["miniatura"], escolhas["legenda"]
+
+
+def reeditar(ident, lado, legenda, agora=None):
+    """
+    O Editar ✏️ no servidor, sem o celular: a edição do vídeo original refeita com o lado da miniatura (lado) e
+    a legenda da fala (legenda) pedidos, numa nova versão ({id}_nova_{n}.mp4), que espera o Aprovar ✅ do Rafael
+    (nova_versao). Devolve (ok, o jeito ou o motivo).
+    """
+    rascunho = pegar(ident)
+    if not rascunho or rascunho["estado"] != "rascunho":
+        return False, "o rascunho não espera mais a sua aprovação"
+    if not pode_editar(rascunho):
+        return False, SEM_O_QUE_EDITAR
+    guardado = rascunho["edicao"]
+    versao = int(guardado.get("versoes") or 1) + 1
+    destino = os.path.join(PASTA_RASCUNHOS, f"{ident}_nova_{versao}.mp4")
+    try:
+        with open(guardado["foto"], "rb") as arquivo:
+            foto = arquivo.read()
+        outras = []
+        for caminho in guardado.get("outras") or []:
+            with open(caminho, "rb") as arquivo:
+                outras.append(arquivo.read())
+        motivo, como = edicao_video.refazer_para_postar(guardado["original"], foto, destino, guardado, outras, lado,
+                                                        legenda)
+    except Exception as e:
+        motivo, como = f"erro ({type(e).__name__})", ""
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_EDITAR, "não saiu" if motivo else "nova versão",
+                                 motivo or f"miniatura: {lado}; legenda: {'com' if legenda else 'sem'}",
+                                 ok=not motivo, agora=agora)
+    if motivo:
+        return False, motivo
+    atualizar(ident, nova_versao={"arquivo": destino, "versao": versao, "miniatura": lado, "legenda": bool(legenda),
+                                  "como": como, "feita_em": _momento(agora)})
+    return True, como
+
+
+def manter_a_versao_de_antes(ident):
+    """O Rafael fica com o vídeo de antes do Editar ✏️: a nova versão sai, e o rascunho volta a ser o de antes."""
+    rascunho = pegar(ident)
+    arquivo = ((rascunho or {}).get("nova_versao") or {}).get("arquivo")
+    if arquivo and os.path.exists(arquivo):
+        os.remove(arquivo)
+    if rascunho:
+        atualizar(ident, nova_versao={})
 
 
 def fotos_da_miniatura(video, foto, outras):
@@ -5574,13 +5736,17 @@ def _sem_ver_produtos(xml):
     return "o link de vídeo não mostrou o Ver Produtos"
 
 
-def nome_na_galeria(ident):
-    return f"robo_shopee_video_{ident}.mp4"
+def nome_na_galeria(ident, versao=1):
+    """O nome do vídeo do rascunho na galeria do celular; cada versão do Editar ✏️ tem o seu (P192 1)."""
+    return f"robo_shopee_video_{ident}.mp4" if versao <= 1 else f"robo_shopee_video_{ident}_v{versao}.mp4"
 
 
 # O vídeo, o print, as fotos de capa (P75) e as dos recusados de cada rascunho: {id}.mp4, {id}.png,
-# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg.
-ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado)_\d+\.(?:jpg|png|webp)|\.(?:mp4|png))$")
+# {id}_capa_{n}.jpg e {id}_recusado_{n}.jpg; e o que o Editar ✏️ guarda (P192 1): o vídeo original
+# ({id}_original.mp4), a foto do anúncio ({id}_foto.jpg), as fotos da miniatura que troca
+# ({id}_outra_{n}.jpg) e cada versão refeita, com o print dela ({id}_nova_{n}.mp4 e .png).
+ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)(?:_(?:capa|recusado|outra)_\d+\.(?:jpg|png|webp)|_foto\.(?:jpg|png|webp)"
+                                 r"|_original\.mp4|_nova_\d+\.(?:mp4|png)|\.(?:mp4|png))$")
 
 
 # --- Os rascunhos no app ---
@@ -5615,7 +5781,7 @@ def posicao_no_app(rascunho):
     Onde o rascunho fica na lista do app: a lista vem do mais novo para o mais velho, e
     os rascunhos do robô são os mais novos (o antigo só com o vídeo é o último).
     """
-    no_app = sorted(listar(*NO_APP), key=lambda r: (r["criado_em"], r["id"]), reverse=True)
+    no_app = sorted(listar(*NO_APP), key=lambda r: (r["no_app_em"] or r["criado_em"], r["id"]), reverse=True)
     return next(i for i, r in enumerate(no_app) if r["id"] == rascunho["id"])
 
 
@@ -6059,6 +6225,110 @@ def apagar_do_app(d, rascunho):
     return "rascunho recusado apagado"
 
 
+def produtos_para_refazer(rascunho):
+    """
+    Os produtos do rascunho de link de produto na ordem do post, com o link de cada um, para o robô curtir de
+    novo ao refazer o rascunho no app (o 1º é o do vídeo, os outros os produtos a mais); [] sem o link de algum.
+    """
+    nomes = list(rascunho.get("produtos") or [])
+    links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
+    if not nomes or len(links) != len(nomes) or not all(links):
+        return []
+    return [{"nome": nome, "link": link, "do_video": n == 0} for n, (nome, link) in enumerate(zip(nomes, links))]
+
+
+def _guardar_a_versao_de_antes(rascunho):
+    """
+    A versão de antes do rascunho refeito no app ganha um registro próprio, recusado (o robô a apaga do app
+    como os recusados, conferindo antes o título e os produtos), no lugar dela na lista do app (no_app_em) e
+    com versao_de, para não contar como rascunho do dia. Devolve o id dele.
+    """
+    antigo = criar(rascunho["id_video"])
+    atualizar(antigo, estado="recusado", criado_em=rascunho["criado_em"],
+              no_app_em=rascunho.get("no_app_em") or rascunho["criado_em"], versao_de=str(rascunho["id"]),
+              titulo=rascunho["titulo"], produtos=rascunho["produtos"], link=rascunho["link"],
+              mais_produtos=rascunho.get("mais_produtos") or [], arquivo=rascunho["arquivo"],
+              print=rascunho["print"], fonte=rascunho.get("fonte"), rotulo_ia=rascunho.get("rotulo_ia"),
+              aprovado_em=_momento(), motivo="a versão de antes do Editar ✏️")
+    return antigo
+
+
+def refazer_no_app(d, rascunho, agora=None):
+    """
+    O rascunho que o Rafael editou (Editar ✏️) e aprovou, refeito no app com a nova versão do vídeo (P192 1):
+    o app não deixa trocar o vídeo de um rascunho, então o robô curte de novo os produtos (os mesmos links),
+    põe a nova versão na galeria com um nome só dela, faz o rascunho do zero (os mesmos produtos, na mesma
+    ordem, e o mesmo título), confere a tela final e salva. Só com o novo salvo, a versão de antes sai do app
+    (_guardar_a_versao_de_antes e apagar_do_app); o que não sair dela na hora fica para a próxima rodada, como
+    um recusado. O rascunho passa a ser o novo e ganha a hora de ir ao ar. No fim, descurte o que curtiu.
+    """
+    nova = rascunho.get("nova_versao") or {}
+    arquivo, versao = nova.get("arquivo"), int(nova.get("versao") or 2)
+    if not arquivo or not os.path.exists(arquivo):
+        raise Parada("a nova versão do vídeo não está mais no servidor")
+    produtos = produtos_para_refazer(rascunho)
+    if not produtos:
+        raise Parada("o rascunho não tem o link de cada produto para refazer no app")
+    video = dict(video_do_rascunho(rascunho), arquivo=arquivo)
+    curtidos, verificacao = [], False
+    try:
+        feitos = _curtir_os_produtos(d, video, produtos, curtidos)
+        if len(feitos) != len(produtos):
+            raise Parada(f"não consegui curtir de novo {len(produtos) - len(feitos)} de {len(produtos)} produto(s)")
+        ir_ao_perfil(d)
+        if not ps.por_na_galeria(d, arquivo, nome_na_galeria(rascunho["id"], versao)):
+            raise Parada("a nova versão do vídeo não apareceu na galeria do celular")
+        abrir_galeria(d, agora)
+        marcar_so_o_mais_novo(d)
+        seguir(d, CAMINHO_EDICAO[:1])
+        efeitos_na_edicao(d)
+        seguir(d, CAMINHO_EDICAO[1:])
+        # Todos os produtos de antes, na mesma ordem: o que não anexa para tudo (nenhum é "a mais" aqui).
+        nomes = list(rascunho["produtos"])
+        _anexados, no_post = anexar_os_produtos(d, video, nomes, (), lista_limpa())
+        if len(no_post) != len(nomes):
+            raise Parada(f"o rascunho novo ficou com {len(no_post)} de {len(nomes)} produto(s)")
+        escrever_a_legenda(d, rascunho["titulo"])
+        _conferir(ps.conferir_tela_final(d, video_do_rascunho(rascunho)))
+        _conferir(ps.ajustar_rotulo_de_ia(d, bool(rascunho.get("rotulo_ia"))))
+        print_tela = os.path.join(PASTA_RASCUNHOS, f"{rascunho['id']}_nova_{versao}.png")
+        d.screenshot(print_tela)
+        tocar(d, "@tv_drafts_box", 12)
+        if tem(tela(d), "@btn_post"):
+            raise Parada("toquei em Rascunhos, mas o app continuou na tela final")
+        # O novo está salvo: a versão de antes ganha o registro dela, e o rascunho passa a ser o novo.
+        antigo = _guardar_a_versao_de_antes(rascunho)
+        escolhas = edicao_video.escolhas_certas((rascunho.get("edicao") or {}).get("escolhas"))
+        escolhas.update(miniatura=nova.get("miniatura") or escolhas["miniatura"], legenda=bool(nova.get("legenda")))
+        quando = proxima_postagem(ler_config(), agora)
+        atualizar(rascunho["id"], arquivo=arquivo, print=print_tela, no_app_em=_momento(agora), nova_versao={},
+                  edicao=dict(rascunho.get("edicao") or {}, versoes=versao, escolhas=escolhas), estado="aprovado",
+                  postar_em=quando, falhas_ao_postar="0", postar_agora_em=None, motivo="")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_REFAZER, "refeito no app",
+                                     f"{len(nomes)} produto(s), versão {versao}", ok=True, agora=agora)
+        apagado = ""
+        try:
+            apagar_do_app(d, pegar(antigo))
+            apagado = "apaguei a versão de antes."
+        except Parada as e:
+            # Fica recusada: a próxima rodada tenta de novo, conferindo o título e os produtos antes.
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_REFAZER, "a versão de antes ficou", e.motivo,
+                                         ok=False, agora=agora)
+            apagado = f"a versão de antes ainda não saiu do celular ({e.motivo}): tento de novo na próxima rodada."
+        avisar(f"✏️ Robô da Shopee Vídeo: refiz no celular o rascunho que você editou e {apagado} Ele vai ao ar "
+               f"por volta de {quando[11:16]} e fica em Aprovados para Postar ⏳ até lá.")
+        return "rascunho editado refeito no app"
+    except Verificacao:
+        # Na Verificação o robô para sem tocar em mais nada: a curtida fica para as 4h.
+        verificacao = True
+        if curtidos:
+            gravar_estado(favoritos_limpos=False)
+        raise
+    finally:
+        if not verificacao:
+            descurtir_no_fim(d, video, curtidos)
+
+
 def faxina_dos_arquivos(d):
     """
     O vídeo e o print de cada rascunho são a memória só deste robô, para aquele rascunho:
@@ -6076,12 +6346,16 @@ def faxina_dos_arquivos(d):
             usados.setdefault(int(achado.group(1)), []).append(os.path.join(PASTA_RASCUNHOS, nome))
     for ident, arquivos in sorted(usados.items()):
         # A cópia do servidor sai só depois da galeria: é ela que lembra o que falta tirar
-        # do celular, se ele cair no meio.
+        # do celular, se ele cair no meio. Com o Editar ✏️, cada versão que foi à galeria (e a que pode
+        # ter ido numa vez que parou no meio) também sai (P192 1).
         try:
-            caminho = f"{ps.GALERIA}/{nome_na_galeria(ident)}"
-            d.shell(["rm", "-f", caminho])
-            d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-                     "-d", "file://" + caminho])
+            edicao = (pegar(ident) or {}).get("edicao") or {}
+            ultima = int(edicao.get("versoes") or 1) + (1 if edicao else 0)
+            for versao in range(1, ultima + 1):
+                caminho = f"{ps.GALERIA}/{nome_na_galeria(ident, versao)}"
+                d.shell(["rm", "-f", caminho])
+                d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                         "-d", "file://" + caminho])
             for arquivo in arquivos:
                 os.remove(arquivo)
         except Exception as e:
@@ -7600,6 +7874,10 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
             resultado = publicar(d, pegar(ident), agora)
             registrar_tentativa("postar", "postado", produto=produto, agora=agora)
             return resultado
+        if acao == "refazer":
+            resultado = refazer_no_app(d, pegar(ident), agora)
+            registrar_tentativa("refazer", "refeito", produto=produto, agora=agora)
+            return resultado
         if not preparar:
             _em_preparo(config, agora, True)
         try:
@@ -7630,6 +7908,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
             _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
         if acao == "postar":
             _nao_saiu_o_post(ident, e.motivo, pedido)
+        elif acao == "refazer":
+            _nao_saiu_o_refazer(ident, e.motivo)
         elif acao == "apagar":
             # Não insiste: o Rafael decide de novo pelo botão.
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
@@ -7653,6 +7933,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
         if acao == "postar":
             _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})", pedido)
+        elif acao == "refazer":
+            _nao_saiu_o_refazer(ident, f"erro inesperado ({type(e).__name__})")
         _limpeza_de_novo(acao)
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)
@@ -7706,6 +7988,29 @@ def _nao_saiu_o_post(ident, motivo, pedido=False):
     avisar(f"⚠️ Robô da Shopee Vídeo: tentei postar o rascunho aprovado {TENTATIVAS_DE_POSTAR} vezes e não "
            f"consegui (da última vez: {motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝 "
            "para você decidir de novo.")
+
+
+def _nao_saiu_o_refazer(ident, motivo):
+    """
+    O rascunho editado que não foi refeito no app (P192 1): a versão de antes continua no celular, sem mudança.
+    Tenta de novo nas rodadas seguintes, até TENTATIVAS_DE_POSTAR vezes; depois volta para o Rafael, com a nova
+    versão guardada (ele aprova de novo ou fica com o vídeo de antes).
+    """
+    rascunho = pegar(ident)
+    if not rascunho or rascunho["estado"] != "refazer":
+        return
+    falhas = int(rascunho.get("falhas_ao_postar") or 0) + 1
+    if falhas < TENTATIVAS_DE_POSTAR:
+        atualizar(ident, falhas_ao_postar=str(falhas), motivo=motivo)
+        avisar(f"⚠️ Robô da Shopee Vídeo: não consegui refazer no celular o rascunho que você editou ({motivo}). O "
+               "de antes continua no celular, sem mudança. Tento de novo na próxima rodada (tentativa "
+               f"{falhas + 1} de {TENTATIVAS_DE_POSTAR}).")
+        return
+    atualizar(ident, estado="rascunho", aprovado_em=None, falhas_ao_postar="0", motivo=motivo)
+    avisar(f"⚠️ Robô da Shopee Vídeo: tentei {TENTATIVAS_DE_POSTAR} vezes refazer no celular o rascunho que você "
+           f"editou e não consegui (da última vez: {motivo}). O de antes continua no celular. Ele voltou para "
+           "Rascunhos do Robô 📝 com a nova versão guardada: aprove de novo para eu tentar outra vez, ou fique com "
+           "o vídeo de antes.")
 
 
 def _suspender(e, acao, preparar, produto="", agora=None):
