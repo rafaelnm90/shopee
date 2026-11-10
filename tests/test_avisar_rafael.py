@@ -78,6 +78,10 @@ def test_id_da_mensagem_para_apagar_e_editar_depois(bm, monkeypatch):
     assert avisar_rafael.apagar_mensagem(88) is False and avisar_rafael.editar_texto(88, "Respondida") is True
     assert [p[0] for p in pedidos] == ["sendMessage", "sendMessage", "deleteMessage", "editMessageText"]
     assert pedidos[2][1]["message_id"] == ["88"] and pedidos[3][1]["chat_id"] == [str(bm.ADMIN_ID)]
+    # O aviso da informação vista é editado em HTML (perguntas_rafael.montar_aviso_visto).
+    assert "parse_mode" not in pedidos[3][1]
+    assert avisar_rafael.editar_texto(88, "<b>Vista</b>", html=True) is True
+    assert pedidos[4][0] == "editMessageText" and pedidos[4][1]["parse_mode"] == ["HTML"]
 
 
 def test_foto_vai_para_o_admin_pelo_bot(bm, monkeypatch, tmp_path):

@@ -157,7 +157,7 @@ def test_informacao_cifrada_chega_ao_servidor_com_o_vi(monkeypatch):
 
 def test_vista_pela_conversa_tira_os_lembretes_e_deixa_o_aviso(monkeypatch):
     # O "ok" na conversa com o Claude (avisar.yml, vista): os lembretes saem do privado, e o
-    # aviso de onde a informação veio fica, sem o botão, para consulta.
+    # aviso de onde a informação veio fica, marcado como visto, sem o botão, para consulta.
     import avisar_rafael
     pr.nova_informacao("Informação.", LINK, AGORA)
     ids = iter([41, 42, 43])
@@ -169,11 +169,51 @@ def test_vista_pela_conversa_tira_os_lembretes_e_deixa_o_aviso(monkeypatch):
     apagadas, editadas, sem_botao = [], [], []
     # A de 42 passou das 48 h: o Telegram não deixa apagar, e o texto dela vira "vista".
     monkeypatch.setattr(avisar_rafael, "apagar_mensagem", lambda ident: ident != 42 and not apagadas.append(ident))
-    monkeypatch.setattr(avisar_rafael, "editar_texto", lambda ident, texto: editadas.append((ident, texto)) or True)
+    monkeypatch.setattr(avisar_rafael, "editar_texto",
+                        lambda ident, texto, html=False: editadas.append((ident, texto, html)) or True)
     monkeypatch.setattr(avisar_rafael, "tirar_botoes", lambda ident: sem_botao.append(ident) or True)
     assert pr.main(["vista", "i1"]) == 0
-    assert apagadas == [43] and editadas == [(42, pr.texto_da_vista("I1"))] and sem_botao == [41]
+    assert apagadas == [43] and editadas[0] == (42, pr.texto_da_vista("I1"), False) and sem_botao == []
+    # O aviso fica com a informação e o link, o "você viu" no topo e sem o pedido do Vi ✅.
+    ident, aviso, html = editadas[1]
+    assert ident == 41 and html is True and "você viu em" in aviso and "(I1)" in aviso
+    assert "Informação." in aviso and LINK in aviso and "Toque em" not in aviso and "Lembro" not in aviso
+    assert pr.mensagens_da_informacao("I1") == [41, 42]
     assert pr.main(["vista", "I1"]) == 1 and pr.main(["vista", "P1"]) == 1
+
+
+def test_lembrete_novo_da_informacao_apaga_o_anterior():
+    # Pedido do Rafael (10/11): o lembrete visto não pode ficar no privado, e o Telegram só deixa
+    # apagar até 48 h depois do envio. Cada lembrete novo apaga o anterior: ficam o aviso e o
+    # último lembrete; o que não sai fica na lista, para sair no visto.
+    pr.nova_informacao("Informação.", LINK, AGORA)
+    ids, apagadas = iter(range(51, 60)), []
+
+    async def enviar(texto, teclado):
+        return next(ids)
+
+    async def apagar(ident):
+        apagadas.append(ident)
+        return ident != 54
+    for horas in range(4):
+        rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=horas), apagar=apagar))
+    assert apagadas == [52, 53] and pr.mensagens_da_informacao("I1") == [51, 54]
+    # O 54 não sai na hora: fica na lista com o lembrete novo.
+    rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=4), apagar=apagar))
+    assert apagadas == [52, 53, 54] and pr.mensagens_da_informacao("I1") == [51, 54, 55]
+    # Vista: saem os lembretes, também o tocado, e fica o aviso.
+    assert pr.marcar_vista("I1", AGORA + timedelta(hours=5))
+    assert pr.lembretes_para_tirar("I1", 55) == (51, [54, 55])
+    assert pr.lembretes_para_tirar("I1", 99) == (51, [54, 55, 99])
+    # Vista enquanto o lembrete da hora saía: ele sai logo depois.
+    pr.nova_informacao("Outra.", LINK, AGORA)
+
+    async def enviar_e_ver(texto, teclado):
+        pr.marcar_vista("I2", AGORA)
+        return 70
+    apagadas.clear()
+    rodar(pr.lembrar_informacoes(enviar_e_ver, AGORA, apagar=apagar))
+    assert apagadas == [70] and pr.mensagens_da_informacao("I2") == []
 
 
 def test_robo_lembra_a_informacao_e_o_vi_tira_os_lembretes(bm, monkeypatch):
@@ -196,9 +236,15 @@ def test_robo_lembra_a_informacao_e_o_vi_tira_os_lembretes(bm, monkeypatch):
         con.execute("UPDATE informacoes_rafael SET ultimo_aviso = '2000-01-01 00:00:00'")
     rodar(bm.lembrar_perguntas_do_claude())
     assert pr.mensagens_da_informacao("I1") == [801, 802]
-    # O Vi ✅ no lembrete 802: a informação fica vista, o 801 sai e o 802 fica, sem o botão.
-    avisos, teclados = [], []
-    mensagem = SimpleNamespace(message_id=802)
+    # O lembrete seguinte apaga o anterior (o 801 é o aviso e fica).
+    with pr.db.conexao() as con:
+        con.execute("UPDATE informacoes_rafael SET ultimo_aviso = '2000-01-01 00:00:00'")
+    rodar(bm.lembrar_perguntas_do_claude())
+    assert apagadas == [802] and pr.mensagens_da_informacao("I1") == [801, 803]
+    # O Vi ✅ no lembrete 803: a informação fica vista, o 803 sai e o 801, o aviso, fica marcado
+    # como visto, sem o botão (pedido do Rafael, 10/11).
+    avisos, teclados, editadas = [], [], []
+    mensagem = SimpleNamespace(message_id=803)
 
     async def tirar(reply_markup=None):
         teclados.append(reply_markup)
@@ -206,13 +252,24 @@ def test_robo_lembra_a_informacao_e_o_vi_tira_os_lembretes(bm, monkeypatch):
 
     async def responder(texto, **k):
         avisos.append(texto)
+
+    async def edit_message_text(texto, chat_id=None, message_id=None, **k):
+        editadas.append((message_id, texto, k.get("parse_mode")))
+    monkeypatch.setattr(bm.bot, "edit_message_text", edit_message_text)
     clique = SimpleNamespace(data=botao.callback_data, from_user=SimpleNamespace(id=bm.ADMIN_ID), message=mensagem,
                              answer=responder)
     rodar(bm.informacao_vista(clique))
-    assert "você viu" in avisos[0] and teclados == [None] and apagadas == [801]
-    assert pr.informacoes_abertas() == []
+    assert "você viu" in avisos[0] and teclados == [None] and apagadas == [802, 803]
+    assert [(ident, modo) for ident, _texto, modo in editadas] == [(801, "HTML")]
+    assert "você viu em" in editadas[0][1] and "Toque em" not in editadas[0][1]
+    assert pr.informacoes_abertas() == [] and pr.mensagens_da_informacao("I1") == [801]
     rodar(bm.lembrar_perguntas_do_claude())
-    assert len(enviados) == 2
+    assert len(enviados) == 3
+    # O Vi ✅ de novo (no aviso que ficou): nada mais sai.
+    rodar(bm.informacao_vista(SimpleNamespace(data=botao.callback_data, from_user=SimpleNamespace(id=bm.ADMIN_ID),
+                                              message=SimpleNamespace(message_id=801, edit_reply_markup=tirar),
+                                              answer=responder)))
+    assert "já estava vista" in avisos[-1] and apagadas == [802, 803]
     # Outra pessoa não marca.
     pr.nova_informacao("Outra.", LINK)
     estranho = SimpleNamespace(data="info_vi:2", from_user=SimpleNamespace(id=bm.ADMIN_ID + 1), message=mensagem,
