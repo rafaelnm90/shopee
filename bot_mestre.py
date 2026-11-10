@@ -8113,6 +8113,8 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
             dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
             dt_obj = dt_obj_utc.astimezone(fuso_horario)
             dt_db_str = dt_obj.strftime("%Y-%m-%d")
+            # A hora da compra, para a conta das vendas por hora (P13, vendas.relatorio_privado).
+            dt_hora = dt_obj.strftime("%H:%M")
             
             # A etiqueta do link (o robô ou canal que levou à venda) e os produtos do pedido.
             etiqueta = vendas.etiqueta_do_utm(conv.get("utmContent"))
@@ -8130,6 +8132,9 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                 
                 itens = vendas.itens_do_pedido(order)
                 if order_sn in pedidos_db:
+                    if conv.get("purchaseTime") and pedidos_db[order_sn].get("hora") != dt_hora:
+                        pedidos_db[order_sn]["hora"] = dt_hora
+                        houve_atualizacao = True
                     if conv.get("utmContent") is not None and (
                             pedidos_db[order_sn].get("etiqueta") != etiqueta or pedidos_db[order_sn].get("itens") != itens):
                         pedidos_db[order_sn].update(etiqueta=etiqueta, itens=itens)
@@ -8170,6 +8175,8 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                         "comissao_shopee": c_shopee_frac,
                         "comissao_vendedor": c_extra_frac
                     }
+                    if conv.get("purchaseTime"):
+                        pedidos_db[order_sn]["hora"] = dt_hora
                     if conv.get("utmContent") is not None:
                         pedidos_db[order_sn].update(etiqueta=etiqueta, itens=itens)
                     houve_atualizacao = True
