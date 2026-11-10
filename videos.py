@@ -525,7 +525,9 @@ def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
     entradas = ["-i", video]
     for i, (imagem, inicio, fim, x, y) in enumerate(letreiros):
         entradas += ["-i", imagem]
-        filtro += (f";[t{i}][{i + 1}:v]overlay=x={x}:y={y}:enable='between(t,{inicio:.2f},{fim:.2f})',"
+        # Do início até antes do fim: o letreiro que acaba quando o seguinte começa (as legendas da
+        # fala) não fica junto com ele no quadro da troca, um por cima do outro.
+        filtro += (f";[t{i}][{i + 1}:v]overlay=x={x}:y={y}:enable='gte(t,{inicio:.2f})*lt(t,{fim:.2f})',"
                    f"format=yuv420p[t{i + 1}]")
     saida = ["-map", f"[t{len(letreiros)}]"]
     if com_audio:

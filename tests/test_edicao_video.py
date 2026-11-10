@@ -1332,6 +1332,38 @@ def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
     assert vermelho > 150 and verde < 80
 
 
+
+def test_legendas_seguidas_nao_ficam_juntas_no_quadro_da_troca(tmp_path):
+    # Vídeo do Rafael das 14:47 de 10/11: na troca de uma legenda da fala para a seguinte, um quadro
+    # mostrava as duas juntas, uma por cima da outra ("a priduradouroção"). A legenda acaba quando a
+    # seguinte começa (letreiros_da_fala): no quadro desse instante, só a seguinte fica na tela.
+    if not shutil.which("ffmpeg"):
+        return
+    import io
+
+    from PIL import Image
+
+    def quadrado(cor):
+        saida = io.BytesIO()
+        Image.new("RGBA", (60, 60), cor + (255,)).save(saida, "PNG")
+        return saida.getvalue()
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:size=360x640:rate=30:duration=2",
+                    str(video)], check=True)
+    destino = tmp_path / "r.mp4"
+    letreiros = [(quadrado((230, 20, 20)), 0.0, 1.0, 100, 100), (quadrado((20, 20, 230)), 1.0, 2.0, 300, 100)]
+    assert edicao_video.videos.com_cortes_e_ritmo(str(video), [(0.0, 2.0, 1.0)], str(destino), letreiros) == ""
+
+    def quadro(numero):
+        saida = tmp_path / f"q{numero}.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(destino), "-vf", f"select=eq(n\\,{numero})",
+                        "-frames:v", "1", str(saida)], check=True)
+        with Image.open(saida) as imagem:
+            return imagem.convert("RGB")
+    antes, troca = quadro(29), quadro(30)                 # 30 quadros por segundo: o 30 é o de 1,0 s
+    assert antes.getpixel((130, 130))[0] > 180 and antes.getpixel((330, 130))[2] < 180
+    assert troca.getpixel((130, 130))[0] < 180 and troca.getpixel((330, 130))[2] > 180
+
 def test_as_tres_musicas_de_fundo_estao_na_midia():
     # Escolha do Rafael (28/10, P55): 3 músicas feitas pelo Claude do zero (animada, calma e
     # divertida), sem música de ninguém, para os vídeos sem som.
