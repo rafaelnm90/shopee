@@ -652,6 +652,33 @@ BOTAO_EXEMPLO_DA_CAPA = "Ver Exemplo da Capa 👀"
 BOTAO_LIGAR_CAPA = "Ligar Capa com Chamada ✅"
 BOTAO_DESLIGAR_CAPA = "Desligar Capa com Chamada ⏸️"
 BOTAO_VOLTAR_EDICAO = "Voltar à Edição 🔙"
+# Os itens do vídeo (P191 1 e P192 1), dentro da Edição dos Vídeos: o que vai por cima dos próximos vídeos
+# editados. Cada botão de ligar mostra o contrário do que está valendo, como os outros do painel.
+BOTAO_ITENS = "Itens do Vídeo 🧩"
+BOTAO_VOLTAR_ITENS = "Voltar aos Itens 🔙"
+BOTAO_MINIATURA_DIREITA = "Miniatura à Direita ➡️"
+BOTAO_MINIATURA_ESQUERDA = "Miniatura à Esquerda ⬅️"
+BOTAO_SEM_MINIATURA = "Sem Miniatura 🚫"
+LADOS_DOS_BOTOES = {BOTAO_MINIATURA_DIREITA: edicao_video.MINIATURA_A_DIREITA,
+                    BOTAO_MINIATURA_ESQUERDA: edicao_video.MINIATURA_A_ESQUERDA,
+                    BOTAO_SEM_MINIATURA: edicao_video.SEM_MINIATURA}
+# (chave das escolhas, nome na tela, botão de ligar, botão de desligar)
+ITENS_DE_LIGAR = (("legenda", "Legenda da fala", "Ligar Legenda da Fala ✅", "Desligar Legenda da Fala ⏸️"),
+                  ("setinhas", "Setinhas", "Ligar Setinhas ✅", "Desligar Setinhas ⏸️"),
+                  ("moldura", "Moldura do cartão", "Ligar Moldura do Cartão ✅", "Desligar Moldura do Cartão ⏸️"))
+BOTOES_DE_LIGAR = {botao: (chave, ligar) for chave, _nome, liga, desliga in ITENS_DE_LIGAR
+                   for botao, ligar in ((liga, True), (desliga, False))}
+BOTAO_COR_DO_DESTAQUE = "Cor das Setinhas e da Moldura 🎨"
+BOTOES_DAS_CORES = {"Vermelho 🔴": "vermelho", "Laranja da Shopee 🟠": "laranja", "Amarelo 🟡": "amarelo",
+                    "Verde 🟢": "verde", "Azul 🔵": "azul", "Branco ⚪": "branco",
+                    "Cor do Produto 🎨": edicao_video.DESTAQUE_NA_COR_DO_PRODUTO}
+NOMES_DAS_CORES = {"vermelho": "vermelho (o de sempre)", "laranja": "laranja da Shopee", "amarelo": "amarelo",
+                   "verde": "verde", "azul": "azul", "branco": "branco",
+                   edicao_video.DESTAQUE_NA_COR_DO_PRODUTO: "a cor do produto (no produto vermelho, o vermelho)"}
+NOMES_DOS_LADOS = {edicao_video.MINIATURA_A_DIREITA: "em cima à direita (a de sempre)",
+                   edicao_video.MINIATURA_A_ESQUERDA: "em cima à esquerda, com os textos do alto à direita",
+                   edicao_video.SEM_MINIATURA: "sem a miniatura"}
+PROCESSO_DOS_ITENS = "edição do vídeo: itens do painel"
 BOTAO_PRODUTOS_A_MAIS = "Produtos a Mais 🛍️"
 # O processo dos produtos a mais no registro: o mesmo do robo_shopee_video (o teste confere).
 PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
@@ -718,8 +745,32 @@ def teclado_edicao(config):
     return montar_teclado([
         [KeyboardButton(text=BOTAO_EDITOR_1), KeyboardButton(text=BOTAO_EDITOR_2)],
         [KeyboardButton(text=liga), KeyboardButton(text=BOTAO_CAPA)],
+        [KeyboardButton(text=BOTAO_ITENS)],
         [KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
     ])
+
+
+def escolhas_da_edicao(config):
+    """As escolhas dos itens do vídeo guardadas no painel, com o padrão no que falta (P192 1)."""
+    return edicao_video.escolhas_certas(config.get(edicao_video.CHAVE_DAS_ESCOLHAS))
+
+
+def teclado_itens(config):
+    escolhas = escolhas_da_edicao(config)
+    liga = [KeyboardButton(text=desliga if escolhas[chave] else liga)
+            for chave, _nome, liga, desliga in ITENS_DE_LIGAR]
+    return montar_teclado([
+        [KeyboardButton(text=BOTAO_MINIATURA_DIREITA), KeyboardButton(text=BOTAO_MINIATURA_ESQUERDA)],
+        [KeyboardButton(text=BOTAO_SEM_MINIATURA), liga[0]],
+        liga[1:],
+        [KeyboardButton(text=BOTAO_COR_DO_DESTAQUE)],
+        [KeyboardButton(text=BOTAO_VOLTAR_EDICAO), KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
+    ])
+
+
+def teclado_cores():
+    botoes = [KeyboardButton(text=botao) for botao in BOTOES_DAS_CORES]
+    return montar_teclado([botoes[0:3], botoes[3:6], botoes[6:], [KeyboardButton(text=BOTAO_VOLTAR_ITENS)]])
 
 
 def teclado_capa(config):
@@ -878,7 +929,8 @@ def texto_robo(config, agora=None, celular=None):
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
-        "canto, as setinhas vermelhas e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
+        "canto, as setinhas e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar, e escolher "
+        f"o que vai por cima dos vídeos em {BOTAO_ITENS}.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta, sem hora marcada: "
         "cada coisa sai assim que o celular fica livre. Nele também se espalham os vídeos de outros criadores que ele curte (até 5 por dia, "
@@ -946,7 +998,8 @@ def texto_edicao(config):
         "no canto de cima à direita e as setinhas vermelhas em cascata, apontando para o cartão do produto, embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
         "(a foto do produto, um quadro ou um texto), a nossa miniatura fica de fora; se a coisa dele fica logo "
-        "abaixo do canto, ela diminui (até 2/3 do tamanho) para ficar acima dela.\n\n"
+        "abaixo do canto, ela diminui (até 2/3 do tamanho) para ficar acima dela. O lado da miniatura (ou sem ela), "
+        f"a cor das setinhas e o que vai ou não por cima do vídeo você escolhe em {BOTAO_ITENS}.\n\n"
         "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
         "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto, uma vantagem que o vídeo "
         "mostra e, no fim, uma chamada para o produto anexado embaixo, numa caixa vermelha, em CAIXA ALTA (escritos pela IA, "
@@ -957,8 +1010,8 @@ def texto_edicao(config):
         "🎨 <b>A cor de cada vídeo</b>: a caixa do nome e da vantagem, a moldura da miniatura e o fio e a faixa "
         "da capa vão na cor principal do produto, que a IA diz vendo o vídeo (no produto de várias cores, a que "
         "mais aparece nele), com a letra branca ou preta, a de mais destaque; no produto vermelho, ficam as de "
-        "sempre (a caixa preta e o laranja). A chamada final, as setinhas e a moldura do cartão continuam "
-        "vermelhas.\n\n"
+        "sempre (a caixa preta e o laranja). A chamada final continua vermelha, e as setinhas e a moldura do "
+        f"cartão vão na cor que você escolhe em {BOTAO_ITENS} (de começo, vermelhas).\n\n"
         "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
@@ -985,8 +1038,58 @@ def texto_edicao(config):
         "próximos rascunhos e nos vídeos do modo assistente. Com a edição ligada, só vai vídeo editado: o vídeo "
         "que não sair editado fica de lado e o robô pega o próximo.\n"
         f"🏷️ <b>{BOTAO_CAPA}</b>: a vantagem do vídeo escrita em letras grandes na capa que aparece na grade do "
-        "seu perfil, sem cobrir os números; ver o exemplo, ligar ou desligar."
+        "seu perfil, sem cobrir os números; ver o exemplo, ligar ou desligar.\n"
+        f"🧩 <b>{BOTAO_ITENS}</b>: o que vai por cima dos próximos vídeos: a miniatura (à direita, à esquerda ou "
+        "sem), a legenda da fala, as setinhas e a moldura do cartão (cada uma com ou sem) e a cor das setinhas e da "
+        "moldura."
     )
+
+
+def linhas_dos_itens(escolhas):
+    """Como estão os itens do vídeo (P192 1), um por linha."""
+    return "\n".join([f"🖼️ Miniatura: <b>{NOMES_DOS_LADOS[escolhas['miniatura']]}</b>"]
+                     + [f"{'✅' if escolhas[chave] else '⏸️'} {nome}: <b>{'com' if escolhas[chave] else 'sem'}</b>"
+                        for chave, nome, _liga, _desliga in ITENS_DE_LIGAR]
+                     + [f"🎨 Cor das setinhas e da moldura: <b>{NOMES_DAS_CORES[escolhas['cor']]}</b>"])
+
+
+def texto_itens(config):
+    """A tela dos Itens do Vídeo. Escolhas do Rafael (10/11, P191 1 e P192 1): DECISOES.md, Shopee Vídeo."""
+    liga = {chave: (liga, desliga) for chave, _nome, liga, desliga in ITENS_DE_LIGAR}
+    return (
+        "🧩 <b>Itens do Vídeo</b>\n"
+        "O que vai por cima dos próximos vídeos editados (rascunhos do robô e modo assistente) e dos exemplos dos "
+        "editores. Tudo começou como era antes, e os rascunhos já salvos ficam como estão.\n\n"
+        f"<b>Agora</b>\n{linhas_dos_itens(escolhas_da_edicao(config))}\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"➡️ <b>{BOTAO_MINIATURA_DIREITA}</b>: a miniatura da foto do anúncio no canto de cima à direita, a de "
+        "sempre.\n"
+        f"⬅️ <b>{BOTAO_MINIATURA_ESQUERDA}</b>: a miniatura no canto de cima à esquerda. Os textos que iam no alto "
+        "à esquerda (o nome, a vantagem e a chamada) passam para a direita, e a IA confere o canto da esquerda (se o "
+        "criador pôs coisa ali, a miniatura diminui ou fica de fora, como no da direita).\n"
+        f"🚫 <b>{BOTAO_SEM_MINIATURA}</b>: os vídeos vão sem a miniatura.\n"
+        f"💬 <b>{liga['legenda'][0]}</b> / <b>{liga['legenda'][1]}</b>: as palavras faladas no vídeo, escritas "
+        "embaixo, ao lado das setinhas.\n"
+        f"⬇️ <b>{liga['setinhas'][0]}</b> / <b>{liga['setinhas'][1]}</b>: as setinhas em cascata, apontando para "
+        "o cartão do produto.\n"
+        f"🔲 <b>{liga['moldura'][0]}</b> / <b>{liga['moldura'][1]}</b>: a moldura em volta do cartão do produto "
+        "que o app mostra embaixo.\n"
+        f"🎨 <b>{BOTAO_COR_DO_DESTAQUE}</b>: uma cor só para as setinhas e a moldura do cartão: vermelho (o de "
+        "sempre), laranja da Shopee, amarelo, verde, azul, branco ou a cor do produto. A caixa da chamada do fim "
+        "continua vermelha.\n"
+        f"🔙 <b>{BOTAO_VOLTAR_EDICAO}</b>: volta à tela da Edição dos Vídeos."
+    )
+
+
+def texto_cores(config):
+    """A escolha da cor das setinhas e da moldura do cartão (P192 1)."""
+    escolhida = escolhas_da_edicao(config)["cor"]
+    return ("🎨 <b>Cor das setinhas e da moldura do cartão</b>\n"
+            f"Agora: <b>{NOMES_DAS_CORES[escolhida]}</b>.\n\n"
+            "Toque na cor que vale para os próximos vídeos. Com a cor do produto, as duas vão na cor principal dele, "
+            "a mesma da faixa da capa e da moldura da miniatura; no produto vermelho e no vídeo sem a cor da IA, "
+            "ficam vermelhas. A caixa da chamada do fim continua vermelha.\n"
+            f"🔙 <b>{BOTAO_VOLTAR_ITENS}</b>: volta sem mudar.")
 
 
 def rotulo_capa(config):
@@ -1273,6 +1376,68 @@ async def ligar_edicao_handler(message: types.Message, state: FSMContext):
     await mostrar_edicao(message, state)
 
 
+async def mostrar_itens(message, state):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    await message.answer(texto_itens(config), parse_mode="HTML", reply_markup=teclado_itens(config))
+
+
+@router.message(F.text.in_([BOTAO_ITENS, BOTAO_VOLTAR_ITENS]), StateFilter("*"))
+async def itens_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_itens(message, state)
+
+
+def alterar_itens(**mudancas):
+    """
+    Grava a escolha de um item do vídeo (P192 1) junto das outras, sem perder o que o robô gravar na mesma
+    chave ao mesmo tempo.
+    """
+    def alterar(dados):
+        escolhas = edicao_video.escolhas_certas(dados.get(edicao_video.CHAVE_DAS_ESCOLHAS))
+        escolhas.update(mudancas)
+        dados[edicao_video.CHAVE_DAS_ESCOLHAS] = escolhas
+    db.atualizar_config(CHAVE_CONFIG, alterar)
+
+
+@router.message(F.text.in_(list(LADOS_DOS_BOTOES)), StateFilter("*"))
+async def lado_da_miniatura_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    lado = LADOS_DOS_BOTOES[message.text]
+    alterar_itens(miniatura=lado)
+    registro_processos.registrar("shopee_video", PROCESSO_DOS_ITENS, f"miniatura: {lado}", ok=True)
+    logger.info(f"🧩 [Shopee Vídeo] Miniatura dos vídeos: {lado}.")
+    await mostrar_itens(message, state)
+
+
+@router.message(F.text.in_(list(BOTOES_DE_LIGAR)), StateFilter("*"))
+async def ligar_item_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    chave, ligar = BOTOES_DE_LIGAR[message.text]
+    alterar_itens(**{chave: ligar})
+    registro_processos.registrar("shopee_video", PROCESSO_DOS_ITENS, f"{chave}: {'com' if ligar else 'sem'}",
+                                 ok=True)
+    logger.info(f"🧩 [Shopee Vídeo] Item dos vídeos ({chave}) {'ligado' if ligar else 'desligado'} pelo painel.")
+    await mostrar_itens(message, state)
+
+
+@router.message(F.text == BOTAO_COR_DO_DESTAQUE, StateFilter("*"))
+async def pedir_cor_do_destaque(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    await message.answer(texto_cores(ler_config()), parse_mode="HTML", reply_markup=teclado_cores())
+
+
+@router.message(F.text.in_(list(BOTOES_DAS_CORES)), StateFilter("*"))
+async def salvar_cor_do_destaque(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    cor = BOTOES_DAS_CORES[message.text]
+    alterar_itens(cor=cor)
+    registro_processos.registrar("shopee_video", PROCESSO_DOS_ITENS, f"cor: {cor}", ok=True)
+    logger.info(f"🎨 [Shopee Vídeo] Cor das setinhas e da moldura: {cor}.")
+    await mostrar_itens(message, state)
+
+
 async def mostrar_capa(message, state):
     await state.set_state(ShopeeVideoFluxo.menu_robo)
     config = ler_config()
@@ -1476,15 +1641,20 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
         linhas.append("⚠️ A IA não escreveu o nome, a vantagem e a chamada desta vez.")
     largura = edicao_video.largura_da_miniatura(resumo.get("miniatura", True))
-    if not gancho and not largura:
+    # O lado da miniatura é o do painel (Itens do Vídeo 🧩, P192 1).
+    lado = resumo.get("lado", edicao_video.MINIATURA_A_DIREITA)
+    canto = "esquerda" if lado == edicao_video.MINIATURA_A_ESQUERDA else "direita"
+    if not gancho and lado == edicao_video.SEM_MINIATURA:
+        linhas.append(f"🖼️ Sem a nossa miniatura (neste vídeo e nas versões): ela está desligada em {BOTAO_ITENS}.")
+    elif not gancho and not largura:
         # Escolha do Rafael (29/10, P81): DECISOES.md, Shopee Vídeo.
         linhas.append("🖼️ Sem a nossa miniatura (neste vídeo e nas versões): o criador já pôs coisa no canto de "
-                      "cima à direita.")
+                      f"cima à {canto}.")
     elif not gancho and largura < edicao_video.LARGURA_DA_MINIATURA:
         # Escolha do Rafael (29/10, P97): DECISOES.md, Shopee Vídeo.
         linhas.append(f"🖼️ Miniatura menor ({round(largura * 100 / edicao_video.LARGURA_DA_MINIATURA)}% do tamanho "
                       "de sempre, neste vídeo e nas versões): o criador pôs coisa logo abaixo do canto de cima à "
-                      "direita, e a miniatura diminuiu para ficar acima.")
+                      f"{canto}, e a miniatura diminuiu para ficar acima.")
     if indice < total - 1:
         return "\n".join(linhas)
     if total < edicao_video.VERSOES_POR_VIDEO:
