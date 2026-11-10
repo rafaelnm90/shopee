@@ -1942,8 +1942,11 @@ def test_itens_do_video_no_painel(bm, Msg, Est):
     assert "Itens do Vídeo 🧩" in sv.texto_edicao(config) and "Itens do Vídeo 🧩" in sv.texto_robo(config)
 
 
-def _rascunho_editavel(sv):
-    """Um rascunho de link de produto com o que o Editar ✏️ precisa guardado (P192 1)."""
+def _rascunho_editavel(sv, legendas=([0.0, 1.5, "olha que lindo"],)):
+    """
+    Um rascunho de link de produto com o que o Editar ✏️ precisa guardado (P192 1); legendas: a fala que a IA
+    escreveu ([] no vídeo em que ninguém fala em português).
+    """
     robo = sv.robo
     ident = _rascunho(sv)
     base = os.path.join(robo.PASTA_RASCUNHOS, str(ident))
@@ -1951,7 +1954,8 @@ def _rascunho_editavel(sv):
         with open(caminho, "wb") as f:
             f.write(b"x")
     robo.atualizar(ident, edicao={"original": base + "_original.mp4", "foto": base + "_foto.jpg", "outras": [],
-                                  "versoes": 1, "escolhas": dict(sv.edicao_video.ESCOLHAS_PADRAO), "textos": {}})
+                                  "versoes": 1, "escolhas": dict(sv.edicao_video.ESCOLHAS_PADRAO),
+                                  "textos": {"legendas": [list(trecho) for trecho in legendas]}})
     return ident
 
 
@@ -1968,13 +1972,13 @@ def test_editar_no_rascunho_refaz_o_video_e_o_aprovar_refaz_no_celular(bm, Msg, 
     msg = MsgComMidia(Msg, sv.BOTAO_EDITAR)
     rodar(sv.editar_handler(msg, est))
     assert est.estado == sv.ShopeeVideoFluxo.editando_rascunho
-    assert "Fica assim: <b>a miniatura à direita, com a legenda da fala</b>" in msg.saidas[-1]
+    assert "Agora ele está assim: <b>a miniatura à direita, com a legenda da fala</b>" in msg.saidas[-1]
     assert _botoes(msg.teclados[-1]) == ["Direita ➡️", "Esquerda ⬅️", "Sem Miniatura ✖️", "Com Legenda 💬",
                                          "Sem Legenda 🔇", sv.BOTAO_REFAZER_O_VIDEO, "Cancelar ❌"]
     for texto in ("Esquerda ⬅️", "Sem Legenda 🔇"):
         msg = MsgComMidia(Msg, texto)
         rodar(sv.escolher_no_editar(msg, est))
-    assert "Fica assim: <b>a miniatura à esquerda, sem a legenda da fala</b>" in msg.saidas[-1]
+    assert msg.saidas[-1].startswith("✅ Escolhido: <b>a miniatura à esquerda, sem a legenda da fala</b>. Agora toque")
     pedidos = []
 
     def reeditar(ident_, lado, legenda, agora=None):
@@ -1999,6 +2003,66 @@ def test_editar_no_rascunho_refaz_o_video_e_o_aprovar_refaz_no_celular(bm, Msg, 
     rodar(sv.aprovar_handler(msg, est))
     assert "o robô refaz o rascunho no celular com ela" in msg.saidas[0]
     assert sv.robo.pegar(ident)["estado"] == "refazer"
+
+
+def test_editar_cada_toque_diz_o_que_fez_e_o_refazer_igual_nao_refaz(bm, Msg, Est, monkeypatch):
+    # Vídeo do Rafael das 17:51 de 10/11: ele tocou Com Legenda 💬 duas vezes num vídeo que já tinha a legenda,
+    # a tela inteira voltou igual e ele escreveu "Não está fazendo nada". Cada toque responde curto o que fez, e o
+    # Refazer o Vídeo 🎬 sem nada mudado não refaz o mesmo vídeo.
+    sv, est = _painel(bm), Est()
+    _rascunho_editavel(sv)
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    rodar(sv.editar_handler(MsgComMidia(Msg, sv.BOTAO_EDITAR), est))
+    msg = MsgComMidia(Msg, "Com Legenda 💬")
+    rodar(sv.escolher_no_editar(msg, est))
+    assert msg.saidas == ["O vídeo já está assim: <b>a miniatura à direita, com a legenda da fala</b>. Escolha o que "
+                          f"quer mudar e depois toque em <b>{sv.BOTAO_REFAZER_O_VIDEO}</b>."]
+    pedidos = []
+    monkeypatch.setattr(sv.robo, "reeditar", lambda *args, **kwargs: pedidos.append(args) or (True, "editado"))
+    msg = MsgComMidia(Msg, sv.BOTAO_REFAZER_O_VIDEO)
+    rodar(sv.refazer_o_video_handler(msg, est))
+    assert pedidos == [] and "nada a refazer" in msg.saidas[-1]
+    assert est.estado == sv.ShopeeVideoFluxo.editando_rascunho
+    # Mudou e voltou ao que era: de novo o mesmo vídeo.
+    for texto in ("Sem Miniatura ✖️", "Direita ➡️"):
+        msg = MsgComMidia(Msg, texto)
+        rodar(sv.escolher_no_editar(msg, est))
+    assert msg.saidas[-1].startswith("O vídeo já está assim")
+    msg = MsgComMidia(Msg, "Sem Miniatura ✖️")
+    rodar(sv.escolher_no_editar(msg, est))
+    assert msg.saidas[-1].startswith("✅ Escolhido: <b>sem a miniatura, com a legenda da fala</b>")
+
+
+def test_editar_no_video_sem_a_fala_nao_oferece_a_legenda(bm, Msg, Est, monkeypatch):
+    # Sem a fala que a IA escreveu (ninguém fala em português, a fala já escrita na tela ou a IA sem as
+    # legendas), o servidor não tem legenda para pôr: os botões dela não aparecem, e o toque nela diz por quê.
+    sv, est = _painel(bm), Est()
+    robo, edicao = sv.robo, sv.edicao_video
+    assert robo.sem_a_fala({"edicao": {"textos": {"legendas": [[0.0, 1.0, "oi"]]}}}) == ""
+    assert robo.sem_a_fala({"edicao": {"textos": {"legendas": []}}}) == edicao.SEM_FALA
+    assert robo.sem_a_fala({"edicao": {"textos": {}}}) == edicao.SEM_AS_LEGENDAS_DA_IA
+    assert robo.sem_a_fala({"edicao": {"textos": {"legenda_no_video": True}}}) == edicao.LEGENDA_JA_NO_VIDEO
+    ident = _rascunho_editavel(sv, legendas=())
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    msg = MsgComMidia(Msg, sv.BOTAO_EDITAR)
+    rodar(sv.editar_handler(msg, est))
+    assert (f"Agora ele está assim: <b>a miniatura à direita, sem a legenda da fala ({edicao.SEM_FALA})</b>"
+            in msg.saidas[-1])
+    assert f"Legenda da fala: este vídeo não tem ({edicao.SEM_FALA})" in msg.saidas[-1]
+    assert _botoes(msg.teclados[-1]) == ["Direita ➡️", "Esquerda ⬅️", "Sem Miniatura ✖️",
+                                         sv.BOTAO_REFAZER_O_VIDEO, "Cancelar ❌"]
+    msg = MsgComMidia(Msg, "Sem Legenda 🔇")
+    rodar(sv.escolher_no_editar(msg, est))
+    assert msg.saidas[-1].startswith(f"⚠️ Este vídeo não tem a legenda da fala ({edicao.SEM_FALA})")
+    pedidos = []
+    monkeypatch.setattr(sv.robo, "reeditar", lambda *args, **kwargs: pedidos.append(args) or (False, "teste"))
+    rodar(sv.refazer_o_video_handler(MsgComMidia(Msg, sv.BOTAO_REFAZER_O_VIDEO), est))
+    assert pedidos == []
+    msg = MsgComMidia(Msg, "Esquerda ⬅️")
+    rodar(sv.escolher_no_editar(msg, est))
+    assert msg.saidas[-1].startswith("✅ Escolhido: <b>a miniatura à esquerda, sem a legenda da fala (")
+    rodar(sv.refazer_o_video_handler(MsgComMidia(Msg, sv.BOTAO_REFAZER_O_VIDEO), est))
+    assert pedidos == [(ident, "esquerda", True)]
 
 
 def test_manter_o_video_de_antes_e_a_versao_de_antes_so_se_recusa(bm, Msg, Est):

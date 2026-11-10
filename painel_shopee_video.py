@@ -2583,32 +2583,59 @@ NOMES_NO_EDITAR = {edicao_video.MINIATURA_A_DIREITA: "a miniatura à direita",
 _refazendo = asyncio.Lock()
 
 
-def linha_do_editar(lado, legenda):
-    """Como o vídeo fica pelo Editar ✏️, numa linha: "a miniatura à esquerda, sem a legenda da fala"."""
-    return (f"{NOMES_NO_EDITAR.get(lado, NOMES_NO_EDITAR[edicao_video.MINIATURA_A_DIREITA])}, "
-            f"{'com' if legenda else 'sem'} a legenda da fala")
+def linha_do_editar(lado, legenda, sem_fala=""):
+    """
+    Como o vídeo fica pelo Editar ✏️, numa linha: "a miniatura à esquerda, sem a legenda da fala"; no vídeo
+    sem a fala para a legenda, o porquê no lugar dela.
+    """
+    miniatura = NOMES_NO_EDITAR.get(lado, NOMES_NO_EDITAR[edicao_video.MINIATURA_A_DIREITA])
+    if sem_fala:
+        return f"{miniatura}, sem a legenda da fala ({sem_fala})"
+    return f"{miniatura}, {'com' if legenda else 'sem'} a legenda da fala"
 
 
-def texto_editar(lado, legenda):
-    """A tela do Editar ✏️ de um rascunho."""
+def texto_editar(lado, legenda, sem_fala=""):
+    """
+    A tela do Editar ✏️ de um rascunho, com o vídeo como está agora (lado e legenda). No vídeo sem a fala para a
+    legenda (sem_fala, o porquê), os botões dela não aparecem: com ou sem, o vídeo ficaria igual.
+    """
+    if sem_fala:
+        legenda_da_fala = (f"Legenda da fala: este vídeo não tem ({sem_fala}); por isso, os botões dela não "
+                           "aparecem.\n")
+    else:
+        legenda_da_fala = ("<b>Com Legenda 💬</b> / <b>Sem Legenda 🔇</b>: as palavras faladas escritas embaixo, ao "
+                           "lado das setinhas.\n")
     return ("✏️ <b>Editar este vídeo</b>\n"
-            f"Fica assim: <b>{linha_do_editar(lado, legenda)}</b>.\n\n"
-            "Escolha a miniatura e a legenda e toque em "
-            f"<b>{BOTAO_REFAZER_O_VIDEO}</b>: o servidor refaz o vídeo (uns minutos, sem usar o celular), com o "
+            f"Agora ele está assim: <b>{linha_do_editar(lado, legenda, sem_fala)}</b>.\n\n"
+            "Para mudar: 1º escolha nos botões de baixo; 2º toque em "
+            f"<b>{BOTAO_REFAZER_O_VIDEO}</b>. O servidor refaz o vídeo (uns minutos, sem usar o celular), com o "
             "mesmo título, os mesmos produtos, a mesma capa e os mesmos textos, e manda a nova versão aqui. Ela só "
             "vai para o celular quando você aprovar.\n\n"
             "<b>Direita ➡️</b> / <b>Esquerda ⬅️</b>: a miniatura da foto do anúncio no canto de cima à direita ou à "
             "esquerda (à esquerda, os textos do alto passam para a direita).\n"
             "<b>Sem Miniatura ✖️</b>: o vídeo vai sem a miniatura.\n"
-            "<b>Com Legenda 💬</b> / <b>Sem Legenda 🔇</b>: as palavras faladas escritas embaixo, ao lado das "
-            "setinhas.\n"
+            f"{legenda_da_fala}"
             "<b>Cancelar ❌</b>: volta ao rascunho sem mudar nada.")
 
 
-def teclado_editar():
-    return montar_teclado([[KeyboardButton(text=botao) for botao in LADOS_NO_EDITAR],
-                           [KeyboardButton(text=botao) for botao in LEGENDA_NO_EDITAR],
-                           [KeyboardButton(text=BOTAO_REFAZER_O_VIDEO), KeyboardButton(text="Cancelar ❌")]])
+def teclado_editar(com_legenda=True):
+    """Os botões do Editar ✏️; no vídeo sem a fala para a legenda, sem os da legenda."""
+    linhas = [[KeyboardButton(text=botao) for botao in LADOS_NO_EDITAR]]
+    if com_legenda:
+        linhas.append([KeyboardButton(text=botao) for botao in LEGENDA_NO_EDITAR])
+    linhas.append([KeyboardButton(text=BOTAO_REFAZER_O_VIDEO), KeyboardButton(text="Cancelar ❌")])
+    return montar_teclado(linhas)
+
+
+def _mesmo_video(dados, lado, legenda):
+    """
+    A escolha do Editar ✏️ (lado, legenda) dá o vídeo que o rascunho já tem? Pelo que o editar_handler guardou
+    (agora_lado, agora_legenda e sem_fala); no vídeo sem a fala para a legenda, só a miniatura muda algo.
+    """
+    if "agora_lado" not in dados:
+        return False
+    return lado == dados["agora_lado"] and (bool(dados.get("sem_fala")) or bool(legenda) == bool(
+        dados.get("agora_legenda")))
 
 
 @router.message(F.text == BOTAO_EDITAR, StateFilter("*"))
@@ -2622,21 +2649,40 @@ async def editar_handler(message: types.Message, state: FSMContext):
                              "antes do Editar ✏️, de um vídeo de Ver Produtos ou de um produto sem o link).")
         return
     lado, legenda = robo.escolhas_do_rascunho(rascunho)
+    sem_fala = robo.sem_a_fala(rascunho)
     await state.set_state(ShopeeVideoFluxo.editando_rascunho)
-    await state.update_data(lado=lado, legenda=legenda)
-    await message.answer(texto_editar(lado, legenda), parse_mode="HTML", reply_markup=teclado_editar())
+    # O vídeo como está agora fica guardado, para cada toque dizer se a escolha muda algo nele.
+    await state.update_data(lado=lado, legenda=legenda, agora_lado=lado, agora_legenda=legenda, sem_fala=sem_fala)
+    await message.answer(texto_editar(lado, legenda, sem_fala), parse_mode="HTML",
+                         reply_markup=teclado_editar(not sem_fala))
 
 
 @router.message(ShopeeVideoFluxo.editando_rascunho, F.text.in_(list(LADOS_NO_EDITAR) + list(LEGENDA_NO_EDITAR)))
 async def escolher_no_editar(message: types.Message, state: FSMContext):
+    """
+    Cada toque numa opção do Editar ✏️ só escolhe; o vídeo muda no Refazer o Vídeo 🎬. A resposta, curta, diz o que
+    o toque fez (escolhido, o vídeo já é assim, ou o vídeo sem a fala para a legenda), para nenhum toque parecer
+    sem efeito. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
     dados = await state.get_data()
-    lado, legenda = dados.get("lado"), dados.get("legenda")
+    lado, legenda, sem_fala = dados.get("lado"), dados.get("legenda"), dados.get("sem_fala") or ""
+    if message.text in LEGENDA_NO_EDITAR and sem_fala:
+        await message.answer(f"⚠️ Este vídeo não tem a legenda da fala ({sem_fala}): com ou sem a legenda, ele fica "
+                             "igual. Dá para mudar só a miniatura.", reply_markup=teclado_editar(False))
+        return
     if message.text in LADOS_NO_EDITAR:
         lado = LADOS_NO_EDITAR[message.text]
     else:
         legenda = LEGENDA_NO_EDITAR[message.text]
     await state.update_data(lado=lado, legenda=legenda)
-    await message.answer(texto_editar(lado, legenda), parse_mode="HTML", reply_markup=teclado_editar())
+    linha = linha_do_editar(lado, legenda, sem_fala)
+    if _mesmo_video(dados, lado, legenda):
+        texto = (f"O vídeo já está assim: <b>{linha}</b>. Escolha o que quer mudar e depois toque em "
+                 f"<b>{BOTAO_REFAZER_O_VIDEO}</b>.")
+    else:
+        texto = (f"✅ Escolhido: <b>{linha}</b>. Agora toque em <b>{BOTAO_REFAZER_O_VIDEO}</b> para o servidor "
+                 "fazer a nova versão (ou escolha mais alguma coisa antes).")
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_editar(not sem_fala))
 
 
 @router.message(ShopeeVideoFluxo.editando_rascunho, F.text == BOTAO_REFAZER_O_VIDEO)
@@ -2651,8 +2697,15 @@ async def refazer_o_video_handler(message: types.Message, state: FSMContext):
     dados = await state.get_data()
     lado = dados.get("lado") or edicao_video.MINIATURA_A_DIREITA
     legenda = bool(dados.get("legenda", True))
-    await message.answer(f"⏳ Refazendo o vídeo no servidor ({linha_do_editar(lado, legenda)}). Leva uns minutos, "
-                         "sem usar o celular; a nova versão chega aqui.")
+    sem_fala = dados.get("sem_fala") or ""
+    if _mesmo_video(dados, lado, legenda):
+        # Refazer igual só gastaria o servidor e mandaria o mesmo vídeo de volta.
+        await message.answer(f"O vídeo já está assim ({linha_do_editar(lado, legenda, sem_fala)}): nada a refazer. "
+                             "Escolha a miniatura ou a legenda que quer mudar e toque de novo em "
+                             f"{BOTAO_REFAZER_O_VIDEO}.", reply_markup=teclado_editar(not sem_fala))
+        return
+    await message.answer(f"⏳ Refazendo o vídeo no servidor ({linha_do_editar(lado, legenda, sem_fala)}). Leva uns "
+                         "minutos, sem usar o celular; a nova versão chega aqui.")
     logger.info("✏️ Shopee Vídeo: Editar do rascunho.")
     async with _refazendo:
         try:
