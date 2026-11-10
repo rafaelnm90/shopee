@@ -4517,37 +4517,51 @@ JANELA_DOS_SINAIS_DO_APP = timedelta(hours=1)
 # os que não ficam, e separa a falha da Shopee da do app aberto há muito tempo.
 FICOU_DE_PRIMEIRA = "ficou de primeira"
 FAIXAS_DO_APP_ABERTO = ((1, "menos de 1 h"), (6, "1 a 6 h"), (12, "6 a 12 h"), (24, "12 a 24 h"))
+# Em 10/11, das 05:44 às 06:24, 3 produtos seguidos não ficaram, com o app aberto havia 16 h e o
+# Java dele perto do teto (512 MB no Motorola), pelo log do coletor: a cada Feito, o app refazia a
+# tela de publicar e perdia o produto. A linha dos sinais diz também a memória do Java do app
+# (casos_robo.memoria_do_app), e a do que fica de primeira, em faixas (FAIXAS_DA_MEMORIA, em MB).
+FAIXAS_DA_MEMORIA = ((300, "menos de 300 MB"), (400, "300 a 400 MB"), (450, "400 a 450 MB"))
 
 
 def sinais_do_app(d, agora=None):
     """
     Os sinais do app em rótulos fixos, como "na última hora: app travado 1, leitura sem o app 0,
-    erro de sistema da Shopee na API 2; o app aberto há 95 min".
+    erro de sistema da Shopee na API 2; o app aberto há 95 min; a memória do app 310 de 400 MB".
     """
     desde = (agora_br(agora) - JANELA_DOS_SINAIS_DO_APP).strftime("%Y-%m-%d %H:%M:%S")
     travado = len(registro_processos.sequencia(REGISTRO, "app travado", desde))
     sem_o_app = sum(1 for linha in registro_processos.sequencia(REGISTRO, PROCESSO_DA_LEITURA_DA_TELA, desde)
                     if str(linha[3]).startswith("sem o app"))
     minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
+    memoria = casos_robo.memoria_do_app(d, ps.PACOTE)
     return (f"na última hora: app travado {travado}, leitura sem o app {sem_o_app}, "
             f"erro de sistema da Shopee na API {erros_da_api_da_shopee(desde)}"
-            + (f"; o app aberto há {minutos} min" if minutos is not None else ""))
+            + (f"; o app aberto há {minutos} min" if minutos is not None else "")
+            + (f"; a memória do app {memoria[0]} de {memoria[1]} MB" if memoria else ""))
 
 
 def sinais_de_quem_ficou(d, agora=None):
     """
     Os sinais do produto que ficou de primeira, em faixas que o checkup agrupa: "na última hora:
-    erro de sistema da Shopee na API 0; o app aberto há 12 a 24 h".
+    erro de sistema da Shopee na API 0; o app aberto há 12 a 24 h; a memória do app 300 a 400 MB".
     """
     desde = (agora_br(agora) - JANELA_DOS_SINAIS_DO_APP).strftime("%Y-%m-%d %H:%M:%S")
     minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
+    memoria = casos_robo.memoria_do_app(d, ps.PACOTE)
     return (f"na última hora: erro de sistema da Shopee na API {erros_da_api_da_shopee(desde)}"
-            + (f"; o app aberto há {faixa_do_app_aberto(minutos)}" if minutos is not None else ""))
+            + (f"; o app aberto há {faixa_do_app_aberto(minutos)}" if minutos is not None else "")
+            + (f"; a memória do app {faixa_da_memoria_do_app(memoria[0])}" if memoria else ""))
 
 
 def faixa_do_app_aberto(minutos):
     """Há quanto tempo o app está aberto, na faixa de FAIXAS_DO_APP_ABERTO ("mais de 1 dia" depois da última)."""
     return next((rotulo for horas, rotulo in FAIXAS_DO_APP_ABERTO if minutos < horas * 60), "mais de 1 dia")
+
+
+def faixa_da_memoria_do_app(megas):
+    """A memória do Java do app na faixa de FAIXAS_DA_MEMORIA ("450 MB ou mais" depois da última)."""
+    return next((rotulo for teto, rotulo in FAIXAS_DA_MEMORIA if megas < teto), "450 MB ou mais")
 
 
 def erros_da_api_da_shopee(desde):

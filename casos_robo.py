@@ -343,6 +343,28 @@ def minutos_do_app(d, pacote):
     return _minutos_do_elapsed(linhas[-1]) if linhas else None
 
 
+# A linha "Dalvik Heap" do dumpsys meminfo do app: a memória do Java dele. As três últimas colunas
+# são Heap Size, Heap Alloc e Heap Free, em KB (as de antes mudam com a versão do Android).
+LINHA_DO_JAVA = re.compile(r"^\s*Dalvik Heap((?:\s+\d+){3,})\s*$", re.M)
+
+
+def memoria_do_app(d, pacote):
+    """
+    A memória do Java do app no celular, (usada, tamanho) em MB, pela linha Dalvik Heap do dumpsys
+    meminfo, ou None sem a leitura. Em 10/11, o produto não ficou depois do Feito com o Java do app
+    perto do teto (512 MB no Motorola), e só o log do coletor dizia isso.
+    """
+    try:
+        saida = getattr(d.shell(["dumpsys", "meminfo", pacote]), "output", "") or ""
+    except Exception:
+        return None
+    achado = LINHA_DO_JAVA.search(saida)
+    if not achado:
+        return None
+    tamanho, usada, _livre = (int(numero) for numero in achado.group(1).split()[-3:])
+    return usada // 1024, tamanho // 1024
+
+
 def _minutos_do_elapsed(elapsed):
     """O ELAPSED do ps ([[dias-]horas:]minutos:segundos) em minutos inteiros; None fora do formato."""
     achado = re.fullmatch(r"(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)", str(elapsed or "").strip())
