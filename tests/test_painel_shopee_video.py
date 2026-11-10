@@ -435,7 +435,7 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     # completo do Editor 2, nos rascunhos e no modo assistente; sem ele, o Editor 1.
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
         "Editor 1 sem Legendas 👀", "Editor 2 com Legendas ✨", "Ligar Edição ✅", "Capa com Chamada 🏷️",
-        "Voltar ao Robô 🔙"]
+        "Itens do Vídeo 🧩", "Voltar ao Robô 🔙"]
     assert "Editor 2 com legendas</b> (o que vai ao ar)" in texto
     assert "o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente" in texto
     assert "ele vai com o Editor 1, sem legendas" in texto and "nada delas vai ao ar" in texto
@@ -1893,3 +1893,50 @@ def test_rodada_agendada_atende_o_pedido_do_fazer_agora_mesmo_pausada(bm, monkey
     sv.robo.pedir_agora("feed")
     rodar(sv.verificar_robo())
     assert rodadas == [("--fazer",)]
+
+
+def test_itens_do_video_no_painel(bm, Msg, Est):
+    # Escolhas do Rafael (10/11, P191 1 e P192 1): na Edição dos Vídeos, os itens do vídeo: a miniatura (à
+    # direita, à esquerda ou sem), a legenda da fala, as setinhas e a moldura do cartão (cada uma com ou sem)
+    # e uma cor só para as setinhas e a moldura. Tudo começa como era e vale para os próximos vídeos.
+    sv, est = _painel(bm), Est()
+    edicao_video = sv.edicao_video
+    msg = Msg("Itens do Vídeo 🧩")
+    rodar(sv.itens_handler(msg, est))
+    texto = msg.saidas[-1]
+    assert "Miniatura: <b>em cima à direita (a de sempre)</b>" in texto
+    assert "Legenda da fala: <b>com</b>" in texto and "Setinhas: <b>com</b>" in texto
+    assert "Moldura do cartão: <b>com</b>" in texto and "<b>vermelho (o de sempre)</b>" in texto
+    assert "os rascunhos já salvos ficam como estão" in texto and "O que cada botão faz" in texto
+    teclado = _textos(sv.teclado_itens(sv.ler_config()))
+    assert teclado == ["Miniatura à Direita ➡️", "Miniatura à Esquerda ⬅️", "Sem Miniatura 🚫",
+                       "Desligar Legenda da Fala ⏸️", "Desligar Setinhas ⏸️", "Desligar Moldura do Cartão ⏸️",
+                       "Cor das Setinhas e da Moldura 🎨", "Voltar à Edição 🔙", "Voltar ao Robô 🔙"]
+    # Cada botão do teclado aparece explicado na tela, como os das outras telas.
+    for botao in teclado[:3] + ["Ligar Legenda da Fala ✅", "Desligar Setinhas ⏸️", "Ligar Moldura do Cartão ✅",
+                                "Cor das Setinhas e da Moldura 🎨", "Voltar à Edição 🔙"]:
+        assert botao in texto, botao
+    # A miniatura à esquerda, sem as setinhas, com a moldura de volta e na cor do produto.
+    sv.db.salvar_config(sv.CHAVE_CONFIG, {**sv.db.ler_config(sv.CHAVE_CONFIG, {}), "edicao_ligada": True})
+    rodar(sv.lado_da_miniatura_handler(Msg("Miniatura à Esquerda ⬅️"), est))
+    rodar(sv.ligar_item_handler(Msg("Desligar Setinhas ⏸️"), est))
+    rodar(sv.ligar_item_handler(Msg("Desligar Moldura do Cartão ⏸️"), est))
+    rodar(sv.ligar_item_handler(Msg("Ligar Moldura do Cartão ✅"), est))
+    cores = Msg("Cor das Setinhas e da Moldura 🎨")
+    rodar(sv.pedir_cor_do_destaque(cores, est))
+    assert "Agora: <b>vermelho (o de sempre)</b>" in cores.saidas[-1]
+    assert _textos(sv.teclado_cores()) == ["Vermelho 🔴", "Laranja da Shopee 🟠", "Amarelo 🟡", "Verde 🟢", "Azul 🔵",
+                                           "Branco ⚪", "Cor do Produto 🎨", "Voltar aos Itens 🔙"]
+    rodar(sv.salvar_cor_do_destaque(Msg("Cor do Produto 🎨"), est))
+    config = sv.ler_config()
+    assert config["edicao_ligada"] and edicao_video.escolhas_do_painel() == {
+        "miniatura": "esquerda", "legenda": True, "setinhas": False, "moldura": True, "cor": "produto"}
+    texto = sv.texto_itens(config)
+    assert "Miniatura: <b>em cima à esquerda, com os textos do alto à direita</b>" in texto
+    assert "Setinhas: <b>sem</b>" in texto and "<b>a cor do produto (no produto vermelho, o vermelho)</b>" in texto
+    assert "Ligar Setinhas ✅" in _textos(sv.teclado_itens(config))
+    registro = consultar("SELECT group_concat(resultado, ' | ') FROM (SELECT resultado FROM registro_processos "
+                         "WHERE processo = ? ORDER BY id)", sv.PROCESSO_DOS_ITENS)
+    assert registro == ("miniatura: esquerda | setinhas: sem | moldura: sem | moldura: com | cor: produto",)
+    # A Edição dos Vídeos diz onde ficam os itens.
+    assert "Itens do Vídeo 🧩" in sv.texto_edicao(config) and "Itens do Vídeo 🧩" in sv.texto_robo(config)

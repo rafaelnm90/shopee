@@ -181,14 +181,12 @@ def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
                          for q in ImageSequence.Iterator(seta) if q.convert("RGBA").getchannel("A").getbbox())
         topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - seta.size[1] // 2
     assert topo_da_seta + pe_da_seta < caixa[1] and edicao_video.PE_DA_LEGENDA < caixa[1] and caixa[3] <= 1115
-    # Desligada, nada vai.
-    monkeypatch.setattr(edicao_video, "MOLDURA_DO_CARTAO", False)
-    edicao_video.moldura_do_cartao.cache_clear()
-    try:
-        assert edicao_video.moldura_do_cartao() is None
-    finally:
-        monkeypatch.setattr(edicao_video, "MOLDURA_DO_CARTAO", True)
-        edicao_video.moldura_do_cartao.cache_clear()
+    # Na cor escolhida no painel (P192 1), no mesmo lugar.
+    azul = edicao_video.CORES_DO_DESTAQUE["azul"]
+    na_cor = Image.open(io.BytesIO(edicao_video.moldura_do_cartao(cor=azul)))
+    assert na_cor.getchannel("A").getbbox() == caixa
+    pixel = na_cor.getpixel((x1 - folga - grossura // 2, meio_y))
+    assert pixel[3] > 200 and sum(abs(a - b) for a, b in zip(pixel[:3], azul)) < 30
 
 
 def test_com_o_rotulo_de_ia_a_moldura_as_setinhas_e_a_legenda_sobem_com_o_cartao(monkeypatch, tmp_path):
@@ -229,7 +227,7 @@ def test_com_o_rotulo_de_ia_a_moldura_as_setinhas_e_a_legenda_sobem_com_o_cartao
         return ""
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         vistos.append(rotulo_de_ia)
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
@@ -716,17 +714,17 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         ("viral:2", videos["v2"], "https://s.shopee.com.br/2", "")]}, fonte_do_robo="viral")
     monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Copo Marca X", "preco": 39.9})
     versoes = [{"vantagem": "Tampa firme", "inicio": 4.0, "fim": 6.0, "chamada": "Veja aqui"}]
-    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome, *_: {
         "nome": "Copo Térmico", "vantagem": "Gelado o dia todo", "chamada": "Toque no copo aqui embaixo",
         "versoes": versoes, "falas": [], "lugar": "meio"})
     pedidos = []
 
-    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True):
+    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True, escolhas=None):
         pedidos.append((1, video, list(versoes_da_ia), falas, miniatura))
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=(), cor=None):
+                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -746,14 +744,14 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
     edicao_video.exemplo_editor_2("exemplo.mp4")
     assert pedidos[-1][1] == videos["v2"]
     # Escolha do Rafael (P52): o vídeo que já tem texto próprio na tela vai sem as nossas legendas.
-    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome, *_: {
         "nome": "Presilha", "vantagem": "Firme", "versoes": versoes, "falas": [], "lugar": "alto",
         "texto_no_video": True})
     _, _, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
     assert pedidos[-1][-2] == edicao_video.SEM_LUGAR and resumo["texto_no_video"]
     # Escolha do Rafael (29/10, P81): o criador pôs coisa no canto da nossa miniatura, e os dois
     # exemplos vão sem ela, como o vídeo que vai ao ar; as nossas legendas continuam (P82).
-    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome, *_: {
         "nome": "Cortina", "vantagem": "Tecido com relevo", "versoes": versoes, "falas": [], "lugar": "alto",
         "canto_ocupado": True})
     _, _, resumo = edicao_video.exemplo_editor_1("exemplo.mp4")
@@ -763,7 +761,7 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
     assert resumo["miniatura"] == 0
     # Escolha do Rafael (29/10, P97): com a coisa dele logo abaixo do canto, os dois exemplos levam
     # a miniatura menor, como o vídeo que vai ao ar.
-    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome, *_: {
         "nome": "Mercadinho", "vantagem": "Brincar de vender", "versoes": versoes, "falas": [], "lugar": "alto",
         "canto_ocupado": True, "por_cima": [(55.0, 95.0, 24.5, 30.0)]})
     for exemplo in (edicao_video.exemplo_editor_1, edicao_video.exemplo_editor_2):
@@ -890,7 +888,7 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
     monkeypatch.setattr(edicao_video, "editar",
                         lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True,
-                               outras_fotos=(), rotulo_de_ia=False, cor=None: "")
+                               outras_fotos=(), rotulo_de_ia=False, cor=None, escolhas=None: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -1026,7 +1024,7 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         return ""
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -1111,7 +1109,7 @@ def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatc
 def _textos_da_tela(monkeypatch, textos):
     """A IA de mentira dos textos da tela; devolve os nomes de produto que ela recebeu."""
     pedidos = []
-    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: pedidos.append(nome) or dict(textos))
+    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome, *_: pedidos.append(nome) or dict(textos))
     return pedidos
 
 
@@ -1183,7 +1181,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     avisos = []
 
     def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True,
-               outras_fotos=(), rotulo_de_ia=False, cor=None):
+               outras_fotos=(), rotulo_de_ia=False, cor=None, escolhas=None):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1963,7 +1961,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     capas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         capas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2008,7 +2006,7 @@ def test_capa_com_a_frase_abre_o_video_no_robo_e_no_assistente(monkeypatch, tmp_
     aberturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         aberturas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2104,7 +2102,7 @@ def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     capas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         capas.append(capa is not None)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2278,7 +2276,7 @@ def test_frase_da_capa_diz_o_que_e_o_produto_e_a_vantagem():
     # Escolha do Rafael (02/11, P122 1): no print da grade, a capa da calça só com a vantagem
     # ("Caimento impecável") não dizia o que era o produto. A frase da capa começa pelo que é o
     # produto e traz a vantagem, em letra grande, até 20 letras como antes.
-    for prompt in (edicao_video.PROMPT_DOS_TEXTOS.format(nome="Calça"), edicao_video._CAPA_NO_PROMPT):
+    for prompt in (edicao_video.prompt_dos_textos("Calça"), edicao_video._CAPA_NO_PROMPT):
         assert "começa pelo que é o produto e traz a vantagem que o vídeo mostra" in prompt
         assert "a mesma vantagem em poucas palavras" not in prompt and "até 20 caracteres" in prompt
     # Os exemplos que a IA recebe cabem no limite e no retângulo da frase, em letra grande (com a frase
@@ -2444,7 +2442,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     pedidas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         pedidas.append(list(outras_fotos))
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2503,7 +2501,7 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2574,7 +2572,7 @@ def test_canto_so_com_o_que_foi_filmado_nao_tira_a_miniatura(monkeypatch, tmp_pa
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2617,7 +2615,7 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2651,8 +2649,8 @@ def test_a_miniatura_fica_do_tamanho_de_sempre_abaixo_da_barra_de_busca_e_longe_
     folga = edicao_video.FOLGA_DA_MINIATURA
     assert comeco * largura_da_tela / 100 <= canto_x - largura - folga and canto_x <= fim * largura_da_tela / 100
     assert desde * altura / 100 <= canto_y - folga and canto_y + largura + folga <= ate * altura / 100
-    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
-        assert f"de uns {comeco}% a {fim}% da largura e de uns {desde}% a {ate}% da altura" in prompt
+    for pedir in (edicao_video.prompt_dos_textos, edicao_video.prompt_das_versoes):
+        assert f"de uns {comeco}% a {fim}% da largura e de uns {desde}% a {ate}% da altura" in pedir("Bolsa")
     # O que o criador pôs bem no alto, acima dela, não a tira mais do vídeo.
     assert edicao_video.miniatura_no_video({"canto_ocupado": False, "por_cima": [(70.0, 95.0, 1.0, 7.0)]}) == largura
 
@@ -2686,7 +2684,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None):
+               rotulo_de_ia=False, cor=None, escolhas=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2763,8 +2761,8 @@ def test_o_que_foi_filmado_nao_conta_como_coisa_do_criador():
     # mesa como texto do criador no canto da nossa miniatura (P81), e a miniatura saiu. Só conta
     # o que o criador acrescentou por cima na edição; o lugar dos nossos textos não cobre o que
     # ele pôs por cima em nenhum momento (P52 e P82).
-    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
-        texto = prompt.format(nome="Fone")
+    for pedir in (edicao_video.prompt_dos_textos, edicao_video.prompt_das_versoes):
+        texto = pedir("Fone")
         assert edicao_video._O_QUE_FOI_FILMADO_NAO_CONTA in texto
         assert "uma revista ou a tela de um celular" in texto and "nunca contam" in texto
         assert "as coisas filmadas também não" in texto and "nome do perfil nem as coisas filmadas" in texto
@@ -2902,7 +2900,7 @@ def test_legenda_quebra_nas_pausas_sem_separar_o_nome_do_produto():
 
 
 def test_o_pedido_da_ia_quer_a_fala_inteira_palavra_por_palavra():
-    pedido = edicao_video.PROMPT_DOS_TEXTOS.format(nome="Jaqueta")
+    pedido = edicao_video.prompt_dos_textos("Jaqueta")
     for exigido in ("palavra por palavra", "sem resumir", "sem pular nenhuma frase", "Siga o áudio, não a imagem"):
         assert exigido in pedido
     # Sem limite de tamanho por trecho: com ele, a IA encurtava a fala.
@@ -3062,12 +3060,12 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
                        fonte_do_robo="viral")
     monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Vestido Marca X", "preco": 59.9})
     fala = [(0.5, 2.0, "Olha só esse vestido")]
-    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome, *_: {
         "nome": "Vestido", "vantagem": "Tecido leve", "lugar": "alto", "legendas": fala, "falas": [[0.5, 2.0]]})
     recebidas = []
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=(), cor=None):
+                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None):
         recebidas.append(list(legendas))
         return "", {"versoes": []}
 
@@ -3180,7 +3178,7 @@ def test_exemplo_da_capa_usa_a_foto_do_anuncio_inteira(monkeypatch):
         return respostas.pop(0) if respostas else None
     monkeypatch.setattr(api_gemini, "gerar_texto_gemini", ia)
     monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Bolsa de Palha"})
-    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {"capa": "Leve e forte"})
+    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome, *_: {"capa": "Leve e forte"})
     capas = []
     monkeypatch.setattr(edicao_video, "capa_com_chamada",
                         lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append(foto) or None)
@@ -3221,8 +3219,8 @@ def test_produto_de_varias_cores_vai_na_cor_que_mais_aparece_nele():
     # Escolha do Rafael (08/11, P179 1): no produto de várias cores, a IA diz a cor da lista que mais
     # aparece nele, e o "colorido" (que deixava o vídeo no laranja de sempre) sai dos dois pedidos; o
     # vermelho continua na lista, para ficar com as cores de sempre.
-    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
-        pedido = prompt.format(nome="Pote")
+    for pedir in (edicao_video.prompt_dos_textos, edicao_video.prompt_das_versoes):
+        pedido = pedir("Pote")
         assert "colorido" not in pedido
         assert "várias cores, diga a que mais aparece nele" in pedido
         assert "vermelho" in pedido
@@ -3282,7 +3280,7 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
                         lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append(cor) or b"capa")
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3442,8 +3440,8 @@ def test_faixa_que_some_no_fundo_da_foto_vai_na_2a_cor_do_produto():
 def test_ia_diz_a_2a_cor_do_produto():
     # P173: a IA diz também a 2ª cor que mais se destaca no produto, da mesma lista, diferente da
     # principal; o "colorido" e o nome fora da lista ficam de fora.
-    assert '"cor_2"' in edicao_video.PROMPT_DOS_TEXTOS.format(nome="Pote")
-    assert '"cor_2"' in edicao_video.PROMPT_DAS_VERSOES.format(nome="Pote")
+    assert '"cor_2"' in edicao_video.prompt_dos_textos("Pote")
+    assert '"cor_2"' in edicao_video.prompt_das_versoes("Pote")
     for dados, segunda in (({"cor": "branco", "cor_2": " Azul "}, "azul"), ({"cor": "branco", "cor_2": "vermelho"}, "vermelho"),
                            ({"cor": "branco", "cor_2": "branco"}, None), ({"cor": "branco", "cor_2": "colorido"}, None),
                            ({"cor": "branco", "cor_2": "xadrez"}, None), ({"cor": "branco"}, None),
@@ -3466,7 +3464,7 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
                         or b"capa")
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None):
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3517,3 +3515,177 @@ def test_frase_acaba_antes_da_sacolinha_e_dos_icones_do_app():
             assert abs((min(letras) + max(letras)) / 2 - (x1 + x2 - 1) / 2) <= 3, (frase, no_video)
             assert abs((min(letras) + max(letras)) / 2 - (esquerda + direita - 1) / 2) <= 3, (frase, no_video)
             assert _cor_de(capa, (direita - 2, pe - 3), edicao_video.LARANJA_DA_SHOPEE), (frase, no_video)
+
+
+# --- Itens do vídeo no painel (P191 1 e P192 1) ---
+
+def _edicao_de_mentira(monkeypatch):
+    """O que a edição pediu ao ffmpeg (videos.com_foto_e_miniatura): a largura, o centro, as setinhas e a moldura."""
+    pedidos = []
+
+    def com_foto_e_miniatura(video, foto, destino, segundos, largura, centro, seta, centro_seta, *args, **opcoes):
+        cores = None
+        if seta and seta != edicao_video.SETA:
+            # As setinhas noutra cor existem durante a edição; a cor de um ponto do meio da setinha acesa.
+            from PIL import Image
+            with Image.open(seta) as arquivo:
+                quadro = arquivo.convert("RGBA")
+                cores = {quadro.getpixel((x, y))[:3] for x in range(quadro.width) for y in range(quadro.height)
+                         if quadro.getpixel((x, y))[3] == 255}
+        pedidos.append({"largura": largura, "centro": centro, "seta": seta, "cores": cores,
+                        "moldura": opcoes.get("moldura")})
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura", com_foto_e_miniatura)
+    return pedidos
+
+
+def test_itens_do_video_comecam_como_eram(monkeypatch, tmp_path):
+    # Escolha do Rafael (10/11, P192 1): tudo começa igual a hoje.
+    assert edicao_video.escolhas_do_painel() == edicao_video.ESCOLHAS_PADRAO == {
+        "miniatura": "direita", "legenda": True, "setinhas": True, "moldura": True, "cor": "vermelho"}
+    # O que não vale fica o padrão.
+    assert edicao_video.escolhas_certas({"miniatura": "embaixo", "legenda": "sim", "cor": "roxo"}) == (
+        edicao_video.ESCOLHAS_PADRAO)
+    pedidos = _edicao_de_mentira(monkeypatch)
+    destino = str(tmp_path / "r.mp4")
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino) == ""
+    assert pedidos == [{"largura": edicao_video.LARGURA_DA_MINIATURA, "centro": edicao_video.CENTRO_DA_MINIATURA,
+                        "seta": edicao_video.SETA, "cores": None, "moldura": edicao_video.moldura_do_cartao()}]
+
+
+def test_itens_do_video_mudam_a_edicao(monkeypatch, tmp_path):
+    # Escolhas do Rafael (10/11, P191 1 e P192 1): a miniatura à esquerda ou sem ela, as setinhas e a
+    # moldura do cartão com ou sem, e uma cor só para as duas.
+    pedidos = _edicao_de_mentira(monkeypatch)
+    destino = str(tmp_path / "r.mp4")
+    largura = edicao_video.LARGURA_DA_MINIATURA
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"miniatura": "esquerda"}) == ""
+    canto_x, canto_y = edicao_video.CANTO_DA_ESQUERDA
+    assert pedidos[-1]["centro"] == (canto_x + largura // 2, canto_y + largura // 2)
+    # O espelho do canto de sempre, dentro do que o app mostra do vídeo aberto.
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    assert canto_x - esquerda == direita - edicao_video.CANTO_DA_MINIATURA[0] > 0
+    assert canto_y == edicao_video.CANTO_DA_MINIATURA[1] > edicao_video.FIM_DA_BARRA_DE_BUSCA
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"miniatura": "sem"}) == ""
+    assert pedidos[-1]["largura"] == 0
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"setinhas": False, "moldura": False}) == ""
+    assert pedidos[-1]["seta"] is None and pedidos[-1]["moldura"] is None
+    # Em azul: as setinhas (num arquivo à parte, que some depois) e a moldura.
+    azul = edicao_video.CORES_DO_DESTAQUE["azul"]
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"cor": "azul"}) == ""
+    assert pedidos[-1]["moldura"] == edicao_video.moldura_do_cartao(False, azul)
+    assert azul in pedidos[-1]["cores"] and edicao_video.VERMELHO_DO_DESTAQUE not in pedidos[-1]["cores"]
+    assert not os.path.exists(os.path.dirname(pedidos[-1]["seta"]))
+    # Na cor do produto; sem ela (o produto vermelho), no vermelho de sempre.
+    verde = edicao_video.CORES_DO_PRODUTO["verde"]
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, cor=verde, escolhas={"cor": "produto"}) == ""
+    assert pedidos[-1]["moldura"] == edicao_video.moldura_do_cartao(False, verde)
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"cor": "produto"}) == ""
+    assert pedidos[-1]["seta"] == edicao_video.SETA and pedidos[-1]["moldura"] == edicao_video.moldura_do_cartao()
+
+
+def test_setinhas_na_cor_trocam_so_o_vermelho(tmp_path):
+    # P192 1: o contorno branco, a sombra e a cascata (a setinha apagada) ficam como são.
+    from PIL import Image, ImageSequence
+    azul = edicao_video.CORES_DO_DESTAQUE["azul"]
+    caminho = edicao_video.seta_na_cor(azul, str(tmp_path / "setas.apng"))
+    assert edicao_video.seta_na_cor(edicao_video.VERMELHO_DO_DESTAQUE, "outro.apng") == edicao_video.SETA
+    with Image.open(edicao_video.SETA) as original, Image.open(caminho) as nova:
+        assert nova.n_frames == original.n_frames and nova.size == original.size
+        for antes, depois in zip(ImageSequence.Iterator(original), ImageSequence.Iterator(nova)):
+            antes, depois = antes.convert("RGBA"), depois.convert("RGBA")
+            assert antes.getchannel("A").tobytes() == depois.getchannel("A").tobytes()
+            for x in range(0, antes.width, 3):
+                for y in range(0, antes.height, 3):
+                    r, g, b, a = antes.getpixel((x, y))
+                    if a == 255 and (r, g, b) == edicao_video.VERMELHO_DO_DESTAQUE:
+                        assert depois.getpixel((x, y))[:3] == azul
+                    elif a == 255 and min(r, g, b) > 240:
+                        assert min(depois.getpixel((x, y))[:3]) > 240
+
+
+def test_miniatura_a_esquerda_leva_os_textos_do_alto_para_a_direita_e_a_ia_olha_o_canto_dela():
+    # P192 1: com a miniatura à esquerda, os textos do alto passam para a direita, e a IA confere o canto
+    # da esquerda; a resposta sobre o canto da direita não vale para ela.
+    letreiros, _textos = edicao_video._letreiros([("Bolsa de Palha", edicao_video.FUNDO_DOS_TEXTOS)], "alto", 10.0,
+                                                 edicao_video.MINIATURA_A_ESQUERDA)
+    imagem, _inicio, _fim, x, topo = letreiros[0]
+    largura_do_texto = int.from_bytes(imagem[16:20], "big")
+    margem, topo_do_alto = edicao_video.LUGARES_DOS_TEXTOS["alto"][:2]
+    assert x + largura_do_texto == edicao_video.TELA[0] - margem and topo == topo_do_alto
+    centro_x, _ = edicao_video.centro_da_miniatura(edicao_video.LARGURA_DA_MINIATURA, edicao_video.MINIATURA_A_ESQUERDA)
+    assert x > centro_x + edicao_video.LARGURA_DA_MINIATURA // 2
+    # À direita, o lugar de sempre.
+    de_sempre = edicao_video._letreiros([("Bolsa de Palha", edicao_video.FUNDO_DOS_TEXTOS)], "alto", 10.0)[0][0]
+    assert de_sempre[3] == margem
+    pedido = edicao_video.prompt_dos_textos("Bolsa", edicao_video.MINIATURA_A_ESQUERDA)
+    assert "o canto de cima à esquerda do vídeo (de uns 5% a 38% da largura" in pedido
+    assert "\"alto\" (no topo, à direita, a partir de uns 35% da largura" in pedido
+    assert "o canto de cima à direita do vídeo (de uns 62% a 95% da largura" in edicao_video.prompt_dos_textos("Bolsa")
+    # A coisa do criador no canto da esquerda tira a miniatura da esquerda, não a da direita.
+    no_canto_da_esquerda = {"canto_ocupado": False, "por_cima": [(8.0, 30.0, 10.0, 20.0)]}
+    assert edicao_video.miniatura_no_video(no_canto_da_esquerda, edicao_video.MINIATURA_A_ESQUERDA) == 0
+    assert edicao_video.miniatura_no_video(no_canto_da_esquerda) == edicao_video.LARGURA_DA_MINIATURA
+    # O canto ocupado que a IA disse olhando o da direita não vale para a esquerda (e vice-versa).
+    ocupado = {"canto_ocupado": True, "por_cima": []}
+    assert edicao_video.miniatura_no_video(ocupado) == 0
+    assert edicao_video.miniatura_no_video(ocupado, edicao_video.MINIATURA_A_ESQUERDA) == (
+        edicao_video.LARGURA_DA_MINIATURA)
+    ocupado["lado_olhado"] = edicao_video.MINIATURA_A_ESQUERDA
+    assert edicao_video.miniatura_no_video(ocupado, edicao_video.MINIATURA_A_ESQUERDA) == 0
+    assert edicao_video.miniatura_no_video(ocupado, edicao_video.SEM_MINIATURA) == 0
+
+
+def test_textos_da_tela_olham_o_canto_do_lado_da_miniatura(monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia", lambda video, prompt: pedidos.append(prompt) or {
+        "nome": "Bolsa", "canto_ocupado": True, "por_cima_no_alto": []})
+    monkeypatch.setattr(edicao_video, "_revisar_ortografia", lambda textos: textos)
+    textos = edicao_video.textos_da_tela("v.mp4", "Bolsa", edicao_video.MINIATURA_A_ESQUERDA)
+    assert textos["lado_olhado"] == edicao_video.MINIATURA_A_ESQUERDA
+    # A 2ª pergunta, só do canto, é a do canto da esquerda.
+    assert "canto de cima à esquerda" in pedidos[0] and "Olhe só o canto de cima à esquerda" in pedidos[1]
+    # Sem a miniatura, nenhuma 2ª pergunta.
+    pedidos.clear()
+    textos = edicao_video.textos_da_tela("v.mp4", "Bolsa", edicao_video.SEM_MINIATURA)
+    assert len(pedidos) == 1 and "lado_olhado" not in textos
+
+
+def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
+    # P192 1: os itens que o Rafael escolhe no painel valem para os próximos vídeos que vão ao ar, e o
+    # jeito do registro diz o que mudou.
+    import registro_processos as rp
+    fala = [(0.5, 2.0, "Olha só essa bolsa")]
+    lados = []
+    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome, lado="direita": lados.append(lado) or {
+        "nome": "Bolsa", "vantagem": "Leve", "chamada": "Toque aqui", "lugar": "alto", "legendas": fala})
+    recebidos = []
+
+    def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+        recebidos.append({"miniatura": miniatura, "legendas": list(legendas), "escolhas": escolhas})
+        return "", {"textos": [nome], "legendas": len(legendas)}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    destino = str(tmp_path / "r.mp4")
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DAS_ESCOLHAS: {
+        "miniatura": "sem", "legenda": False, "setinhas": False, "moldura": False, "cor": "azul"}})
+    _motivo, como, _detalhe = edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")
+    assert lados == ["sem"] and recebidos[-1]["miniatura"] == 0 and recebidos[-1]["legendas"] == []
+    assert recebidos[-1]["escolhas"]["cor"] == "azul" and not recebidos[-1]["escolhas"]["setinhas"]
+    assert como == (edicao_video.COM_LEGENDAS + edicao_video.SEM_A_MINIATURA_PELO_PAINEL + edicao_video.SEM_AS_SETINHAS
+                    + edicao_video.SEM_A_MOLDURA_DO_CARTAO)
+    assert edicao_video.SEM_A_MINIATURA in como
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
+    assert (registro[-1][2], registro[-1][3]) == ("sem as legendas", edicao_video.LEGENDAS_DESLIGADAS)
+    # Sem a miniatura pelo painel, o canto dela não vai ao registro como "de fora".
+    assert rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_CANTO, "2000-01-01 00:00:00") == []
+    # À esquerda, com a cor do produto nas setinhas e na moldura.
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DAS_ESCOLHAS: {"miniatura": "esquerda", "cor": "produto"}})
+    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome, lado="direita": lados.append(lado) or {
+        "nome": "Bolsa", "lugar": "alto", "legendas": fala, "cor": "verde"})
+    _motivo, como, _detalhe = edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")
+    assert lados[-1] == "esquerda" and recebidos[-1]["miniatura"] == edicao_video.LARGURA_DA_MINIATURA
+    assert recebidos[-1]["legendas"] and edicao_video.COM_A_MINIATURA_A_ESQUERDA in como
+    assert como == (edicao_video.COM_LEGENDAS + edicao_video.COM_A_MINIATURA_A_ESQUERDA
+                    + ", setinhas e moldura na cor do produto" + edicao_video.COM_AS_LEGENDAS_DA_FALA)
