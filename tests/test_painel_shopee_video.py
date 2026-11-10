@@ -478,11 +478,13 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     assert "a foto quadrada, a maioria, perde só uns 1% de cada lado" in texto and "a própria foto desfocada" in texto
     assert "estica até 15% na largura" not in texto
     assert "um pouco menor" not in texto
-    # Escolhas do Rafael (10/11, P188 2, P189 B e P196 1): a frase numa faixa no alto da capa, à esquerda
+    # Escolhas do Rafael (10/11, P188 2, P189 B e P196 1): a frase numa faixa no alto da capa, antes
     # da sacolinha, num tamanho harmônico (print de 07/11, 02:49), e embaixo só um fio fino, como no
     # vídeo aberto, com o número em cima da foto, longe da frase; no vídeo aberto, a mesma faixa, com a
     # frase parada. Nada no preto.
-    assert "o robô escreve no alto da capa" in texto and "fica à esquerda da sacolinha da Shopee" in texto
+    assert "o robô escreve no alto da capa" in texto and "fica à esquerda da sacolinha" not in texto
+    # P198 1 (10/11): a frase no meio da faixa, nas duas capas.
+    assert "fica no meio da faixa, antes da sacolinha da Shopee (escolha sua, P198)" in texto
     assert "só um fio fino na mesma cor, como no vídeo aberto (escolha sua, P196)" in texto
     assert "num tamanho harmônico, em duas linhas" in texto
     assert "fica embaixo, em cima da foto, como nos outros posts do perfil, longe da frase" in texto

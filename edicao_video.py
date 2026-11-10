@@ -353,8 +353,8 @@ ESCALA_NA_MINIATURA = 0.5
 # aberto, no resto, P129): a faixa de cima, do alto do quadro até PE_DA_FAIXA_DE_CIMA, com a frase
 # (só o título), e, logo abaixo dela, a foto do anúncio, sem moldura; a faixa e o fio no laranja ou
 # na cor do produto (P159 2). A frase é a mesma nas duas capas e não se mexe ao abrir o vídeo: fica
-# no mesmo lugar (lugar_das_letras_na_grade), à esquerda da sacolinha da grade e dos ícones do vídeo
-# aberto, dentro do que o app mostra do vídeo aberto e abaixo da barra de pesquisa dele, na maior
+# no mesmo lugar (lugar_das_letras_na_grade), no meio da tela, antes da sacolinha da grade e dos ícones
+# do vídeo aberto, dentro do que o app mostra do vídeo aberto e abaixo da barra de pesquisa dele, na maior
 # letra que cabe, até um teto harmônico (LETRAS_NA_GRADE), em duas linhas (ENTRELINHA_NA_GRADE; a
 # frase de uma palavra só, numa), um pouco mais estreita (APERTO_DA_LETRA) para caber maior.
 # Na capa da grade, a faixa de cima e o fio de baixo vão de uma beirada à outra do quadro, e nada fica
@@ -369,7 +369,7 @@ ESCALA_NA_MINIATURA = 0.5
 # do que o app mostra, e a foto, inteira, fica logo abaixo dela, no maior tamanho que cabe acima do
 # cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO), com o fio (FIO_DA_CAPA)
 # logo abaixo do pé dela. Pedidos do Rafael (P139 2, P168, P169 1, P171, o print de 07/11 às 02:49,
-# P188 2, P189 B e P196 1): DECISOES.md, Shopee Vídeo.
+# P188 2, P189 B, P196 1 e P198 1): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
 # O que a grade do perfil mostra no Motorola do Rafael (print de 06/11, 21:09): o quadro em 3:4 com
 # a largura toda. Com a foto menor que isso, a grade mostra o preto em volta dela (P168).
@@ -740,13 +740,15 @@ def cor_guardada(texto):
 def lugar_das_letras_na_grade():
     """
     (esquerda, cima, direita, baixo) do retângulo da frase na faixa de cima, o mesmo nas duas capas,
-    para a frase não se mexer ao abrir o vídeo (P189 B): dentro do que o vídeo aberto mostra, com a
-    margem, abaixo do que a grade esconde e da barra de pesquisa do vídeo aberto, com a folga, e à
-    esquerda da sacolinha da grade e da coluna de ícones do vídeo aberto (P165 1), longe do número de
-    visualizações, que fica embaixo, em cima da foto (P188 2 e P196 1).
+    para a frase não se mexer ao abrir o vídeo (P189 B): abaixo do que a grade esconde e da barra de
+    pesquisa do vídeo aberto, com a folga; a direita termina antes da sacolinha da grade e da coluna de
+    ícones do vídeo aberto (P165 1), com a margem, e a esquerda fica à mesma distância do meio do que o
+    vídeo aberto mostra, para a frase ficar no meio da tela (P198 1); longe do número de visualizações,
+    que fica embaixo, em cima da foto (P188 2 e P196 1).
     """
-    return (VISIVEL_NO_APP[0] + MARGEM_DA_FAIXA, max(GRADE_NO_CELULAR[0], TOPO_NO_VIDEO_ABERTO) + FOLGA_DA_FAIXA,
-            min(SACOLINHA_DA_GRADE[0], ICONES_NO_VIDEO_ABERTO) - MARGEM_DA_FAIXA, PE_DA_FAIXA_DE_CIMA - FOLGA_DA_FAIXA)
+    direita = min(SACOLINHA_DA_GRADE[0], ICONES_NO_VIDEO_ABERTO) - MARGEM_DA_FAIXA
+    return (VISIVEL_NO_APP[0] + VISIVEL_NO_APP[1] - direita, max(GRADE_NO_CELULAR[0], TOPO_NO_VIDEO_ABERTO) + FOLGA_DA_FAIXA,
+            direita, PE_DA_FAIXA_DE_CIMA - FOLGA_DA_FAIXA)
 
 
 def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
