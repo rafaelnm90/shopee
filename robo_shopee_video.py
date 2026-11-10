@@ -5279,6 +5279,16 @@ def pode_editar(rascunho):
                 and len(rascunho.get("mais_produtos") or []) + 1 == len(nomes))
 
 
+def sem_a_fala(rascunho):
+    """
+    Por que o Editar ✏️ não tem a legenda da fala para pôr ou tirar no vídeo do rascunho (o porquê fixo de
+    edicao_video.legendas_da_fala: ninguém fala em português, a fala já escrita na tela, a IA sem as
+    legendas), ou "" quando tem: o servidor refaz o vídeo com o que a IA escreveu, e sem a fala dela, com ou
+    sem a legenda, o vídeo fica igual.
+    """
+    return edicao_video.legendas_da_fala(((rascunho or {}).get("edicao") or {}).get("textos") or {})[1]
+
+
 def escolhas_do_rascunho(rascunho):
     """O lado da miniatura e a legenda da fala do vídeo do rascunho: os da nova versão ou os da edição."""
     nova = (rascunho or {}).get("nova_versao") or {}
