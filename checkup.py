@@ -1198,8 +1198,9 @@ def _linha_da_capa_com_chamada(medicao):
 def aprovados_postados(agora=None):
     """
     Os aprovados que foram ao ar nas últimas 24 h: [(aprovado HH:MM, previsto HH:MM,
-    postado HH:MM, atraso em min)]. O atraso é do postado sobre o previsto: diz se outra
-    tarefa (um preparo longo segurando o celular, a pausa) atrasou o post.
+    postado HH:MM, atraso em min, o que o robô fez no meio)]. O atraso é do postado sobre o
+    previsto: diz se outra tarefa (um preparo longo segurando o celular, a pausa) atrasou o
+    post; no que atrasou mais de ATRASO_DO_APROVADO, o que ele fez no meio (no_meio_do_atraso).
     """
     agora = _agora(agora)
     try:
@@ -1217,8 +1218,30 @@ def aprovados_postados(agora=None):
                           - datetime.strptime(previsto, "%Y-%m-%d %H:%M:%S")).total_seconds() // 60)
         except (TypeError, ValueError):
             continue
-        postados.append(((aprovado or "")[11:16] or "?", previsto[11:16], postado[11:16], atraso))
+        no_meio = no_meio_do_atraso(previsto, postado) if atraso > ATRASO_DO_APROVADO.total_seconds() // 60 else ""
+        postados.append(((aprovado or "")[11:16] or "?", previsto[11:16], postado[11:16], atraso, no_meio))
     return postados
+
+
+def no_meio_do_atraso(previsto, postado):
+    """
+    O que o robô fez entre o previsto e o postado de um aprovado atrasado: as tentativas por
+    ação e os pedidos do Preparar 1 Agora (09/11: um post saiu 36 min depois, e o checkup não
+    dizia o que segurou o celular). Só ações e contagens; "" sem nada no meio.
+    """
+    try:
+        with db.conexao() as conexao:
+            acoes = conexao.execute(
+                "SELECT acao, COUNT(*) FROM shopee_video_tentativas WHERE momento >= ? AND momento < ? "
+                "GROUP BY acao ORDER BY 2 DESC, 1", (previsto, postado)).fetchall()
+    except sqlite3.OperationalError:
+        acoes = []
+    pedidos = sum(1 for momento, *_ in registro_processos.sequencia("shopee_video", PROCESSO_DO_BOTAO, previsto, "pedido")
+                  if momento < postado)
+    partes = [", ".join(f"{acao} {qtd}" for acao, qtd in acoes)] if acoes else []
+    if pedidos:
+        partes.append(f"Preparar 1 Agora {pedidos}")
+    return f"no meio: {'; '.join(partes)}" if partes else ""
 
 
 def tentativas_recentes(horas, agora=None):
@@ -1726,7 +1749,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
                       f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         pontos.append(f"Robô da Shopee Vídeo: {acao} → {resultado} em \"{passo or '?'}\" {qtd}x")
-    tarde = [atraso for *_h, atraso in robo_sv.get("postados", []) if atraso > ATRASO_DO_APROVADO.total_seconds() // 60]
+    tarde = [atraso for _a, _p, _q, atraso, *_m in robo_sv.get("postados", [])
+             if atraso > ATRASO_DO_APROVADO.total_seconds() // 60]
     if tarde:
         pontos.append(f"Robô da Shopee Vídeo: {len(tarde)} aprovado(s) foram ao ar com mais de "
                       f"{int(ATRASO_DO_APROVADO.total_seconds() // 60)} min de atraso (o maior: {max(tarde)} min)")
@@ -2006,8 +2030,9 @@ def main():
         print(_linha_da_tentativa(tentativa))
     print(f"Aprovados que passaram da hora de ir ao ar: {robo_sv['atrasados']}"
           + (f" (o mais atrasado há {robo_sv['minutos_de_atraso']} min)" if robo_sv["atrasados"] else ""))
-    for aprovado, previsto, postado, atraso in robo_sv.get("postados", []):
-        print(f"   aprovado {aprovado} → previsto {previsto} → postado {postado} (atraso {atraso} min)")
+    for aprovado, previsto, postado, atraso, no_meio in robo_sv.get("postados", []):
+        print(f"   aprovado {aprovado} → previsto {previsto} → postado {postado} (atraso {atraso} min"
+              + (f"; {no_meio}" if no_meio else "") + ")")
     print(f"Canal Afiliados: postados esperando a fila do canal há mais de {ESPERA_DO_CANAL} min: "
           f"{robo_sv['canal_parados']}")
     print(f"Fila do Viral: vídeos que vieram do Canal Afiliados (o robô e o assistente não os pegam): "
