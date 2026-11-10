@@ -425,8 +425,20 @@ def test_aprovados_postados_mostram_o_atraso_sobre_o_previsto():
     robo.atualizar(na_hora, estado="postado", aprovado_em=em(4), postar_em=em(3.5), postado_em=em(3.4))
     tarde = robo.criar("v2", AGORA - timedelta(hours=5))
     robo.atualizar(tarde, estado="postado", aprovado_em=em(3), postar_em=em(2.5), postado_em=em(1.5))
+    # 09/11: um aprovado saiu 36 min depois do previsto, e o checkup não dizia o que segurou o
+    # celular. No atrasado, vêm as tentativas do robô entre o previsto e o postado, por ação, e os
+    # pedidos do Preparar 1 Agora.
+    import registro_processos
+    for horas in (2.4, 2.2, 1.9):
+        robo.registrar_tentativa("rascunho", "pulado", "anexar o produto", agora=AGORA - timedelta(hours=horas))
+    robo.registrar_tentativa("feed", "ok", agora=AGORA - timedelta(hours=1.6))
+    robo.registrar_tentativa("rascunho", "salvo", agora=AGORA - timedelta(hours=1))      # depois do post
+    for horas in (2.45, 2.25):
+        registro_processos.registrar("shopee_video", checkup.PROCESSO_DO_BOTAO, "pedido", ok=None,
+                                     agora=AGORA - timedelta(hours=horas))
     r = checkup.robo_da_shopee_video(AGORA)
-    assert [atraso for *_h, atraso in r["postados"]] == [6, 60]
+    assert [p[3] for p in r["postados"]] == [6, 60]
+    assert [p[4] for p in r["postados"]] == ["", "no meio: rascunho 3, feed 1; Preparar 1 Agora 2"]
     pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
     assert "Robô da Shopee Vídeo: 1 aprovado(s) foram ao ar com mais de 30 min de atraso (o maior: 60 min)" in pontos
 
