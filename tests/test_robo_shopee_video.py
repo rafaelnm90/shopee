@@ -6678,6 +6678,47 @@ def test_sinais_do_anexar_contam_o_erro_de_sistema_da_shopee_e_o_produto_que_fic
     assert sinais[-1][3] == "na última hora: erro de sistema da Shopee na API 2"
 
 
+def test_sinais_do_anexar_dizem_a_memoria_do_app(monkeypatch, avisos):
+    # 10/11, das 05:44 às 06:24: o produto não ficou depois do Feito em 3 tentativas seguidas, com o
+    # app aberto havia 16 h e o Java dele perto do teto (512 MB no Motorola), pelo log do coletor: a
+    # cada Feito, o app refazia a tela de publicar e perdia o produto. A linha dos sinais diz a
+    # memória do Java do app (a linha Dalvik Heap do dumpsys meminfo); a do que fica, em faixas.
+    app = AppQueReabreALegenda()
+    app.atual = "final"
+    meminfo = ("** MEMINFO in pid 4321 [com.shopee.br] **\n"
+               "                   Pss  Private  Private  SwapPss      Rss     Heap     Heap     Heap\n"
+               "                 Total    Dirty    Clean    Dirty    Total     Size    Alloc     Free\n"
+               "  Native Heap    81920    81000        0      100    90000   120000    95000    25000\n"
+               "  Dalvik Heap   480000   470000      100     2000   500000   524288   515072     9216\n"
+               " App Summary\n           Java Heap:   515072\n")
+    comandos = []
+
+    def shell(partes):
+        comandos.append(partes)
+        return type("R", (), {"output": {"pidof": "4321", "ps": "     ELAPSED\n  16:41:00",
+                                         "dumpsys": meminfo}.get(partes[0], "")})()
+    monkeypatch.setattr(app, "shell", shell)
+    assert not robo.primeiro_na_tela_final(app, 1, "Mala de Bordo")
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert sinais[-1][3].endswith("; o app aberto há 1001 min; a memória do app 503 de 512 MB")
+    assert ["dumpsys", "meminfo", robo.ps.PACOTE] in comandos
+    app.com_produto = True
+    assert robo.primeiro_na_tela_final(app, 1, "Mala de Bordo")
+    sinais = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_SINAIS_DO_APP, "2000-01-01 00:00:00")
+    assert sinais[-1][3].endswith("; o app aberto há 12 a 24 h; a memória do app 450 MB ou mais")
+    faixa = robo.faixa_da_memoria_do_app
+    assert [faixa(mb) for mb in (120, 299, 300, 399, 400, 449, 450, 600)] == [
+        "menos de 300 MB", "menos de 300 MB", "300 a 400 MB", "300 a 400 MB", "400 a 450 MB", "400 a 450 MB",
+        "450 MB ou mais", "450 MB ou mais"]
+    # O Android antigo, sem a coluna Rss, tem as mesmas três últimas; sem a linha ou sem a leitura, nada.
+    antigo = type("C", (), {"shell": lambda self, partes: type("R", (), {"output": (
+        "  Dalvik Heap   200000   190000      100     2000   262144   204800    57344\n")})()})()
+    assert robo.casos_robo.memoria_do_app(antigo, robo.ps.PACOTE) == (200, 256)
+    assert robo.casos_robo.memoria_do_app(object(), robo.ps.PACOTE) is None
+    assert robo.casos_robo.memoria_do_app(type("C", (), {"shell": lambda self, partes: type(
+        "R", (), {"output": " App Summary\n           Java Heap:   515072\n"})()})(), robo.ps.PACOTE) is None
+
+
 def test_faixas_do_app_aberto():
     faixa = robo.faixa_do_app_aberto
     assert [faixa(m) for m in (0, 59, 60, 359, 360, 719, 720, 1439, 1440, 5000)] == [
