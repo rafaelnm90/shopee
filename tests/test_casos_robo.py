@@ -73,7 +73,7 @@ class CelularComLog(Celular):
 
     LOG = [
         "--------- beginning of main",
-        "10-25 09:56:00.100  4321  4330 I ReactNativeJS: velho demais",
+        "10-25 09:50:00.100  4321  4330 I ReactNativeJS: velho demais",
         "10-25 09:58:10.200  4321  4330 W ReactNativeJS: o produto não entrou",
         "10-25 09:58:11.300  4400  4410 I Push: recebido",
         "10-25 09:58:12.000  5000  5010 I Gmail: outro app",
@@ -85,6 +85,7 @@ class CelularComLog(Celular):
         if partes[:2] == ["ps", "-A"]:
             saida = "  PID NAME\n 4321 com.shopee.br\n 4400 com.shopee.br:push\n 5000 com.google.android.gm\n"
         elif partes[0] == "logcat":
+            self.leitura_do_log = partes
             saida = "\n".join(self.LOG)
         elif partes[0] == "dumpsys":
             saida = "Packages:\n  Package [com.shopee.br]\n    versionCode=1 minSdk=24\n    versionName=3.61.20\n"
@@ -113,6 +114,31 @@ def test_caso_guarda_o_log_do_app_dos_ultimos_minutos_e_a_versao(monkeypatch):
     assert not os.path.exists(os.path.join(pasta, casos_robo.ARQUIVO_DO_LOG))
     assert casos_robo.log_do_app(object(), "com.shopee.br", AGORA) == ""
     assert casos_robo.versao_do_app(object(), "com.shopee.br") is None
+
+
+class CelularComRepetidas(CelularComLog):
+    """O app escrevendo a mesma linha muitas vezes (só os números mudam)."""
+
+    LOG = CelularComLog.LOG[:2] + [
+        f"10-25 09:58:{segundo:02d}.{milesimo:03d}  4321  4331 I Rede    : v2:msg invalid, {segundo}, {milesimo}, errno=11"
+        for segundo in range(20, 30) for milesimo in (100, 600)
+    ] + CelularComLog.LOG[2:]
+
+
+def test_log_do_app_le_pela_hora_sem_as_linhas_que_se_repetem():
+    # 09/11, 22:21: o app escrevia 43 linhas por segundo de "LOOPER msg invalid", e as 400 linhas
+    # do caso cobriam só 9 s. O log é lido pela hora (os últimos MINUTOS_DO_LOG_DO_APP), sem as
+    # ETIQUETAS_CALADAS, e da linha que se repete (só os números mudam) ficam as primeiras; o fim
+    # diz quantas saíram de cada etiqueta.
+    celular = CelularComRepetidas()
+    linhas = casos_robo.log_do_app(celular, "com.shopee.br", AGORA).splitlines()
+    desde = (AGORA - timedelta(minutes=casos_robo.MINUTOS_DO_LOG_DO_APP)).strftime("%m-%d %H:%M:%S")
+    assert celular.leitura_do_log == ["logcat", "-d", "-v", "threadtime", "-t", f"{desde}.000"] + [
+        f"{etiqueta}:S" for etiqueta in casos_robo.ETIQUETAS_CALADAS]
+    repetidas = [linha for linha in linhas if "msg invalid" in linha]
+    assert repetidas == CelularComRepetidas.LOG[2:2 + casos_robo.REPETICOES_NO_LOG]
+    assert linhas[-1] == f"-- linhas repetidas que saíram: Rede {20 - casos_robo.REPETICOES_NO_LOG}"
+    assert CelularComLog.LOG[2] in linhas and CelularComLog.LOG[5] in linhas and CelularComLog.LOG[1] not in linhas
 
 
 def test_caso_leva_os_passos_do_registro_desde_o_comeco_do_rascunho():
