@@ -2211,8 +2211,26 @@ def legendas_no_tempo(video, legendas):
 
 
 def _linhas_da_legenda(texto, fonte, rascunho):
-    """As linhas do texto quebradas na largura da legenda (só no espaço comum)."""
+    """
+    As linhas do texto quebradas na largura da legenda (só no espaço comum). Em duas linhas, a quebra
+    que cabe vem de preferência depois de um ponto ou de uma vírgula e nunca deixa palavra de ligação
+    no fim da 1ª ("Tratamento potente / e duradouro"); entre as iguais, a da 1ª linha mais comprida.
+    Escolha do Rafael (10/11, P199 1): DECISOES.md, Shopee Vídeo. O texto que não cabe em duas linhas
+    vai quebrado palavra a palavra, e a legenda tenta a letra menor ou é dividida antes.
+    """
     limite = DIREITA_DA_LEGENDA - ESQUERDA_DA_LEGENDA - 2 * CONTORNO_DA_LEGENDA
+    palavras = texto.split()
+    if palavras and rascunho.textlength(" ".join(palavras), font=fonte) <= limite:
+        return [" ".join(palavras)], True
+    quebras = []
+    for i in range(1, len(palavras)):
+        primeira, segunda = " ".join(palavras[:i]), " ".join(palavras[i:])
+        if rascunho.textlength(primeira, font=fonte) <= limite and rascunho.textlength(segunda, font=fonte) <= limite:
+            nota = (int(palavras[i - 1].lower().strip(",.-:") in PALAVRAS_DE_LIGACAO)
+                    - int(palavras[i - 1][-1:] in ",;:.!?"))
+            quebras.append((nota, -i, [primeira, segunda]))
+    if quebras and LINHAS_DA_LEGENDA >= 2:
+        return min(quebras)[2], True
     linhas, linha = [], ""
     for palavra in texto.split():
         tentativa = f"{linha} {palavra}".strip()
@@ -2261,18 +2279,30 @@ def legenda_da_fala(texto):
 
 
 # Ao dividir um trecho em dois, o corte depois de uma vírgula ou de um ponto vale esta parte do tamanho
-# do trecho a mais perto do meio: a legenda fica com a frase inteira quando dá.
+# do trecho a mais perto do meio: a legenda fica com a frase inteira quando dá. O corte depois de uma
+# palavra de ligação ("com esse kit de / banho de") ou antes do "de" que prende o nome ao que vem antes
+# ("banho / de verniz") vale PENALIDADE_DA_LIGACAO a mais longe: a troca de legenda fica nas pausas da
+# fala e não separa o nome do produto. Escolha do Rafael (10/11, P199 1): DECISOES.md, Shopee Vídeo.
 PREFERENCIA_DA_PONTUACAO = 0.25
+PENALIDADE_DA_LIGACAO = 0.25
+PRENDEM_AO_ANTERIOR = {"de", "da", "do", "das", "dos"}
 
 
 def _ponto_de_corte(palavras):
-    """Onde dividir as palavras em duas partes: perto do meio (em letras), de preferência depois de uma pontuação."""
+    """
+    Onde dividir as palavras em duas partes: perto do meio (em letras), de preferência depois de uma
+    pontuação, e não depois de uma palavra de ligação nem antes do "de" que prende o nome ao anterior.
+    """
     total = len(" ".join(palavras))
     melhor, nota_melhor = len(palavras) // 2, None
     for i in range(1, len(palavras)):
         nota = abs(total - 2 * len(" ".join(palavras[:i]))) / total
         if palavras[i - 1][-1:] in ",;:.!?":
             nota -= PREFERENCIA_DA_PONTUACAO
+        if palavras[i - 1].lower().strip(",.-:") in PALAVRAS_DE_LIGACAO:
+            nota += PENALIDADE_DA_LIGACAO
+        if palavras[i].lower().strip(",.-:") in PRENDEM_AO_ANTERIOR:
+            nota += PENALIDADE_DA_LIGACAO
         if nota_melhor is None or nota < nota_melhor:
             melhor, nota_melhor = i, nota
     return melhor
