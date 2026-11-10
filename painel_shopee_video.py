@@ -421,6 +421,7 @@ class ShopeeVideoFluxo(StatesGroup):
     rascunho = State()
     aguardando_confirmacao_recusa = State()
     aguardando_produtos_a_tirar = State()
+    editando_rascunho = State()
     celular = State()
     aguardando_escolha_celular = State()
     aguardando_pareamento = State()
@@ -692,6 +693,14 @@ BOTAO_ANTERIOR = "Rascunho Anterior ⏮️"
 # celular na hora de postar. Cada produto vira um botão "Produto N", com o ➖ quando marcado.
 BOTAO_TIRAR = "Tirar Produto ➖"
 BOTAO_POSTAR_AGORA = "Postar Agora 🚀"
+# O Editar ✏️ de cada rascunho (P191 1 e P192 1): a miniatura e a legenda da fala daquele vídeo. O servidor
+# refaz o vídeo, e a nova versão espera o Aprovar ✅; o Manter o Vídeo de Antes ↩️ fica com o de antes.
+BOTAO_EDITAR = "Editar ✏️"
+BOTAO_REFAZER_O_VIDEO = "Refazer o Vídeo 🎬"
+BOTAO_MANTER_O_DE_ANTES = "Manter o Vídeo de Antes ↩️"
+LADOS_NO_EDITAR = {"Direita ➡️": edicao_video.MINIATURA_A_DIREITA, "Esquerda ⬅️": edicao_video.MINIATURA_A_ESQUERDA,
+                   "Sem Miniatura ✖️": edicao_video.SEM_MINIATURA}
+LEGENDA_NO_EDITAR = {"Com Legenda 💬": True, "Sem Legenda 🔇": False}
 BOTAO_PRONTO_TIRAR = "Pronto ✅"
 MARCA_DE_TIRAR = " ➖"
 # Os botões de pausar e retomar de cada robô trocam conforme o estado (pausado mostra
@@ -1258,8 +1267,8 @@ async def mostrar_assistente(message: types.Message, state: FSMContext):
 ESTADOS_DO_ROBO = ("aguardando_tipo_faixa_robo", "aguardando_faixa_robo", "aguardando_confirmacao_faixa_robo", "aguardando_janela_robo",
                    "aguardando_confirmacao_janela_robo", "aguardando_confirmacao_pausa_robo", "menu_robo",
                    "rascunho", "aguardando_confirmacao_recusa", "fazer_agora")
-# Do Tirar Produto ➖, o Cancelar ❌ volta ao rascunho, sem mudar as marcas.
-ESTADOS_DO_RASCUNHO = ("aguardando_produtos_a_tirar",)
+# Do Tirar Produto ➖ e do Editar ✏️, o Cancelar ❌ volta ao rascunho, sem mudar nada.
+ESTADOS_DO_RASCUNHO = ("aguardando_produtos_a_tirar", "editando_rascunho")
 ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
                          "aguardando_confirmacao_janela", "aguardando_confirmacao_pausa", "menu_assistente")
 ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_pareamento", "aguardando_porta")
@@ -2010,18 +2019,22 @@ async def treino_handler(message: types.Message, state: FSMContext):
 
 # --- Rascunhos do robô: aprovar um por um ---
 
-def teclado_rascunho(anterior=False, proximo=False, tirar=False):
+def teclado_rascunho(anterior=False, proximo=False, tirar=False, editar=False, manter=False, so_recusar=False):
     """
     O teclado de um rascunho: o Rascunho Anterior só quando há um antes dele e o Próximo
     Rascunho só quando há um depois; com um rascunho só, nenhum dos dois (o Próximo não dá a
     volta). Pedido do Rafael (30/10): DECISOES.md, Shopee Vídeo. O Tirar Produto ➖ só no
-    rascunho com 2 produtos ou mais (P123).
+    rascunho com 2 produtos ou mais (P123). O Editar ✏️ no que deixa (P192 1), e o Manter o Vídeo de Antes ↩️
+    com a nova versão dele esperando. A versão de antes de um rascunho refeito que não saiu do app só se recusa.
     """
     navegar = ([KeyboardButton(text=BOTAO_ANTERIOR)] if anterior else []) + \
               ([KeyboardButton(text=BOTAO_PROXIMO)] if proximo else [])
-    return montar_teclado([[KeyboardButton(text=BOTAO_APROVAR), KeyboardButton(text=BOTAO_RECUSAR)]]
-                          + ([[KeyboardButton(text=BOTAO_TIRAR)]] if tirar else [])
-                          + ([navegar] if navegar else []) + [[KeyboardButton(text=BOTAO_VOLTAR)]])
+    decidir = ([KeyboardButton(text=BOTAO_RECUSAR)] if so_recusar
+               else [KeyboardButton(text=BOTAO_APROVAR), KeyboardButton(text=BOTAO_RECUSAR)])
+    mexer = (([KeyboardButton(text=BOTAO_TIRAR)] if tirar else []) + ([KeyboardButton(text=BOTAO_EDITAR)] if editar else [])
+             + ([KeyboardButton(text=BOTAO_MANTER_O_DE_ANTES)] if manter else []))
+    return montar_teclado([decidir] + ([mexer] if mexer else []) + ([navegar] if navegar else [])
+                          + [[KeyboardButton(text=BOTAO_VOLTAR)]])
 
 
 def teclado_aprovado(anterior=False, proximo=False):
@@ -2035,11 +2048,20 @@ def teclado_aprovado(anterior=False, proximo=False):
                           + ([navegar] if navegar else []) + [[KeyboardButton(text=BOTAO_VOLTAR)]])
 
 
+def nova_versao(rascunho):
+    """A nova versão do Editar ✏️ que espera o Aprovar ✅ ({arquivo, miniatura, legenda, ...}), ou {}."""
+    nova = (rascunho or {}).get("nova_versao") or {}
+    return nova if nova.get("arquivo") and os.path.exists(nova["arquivo"]) else {}
+
+
 def teclado_do_rascunho(rascunho, anterior=False, proximo=False):
     """O teclado do rascunho da tela: o do aprovado (Postar Agora 🚀) ou o de aprovar ou recusar."""
     if rascunho.get("estado") == "aprovado":
         return teclado_aprovado(anterior, proximo)
-    return teclado_rascunho(anterior, proximo, robo.pode_tirar(rascunho))
+    if rascunho.get("versao_de"):
+        return teclado_rascunho(anterior, proximo, so_recusar=True)
+    return teclado_rascunho(anterior, proximo, robo.pode_tirar(rascunho), robo.pode_editar(rascunho),
+                            bool(nova_versao(rascunho)))
 
 
 LISTA_DOS_RASCUNHOS, LISTA_DOS_APROVADOS = "rascunhos", "aprovados"
@@ -2163,6 +2185,18 @@ def texto_rascunho(rascunho, posicao, total):
     if rascunho.get("estado") == "aprovado":
         aviso = (f"✅ <b>Aprovado</b>: vai ao ar por volta de <b>{_data_curta(rascunho['postar_em'])}</b>. Para postar "
                  f"já, toque em <b>{BOTAO_POSTAR_AGORA}</b>.\n\n" + aviso)
+    if rascunho.get("versao_de"):
+        # A versão de antes de um rascunho refeito no app pelo Editar ✏️ que não saiu do celular (P192 1).
+        return (f"↩️ <b>{_nome_na_tela(rascunho)} {posicao} de {total}: a versão de antes</b> de um rascunho que você "
+                "editou e que o robô já refez no celular com a nova versão. Ela ainda está no celular: o robô não "
+                f"conseguiu apagá-la ({html_escape(rascunho.get('motivo') or 'sem motivo')}).\n\n"
+                f"<b>{BOTAO_RECUSAR}</b>: o robô tenta apagar de novo, conferindo antes o título e os produtos.")
+    nova = nova_versao(rascunho)
+    if nova:
+        aviso = (f"✏️ <b>Nova versão do vídeo</b> ({linha_do_editar(nova.get('miniatura'), nova.get('legenda'))}), "
+                 "ainda não está no celular. Com o Aprovar, o robô refaz o rascunho no celular com ela (o vídeo, os "
+                 "produtos e o título; uns 10 min de celular, numa das próximas rodadas), e o de antes só sai depois "
+                 "de o novo ficar salvo.\n\n" + aviso)
     return (f"📝 <b>{_nome_na_tela(rascunho)} {posicao} de {total}</b> (salvo em "
             f"{_data_curta(rascunho['criado_em'])})\n\n"
             "📝 <b>Título</b> (o que está na legenda):\n"
@@ -2178,7 +2212,12 @@ def texto_rascunho(rascunho, posicao, total):
                 f"<b>{BOTAO_APROVAR}</b>: o robô posta, um de cada vez, dentro do Horário do Robô.\n"
                 f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta."
                 + (f"\n<b>{BOTAO_TIRAR}</b>: marque os produtos que saem do post; o robô os tira no celular na hora "
-                   "de postar." if robo.pode_tirar(rascunho) else "")))
+                   "de postar." if robo.pode_tirar(rascunho) else "")
+                + (f"\n<b>{BOTAO_EDITAR}</b>: mude a miniatura (à direita, à esquerda ou sem) e a legenda da fala "
+                   "(com ou sem) deste vídeo; o servidor refaz o vídeo e manda a nova versão aqui, para você aprovar."
+                   if robo.pode_editar(rascunho) else "")
+                + (f"\n<b>{BOTAO_MANTER_O_DE_ANTES}</b>: fica com o vídeo de antes, e a nova versão sai."
+                   if nova else "")))
 
 
 # O Telegram manda até 10 fotos num álbum; o post tem até 6 produtos.
@@ -2210,13 +2249,15 @@ def legenda_dos_recusados(posicao, fotos):
             "diferente do produto do vídeo. Ele não vai no post: é só para você conferir se ela está acertando.")
 
 
-def _rascunho_a_mostrar(pendentes, depois_de=None, antes_de=None):
+def _rascunho_a_mostrar(pendentes, depois_de=None, antes_de=None, este=None):
     """
-    O rascunho da tela: o anterior ao antes_de, o seguinte ao depois_de ou, sem eles, o 1º.
+    O rascunho da tela: este (o id), o anterior ao antes_de, o seguinte ao depois_de ou, sem eles, o 1º.
     O depois_de que já saiu da lista (aprovado ou recusado) dá o seguinte a ele, e depois do
     último, o 1º dos que sobraram.
     """
     ids = [r["id"] for r in pendentes]
+    if este in ids:
+        return pendentes[ids.index(este)]
     if antes_de in ids:
         return pendentes[max(ids.index(antes_de) - 1, 0)]
     if depois_de in ids:
@@ -2241,7 +2282,8 @@ def _nenhum_na_lista(lista, depois_de_resolver=False):
              if aprovados and not depois_de_resolver else ""))
 
 
-async def mostrar_rascunho(message, state, depois_de=None, antes_de=None, depois_de_resolver=False, lista=None):
+async def mostrar_rascunho(message, state, depois_de=None, antes_de=None, depois_de_resolver=False, lista=None,
+                          este=None):
     """
     Um rascunho por vez, com o vídeo, o print da tela final, o título e o link do produto:
     o Rafael é o validador, e o print prova que o que ele aprova é o que vai ao ar.
@@ -2255,12 +2297,20 @@ async def mostrar_rascunho(message, state, depois_de=None, antes_de=None, depois
         await state.set_state(ShopeeVideoFluxo.menu)
         await message.answer(_nenhum_na_lista(lista, depois_de_resolver), reply_markup=teclado_painel(ler_config()))
         return
-    rascunho = _rascunho_a_mostrar(pendentes, depois_de, antes_de)
+    rascunho = _rascunho_a_mostrar(pendentes, depois_de, antes_de, este)
     posicao = [r["id"] for r in pendentes].index(rascunho["id"]) + 1
     nome = _nome_na_tela(rascunho)
     await state.set_state(ShopeeVideoFluxo.rascunho)
     await state.update_data(rascunho_id=rascunho["id"], lista=lista)
-    if rascunho["arquivo"] and os.path.exists(rascunho["arquivo"]):
+    nova = nova_versao(rascunho)
+    if nova:
+        # A nova versão do Editar ✏️ no lugar do vídeo de antes (P192 1).
+        await message.answer_video(FSInputFile(nova["arquivo"]), supports_streaming=True,
+                                   caption=f"✏️ {nome} {posicao}: a nova versão do vídeo "
+                                           f"({linha_do_editar(nova.get('miniatura'), nova.get('legenda'))}). A tela "
+                                           "final abaixo é a do rascunho de antes: os produtos e o título são os "
+                                           "mesmos.")
+    elif rascunho["arquivo"] and os.path.exists(rascunho["arquivo"]):
         await message.answer_video(FSInputFile(rascunho["arquivo"]), supports_streaming=True,
                                    caption=f"🎬 {nome} {posicao}: o vídeo.")
     if rascunho["print"] and os.path.exists(rascunho["print"]):
@@ -2340,14 +2390,25 @@ async def aprovar_handler(message: types.Message, state: FSMContext):
     rascunho = await _rascunho_da_vez(message, state)
     if not rascunho:
         return
+    if rascunho.get("versao_de"):
+        await message.answer("↩️ Esta é a versão de antes de um rascunho que você editou: ela só sai do celular. "
+                             f"Toque em {BOTAO_RECUSAR}.")
+        return
     quando = robo.aprovar(rascunho["id"])
     logger.info("✅ Shopee Vídeo: rascunho aprovado.")
     tirar = sorted(rascunho.get("tirar") or []) if robo.pode_tirar(rascunho) else []
     sem_eles = (f" Na hora de postar, ele tira {numeros_por_extenso(tirar)} "
                 f"{'produtos' if len(tirar) > 1 else 'produto'}, como você marcou." if tirar else "")
-    await message.answer(f"✅ Aprovado. O robô posta por volta de <b>{_data_curta(quando)}</b> e manda aqui o "
-                         f"link do post e o comentário.{sem_eles} Até lá, ele fica em <b>{BOTAO_APROVADOS}</b>, "
-                         f"onde o {BOTAO_POSTAR_AGORA} posta na hora.", parse_mode="HTML")
+    if quando is None:
+        # Com a nova versão do Editar ✏️, o robô refaz o rascunho no celular antes (P192 1).
+        await message.answer("✅ Aprovado, com a nova versão do vídeo. Numa das próximas rodadas, o robô refaz o "
+                             "rascunho no celular com ela (uns 10 min de celular) e só depois apaga o de antes. Aí "
+                             f"ele ganha a hora de ir ao ar e vai para <b>{BOTAO_APROVADOS}</b>; o robô avisa aqui."
+                             + sem_eles, parse_mode="HTML")
+    else:
+        await message.answer(f"✅ Aprovado. O robô posta por volta de <b>{_data_curta(quando)}</b> e manda aqui o "
+                             f"link do post e o comentário.{sem_eles} Até lá, ele fica em <b>{BOTAO_APROVADOS}</b>, "
+                             f"onde o {BOTAO_POSTAR_AGORA} posta na hora.", parse_mode="HTML")
     await mostrar_rascunho(message, state, depois_de=rascunho["id"], depois_de_resolver=True,
                            lista=LISTA_DOS_RASCUNHOS)
 
@@ -2512,6 +2573,108 @@ async def marcar_produto_a_tirar(message: types.Message, state: FSMContext):
         marcados.add(numero)
     await state.update_data(tirar=sorted(marcados))
     await message.answer(texto_tirar(rascunho, marcados), parse_mode="HTML", reply_markup=teclado_tirar(total, marcados))
+
+
+# --- Editar ✏️ (P191 1 e P192 1): a miniatura e a legenda da fala de um rascunho ---
+
+NOMES_NO_EDITAR = {edicao_video.MINIATURA_A_DIREITA: "a miniatura à direita",
+                   edicao_video.MINIATURA_A_ESQUERDA: "a miniatura à esquerda",
+                   edicao_video.SEM_MINIATURA: "sem a miniatura"}
+_refazendo = asyncio.Lock()
+
+
+def linha_do_editar(lado, legenda):
+    """Como o vídeo fica pelo Editar ✏️, numa linha: "a miniatura à esquerda, sem a legenda da fala"."""
+    return (f"{NOMES_NO_EDITAR.get(lado, NOMES_NO_EDITAR[edicao_video.MINIATURA_A_DIREITA])}, "
+            f"{'com' if legenda else 'sem'} a legenda da fala")
+
+
+def texto_editar(lado, legenda):
+    """A tela do Editar ✏️ de um rascunho."""
+    return ("✏️ <b>Editar este vídeo</b>\n"
+            f"Fica assim: <b>{linha_do_editar(lado, legenda)}</b>.\n\n"
+            "Escolha a miniatura e a legenda e toque em "
+            f"<b>{BOTAO_REFAZER_O_VIDEO}</b>: o servidor refaz o vídeo (uns minutos, sem usar o celular), com o "
+            "mesmo título, os mesmos produtos, a mesma capa e os mesmos textos, e manda a nova versão aqui. Ela só "
+            "vai para o celular quando você aprovar.\n\n"
+            "<b>Direita ➡️</b> / <b>Esquerda ⬅️</b>: a miniatura da foto do anúncio no canto de cima à direita ou à "
+            "esquerda (à esquerda, os textos do alto passam para a direita).\n"
+            "<b>Sem Miniatura ✖️</b>: o vídeo vai sem a miniatura.\n"
+            "<b>Com Legenda 💬</b> / <b>Sem Legenda 🔇</b>: as palavras faladas escritas embaixo, ao lado das "
+            "setinhas.\n"
+            "<b>Cancelar ❌</b>: volta ao rascunho sem mudar nada.")
+
+
+def teclado_editar():
+    return montar_teclado([[KeyboardButton(text=botao) for botao in LADOS_NO_EDITAR],
+                           [KeyboardButton(text=botao) for botao in LEGENDA_NO_EDITAR],
+                           [KeyboardButton(text=BOTAO_REFAZER_O_VIDEO), KeyboardButton(text="Cancelar ❌")]])
+
+
+@router.message(F.text == BOTAO_EDITAR, StateFilter("*"))
+async def editar_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    rascunho = await _rascunho_da_vez(message, state)
+    if not rascunho:
+        return
+    if not robo.pode_editar(rascunho):
+        await message.answer("✏️ Este rascunho não dá para editar: ele não guardou o que a edição precisa (é de "
+                             "antes do Editar ✏️, de um vídeo de Ver Produtos ou de um produto sem o link).")
+        return
+    lado, legenda = robo.escolhas_do_rascunho(rascunho)
+    await state.set_state(ShopeeVideoFluxo.editando_rascunho)
+    await state.update_data(lado=lado, legenda=legenda)
+    await message.answer(texto_editar(lado, legenda), parse_mode="HTML", reply_markup=teclado_editar())
+
+
+@router.message(ShopeeVideoFluxo.editando_rascunho, F.text.in_(list(LADOS_NO_EDITAR) + list(LEGENDA_NO_EDITAR)))
+async def escolher_no_editar(message: types.Message, state: FSMContext):
+    dados = await state.get_data()
+    lado, legenda = dados.get("lado"), dados.get("legenda")
+    if message.text in LADOS_NO_EDITAR:
+        lado = LADOS_NO_EDITAR[message.text]
+    else:
+        legenda = LEGENDA_NO_EDITAR[message.text]
+    await state.update_data(lado=lado, legenda=legenda)
+    await message.answer(texto_editar(lado, legenda), parse_mode="HTML", reply_markup=teclado_editar())
+
+
+@router.message(ShopeeVideoFluxo.editando_rascunho, F.text == BOTAO_REFAZER_O_VIDEO)
+async def refazer_o_video_handler(message: types.Message, state: FSMContext):
+    """O servidor refaz o vídeo do rascunho com a miniatura e a legenda escolhidas, sem o celular (P192 1)."""
+    rascunho = await _rascunho_da_vez(message, state)
+    if not rascunho:
+        return
+    if _refazendo.locked():
+        await message.answer("⏳ Já estou refazendo um vídeo. Toque de novo quando ele chegar.")
+        return
+    dados = await state.get_data()
+    lado = dados.get("lado") or edicao_video.MINIATURA_A_DIREITA
+    legenda = bool(dados.get("legenda", True))
+    await message.answer(f"⏳ Refazendo o vídeo no servidor ({linha_do_editar(lado, legenda)}). Leva uns minutos, "
+                         "sem usar o celular; a nova versão chega aqui.")
+    logger.info("✏️ Shopee Vídeo: Editar do rascunho.")
+    async with _refazendo:
+        try:
+            ok, texto = await asyncio.to_thread(robo.reeditar, rascunho["id"], lado, legenda)
+        except Exception as e:
+            ok, texto = False, f"erro ({type(e).__name__})"
+    if not ok:
+        await message.answer(f"⚠️ A nova versão não saiu ({html_escape(texto)}). O rascunho continua como estava.",
+                             parse_mode="HTML")
+    await mostrar_rascunho(message, state, lista=LISTA_DOS_RASCUNHOS, este=rascunho["id"])
+
+
+@router.message(F.text == BOTAO_MANTER_O_DE_ANTES, StateFilter("*"))
+async def manter_o_de_antes_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    rascunho = await _rascunho_da_vez(message, state)
+    if not rascunho:
+        return
+    robo.manter_a_versao_de_antes(rascunho["id"])
+    logger.info("↩️ Shopee Vídeo: vídeo de antes mantido no rascunho.")
+    await message.answer("↩️ Fica o vídeo de antes; a nova versão saiu.")
+    await mostrar_texto_do_rascunho(message, state, robo.pegar(rascunho["id"]))
 
 
 # --- Celular do robô ---

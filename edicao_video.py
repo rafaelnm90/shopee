@@ -2661,6 +2661,25 @@ TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
 
 
+def _avisado(avisos, com_capa, musica, miniatura, outras_fotos, escolhas, cor):
+    """
+    O que o jeito do vídeo que vai ao ar diz depois do editor (textos fixos: o checkup conta por eles):
+    os avisos, a capa com a frase, a música, a miniatura (de fora, menor, à esquerda, alternada) e os
+    itens do painel que mudam o vídeo (P192 1).
+    """
+    lado = escolhas["miniatura"]
+    return ((COM_OS_AVISOS if avisos else "") + (COM_A_CHAMADA if com_capa else "") + (COM_MUSICA if musica else "")
+            + (SEM_A_MINIATURA_PELO_PAINEL if lado == SEM_MINIATURA else SEM_A_MINIATURA if not miniatura
+               else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
+            + (COM_A_MINIATURA_A_ESQUERDA if lado == MINIATURA_A_ESQUERDA and miniatura else "")
+            + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else "")
+            + ("" if escolhas["setinhas"] else SEM_AS_SETINHAS)
+            + ("" if escolhas["moldura"] else SEM_A_MOLDURA_DO_CARTAO)
+            + (f", setinhas e moldura {nome_do_destaque(escolhas, cor)}"
+               if (escolhas["setinhas"] or escolhas["moldura"])
+               and cor_do_destaque(escolhas, cor) != VERMELHO_DO_DESTAQUE else ""))
+
+
 def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
                        anotar=None, escolhas=None):
     """
@@ -2699,7 +2718,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
         return (editar(video, foto, destino, avisos, escolhas=escolhas),
                 SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), "")
-    musica = _caminho(musicas_de_fundo(video)[0])
+    musica_da_vez = musicas_de_fundo(video)[0]
+    musica = _caminho(musica_da_vez)
     textos = textos_da_tela(video, produto, lado) if produto else {}
     # A cor do produto no lugar do laranja e do preto (P159 2); o registro conta cada uma.
     cor = cor_do_produto(textos.get("cor"))
@@ -2751,7 +2771,6 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         no_video = _capa_da_vez(foto, frase, no_video=True, cor=cor, segunda=segunda)
         if no_video:
             abertura = (capa, no_video)
-    chamada = COM_A_CHAMADA if capa else ""
     # Sem a nossa miniatura quando o criador já pôs coisa no canto dela (P81); menor quando a
     # coisa dele fica logo abaixo do canto (P97). Sem ela também quando o Rafael a desliga no painel,
     # que diz o canto dela (P192 1).
@@ -2762,16 +2781,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     if lado != SEM_MINIATURA and miniatura < LARGURA_DA_MINIATURA:
         registro_processos.registrar("shopee_video", PROCESSO_DO_CANTO, "menor" if miniatura else "de fora",
                                      por_que_a_miniatura(textos, lado))
-    avisado = ((COM_OS_AVISOS if avisos else "") + chamada + (COM_MUSICA if musica else "")
-               + (SEM_A_MINIATURA_PELO_PAINEL if lado == SEM_MINIATURA else SEM_A_MINIATURA if not miniatura
-                  else COM_A_MINIATURA_MENOR if miniatura < LARGURA_DA_MINIATURA else "")
-               + (COM_A_MINIATURA_A_ESQUERDA if lado == MINIATURA_A_ESQUERDA and miniatura else "")
-               + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else "")
-               + ("" if escolhas["setinhas"] else SEM_AS_SETINHAS)
-               + ("" if escolhas["moldura"] else SEM_A_MOLDURA_DO_CARTAO)
-               + (f", setinhas e moldura {nome_do_destaque(escolhas, cor)}"
-                  if (escolhas["setinhas"] or escolhas["moldura"])
-                  and cor_do_destaque(escolhas, cor) != VERMELHO_DO_DESTAQUE else ""))
+    avisado = _avisado(avisos, bool(capa), musica, miniatura, outras_fotos, escolhas, cor)
     # As legendas da fala (P118): só o que alguém fala, num vídeo que ainda não a tem escrita na tela,
     # no tempo do áudio, palavra por palavra; nenhuma com ela desligada no painel (P192 1).
     if not escolhas["legenda"]:
@@ -2782,6 +2792,11 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     if tempo_das_legendas:
         registro_processos.registrar("shopee_video", PROCESSO_DO_TEMPO_DAS_LEGENDAS, tempo_das_legendas,
                                      detalhe_do_tempo, ok=tempo_das_legendas == PELO_AUDIO)
+    if anotar is not None:
+        # O que o Editar ✏️ do rascunho precisa para refazer a edição sem perguntar de novo à IA (P192 1).
+        anotar["refazer"] = {"textos": textos_para_guardar(textos), "frase": frase if capa else "",
+                             "musica": musica_da_vez[0] if musica_da_vez else "", "avisos": bool(avisos),
+                             "rotulo_de_ia": bool(rotulo_de_ia), "escolhas": escolhas}
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
@@ -2812,6 +2827,75 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
                    escolhas=escolhas),
             SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}")
+
+
+# O que o Editar ✏️ guarda dos textos da IA de cada rascunho (P192 1): o que a edição usa, sem a frase da
+# capa, que vai à parte.
+TEXTOS_GUARDADOS = ("nome", "vantagem", "chamada", "lugar", "texto_no_video", "canto_ocupado", "por_cima",
+                    "lado_olhado", "legendas", "legenda_no_video", "cor", "cor_2")
+
+
+def textos_para_guardar(textos):
+    """Os textos da IA que a edição usa, em JSON (as caixas e as legendas viram listas)."""
+    guardar = {}
+    for chave in TEXTOS_GUARDADOS:
+        if chave in textos:
+            valor = textos[chave]
+            guardar[chave] = [list(item) for item in valor] if chave in ("por_cima", "legendas") else valor
+    return guardar
+
+
+def _textos_guardados(guardados):
+    """Os textos guardados por textos_para_guardar de volta como a edição os usa (as listas viram tuplas)."""
+    textos = {}
+    for chave in TEXTOS_GUARDADOS:
+        if chave in (guardados or {}):
+            valor = guardados[chave]
+            textos[chave] = ([tuple(item) for item in valor if isinstance(item, (list, tuple))]
+                             if chave in ("por_cima", "legendas") else valor)
+    return textos
+
+
+def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=None, legenda=None):
+    """
+    O Editar ✏️ de um rascunho do robô (P192 1): a edição do vídeo original (video) refeita em destino,
+    sem perguntar de novo à IA, com o que editar_para_postar guardou (guardado: o anotar["refazer"] dele) e
+    a mesma foto do anúncio (foto) e fotos da miniatura que troca (outras_fotos). Muda só o lado da
+    miniatura (lado: direita, esquerda ou sem) e a legenda da fala (legenda: True ou False); a música, a
+    capa com a frase, os textos, as setinhas, a moldura e a cor ficam as do rascunho. Com a miniatura do
+    outro lado, ela diminui ou fica de fora pelo que o criador pôs no alto (P81 e P97). Devolve (motivo,
+    como): motivo "" quando saiu.
+    """
+    escolhas = escolhas_certas((guardado or {}).get("escolhas"))
+    if lado in LADOS_DA_MINIATURA:
+        escolhas["miniatura"] = lado
+    if legenda is not None:
+        escolhas["legenda"] = bool(legenda)
+    textos = _textos_guardados((guardado or {}).get("textos"))
+    cor, segunda = cor_do_produto(textos.get("cor")), cor_da_segunda(textos.get("cor_2"))
+    musica = dict(MUSICAS).get((guardado or {}).get("musica") or "")
+    musica = os.path.join(PASTA_DA_MIDIA, musica) if musica else None
+    avisos, frase = bool((guardado or {}).get("avisos")), (guardado or {}).get("frase") or ""
+    abertura = None
+    if frase and not avisos:
+        # A mesma capa com a frase (P125), refeita com a foto e a cor do rascunho.
+        capa = _capa_da_vez(foto, frase, cor=cor, segunda=segunda)
+        no_video = _capa_da_vez(foto, frase, no_video=True, cor=cor, segunda=segunda) if capa else None
+        abertura = (capa, no_video) if capa and no_video else capa
+    miniatura = miniatura_no_video(textos, escolhas["miniatura"])
+    legendas = []
+    if escolhas["legenda"]:
+        legendas = legendas_no_tempo(video, legendas_da_fala(textos)[0])[0]
+    motivo, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
+                              textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
+                              miniatura, outras_fotos if miniatura else (), legendas,
+                              bool((guardado or {}).get("rotulo_de_ia")), cor=cor, escolhas=escolhas)
+    if motivo:
+        return motivo, ""
+    como = ((COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA)
+            + _avisado(avisos, bool(abertura), musica, miniatura, outras_fotos, escolhas, cor)
+            + (COM_AS_LEGENDAS_DA_FALA if resumo.get("legendas") else ""))
+    return "", como
 
 
 def _fontes_do_exemplo():

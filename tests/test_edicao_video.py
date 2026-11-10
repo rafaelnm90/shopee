@@ -3293,6 +3293,8 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
         editores.clear()
         anotado = {}
         edicao_video.editar_para_postar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), "Bolsa", anotar=anotado)
+        # O que o Editar ✏️ precisa (P192 1) vai junto, em "refazer".
+        anotado.pop("refazer")
         assert (capas, editores, anotado) == ([esperada, esperada], [esperada], {"cor": nome, "letras": "0"}), cor
     linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DA_COR,
                                                        "2000-01-01 00:00:00")
@@ -3480,6 +3482,7 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
         editores.clear()
         anotado = {}
         edicao_video.editar_para_postar("v.mp4", foto, str(tmp_path / "r.mp4"), "Creme de Cabelo", anotar=anotado)
+        anotado.pop("refazer")
         tom = azul if segunda else None
         assert (capas, editores, anotado) == ([(branco, tom), (branco, tom)], [branco],
                                               {"cor": guardada, "letras": "0"}), guardada
@@ -3689,3 +3692,49 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
     assert recebidos[-1]["legendas"] and edicao_video.COM_A_MINIATURA_A_ESQUERDA in como
     assert como == (edicao_video.COM_LEGENDAS + edicao_video.COM_A_MINIATURA_A_ESQUERDA
                     + ", setinhas e moldura na cor do produto" + edicao_video.COM_AS_LEGENDAS_DA_FALA)
+
+
+def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(monkeypatch, tmp_path):
+    # Escolhas do Rafael (10/11, P191 1 e P192 1): o Editar ✏️ do rascunho refaz a edição com o que a IA já
+    # disse (guardado pelo editar_para_postar), mudando só a miniatura e a legenda daquele vídeo.
+    fala = [(0.5, 2.0, "Olha só essa bolsa")]
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa", "vantagem": "Leve", "chamada": "Toque aqui", "lugar": "alto",
+                                  "legendas": fala, "cor": "azul", "por_cima": [(8.0, 30.0, 10.0, 20.0)]})
+    recebidos = []
+
+    def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+        recebidos.append({"nome": nome, "lugar": lugar, "musica": musica, "capa": capa, "miniatura": miniatura,
+                          "outras": list(outras_fotos), "legendas": [legenda[:3] for legenda in legendas],
+                          "rotulo": rotulo_de_ia, "cor": cor, "escolhas": escolhas})
+        return "", {"textos": [nome], "legendas": len(legendas)}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    monkeypatch.setattr(edicao_video, "musicas_de_fundo", lambda video, quantas=1: [("calma", "/m/musica_calma.m4a")])
+    monkeypatch.setattr(edicao_video, "_capa_da_vez", lambda foto, frase, no_video=False, cor=None, segunda=None:
+                        f"{frase}|{no_video}".encode())
+    monkeypatch.setattr(edicao_video, "capa_ligada", lambda: True)
+    monkeypatch.setattr(edicao_video, "letras_da_foto", lambda foto: edicao_video.SEM_LETRAS)
+    anotado = {}
+    destino = str(tmp_path / "r.mp4")
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", outras_fotos=[b"outra"], rotulo_de_ia=True,
+                                    anotar=anotado)
+    guardado = anotado["refazer"]
+    # O que vai ao banco é JSON.
+    import json
+    guardado = json.loads(json.dumps(guardado))
+    assert guardado["musica"] == "calma" and guardado["rotulo_de_ia"] and guardado["frase"]
+    original = recebidos[-1]
+    # Refazer sem mudar nada dá o mesmo vídeo: os mesmos textos, a mesma capa, a mesma música e a mesma miniatura.
+    motivo, como = edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado, [b"outra"])
+    assert motivo == "" and recebidos[-1]["musica"].endswith("musica_calma.m4a")
+    assert {k: v for k, v in recebidos[-1].items() if k != "musica"} == {k: v for k, v in original.items() if k != "musica"}
+    assert como.startswith(edicao_video.COM_LEGENDAS) and edicao_video.COM_AS_LEGENDAS_DA_FALA in como
+    # À esquerda e sem a legenda: o que o criador pôs no canto da esquerda tira a miniatura (P81 e P97).
+    motivo, como = edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado, [b"outra"],
+                                                    edicao_video.MINIATURA_A_ESQUERDA, False)
+    assert motivo == "" and recebidos[-1]["miniatura"] == 0 and recebidos[-1]["legendas"] == []
+    assert recebidos[-1]["outras"] == [] and recebidos[-1]["escolhas"]["miniatura"] == "esquerda"
+    assert not recebidos[-1]["escolhas"]["legenda"] and edicao_video.COM_AS_LEGENDAS_DA_FALA not in como
+    # Sem a miniatura.
+    edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado, [], edicao_video.SEM_MINIATURA, True)
+    assert recebidos[-1]["miniatura"] == 0 and recebidos[-1]["legendas"] == [(0.5, 2.0, "Olha só essa bolsa")]

@@ -1940,3 +1940,96 @@ def test_itens_do_video_no_painel(bm, Msg, Est):
     assert registro == ("miniatura: esquerda | setinhas: sem | moldura: sem | moldura: com | cor: produto",)
     # A Edição dos Vídeos diz onde ficam os itens.
     assert "Itens do Vídeo 🧩" in sv.texto_edicao(config) and "Itens do Vídeo 🧩" in sv.texto_robo(config)
+
+
+def _rascunho_editavel(sv):
+    """Um rascunho de link de produto com o que o Editar ✏️ precisa guardado (P192 1)."""
+    robo = sv.robo
+    ident = _rascunho(sv)
+    base = os.path.join(robo.PASTA_RASCUNHOS, str(ident))
+    for caminho in (base + "_original.mp4", base + "_foto.jpg"):
+        with open(caminho, "wb") as f:
+            f.write(b"x")
+    robo.atualizar(ident, edicao={"original": base + "_original.mp4", "foto": base + "_foto.jpg", "outras": [],
+                                  "versoes": 1, "escolhas": dict(sv.edicao_video.ESCOLHAS_PADRAO), "textos": {}})
+    return ident
+
+
+def test_editar_no_rascunho_refaz_o_video_e_o_aprovar_refaz_no_celular(bm, Msg, Est, monkeypatch):
+    # Escolhas do Rafael (10/11, P191 1 e P192 1): no rascunho, o Editar ✏️ muda a miniatura e a legenda
+    # daquele vídeo; o servidor refaz o vídeo e manda a nova versão; com o Aprovar, o robô refaz o rascunho
+    # no celular com ela, e o de antes só sai depois de o novo ficar salvo.
+    sv, est = _painel(bm), Est()
+    ident = _rascunho_editavel(sv)
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert _botoes(msg.teclados[-1]) == [sv.BOTAO_APROVAR, sv.BOTAO_RECUSAR, sv.BOTAO_EDITAR, sv.BOTAO_VOLTAR]
+    assert f"<b>{sv.BOTAO_EDITAR}</b>: mude a miniatura" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, sv.BOTAO_EDITAR)
+    rodar(sv.editar_handler(msg, est))
+    assert est.estado == sv.ShopeeVideoFluxo.editando_rascunho
+    assert "Fica assim: <b>a miniatura à direita, com a legenda da fala</b>" in msg.saidas[-1]
+    assert _botoes(msg.teclados[-1]) == ["Direita ➡️", "Esquerda ⬅️", "Sem Miniatura ✖️", "Com Legenda 💬",
+                                         "Sem Legenda 🔇", sv.BOTAO_REFAZER_O_VIDEO, "Cancelar ❌"]
+    for texto in ("Esquerda ⬅️", "Sem Legenda 🔇"):
+        msg = MsgComMidia(Msg, texto)
+        rodar(sv.escolher_no_editar(msg, est))
+    assert "Fica assim: <b>a miniatura à esquerda, sem a legenda da fala</b>" in msg.saidas[-1]
+    pedidos = []
+
+    def reeditar(ident_, lado, legenda, agora=None):
+        pedidos.append((ident_, lado, legenda))
+        nova = os.path.join(sv.robo.PASTA_RASCUNHOS, f"{ident_}_nova_2.mp4")
+        with open(nova, "wb") as f:
+            f.write(b"nova")
+        sv.robo.atualizar(ident_, nova_versao={"arquivo": nova, "versao": 2, "miniatura": lado, "legenda": legenda})
+        return True, "editado"
+    monkeypatch.setattr(sv.robo, "reeditar", reeditar)
+    msg = MsgComMidia(Msg, sv.BOTAO_REFAZER_O_VIDEO)
+    rodar(sv.refazer_o_video_handler(msg, est))
+    assert pedidos == [(ident, "esquerda", False)]
+    # A nova versão chega no lugar do vídeo de antes, e o texto diz que ela ainda não está no celular.
+    assert msg.midias[0][0] == "video" and msg.midias[0][1].endswith(f"{ident}_nova_2.mp4")
+    assert "a nova versão do vídeo (a miniatura à esquerda, sem a legenda da fala)" in msg.midias[0][2]
+    assert "Nova versão do vídeo</b> (a miniatura à esquerda, sem a legenda da fala), ainda não está no celular" \
+        in msg.saidas[-1]
+    assert _botoes(msg.teclados[-1]) == [sv.BOTAO_APROVAR, sv.BOTAO_RECUSAR, sv.BOTAO_EDITAR,
+                                         sv.BOTAO_MANTER_O_DE_ANTES, sv.BOTAO_VOLTAR]
+    msg = MsgComMidia(Msg, "Aprovar Rascunho ✅")
+    rodar(sv.aprovar_handler(msg, est))
+    assert "o robô refaz o rascunho no celular com ela" in msg.saidas[0]
+    assert sv.robo.pegar(ident)["estado"] == "refazer"
+
+
+def test_manter_o_video_de_antes_e_a_versao_de_antes_so_se_recusa(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    ident = _rascunho_editavel(sv)
+    nova = os.path.join(sv.robo.PASTA_RASCUNHOS, f"{ident}_nova_2.mp4")
+    with open(nova, "wb") as f:
+        f.write(b"nova")
+    sv.robo.atualizar(ident, nova_versao={"arquivo": nova, "versao": 2, "miniatura": "sem", "legenda": True})
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    msg = MsgComMidia(Msg, sv.BOTAO_MANTER_O_DE_ANTES)
+    rodar(sv.manter_o_de_antes_handler(msg, est))
+    assert msg.saidas[0].startswith("↩️ Fica o vídeo de antes") and sv.robo.pegar(ident)["nova_versao"] == {}
+    assert not os.path.exists(nova) and sv.BOTAO_MANTER_O_DE_ANTES not in _botoes(msg.teclados[-1])
+    # A versão de antes de um rascunho refeito que não saiu do celular: só o Recusar.
+    sv.robo.atualizar(ident, versao_de="7", motivo="a lista não marcou só o rascunho")
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert _botoes(msg.teclados[-1]) == [sv.BOTAO_RECUSAR, sv.BOTAO_VOLTAR]
+    assert "a versão de antes</b>" in msg.saidas[-1] and "a lista não marcou só o rascunho" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, "Aprovar Rascunho ✅")
+    rodar(sv.aprovar_handler(msg, est))
+    assert "ela só sai do celular" in msg.saidas[0] and sv.robo.pegar(ident)["estado"] == "rascunho"
+
+
+def test_rascunho_sem_o_que_a_edicao_precisa_nao_tem_o_editar(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    _rascunho(sv)
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert sv.BOTAO_EDITAR not in _botoes(msg.teclados[-1])
+    msg = MsgComMidia(Msg, sv.BOTAO_EDITAR)
+    rodar(sv.editar_handler(msg, est))
+    assert "não dá para editar" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.rascunho
