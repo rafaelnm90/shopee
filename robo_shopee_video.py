@@ -1665,7 +1665,8 @@ def fechar_e_reabrir(d, xml):
     A Shopee continua sem responder depois dos Aguardar: toca em Fechar app no aviso do
     Android e abre a Shopee de novo. Devolve a tela do app reaberto. A Verificação que
     aparecer depois para a rodada como sempre (o Rafael recebe o link da tela); o app
-    ainda travado também para. Fora este aviso, o robô nunca fecha o app.
+    ainda travado também para. Fora este aviso e do produto que não fica com o app aberto há
+    muitas horas (reabrir_o_app_aberto_ha_muito_tempo, P193 1), o robô nunca fecha o app.
     Escolha do Rafael (24/10, P15): DECISOES.md, Shopee Vídeo.
     """
     fechar = ps.achar(xml, "@aerr_close")
@@ -1689,6 +1690,38 @@ def fechar_e_reabrir(d, xml):
     registro_processos.registrar(REGISTRO, "app travado", "fechado e reaberto",
                                  f"depois de {VEZES_DO_AGUARDAR} toque(s) em Aguardar", ok=True)
     return xml
+
+
+# Escolha do Rafael (10/11, P193 1): o produto que não fica na tela final depois do Feito, nem na 2ª
+# vez, com o app da Shopee aberto há mais de HORAS_DO_APP_ABERTO, faz o robô fechar e reabrir o app
+# (em 10/11, das 05:44 às 06:24, 3 produtos seguidos não ficaram com o app aberto havia 16 h e a
+# memória dele perto do teto do celular). O caso guarda antes a tela da falha; o vídeo volta mais
+# tarde, como sempre (P182 1); a Verificação que aparecer na volta para tudo e avisa. Com o app aberto
+# há menos tempo, nada muda. DECISOES.md, Shopee Vídeo.
+HORAS_DO_APP_ABERTO = 12
+PROCESSO_DO_APP_REABERTO = "app reaberto: produto que não ficou"
+
+
+def reabrir_o_app_aberto_ha_muito_tempo(d):
+    """
+    Depois do produto que não ficou (MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU): com o app aberto há mais de
+    HORAS_DO_APP_ABERTO, fecha a Shopee e abre de novo. Devolve se reabriu. Sem a leitura de há
+    quanto tempo o app está aberto, não fecha. A Verificação na volta para (Verificacao).
+    """
+    minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
+    if minutos is None or minutos <= HORAS_DO_APP_ABERTO * 60:
+        return False
+    aberto_ha = f"o app aberto há {faixa_do_app_aberto(minutos)}"
+    d.app_stop(ps.PACOTE)
+    pausa(4)
+    d.app_start(ps.PACOTE, wait=True)
+    pausa(ESPERA_DEPOIS_DE_REABRIR)
+    if ps.eh_verificacao(d.dump_hierarchy()):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_APP_REABERTO, "a Verificação apareceu", aberto_ha,
+                                     ok=False)
+        raise Verificacao()
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_APP_REABERTO, "fechado e reaberto", aberto_ha, ok=True)
+    return True
 
 
 def app_travado(xml):
@@ -2714,6 +2747,15 @@ def preparar_rascunho(d, config, agora=None):
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video)
         registrar_tentativa("rascunho", "pulado" if e.do_video else "parou", e.motivo, _produto_do_video(video), agora)
         e.id_video = video["id"]
+        if celular and e.motivo.startswith(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU):
+            # Com o caso já guardado com a tela da falha: o app aberto há muitas horas é fechado e
+            # reaberto (P193 1), e o descurtir do fim já vai no app novo.
+            try:
+                reabrir_o_app_aberto_ha_muito_tempo(d)
+            except Verificacao:
+                if curtidos:
+                    gravar_estado(favoritos_limpos=False)
+                raise
         descurtir_no_fim(d, video, curtidos)
         raise
     except Exception as e:
