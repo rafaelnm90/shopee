@@ -156,3 +156,40 @@ def test_bot_que_sobe_de_madrugada_espera_o_job_da_manha(bm, relogio):
     bm.agendar_tendencia_atrasada()
     assert bm.scheduler.get_job("tendencia_atrasada") is not None
     bm.scheduler.remove_job("tendencia_atrasada")
+
+
+def _anotacao(dia, item, total, canais=0, videos=1, comissao=0.06, preco=50.0):
+    tv.comparacao({})          # cria as tabelas
+    inserir("INSERT INTO shopee_video_tendencia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", dia, "1", item, total, 4.8,
+            comissao, preco, videos, canais)
+
+
+def test_comparacao_mostra_o_crescimento_por_faixa_e_o_que_vendeu_pelos_nossos_links():
+    # P135: depois dos 7 dias, o Claude compara os sinais de tendência com o que vendeu. A
+    # comparação (no relatório cifrado do vendas.py) diz quanto as vendas de cada produto
+    # cresceram por dia na Shopee, por faixa dos sinais, e quais venderam pelos nossos links.
+    assert "Nenhuma anotação ainda." in tv.comparacao({})
+    _anotacao("2026-11-02", "10", 100, canais=2, videos=2, comissao=0.12, preco=60.0)
+    _anotacao("2026-11-06", "10", 180, canais=1, videos=1, comissao=0.12, preco=60.0)
+    _anotacao("2026-11-02", "20", 50)
+    _anotacao("2026-11-04", "20", 50)
+    _anotacao("2026-11-05", "30", 7)                                       # um dia só: sem o crescimento
+    pedidos = {
+        "A": {"data": "2026-11-03", "status": "COMPLETED", "comissao_total": 7.2, "etiqueta": "viral",
+              "itens": [{"id": "10", "nome": "x", "qtd": 1, "comissao": 7.2}]},
+        "B": {"data": "2026-11-01", "status": "COMPLETED", "comissao_total": 7.2, "etiqueta": "viral",
+              "itens": [{"id": "10", "nome": "x", "qtd": 1, "comissao": 7.2}]},   # antes do 1º dia anotado
+        "C": {"data": "2026-11-04", "status": "CANCELLED", "comissao_total": 5.0, "etiqueta": "achadinhos",
+              "itens": [{"id": "20", "nome": "y", "qtd": 1, "comissao": 5.0}]},   # cancelado
+    }
+    texto = tv.comparacao(pedidos)
+    assert "Anotações de 02/11 a 06/11 (4 dia(s)); 3 produto(s), 2 anotado(s) em 2 dias ou mais" in texto
+    assert "Venderam pelos nossos links desde o 1º dia anotado: 1 produto(s), 1 venda(s), R$ 7,20." in texto
+    # O 10 cresceu 20 por dia (de 100 a 180 em 4 dias), esteve em 2 canais e em 2 vídeos; o 20, 0.
+    assert "| 2 canais ou mais | 1 | 20.0 | 20.0 | 100% | 1 |" in texto
+    assert "| 0 canal | 1 | 0.0 | 0.0 | 0% | 0 |" in texto
+    assert "| 2 vídeos ou mais | 1 | 20.0 | 20.0 | 100% | 1 |" in texto
+    assert "| 10% ou mais | 1 | 20.0 |" in texto and "| 5% a 10% | 1 | 0.0 |" in texto
+    assert "| R$ 5 ou mais por venda | 1 | 20.0 |" in texto and "| R$ 2 a R$ 5 por venda | 1 | 0.0 |" in texto
+    assert "| 1/10 | 2 | 20.0 | 180 | 2 | 2 | 12.0% | R$ 60,00 | R$ 7,20 | 1 (R$ 7,20; viral) |" in texto
+    assert "## Os que venderam pelos nossos links" in texto and "| 1/10 | 1 | R$ 7,20 | viral | 20.0 | 2 | 2 |" in texto
