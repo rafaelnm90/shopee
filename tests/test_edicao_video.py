@@ -1441,60 +1441,48 @@ def _pretos(imagem, caixa, passo=4):
     return all(max(imagem.getpixel((x, y))) < 20 for x in range(x1, x2, passo) for y in range(y1, y2, passo))
 
 
-def test_capa_da_grade_com_a_foto_quadrada_tampa_o_que_a_grade_mostra_e_a_faixa_desce_ate_embaixo():
-    # Vídeo do Rafael das 20:14 de 02/11: sem as laterais laranja, um fio laranja em cima da foto e,
-    # no pé, a faixa laranja com a frase em letras brancas (P107). Print das 21:09 de 06/11 (P168): a
-    # grade do celular dele mostra o quadro com a largura toda, e a foto quadrada aumenta, sem
-    # deformar, até tampar tudo do fio à faixa. Vídeo das 23:29 de 06/11 (P171): a faixa desce até o
-    # fim do quadro na mesma cor, e a frase, maior, fica no meio dela, não em cima, logo acima do
-    # número de visualizações, que fica por cima da faixa.
+def test_capa_da_grade_com_a_frase_em_cima_e_o_numero_na_faixa_de_baixo():
+    # Print da grade de 09/11: a frase no meio da faixa de baixo se misturava com o número de
+    # visualizações ("▷ 9" encostado em "com rodinhas"). Escolha do Rafael (10/11, P188 2, a "3b"): a
+    # frase vai numa faixa no alto do quadro, à esquerda da sacolinha, e o número fica numa faixa
+    # embaixo, longe dela; a foto tampa o que a grade mostra entre as duas (P168 e P169 1), sem nada
+    # no preto do fundo (vídeo das 01:04 de 07/11).
     capa = _capa("Organize sua cozinha")
     assert capa.size == edicao_video.TELA
-    _esquerda, _cima, _direita, faixa = edicao_video.lugar_da_foto()
-    fio = edicao_video.FIO_DA_CAPA_NA_GRADE
-    alto, baixo = edicao_video.GRADE_NO_CELULAR
-    topo = alto + fio
-    # Vídeo das 01:04 de 07/11: o fio que a grade mostra, mais grosso que o do vídeo aberto.
-    assert edicao_video.FIO_DA_CAPA < fio <= 20 and alto < topo < faixa < baixo
-    # A foto, aumentada sem deformar, de uma beirada à outra, do fio até a faixa, sem nada por cima:
-    # a quadrada perde só um pouco em cima e embaixo.
-    foto = edicao_video._foto_que_tampa(_foto_jpg(), 720, faixa - topo)
-    assert foto.size == (720, faixa - topo) and (faixa - topo) / 720 >= 1 - edicao_video.CORTE_MAXIMO_AO_TAMPAR
-    assert capa.crop((0, topo, 720, faixa)).tobytes() == foto.tobytes()
-    # O fio no alto do que a grade mostra, de uma beirada à outra, vem do alto do quadro: nada fica no
-    # preto do fundo, nem se a grade mostrar um pouco mais do quadro (vídeo das 01:04 de 07/11).
-    for ponto in [(0, 0), (360, alto - 30), (0, alto), (360, topo - 1), (719, alto + fio // 2)]:
+    x1, cima, x2, baixo = edicao_video.lugar_da_foto()
+    alto, pe_da_grade = edicao_video.GRADE_NO_CELULAR
+    assert (x1, cima, x2, baixo) == (0, edicao_video.PE_DA_FAIXA_DE_CIMA, 720, edicao_video.FAIXA_DE_BAIXO_NA_GRADE)
+    assert alto < cima < baixo < pe_da_grade
+    # A foto tampa o lugar todo, de uma beirada à outra (a quadrada estica até 15%, P169 1).
+    foto = edicao_video._foto_que_tampa_esticando(_foto_jpg(), 720, baixo - cima)
+    assert capa.crop((0, cima, 720, baixo)).tobytes() == foto.tobytes()
+    # A faixa de cima vem do alto do quadro até a foto, e a de baixo vai da foto até o fim do quadro,
+    # de uma beirada à outra; nada no preto do fundo.
+    for ponto in [(0, 0), (719, 0), (0, cima - 1), (719, cima - 1), (360, alto - 30), (0, baixo), (719, baixo),
+                  (360, baixo + 2), (3, pe_da_grade - 1), (716, 1279)]:
         assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
     assert not any(max(capa.getpixel((x, y))) < 20 for x in range(0, 720, 3) for y in range(0, 1280, 3))
-    # A faixa logo abaixo da foto, de uma beirada à outra e até o fim do quadro.
-    for ponto in [(0, faixa), (719, faixa), (360, faixa + 2), (3, baixo - 1), (716, 1279), (360, 1279)]:
-        assert _cor_de(capa, ponto, edicao_video.LARANJA_DA_SHOPEE), ponto
-    # As letras brancas só na faixa, no meio dela (de uma beirada à outra e do alto da faixa até o pé
-    # do que a grade mostra), na maior letra que cabe, até o teto, sem se preocupar com o número de
-    # visualizações (vídeos e prints do Rafael de 07/11, das 01:04 às 02:49).
-    x1, y1, x2, y2 = edicao_video.NUMERO_DA_GRADE
+    # As letras brancas só no retângulo da frase, na faixa de cima, no meio dele: à esquerda da
+    # sacolinha e longe do número de visualizações, que fica dentro da faixa de baixo.
     esquerda, cima_das_letras, direita, pe_das_letras = edicao_video.lugar_das_letras_na_grade()
-    assert esquerda <= x1 and faixa < cima_das_letras and y2 < pe_das_letras <= baixo and direita > 700
-    letras = [(x, y) for x in range(720) for y in range(faixa, 1280) if min(capa.getpixel((x, y))) > 200]
-    assert letras and _claros(capa, (0, 0, 720, faixa)) == 0
+    sx1, _sy1, _sx2, sy2 = edicao_video.SACOLINHA_DA_GRADE
+    _nx1, ny1, _nx2, ny2 = edicao_video.NUMERO_DA_GRADE
+    assert alto < cima_das_letras and pe_das_letras < cima and direita < sx1 and sy2 < cima
+    assert baixo < ny1 and ny2 < pe_da_grade
+    letras = [(x, y) for x in range(720) for y in range(0, cima) if min(capa.getpixel((x, y))) > 200]
+    assert letras and _claros(capa, (0, cima, 720, 1280)) == 0
     xs, ys = [x for x, _y in letras], [y for _x, y in letras]
     assert esquerda - 1 <= min(xs) and max(xs) <= direita and cima_das_letras - 1 <= min(ys) and max(ys) <= pe_das_letras
     assert abs((min(xs) + max(xs)) / 2 - (esquerda + direita - 1) / 2) <= 3
     assert abs((min(ys) + max(ys)) / 2 - (cima_das_letras + pe_das_letras - 1) / 2) <= 3
-    fonte, _linhas = edicao_video._quebra_da_grade("Organize sua cozinha", _fonte_da_capa(), direita - esquerda,
-                                                   pe_das_letras - cima_das_letras)
-    assert (fonte.size == edicao_video.LETRAS_NA_GRADE[0] or max(xs) - min(xs) + 1 >= 0.9 * (direita - esquerda) or
-            max(ys) - min(ys) + 1 >= 0.9 * (pe_das_letras - cima_das_letras))
-    assert faixa < y1 and y2 < baixo
-    # A sacolinha da Shopee fica por cima do canto de cima da foto (P139 2).
-    assert topo < edicao_video.SACOLINHA_DA_GRADE[1] and not _pretos(capa, edicao_video.SACOLINHA_DA_GRADE)
-
-
-def test_capa_da_grade_sem_preto_com_o_fio_mais_grosso_e_a_frase_grande_a_direita_do_numero():
-    # Vídeo do Rafael das 01:04 de 07/11: o fio de cima quase sumia na grade ("pode dar uma
-    # aumentadinha nela"), havia uma faixinha preta do fundo ("não é para ter nada de preto ali") e a
-    # frase não aproveitava a faixa. Vídeo das 01:31: letras grandes, em duas linhas se precisar. Vídeo
-    # das 02:49: a frase ocupa a faixa toda, no meio dela, sem se preocupar com o número.
+    # Em duas linhas, na maior letra que cabe, até o teto (print de 07/11, 02:49).
+    fonte, linhas = edicao_video._quebra_da_grade("Organize sua cozinha", _fonte_da_capa(), direita - esquerda,
+                                                  pe_das_letras - cima_das_letras)
+    assert len(linhas) == 2 and fonte.size == edicao_video.LETRAS_NA_GRADE[0]
+def test_capa_da_grade_sem_preto_com_as_duas_faixas_em_qualquer_foto():
+    # Vídeo do Rafael das 01:04 de 07/11: "não é para ter nada de preto ali". Com a frase em cima
+    # (P188 2), a faixa de cima vem do alto do quadro até a foto, e a de baixo vai da foto até o fim do
+    # quadro, em qualquer formato de foto; a frase, em duas linhas grandes, no meio do retângulo dela.
     import io
 
     from PIL import Image
@@ -1505,33 +1493,31 @@ def test_capa_da_grade_sem_preto_com_o_fio_mais_grosso_e_a_frase_grande_a_direit
         return saida.getvalue()
 
     marrom = (124, 84, 56)
-    alto = edicao_video.GRADE_NO_CELULAR[0]
-    faixa = edicao_video.lugar_da_foto()[3]
+    _x1, cima, _x2, baixo = edicao_video.lugar_da_foto()
     for tamanho in ((800, 800), (800, 600), (600, 800), (1200, 500)):
         capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(foto(*tamanho), "Potes para biscoitos",
                                                                    cor=marrom))).convert("RGB")
         # Nada no preto do fundo, no quadro todo.
         assert not any(max(capa.getpixel((x, y))) < 30 for x in range(0, 720, 2) for y in range(0, 1280, 2)), tamanho
-        # O fio vem do alto do quadro e a grade mostra 16 px dele, o dobro de antes.
-        assert all(_cor_de(capa, (x, y), marrom) for x in (0, 360, 719) for y in range(0, alto + 16)), tamanho
-        assert _cor_de(capa, (360, alto + 17), (128, 128, 128)), tamanho
-    # A frase em duas linhas grandes no meio da faixa toda.
-    esquerda, cima, direita, baixo = edicao_video.lugar_das_letras_na_grade()
-    assert esquerda <= edicao_video.MARGEM_DA_FAIXA and 720 - edicao_video.MARGEM_DA_FAIXA <= direita <= 720
-    assert faixa < cima < edicao_video.NUMERO_DA_GRADE[1] < edicao_video.NUMERO_DA_GRADE[3] < baixo
-    letras = [(x, y) for x in range(720) for y in range(faixa, 1280) if min(capa.getpixel((x, y))) > 200]
+        # As duas faixas nas beiradas do quadro, e a foto entre elas.
+        assert all(_cor_de(capa, (x, y), marrom) for x in (0, 719) for y in range(0, cima)), tamanho
+        assert all(_cor_de(capa, (x, y), marrom) for x in (0, 360, 719) for y in range(baixo, 1280)), tamanho
+        assert _cor_de(capa, (360, cima + 1), (128, 128, 128)), tamanho
+        assert _cor_de(capa, (360, baixo - 2), (128, 128, 128)), tamanho
+    # A frase em duas linhas grandes, no meio do retângulo dela.
+    esquerda, cima_das_letras, direita, pe_das_letras = edicao_video.lugar_das_letras_na_grade()
+    letras = [(x, y) for x in range(720) for y in range(0, cima) if min(capa.getpixel((x, y))) > 200]
     xs, ys = [x for x, _y in letras], [y for _x, y in letras]
-    assert min(xs) >= esquerda - 1 and max(xs) <= direita and min(ys) >= cima - 1 and max(ys) <= baixo
+    assert min(xs) >= esquerda - 1 and max(xs) <= direita and min(ys) >= cima_das_letras - 1 and max(ys) <= pe_das_letras
     linhas_com_letras = sorted(set(ys))
     vaos = [b - a for a, b in zip(linhas_com_letras, linhas_com_letras[1:]) if b - a > 1]
     assert len(vaos) == 1, "duas linhas"
-    assert abs((min(xs) + max(xs)) / 2 - 359.5) <= 3 and abs((min(ys) + max(ys)) / 2 - (cima + baixo - 1) / 2) <= 3
+    assert abs((min(xs) + max(xs)) / 2 - (esquerda + direita - 1) / 2) <= 3
+    assert abs((min(ys) + max(ys)) / 2 - (cima_das_letras + pe_das_letras - 1) / 2) <= 3
     # Bem maior que a letra de uma linha só que cabia antes (até 84, P171).
     fonte, linhas = edicao_video._quebra_da_grade("Potes para biscoitos", _fonte_da_capa(), direita - esquerda,
-                                                  baixo - cima)
-    assert len(linhas) == 2 and fonte.size > 84 and max(ys) - min(ys) + 1 > 1.5 * 84
-
-
+                                                  pe_das_letras - cima_das_letras)
+    assert len(linhas) == 2 and fonte.size > 84
 def _fonte_da_capa():
     import os
 
@@ -1543,7 +1529,8 @@ def test_frase_da_grade_em_letra_harmonica_nem_enorme_nem_pequena():
     # Print do Rafael de 07/11, 02:49: "Bolsa espaçosa", em duas linhas na letra 120, enchia a faixa
     # toda ("ficou feio muito grande"); "pode reduzir um pouco o tamanho do texto para ficar mais
     # harmônico [...] Mas tbm não deixe muito pequeno". A letra vai até LETRAS_NA_GRADE, maior que a de
-    # uma linha de antes (84, P171) e menor que a que enchia a faixa, e as duas linhas deixam folga.
+    # uma linha de antes (84, P171) e menor que a que enchia a faixa; na faixa de cima (P188 2), as
+    # duas linhas cabem no retângulo da frase, no meio dele.
     import io
 
     from PIL import Image
@@ -1555,10 +1542,8 @@ def test_frase_da_grade_em_letra_harmonica_nem_enorme_nem_pequena():
                                                                cor=(205, 93, 132)))).convert("RGB")
     ys = [y for x in range(esquerda, direita) for y in range(cima, baixo) if min(capa.getpixel((x, y))) > 200]
     altura = max(ys) - min(ys) + 1
-    assert 0.6 * (baixo - cima) < altura < 0.8 * (baixo - cima)
+    assert 0.8 * (baixo - cima) < altura <= baixo - cima
     assert abs((min(ys) + max(ys)) / 2 - (cima + baixo - 1) / 2) <= 3
-
-
 def test_foto_quase_quadrada_tampa_e_a_outra_fica_inteira():
     # P168: só a foto que perde no máximo CORTE_MAXIMO_AO_TAMPAR ao tampar aumenta cortando (a
     # quadrada, a um pouco mais alta ou mais larga); a outra não é cortada (estica, P169 1). A que
@@ -1577,11 +1562,14 @@ def test_foto_quase_quadrada_tampa_e_a_outra_fica_inteira():
     for largura, altura in ((800, 600), (600, 800), (800, 700), (700, 800)):
         assert edicao_video._foto_que_tampa(foto(largura, altura), 720, 728) is None, (largura, altura)
     assert edicao_video._foto_que_tampa(b"nao e imagem", 720, 728) is None
-    # Na capa da grade com a faixa da P171, a quadrada continua tampando.
-    _esquerda, _cima, _direita, faixa = edicao_video.lugar_da_foto()
-    lugar = (720, faixa - edicao_video.GRADE_NO_CELULAR[0] - edicao_video.FIO_DA_CAPA_NA_GRADE)
-    for largura, altura in ((800, 800), (1000, 1000), (840, 800)):
+    # Na capa da grade com a frase em cima (P188 2), o lugar da foto é mais largo que alto: a foto
+    # quase desse formato tampa cortando; a quadrada estica (P169 1).
+    x1, cima, x2, baixo = edicao_video.lugar_da_foto()
+    lugar = (x2 - x1, baixo - cima)
+    for largura, altura in ((840, 726), (1000, 864), (810, 720)):
         assert edicao_video._foto_que_tampa(foto(largura, altura), *lugar).size == lugar, (largura, altura)
+    for largura, altura in ((800, 800), (1000, 1000)):
+        assert edicao_video._foto_que_tampa(foto(largura, altura), *lugar) is None, (largura, altura)
     # O corte sai por igual dos dois lados: o meio da foto fica no meio.
     listrada = Image.new("RGB", (800, 780), (0, 0, 0))
     listrada.paste((255, 255, 255), (390, 0, 410, 780))
@@ -1590,13 +1578,11 @@ def test_foto_quase_quadrada_tampa_e_a_outra_fica_inteira():
     tampada = edicao_video._foto_que_tampa(saida.getvalue(), 720, 728)
     brancos = [x for x in range(720) if min(tampada.getpixel((x, 364))) > 200]
     assert abs((min(brancos) + max(brancos)) / 2 - 359.5) <= 2
-
-
 def test_capa_da_grade_com_a_foto_que_nao_e_quadrada_estica_ate_15_e_o_resto_fica_desfocado():
-    # P169 1 (vídeo do Rafael das 23:29 de 06/11): a foto que não é quase quadrada (a mais larga,
-    # quando o robô corta as letras do anúncio, ou a de pé) estica só até 15% na direção em que
-    # falta e, se ainda não tampar, o que faltar fica com a própria foto desfocada; nada de preto
-    # no que a grade mostra, e nada da foto é cortado. A faixa desce até o fim do quadro (P171).
+    # P169 1 (vídeo do Rafael das 23:29 de 06/11): a foto que não é quase do formato do lugar (a
+    # quadrada também, com a frase em cima, P188 2) estica só até 15% na direção em que falta e, se
+    # ainda não tampar, o que faltar fica com a própria foto desfocada; nada de preto no que a grade
+    # mostra, e nada da foto é cortado. A faixa de baixo desce até o fim do quadro.
     import io
 
     from PIL import Image
@@ -1609,37 +1595,35 @@ def test_capa_da_grade_com_a_foto_que_nao_e_quadrada_estica_ate_15_e_o_resto_fic
         imagem.save(saida, "PNG")
         return saida.getvalue(), imagem
 
-    x1, cima, x2, faixa = edicao_video.lugar_da_foto()
-    fio = edicao_video.FIO_DA_CAPA_NA_GRADE
-    alto, baixo = edicao_video.GRADE_NO_CELULAR
-    largura, altura = x2 - x1, faixa - cima - fio
-    assert (x1, x2, cima) == (0, edicao_video.TELA[0], alto)
-    for tamanho in ((800, 560), (800, 680), (600, 800)):
+    x1, cima, x2, baixo = edicao_video.lugar_da_foto()
+    alto, pe_da_grade = edicao_video.GRADE_NO_CELULAR
+    largura, altura = x2 - x1, baixo - cima
+    assert (x1, x2) == (0, edicao_video.TELA[0]) and alto < cima < baixo < pe_da_grade
+    for tamanho in ((800, 560), (800, 800), (600, 800)):
         foto, imagem = listrada(*tamanho)
         capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(foto, "Leve"))).convert("RGB")
         # Nada de preto no que a grade mostra.
-        assert not any(max(capa.getpixel((x, y))) < 20 for x in range(0, 720, 3) for y in range(alto, baixo, 3)), tamanho
+        assert not any(max(capa.getpixel((x, y))) < 20 for x in range(0, 720, 3)
+                       for y in range(alto, pe_da_grade, 3)), tamanho
         escala = min(largura / imagem.width, altura / imagem.height)
         esticada = (round(min(largura, imagem.width * escala * 1.15)), round(min(altura, imagem.height * escala * 1.15)))
         # A foto inteira, esticada no máximo 15%, no pé do lugar dela e no meio da largura.
-        x, y = (largura - esticada[0]) // 2, cima + fio + altura - esticada[1]
+        x, y = (largura - esticada[0]) // 2, cima + altura - esticada[1]
         assert capa.crop((x, y, x + esticada[0], y + esticada[1])).tobytes() == imagem.resize(esticada,
                                                                                              Image.LANCZOS).tobytes()
         assert max(esticada[0] / (imagem.width * escala), esticada[1] / (imagem.height * escala)) <= 1.15 + 0.01
         if esticada == (largura, altura):
             continue
         # O resto, a própria foto desfocada: as listras se misturam, sem o laranja nem o azul puros.
-        fora = (0, cima + fio, 720, y) if esticada[0] == largura else (0, cima + fio, x, faixa)
+        fora = (0, cima, 720, y) if esticada[0] == largura else (0, cima, x, baixo)
         pontos = [capa.getpixel((px, py)) for px in range(fora[0], fora[2], 2) for py in range(fora[1], fora[3], 2)]
         assert pontos and not any(p in ((200, 120, 40), (40, 90, 200)) for p in pontos), tamanho
-    # A foto um pouco mais larga estica até tampar, sem desfocado (no máximo 15%).
-    foto, imagem = listrada(800, 680)
+    # A foto um pouco mais larga que a quadrada estica até tampar, sem desfocado (no máximo 15%).
+    foto, imagem = listrada(810, 800)
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(foto, "Leve"))).convert("RGB")
-    assert capa.crop((0, cima + fio, 720, faixa)).tobytes() == imagem.resize((largura, altura), Image.LANCZOS).tobytes()
-    assert _cor_de(capa, (360, cima + fio - 1), edicao_video.LARANJA_DA_SHOPEE)
+    assert capa.crop((0, cima, 720, baixo)).tobytes() == imagem.resize((largura, altura), Image.LANCZOS).tobytes()
+    assert _cor_de(capa, (360, cima - 1), edicao_video.LARANJA_DA_SHOPEE)
     assert _cor_de(capa, (3, 1279), edicao_video.LARANJA_DA_SHOPEE)
-
-
 def test_foto_em_tela_cheia_como_o_ffmpeg_punha_antes_da_moldura():
     # Vídeo do Rafael das 22:01 de 01/11 (P119): sem a capa, a foto do começo é a do anúncio no
     # maior tamanho que cabe na tela, no meio, no fundo preto (o FILTRO_720P), também a que não é
@@ -1692,33 +1676,29 @@ def test_edicao_de_verdade_abre_com_a_foto_sem_a_moldura_da_miniatura(tmp_path):
 
 def test_frase_da_capa_fica_dentro_do_que_o_app_mostra_do_video_aberto():
     # Vídeo do Rafael (31/10, 08:38): com o vídeo aberto, o app corta os lados do quadro, e o
-    # "C" e o "l" de "Caimento impecável" ficavam cortados nas pontas da faixa. As letras ficam
-    # dentro do que o app mostra do vídeo aberto, na capa do vídeo aberto (P129). Na da grade, que
-    # o vídeo aberto não mostra, a frase vai no retângulo que o Rafael desenhou, até a beirada da
-    # grade, com a margem (vídeo de 07/11, 01:31).
+    # "C" e o "l" de "Caimento impecável" ficavam cortados nas pontas da faixa. A frase fica dentro do
+    # que o app mostra do vídeo aberto, com a margem. Escolha do Rafael (10/11, P189 B): ela é a mesma
+    # nas duas capas e fica no mesmo lugar, para não se mexer ao abrir o vídeo.
     import io
 
     from PIL import Image
     esquerda, direita = edicao_video.VISIVEL_NO_APP
     folga = edicao_video.MARGEM_DA_FAIXA // 2
-    pe = edicao_video.PE_DA_FAIXA_NO_VIDEO
-    cima, y2 = pe - edicao_video.FAIXA_DA_CHAMADA, pe
+    pe = edicao_video.PE_DA_FAIXA_DE_CIMA
     for frase in ("Caimento impecável", "Organize sua cozinha", "Acaba com a bagunça da cozinha"):
         capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), frase, no_video=True))).convert("RGB")
-        assert _claros(capa, (esquerda + folga, cima, direita - folga, y2), passo=2) > 50
-        assert _claros(capa, (0, cima, esquerda + folga, y2), passo=1) == 0, frase
-        assert _claros(capa, (direita - folga, cima, 720, y2), passo=1) == 0, frase
+        assert _claros(capa, (esquerda + folga, 0, direita - folga, pe), passo=2) > 50, frase
+        assert _claros(capa, (0, 0, esquerda + folga, 1280), passo=1) == 0, frase
+        assert _claros(capa, (direita - folga, 0, 720, 1280), passo=1) == 0, frase
         da_grade = _capa(frase)
-        faixa = edicao_video.lugar_da_foto()[3]
-        assert _claros(da_grade, (720 - edicao_video.MARGEM_DA_FAIXA, faixa, 720, 1280), passo=1) == 0, frase
-
-
-def test_capa_do_video_aberto_tem_a_foto_inteira_e_a_faixa_acima_do_cartao_do_produto():
-    # No vídeo aberto, que corta mais dos lados que a grade (P129), o resto da abertura vai com a
-    # foto inteira da largura do que o app mostra, o fio em cima e a faixa no pé, de um lado ao
-    # outro dela (vídeo do Rafael das 20:14 de 02/11). Vídeo das 09:56 de 06/11 (P160 2): o cartão
-    # do produto que o app põe por cima do vídeo cobria a metade de baixo da frase; a faixa fica
-    # acima dele, e a foto, inteira entre a barra de pesquisa do app e a faixa.
+        assert _claros(da_grade, (0, 0, esquerda + folga, 1280), passo=1) == 0, frase
+        letras = edicao_video.lugar_das_letras_na_grade()
+        assert capa.crop(letras).tobytes() == da_grade.crop(letras).tobytes(), frase
+def test_capa_do_video_aberto_com_a_faixa_de_cima_e_a_foto_inteira_logo_abaixo():
+    # No vídeo aberto, que corta mais dos lados que a grade (P129), o resto da abertura vai com a foto
+    # inteira (P160 2). Escolha do Rafael (10/11, P189 B): a mesma faixa de cima da capa da grade,
+    # com a frase parada ao abrir o vídeo, e a foto inteira logo abaixo dela, com o fio embaixo da
+    # foto, acima do cartão do produto que o app põe por cima do vídeo.
     import io
 
     from PIL import Image
@@ -1727,32 +1707,34 @@ def test_capa_do_video_aberto_tem_a_foto_inteira_e_a_faixa_acima_do_cartao_do_pr
     assert capa.size == edicao_video.TELA
     esquerda, direita = edicao_video.VISIVEL_NO_APP
     assert edicao_video.lados_da_capa(True) == (esquerda, direita) and edicao_video.lados_da_capa() == (0, 720)
-    x1, cima, x2, alto_da_faixa = edicao_video.lugar_da_foto(True)
-    fio, faixa = edicao_video.FIO_DA_CAPA, edicao_video.FAIXA_DA_CHAMADA
-    pe = alto_da_faixa + faixa
-    assert (x1, x2) == (esquerda, direita) and pe == edicao_video.PE_DA_FAIXA_NO_VIDEO < edicao_video.CARTAO_NO_VIDEO_ABERTO
-    lado = direita - esquerda
-    topo = pe - faixa - lado
-    assert topo - fio >= cima == edicao_video.TOPO_NO_VIDEO_ABERTO
+    x1, cima, x2, baixo = edicao_video.lugar_da_foto(True)
+    fio = edicao_video.FIO_DA_CAPA
+    assert (x1, cima, x2) == (esquerda, edicao_video.PE_DA_FAIXA_DE_CIMA, direita)
+    assert baixo + fio < edicao_video.CARTAO_NO_VIDEO_ABERTO
+    # A faixa de cima, de um lado ao outro do que o app mostra.
     for x in (esquerda, direita - 1):
-        assert _cor_de(capa, (x, (topo + pe - faixa) // 2), (200, 120, 40)), x
-        assert _cor_de(capa, (x, topo - fio + 1), edicao_video.LARANJA_DA_SHOPEE), x
-        assert _cor_de(capa, (x, pe - faixa // 2), edicao_video.LARANJA_DA_SHOPEE), x
-    assert _cor_de(capa, (360, topo + 2), (200, 120, 40)) and _cor_de(capa, (360, pe - faixa - 3), (200, 120, 40))
+        assert all(_cor_de(capa, (x, y), edicao_video.LARANJA_DA_SHOPEE) for y in range(0, cima, 7)), x
+    # A foto quadrada inteira, no maior tamanho que cabe, logo abaixo da faixa e no meio da largura.
+    lado = min(direita - esquerda, baixo - cima)
+    inicio = esquerda + (direita - esquerda - lado) // 2
+    for ponto in [(inicio, cima), (inicio + lado - 1, cima), (360, cima + lado // 2), (inicio, cima + lado - 1)]:
+        assert _cor_de(capa, ponto, (200, 120, 40)), ponto
+    # O fio logo abaixo do pé da foto, de um lado ao outro do que o app mostra.
+    for x in (esquerda, 360, direita - 1):
+        assert _cor_de(capa, (x, cima + lado), edicao_video.LARANJA_DA_SHOPEE), x
+        assert _cor_de(capa, (x, cima + lado + fio - 1), edicao_video.LARANJA_DA_SHOPEE), x
+    # Preto fora do que o app mostra, nos lados da foto e embaixo do fio (onde fica o cartão do produto).
     assert _pretos(capa, (0, 0, esquerda, 1280), passo=2) and _pretos(capa, (direita, 0, 720, 1280), passo=2)
-    assert _pretos(capa, (0, 0, 720, topo - fio), passo=2) and _pretos(capa, (0, pe, 720, 1280), passo=2)
-    # Nada da capa onde fica o cartão do produto.
-    assert _pretos(capa, (0, edicao_video.CARTAO_NO_VIDEO_ABERTO, 720, 1280), passo=2)
-    # O que o app mostra do vídeo aberto: a foto de um lado ao outro, sem preto dos lados.
+    assert _pretos(capa, (esquerda, cima, inicio, cima + lado), passo=2)
+    assert _pretos(capa, (0, cima + lado + fio, 720, 1280), passo=2)
+    # A frase só na faixa de cima.
+    assert _claros(capa, (esquerda, 0, direita, cima)) > 50 and _claros(capa, (0, cima, 720, 1280)) == 0
+    # O exemplo do painel mostra o que o app mostra do vídeo aberto: a faixa de um lado ao outro.
     recorte = Image.open(io.BytesIO(edicao_video.recorte_do_video_aberto(
         edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", no_video=True)))).convert("RGB")
-    assert recorte.size == (lado, 1280)
-    assert _cor_de(recorte, (0, 640), (200, 120, 40)) and _cor_de(recorte, (lado - 1, 640), (200, 120, 40))
-    # A frase fica no pé da foto, dentro do que o app mostra.
-    assert _claros(capa, (0, 0, esquerda + 6, 1280)) == 0 and _claros(capa, (direita - 6, 0, 720, 1280)) == 0
-    assert _claros(capa, (esquerda, pe - faixa, direita, pe)) > 50
-
-
+    assert recorte.size == (direita - esquerda, 1280)
+    assert _cor_de(recorte, (0, 0), edicao_video.LARANJA_DA_SHOPEE)
+    assert _cor_de(recorte, (recorte.width - 1, 0), edicao_video.LARANJA_DA_SHOPEE)
 def test_faixa_nos_lados_diz_qual_capa_a_grade_mostrou():
     # No post, a grade mostra o 1º quadro (a capa da grade, a faixa de lado a lado) ou outro quadro
     # da abertura (a do vídeo aberto, a faixa só no meio, P129); sem a faixa, não dá para dizer.
@@ -1782,23 +1764,21 @@ def test_faixa_nos_lados_diz_qual_capa_a_grade_mostrou():
 
 
 def test_faixa_so_no_meio_com_uma_letra_bem_na_coluna_do_centro():
-    # No vídeo aberto, a frase acaba antes dos ícones do app e sai do meio da faixa (P165 1): uma
-    # letra pode cruzar bem a coluna do centro do quadro. A faixa só no meio continua reconhecida
-    # pelas outras colunas do meio.
+    # Na capa do vídeo aberto, a faixa de cima só no meio (P189 B), e a frase, à esquerda da
+    # sacolinha e dos ícones do app (P165 1), fora do meio do quadro: uma letra pode cruzar bem a
+    # coluna do centro. A faixa só no meio continua reconhecida pelas outras colunas do meio.
     from PIL import Image, ImageDraw
     caixa = (100, 300, 454, 772)
     tela = Image.new("RGB", (1080, 2400), (240, 240, 240))
     desenho = ImageDraw.Draw(tela)
     desenho.rectangle(caixa, fill=(0, 0, 0))
-    altura = round(edicao_video.FAIXA_DA_CHAMADA * (caixa[3] - caixa[1])
-                   / (edicao_video.VISIVEL_NA_GRADE[1] - edicao_video.VISIVEL_NA_GRADE[0]))
-    cima = caixa[3] - altura - 20
+    alto, baixo = edicao_video.GRADE_NO_CELULAR
+    altura = round((edicao_video.PE_DA_FAIXA_DE_CIMA - alto) * (caixa[3] - caixa[1]) / (baixo - alto))
+    cima = caixa[1]
     desenho.rectangle((caixa[0] + 20, cima, caixa[2] - 20, cima + altura), fill=edicao_video.LARANJA_DA_SHOPEE)
     meio = (caixa[0] + caixa[2]) // 2
     desenho.rectangle((meio - 4, cima + altura // 4, meio + 4, cima + altura * 3 // 4), fill=(255, 255, 255))
     assert edicao_video.faixa_nos_lados(tela, caixa) is False
-
-
 def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path, monkeypatch):
     # Com o ffmpeg de verdade (P129) e a passagem desligada (PASSAGEM_NOS_VIDEOS): o 1º quadro, que o
     # app usa como capa da grade, tem a faixa de uma beirada à outra do vídeo; do 2º em diante, a do
@@ -1822,7 +1802,7 @@ def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path, monke
         with Image.open(saida) as imagem:
             return imagem.convert("RGB")
 
-    ponto = (edicao_video.VISIVEL_NO_APP[0] // 2, edicao_video.FOTO_DA_CAPA[3] - edicao_video.FAIXA_DA_CHAMADA // 2)
+    ponto = (edicao_video.VISIVEL_NO_APP[0] // 2, (edicao_video.FAIXA_DE_BAIXO_NA_GRADE + edicao_video.TELA[1]) // 2)
     assert _cor_de(quadro(0), ponto, edicao_video.LARANJA_DA_SHOPEE)
     for numero in (1, 30, 58):
         assert max(quadro(numero).getpixel(ponto)) < 40, numero
@@ -1851,7 +1831,7 @@ def test_abertura_de_verdade_com_a_passagem_suave_entre_as_capas(tmp_path):
             return imagem.convert("RGB")
 
     # No ponto em que a capa da grade tem a faixa e a do vídeo aberto tem o preto do fundo.
-    ponto = (edicao_video.VISIVEL_NO_APP[0] // 2, edicao_video.FOTO_DA_CAPA[3] - edicao_video.FAIXA_DA_CHAMADA // 2)
+    ponto = (edicao_video.VISIVEL_NO_APP[0] // 2, (edicao_video.FAIXA_DE_BAIXO_NA_GRADE + edicao_video.TELA[1]) // 2)
     assert _cor_de(quadro(0), ponto, edicao_video.LARANJA_DA_SHOPEE)
     vermelho = [quadro(numero).getpixel(ponto)[0] for numero in (2, 5, 8)]
     assert vermelho[0] > vermelho[1] > vermelho[2] > 40, vermelho          # a faixa vai sumindo aos poucos
@@ -1862,77 +1842,53 @@ def test_abertura_de_verdade_com_a_passagem_suave_entre_as_capas(tmp_path):
 
 def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa():
     import io
-    import os
 
-    import matplotlib
-    from PIL import Image, ImageDraw
-    desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
-    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-    # A frase curta (até MAXIMO_DA_CAPA letras, P106) vai numa linha só, em letra grande.
-    fonte, linhas = edicao_video._quebra_da_chamada("Leve", desenho, fonte_ttf)
-    assert (fonte.size, linhas) == (edicao_video.LETRAS_DA_CHAMADA[0], ["Leve"])
+    from PIL import Image
+    esquerda, cima_das_letras, direita, pe_das_letras = edicao_video.lugar_das_letras_na_grade()
+    largura, altura = direita - esquerda, pe_das_letras - cima_das_letras
+    # A frase de uma palavra vai numa linha só, na letra do teto.
+    fonte, linhas = edicao_video._quebra_da_grade("Leve", _fonte_da_capa(), largura, altura)
+    assert (fonte.size, linhas) == (edicao_video.LETRAS_NA_GRADE[0], ["Leve"])
+    # A curta (até MAXIMO_DA_CAPA letras, P106) vai em duas linhas grandes (print de 07/11, 02:49).
     for curta in ("Organize sua cozinha", "Mochila impermeável", "Limpeza sem esforço", "Gelado o dia todo"):
         assert len(curta) <= edicao_video.MAXIMO_DA_CAPA
-        fonte, linhas = edicao_video._quebra_da_chamada(curta, desenho, fonte_ttf)
-        assert linhas == [curta] and fonte.size >= edicao_video.LETRAS_DA_CHAMADA[1]
-    # A comprida (o nome ou a vantagem, sem a curta) vai em duas linhas equilibradas, sem a 1ª
-    # terminar numa palavra de ligação.
-    assert edicao_video._quebra_da_chamada("Acaba com a bagunça da cozinha", desenho, fonte_ttf)[1] == [
+        fonte, linhas = edicao_video._quebra_da_grade(curta, _fonte_da_capa(), largura, altura)
+        assert len(linhas) == 2 and fonte.size >= 80, curta
+    # A comprida (o nome ou a vantagem, sem a curta) também cabe, em duas linhas, sem a 1ª terminar
+    # numa palavra de ligação.
+    assert edicao_video._quebra_da_grade("Acaba com a bagunça da cozinha", _fonte_da_capa(), largura, altura)[1] == [
         "Acaba com a bagunça", "da cozinha"]
     longa = "Organiza todos os temperos em segundos"[:edicao_video.MAXIMO_DA_VANTAGEM]
-    fonte, linhas = edicao_video._quebra_da_chamada(longa, desenho, fonte_ttf)
-    assert len(linhas) == 2 and fonte.size >= edicao_video.LETRAS_EM_DUAS_LINHAS[1]
-    # Vídeo do Rafael das 20:14 de 02/11: com duas linhas, a faixa crescia para cima e cobria mais
-    # da foto. Agora as duas cabem na faixa de uma linha, com a folga, e a foto não perde nada.
-    maior = edicao_video.LETRAS_EM_DUAS_LINHAS[0]
-    assert 2 * round(maior * 1.2) + 2 * edicao_video.FOLGA_DA_FAIXA <= edicao_video.FAIXA_DA_CHAMADA
+    fonte, linhas = edicao_video._quebra_da_grade(longa, _fonte_da_capa(), largura, altura)
+    assert len(linhas) == 2 and fonte.size >= edicao_video.LETRAS_NA_GRADE[1]
+    # A frase só muda a faixa de cima (P188 2): a foto e a faixa de baixo ficam iguais.
     capa, curta = _capa(longa), _capa("Leve")
-    cima = edicao_video.lugar_da_foto()[3]
-    y2 = edicao_video.lugar_das_letras_na_grade()[3]
-    assert _cor_de(capa, (3, cima), edicao_video.LARANJA_DA_SHOPEE)
-    assert _cor_de(capa, (20, cima - 3), (200, 120, 40)) and _cor_de(capa, (360, cima - 3), (200, 120, 40))
-    acima = (0, 0, 720, cima)
-    assert capa.crop(acima).tobytes() == curta.crop(acima).tobytes()
-    assert _claros(capa, (0, cima, 720, y2)) > 50 and _claros(capa, acima) == 0
-    # Embaixo da frase, a faixa sem letras até o fim do quadro (P168 e P171).
-    assert _claros(capa, (0, y2, 720, 1280)) == 0 and _cor_de(capa, (360, 1279), edicao_video.LARANJA_DA_SHOPEE)
-    # Vídeo do Rafael das 23:29 de 06/11 (P171): na grade, a letra é maior que a do vídeo aberto. Vídeos
-    # de 07/11, 01:04 e 01:31: as duas linhas da frase comprida no meio do retângulo da faixa à direita
-    # do número.
-
-    def altura_das_letras(imagem, caixa):
-        ys = [y for x in range(caixa[0], caixa[2]) for y in range(caixa[1], caixa[3]) if min(imagem.getpixel((x, y))) > 200]
-        return (max(ys) - min(ys) + 1, min(ys)) if ys else (0, None)
-    da_grade = altura_das_letras(curta, (0, cima, 720, 1280))[0]
-    pe_no_video = edicao_video.PE_DA_FAIXA_NO_VIDEO
-    no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Leve", no_video=True))).convert("RGB")
-    assert da_grade > 1.1 * altura_das_letras(no_video, (0, pe_no_video - edicao_video.FAIXA_DA_CHAMADA, 720,
-                                                          pe_no_video))[0]
-    altura, alto_das_letras = altura_das_letras(capa, (0, cima, 720, 1280))
-    _esquerda, cima_das_letras, _direita, pe_das_letras = edicao_video.lugar_das_letras_na_grade()
-    assert altura > 2 * edicao_video.LETRAS_NA_GRADE[1] and alto_das_letras >= cima_das_letras - 1
-    assert abs(alto_das_letras + (altura - 1) / 2 - (cima_das_letras + pe_das_letras - 1) / 2) <= 3
+    pe = edicao_video.PE_DA_FAIXA_DE_CIMA
+    abaixo = (0, pe, 720, 1280)
+    assert capa.crop(abaixo).tobytes() == curta.crop(abaixo).tobytes()
+    assert _claros(capa, (0, 0, 720, pe)) > 50 and _claros(capa, abaixo) == 0
+    # As duas linhas da comprida no meio do retângulo da frase.
+    ys = [y for x in range(esquerda, direita) for y in range(0, pe) if min(capa.getpixel((x, y))) > 200]
+    assert min(ys) >= cima_das_letras - 1 and max(ys) <= pe_das_letras
+    assert abs((min(ys) + max(ys)) / 2 - (cima_das_letras + pe_das_letras - 1) / 2) <= 3
     # Sem a frase ou com a foto que não abre, não há capa com chamada (vai a capa de sempre).
     assert edicao_video.capa_com_chamada(_foto_jpg(), "") is None
     assert edicao_video.capa_com_chamada(b"nao e imagem", "Leve") is None
     # O exemplo do painel mostra também o pedaço que a grade do celular do Rafael mostra, com a
-    # largura toda: a foto, o fio e a faixa vão até as bordas, sem preto nenhum, com o fio no alto
-    # e a faixa até embaixo (P168).
+    # largura toda: a foto e as duas faixas vão até as bordas, sem preto nenhum (P168).
     capa_png = edicao_video.capa_com_chamada(_foto_jpg(), "Leve")
     recorte = Image.open(io.BytesIO(edicao_video.recorte_da_grade(capa_png))).convert("RGB")
     alto, baixo = edicao_video.GRADE_NO_CELULAR
     assert recorte.size == (720, baixo - alto) and recorte.width * 4 == recorte.height * 3
     capa = Image.open(io.BytesIO(capa_png)).convert("RGB")
     assert recorte.tobytes() == capa.crop((0, alto, 720, baixo)).tobytes()
-    fio = edicao_video.FIO_DA_CAPA_NA_GRADE
+    faixa_de_baixo = edicao_video.FAIXA_DE_BAIXO_NA_GRADE - alto
     for x in (0, recorte.width - 1):
         assert _cor_de(recorte, (x, 0), edicao_video.LARANJA_DA_SHOPEE), x
-        assert _cor_de(recorte, (x, fio + 2), (200, 120, 40)), x
-        assert _cor_de(recorte, (x, 640 - alto), (200, 120, 40)), x
-        assert _cor_de(recorte, (x, y2 - 3 - alto), edicao_video.LARANJA_DA_SHOPEE), x
+        assert _cor_de(recorte, (x, pe - alto + 2), (200, 120, 40)), x
+        assert _cor_de(recorte, (x, faixa_de_baixo - 3), (200, 120, 40)), x
+        assert _cor_de(recorte, (x, faixa_de_baixo + 2), edicao_video.LARANJA_DA_SHOPEE), x
         assert _cor_de(recorte, (x, recorte.height - 1), edicao_video.LARANJA_DA_SHOPEE), x
-
-
 def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkeypatch, tmp_path):
     _versoes_de_mentira(monkeypatch)
     _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve e resistente", "lugar": "alto"})
@@ -2007,10 +1963,10 @@ def test_faixa_laranja_acha_a_faixa_da_capa_no_print_e_nao_acha_sem_ela():
     from PIL import Image
     capa = _capa("Organize sua cozinha")
     cima, baixo, esquerda, direita = edicao_video.faixa_laranja(capa)
-    # A faixa vai de uma beirada à outra da capa, do pé da foto até o fim do quadro (P168 e P171); o
-    # fio fino em cima da foto não é a faixa.
+    # A maior das duas faixas da capa (P188 2): a de cima, com a frase, de uma beirada à outra, do alto
+    # do quadro até a foto.
     assert (esquerda, direita) == (0, edicao_video.TELA[0])
-    assert (cima, baixo) == (edicao_video.lugar_da_foto()[3], edicao_video.TELA[1])
+    assert (cima, baixo) == (0, edicao_video.PE_DA_FAIXA_DE_CIMA)
     tela = Image.new("RGB", (1080, 2400), (30, 30, 30))
     escala = 957 / 720
     tela.paste(capa.resize((957, round(1280 * escala))), (61, 267))
@@ -2020,8 +1976,6 @@ def test_faixa_laranja_acha_a_faixa_da_capa_no_print_e_nao_acha_sem_ela():
     assert abs(medida[2] - (61 + esquerda * escala)) <= 2 and abs(medida[3] - (61 + direita * escala)) <= 2
     # A foto sem a faixa (a capa de sempre) não tem faixa nenhuma.
     assert edicao_video.faixa_laranja(Image.open(io.BytesIO(edicao_video.foto_em_tela_cheia(_foto_jpg())))) is None
-
-
 def test_faixa_laranja_mede_a_faixa_inteira_com_letras_grossas_e_cortadas_nas_pontas():
     # No print do celular, as linhas do meio das letras têm mais branco (e a borda borrada delas)
     # que laranja, e a medida pegaria só o pedaço da faixa acima das letras; com a faixa maior que
@@ -2219,16 +2173,11 @@ def test_sem_a_frase_certa_nem_na_2a_vez_a_capa_vai_com_o_nome_e_o_registro_diz_
     assert edicao_video.frase_da_capa(sem_nome) == "Remove bolinhas de tecido"
     assert edicao_video.registro_da_frase(sem_nome, edicao_video.frase_da_capa(sem_nome)) == (
         "a vantagem (sem a curta nem o nome)", "a 1ª: sem frase; a 2ª: sem frase; 25 letras", None)
-    # O nome que não cabe numa linha vai em duas, na faixa do tamanho de uma linha (a letra menor:
-    # vídeo do Rafael das 20:14 de 02/11, a faixa não cresce e a foto não perde nada).
-    import os
-
-    import matplotlib
-    from PIL import Image, ImageDraw
-    desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
-    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-    fonte, linhas = edicao_video._quebra_da_chamada("Removedor de Bolinhas Elétrico", desenho, fonte_ttf)
-    assert len(linhas) == 2 and fonte.size >= edicao_video.LETRAS_EM_DUAS_LINHAS[1]
+    # O nome comprido cabe em duas linhas, no retângulo da frase na faixa de cima (P188 2).
+    esquerda, cima, direita, baixo = edicao_video.lugar_das_letras_na_grade()
+    fonte, linhas = edicao_video._quebra_da_grade("Removedor de Bolinhas Elétrico", _fonte_da_capa(), direita - esquerda,
+                                                  baixo - cima)
+    assert len(linhas) == 2 and fonte.size >= edicao_video.LETRAS_NA_GRADE[1]
     # Sem a frase da IA nenhuma vez (a IA de texto sem resposta).
     _ia_dos_textos(monkeypatch, json.dumps({"nome": "Removedor de Bolinhas", "vantagem": "Remove bolinhas"}), [])
     textos = edicao_video.textos_da_tela("v.mp4", "Removedor")
@@ -2260,21 +2209,16 @@ def test_frase_da_capa_comeca_pelo_que_e_o_produto():
 def test_frase_da_capa_diz_o_que_e_o_produto_e_a_vantagem():
     # Escolha do Rafael (02/11, P122 1): no print da grade, a capa da calça só com a vantagem
     # ("Caimento impecável") não dizia o que era o produto. A frase da capa começa pelo que é o
-    # produto e traz a vantagem, numa linha de letra grande, até 20 letras como antes.
-    import os
-
-    import matplotlib
-    from PIL import Image, ImageDraw
+    # produto e traz a vantagem, em letra grande, até 20 letras como antes.
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS.format(nome="Calça"), edicao_video._CAPA_NO_PROMPT):
         assert "começa pelo que é o produto e traz a vantagem que o vídeo mostra" in prompt
         assert "a mesma vantagem em poucas palavras" not in prompt and "até 20 caracteres" in prompt
-    desenho = ImageDraw.Draw(Image.new("RGB", edicao_video.TELA))
-    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
-    # Os exemplos que a IA recebe cabem no limite e numa linha só, em letra grande.
+    # Os exemplos que a IA recebe cabem no limite e no retângulo da frase, em letra grande.
+    esquerda, cima, direita, baixo = edicao_video.lugar_das_letras_na_grade()
     for exemplo in ("Calça que modela", "Travessas 3 tamanhos", "Copo sempre gelado"):
         assert f'"{exemplo}"' in edicao_video._CAPA_NO_PROMPT and len(exemplo) <= edicao_video.MAXIMO_DA_CAPA
-        fonte, linhas = edicao_video._quebra_da_chamada(exemplo, desenho, fonte_ttf)
-        assert linhas == [exemplo] and fonte.size >= edicao_video.LETRAS_DA_CHAMADA[1]
+        fonte, _linhas = edicao_video._quebra_da_grade(exemplo, _fonte_da_capa(), direita - esquerda, baixo - cima)
+        assert fonte.size >= 80, exemplo
 
 
 def test_capa_vai_com_a_frase_curta_e_sem_ela_com_o_nome(monkeypatch, tmp_path):
@@ -3187,28 +3131,26 @@ def test_produto_de_varias_cores_vai_na_cor_que_mais_aparece_nele():
     assert edicao_video.cor_do_produto("colorido") is None
 
 
-def test_capa_com_a_cor_do_produto_no_fio_e_na_faixa_com_a_letra_que_contrasta():
+def test_capa_com_a_cor_do_produto_nas_faixas_com_a_letra_que_contrasta():
     import io
 
     from PIL import Image
-    faixa, fio = edicao_video.lugar_da_foto()[3], edicao_video.FIO_DA_CAPA_NA_GRADE
-    topo = edicao_video.GRADE_NO_CELULAR[0] + fio
+    _x1, cima, _x2, baixo = edicao_video.lugar_da_foto()
     for nome, letra_branca in (("azul", True), ("amarelo", False), ("branco", False)):
         cor = edicao_video.CORES_DO_PRODUTO[nome]
         capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha",
                                                                    cor=cor))).convert("RGB")
-        for ponto in [(360, 0), (0, topo - fio), (719, topo - 1), (0, faixa), (719, faixa + 5)]:
+        for ponto in [(360, 0), (0, 0), (719, cima - 1), (0, baixo), (719, baixo + 5)]:
             assert _cor_de(capa, ponto, cor), (nome, ponto)
-        # Na grade, a faixa desce até o fim do quadro na mesma cor, também nas claras, com o número
-        # de visualizações por cima dela (P171, que respondeu a P170).
+        # Na grade, a faixa de baixo desce até o fim do quadro na mesma cor, também nas claras, com o
+        # número de visualizações dentro dela (P171, que respondeu a P170, e P188 2).
         assert _cor_de(capa, (3, 1279), cor) and _cor_de(capa, (360, 1279), cor)
-        assert all(_cor_de(capa, (x, y), cor) for x in range(0, 720, 6) for y in range(1120, 1280, 6)), nome
-        pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(faixa, 1280, 2)]
+        assert all(_cor_de(capa, (x, y), cor) for x in range(0, 720, 6) for y in range(baixo, 1280, 6)), nome
+        # A frase, na faixa de cima, na letra que contrasta.
+        pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(0, cima, 2)]
         brancos = sum(1 for p in pontos if min(p) > 250)
         pretos = sum(1 for p in pontos if max(p) < 50)
         assert (brancos > 50 and pretos == 0) if letra_branca else (pretos > 50 and brancos == 0), nome
-
-
 def test_caixa_do_nome_e_moldura_da_miniatura_na_cor_do_produto():
     import io
 
@@ -3276,12 +3218,12 @@ def test_faixa_da_capa_na_cor_do_produto_e_achada_no_print():
         tela.paste(capa.resize((caixa[2] - caixa[0], caixa[3] - caixa[1])), caixa[:2])
         return tela
 
-    cima = edicao_video.lugar_da_foto()[3]
     for nome in ("azul", "amarelo", "preto", "branco"):
         cor = edicao_video.CORES_DO_PRODUTO[nome]
         png = edicao_video.capa_com_chamada(_foto_jpg(), "Organize sua cozinha", cor=cor)
         capa = Image.open(io.BytesIO(png)).convert("RGB")
-        assert edicao_video.faixa_laranja(capa, cor=cor) == (cima, edicao_video.TELA[1], 0, edicao_video.TELA[0]), nome
+        assert edicao_video.faixa_laranja(capa, cor=cor) == (0, edicao_video.PE_DA_FAIXA_DE_CIMA, 0,
+                                                             edicao_video.TELA[0]), nome
         # Pelo laranja de sempre, ela não é achada.
         assert edicao_video.faixa_laranja(capa) is None, nome
         assert edicao_video.faixa_nos_lados(grade(png), caixa, cor) is True, nome
@@ -3360,39 +3302,37 @@ def test_faixa_que_some_no_fundo_da_foto_vai_na_2a_cor_do_produto():
         cinza_claro, azul, None, None, None, None]
 
     frase = "Creme para cachos"
-    faixa, fio = edicao_video.lugar_da_foto()[3], edicao_video.FIO_DA_CAPA_NA_GRADE
-    topo = edicao_video.GRADE_NO_CELULAR[0] + fio
+    _x1, cima, _x2, baixo = edicao_video.lugar_da_foto()
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco,
                                                                segunda=azul))).convert("RGB")
-    for ponto in [(360, 0), (0, topo - fio), (719, topo - 1), (0, faixa), (719, faixa + 5), (3, 1279)]:
+    for ponto in [(360, 0), (0, cima - 1), (719, cima - 1), (0, baixo), (719, baixo + 5), (3, 1279)]:
         assert _cor_de(capa, ponto, azul), ponto
-    pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(faixa, 1280, 2)]
+    pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(0, cima, 2)]
     assert sum(1 for p in pontos if min(p) > 250) > 50 and not any(max(p) < 50 for p in pontos)
     # O robô confere no post a faixa na cor que o rascunho guardou (o nome dela).
     cor_guardada = edicao_video.cor_do_produto(edicao_video.nome_da_cor(edicao_video.cor_da_faixa(fundo_branco, branco,
                                                                                                 azul)))
-    assert edicao_video.faixa_laranja(capa, cor=cor_guardada) == (faixa, edicao_video.TELA[1], 0, edicao_video.TELA[0])
-    # A do vídeo aberto vai na mesma cor: o fio logo acima da foto e a faixa embaixo dela.
+    assert edicao_video.faixa_laranja(capa, cor=cor_guardada) == (0, cima, 0, edicao_video.TELA[0])
+    # A do vídeo aberto vai na mesma cor: a faixa de cima e o fio logo abaixo da foto.
     no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, no_video=True, cor=branco,
                                                                    segunda=azul))).convert("RGB")
-    pe, altura = edicao_video.PE_DA_FAIXA_NO_VIDEO, edicao_video.FAIXA_DA_CHAMADA
     esquerda, direita = edicao_video.VISIVEL_NO_APP
-    assert _cor_de(no_video, (esquerda + 2, pe - 3), azul) and _cor_de(no_video, (direita - 2, pe - altura + 2), azul)
-    alto_do_fio = next(y for y in range(1280) if max(no_video.getpixel((360, y))) > 60)
-    assert all(_cor_de(no_video, (360, y), azul) for y in range(alto_do_fio, alto_do_fio + edicao_video.FIO_DA_CAPA))
+    assert _cor_de(no_video, (esquerda + 2, 3), azul) and _cor_de(no_video, (direita - 2, cima - 3), azul)
+    pe_do_fio = max(y for y in range(1280) if max(no_video.getpixel((360, y))) > 60) + 1
+    assert all(_cor_de(no_video, (360, y), azul) for y in range(pe_do_fio - edicao_video.FIO_DA_CAPA, pe_do_fio))
     # Sem a 2ª cor, o cinza-claro (o tom mais escuro do branco), com a letra preta, e o post o confere
     # pelo #rrggbb que o rascunho guarda; no fundo laranja, um laranja mais claro, nas duas.
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco))).convert("RGB")
     assert _cor_de(capa, (360, 0), cinza_claro) and _cor_de(capa, (3, 1279), cinza_claro)
-    pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(faixa, 1280, 2)]
+    pontos = [capa.getpixel((x, y)) for x in range(0, 720, 2) for y in range(0, cima, 2)]
     assert sum(1 for p in pontos if max(p) < 50) > 50 and not any(min(p) > 250 for p in pontos)
     assert edicao_video.faixa_laranja(capa, cor=edicao_video.cor_guardada(edicao_video.nome_da_cor(cinza_claro))) == (
-        faixa, edicao_video.TELA[1], 0, edicao_video.TELA[0])
+        0, cima, 0, edicao_video.TELA[0])
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, "Bolsa espaçosa"))).convert("RGB")
-    assert all(_cor_de(capa, ponto, laranja_claro) for ponto in [(360, 0), (3, 1279), (719, faixa)])
+    assert all(_cor_de(capa, ponto, laranja_claro) for ponto in [(360, 0), (3, 1279), (719, baixo)])
     no_video = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, "Bolsa espaçosa",
                                                                    no_video=True))).convert("RGB")
-    assert _cor_de(no_video, (esquerda + 2, pe - 3), laranja_claro)
+    assert _cor_de(no_video, (esquerda + 2, 3), laranja_claro)
     # Na foto que não é da cor da faixa, a faixa branca continua.
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_laranja, frase, cor=branco,
                                                                segunda=azul))).convert("RGB")
@@ -3452,24 +3392,24 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
                                               (edicao_video.TOM_MAIS_ESCURO, edicao_video.A_2A_COR_SOME_TAMBEM)]
 
 
-def test_frase_do_video_aberto_acaba_antes_dos_icones_do_app():
+def test_frase_acaba_antes_da_sacolinha_e_dos_icones_do_app():
     # Escolha do Rafael (06/11, P165 1): no vídeo aberto, o coração e os ícones da direita do app
-    # ficavam por cima do fim da frase; ela acaba antes deles, e a faixa continua de um lado ao outro.
-    # A capa da grade, sem os ícones, vai até a beirada da grade, no meio do retângulo à direita do
-    # número de visualizações (vídeos de 07/11, 01:04 e 01:31).
+    # ficavam por cima do fim da frase; ela acaba antes deles. Com a frase em cima (P188 2 e P189 B),
+    # o retângulo dela acaba antes da sacolinha da grade e da coluna de ícones do vídeo aberto, nas
+    # duas capas, e a faixa continua de um lado ao outro.
     import io
 
     from PIL import Image
-    frase = "Almofada respirável"
-    pe, faixa = edicao_video.PE_DA_FAIXA_NO_VIDEO, edicao_video.FAIXA_DA_CHAMADA
     esquerda, direita = edicao_video.VISIVEL_NO_APP
-    capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), frase, no_video=True))).convert("RGB")
-    letras = [x for x in range(esquerda, direita) for y in range(pe - faixa, pe, 2) if min(capa.getpixel((x, y))) > 200]
-    assert letras and max(letras) < edicao_video.ICONES_NO_VIDEO_ABERTO - edicao_video.MARGEM_DA_FAIXA + 3
-    assert _cor_de(capa, (direita - 2, pe - 3), edicao_video.LARANJA_DA_SHOPEE)
-    grade = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Almofada ortopédica respirável"))).convert(
-        "RGB")
-    cima = edicao_video.lugar_da_foto()[3]
-    letras = [x for x in range(0, 720) for y in range(cima, 1280, 2) if min(grade.getpixel((x, y))) > 200]
     x1, _cima, x2, _baixo = edicao_video.lugar_das_letras_na_grade()
-    assert abs((min(letras) + max(letras)) / 2 - (x1 + x2 - 1) / 2) <= 3 and max(letras) > edicao_video.ICONES_NO_VIDEO_ABERTO
+    fim = min(edicao_video.SACOLINHA_DA_GRADE[0], edicao_video.ICONES_NO_VIDEO_ABERTO) - edicao_video.MARGEM_DA_FAIXA
+    assert x2 == fim and x1 == esquerda + edicao_video.MARGEM_DA_FAIXA
+    pe = edicao_video.PE_DA_FAIXA_DE_CIMA
+    for frase in ("Almofada respirável", "Almofada ortopédica respirável"):
+        for no_video in (True, False):
+            capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), frase,
+                                                                       no_video=no_video))).convert("RGB")
+            letras = [x for x in range(0, 720) for y in range(0, pe, 2) if min(capa.getpixel((x, y))) > 200]
+            assert letras and max(letras) <= fim and min(letras) >= x1 - 1, (frase, no_video)
+            assert abs((min(letras) + max(letras)) / 2 - (x1 + x2 - 1) / 2) <= 3, (frase, no_video)
+            assert _cor_de(capa, (direita - 2, pe - 3), edicao_video.LARANJA_DA_SHOPEE), (frase, no_video)
