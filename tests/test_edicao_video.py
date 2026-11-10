@@ -2870,6 +2870,37 @@ def test_fala_longa_vira_varias_legendas_sem_perder_nenhuma_palavra():
     assert edicao_video._ponto_de_corte("um dois três quatro".split()) == 2
 
 
+def test_legenda_quebra_nas_pausas_sem_separar_o_nome_do_produto():
+    # Vídeo do Rafael das 14:47 de 10/11: a fala comprida foi dividida em "com esse kit de / banho de" e
+    # "verniz para seus cabelos. / Clica no link e compre já!", com o nome do produto cortado entre duas
+    # legendas. Escolha dele (P199 1): a troca de legenda não separa "banho de verniz", e nem ela nem a
+    # troca de linha deixam "de", "e", "com", "para"... no fim; o ponto e a vírgula seguem preferidos.
+    import os
+
+    import matplotlib
+    from PIL import Image, ImageDraw, ImageFont
+    texto = ("Tratamento potente e duradouro com esse kit de banho de verniz para seus cabelos. "
+             "Clica no link e compre já!")
+    pedacos = edicao_video.pedacos_da_legenda(0.0, 8.0, texto)
+    assert [parte for _i, _f, parte, _imagem in pedacos] == [
+        "Tratamento potente e duradouro", "com esse kit de banho de verniz", "para seus cabelos. Clica no link e compre já!"]
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+
+    def linhas(parte):
+        maior, menor = edicao_video.LETRA_DA_LEGENDA
+        for tamanho in range(maior, menor - 1, -2):
+            achadas, cabe = edicao_video._linhas_da_legenda(parte, ImageFont.truetype(fonte_ttf, tamanho), rascunho)
+            if cabe and len(achadas) <= edicao_video.LINHAS_DA_LEGENDA:
+                return achadas
+    assert [linhas(parte) for _i, _f, parte, _imagem in pedacos] == [
+        ["Tratamento potente", "e duradouro"], ["com esse kit", "de banho de verniz"],
+        ["para seus cabelos.", "Clica no link e compre já!"]]
+    # Sem ligação nem pontuação no caminho, a 1ª linha fica a mais comprida que cabe, como antes.
+    assert linhas("Resultado visível desde a primeira aplicação.") == ["Resultado visível desde", "a primeira aplicação."]
+    assert linhas("Leve") == ["Leve"] and edicao_video._linhas_da_legenda("", None, rascunho) == ([], True)
+
+
 def test_o_pedido_da_ia_quer_a_fala_inteira_palavra_por_palavra():
     pedido = edicao_video.PROMPT_DOS_TEXTOS.format(nome="Jaqueta")
     for exigido in ("palavra por palavra", "sem resumir", "sem pular nenhuma frase", "Siga o áudio, não a imagem"):
