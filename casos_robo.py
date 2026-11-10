@@ -36,7 +36,7 @@ import shutil
 import sys
 import time
 import zipfile
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timedelta
 from xml.etree import ElementTree
 
@@ -263,38 +263,56 @@ def _acoes_antes(d, pasta):
 
 # O log do Android (logcat) do app que estava na tela, para o caso: as linhas dos processos dele e
 # as do Android que falam dele (a tela que abriu, o processo que morreu) dos últimos
-# MINUTOS_DO_LOG_DO_APP minutos, no máximo LINHAS_DO_LOG_DO_APP (as mais novas), entre as
-# LINHAS_LIDAS_DO_LOG mais novas do log do celular. Em 09/11, das 13:08 às 13:37, o app não deixou o
-# produto na tela final depois do Feito em 4 vídeos seguidos, sem aviso na tela: o que ele recebeu
-# da Shopee só o log dele pode dizer. Fica só no caso (cifrado na exportação): o log pode ter
-# dados da conta. Com ele, a versão do app (a falha que começa com uma versão nova).
-MINUTOS_DO_LOG_DO_APP = 3
-LINHAS_DO_LOG_DO_APP = 400
-LINHAS_LIDAS_DO_LOG = 6000
+# MINUTOS_DO_LOG_DO_APP minutos, no máximo LINHAS_DO_LOG_DO_APP (as mais novas). Em 09/11, das 13:08
+# às 13:37, o app não deixou o produto na tela final depois do Feito em 4 vídeos seguidos, sem
+# aviso na tela: o que ele recebeu da Shopee só o log dele pode dizer. Fica só no caso (cifrado na
+# exportação): o log pode ter dados da conta. Com ele, a versão do app (a falha que começa com uma
+# versão nova).
+# A leitura é pela hora, sem as ETIQUETAS_CALADAS, e da linha que se repete (a mesma etiqueta e o
+# mesmo texto, só os números mudam) ficam as REPETICOES_NO_LOG primeiras: em 09/11, às 22:21, o
+# app escrevia 43 linhas por segundo de "LOOPER msg invalid", e as 400 linhas do caso cobriam 9 s.
+MINUTOS_DO_LOG_DO_APP = 6
+LINHAS_DO_LOG_DO_APP = 600
+ETIQUETAS_CALADAS = ("LOOPER",)
+REPETICOES_NO_LOG = 3
 ARQUIVO_DO_LOG = "log_do_app.txt"
 # A linha do logcat no formato threadtime: "MM-DD HH:MM:SS.mmm  PID  TID N Etiqueta: texto".
-LINHA_DO_LOG = re.compile(r"(\d\d-\d\d \d\d:\d\d:\d\d)\.\d+\s+(\d+)\s+\d+\s")
+LINHA_DO_LOG = re.compile(r"(\d\d-\d\d \d\d:\d\d:\d\d)\.\d+\s+(\d+)\s+\d+\s+\S\s+([^:]*?)\s*:\s?(.*)$")
 
 
 def log_do_app(d, pacote, agora=None):
     """
     As linhas do log do Android dos últimos MINUTOS_DO_LOG_DO_APP minutos que são dos processos do
-    app (o principal e os "pacote:nome") ou que citam o pacote, como texto; "" sem a leitura. Só lê.
+    app (o principal e os "pacote:nome") ou que citam o pacote, como texto, sem as repetidas além
+    das REPETICOES_NO_LOG primeiras (a última linha diz quantas saíram de cada etiqueta); "" sem a
+    leitura. Só lê.
     """
+    desde = (_agora(agora) - timedelta(minutes=MINUTOS_DO_LOG_DO_APP)).strftime("%m-%d %H:%M:%S")
     try:
         processos = getattr(d.shell(["ps", "-A", "-o", "PID,NAME"]), "output", "") or ""
-        log = getattr(d.shell(["logcat", "-d", "-v", "threadtime", "-t", str(LINHAS_LIDAS_DO_LOG)]), "output", "") or ""
+        log = getattr(d.shell(["logcat", "-d", "-v", "threadtime", "-t", f"{desde}.000"]
+                              + [f"{etiqueta}:S" for etiqueta in ETIQUETAS_CALADAS]), "output", "") or ""
     except Exception:
         return ""
     pids = {partes[0] for partes in (linha.split() for linha in processos.splitlines())
             if len(partes) >= 2 and partes[0].isdigit() and (partes[1] == pacote or partes[1].startswith(pacote + ":"))}
-    desde = (_agora(agora) - timedelta(minutes=MINUTOS_DO_LOG_DO_APP)).strftime("%m-%d %H:%M:%S")
-    linhas = []
+    linhas, vistas, cortadas = [], Counter(), Counter()
     for linha in log.splitlines():
         achado = LINHA_DO_LOG.match(linha)
-        if achado and achado.group(1) >= desde and (achado.group(2) in pids or pacote in linha):
-            linhas.append(linha)
-    return "\n".join(linhas[-LINHAS_DO_LOG_DO_APP:])
+        if not achado or achado.group(1) < desde or not (achado.group(2) in pids or pacote in linha):
+            continue
+        etiqueta = achado.group(3)
+        forma = (etiqueta, re.sub(r"\d+", "#", achado.group(4)))
+        vistas[forma] += 1
+        if vistas[forma] > REPETICOES_NO_LOG:
+            cortadas[etiqueta] += 1
+            continue
+        linhas.append(linha)
+    linhas = linhas[-LINHAS_DO_LOG_DO_APP:]
+    if cortadas:
+        linhas.append("-- linhas repetidas que saíram: "
+                      + ", ".join(f"{etiqueta} {quantas}" for etiqueta, quantas in cortadas.most_common()))
+    return "\n".join(linhas)
 
 
 def versao_do_app(d, pacote):
