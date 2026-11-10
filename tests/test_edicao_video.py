@@ -1507,8 +1507,12 @@ def test_capa_da_grade_com_a_frase_em_cima_e_so_o_fio_fino_embaixo():
     assert esquerda - 1 <= min(xs) and max(xs) <= direita and cima_das_letras - 1 <= min(ys) and max(ys) <= pe_das_letras
     assert abs((min(xs) + max(xs)) / 2 - (esquerda + direita - 1) / 2) <= 3
     assert abs((min(ys) + max(ys)) / 2 - (cima_das_letras + pe_das_letras - 1) / 2) <= 3
-    # Em duas linhas, na maior letra que cabe, até o teto (print de 07/11, 02:49).
+    # Em duas linhas, na maior letra que cabe, até o teto (print de 07/11, 02:49); com a frase no meio
+    # (P198 1), a de 20 letras fica um pouco menor que o teto, e a curta continua nele.
     fonte, linhas = edicao_video._quebra_da_grade("Organize sua cozinha", _fonte_da_capa(), direita - esquerda,
+                                                  pe_das_letras - cima_das_letras)
+    assert len(linhas) == 2 and 76 <= fonte.size < edicao_video.LETRAS_NA_GRADE[0]
+    fonte, linhas = edicao_video._quebra_da_grade("Banho de verniz", _fonte_da_capa(), direita - esquerda,
                                                   pe_das_letras - cima_das_letras)
     assert len(linhas) == 2 and fonte.size == edicao_video.LETRAS_NA_GRADE[0]
 
@@ -1912,11 +1916,12 @@ def test_frase_da_capa_vai_numa_linha_a_comprida_em_duas_e_sem_frase_nao_ha_capa
     # A frase de uma palavra vai numa linha só, na letra do teto.
     fonte, linhas = edicao_video._quebra_da_grade("Leve", _fonte_da_capa(), largura, altura)
     assert (fonte.size, linhas) == (edicao_video.LETRAS_NA_GRADE[0], ["Leve"])
-    # A curta (até MAXIMO_DA_CAPA letras, P106) vai em duas linhas grandes (print de 07/11, 02:49).
+    # A curta (até MAXIMO_DA_CAPA letras, P106) vai em duas linhas grandes (print de 07/11, 02:49); com
+    # a frase no meio (P198 1), a de quase 20 letras fica um pouco menor.
     for curta in ("Organize sua cozinha", "Mochila impermeável", "Limpeza sem esforço", "Gelado o dia todo"):
         assert len(curta) <= edicao_video.MAXIMO_DA_CAPA
         fonte, linhas = edicao_video._quebra_da_grade(curta, _fonte_da_capa(), largura, altura)
-        assert len(linhas) == 2 and fonte.size >= 80, curta
+        assert len(linhas) == 2 and fonte.size >= 70, curta
     # A comprida (o nome ou a vantagem, sem a curta) também cabe, em duas linhas, sem a 1ª terminar
     # numa palavra de ligação.
     assert edicao_video._quebra_da_grade("Acaba com a bagunça da cozinha", _fonte_da_capa(), largura, altura)[1] == [
@@ -2276,12 +2281,13 @@ def test_frase_da_capa_diz_o_que_e_o_produto_e_a_vantagem():
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS.format(nome="Calça"), edicao_video._CAPA_NO_PROMPT):
         assert "começa pelo que é o produto e traz a vantagem que o vídeo mostra" in prompt
         assert "a mesma vantagem em poucas palavras" not in prompt and "até 20 caracteres" in prompt
-    # Os exemplos que a IA recebe cabem no limite e no retângulo da frase, em letra grande.
+    # Os exemplos que a IA recebe cabem no limite e no retângulo da frase, em letra grande (com a frase
+    # no meio, P198 1, a de quase 20 letras um pouco menor).
     esquerda, cima, direita, baixo = edicao_video.lugar_das_letras_na_grade()
     for exemplo in ("Calça que modela", "Travessas 3 tamanhos", "Copo sempre gelado"):
         assert f'"{exemplo}"' in edicao_video._CAPA_NO_PROMPT and len(exemplo) <= edicao_video.MAXIMO_DA_CAPA
         fonte, _linhas = edicao_video._quebra_da_grade(exemplo, _fonte_da_capa(), direita - esquerda, baixo - cima)
-        assert fonte.size >= 80, exemplo
+        assert fonte.size >= 70, exemplo
 
 
 def test_capa_vai_com_a_frase_curta_e_sem_ela_com_o_nome(monkeypatch, tmp_path):
@@ -3459,14 +3465,17 @@ def test_frase_acaba_antes_da_sacolinha_e_dos_icones_do_app():
     # Escolha do Rafael (06/11, P165 1): no vídeo aberto, o coração e os ícones da direita do app
     # ficavam por cima do fim da frase; ela acaba antes deles. Com a frase em cima (P188 2 e P189 B),
     # o retângulo dela acaba antes da sacolinha da grade e da coluna de ícones do vídeo aberto, nas
-    # duas capas, e a faixa continua de um lado ao outro.
+    # duas capas, e a faixa continua de um lado ao outro. Escolha do Rafael (10/11, P198 1): no print
+    # das 14:47, a frase ficava 86 px à esquerda do meio no vídeo aberto; o retângulo dela fica no meio
+    # do que o vídeo aberto mostra (o meio da grade também), ainda antes da sacolinha e dos ícones.
     import io
 
     from PIL import Image
     esquerda, direita = edicao_video.VISIVEL_NO_APP
     x1, _cima, x2, _baixo = edicao_video.lugar_das_letras_na_grade()
     fim = min(edicao_video.SACOLINHA_DA_GRADE[0], edicao_video.ICONES_NO_VIDEO_ABERTO) - edicao_video.MARGEM_DA_FAIXA
-    assert x2 == fim and x1 == esquerda + edicao_video.MARGEM_DA_FAIXA
+    assert x2 == fim and x1 - esquerda == direita - x2 and (x1 + x2) / 2 == edicao_video.TELA[0] / 2
+    assert x1 > esquerda + edicao_video.MARGEM_DA_FAIXA
     pe = edicao_video.PE_DA_FAIXA_DE_CIMA
     for frase in ("Almofada respirável", "Almofada ortopédica respirável"):
         for no_video in (True, False):
@@ -3475,4 +3484,5 @@ def test_frase_acaba_antes_da_sacolinha_e_dos_icones_do_app():
             letras = [x for x in range(0, 720) for y in range(0, pe, 2) if min(capa.getpixel((x, y))) > 200]
             assert letras and max(letras) <= fim and min(letras) >= x1 - 1, (frase, no_video)
             assert abs((min(letras) + max(letras)) / 2 - (x1 + x2 - 1) / 2) <= 3, (frase, no_video)
+            assert abs((min(letras) + max(letras)) / 2 - (esquerda + direita - 1) / 2) <= 3, (frase, no_video)
             assert _cor_de(capa, (direita - 2, pe - 3), edicao_video.LARANJA_DA_SHOPEE), (frase, no_video)
