@@ -181,3 +181,19 @@ def test_relatorio_da_semana_mostra_os_produtos_a_mais_so_quando_ha():
     sem = [("2026-10-30", [{"item": "1", "a_mais": False}])]
     assert "Produtos a mais" not in vendas.texto_semanal(pedidos, AGORA, sem)
     assert "Produtos a mais" not in vendas.texto_semanal(pedidos, AGORA)
+
+
+def test_pedido_guarda_a_hora_da_compra(bm):
+    # P13: a conta por hora precisa da hora da compra, que a API manda (purchaseTime). O pedido
+    # novo a guarda, e o que já estava no banco sem ela ganha a hora quando a Shopee o manda de novo.
+    quando = int(datetime(2026, 11, 3, 21, 7, tzinfo=fuso_horario).timestamp())
+    conversoes = [{"purchaseTime": quando, "totalCommission": "4", "shopeeCommissionCapped": "3",
+                   "sellerCommission": "1", "utmContent": "viral----",
+                   "orders": [{"orderId": "H1", "orderStatus": "PENDING", "items": []}]}]
+    bm.processar_e_salvar_pedidos_api(conversoes)
+    assert bm.ler_banco_pedidos()["H1"]["hora"] == "21:07"
+    banco = bm.ler_banco_pedidos()
+    del banco["H1"]["hora"]
+    bm.salvar_banco_pedidos(banco)
+    bm.processar_e_salvar_pedidos_api(conversoes)
+    assert bm.ler_banco_pedidos()["H1"]["hora"] == "21:07"
