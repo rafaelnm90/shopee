@@ -413,7 +413,7 @@ SEM_META = {
     ("shopee_video", "link do post"), ("shopee_video", "leitura da tela"),
     ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
-    ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
+    ("shopee_video", "voltar no app"), ("shopee_video", "app travado"), ("shopee_video", "app reaberto"),
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
     ("shopee_video", "edição do vídeo: "), ("shopee_video", "visualizações na grade"),
     ("shopee_video", "responder comentário"), ("shopee_video", "curtir comentário"),

@@ -6534,6 +6534,87 @@ def test_primeiro_produto_que_nao_fica_nem_na_segunda_vez_para_o_rascunho(monkey
     assert [r[0] for r in _registro_do_anexar()] == ["não ficou depois do Feito"] * robo.VEZES_DO_PRIMEIRO_PRODUTO
 
 
+class AppAbertoHaHoras(AppQueReabreALegenda):
+    """O app que perde o produto no Feito, com o processo do app rodando há etime (o ELAPSED do ps)."""
+
+    def __init__(self, perdidos=None, etime="16:02:03"):
+        super().__init__(perdidos)
+        self.etime = etime
+
+    def shell(self, partes):
+        if partes and partes[0] in ("pidof", "ps"):
+            self.comandos.append(partes)
+            saida = ({"pidof": "4321", "ps": f"     ELAPSED\n  {self.etime}"}[partes[0]]) if self.etime else ""
+            return type("R", (), {"output": saida})()
+        return super().shell(partes)
+
+    def app_stop(self, pacote):
+        self.comandos.append(["fechar", pacote])
+        self.atual = "inicio"
+
+    def app_start(self, pacote, wait=False):
+        self.comandos.append(["abrir", pacote])
+
+
+def _app_reaberto():
+    import sqlite3
+    try:
+        with robo.db.conexao() as con:
+            return [tuple(linha) for linha in con.execute(
+                "SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ? ORDER BY id",
+                (robo.PROCESSO_DO_APP_REABERTO,))]
+    except sqlite3.OperationalError:
+        return []
+
+
+def test_app_aberto_ha_mais_de_12_horas_e_reaberto_depois_do_produto_que_nao_ficou(monkeypatch, avisos):
+    # Escolha do Rafael (10/11, P193 1): em 10/11, das 05:44 às 06:24, 3 produtos seguidos não ficaram
+    # depois do Feito com o app aberto havia 16 h e a memória dele perto do teto do celular. Só quando
+    # o produto não fica nem na 2ª vez e o app está aberto há mais de 12 h, o robô fecha e reabre a
+    # Shopee, depois de guardar o caso com a tela da falha; o vídeo volta mais tarde (P182 1).
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    ordem = []
+    guardar = robo.casos_robo.guardar
+    monkeypatch.setattr(robo.casos_robo, "guardar", lambda d, *a, **k: ordem.append("caso") or guardar(d, *a, **k))
+    app = AppAbertoHaHoras(perdidos=5)
+    parar = app.app_stop
+    monkeypatch.setattr(app, "app_stop", lambda pacote: ordem.append("fechar") or parar(pacote))
+    resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU in resultado and robo.esperando_aprovacao() == []
+    # Fechado uma vez e aberto de novo logo depois (o 1º abrir é o do começo da rodada).
+    assert app.comandos.count(["fechar", robo.ps.PACOTE]) == 1
+    assert ["abrir", robo.ps.PACOTE] in app.comandos[app.comandos.index(["fechar", robo.ps.PACOTE]):]
+    assert ordem[:2] == ["caso", "fechar"]
+    assert _app_reaberto() == [("fechado e reaberto", "o app aberto há 12 a 24 h", 1)]
+    assert robo.listar("pulado") == [] and robo.proximo_video(robo.ler_config())["id"] == "a1"
+
+
+def test_app_aberto_ha_pouco_tempo_ou_sem_a_leitura_nao_e_fechado(monkeypatch, avisos):
+    # P193 1: só com o app aberto há mais de 12 h; com menos, ou sem saber, o robô não fecha o app
+    # (P15: fora do aviso de app travado, ele nunca fecha).
+    for etime in ("11:59:00", "12:00:00", None):
+        app = AppAbertoHaHoras(etime=etime)
+        assert robo.reabrir_o_app_aberto_ha_muito_tempo(app) is False, etime
+        assert not any(c[0] in ("fechar", "abrir") for c in app.comandos), etime
+    assert _app_reaberto() == []
+    # O produto que não fica com o app aberto há pouco tempo também não fecha nada na rodada.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = AppAbertoHaHoras(perdidos=5, etime="03:10:00")
+    assert robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU in robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert ["fechar", robo.ps.PACOTE] not in app.comandos and _app_reaberto() == []
+
+
+def test_verificacao_depois_de_reabrir_o_app_aberto_ha_horas_para_e_avisa(monkeypatch, avisos):
+    # P193 1: se a Verificação aparecer depois de reabrir, o robô para e avisa, como sempre.
+    app = AppAbertoHaHoras(etime="1-02:03:04")
+    monkeypatch.setattr(robo.ps, "eh_verificacao", lambda xml: ["abrir", robo.ps.PACOTE] in app.comandos)
+    with pytest.raises(robo.Verificacao):
+        robo.reabrir_o_app_aberto_ha_muito_tempo(app)
+    assert _app_reaberto() == [("a Verificação apareceu", "o app aberto há mais de 1 dia", 0)]
+
+
 class AppQueAvisaNoFeito(AppQueReabreALegenda):
     """O app que perde o produto no Feito e mostra um aviso curto (toast), como o uiautomator2 lê."""
 
