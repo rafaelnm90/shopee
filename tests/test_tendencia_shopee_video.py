@@ -102,9 +102,14 @@ def test_anota_os_sinais_de_cada_produto_da_fonte_sem_mudar_a_escolha(monkeypatc
 
 
 def test_o_que_passa_dos_dias_guardados_sai(monkeypatch):
+    # P195 (10/11): a anotação continua sem prazo, e a análise de toda segunda compara a semana com as
+    # três anteriores; o que passa das quatro semanas sai.
+    assert tv.DIAS_GUARDADOS == 28
     _fonte(DO_PRODUTO)
     _links(monkeypatch), _ofertas(monkeypatch)
+    rodar(tv.anotar(AGORA - timedelta(days=21)))
     rodar(tv.anotar(AGORA))
+    assert len({linha[0] for linha in _linhas()}) == 2                          # três semanas depois, as duas ficam
     rodar(tv.anotar(AGORA + timedelta(days=tv.DIAS_GUARDADOS + 1)))
     assert [linha[0] for linha in _linhas()] == [(AGORA + timedelta(days=tv.DIAS_GUARDADOS + 1)).strftime("%Y-%m-%d")]
 

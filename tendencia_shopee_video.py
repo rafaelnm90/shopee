@@ -1,17 +1,16 @@
 """
-A medição da P135 (02/11/2026): por uma semana, o robô da Shopee Vídeo continua escolhendo os
-vídeos como sempre (o mais novo da fonte, com a troca pelo mesmo item que paga mais por venda), e
-uma vez por dia o bot_mestre anota aqui os sinais de tendência dos produtos dos vídeos mais novos
-da fonte do robô, junto da comissão: as vendas do produto na API de afiliado (o total, para a
-conta de quanto cresceu de um dia para o outro), a nota, a comissão e o preço (o valor por venda),
-em quantos desses vídeos o produto está e em quantos canais diferentes o Espião o viu nos últimos
-dias (o que está viralizando entre os afiliados). Depois dos 7 dias, o Claude compara com o que
-vendeu (comparacao, no relatório cifrado do vendas.py) e leva os números ao Rafael, que decide se a
-escolha passa a ser por tendência e comissão juntas. Nada aqui muda a escolha do robô.
+A anotação da tendência da P135 (02/11/2026), sem prazo desde a P195 (10/11): uma vez por dia o
+bot_mestre anota aqui os sinais de tendência dos produtos dos vídeos mais novos da fonte do robô da
+Shopee Vídeo, junto da comissão: as vendas do produto na API de afiliado (o total, para a conta de
+quanto cresceu de um dia para o outro), a nota, a comissão e o preço (o valor por venda), em quantos
+desses vídeos o produto está e em quantos canais diferentes o Espião o viu nos últimos dias (o que
+está viralizando entre os afiliados). Toda segunda, o Claude compara com o que vendeu (comparacao,
+no relatório cifrado do vendas.py), como um analista, e avisa o Rafael quando vê uma mudança, com o
+que fazer. Nada aqui muda a escolha do robô.
 
 Só ids e números no banco (tabelas shopee_video_tendencia e shopee_video_tendencia_links, por
 DIAS_GUARDADOS dias); no registro, só contagens. Usado pelo bot_mestre (anotar, todo dia).
-Escolha do Rafael (P135): DECISOES.md, Shopee Vídeo.
+Escolhas do Rafael (P135 e P195): DECISOES.md, Shopee Vídeo.
 """
 import json
 import logging
@@ -37,7 +36,8 @@ VIDEOS_DA_FONTE = 30
 DIAS_DO_ESPIAO = 3
 # Links novos seguidos numa vez (cada um é uma ida à Shopee); o resto fica para o dia seguinte.
 LINKS_POR_VEZ = 100
-DIAS_GUARDADOS = 14
+# Quatro semanas, para a análise de toda segunda comparar a semana com as anteriores (P195).
+DIAS_GUARDADOS = 28
 # A hora da anotação do dia (o job do bot_mestre). Na subida, o dia sem a anotação só ganha uma
 # depois dela: antes, o job da manhã ainda vem, e o dia ficaria com duas fotografias misturadas.
 HORA_DA_ANOTACAO = time(6, 41)
