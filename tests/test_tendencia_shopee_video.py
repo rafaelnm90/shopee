@@ -182,14 +182,25 @@ def test_comparacao_mostra_o_crescimento_por_faixa_e_o_que_vendeu_pelos_nossos_l
         "C": {"data": "2026-11-04", "status": "CANCELLED", "comissao_total": 5.0, "etiqueta": "achadinhos",
               "itens": [{"id": "20", "nome": "y", "qtd": 1, "comissao": 5.0}]},   # cancelado
     }
+    # O robô postou o 10 duas vezes (a última leitura da grade: 1200 e 300) e o 20 como produto a mais.
+    inserir("CREATE TABLE shopee_video_rascunhos (id INTEGER PRIMARY KEY, estado TEXT, itens TEXT, vistas TEXT)")
+    inserir("INSERT INTO shopee_video_rascunhos (estado, itens, vistas) VALUES (?, ?, ?)", "postado",
+            '[{"item": "10", "a_mais": false}, {"item": "20", "a_mais": true}]',
+            '[["2026-11-04 08:00:00", 900], ["2026-11-05 08:00:00", 1200]]')
+    inserir("INSERT INTO shopee_video_rascunhos (estado, itens, vistas) VALUES (?, ?, ?)", "postado",
+            '[{"item": "10", "a_mais": false}]', '[["2026-11-06 08:00:00", 300]]')
+    inserir("INSERT INTO shopee_video_rascunhos (estado, itens, vistas) VALUES (?, ?, ?)", "salvo",
+            '[{"item": "30", "a_mais": false}]', None)
     texto = tv.comparacao(pedidos)
     assert "Anotações de 02/11 a 06/11 (4 dia(s)); 3 produto(s), 2 anotado(s) em 2 dias ou mais" in texto
+    assert "Postados pelo robô da Shopee Vídeo: 1 produto(s), 2 post(s)." in texto
     assert "Venderam pelos nossos links desde o 1º dia anotado: 1 produto(s), 1 venda(s), R$ 7,20." in texto
     # O 10 cresceu 20 por dia (de 100 a 180 em 4 dias), esteve em 2 canais e em 2 vídeos; o 20, 0.
-    assert "| 2 canais ou mais | 1 | 20.0 | 20.0 | 100% | 1 |" in texto
-    assert "| 0 canal | 1 | 0.0 | 0.0 | 0% | 0 |" in texto
-    assert "| 2 vídeos ou mais | 1 | 20.0 | 20.0 | 100% | 1 |" in texto
+    assert "| 2 canais ou mais | 1 | 20.0 | 20.0 | 100% | 1 | 1 | 1200 |" in texto
+    assert "| 0 canal | 1 | 0.0 | 0.0 | 0% | 0 | 0 | - |" in texto
+    assert "| 2 vídeos ou mais | 1 | 20.0 | 20.0 | 100% | 1 | 1 | 1200 |" in texto
     assert "| 10% ou mais | 1 | 20.0 |" in texto and "| 5% a 10% | 1 | 0.0 |" in texto
     assert "| R$ 5 ou mais por venda | 1 | 20.0 |" in texto and "| R$ 2 a R$ 5 por venda | 1 | 0.0 |" in texto
-    assert "| 1/10 | 2 | 20.0 | 180 | 2 | 2 | 12.0% | R$ 60,00 | R$ 7,20 | 1 (R$ 7,20; viral) |" in texto
+    assert "| 1/10 | 2 | 20.0 | 180 | 2 | 2 | 12.0% | R$ 60,00 | R$ 7,20 | 1 (R$ 7,20; viral) | 2 (1200) |" in texto
+    assert "## Os que o robô postou" in texto and "| 1/10 | 2 (1200) | 20.0 | 2 | 2 | R$ 7,20 | 1 |" in texto
     assert "## Os que venderam pelos nossos links" in texto and "| 1/10 | 1 | R$ 7,20 | viral | 20.0 | 2 | 2 |" in texto

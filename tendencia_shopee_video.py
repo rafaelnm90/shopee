@@ -13,6 +13,7 @@ Só ids e números no banco (tabelas shopee_video_tendencia e shopee_video_tende
 DIAS_GUARDADOS dias); no registro, só contagens. Usado pelo bot_mestre (anotar, todo dia).
 Escolha do Rafael (P135): DECISOES.md, Shopee Vídeo.
 """
+import json
 import logging
 import re
 from datetime import datetime, time, timedelta
@@ -200,13 +201,21 @@ def _mediana(valores):
     return valores[meio] if len(valores) % 2 else (valores[meio - 1] + valores[meio]) / 2
 
 
+def _posts(p):
+    """Os posts do robô com o produto e as visualizações da última leitura: "1 (1200)", "0"."""
+    if not p["posts"]:
+        return "0"
+    return f"{p['posts']} ({'-' if p['vistas'] is None else p['vistas']})"
+
+
 def comparacao(pedidos):
     """
     A comparação da P135 para o Claude, em Markdown: de cada produto anotado em 2 dias ou mais,
     quanto as vendas dele cresceram por dia na Shopee (do primeiro ao último dia anotado), por
     faixa dos sinais (em quantos canais do Espião e em quantos vídeos da fonte ele esteve, a
-    comissão e o valor por venda), e quais venderam pelos nossos links (pedidos: o banco_pedidos
-    do vendas.py) do primeiro dia anotado em diante. Só ids e números; sai junto do relatório
+    comissão e o valor por venda), quais venderam pelos nossos links (pedidos: o banco_pedidos
+    do vendas.py) do primeiro dia anotado em diante e quais o robô da Shopee Vídeo postou, com
+    as visualizações da última leitura da grade. Só ids e números; sai junto do relatório
     cifrado (vendas.cifrado).
     """
     with db.conexao() as con:
@@ -229,6 +238,20 @@ def comparacao(pedidos):
             nossas.setdefault(str(item.get("id") or ""), []).append(
                 (p.get("data") or "", float(item.get("comissao") or 0), vendas.canal(p.get("etiqueta") or "")))
 
+    # Os vídeos que o robô da Shopee Vídeo postou com cada item (o produto do vídeo, sem os a
+    # mais), com as visualizações da última leitura da grade (visualizacoes_shopee_video).
+    postados = {}
+    try:
+        with db.conexao() as con:
+            for itens, vistas in con.execute("SELECT itens, vistas FROM shopee_video_rascunhos "
+                                             "WHERE estado = 'postado'"):
+                leituras = [n for _momento, n in json.loads(vistas or "[]") or [] if n is not None]
+                for item in json.loads(itens or "[]") or []:
+                    if not item.get("a_mais"):
+                        postados.setdefault(str(item.get("item") or ""), []).append(max(leituras, default=None))
+    except Exception as e:
+        logger.warning(f"⚠️ [Tendência] Os posts do robô não entraram na comparação: {type(e).__name__}")
+
     produtos = []
     for (loja, item), registros in por_produto.items():
         primeiro, ultimo = registros[0], registros[-1]
@@ -240,13 +263,17 @@ def comparacao(pedidos):
             "canais": max(r[6] for r in registros), "videos": max(r[5] for r in registros),
             "comissao": ultimo[3] * 100, "preco": ultimo[4], "valor": ultimo[3] * ultimo[4],
             "nossas": len(vendidos), "nossa_comissao": sum(v[1] for v in vendidos),
-            "nossos_canais": sorted({v[2] or "(sem etiqueta)" for v in vendidos})})
+            "nossos_canais": sorted({v[2] or "(sem etiqueta)" for v in vendidos}),
+            "posts": len(postados.get(item, [])),
+            "vistas": max((v for v in postados.get(item, []) if v is not None), default=None)})
     medidos = [p for p in produtos if p["crescimento"] is not None]
     vendidos = [p for p in produtos if p["nossas"]]
+    do_robo = [p for p in produtos if p["posts"]]
     texto += [f"Anotações de {dias[0][8:10]}/{dias[0][5:7]} a {dias[-1][8:10]}/{dias[-1][5:7]} ({len(dias)} dia(s)); "
               f"{len(produtos)} produto(s), {len(medidos)} anotado(s) em 2 dias ou mais (com o crescimento das vendas "
               f"na Shopee por dia). Venderam pelos nossos links desde o 1º dia anotado: {len(vendidos)} produto(s), "
-              f"{sum(p['nossas'] for p in vendidos)} venda(s), {vendas._reais(sum(p['nossa_comissao'] for p in vendidos))}.",
+              f"{sum(p['nossas'] for p in vendidos)} venda(s), {vendas._reais(sum(p['nossa_comissao'] for p in vendidos))}. "
+              f"Postados pelo robô da Shopee Vídeo: {len(do_robo)} produto(s), {sum(p['posts'] for p in do_robo)} post(s).",
               ""]
 
     def faixas(titulo, rotulo_de):
@@ -254,10 +281,14 @@ def comparacao(pedidos):
         for p in medidos:
             grupos.setdefault(rotulo_de(p), []).append(p)
         texto.extend(["", f"## Crescimento por {titulo}", ""] + vendas._tabela(
-            ("faixa", "produtos", "vendas/dia (mediana)", "vendas/dia (média)", "crescendo", "nossas vendas"),
+            ("faixa", "produtos", "vendas/dia (mediana)", "vendas/dia (média)", "crescendo", "nossas vendas",
+             "postados pelo robô", "vistas (mediana)"),
             [(rotulo, len(g), f"{_mediana([p['crescimento'] for p in g]):.1f}",
               f"{sum(p['crescimento'] for p in g) / len(g):.1f}",
-              f"{sum(1 for p in g if p['crescimento'] > 0) * 100 / len(g):.0f}%", sum(p["nossas"] for p in g))
+              f"{sum(1 for p in g if p['crescimento'] > 0) * 100 / len(g):.0f}%", sum(p["nossas"] for p in g),
+              sum(1 for p in g if p["posts"]),
+              "-" if not [p for p in g if p["vistas"] is not None]
+              else f"{_mediana([p['vistas'] for p in g if p['vistas'] is not None]):.0f}")
              for rotulo, g in sorted(grupos.items())]))
 
     faixas("canais do Espião (o máximo no período)",
@@ -270,11 +301,18 @@ def comparacao(pedidos):
     mais = sorted(medidos, key=lambda p: (-p["crescimento"], -p["nossas"], p["id"]))[:PRODUTOS_NA_COMPARACAO]
     texto += ["", f"## Os que mais cresceram ({len(mais)} de {len(medidos)})", ""] + vendas._tabela(
         ("produto (loja/item)", "dias", "vendas/dia", "total", "canais", "vídeos", "comissão", "preço", "por venda",
-         "nossas vendas"),
+         "nossas vendas", "posts do robô (vistas)"),
         [(p["id"], p["dias"], f"{p['crescimento']:.1f}", p["total"], p["canais"], p["videos"], f"{p['comissao']:.1f}%",
           vendas._reais(p["preco"]), vendas._reais(p["valor"]),
           f"{p['nossas']} ({vendas._reais(p['nossa_comissao'])}; {', '.join(p['nossos_canais'])})" if p["nossas"]
-          else "0") for p in mais])
+          else "0", _posts(p)) for p in mais])
+    if do_robo:
+        texto += ["", "## Os que o robô postou", ""] + vendas._tabela(
+            ("produto (loja/item)", "posts do robô (vistas)", "vendas/dia", "canais do Espião", "vídeos", "por venda",
+             "nossas vendas"),
+            [(p["id"], _posts(p), "-" if p["crescimento"] is None else f"{p['crescimento']:.1f}", p["canais"],
+              p["videos"], vendas._reais(p["valor"]), p["nossas"])
+             for p in sorted(do_robo, key=lambda p: -(p["vistas"] or 0))])
     if vendidos:
         texto += ["", "## Os que venderam pelos nossos links", ""] + vendas._tabela(
             ("produto (loja/item)", "nossas vendas", "comissão", "canais", "vendas/dia", "canais do Espião", "vídeos"),
