@@ -16,6 +16,10 @@ CANAIS = ("canal principal", "Viral", "Grupo Público")
 # não havia outro assunto marcado no dia no canal (a regra deixa); o checkup não a cobra.
 # Escolha do Rafael (23/10): DECISOES.md, Trabalho com o Claude.
 EM_SEGUIDA_SEM_OUTRO = "em seguida (sem outro assunto marcado)"
+# E quando a de outro assunto só está marcada depois do fim da janela desta no painel: a espera
+# não passa do fim (P93 e P94), e ela sai na hora, anotada assim; o checkup não a cobra.
+EM_SEGUIDA_FIM_DA_JANELA = "em seguida (o outro assunto só depois do fim da janela)"
+EM_SEGUIDA_QUE_A_REGRA_DEIXA = (EM_SEGUIDA_SEM_OUTRO, EM_SEGUIDA_FIM_DA_JANELA)
 
 
 def canal_da_rotina(tipo):

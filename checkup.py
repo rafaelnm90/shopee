@@ -543,10 +543,11 @@ def rotinas_do_dia(agora=None, inicios=()):
     for canal, lista in saidas.items():
         lista.sort()
         intervalos = [b[0] - a[0] for a, b in zip(lista, lista[1:])]
-        # O mesmo assunto em seguida que a regra deixa (sem outro assunto marcado no dia) não
-        # conta; o bot anota a hora de cada um.
+        # O mesmo assunto em seguida que a regra deixa (sem outro assunto marcado no dia, ou só
+        # depois do fim da janela dela) não conta; o bot anota a hora e o porquê de cada um.
         sem_outro = em_seguida_sem_outro(canal, agora)
-        pares = [(a, b, any(tipo == b[1] and -1 <= minuto - b[0] <= MINUTOS_DA_ANOTACAO for tipo, minuto in sem_outro))
+        pares = [(a, b, next((porque for tipo, minuto, porque in sem_outro
+                              if tipo == b[1] and -1 <= minuto - b[0] <= MINUTOS_DA_ANOTACAO), None))
                  for a, b in zip(lista, lista[1:]) if a[1] == b[1]]
         por_assunto = Counter(tipo for _m, tipo in lista)
         fora_da_janela, tipos_fora_da_janela, depois_do_reinicio = [], [], []
@@ -586,7 +587,7 @@ def rotinas_do_dia(agora=None, inicios=()):
             "seguidos": sum(1 for _a, _b, deixado in pares if not deixado),
             "seguidos_sem_outro": sum(1 for _a, _b, deixado in pares if deixado),
             "pares_seguidos": [f"{_hhmm(a[0])} {a[1]} → {_hhmm(b[0])} {b[1]}"
-                               + (" (sem outro assunto marcado)" if deixado else "") for a, b, deixado in pares],
+                               + (f" ({deixado})" if deixado else "") for a, b, deixado in pares],
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
             "fora_da_janela": fora_da_janela, "tipos_fora_da_janela": tipos_fora_da_janela,
             "depois_do_reinicio": depois_do_reinicio,
@@ -629,12 +630,13 @@ MINUTOS_DA_ANOTACAO = 3
 def em_seguida_sem_outro(canal, agora=None):
     """
     As rotinas de hoje no canal que saíram logo depois de outra do mesmo assunto porque não
-    havia outro assunto marcado (o bot anota; a regra deixa): [(tipo, minuto do dia)].
+    havia outro assunto marcado, ou só depois do fim da janela dela (o bot anota; a regra
+    deixa): [(tipo, minuto do dia, o porquê, como o bot anotou entre parênteses)].
     """
     desde = _agora(agora).strftime("%Y-%m-%d 00:00:00")
-    return [(detalhe, _minutos(momento[11:16]))
+    return [(detalhe, _minutos(momento[11:16]), resultado[resultado.find("(") + 1:resultado.rfind(")")])
             for momento, _p, resultado, detalhe, _o in registro_processos.sequencia("bot_mestre", f"rotina {canal}", desde)
-            if resultado == rotinas.EM_SEGUIDA_SEM_OUTRO]
+            if resultado in rotinas.EM_SEGUIDA_QUE_A_REGRA_DEIXA]
 
 
 def linha_do_tempo_da_rotina(canal, tipo, agora=None):
@@ -1909,7 +1911,7 @@ def main():
         menor = "—" if r["menor"] is None else f"{r['menor']} min"
         print(f"{canal}{' (pausado)' if r['pausado'] else ''}: enviadas {r['enviadas']} | menor intervalo {menor} | "
               f"abaixo de {INTERVALO_CURTO_ROTINA} min {r['curtos']} | mesmo assunto em seguida {r['seguidos']}"
-              + (f" (mais {r['seguidos_sem_outro']} sem outro assunto marcado, como a regra deixa)"
+              + (f" (mais {r['seguidos_sem_outro']} que a regra deixa: sem outro assunto marcado na janela)"
                  if r.get("seguidos_sem_outro") else ""))
         if r["por_assunto"]:
             print("   " + " | ".join(f"{tipo}: {qtd}" for tipo, qtd in sorted(r["por_assunto"].items())))
