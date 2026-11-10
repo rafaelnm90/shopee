@@ -2283,6 +2283,86 @@ def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, a
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
 
 
+def _videos_com_valor(monkeypatch, valores, padrao=5.99):
+    """
+    Vídeos da fonte mais novos que o a1, do mais novo para o mais velho, cada um com o produto do link que
+    paga valores[i] reais por venda (o preço 100 e a comissão valores[i]%); o do a1 paga padrao.
+    """
+    for i, _valor in enumerate(valores):
+        with open(f"archive/v{i}.mp4", "wb") as f:
+            f.write(b"video")
+        inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", f"v{i}", f"archive/v{i}.mp4",
+                f"Produto {i}\nhttps://s.shopee.com.br/valor{i}", f"2026-10-22 {19 - i}:00:00")
+
+    async def produtos_do_link(link):
+        for i, valor in enumerate(valores):
+            if link.endswith(f"/valor{i}"):
+                return [{"nome": VESTIDO, "preco": 100.0, "comissao": valor, "item": f"9{i}"}], link
+        return [{"nome": VESTIDO, "preco": 100.0, "comissao": padrao, "item": "2"}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+
+
+def test_robo_escolhe_entre_os_proximos_o_produto_que_paga_mais_por_venda(monkeypatch, avisos):
+    # Escolha do Rafael (10/11, P194 1): de 25/09 a 09/11, 2 produtos deram 70% da comissão e os posts
+    # do robô ainda não tinham vendido. Entre os próximos 10 vídeos da fonte, o robô escolhe o de
+    # produto que paga mais por venda (o preço vezes a comissão) e deixa de lado, só no dia, o que paga
+    # menos de R$ 2.
+    _fonte(monkeypatch)
+    _videos_com_valor(monkeypatch, [1.5, 5.0, 9.0, 3.0])
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+    agora = momento("2026-10-22 23:59")
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=agora) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["id_video"] == "v2" and rascunho["valor"] == "9.00"
+    # O de menos de R$ 2 fica de lado só hoje, sem virar pulado; os outros continuam na fila.
+    assert robo.listar("pulado") == []
+    assert robo.estado_do_dia(robo.ler_config(), agora)["abaixo_do_minimo"] == ["v0"]
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_ESCOLHA) == ("o que paga mais", "o 3º de 5; 1 abaixo do mínimo", 1)
+    assert any("Vídeo: o que paga mais por venda (R$ 9,00) entre os próximos 10 de" in str(a) for a in avisos)
+    assert robo.proximo_video(robo.ler_config(), robo.evitar_hoje(robo.ler_config(), agora), agora)["id"] == "v1"
+    # No dia seguinte, o de baixo é visto de novo (o preço e a comissão mudam).
+    assert "v0" not in robo.evitar_hoje(robo.ler_config(), momento("2026-10-23 12:00"))
+
+
+def test_so_videos_abaixo_do_minimo_por_venda_param_sem_tocar_no_celular(monkeypatch, avisos):
+    # P194 1: com todos os próximos pagando menos de R$ 2 por venda, nenhum vira rascunho (nem fica
+    # pulado: no dia seguinte eles são vistos de novo), e o celular nem é tocado.
+    _fonte(monkeypatch)
+    _videos_com_valor(monkeypatch, [1.0, 1.99], padrao=0.5)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
+    resultado = robo.rodada(d=Intocavel(), agora=agora)
+    assert resultado == "os próximos 3 vídeos da fonte pagam menos que o mínimo por venda"
+    assert robo.passo_do_motivo(resultado) == "valor por venda" and "R$" not in resultado
+    assert robo.listar("pulado") == []
+    assert robo.estado_do_dia(robo.ler_config(), agora)["abaixo_do_minimo"] == ["a1", "v0", "v1"]
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_ESCOLHA) == ("todos abaixo do mínimo", "3 de 3")
+
+
+def test_video_de_varios_produtos_fica_na_vez_dele_na_escolha_pelo_valor(monkeypatch):
+    # P194 1: o vídeo de vários produtos (o link é de um vídeo; os produtos ficam no Ver Produtos) só
+    # tem o valor no celular. Até o Rafael decidir (P200), ele fica na vez dele, como antes: o produto
+    # antes dele na fila só passa na frente se pagar o mínimo.
+    _fonte_de_video(monkeypatch)
+    _videos_com_valor(monkeypatch, [1.0])
+    config = {**robo.PADRAO, "fonte": "autorais"}
+    hoje = momento("2026-10-22 12:00")
+    video, porque = robo.escolher_o_video(config, robo.evitar_hoje(config, hoje), hoje)
+    assert (video["id"], video["de_video"], porque) == ("a1", True, "") and "valor" not in video
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_ESCOLHA) == ("na vez dele: vídeo de vários produtos", "o 2º de 2; 1 abaixo do mínimo")
+    # Com o produto antes dele pagando o mínimo, o produto passa na frente.
+    async def produtos_do_link(link):
+        return [{"nome": VESTIDO, "preco": 100.0, "comissao": 2.0, "item": "90"}], link
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    amanha = momento("2026-10-23 12:00")
+    video, porque = robo.escolher_o_video(config, robo.evitar_hoje(config, amanha), amanha)
+    assert (video["id"], video["valor"], porque) == ("v0", 2.0, "")
+
+
 class AppDeLojaDeFerias(AppDeMentira):
     """A página do produto avisa "Esse vendedor está de férias." (24/10, o teclado HB199)."""
 

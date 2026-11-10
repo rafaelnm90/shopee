@@ -59,6 +59,7 @@ Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 import asyncio
 import html
 import io
+import itertools
 import json
 import logging
 import math
@@ -911,7 +912,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
-           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras")
+           "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -954,7 +955,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
-                 "postar_agora_em", "letras")
+                 "postar_agora_em", "letras", "valor")
 
 
 def _criar_tabela(con):
@@ -1153,6 +1154,7 @@ PASSOS = (
     ("sem o número do Ponto", "ler os pontos de penalidade"),
     ("em análise na Shopee", "vídeo em análise"),
     ("sem oferta de afiliado", "oferta de afiliado"),
+    ("menos que o mínimo por venda", "valor por venda"),
     ("já foi postado", "produto já postado"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
@@ -2603,13 +2605,13 @@ def avisar_video(caminho, legenda):
 
 # --- Preparar um rascunho ---
 
-def proximo_video(config, evitar=(), agora=None):
+def _videos_da_fonte(config, evitar=(), agora=None):
     """
-    O vídeo da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou
+    Os vídeos da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou
     (ids_usados), com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário),
-    fora os de evitar (os que esgotaram as tentativas hoje) e o arquivo que o robô já levou ao
-    Canal Afiliados, que volta pelo Viral (o loop; pedido do Rafael, 30/10:
-    DECISOES.md, Shopee Vídeo). Sem nenhum, None.
+    fora os de evitar (os que esgotaram as tentativas hoje e os que pagam menos que o mínimo,
+    evitar_hoje) e o arquivo que o robô já levou ao Canal Afiliados, que volta pelo Viral (o
+    loop; pedido do Rafael, 30/10: DECISOES.md, Shopee Vídeo), do mais novo para o mais velho.
     """
     fonte = config.get("fonte", assistente.FONTE_PADRAO)
     usados = ids_usados(agora) | set(evitar)
@@ -2622,9 +2624,102 @@ def proximo_video(config, evitar=(), agora=None):
                 or not os.path.exists(arquivo) or arquivo.lower().endswith(assistente.EXTENSOES_DE_IMAGEM)
                 or pedidos_do_canal.ja_foi_ao_canal(arquivo)):
             continue
-        return {"id": id_video, "arquivo": os.path.abspath(arquivo), "link": link, "nome": nome_da_legenda(legenda),
-                "de_video": eh_video(asyncio.run(link_para_converter(link)))}
-    return None
+        yield {"id": id_video, "arquivo": os.path.abspath(arquivo), "link": link, "nome": nome_da_legenda(legenda),
+               "de_video": eh_video(asyncio.run(link_para_converter(link)))}
+
+
+def proximo_video(config, evitar=(), agora=None):
+    """O próximo vídeo da fonte (_videos_da_fonte), ou None sem nenhum."""
+    return next(_videos_da_fonte(config, evitar, agora), None)
+
+
+# Escolha do Rafael (10/11, P194 1): de 25/09 a 09/11, 2 produtos deram 70% da comissão, e os posts
+# do robô ainda não tinham vendido. Entre os próximos VIDEOS_NA_ESCOLHA vídeos da fonte, o robô
+# escolhe o de produto que paga mais por venda (o preço vezes a comissão do produto do link, pela API
+# de afiliado) e deixa de lado, só no dia, o que paga menos de MINIMO_POR_VENDA reais (no dia
+# seguinte ele é visto de novo: o preço e a comissão mudam). O vídeo de vários produtos (o link é de
+# um vídeo, e os produtos ficam no Ver Produtos, que só o celular lê), o de produto sem oferta e o de
+# produto já postado ficam na vez deles, como antes (o primeiro vira rascunho; os outros ficam de
+# lado): um produto antes deles na fila só passa na frente se pagar o mínimo. O registro diz só
+# posições e contagens (o checkup é público); o valor vai no rascunho (coluna valor). Quando o Rafael
+# decidir o vídeo de vários produtos (P200), a regra dele muda. DECISOES.md, Shopee Vídeo.
+VIDEOS_NA_ESCOLHA = 10
+MINIMO_POR_VENDA = 2.0
+PROCESSO_DA_ESCOLHA = "escolha pelo valor por venda"
+SEM_VIDEO_NA_FONTE = "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
+
+
+def de_onde_veio_o_video(video, fonte):
+    """A linha do aviso do começo do rascunho que diz qual vídeo da fonte o robô pegou (P194 1)."""
+    nome_da_fonte = assistente.FONTES.get(fonte, fonte)
+    if video.get("valor") is not None:
+        return (f"Vídeo: o que paga mais por venda ({assistente._reais(video['valor'])}) entre os próximos "
+                f"{VIDEOS_NA_ESCOLHA} de {nome_da_fonte} ainda não usados.")
+    return f"Vídeo: o mais novo de {nome_da_fonte} ainda não usado."
+
+
+def evitar_hoje(config, agora=None):
+    """Os vídeos que ficam fora da escolha hoje: os que esgotaram as tentativas e os abaixo do mínimo."""
+    estado = estado_do_dia(config, agora)
+    return estado.get("evitar", []) + estado.get("abaixo_do_minimo", [])
+
+
+def _deixar_de_lado_no_dia(ids, config, agora=None):
+    """Os vídeos que pagam menos que o mínimo ficam fora da escolha só hoje (no plano do dia)."""
+    if not ids:
+        return
+    estado = estado_do_dia(config, agora)
+    estado["abaixo_do_minimo"] = sorted(set(estado.get("abaixo_do_minimo", [])) | set(ids))
+    db.salvar_config(CHAVE_DIA, estado)
+
+
+def _produto_do_link_do_video(video):
+    """O produto do link do vídeo pela API de afiliado ({nome, preco, comissao, item}), ou None sem a oferta."""
+    produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
+    return produtos[0] if produtos else None
+
+
+def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
+    """
+    (o vídeo do próximo rascunho, ""), ou (None, o porquê) sem nenhum (P194 1). O de produto ganha
+    "valor" (o que paga por venda) e "posicao" (na fila dos próximos VIDEOS_NA_ESCOLHA).
+    """
+    candidatos = list(itertools.islice(_videos_da_fonte(config, evitar, agora), VIDEOS_NA_ESCOLHA))
+    if not candidatos:
+        return None, SEM_VIDEO_NA_FONTE
+    ja_postados = produtos_ja_postados() if ja_postados is None else ja_postados
+    melhores, abaixo = [], []
+    for posicao, video in enumerate(candidatos, 1):
+        if not video["de_video"]:
+            produto = _produto_do_link_do_video(video)
+            if produto and str(produto.get("item") or "") not in ja_postados:
+                valor = valor_por_venda(assistente._numero(produto.get("preco")),
+                                        assistente._numero(produto.get("comissao")))
+                if valor < MINIMO_POR_VENDA:
+                    abaixo.append(video["id"])
+                else:
+                    melhores.append((valor, -posicao, posicao, video))
+                continue
+        # O de vários produtos, o sem oferta e o já postado: na vez deles, se nenhum antes paga o mínimo.
+        if melhores:
+            break
+        _deixar_de_lado_no_dia(abaixo, config, agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA,
+                                     "na vez dele: " + ("vídeo de vários produtos" if video["de_video"]
+                                                        else "sem oferta ou já postado"),
+                                     f"o {posicao}º de {len(candidatos)}; {len(abaixo)} abaixo do mínimo",
+                                     ok=None)
+        return video, ""
+    _deixar_de_lado_no_dia(abaixo, config, agora)
+    if not melhores:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA, "todos abaixo do mínimo",
+                                     f"{len(abaixo)} de {len(candidatos)}", ok=None)
+        return None, f"os próximos {len(candidatos)} vídeos da fonte pagam menos que o mínimo por venda"
+    valor, _, posicao, video = max(melhores, key=lambda melhor: melhor[:2])
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA, "o que paga mais",
+                                 f"o {posicao}º de {len(candidatos)}; {len(abaixo)} abaixo do mínimo",
+                                 ok=True)
+    return dict(video, valor=valor, posicao=posicao), ""
 
 
 # O Preparar 1 Agora ⚡ que cai num vídeo com problema próprio (em análise na Shopee, a foto do
@@ -2675,7 +2770,7 @@ def preparar_o_pedido(d, config, agora=None, comeco=None):
                 e.motivo = (f"{qual}{e.motivo}; não há tempo para outro vídeo nesta rodada, toque de novo em "
                             "Preparar 1 Agora ⚡")
                 raise
-            if not proximo_video(config, estado_do_dia(config, agora).get("evitar", []), agora):
+            if not proximo_video(config, evitar_hoje(config, agora), agora):
                 e.motivo = f"{qual if vez > 1 else ''}{e.motivo}; a fonte não tem outro vídeo para tentar"
                 raise
             registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "próximo vídeo",
@@ -2693,14 +2788,14 @@ def preparar_rascunho(d, config, agora=None):
     diz o produto: não paga comissão) fica de lado, e o robô passa ao próximo na mesma
     rodada, sem gastar a tentativa do horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    evitar = estado_do_dia(config, agora).get("evitar", [])
+    evitar = evitar_hoje(config, agora)
     ja_postados = produtos_ja_postados()
     for _ in range(VIDEOS_SEM_OFERTA_POR_RODADA):
-        video = proximo_video(config, evitar, agora)
+        # O de produto que paga mais por venda entre os próximos da fonte (P194 1).
+        video, sem_video = escolher_o_video(config, evitar, agora, ja_postados)
         if not video:
-            resultado = "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
-            registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
-            return resultado
+            registrar_tentativa("rascunho", "sem vídeo", sem_video, agora=agora)
+            return sem_video
         # No link de vídeo, os produtos vêm do Ver Produtos, no celular.
         if video["de_video"]:
             break
@@ -2720,6 +2815,9 @@ def preparar_rascunho(d, config, agora=None):
         registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
         return resultado
     ident = criar(video["id"], agora)
+    if video.get("valor") is not None:
+        # O que o produto do link paga por venda, para a medição da escolha (P194 1).
+        atualizar(ident, valor=f"{video['valor']:.2f}")
     assistente.registrar(video["id"], "robo", "rascunho do robô", agora)
     # curtidos: os produtos que o robô curtiu (descurtir_no_fim); celular: se ele já usou o
     # celular (o caso só lê a tela quando ela é deste rascunho).
@@ -4776,7 +4874,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     if video.get("de_video"):
         celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
-               f"confere cada um.\nVídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
+               "confere cada um.\n" + de_onde_veio_o_video(video, fonte))
         fotos_da_pagina = {}
         nomes = _produtos_do_video(d, video, vistos, curtidos, variacoes, fotos_da_pagina)
         # Cada um trocado pelo mesmo item da loja que paga mais, e todos do que paga mais por venda
@@ -4823,7 +4921,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                + (f"Comissão: {troca['comissao']:.1f}%, {assistente._reais(troca['valor'])} por venda (o produto do "
                   f"link pagava {troca['antes']:.1f}%, {assistente._reais(troca['valor_antes'])}: troquei pelo mesmo "
                   "produto de outra loja, conferido pela IA com o vídeo)\n" if troca else "")
-               + f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
+               + de_onde_veio_o_video(video, fonte))
         achado = None
         if not troca:
             ok, motivo = ps.ia_confere_produto(video, vistos, avisar=False)
