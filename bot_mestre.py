@@ -17755,7 +17755,16 @@ async def lembrar_perguntas_do_claude():
         mensagem = await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True)
         # O id volta para o perguntas_rafael apagar o lembrete quando a pergunta for respondida.
         return mensagem.message_id
-    enviados = await perguntas_rafael.lembrar(enviar)
+
+    # O lembrete novo apaga o anterior: ficam a pergunta (ou o aviso) e o último lembrete, que ainda
+    # dá para apagar na resposta ou no visto (pedidos do Rafael, 10/11, e P197 1).
+    async def apagar(mensagem):
+        try:
+            await bot.delete_message(ADMIN_ID, mensagem)
+            return True
+        except Exception:
+            return False
+    enviados = await perguntas_rafael.lembrar(enviar, apagar=apagar)
     if enviados:
         logger.info(f"❓ [Perguntas do Claude] {enviados} lembrete(s) no privado.")
         registro_processos.registrar("bot_mestre", "lembrete de pergunta do Claude", "enviado", str(enviados), ok=True)
@@ -17768,14 +17777,6 @@ async def lembrar_perguntas_do_claude():
                                           reply_markup=botoes)
         return mensagem.message_id
 
-    # O lembrete novo apaga o anterior: ficam o aviso e o último, que ainda dá para apagar no visto
-    # (pedido do Rafael, 10/11).
-    async def apagar(mensagem):
-        try:
-            await bot.delete_message(ADMIN_ID, mensagem)
-            return True
-        except Exception:
-            return False
     informacoes = await perguntas_rafael.lembrar_informacoes(enviar_com_botao, apagar=apagar)
     if informacoes:
         logger.info(f"📌 [Informações do Claude] {informacoes} lembrete(s) no privado.")

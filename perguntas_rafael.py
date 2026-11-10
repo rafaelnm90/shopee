@@ -12,7 +12,8 @@ O caminho:
 - o avisar.yml leva o texto cifrado ao servidor ("nova"): a pergunta entra na
   tabela perguntas_rafael e sai na hora no privado, com um código (P1, P2...);
 - o bot_mestre (lembrar) manda de novo a cada hora enquanto ela estiver aberta,
-  mesmo que o Claude esteja sem crédito;
+  mesmo que o Claude esteja sem crédito, e cada lembrete novo apaga o anterior: no
+  privado ficam a pergunta e o último lembrete (escolha do Rafael, 10/11, P197 1);
 - quando o Rafael responde, o Claude marca pelo avisar.yml ("respondida P3"): os
   lembretes param e o bot apaga do privado a pergunta e os lembretes dela (o que já
   passou das 48 h que o Telegram deixa apagar fica com o texto trocado por "respondida"),
@@ -163,8 +164,24 @@ def marcar_aviso(ident, agora=None, mensagem=None):
         _anotar_aviso(con, "perguntas_rafael", ident, agora, mensagem)
 
 
+def tirar_mensagens_da_pergunta(ident, saidas):
+    """Tira da lista da pergunta (id) os ids das mensagens que já saíram do privado."""
+    if not saidas:
+        return
+    with db.conexao() as con:
+        _criar_tabela(con)
+        _tirar_mensagens(con, "perguntas_rafael", ident, saidas)
+
+
+def _foi_respondida(ident):
+    with db.conexao() as con:
+        _criar_tabela(con)
+        linha = con.execute("SELECT respondida FROM perguntas_rafael WHERE id = ?", (ident,)).fetchone()
+    return bool(linha and linha[0])
+
+
 def mensagens_de(cod):
-    """Os ids, no privado, da pergunta e dos lembretes dela."""
+    """Os ids, no privado, da pergunta e dos lembretes dela, do mais velho para o mais novo."""
     numero = str(cod or "").strip().upper().lstrip("P")
     if not numero.isdigit():
         return []
@@ -227,20 +244,28 @@ def montar_aviso(p):
     return "\n".join(linhas)
 
 
-async def lembrar(enviar, agora=None):
+async def lembrar(enviar, agora=None, apagar=None):
     """
     Manda de novo cada pergunta aberta cujo último aviso tem 1 h ou mais. enviar(texto)
     é a função do robô que manda no privado (async, devolve o id da mensagem, que fica
-    guardado para apagar depois, ou True se saiu). Um aviso que não sai fica para a
-    próxima volta. Devolve quantos saíram.
+    guardado para apagar depois, ou True se saiu). Com apagar(id) (async, True se saiu),
+    o lembrete novo apaga os anteriores: no privado ficam a pergunta e o último lembrete,
+    e na resposta tudo sai, como antes (limpar_do_privado); o que não sai fica na lista,
+    para sair na resposta. Um aviso que não sai fica para a próxima volta. Devolve quantos
+    saíram. Escolha do Rafael (10/11, P197 1): DECISOES.md, Trabalho com o Claude.
     """
     enviados = 0
     for p in vencidas(agora):
         try:
+            anteriores = mensagens_de(p["codigo"])[1:]
             mensagem = await enviar(montar_aviso(p))
             if mensagem:
                 marcar_aviso(p["id"], agora, mensagem)
                 enviados += 1
+                if apagar:
+                    # Respondida enquanto o lembrete saía (a resposta já limpou o privado): ele sai também.
+                    novo = [mensagem] if _foi_respondida(p["id"]) and type(mensagem) is int else []
+                    tirar_mensagens_da_pergunta(p["id"], [m for m in anteriores + novo if await apagar(m)])
         except Exception as e:
             logger.warning(f"⚠️ [Perguntas do Claude] Lembrete de {p['codigo']} não saiu: {type(e).__name__}")
     return enviados
@@ -305,16 +330,21 @@ def marcar_aviso_da_informacao(ident, agora=None, mensagem=None):
         _anotar_aviso(con, "informacoes_rafael", ident, agora, mensagem)
 
 
+def _tirar_mensagens(con, tabela, ident, saidas):
+    """Tira da lista (tabela: a das perguntas ou a das informações) os ids que já saíram do privado."""
+    linha = con.execute(f"SELECT mensagens FROM {tabela} WHERE id = ?", (ident,)).fetchone()
+    mensagens = json.loads((linha[0] if linha else None) or "[]")
+    con.execute(f"UPDATE {tabela} SET mensagens = ? WHERE id = ?",
+                (json.dumps([m for m in mensagens if m not in saidas]), ident))
+
+
 def tirar_mensagens_da_informacao(ident, saidas):
     """Tira da lista da informação (id) os ids das mensagens que já saíram do privado."""
     if not saidas:
         return
     with db.conexao() as con:
         _criar_tabela_das_informacoes(con)
-        linha = con.execute("SELECT mensagens FROM informacoes_rafael WHERE id = ?", (ident,)).fetchone()
-        mensagens = json.loads((linha[0] if linha else None) or "[]")
-        con.execute("UPDATE informacoes_rafael SET mensagens = ? WHERE id = ?",
-                    (json.dumps([m for m in mensagens if m not in saidas]), ident))
+        _tirar_mensagens(con, "informacoes_rafael", ident, saidas)
 
 
 def mensagens_da_informacao(cod):

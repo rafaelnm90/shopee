@@ -84,6 +84,61 @@ def test_robo_lembra_pelo_privado(bm, monkeypatch):
     assert len(enviados) == 1 and pr.mensagens_de("P1") == [701]
 
 
+def test_lembrete_novo_da_pergunta_apaga_o_anterior():
+    # Escolha do Rafael (10/11, P197 1): os lembretes das perguntas ficam enxutos como os das
+    # informações: cada lembrete novo apaga o anterior; ficam a pergunta e o último lembrete, e na
+    # resposta tudo sai, como antes. O que não sai na hora fica na lista, para sair na resposta.
+    pr.nova("Pergunta?", OPCOES, LINK, AGORA)
+    ids, apagadas = iter(range(51, 60)), []
+
+    async def enviar(texto):
+        return next(ids)
+
+    async def apagar(ident):
+        apagadas.append(ident)
+        return ident != 54
+    for horas in range(4):
+        rodar(pr.lembrar(enviar, AGORA + timedelta(hours=horas), apagar=apagar))
+    assert apagadas == [52, 53] and pr.mensagens_de("P1") == [51, 54]
+    rodar(pr.lembrar(enviar, AGORA + timedelta(hours=4), apagar=apagar))
+    assert apagadas == [52, 53, 54] and pr.mensagens_de("P1") == [51, 54, 55]
+    # Respondida: a pergunta e os lembretes que ficaram saem do privado, como antes.
+    assert pr.marcar_respondida("P1", AGORA + timedelta(hours=5))
+    saidas = []
+    assert pr.limpar_do_privado("P1", lambda m: saidas.append(m) or True, lambda m, texto: None) == (3, 3)
+    assert saidas == [51, 54, 55]
+    # Respondida enquanto o lembrete da hora saía: ele sai logo depois.
+    pr.nova("Outra?", OPCOES, LINK, AGORA)
+
+    async def enviar_e_responder(texto):
+        pr.marcar_respondida("P2", AGORA)
+        return 70
+    apagadas.clear()
+    rodar(pr.lembrar(enviar_e_responder, AGORA, apagar=apagar))
+    assert apagadas == [70] and pr.mensagens_de("P2") == []
+
+
+def test_robo_apaga_o_lembrete_anterior_da_pergunta(bm, monkeypatch):
+    pr.nova("Pergunta?", OPCOES, LINK)
+    enviados, apagadas = [], []
+
+    async def send_message(chat_id, texto, **k):
+        enviados.append(texto)
+        return SimpleNamespace(message_id=700 + len(enviados))
+
+    async def delete_message(chat_id, mensagem):
+        assert chat_id == bm.ADMIN_ID
+        apagadas.append(mensagem)
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm.bot, "delete_message", delete_message)
+    for _vez in range(3):
+        with pr.db.conexao() as con:
+            con.execute("UPDATE perguntas_rafael SET ultimo_aviso = '2000-01-01 00:00:00'")
+        rodar(bm.lembrar_perguntas_do_claude())
+    # O 701 é a pergunta e fica; o 702 saiu quando o 703 chegou.
+    assert len(enviados) == 3 and apagadas == [702] and pr.mensagens_de("P1") == [701, 703]
+
+
 def test_respondida_sai_do_privado_com_os_lembretes(monkeypatch):
     # Pedido do Rafael (24/10): respondida aqui, a pergunta some do privado do bot, para ele
     # não achar que ficou sem resposta e responder de novo.
