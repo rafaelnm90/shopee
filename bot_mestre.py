@@ -17767,7 +17767,16 @@ async def lembrar_perguntas_do_claude():
         mensagem = await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True,
                                           reply_markup=botoes)
         return mensagem.message_id
-    informacoes = await perguntas_rafael.lembrar_informacoes(enviar_com_botao)
+
+    # O lembrete novo apaga o anterior: ficam o aviso e o último, que ainda dá para apagar no visto
+    # (pedido do Rafael, 10/11).
+    async def apagar(mensagem):
+        try:
+            await bot.delete_message(ADMIN_ID, mensagem)
+            return True
+        except Exception:
+            return False
+    informacoes = await perguntas_rafael.lembrar_informacoes(enviar_com_botao, apagar=apagar)
     if informacoes:
         logger.info(f"📌 [Informações do Claude] {informacoes} lembrete(s) no privado.")
         registro_processos.registrar("bot_mestre", "lembrete de informação do Claude", "enviado", str(informacoes),
@@ -17777,8 +17786,9 @@ async def lembrar_perguntas_do_claude():
 @dp.callback_query(F.data.startswith(perguntas_rafael.CALLBACK_VI))
 async def informacao_vista(callback: types.CallbackQuery):
     """
-    O Vi ✅ da informação importante do Claude: os lembretes param e saem do privado; fica a
-    mensagem tocada, sem o botão. Pedido do Rafael (09/11): DECISOES.md, Trabalho com o Claude.
+    O Vi ✅ da informação importante do Claude: os lembretes param e todos saem do privado, também
+    o tocado; fica o aviso de onde ela veio, marcado como visto, sem o botão. Pedidos do Rafael
+    (09/11 e 10/11): DECISOES.md, Trabalho com o Claude.
     """
     if callback.from_user is None or callback.from_user.id != ADMIN_ID:
         return
@@ -17792,10 +17802,13 @@ async def informacao_vista(callback: types.CallbackQuery):
         pass
     if not cod:
         return
-    _fica, sair = perguntas_rafael.lembretes_para_tirar(cod, getattr(callback.message, "message_id", None))
+    informacao = perguntas_rafael.informacao(cod)
+    fica, sair = perguntas_rafael.lembretes_para_tirar(cod, getattr(callback.message, "message_id", None))
+    apagadas = []
     for mensagem in sair:
         try:
             await bot.delete_message(ADMIN_ID, mensagem)
+            apagadas.append(mensagem)
         except Exception:
             # Mais de 48 h: o Telegram não deixa apagar; o texto vira "vista".
             try:
@@ -17803,6 +17816,15 @@ async def informacao_vista(callback: types.CallbackQuery):
                                             message_id=mensagem)
             except Exception:
                 pass
+    if not informacao:
+        return
+    perguntas_rafael.tirar_mensagens_da_informacao(informacao["id"], apagadas)
+    if fica is not None:
+        try:
+            await bot.edit_message_text(perguntas_rafael.montar_aviso_visto(informacao), chat_id=ADMIN_ID,
+                                        message_id=fica, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            pass
 
 
 # --- Monitor de saúde ---

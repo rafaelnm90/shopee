@@ -97,10 +97,16 @@ def apagar_mensagem(ident):
         return False
 
 
-def editar_texto(ident, texto):
-    """Troca o texto de uma mensagem do bot no privado (o que já não dá para apagar)."""
+def editar_texto(ident, texto, html=False):
+    """
+    Troca o texto de uma mensagem do bot no privado (o que já não dá para apagar, ou o aviso
+    marcado como visto). html=True: o texto vem em HTML. Os botões da mensagem saem.
+    """
+    campos = {"message_id": ident, "text": texto}
+    if html:
+        campos.update(parse_mode="HTML", disable_web_page_preview="true")
     try:
-        return bool(_chamar("editMessageText", {"message_id": ident, "text": texto}).get("ok"))
+        return bool(_chamar("editMessageText", campos).get("ok"))
     except Exception:
         return False
 
