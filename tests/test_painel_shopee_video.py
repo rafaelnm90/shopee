@@ -471,26 +471,27 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     texto = msg.saidas[-1]
     assert "<b>O número de visualizações</b>" in texto and "O que cada botão faz" in texto
     # Escolha do Rafael (30/10, P107): a frase numa faixa, na cor principal do produto (P159 2); a
-    # foto aumenta até tampar a largura toda da capa, e a faixa desce até o fim dela (06/11, P168).
+    # foto aumenta até tampar a largura toda da capa (06/11, P168).
     assert "aumenta até tampar a largura toda da capa" in texto and "faixa na cor principal do produto" in texto
-    # P169 1: a que não é quase quadrada estica só até 15%, e o resto fica com a foto desfocada.
-    assert "a outra estica só até 15%" in texto and "a própria foto desfocada" in texto
-    assert "a faixa desce até o fim da capa, com o número por cima dela" in texto
+    # P169 1: a quadrada (a maioria, com a frase em cima) estica até 15%, e o resto fica com a foto desfocada.
+    assert "a foto quadrada, a maioria, estica até 15% na largura" in texto and "a própria foto desfocada" in texto
     assert "um pouco menor" not in texto
-    # Vídeo do Rafael das 20:14 de 02/11: o fio em cima. Vídeo das 23:29 de 06/11 (P171): a frase,
-    # maior, na faixa, que vai na mesma cor até embaixo, também nas cores claras. Vídeos das 01:04 e
-    # 01:31 de 07/11 e vídeo das 02:49: a frase no meio da faixa toda, num tamanho harmônico, sem se
-    # preocupar com o número, e nada no preto.
-    assert "com um fio em cima" in texto and "fica no meio da faixa, de uma beirada à outra e do alto até embaixo" in texto
-    assert "pode passar por cima do começo da frase" in texto and "num tamanho harmônico, em duas linhas" in texto
-    assert "nada da capa fica no preto do fundo" in texto
-    # P173 (print de 07/11, 04:15): o fio e a faixa nunca ficam na cor do fundo da foto; a cor do produto
+    # Escolhas do Rafael (10/11, P188 2 e P189 B): a frase numa faixa no alto da capa, à esquerda da
+    # sacolinha, num tamanho harmônico (print de 07/11, 02:49), e o número na faixa de baixo, longe
+    # dela, até o fim da capa; no vídeo aberto, a mesma faixa, com a frase parada. Nada no preto.
+    assert "o robô escreve no alto da capa" in texto and "fica à esquerda da sacolinha da Shopee" in texto
+    assert "outra faixa na mesma cor, até o fim da capa" in texto and "num tamanho harmônico, em duas linhas" in texto
+    assert "fica na faixa de baixo, longe da frase (escolha sua, P188), na mesma cor dela" in texto
+    assert "a mesma faixa, com a frase parada no alto (escolha sua, P189)" in texto
+    assert "o selo Fixado cobre o começo da frase" in texto and "Nada da capa fica no preto do fundo" in texto
+    assert "com um fio em cima" not in texto and "pode passar por cima do começo da frase" not in texto
+    # P173 (print de 07/11, 04:15): as faixas nunca ficam na cor do fundo da foto; a cor do produto
     # que sumiria nele dá lugar à 2ª cor do produto ou, sem ela, ao laranja.
-    assert "O fio e a faixa nunca ficam na cor do fundo da foto (escolha sua)" in texto
+    assert "As faixas nunca ficam na cor do fundo da foto (escolha sua)" in texto
     assert "vão na 2ª cor que mais se destaca no produto (no vermelho, no laranja da Shopee) ou, sem ela, num tom" in texto
     # P174 3: sem a 2ª cor, um tom mais escuro da cor do produto; no fundo escuro, um mais claro.
     assert "num tom mais escuro da cor do produto (no branco, um cinza-claro; no fundo escuro, um tom mais claro)" in texto
-    assert "com o número por cima dela, na mesma cor" in texto and "embaixo da frase fica o preto" not in texto
+    assert "embaixo da frase fica o preto" not in texto
     assert "Até agora: 0 vídeo(s) sem a chamada e 0 com a chamada medidos na grade." in texto
     assert _textos(sv.teclado_capa(sv.ler_config())) == [
         "Ver Exemplo da Capa 👀", "Ligar Capa com Chamada ✅", "Voltar à Edição 🔙", "Voltar ao Robô 🔙"]
@@ -531,7 +532,7 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     tipo, caminhos, legenda = msg.midias[-1]
     assert tipo == "album" and [os.path.basename(c) for c in caminhos] == ["capa.png", "grade.png"]
     assert "Copo Térmico" in legenda and "“Gelado por 12 horas”" in legenda and "não foi postado" in legenda
-    assert "O número de visualizações fica em cima da faixa, logo abaixo da frase" in legenda
+    assert "O número de visualizações fica na faixa de baixo, longe da frase" in legenda
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      "edição do vídeo: exemplo da capa") == ("mandado",)
     # Com a capa do vídeo aberto (P129), ela vai como 3ª foto.
