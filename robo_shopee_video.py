@@ -115,6 +115,11 @@ TENTATIVAS_DO_TITULO = 2
 # tentativas): esses códigos se repetem para o mesmo vídeo, então ele fica de lado na hora.
 BLOQUEIOS_DO_CONTEUDO = ps.api_gemini.BLOQUEIOS_DO_CONTEUDO
 ESPERA_DO_TITULO = 45
+# Em 10/11, o título de um rascunho levou 15 min (das 06:59 às 07:14), e a rodada passou do
+# limite dela sem dizer onde o tempo foi. Os textos da IA que passam deste tempo (segundos) vão ao
+# registro com o tempo de cada parte (api_gemini.TEMPOS_DA_IA: o envio do vídeo, o processamento
+# no Google, as respostas dos modelos) e o que ficou fora da IA (a pausa entre as tentativas).
+LENTIDAO_DA_IA = 120
 # Vídeo de produto sem oferta de afiliado (não paga comissão) fica de lado antes de tocar
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 VIDEOS_SEM_OFERTA_POR_RODADA = 5
@@ -2916,6 +2921,8 @@ def _textos_da_ia(video, nomes=None):
     fixo, para o checkup mostrar a causa.
     """
     motivo, recusa = "", None
+    comeco = time.monotonic()
+    ps.api_gemini.zerar_tempos_da_ia()
     try:
         for vez in range(TENTATIVAS_DO_TITULO):
             ps.api_gemini.ULTIMO_ERRO_IA, assistente.ULTIMA_RECUSA = None, None
@@ -2946,9 +2953,33 @@ def _textos_da_ia(video, nomes=None):
                 pausa(ESPERA_DO_TITULO)
         raise Parada(f"a IA não devolveu o título ({motivo})")
     finally:
+        _anotar_lentidao_da_ia(time.monotonic() - comeco)
         # Uma vez por vídeo, com o que deu por último (o Rafael vê a causa da recusa).
         if recusa:
             _avisar_recusa(video, nomes, recusa)
+
+
+def _anotar_lentidao_da_ia(segundos):
+    """
+    Os textos da IA que passaram de LENTIDAO_DA_IA vão ao registro com onde o tempo foi, como
+    "15 min: 2 análises, envio 70 s, processamento do Google 12 min, resposta 90 s (3 modelos),
+    fora da IA 20 s" (só números).
+    """
+    if segundos < LENTIDAO_DA_IA:
+        return
+    tempos = ps.api_gemini.TEMPOS_DA_IA
+    na_ia = tempos["envio"] + tempos["processamento"] + tempos["resposta"]
+    registro_processos.registrar(
+        REGISTRO, "título da IA", "demorou",
+        f"{_duracao(segundos)}: {tempos['analises']} análise{'s' if tempos['analises'] != 1 else ''}, "
+        f"envio {_duracao(tempos['envio'])}, processamento do Google {_duracao(tempos['processamento'])}, "
+        f"resposta {_duracao(tempos['resposta'])} ({tempos['modelos']} modelo{'s' if tempos['modelos'] != 1 else ''}), "
+        f"fora da IA {_duracao(max(segundos - na_ia, 0))}")
+
+
+def _duracao(segundos):
+    """O tempo em segundos até 2 min e em minutos depois (ex.: 70 → "70 s", 720 → "12 min")."""
+    return f"{round(segundos)} s" if segundos < 120 else f"{round(segundos / 60)} min"
 
 
 # Eu → Criadores & Afiliados → Meus favoritos, como o Rafael ensinou (vídeo de 25/10/2026): a
