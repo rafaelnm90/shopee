@@ -73,7 +73,7 @@ class CelularComLog(Celular):
 
     LOG = [
         "--------- beginning of main",
-        "10-25 09:50:00.100  4321  4330 I ReactNativeJS: velho demais",
+        "10-25 09:30:00.100  4321  4330 I ReactNativeJS: velho demais",
         "10-25 09:58:10.200  4321  4330 W ReactNativeJS: o produto não entrou",
         "10-25 09:58:11.300  4400  4410 I Push: recebido",
         "10-25 09:58:12.000  5000  5010 I Gmail: outro app",
@@ -114,6 +114,22 @@ def test_caso_guarda_o_log_do_app_dos_ultimos_minutos_e_a_versao(monkeypatch):
     assert not os.path.exists(os.path.join(pasta, casos_robo.ARQUIVO_DO_LOG))
     assert casos_robo.log_do_app(object(), "com.shopee.br", AGORA) == ""
     assert casos_robo.versao_do_app(object(), "com.shopee.br") is None
+
+
+class CelularComACurtida(CelularComLog):
+    """O log com a curtida do produto 9 min antes da falha, e uma linha de antes da janela."""
+
+    LOG = ["--------- beginning of main",
+           "10-25 09:49:30.000  4321  4330 I ReactNativeJS: antes da janela",
+           "10-25 09:51:00.000  4321  4330 I ReactNativeJS: curtiu o produto",
+           "10-25 09:58:10.200  4321  4330 W ReactNativeJS: o produto não entrou"]
+
+
+def test_log_do_app_cobre_a_curtida_de_antes_do_anexar():
+    # 10/11, às 07:40: o produto curtido às 07:33 não apareceu no Minhas Curtidas, e o log do caso
+    # (6 min) começava às 07:34, depois da curtida. O log cobre os 10 min de antes da falha.
+    assert casos_robo.log_do_app(CelularComACurtida(), "com.shopee.br", AGORA).splitlines() == \
+        CelularComACurtida.LOG[2:]
 
 
 class CelularComRepetidas(CelularComLog):

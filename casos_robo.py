@@ -271,8 +271,10 @@ def _acoes_antes(d, pasta):
 # A leitura é pela hora, sem as ETIQUETAS_CALADAS, e da linha que se repete (a mesma etiqueta e o
 # mesmo texto, só os números mudam) ficam as REPETICOES_NO_LOG primeiras: em 09/11, às 22:21, o
 # app escrevia 43 linhas por segundo de "LOOPER msg invalid", e as 400 linhas do caso cobriam 9 s.
-MINUTOS_DO_LOG_DO_APP = 6
-LINHAS_DO_LOG_DO_APP = 600
+# Em 10/11, às 07:40, o produto curtido não apareceu no Minhas Curtidas, e o log de 6 min começava
+# às 07:34, depois da curtida das 07:33: a janela cobre a curtida e o Adicionar Produto do rascunho.
+MINUTOS_DO_LOG_DO_APP = 10
+LINHAS_DO_LOG_DO_APP = 1500
 ETIQUETAS_CALADAS = ("LOOPER",)
 REPETICOES_NO_LOG = 3
 ARQUIVO_DO_LOG = "log_do_app.txt"
