@@ -1016,7 +1016,8 @@ def _linha_da_medicao(medicao):
 def texto_capa(config, medicao):
     """
     A tela da Capa com Chamada. Escolhas do Rafael (29/10, P76; 02/11, P122 e P125; 06/11, P168; 07/11,
-    P169 1, P171, o print das 02:49 e P175 1; 08/11, P181 2; 10/11, P188 2 e P189 B): DECISOES.md, Shopee Vídeo.
+    P169 1, P171, o print das 02:49 e P175 1; 08/11, P181 2; 10/11, P188 2, P189 B e P196 1): DECISOES.md,
+    Shopee Vídeo.
     """
     return (
         "🏷️ <b>Capa com Chamada</b>\n"
@@ -1028,15 +1029,16 @@ def texto_capa(config, medicao):
         "as diretrizes da Shopee punem promessa que o vídeo não mostra e desconto falso, e o preço muda. A frase "
         "fica à esquerda da sacolinha da Shopee, em letra grande, mas num tamanho harmônico, em duas linhas (a "
         "palavra só vai numa linha). Logo abaixo da faixa vem a foto do anúncio, que aumenta até tampar a largura "
-        "toda da capa (a foto quadrada, a maioria, estica até 15% na largura; o que ainda faltar fica com a própria "
-        "foto desfocada), e, embaixo dela, outra faixa na mesma cor, até o fim da capa. Nada da capa fica no preto "
-        "do fundo, e as faixas não cobrem nada da foto. As faixas nunca ficam na cor do fundo "
+        "toda da capa (a foto quadrada, a maioria, perde só uns 1% de cada lado; a de outro formato estica até "
+        "15%, e o que ainda faltar fica com a própria foto desfocada), e, embaixo dela, só um fio fino na mesma "
+        "cor, como no vídeo aberto (escolha sua, P196). Nada da capa fica no preto do fundo, e a faixa e o fio não "
+        "cobrem nada da foto. A faixa e o fio nunca ficam na cor do fundo "
         "da foto (escolha sua): quando a cor do produto é a do fundo (o produto branco numa foto de fundo branco) "
-        "e elas sumiriam nela, vão na 2ª cor que mais se destaca no produto (no vermelho, no laranja da Shopee) ou, "
+        "e eles sumiriam nela, vão na 2ª cor que mais se destaca no produto (no vermelho, no laranja da Shopee) ou, "
         "sem ela, num tom mais escuro da cor do produto (no branco, um cinza-claro; no fundo escuro, um tom mais "
         "claro); a caixa do nome e a moldura da miniatura continuam na cor do produto.\n\n"
-        "<b>O número de visualizações</b>: fica na faixa de baixo, longe da frase (escolha sua, P188), na mesma "
-        "cor dela (nas cores claras, o número, em branco, fica mais apagado). A sacolinha da Shopee fica na faixa "
+        "<b>O número de visualizações</b>: fica embaixo, em cima da foto, como nos outros posts do perfil, longe da "
+        "frase (escolha sua, P196). A sacolinha da Shopee fica na faixa "
         "de cima, à direita da frase. Nos vídeos fixados no perfil, o selo Fixado cobre o começo da frase.\n\n"
         f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, no lugar "
         "da foto do anúncio, nos rascunhos do robô e no modo assistente: o app usa o primeiro quadro do vídeo como "
@@ -1309,8 +1311,8 @@ def legenda_do_exemplo_da_capa(nome, chamada):
             "1ª foto: a capa inteira, no 1º quadro do vídeo, que a grade usa. 2ª foto: o pedaço que a grade do "
             "seu perfil mostra. 3ª foto: o que aparece com o vídeo aberto, no resto dos 2 primeiros segundos.\n"
             f"✍️ Chamada (a vantagem que a IA viu no vídeo, em poucas palavras): “{html_escape(chamada)}”\n"
-            "🔢 O número de visualizações fica na faixa de baixo, longe da frase, e a sacolinha da Shopee, na faixa "
-            "de cima, à direita da frase: nenhum deles cobre a chamada.\n"
+            "🔢 O número de visualizações fica embaixo, em cima da foto, longe da frase (embaixo, só o fio fino), e a "
+            "sacolinha da Shopee, na faixa de cima, à direita da frase: nenhum deles cobre a chamada.\n"
             f"Toque de novo em {BOTAO_EXEMPLO_DA_CAPA} para ver outro vídeo.")
 
 
