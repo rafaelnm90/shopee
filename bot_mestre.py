@@ -2410,6 +2410,30 @@ def janela_de_hoje(config, agora):
     return inicio, agora.replace(hour=fim, minute=0, second=0, microsecond=0)
 
 
+# A rotina do Viral ou do Grupo Público que o sorteio empurrou para depois do fim da janela (o
+# espaçamento entre as do mesmo assunto, de 1 a 2 h, ou o desvio das vizinhas) volta para este
+# tanto (min) antes do fim.
+MINUTOS_ANTES_DO_FIM_DA_JANELA = 10
+
+
+def dentro_da_janela(horario, config, agora, vizinhas=()):
+    """
+    O horário sorteado de uma rotina do Viral ou do Grupo Público dentro da janela dela no
+    painel: o que passou do fim volta para MINUTOS_ANTES_DO_FIM_DA_JANELA antes dele, a 2 min ou
+    mais das vizinhas (os horários já marcados no canal). Com a janela de hoje já passada (o bot
+    fora do ar, o painel editado tarde), fica como está: sai logo, para não se perder.
+    Decisão do Rafael (P85, refeita como P94): DECISOES.md, Trabalho com o Claude.
+    """
+    inicio, fim = janela_de_hoje(config, agora)
+    if horario <= fim or fim <= agora:
+        return horario
+    quando = fim - timedelta(minutes=MINUTOS_ANTES_DO_FIM_DA_JANELA)
+    piso = max(agora + timedelta(minutes=2), inicio)
+    while quando > piso and any(abs((quando - vizinha).total_seconds()) < 120 for vizinha in vizinhas):
+        quando -= timedelta(minutes=3)
+    return max(quando, piso)
+
+
 def boa_noite_de_hoje(agora):
     """Quando sai o Boa Noite de hoje (o job marcado); None se não sai mais hoje."""
     quando = proxima_vez_do_job(scheduler.get_job('job_rotina_boa_noite_0'), agora)
@@ -2595,15 +2619,24 @@ async def _disparar_mensagem(tipo, forcar=False):
 
     # Mesmo assunto em seguida: a última rotina de hoje neste canal foi deste assunto e há
     # outra, de outro assunto, marcada para hoje; esta sai logo depois dela. Sem outra
-    # marcada, sai na hora, e fica anotado (o checkup não a cobra).
+    # marcada, sai na hora, e fica anotado (o checkup não a cobra). A espera, como a do vídeo,
+    # não passa do fim da janela desta rotina no painel (P93 e P94): com a outra marcada só
+    # depois do fim, esta sai na hora, anotada também.
     # Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
-    em_seguida = False
+    em_seguida = None
     if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
         if assunto_anterior_no_canal(dados_rotina, canal_rotina, hoje_str) == tipo:
             depois_de = proxima_de_outro_assunto(tipo, canal_rotina, agora_tz)
-            em_seguida = not depois_de
+            fim_da_janela = (janela_de_hoje(dados_rotina[tipo], agora_tz)[1]
+                             if isinstance(dados_rotina.get(tipo), dict) else None)
+            if depois_de and fim_da_janela and depois_de >= fim_da_janela:
+                depois_de, em_seguida = None, rotinas.EM_SEGUIDA_FIM_DA_JANELA
+            elif not depois_de:
+                em_seguida = rotinas.EM_SEGUIDA_SEM_OUTRO
             if depois_de:
                 novo_horario = depois_de + timedelta(minutes=random.randint(10, 25))
+                if fim_da_janela:
+                    novo_horario = min(novo_horario, fim_da_janela)
                 job_id = f"job_rotina_{tipo}_seguido_{int(agora_tz.timestamp())}"
                 scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
                 logger.info(f"🔀 [Assunto seguido] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: a última "
@@ -2681,7 +2714,7 @@ async def _disparar_mensagem(tipo, forcar=False):
     salvar_config_rotina(dados_rotina)
     fim_da_espera_pelo_video(tipo)
     if em_seguida:
-        registro_processos.registrar("bot_mestre", processo_rotina, rotinas.EM_SEGUIDA_SEM_OUTRO, tipo, ok=None)
+        registro_processos.registrar("bot_mestre", processo_rotina, em_seguida, tipo, ok=None)
 
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
@@ -3233,7 +3266,7 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
                 horarios_ocupados_viral.append(encaixe)  # ocupa a lacuna para a próxima rotina
                 horarios_ocupados_viral.sort()
             else:
-                minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60 + 59)
+                minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60)
                 hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
                 horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
             
@@ -3242,14 +3275,13 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
             if horario_candidato >= fronteira_final: horario_candidato = fronteira_final - timedelta(minutes=random.randint(5, 60))
             if horario_candidato <= agora: horario_candidato = agora + timedelta(minutes=random.randint(2, 10))
                 
-            conflito_geral = False
-            for job_existente in scheduler.get_jobs():
-                quando_existente = proxima_vez_do_job(job_existente, agora)
-                if quando_existente and _escopo_do_job(job_existente.id) == "viral":
-                    if abs((horario_candidato - quando_existente).total_seconds()) < 120:
-                        conflito_geral = True
-                        break
-            if conflito_geral: horario_candidato += timedelta(minutes=random.randint(3, 8))
+            vizinhas_viral = [quando for quando in (proxima_vez_do_job(job_existente, agora)
+                                                    for job_existente in scheduler.get_jobs()
+                                                    if _escopo_do_job(job_existente.id) == "viral") if quando]
+            if any(abs((horario_candidato - quando).total_seconds()) < 120 for quando in vizinhas_viral):
+                horario_candidato += timedelta(minutes=random.randint(3, 8))
+            # O espaçamento do mesmo assunto e o desvio não passam do fim da janela (P94).
+            horario_candidato = dentro_da_janela(horario_candidato, config, agora, vizinhas_viral)
                 
             job_id = f"job_rotina_{tipo}_{indice}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_candidato, manter_horarios),
@@ -3331,7 +3363,7 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
                 horarios_ocupados_publico.append(encaixe)
                 horarios_ocupados_publico.sort()
             else:
-                minuto_absoluto = random.randint(ini_cfg * 60, min(fim_cfg, 23) * 60 + 59)
+                minuto_absoluto = random.randint(ini_cfg * 60, min(fim_cfg, 23) * 60)
                 hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
                 horario_candidato = agora.replace(hour=min(hora_sorteada, 23), minute=min_sorteado, second=0, microsecond=0)
 
@@ -3341,12 +3373,13 @@ def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
                 horario_candidato = agora + timedelta(minutes=random.randint(3, 12))
 
             # Anti-colisão só contra as rotinas do próprio Público.
-            for job_existente in scheduler.get_jobs():
-                quando_existente = proxima_vez_do_job(job_existente, agora)
-                if quando_existente and _escopo_do_job(job_existente.id) == "publico":
-                    if abs((horario_candidato - quando_existente).total_seconds()) < 120:
-                        horario_candidato += timedelta(minutes=random.randint(3, 8))
-                        break
+            vizinhas_publico = [quando for quando in (proxima_vez_do_job(job_existente, agora)
+                                                      for job_existente in scheduler.get_jobs()
+                                                      if _escopo_do_job(job_existente.id) == "publico") if quando]
+            if any(abs((horario_candidato - quando).total_seconds()) < 120 for quando in vizinhas_publico):
+                horario_candidato += timedelta(minutes=random.randint(3, 8))
+            # O espaçamento do mesmo assunto e o desvio não passam do fim da janela (P94).
+            horario_candidato = dentro_da_janela(horario_candidato, config, agora, vizinhas_publico)
 
             job_id = f"job_rotina_{tipo}_{indice}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_candidato, manter_horarios),

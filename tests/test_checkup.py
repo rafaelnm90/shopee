@@ -649,6 +649,21 @@ def test_rotina_em_seguida_sem_outro_assunto_marcado_nao_e_cobrada():
                                        "(sem outro assunto marcado)"]
 
 
+def test_rotina_em_seguida_com_o_outro_assunto_so_depois_da_janela_nao_e_cobrada():
+    # 09/11, Viral: a espera pelo outro assunto não passa do fim da janela da rotina (P93 e P94);
+    # com o outro marcado só depois, ela sai na hora, o bot anota o porquê, e o checkup não a cobra.
+    import registro_processos
+    import rotinas
+    db.salvar_config("config_rotina", {"historico_diario": {"data": "2026-10-23", "contagem": {
+        "promo_achadinhos_viral": ["19:00", "19:30"]}}})
+    registro_processos.registrar("bot_mestre", "rotina Viral", rotinas.EM_SEGUIDA_FIM_DA_JANELA,
+                                 "promo_achadinhos_viral", ok=None, agora=AGORA.replace(hour=19, minute=31))
+    viral = checkup.rotinas_do_dia(AGORA)["Viral"]
+    assert (viral["seguidos"], viral["seguidos_sem_outro"]) == (0, 1)
+    assert viral["pares_seguidos"] == ["19:00 promo_achadinhos_viral → 19:30 promo_achadinhos_viral "
+                                       "(o outro assunto só depois do fim da janela)"]
+
+
 def test_rotina_antiga_do_banco_nao_conta_e_a_que_falta_mostra_a_linha_do_tempo():
     # Checkup de 23/10: uma chave antiga do banco (sem texto no código, nunca enviada)
     # contava como 16 rotinas do canal principal, com intervalos curtos e "a menos".

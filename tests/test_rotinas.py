@@ -426,3 +426,74 @@ def test_rotina_espera_o_tempo_que_o_telegram_pede_e_tenta_de_novo(bm, monkeypat
     with pytest.raises(TelegramRetryAfter):
         rodar(bm.com_espera_do_telegram(envio(bm.ESPERA_MAXIMA_DO_TELEGRAM + 1)))
     assert len(tentativas) == 1
+
+
+# As janelas do Viral e do Grupo Público, com uma rotina de 3 por dia: a última de cada rodada do
+# sorteio pode ser do mesmo assunto da anterior, e o espaçamento entre elas (1 a 2 h) a empurrava.
+JANELAS_DO_VIRAL = {"promo_principal": (10, 20, 2), "link_grupo_viral": (9, 21, 2), "divulgar_gem_viral": (8, 22, 1),
+                    "promo_publico_viral": (10, 20, 1), "promo_achadinhos_viral": (10, 20, 3)}
+JANELAS_DO_PUBLICO = {"link_grupo_publico": (9, 21, 2), "promo_principal_publico": (10, 20, 1),
+                      "promo_viral_publico": (10, 20, 1), "promo_achadinhos_publico": (10, 20, 3)}
+
+
+def _horarios_do_escopo(bm, escopo):
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            bm.agendar_tarefas_diarias(escopo)
+            return {j.id: j.next_run_time.astimezone(bm.fuso_horario) for j in bm.scheduler.get_jobs()
+                    if j.id.startswith("job_rotina_")}
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    return rodar(cenario())
+
+
+@pytest.mark.parametrize("escopo, janelas", [("viral", JANELAS_DO_VIRAL), ("publico", JANELAS_DO_PUBLICO)])
+def test_rotinas_do_viral_e_do_grupo_publico_saem_na_janela_do_painel(bm, relogio, escopo, janelas):
+    # 09/11, Viral: promo_achadinhos_viral saiu às 21:10 com a janela das 10h às 20h. O sorteio
+    # empurrava a rotina do mesmo assunto da anterior de 1 a 2 h, sem olhar o fim da janela.
+    # Escolha do Rafael (P85, refeita como P94): cada rotina sai na janela dela no painel.
+    import random
+    relogio("00:30")
+    r = bm.ler_config_rotina()
+    r.update({tipo: {"inicio": i, "fim": f, "frequencia": q} for tipo, (i, f, q) in janelas.items()})
+    r.update({"historico_diario": {"data": "", "contagem": {}}})
+    bm.salvar_config_rotina(r)
+    for semente in range(40):
+        random.seed(semente)
+        horarios = _horarios_do_escopo(bm, escopo)
+        do_escopo = {ident: quando for ident, quando in horarios.items()
+                     if ident[len("job_rotina_"):].rsplit("_", 1)[0] in janelas}
+        assert len(do_escopo) == sum(q for _i, _f, q in janelas.values()), semente
+        for ident, quando in do_escopo.items():
+            inicio, fim, _q = janelas[ident[len("job_rotina_"):].rsplit("_", 1)[0]]
+            assert inicio * 60 <= quando.hour * 60 + quando.minute <= fim * 60, (semente, ident, quando)
+
+
+def test_mesmo_assunto_nao_espera_outro_assunto_marcado_depois_do_fim_da_janela(bm, relogio, monkeypatch):
+    # 09/11, Viral: promo_achadinhos_viral (janela 10h às 20h) foi adiada às 18:02 para depois da
+    # próxima de outro assunto, e saiu depois das 20h. A espera, como a do vídeo (P93), não passa
+    # do fim da janela dela (P94): com o outro assunto só depois do fim, ela sai na hora.
+    relogio("19:30")
+    agora = datetime.now(bm.fuso_horario)
+    _viral_ate_a_ia(bm, monkeypatch)
+    _historico(bm, agora.strftime("%Y-%m-%d"), {"promo_achadinhos_viral": ["19:00"]})
+
+    async def cenario(outra):
+        bm.scheduler.start()
+        try:
+            bm.scheduler.add_job(bm.disparar_mensagem, 'date', args=["divulgar_gem_viral"], id="job_rotina_divulgar_gem_viral_0",
+                                 run_date=agora.replace(hour=outra[0], minute=outra[1], second=0, microsecond=0))
+            await bm.disparar_mensagem("promo_achadinhos_viral")
+            return {j.id: j.next_run_time.astimezone(bm.fuso_horario) for j in bm.scheduler.get_jobs()}
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    with pytest.raises(Parou):
+        rodar(cenario((21, 0)))
+    linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[1] == "rotina Viral" and l[2] == bm.rotinas.EM_SEGUIDA_FIM_DA_JANELA for l in linhas)
+    # O outro assunto antes do fim: espera por ele, mas sai até o fim da janela.
+    jobs = rodar(cenario((19, 50)))
+    adiado = next(quando for ident, quando in jobs.items()
+                  if ident.startswith("job_rotina_promo_achadinhos_viral_seguido_"))
+    assert adiado.strftime("%H:%M:%S") == "20:00:00"
