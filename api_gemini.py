@@ -10,6 +10,7 @@ GEMINI_KEY no .env.
 import os
 import re
 import asyncio
+import contextlib
 import logging
 import time
 from datetime import datetime, timedelta
@@ -147,6 +148,28 @@ def _tirar_da_vez(modelo, erro_txt):
 # submissão quando a análise falha, em vez de um genérico "falha temporária".
 ULTIMO_ERRO_IA = None
 
+# Onde foi o tempo das análises de vídeo desde o último zerar_tempos_da_ia(): quantas análises, os
+# segundos do envio do vídeo, do processamento dele no Google e das respostas dos modelos, e quantos
+# modelos foram pedidos. Em 10/11, o título de um rascunho levou 15 min, e a rodada do robô da Shopee
+# Vídeo passou do limite dela sem dizer onde o tempo foi. Só o robô, que faz uma análise de cada
+# vez, lê (o bot_mestre pode fazer duas juntas e misturar as somas).
+TEMPOS_DA_IA = {"analises": 0, "envio": 0.0, "processamento": 0.0, "resposta": 0.0, "modelos": 0}
+
+
+def zerar_tempos_da_ia():
+    TEMPOS_DA_IA.update(analises=0, envio=0.0, processamento=0.0, resposta=0.0, modelos=0)
+
+
+@contextlib.contextmanager
+def _medir(parte):
+    """Soma em TEMPOS_DA_IA[parte] o tempo do bloco, com erro ou sem."""
+    comeco = time.monotonic()
+    try:
+        yield
+    finally:
+        TEMPOS_DA_IA[parte] += time.monotonic() - comeco
+
+
 # Os códigos do Google (finish_reason e block_reason) de resposta vazia pelo conteúdo do
 # pedido (o vídeo junto com o texto): se repetem para o mesmo pedido. Quem pediu a análise
 # põe o vídeo de lado; não é falha do robô nem da IA.
@@ -255,24 +278,27 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
 
     def processar_ia():
         logger.info("🚀 [IA] Iniciando upload do vídeo para o Google Storage...")
-        
+        TEMPOS_DA_IA["analises"] += 1
+
         video_gemini = None
-        for tentativa in range(3):
-            try:
-                video_gemini = client_genai.files.upload(file=caminho_video)
-                if video_gemini:
-                    break
-            except Exception as erro_rede:
-                logger.warning(f"⚠️ [IA] Tentativa {tentativa+1}/3 falhou por instabilidade: {erro_rede}")
-                if tentativa < 2: time.sleep(3)
-                else: raise erro_rede
-        
+        with _medir("envio"):
+            for tentativa in range(3):
+                try:
+                    video_gemini = client_genai.files.upload(file=caminho_video)
+                    if video_gemini:
+                        break
+                except Exception as erro_rede:
+                    logger.warning(f"⚠️ [IA] Tentativa {tentativa+1}/3 falhou por instabilidade: {erro_rede}")
+                    if tentativa < 2: time.sleep(3)
+                    else: raise erro_rede
+
         try:
-            while video_gemini.state.name == "PROCESSING":
-                logger.info("⏳ [IA] O vídeo está sendo processado nos servidores da Google...")
-                time.sleep(2)
-                video_gemini = client_genai.files.get(name=video_gemini.name)
-                
+            with _medir("processamento"):
+                while video_gemini.state.name == "PROCESSING":
+                    logger.info("⏳ [IA] O vídeo está sendo processado nos servidores da Google...")
+                    time.sleep(2)
+                    video_gemini = client_genai.files.get(name=video_gemini.name)
+
             if video_gemini.state.name == "FAILED":
                 raise Exception("Falha de processamento no servidor do Google.")
                 
@@ -286,11 +312,13 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
             recusas = 0   # modelos que responderam vazio pelo conteúdo do pedido
             codigos, categorias = set(), set()   # o que o Google disse nessas recusas
             for modelo_nome in _modelos_da_vez():
+                TEMPOS_DA_IA["modelos"] += 1
                 try:
-                    response = client_genai.models.generate_content(
-                        model=modelo_nome,
-                        contents=[video_gemini, *partes_das_imagens, prompt]
-                    )
+                    with _medir("resposta"):
+                        response = client_genai.models.generate_content(
+                            model=modelo_nome,
+                            contents=[video_gemini, *partes_das_imagens, prompt]
+                        )
 
                     texto = None
                     try:

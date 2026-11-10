@@ -6719,6 +6719,53 @@ def test_sinais_do_anexar_dizem_a_memoria_do_app(monkeypatch, avisos):
         "R", (), {"output": " App Summary\n           Java Heap:   515072\n"})()})(), robo.ps.PACOTE) is None
 
 
+class _RelogioDoRobo:
+    """O time do robô com o monotonic de mentira (o do asyncio continua o de verdade)."""
+
+    def __init__(self):
+        self.agora = 0.0
+
+    def monotonic(self):
+        return self.agora
+
+    def __getattr__(self, nome):
+        return getattr(time, nome)
+
+
+def test_titulo_da_ia_lento_diz_onde_o_tempo_foi(monkeypatch):
+    # 10/11: o título de um rascunho levou 15 min (das 06:59 às 07:14), e a rodada passou do limite
+    # dela sem dizer onde o tempo foi. Os textos que passam de LENTIDAO_DA_IA vão ao registro com o
+    # tempo do envio do vídeo, do processamento no Google, da resposta dos modelos e o de fora da IA.
+    relogio, duracoes = _RelogioDoRobo(), iter([900.0, 20.0])
+
+    async def textos_do_video(arquivo, nome):
+        robo.ps.api_gemini.TEMPOS_DA_IA.update(analises=2, envio=70.0, processamento=720.0, resposta=90.0,
+                                               modelos=3)
+        relogio.agora += next(duracoes)
+        return {"titulo": "Mala de bordo", "violacao": False}
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos_do_video)
+    monkeypatch.setattr(robo, "time", relogio)
+    assert robo._textos_da_ia({"arquivo": "v.mp4", "nome": "Mala"})["titulo"] == "Mala de bordo"
+    linhas = [(r[2], r[3]) for r in robo.registro_processos.sequencia("shopee_video", "título da IA",
+                                                                      "2000-01-01 00:00:00")]
+    assert ("demorou", "15 min: 2 análises, envio 70 s, processamento do Google 12 min, resposta 90 s "
+                       "(3 modelos), fora da IA 20 s") in linhas
+    # A rápida não vai ao registro como lenta, e cada texto zera as somas da IA.
+    assert robo._textos_da_ia({"arquivo": "v.mp4", "nome": "Mala"})["titulo"] == "Mala de bordo"
+    linhas = [r[2] for r in robo.registro_processos.sequencia("shopee_video", "título da IA", "2000-01-01 00:00:00")]
+    assert linhas.count("demorou") == 1
+    robo.ps.api_gemini.TEMPOS_DA_IA.update(analises=5)
+    monkeypatch.setattr(robo.assistente, "textos_do_video", lambda arquivo, nome: _sem_titulo())
+    monkeypatch.setattr(robo, "pausa", lambda segundos: None)
+    with pytest.raises(robo.Parada):
+        robo._textos_da_ia({"arquivo": "v.mp4", "nome": "Mala"})
+    assert robo.ps.api_gemini.TEMPOS_DA_IA["analises"] == 0
+
+
+async def _sem_titulo():
+    return None
+
+
 def test_faixas_do_app_aberto():
     faixa = robo.faixa_do_app_aberto
     assert [faixa(m) for m in (0, 59, 60, 359, 360, 719, 720, 1439, 1440, 5000)] == [

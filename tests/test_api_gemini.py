@@ -1,4 +1,5 @@
 """IA: modelo sem cota ou inexistente sai da cascata por um tempo, em vez de gastar chamada a cada pedido."""
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -237,3 +238,25 @@ def test_video_com_fotos_rotuladas_manda_cada_rotulo_antes_da_foto(video_no_gemi
     assert video.name == "files/1" and pedido == "compare"
     assert (rotulo_1, rotulo_3) == ("Anúncio 1: Garrafa", "Anúncio 3: Caneca")
     assert [foto.inline_data.data for foto in (foto_1, foto_2, foto_3)] == [b"\xff\xd8um", b"\xff\xd8dois", b"\xff\xd8tres"]
+
+
+def test_analise_do_video_mede_o_envio_o_processamento_e_a_resposta(video_no_gemini, monkeypatch):
+    # 10/11: o título de um rascunho levou 15 min, e não se sabia se foi o envio, o processamento
+    # no Google ou a resposta dos modelos. TEMPOS_DA_IA soma o tempo de cada parte (e quantas
+    # análises e quantos modelos foram pedidos) desde o último zerar_tempos_da_ia().
+    video_no_gemini.respostas = {"a": "500 instável", "b": "ok"}
+    marcas = iter([0.0, 30.0, 30.0, 630.0, 630.0, 640.0, 640.0, 700.0])
+
+    class Relogio:
+        """O time do api_gemini, com o monotonic de mentira (o do asyncio continua o de verdade)."""
+        def monotonic(self):
+            return next(marcas)
+
+        def __getattr__(self, nome):
+            return getattr(time, nome)
+    monkeypatch.setattr(ia, "time", Relogio())
+    ia.zerar_tempos_da_ia()
+    assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "ok"
+    assert ia.TEMPOS_DA_IA == {"analises": 1, "envio": 30.0, "processamento": 600.0, "resposta": 70.0, "modelos": 2}
+    ia.zerar_tempos_da_ia()
+    assert ia.TEMPOS_DA_IA == {"analises": 0, "envio": 0.0, "processamento": 0.0, "resposta": 0.0, "modelos": 0}
