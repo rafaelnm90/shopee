@@ -1087,7 +1087,12 @@ MOTIVOS_DA_TELA_APAGADA = {"timeout": "tempo sem uso (ela apagou sozinha)", "pow
                            "application": "um app pediu", "device_admin": "o bloqueio do aparelho",
                            "inattentive": "tempo sem uso (ela apagou sozinha)"}
 HORAS_DO_HISTORICO = 24
-MARCOS_MOSTRADOS = 20
+# A tomada que sai e volta em segundos (em 11/11/2026, a cada meia hora, com a carga perto de 80%)
+# encheria a linha e esconderia o resto do dia: ela vira uma contagem com as horas, e as mudanças da
+# carga junto dela saem. A tela, que é o que importa, aparece toda, dizendo se a tomada mexeu junto.
+PISCADA_DA_TOMADA = timedelta(minutes=2)
+JUNTO_DA_TOMADA = timedelta(minutes=1)
+MARCOS_MOSTRADOS = 60
 
 
 def _tempo_do_historico(texto):
@@ -1151,6 +1156,21 @@ def interpretar_historico(texto, agora=None, horas=HORAS_DO_HISTORICO):
     return marcos
 
 
+def inicio_do_historico(texto):
+    """A 1ª hora do "dumpsys batterystats --history" (o histórico do celular não vai antes dela); None sem ela."""
+    for linha in (texto or "").splitlines():
+        achado = LINHA_DO_HISTORICO.match(linha)
+        hora_marcada = HORA_DO_HISTORICO.search(achado.group(2)) if achado else None
+        tempo = _tempo_do_historico(achado.group(1)) if hora_marcada else None
+        if tempo is None:
+            continue
+        try:
+            return datetime.strptime(hora_marcada.group(1), "%Y-%m-%d-%H-%M-%S") - timedelta(milliseconds=tempo)
+        except ValueError:
+            continue
+    return None
+
+
 def interpretar_motivo_da_tela_apagada(energia_do_android):
     """Do "dumpsys power": por que a tela apagou pela última vez, em palavras fixas; None sem o motivo."""
     achado = MOTIVO_DA_TELA_APAGADA.search(energia_do_android or "")
@@ -1159,18 +1179,95 @@ def interpretar_motivo_da_tela_apagada(energia_do_android):
     return MOTIVOS_DA_TELA_APAGADA.get(achado.group(1), achado.group(1)[:30])
 
 
-def descrever_tela_e_tomada(marcos, motivo):
-    """Os marcos (interpretar_historico) e o motivo da última tela apagada numa linha, só com horas e palavras fixas."""
-    if not marcos:
-        texto = f"nada nas últimas {HORAS_DO_HISTORICO} h do histórico do celular"
-    else:
-        texto = "; ".join(f"{quando:%d/%m %H:%M} {marco}" + (f" ({carga}%)" if carga is not None else "")
-                          for quando, marco, carga in marcos[-MARCOS_MOSTRADOS:])
-    return texto + f" | a tela apagou pela última vez por: {motivo or 'motivo não lido'}"
+def _horas(momentos):
+    """As horas em sequência, com o dia só quando ele muda ("10/11 23:40, 23:58, 11/11 00:20")."""
+    partes, dia = [], None
+    for quando in momentos:
+        partes.append(f"{quando:%H:%M}" if quando.date() == dia else f"{quando:%d/%m %H:%M}")
+        dia = quando.date()
+    return ", ".join(partes)
+
+
+def _os_ultimos(itens, rotulo=""):
+    """Os últimos MARCOS_MOSTRADOS itens, avisando quantos ficaram de fora antes deles."""
+    if len(itens) <= MARCOS_MOSTRADOS:
+        return itens
+    return [f"(mais {len(itens) - MARCOS_MOSTRADOS}{rotulo} antes)"] + itens[-MARCOS_MOSTRADOS:]
+
+
+def _piscadas_da_tomada(marcos):
+    """
+    As saídas da tomada nos marcos: (piscadas, saídas longas, índices já contados), a piscada é a
+    saída que volta em até PISCADA_DA_TOMADA (a hora em que saiu), a longa é (saiu, voltou ou None),
+    e os índices são os marcos da tomada e da carga que elas explicam (a carga junto da piscada).
+    """
+    piscadas, longas, contados = [], [], set()
+    for i, (quando, marco, _carga) in enumerate(marcos):
+        if marco != "fora da tomada":
+            continue
+        volta = next(((j, q) for j, (q, m, _c) in enumerate(marcos[i + 1:], i + 1) if m.startswith("na tomada")),
+                     None)
+        contados.add(i)
+        if volta:
+            contados.add(volta[0])
+        if volta and volta[1] - quando <= PISCADA_DA_TOMADA:
+            piscadas.append(quando)
+            contados.update(j for j, (q, m, _c) in enumerate(marcos)
+                            if m in CARGAS.values() and quando - JUNTO_DA_TOMADA <= q <= volta[1] + JUNTO_DA_TOMADA)
+        else:
+            longas.append((quando, volta[1] if volta else None))
+    return piscadas, longas, contados
+
+
+def descrever_tela_e_tomada(marcos, motivo, inicio=None):
+    """
+    Os marcos (interpretar_historico) e o motivo da última tela apagada em linhas curtas, só com horas,
+    números e palavras fixas: desde quando o celular guarda o histórico (inicio), cada vez que a tela
+    acendeu ou apagou (com a carga e a tomada que mexeu junto), as piscadas da tomada contadas com as
+    horas, as saídas mais longas, as mudanças da carga fora das piscadas e o motivo.
+    """
+    piscadas, longas, contados = _piscadas_da_tomada(marcos)
+    saidas = [momento for saida, volta in longas for momento in (saida, volta) if momento]
+
+    def junto(quando):
+        if any(abs(quando - piscada) <= JUNTO_DA_TOMADA for piscada in piscadas):
+            return "; a tomada piscou junto"
+        return "; a tomada mexeu junto" if any(abs(quando - momento) <= JUNTO_DA_TOMADA for momento in saidas) else ""
+
+    def com_carga(carga, resto=""):
+        return f" ({carga}%{resto})" if carga is not None else (f" ({resto[2:]})" if resto else "")
+
+    linhas = []
+    if inicio:
+        linhas.append(f"o histórico do celular começa em {inicio:%d/%m %H:%M} (aqui, só as últimas "
+                      f"{HORAS_DO_HISTORICO} h)")
+    tela = [f"{q:%d/%m %H:%M} {m.split(' ', 1)[1]}{com_carga(c, junto(q))}"
+            for q, m, c in marcos if m in MARCOS_DA_TELA.values()]
+    linhas.append("tela: " + ("; ".join(_os_ultimos(tela)) if tela else "não acendeu nem apagou"))
+    tomada = []
+    if piscadas:
+        tomada.append(f"saiu e voltou em até {PISCADA_DA_TOMADA.seconds // 60} min {len(piscadas)} vez(es), às "
+                      + _horas(piscadas[-MARCOS_MOSTRADOS:])
+                      + (f" (e mais {len(piscadas) - MARCOS_MOSTRADOS} antes)" if len(piscadas) > MARCOS_MOSTRADOS
+                         else ""))
+    for saida, volta in longas:
+        if volta:
+            minutos = round((volta - saida).total_seconds() / 60)
+            tomada.append(f"fora das {saida:%d/%m %H:%M} às {volta:%d/%m %H:%M} ({minutos} min)")
+        else:
+            tomada.append(f"fora das {saida:%d/%m %H:%M} em diante")
+    tomada += [f"{q:%d/%m %H:%M} {m}{com_carga(c)}" for i, (q, m, c) in enumerate(marcos)
+               if m.startswith("na tomada") and i not in contados]
+    linhas.append("tomada: " + ("; ".join(tomada) if tomada else "não mexeu"))
+    carga = [f"{q:%d/%m %H:%M} {m}{com_carga(c)}" for i, (q, m, c) in enumerate(marcos)
+             if m in CARGAS.values() and i not in contados]
+    linhas.append("carga fora das piscadas: " + ("; ".join(_os_ultimos(carga)) if carga else "sem mudança"))
+    linhas.append(f"a tela apagou pela última vez por: {motivo or 'motivo não lido'}")
+    return linhas
 
 
 def historico_da_tela_e_da_tomada():
-    """descrever_tela_e_tomada do celular conectado; None sem o celular ou sem resposta."""
+    """descrever_tela_e_tomada do celular conectado (as linhas); None sem o celular ou sem resposta."""
     alvo = endereco()
     if not alvo or shutil.which("adb") is None:
         return None
@@ -1179,7 +1276,7 @@ def historico_da_tela_e_da_tomada():
         return None
     energia = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "power", timeout=15)
     motivo = interpretar_motivo_da_tela_apagada(energia[1]) if av._ok(energia) else None
-    return descrever_tela_e_tomada(interpretar_historico(historico[1]), motivo)
+    return descrever_tela_e_tomada(interpretar_historico(historico[1]), motivo, inicio_do_historico(historico[1]))
 
 
 def descrever_estado():

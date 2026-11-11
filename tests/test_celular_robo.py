@@ -1408,14 +1408,69 @@ def test_tela_e_tomada_pelo_historico_do_celular(cr):
         "carregando", "na tomada (carregador)", "tela acesa", "carga em pausa"]
     assert cr.interpretar_historico("", agora=agora) == []
     assert cr.interpretar_historico("lixo\n  +1h (2) 100 +screen\n", agora=agora) == []   # sem a hora de partida
-    linha = cr.descrever_tela_e_tomada(marcos[-4:], cr.interpretar_motivo_da_tela_apagada(
-        "  mWakefulness=Awake\n  mLastSleepReason=timeout\n"))
-    assert linha == ("11/11 08:27 carregando (81%); 11/11 08:27 na tomada (carregador) (81%); 11/11 08:27 tela acesa "
-                     "(81%); 11/11 08:40 carga em pausa (81%) | a tela apagou pela última vez por: tempo sem uso (ela "
-                     "apagou sozinha)")
-    assert "app_de_mentira" not in cr.descrever_tela_e_tomada(marcos, None)
-    assert cr.descrever_tela_e_tomada([], None) == ("nada nas últimas 24 h do histórico do celular | a tela apagou "
-                                                    "pela última vez por: motivo não lido")
+    assert cr.inicio_do_historico(HISTORICO) == datetime(2026, 11, 10, 20, 0)
+    assert cr.inicio_do_historico("lixo") is None
+    linhas = cr.descrever_tela_e_tomada(marcos, cr.interpretar_motivo_da_tela_apagada(
+        "  mWakefulness=Awake\n  mLastSleepReason=timeout\n"), cr.inicio_do_historico(HISTORICO))
+    assert linhas == [
+        "o histórico do celular começa em 10/11 20:00 (aqui, só as últimas 24 h)",
+        "tela: 10/11 20:00 acesa (100%); 11/11 06:36 apagada (94%); 11/11 08:27 acesa (81%; a tomada mexeu junto)",
+        "tomada: fora das 11/11 06:31 às 11/11 08:27 (116 min); 10/11 20:00 na tomada (carregador) (100%)",
+        "carga fora das piscadas: 10/11 20:00 carga cheia (100%); 11/11 06:31 descarregando (95%); 11/11 08:27 "
+        "carregando (81%); 11/11 08:40 carga em pausa (81%)",
+        "a tela apagou pela última vez por: tempo sem uso (ela apagou sozinha)"]
+    assert not any("app_de_mentira" in linha for linha in cr.descrever_tela_e_tomada(marcos, None))
+    assert cr.descrever_tela_e_tomada([], None) == [
+        "tela: não acendeu nem apagou", "tomada: não mexeu", "carga fora das piscadas: sem mudança",
+        "a tela apagou pela última vez por: motivo não lido"]
+
+
+# A tomada que sai e volta em segundos, a cada meia hora (o celular do robô em 11/11/2026, com a carga
+# perto de 80%), e a tela que apaga ou acende na mesma hora.
+HISTORICO_PISCANDO = """Battery History (0% used, 1460 used of 4096KB, 21 strings using 1286):
+                    0 (10) RESET:TIME: 2026-11-10-18-00-00
+                    0 (2) 100 c0900020 status=full health=good plug=ac temp=290 volt=4380 +running +plugged +screen
+          +1h00m00s000ms (2) 100 c0100020 wake_lock=u0a1:"app_de_mentira"
+         +12h44m00s000ms (2) 082 c0100020 status=discharging plug=none -plugged
+         +12h44m01s000ms (2) 082 c0000020 -screen
+         +12h44m20s000ms (2) 081 c0100020 status=not-charging plug=ac +plugged
+         +13h12m00s000ms (2) 082 c0100020 status=discharging plug=none -plugged
+         +13h12m30s000ms (2) 081 c0100020 status=not-charging plug=ac +plugged
+         +13h40m00s000ms (2) 082 c0100020 status=discharging plug=none -plugged
+         +13h40m30s000ms (2) 081 c0100020 status=not-charging plug=ac +plugged
+         +14h14m00s000ms (2) 082 c0100020 status=discharging plug=none -plugged
+         +14h14m01s000ms (2) 082 c0900020 +screen
+         +14h14m30s000ms (2) 081 c0900020 status=not-charging plug=ac +plugged
+         +15h00m00s000ms (2) 080 c0900020 status=discharging plug=none -plugged
+         +15h25m00s000ms (2) 079 c0900020 status=charging plug=ac +plugged
+         +15h50m00s000ms (2) 080 c0900020 status=not-charging
+"""
+
+
+def test_a_tomada_que_pisca_vira_contagem_e_a_tela_diz_se_mexeu_junto(cr, monkeypatch):
+    # Cada piscada (sai e volta em até 2 min) e a carga junto dela viram uma contagem com as horas: o resto
+    # do dia aparece inteiro, e a tela que apagou ou acendeu na mesma hora diz que a tomada piscou junto.
+    from datetime import datetime
+    marcos = cr.interpretar_historico(HISTORICO_PISCANDO, agora=datetime(2026, 11, 11, 15, 0))
+    assert cr.descrever_tela_e_tomada(marcos, "tempo sem uso (ela apagou sozinha)",
+                                      cr.inicio_do_historico(HISTORICO_PISCANDO)) == [
+        "o histórico do celular começa em 10/11 18:00 (aqui, só as últimas 24 h)",
+        "tela: 10/11 18:00 acesa (100%); 11/11 06:44 apagada (82%; a tomada piscou junto); 11/11 08:14 acesa "
+        "(82%; a tomada piscou junto)",
+        "tomada: saiu e voltou em até 2 min 4 vez(es), às 11/11 06:44, 07:12, 07:40, 08:14; fora das 11/11 09:00 às "
+        "11/11 09:25 (25 min); 10/11 18:00 na tomada (carregador) (100%)",
+        "carga fora das piscadas: 10/11 18:00 carga cheia (100%); 11/11 09:00 descarregando (80%); 11/11 09:25 "
+        "carregando (79%); 11/11 09:50 carga em pausa (80%)",
+        "a tela apagou pela última vez por: tempo sem uso (ela apagou sozinha)"]
+    # Fora da tomada até o fim do histórico, e o limite do que aparece (com quantos ficaram antes).
+    fora = cr.descrever_tela_e_tomada(marcos[:-2], None)
+    assert "fora das 11/11 09:00 em diante" in fora[1]
+    monkeypatch.setattr(cr, "MARCOS_MOSTRADOS", 2)
+    linhas = cr.descrever_tela_e_tomada(marcos, None)
+    assert linhas[0] == ("tela: (mais 1 antes); 11/11 06:44 apagada (82%; a tomada piscou junto); 11/11 08:14 "
+                         "acesa (82%; a tomada piscou junto)")
+    assert linhas[1].startswith("tomada: saiu e voltou em até 2 min 4 vez(es), às 11/11 07:40, 08:14 (e mais 2 "
+                                "antes)")
 
 
 def test_motivo_da_tela_apagada_em_palavras_fixas(cr):
@@ -1433,9 +1488,9 @@ def test_historico_da_tela_e_da_tomada_lido_pelo_adb_sem_mudar_nada(cr, monkeypa
     pedidos = []
     respostas = {"batterystats": (0, HISTORICO), "power": (0, "  mLastSleepReason=timeout\n")}
     monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or respostas[partes[5]])
-    linha = cr.historico_da_tela_e_da_tomada()
-    assert "11/11 06:31 fora da tomada (95%)" in linha and "11/11 06:36 tela apagada (94%)" in linha
-    assert linha.endswith("a tela apagou pela última vez por: tempo sem uso (ela apagou sozinha)")
+    linhas = cr.historico_da_tela_e_da_tomada()
+    assert "11/11 06:36 apagada (94%)" in linhas[1] and "fora das 11/11 06:31 às 11/11 08:27" in linhas[2]
+    assert linhas[-1] == "a tela apagou pela última vez por: tempo sem uso (ela apagou sozinha)"
     assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "batterystats", "--history"),
                        ("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "power")]
     respostas["batterystats"] = (1, "error: device offline")

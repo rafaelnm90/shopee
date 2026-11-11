@@ -232,7 +232,9 @@ def mostrar_estado():
     print(f"celular guardado: {celular_robo.descrever_estado()}")
     tela_e_tomada = celular_robo.historico_da_tela_e_da_tomada() if celular_robo.conectado() else None
     if tela_e_tomada:
-        print(f"tela e tomada do celular guardado: {tela_e_tomada}")
+        print("tela e tomada do celular guardado:")
+        for linha in tela_e_tomada:
+            print(f"  {linha}")
     if estado != "running":
         return
     uso = _rodar("sudo", "-n", "docker", "stats", "--no-stream", "--format", "{{.MemUsage}} | CPU {{.CPUPerc}}",
