@@ -2651,7 +2651,7 @@ async def editar_handler(message: types.Message, state: FSMContext):
         return
     if not robo.pode_editar(rascunho):
         await message.answer("✏️ Este rascunho não dá para editar: ele não guardou o que a edição precisa (é de "
-                             "antes do Editar ✏️, de um vídeo de Ver Produtos ou de um produto sem o link).")
+                             "antes do Editar ✏️ ou tem um produto sem o link).")
         return
     lado, legenda, sem_fala = _o_video_agora(rascunho)
     await state.set_state(ShopeeVideoFluxo.editando_rascunho)
