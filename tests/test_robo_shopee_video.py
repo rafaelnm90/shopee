@@ -60,11 +60,23 @@ def sem_espera(monkeypatch):
 def avisos(monkeypatch):
     mandados = []
     monkeypatch.setattr(robo.avisar_rafael, "mandar_texto", lambda texto: mandados.append(texto) or True)
+    # Os alertas do celular (P205 1) vão com o id, para o próximo apagar o de antes: o id é a posição.
+    monkeypatch.setattr(robo.avisar_rafael, "mandar_texto_com_id",
+                        lambda texto, html=False, teclado=None: mandados.append(texto) or len(mandados))
+    monkeypatch.setattr(robo.avisar_rafael, "apagar_mensagem", lambda ident: True)
     monkeypatch.setattr(robo.avisar_rafael, "mandar_foto",
                         lambda caminho, legenda="": mandados.append(("foto", legenda)) or True)
     monkeypatch.setattr(robo.avisar_rafael, "mandar_video",
                         lambda caminho, legenda="": mandados.append(("video", legenda)) or True)
     return mandados
+
+
+@pytest.fixture
+def apagados(monkeypatch, avisos):
+    """Os ids das mensagens que o robô apagou do privado (o alerta de antes, P205 1)."""
+    lista = []
+    monkeypatch.setattr(robo.avisar_rafael, "apagar_mensagem", lambda ident: lista.append(ident) or True)
+    return lista
 
 
 def ativar(**mudancas):
@@ -895,7 +907,7 @@ CARGA_NO_CARREGADOR = "no carregador, bateria 81%, Manter ativado ligado"
 
 
 def _avisos_da_tela(avisos):
-    return [a for a in avisos if isinstance(a, str) and a.startswith(("🔌", "🔒", "⚠️ Robô da Shopee Vídeo: a tela"))]
+    return [a for a in avisos if isinstance(a, str) and a.startswith(robo.CELULAR_DESLIGADO)]
 
 
 def _registros_da_tela(monkeypatch):
@@ -925,8 +937,8 @@ def test_tela_apagada_fora_do_carregador_para_antes_de_escolher_e_avisa_uma_vez(
     assert acendeu == []
     assert consultar("SELECT acao, resultado, passo, motivo FROM shopee_video_tentativas") == (
         "rodada", "parou", "tela do celular apagada", motivo)
-    assert len(avisos) == 1 and avisos[0].startswith("🔌") and "bateria 41%" in avisos[0]
-    assert "uma vez só" in avisos[0] and "nada perde a vez" in avisos[0]
+    assert len(avisos) == 1 and avisos[0].startswith(robo.CELULAR_DESLIGADO) and "🔌" in avisos[0]
+    assert "bateria 41%" in avisos[0] and "de hora em hora" in avisos[0] and "nada perde a vez" in avisos[0]
     # Nada gastou a vez: o horário do plano espera, e o vídeo da fonte continua o próximo.
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["feitos"] == 0
     assert robo.proximo_video(robo.ler_config())["id"] == "a1"
@@ -970,7 +982,7 @@ def test_tela_que_nao_acende_ou_acende_na_tela_de_bloqueio_para_e_avisa_cada_pro
     _tela(monkeypatch, False, NO_CARREGADOR, bloqueio=True, acende=True)
     motivo = f"{robo.TELA_DE_BLOQUEIO} (o robô não desbloqueia o celular; {CARGA_NO_CARREGADOR})"
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
-    assert len(_avisos_da_tela(avisos)) == 2 and avisos[-1].startswith("🔒") and "Desbloqueie" in avisos[-1]
+    assert len(_avisos_da_tela(avisos)) == 2 and "🔒" in avisos[-1] and "Desbloqueie" in avisos[-1]
     assert consultar("SELECT COUNT(*) FROM shopee_video_tentativas") == (2,)
 
 
@@ -983,7 +995,7 @@ def test_tela_de_bloqueio_na_frente_para_a_rodada_e_avisa_uma_vez_ate_sair(monke
     acendeu = _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
     motivo = f"{robo.TELA_DE_BLOQUEIO} (o robô não desbloqueia o celular; {CARGA_NO_CARREGADOR})"
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
-    assert acendeu == [] and len(avisos) == 1 and avisos[0].startswith("🔒")
+    assert acendeu == [] and len(avisos) == 1 and avisos[0].startswith(robo.CELULAR_DESLIGADO) and "🔒" in avisos[0]
     assert consultar("SELECT acao, passo FROM shopee_video_tentativas") == ("rodada", "tela de bloqueio")
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
     assert len(avisos) == 1
@@ -993,10 +1005,96 @@ def test_tela_de_bloqueio_na_frente_para_a_rodada_e_avisa_uma_vez_ate_sair(monke
     registros = _registros_da_tela(monkeypatch)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     assert robo.ler_estado()["tela_avisada"] == "" and registros == [("de volta depois do aviso", "", True)]
+    assert avisos[-1].startswith(robo.CELULAR_DE_VOLTA) and "continua sozinho" in avisos[-1]
     # Na próxima vez, o aviso vem de novo.
     _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
     assert len(_avisos_da_tela(avisos)) == 2
+
+
+def test_celular_desligado_alerta_de_hora_em_hora_apagando_o_de_antes(monkeypatch, avisos, apagados):
+    # P205 1 (11/11): enquanto a tela não deixa o robô usar o celular, o 🚨 CELULAR DESLIGADO volta de
+    # hora em hora, e o alerta de antes sai do privado; no fim, o ✅ CELULAR DE VOLTA.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
+    motivo = f"{robo.TELA_DE_BLOQUEIO} (o robô não desbloqueia o celular; {CARGA_NO_CARREGADOR})"
+    for hora in ("10:00", "10:15", "10:45"):
+        assert robo.rodada(d=Intocavel(), agora=momento(f"2026-10-22 {hora}")) == motivo
+    assert len(_avisos_da_tela(avisos)) == 1 and apagados == []
+    # Uma hora depois do 1º: o alerta de novo, e o de antes (o id 1) sai do privado.
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 11:00")) == motivo
+    assert len(_avisos_da_tela(avisos)) == 2 and apagados == [1]
+    assert robo.ler_estado()["tela_avisada_id"] == 2 and robo.ler_estado()["tela_avisada_em"] == "2026-10-22 11:00:00"
+    # O histórico continua com a 1ª parada só.
+    assert consultar("SELECT COUNT(*) FROM shopee_video_tentativas") == (1,)
+    # O alerta que não chega não apaga o de antes e tenta de novo na rodada seguinte.
+    monkeypatch.setattr(robo.avisar_rafael, "mandar_texto_com_id", lambda texto, html=False, teclado=None: None)
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 12:00")) == motivo
+    assert apagados == [1] and robo.ler_estado()["tela_avisada_em"] == "2026-10-22 11:00:00"
+    monkeypatch.setattr(robo.avisar_rafael, "mandar_texto_com_id",
+                        lambda texto, html=False, teclado=None: avisos.append(texto) or 9)
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 12:15")) == motivo
+    assert apagados == [1, 2] and robo.ler_estado()["tela_avisada_id"] == 9
+    # Desbloqueado: o ✅ CELULAR DE VOLTA, e os alertas param.
+    _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=False)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 13:30")) == "rascunho salvo"
+    assert [a for a in avisos if a.startswith(robo.CELULAR_DE_VOLTA)] and robo.ler_estado()["tela_avisada_id"] is None
+
+
+def test_celular_desligado_na_suspensao_alerta_uma_vez_so(monkeypatch, avisos, apagados):
+    # Na suspensão da conta, como antes da P205: o alerta da tela vem uma vez por problema.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-10-28 14:41:00")
+    _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
+    for hora in ("10:00", "11:00", "12:30"):
+        robo.rodada(d=Intocavel(), agora=momento(f"2026-10-26 {hora}"))
+    assert len(_avisos_da_tela(avisos)) == 1 and apagados == []
+    assert robo.UMA_VEZ_NA_SUSPENSAO in avisos[0] and "de hora em hora" not in avisos[0]
+
+
+def test_celular_desconectado_alerta_de_hora_em_hora_ate_voltar(monkeypatch, avisos, apagados):
+    # P205 1: sem o celular, a Postagem pausa e o 🚨 CELULAR DESCONECTADO vem na hora; o painel confere a
+    # cada 15 min e, de hora em hora, manda de novo, apagando o de antes. Com o celular de volta, o ✅
+    # CELULAR DE VOLTA, e a Postagem continua esperando o Retomar Postagem ▶️, como sempre.
+    ativar(robo_inicio=0, robo_fim=24)
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    no_ar = {"celular": False}
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: no_ar["celular"])
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (False, "a Depuração por Wi-Fi está desligada"))
+    assert "desconectado" in robo.rodada(agora=momento("2026-10-22 10:00"))
+    assert len(avisos) == 1 and avisos[0].startswith(robo.CELULAR_DESCONECTADO)
+    assert "Retomar Postagem ▶️" in avisos[0] and "de hora em hora" in avisos[0]
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 10:15")) is None
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 10:45")) is None and len(avisos) == 1
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 11:00")) == "alertado de novo"
+    assert len(avisos) == 2 and avisos[1].startswith(robo.CELULAR_DESCONECTADO) and apagados == [1]
+    assert "a Depuração por Wi-Fi está desligada" in avisos[1]
+    # O Reconectar Celular 🔄 (ou a rede de volta): na conferência seguinte, o ✅, e os alertas param.
+    no_ar["celular"] = True
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 11:15")) == "de volta"
+    assert avisos[-1].startswith(robo.CELULAR_DE_VOLTA) and "Retomar Postagem ▶️" in avisos[-1]
+    assert robo.ler_config()["robo_pausado"] is True
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 13:00")) is None and len(avisos) == 3
+    # Durante o pareamento pelo QR, nada de mexer no adb.
+    robo.pausar_por_desconexao("caiu de novo", momento("2026-10-22 14:00"))
+    monkeypatch.setattr(robo.celular_robo, "pareando_agora", lambda: True)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("o pareamento está correndo"))
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 14:30")) is None
+    # O Retomar Postagem ▶️ acaba com os alertas (o painel diz o CELULAR DE VOLTA).
+    assert robo.fim_do_alerta_desconectado() is True and robo.fim_do_alerta_desconectado() is False
+
+
+def test_celular_desconectado_sem_pausa_ou_na_suspensao_nao_alerta_de_novo(monkeypatch, avisos, apagados):
+    ativar(robo_inicio=0, robo_fim=24)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("sem o alerta, nem olha o celular"))
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 11:00")) is None
+    robo.gravar_estado(alerta_desconectado={"motivo": "x", "em": "2026-10-22 09:00:00", "id": 1})
+    assert robo.lembrar_celular_desconectado(momento("2026-10-22 11:00")) is None      # a Postagem não está pausada
+    ativar(robo_inicio=0, robo_fim=24, robo_pausado=True, robo_pausa_motivo=robo.MOTIVO_DA_DESCONEXAO,
+           robo_suspenso_ate="2026-10-28 14:41:00")
+    assert robo.lembrar_celular_desconectado(momento("2026-10-26 11:00")) is None      # na suspensão
+    assert avisos == [] and apagados == []
 
 
 def test_tela_sem_uso_responde_os_pedidos_do_rafael_e_o_aprovado_nao_perde_a_vez(monkeypatch, avisos):
@@ -1058,7 +1156,7 @@ def test_tela_de_bloqueio_na_leitura_para_na_hora_sem_apertar_voltar(monkeypatch
         robo.tela(d, seguir=True)
     assert parada.value.motivo.startswith(robo.TELA_DE_BLOQUEIO) and d.apertos == []
     assert robo.passo_do_motivo(parada.value.motivo) == "tela de bloqueio"
-    assert len(avisos) == 1 and avisos[0].startswith("🔒")
+    assert len(avisos) == 1 and avisos[0].startswith(robo.CELULAR_DESLIGADO) and "🔒" in avisos[0]
     with pytest.raises(robo.Parada):
         robo.voltar(d, "Eu")
     assert len(avisos) == 1 and d.apertos == []

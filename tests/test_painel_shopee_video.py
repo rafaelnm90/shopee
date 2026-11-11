@@ -274,6 +274,41 @@ def test_retomar_diz_o_que_ficou_para_tras_e_como_volta(bm, Msg, Est, monkeypatc
     assert "Ficou para trás hoje: 3 horário(s) de rascunho e 2 aprovado(s) atrasado(s)" in texto
     assert "pelo menos 30 min entre um e outro" in texto and "sai amanhã cedo" in texto
 
+def test_retomar_depois_do_celular_desconectado_diz_celular_de_volta(bm, Msg, Est, monkeypatch):
+    # P205 1: os alertas do 🚨 CELULAR DESCONECTADO param no Retomar Postagem ▶️, com o ✅ CELULAR DE VOLTA.
+    sv = _painel(bm)
+    monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho", lambda: (True, "moto g(100)"))
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado", robo_inicio=0, robo_fim=24)
+    sv.robo.gravar_estado(alerta_desconectado={"motivo": "x", "em": "2026-10-22 09:00:00", "id": 7})
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, Est()))
+    texto = next(t for t in msg.saidas if "retomado" in t)
+    assert texto.startswith(sv.robo.CELULAR_DE_VOLTA) and sv.robo.ler_estado()["alerta_desconectado"] == {}
+    # Sem alerta de antes, o Retomar responde como sempre.
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="")
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, Est()))
+    assert next(t for t in msg.saidas if "retomado" in t).startswith("▶️")
+
+
+def test_agendador_confere_o_celular_desconectado_so_com_a_pausa_sem_o_celular(bm, monkeypatch):
+    # P205 1: com a Postagem pausada sem o celular, a cada 15 min o painel confere (o robô manda o alerta
+    # de novo de hora em hora, ou o CELULAR DE VOLTA); pausada pelo Rafael, não.
+    sv = _painel(bm)
+    conferidos = []
+    monkeypatch.setattr(sv.robo, "lembrar_celular_desconectado", lambda agora=None: conferidos.append(1))
+    monkeypatch.setattr(sv.robo, "pedidos_de_agora", lambda agora=None: [])
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="", robo_inicio=0, robo_fim=24)
+    rodar(sv.verificar_robo())
+    assert conferidos == []
+    sv.alterar_config(robo_pausa_motivo="celular desconectado")
+    rodar(sv.verificar_robo())
+    assert conferidos == [1]
+    # Um erro na conferência não derruba o agendador.
+    monkeypatch.setattr(sv.robo, "lembrar_celular_desconectado", lambda agora=None: 1 / 0)
+    rodar(sv.verificar_robo())
+
+
 def test_reconectar_acha_a_porta_sozinho_antes_de_pedir(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
     monkeypatch.setattr(sv.celular_robo, "ler", lambda: {"pareado_em": "2026-10-17 10:00:00", "ip": "100.1.2.3"})

@@ -2134,19 +2134,32 @@ AVISOS_DA_TELA = {
         "Fora do carregador, o robô não acende a tela: ela apagaria de novo no meio e gastaria a bateria. "
         + _NADA_PERDE_A_VEZ + "\n\n"
         "Ponha o celular no carregador: na rodada seguinte (em até 15 min) o robô acende a tela sozinho. Se "
-        "aparecer a tela de bloqueio, desbloqueie com a mão. Este aviso vem uma vez só."),
+        "aparecer a tela de bloqueio, desbloqueie com a mão."),
     "nao_acendeu": (
         "⚠️ Robô da Shopee Vídeo: a tela do celular do robô está apagada e não acendeu quando o robô tentou "
         "({carga}). " + _NADA_PERDE_A_VEZ + "\n\n"
         "Aperte o botão de ligar do celular e, se aparecer a tela de bloqueio, desbloqueie com a mão: o robô "
-        "continua sozinho na rodada seguinte (em até 15 min). Este aviso vem uma vez só."),
+        "continua sozinho na rodada seguinte (em até 15 min)."),
     "bloqueio": (
         "🔒 Robô da Shopee Vídeo: o celular do robô está na tela de bloqueio ({carga}), e o robô não desbloqueia "
         "o celular. " + _NADA_PERDE_A_VEZ + "\n\n"
         "Desbloqueie o celular com a mão e deixe-o no carregador, com o Manter ativado ligado (assim a tela não "
-        "apaga e não bloqueia de novo): o robô continua sozinho na rodada seguinte (em até 15 min). Este aviso "
-        "vem uma vez só."),
+        "apaga e não bloqueia de novo): o robô continua sozinho na rodada seguinte (em até 15 min)."),
 }
+
+# Os alertas do celular (P205 1, 11/11/2026): a tela que não deixa o robô usar o celular (CELULAR
+# DESLIGADO, conferir_a_tela) e o celular que o servidor perdeu (CELULAR DESCONECTADO,
+# pausar_por_desconexao) voltam de hora em hora enquanto duram, e o alerta de antes sai do privado;
+# no fim, o CELULAR DE VOLTA. Na suspensão da conta, como antes: o da tela vem uma vez por problema, e o
+# celular fora só avisa pela falha do servidor (alertas.py, P155 1). Decisão do Rafael: DECISOES.md,
+# Shopee Vídeo.
+CELULAR_DESLIGADO = "🚨⚠️🚨⚠️🚨CELULAR DESLIGADO🚨⚠️🚨⚠️🚨"
+CELULAR_DESCONECTADO = "🚨⚠️🚨⚠️🚨CELULAR DESCONECTADO🚨⚠️🚨⚠️🚨"
+CELULAR_DE_VOLTA = "✅ CELULAR DE VOLTA"
+ALERTA_DE_NOVO = timedelta(hours=1)
+DE_HORA_EM_HORA = ("Este alerta volta de hora em hora enquanto isso durar (o de antes sai daqui), e o "
+                   f"{CELULAR_DE_VOLTA} avisa quando acabar.")
+UMA_VEZ_NA_SUSPENSAO = "Com a conta suspensa, este alerta vem uma vez só."
 
 
 class TelaSemUso(Exception):
@@ -2166,24 +2179,63 @@ def _carga_do_celular():
     return energia, celular_robo.descrever_energia(energia)
 
 
+def avisar_com_id(texto):
+    """O aviso no privado com o id da mensagem, para apagar depois: o id (True sem ele), ou None se não chegou."""
+    try:
+        return avisar_rafael.mandar_texto_com_id(texto)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Aviso não chegou ao Rafael: {type(e).__name__}")
+        return None
+
+
+def _alertar(texto, anterior=None):
+    """
+    Manda um alerta do celular e, se ele chegou, apaga do privado o de antes (anterior: o id dele; o
+    Telegram só deixa apagar até 48 h). Devolve o id do novo, ou None quando ele não chegou (o de antes
+    fica, e o alerta tenta de novo na vez seguinte).
+    """
+    ident = avisar_com_id(texto)
+    if ident and isinstance(anterior, int) and not isinstance(anterior, bool):
+        avisar_rafael.apagar_mensagem(anterior)
+    return ident
+
+
+def _hora_de_alertar(ultimo, agora=None):
+    """Passou ALERTA_DE_NOVO desde o último alerta (ou ele não tem a hora)?"""
+    try:
+        quando = datetime.strptime(ultimo or "", "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return True
+    return agora_br(agora).replace(tzinfo=None) - quando >= ALERTA_DE_NOVO
+
+
 def _sem_a_tela(problema, carga, agora=None):
     """
-    O TelaSemUso do problema, com o registro e o aviso ao Rafael: um só por problema; enquanto ele dura,
-    as rodadas seguintes não avisam de novo, e um problema diferente avisa (o celular posto no
-    carregador que acende na tela de bloqueio, por exemplo). O aviso que não chega tenta de novo.
+    O TelaSemUso do problema, com o registro e o CELULAR DESLIGADO ao Rafael (P205 1): na hora, e de novo
+    de hora em hora enquanto o problema dura, apagando o alerta de antes; um problema diferente alerta
+    na hora (o celular posto no carregador que acende na tela de bloqueio, por exemplo). Na suspensão
+    da conta, uma vez só por problema. O alerta que não chega tenta de novo na rodada seguinte.
     """
     registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, ROTULOS_DA_TELA[problema], carga, ok=None, agora=agora)
-    novo = ler_estado().get("tela_avisada") != problema
-    if novo and avisar(AVISOS_DA_TELA[problema].format(carga=carga)):
-        gravar_estado(tela_avisada=problema)
+    estado = ler_estado()
+    novo = estado.get("tela_avisada") != problema
+    na_suspensao = suspensa(ler_config(), agora)
+    if novo or (not na_suspensao and _hora_de_alertar(estado.get("tela_avisada_em"), agora)):
+        fecho = UMA_VEZ_NA_SUSPENSAO if na_suspensao else DE_HORA_EM_HORA
+        ident = _alertar(f"{CELULAR_DESLIGADO}\n\n{AVISOS_DA_TELA[problema].format(carga=carga)}\n\n{fecho}",
+                         estado.get("tela_avisada_id"))
+        if ident:
+            gravar_estado(tela_avisada=problema, tela_avisada_em=_momento(agora), tela_avisada_id=ident)
     return TelaSemUso(MOTIVOS_DA_TELA[problema].format(carga=carga), problema, novo)
 
 
 def _tela_de_volta(agora=None):
-    """A tela acesa e sem a tela de bloqueio: o próximo problema dela volta a avisar."""
+    """A tela acesa e sem a tela de bloqueio depois do alerta: o CELULAR DE VOLTA, e o próximo problema alerta na hora."""
     if ler_estado().get("tela_avisada"):
-        gravar_estado(tela_avisada="")
+        gravar_estado(tela_avisada="", tela_avisada_em="", tela_avisada_id=None)
         registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, "de volta depois do aviso", ok=True, agora=agora)
+        avisar(f"{CELULAR_DE_VOLTA}\n\nA tela do celular do robô voltou (acesa e sem a tela de bloqueio): o robô "
+               "continua sozinho.")
 
 
 def _ler(funcao):
@@ -7955,19 +8007,67 @@ COMO_RETOMAR_PAREANDO = (f"{celular_robo.COMO_PAREAR}. Depois, no bot, toque em 
                          "Automático 🤖 → Retomar Postagem ▶️.")
 
 
-def pausar_por_desconexao(motivo):
+def _alerta_desconectado(motivo):
+    """O texto do CELULAR DESCONECTADO (P205 1), com o motivo e o caminho de volta ao automático."""
+    como = COMO_RETOMAR_PAREANDO if celular_robo.pede_pareamento(motivo) else COMO_RETOMAR
+    return (f"{CELULAR_DESCONECTADO}\n\n📱 Robô da Shopee Vídeo: perdi a conexão com o celular guardado ({motivo}). "
+            "Pausei a Postagem, e o modo assistente volta a mandar as postagens aqui no privado para você postar à "
+            f"mão.\n\nPara voltar ao automático: {como}\n\n{DE_HORA_EM_HORA}")
+
+
+def pausar_por_desconexao(motivo, agora=None):
     """
     Sem o celular, a Postagem pausa sozinha (o botão vira Retomar Postagem ▶️) e o modo
-    assistente volta a mandar as postagens no privado, para o Rafael postar à mão.
+    assistente volta a mandar as postagens no privado, para o Rafael postar à mão. O CELULAR
+    DESCONECTADO volta de hora em hora até o celular voltar (lembrar_celular_desconectado, P205 1).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=True,
                                                                 robo_pausa_motivo=MOTIVO_DA_DESCONEXAO))
     logger.warning(f"⚠️ [Robô Shopee Vídeo] Celular desconectado ({motivo}): Postagem pausada.")
-    como = COMO_RETOMAR_PAREANDO if celular_robo.pede_pareamento(motivo) else COMO_RETOMAR
-    avisar(f"📱 Robô da Shopee Vídeo: perdi a conexão com o celular guardado ({motivo}). Pausei a Postagem, "
-           "e o modo assistente volta a mandar as postagens aqui no privado para você postar à mão.\n\n"
-           f"Para voltar ao automático: {como}")
+    anterior = (ler_estado().get("alerta_desconectado") or {}).get("id")
+    ident = _alertar(_alerta_desconectado(motivo), anterior)
+    # Sem o alerta (o Telegram fora), a hora fica vazia, e o painel tenta de novo em 15 min.
+    gravar_estado(alerta_desconectado={"motivo": motivo, "em": _momento(agora) if ident else "",
+                                       "id": ident or anterior})
+
+
+def fim_do_alerta_desconectado():
+    """
+    O celular de volta depois do CELULAR DESCONECTADO (o Retomar Postagem ▶️, ou a conferência do
+    painel): os alertas param. True quando havia um alerta, para quem chamou dizer o CELULAR DE VOLTA.
+    """
+    if not ler_estado().get("alerta_desconectado"):
+        return False
+    gravar_estado(alerta_desconectado={})
+    return True
+
+
+def lembrar_celular_desconectado(agora=None):
+    """
+    O painel chama a cada 15 min com a Postagem pausada sem o celular (P205 1). Com o celular de volta
+    (o Reconectar Celular 🔄, ou a rede de volta), o CELULAR DE VOLTA, e os alertas param: a Postagem
+    continua esperando o Retomar Postagem ▶️, como sempre. Sem ele, de hora em hora, o CELULAR
+    DESCONECTADO de novo, apagando o de antes. Na suspensão da conta, nada (o alertas.py avisa a falha
+    do servidor, P155 1). Devolve o que fez, numa palavra, ou None.
+    """
+    alerta = ler_estado().get("alerta_desconectado") or {}
+    config = ler_config()
+    if (not alerta or not config["robo_pausado"] or config.get("robo_pausa_motivo") != MOTIVO_DA_DESCONEXAO
+            or suspensa(config, agora)):
+        return None
+    if not celular_robo.pareando_agora() and celular_robo.conectado():
+        fim_do_alerta_desconectado()
+        avisar(f"{CELULAR_DE_VOLTA}\n\nO servidor achou o celular do robô de novo. A Postagem continua pausada: "
+               "toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️ para o robô voltar.")
+        return "de volta"
+    if not _hora_de_alertar(alerta.get("em"), agora):
+        return None
+    ident = _alertar(_alerta_desconectado(alerta.get("motivo") or "sem o motivo"), alerta.get("id"))
+    if not ident:
+        return "alerta não chegou"
+    gravar_estado(alerta_desconectado={**alerta, "em": _momento(agora), "id": ident})
+    return "alertado de novo"
 
 
 def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar=None, fazer=False):
@@ -8030,7 +8130,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}; celular fora (esperado)"
             if not ok:
                 if not na_hora:
-                    pausar_por_desconexao(motivo)
+                    pausar_por_desconexao(motivo, agora)
                 registrar_tentativa("rodada", "parou", f"celular desconectado ({motivo})", agora=agora)
                 if pedidos:
                     # Sem o celular não há folga para esperar: os pedidos saem, com o aviso (P162 1).

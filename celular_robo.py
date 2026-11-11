@@ -578,6 +578,11 @@ def destravar_servidor_do_adb():
     return True, travado
 
 
+def pareando_agora():
+    """O pareamento pelo QR está correndo agora (pareando_ate)? Enquanto isso, ninguém mexe no adb."""
+    return (ler().get("pareando_ate") or "") > _agora()
+
+
 def reconectar_sozinho():
     """
     Reconecta sem o Rafael mandar a porta: primeiro a porta guardada, refazendo a conexão
@@ -592,7 +597,7 @@ def reconectar_sozinho():
     """
     if conectado():
         return True, ler().get("modelo") or "celular"
-    if (ler().get("pareando_ate") or "") > _agora():
+    if pareando_agora():
         return False, PAREANDO_PELO_QR
     inicio = _agora()
     derrubou, travado = destravar_servidor_do_adb()
