@@ -2160,6 +2160,12 @@ ALERTA_DE_NOVO = timedelta(hours=1)
 DE_HORA_EM_HORA = ("Este alerta volta de hora em hora enquanto isso durar (o de antes sai daqui), e o "
                    f"{CELULAR_DE_VOLTA} avisa quando acabar.")
 UMA_VEZ_NA_SUSPENSAO = "Com a conta suspensa, este alerta vem uma vez só."
+# Cada alerta no registro (o checkup confere o de hora em hora e mostra o que não chegou ao Rafael).
+PROCESSO_DO_ALERTA = "alerta do celular"
+
+
+def _anotar_alerta(resultado, ok=True, agora=None):
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_ALERTA, resultado, ok=ok, agora=agora)
 
 
 class TelaSemUso(Exception):
@@ -2226,6 +2232,8 @@ def _sem_a_tela(problema, carga, agora=None):
                          estado.get("tela_avisada_id"))
         if ident:
             gravar_estado(tela_avisada=problema, tela_avisada_em=_momento(agora), tela_avisada_id=ident)
+        _anotar_alerta(("celular desligado: 1º alerta" if novo else "celular desligado: de novo") if ident
+                       else "celular desligado: não chegou", ok=bool(ident), agora=agora)
     return TelaSemUso(MOTIVOS_DA_TELA[problema].format(carga=carga), problema, novo)
 
 
@@ -2234,8 +2242,10 @@ def _tela_de_volta(agora=None):
     if ler_estado().get("tela_avisada"):
         gravar_estado(tela_avisada="", tela_avisada_em="", tela_avisada_id=None)
         registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, "de volta depois do aviso", ok=True, agora=agora)
-        avisar(f"{CELULAR_DE_VOLTA}\n\nA tela do celular do robô voltou (acesa e sem a tela de bloqueio): o robô "
-               "continua sozinho.")
+        chegou = avisar(f"{CELULAR_DE_VOLTA}\n\nA tela do celular do robô voltou (acesa e sem a tela de bloqueio): o "
+                        "robô continua sozinho.")
+        _anotar_alerta("celular de volta: a tela" if chegou else "celular de volta: não chegou", ok=bool(chegou),
+                       agora=agora)
 
 
 def _ler(funcao):
@@ -8030,9 +8040,11 @@ def pausar_por_desconexao(motivo, agora=None):
     # Sem o alerta (o Telegram fora), a hora fica vazia, e o painel tenta de novo em 15 min.
     gravar_estado(alerta_desconectado={"motivo": motivo, "em": _momento(agora) if ident else "",
                                        "id": ident or anterior})
+    _anotar_alerta("celular desconectado: 1º alerta" if ident else "celular desconectado: não chegou",
+                   ok=bool(ident), agora=agora)
 
 
-def fim_do_alerta_desconectado():
+def fim_do_alerta_desconectado(como="o Retomar Postagem", agora=None):
     """
     O celular de volta depois do CELULAR DESCONECTADO (o Retomar Postagem ▶️, ou a conferência do
     painel): os alertas param. True quando havia um alerta, para quem chamou dizer o CELULAR DE VOLTA.
@@ -8040,6 +8052,7 @@ def fim_do_alerta_desconectado():
     if not ler_estado().get("alerta_desconectado"):
         return False
     gravar_estado(alerta_desconectado={})
+    _anotar_alerta(f"celular de volta: {como}", agora=agora)
     return True
 
 
@@ -8057,7 +8070,7 @@ def lembrar_celular_desconectado(agora=None):
             or suspensa(config, agora)):
         return None
     if not celular_robo.pareando_agora() and celular_robo.conectado():
-        fim_do_alerta_desconectado()
+        fim_do_alerta_desconectado("o servidor achou o celular", agora)
         avisar(f"{CELULAR_DE_VOLTA}\n\nO servidor achou o celular do robô de novo. A Postagem continua pausada: "
                "toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️ para o robô voltar.")
         return "de volta"
@@ -8065,8 +8078,10 @@ def lembrar_celular_desconectado(agora=None):
         return None
     ident = _alertar(_alerta_desconectado(alerta.get("motivo") or "sem o motivo"), alerta.get("id"))
     if not ident:
+        _anotar_alerta("celular desconectado: não chegou", ok=False, agora=agora)
         return "alerta não chegou"
     gravar_estado(alerta_desconectado={**alerta, "em": _momento(agora), "id": ident})
+    _anotar_alerta("celular desconectado: de novo", agora=agora)
     return "alertado de novo"
 
 

@@ -923,6 +923,19 @@ def _registros_da_tela(monkeypatch):
     return anotados
 
 
+def _alertas_anotados(monkeypatch):
+    """Os alertas do celular no registro (P205 1), como (resultado, ok)."""
+    anotados, registrar = [], robo.registro_processos.registrar
+
+    def anotar(quem, processo, resultado, detalhe="", ok=None, **outros):
+        if processo == robo.PROCESSO_DO_ALERTA:
+            anotados.append((resultado, ok))
+        return registrar(quem, processo, resultado, detalhe, ok, **outros)
+
+    monkeypatch.setattr(robo.registro_processos, "registrar", anotar)
+    return anotados
+
+
 def test_tela_apagada_fora_do_carregador_para_antes_de_escolher_e_avisa_uma_vez(monkeypatch, avisos):
     # Em 11/11, das 06:44 às 08:14, seis rodadas escolheram o vídeo, perguntaram à IA e só no celular
     # apertaram voltar 15 vezes com a tela apagada (o Moto Display). Fora do carregador, o robô não acende
@@ -1018,6 +1031,7 @@ def test_celular_desligado_alerta_de_hora_em_hora_apagando_o_de_antes(monkeypatc
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
+    anotados = _alertas_anotados(monkeypatch)
     motivo = f"{robo.TELA_DE_BLOQUEIO} (o robô não desbloqueia o celular; {CARGA_NO_CARREGADOR})"
     for hora in ("10:00", "10:15", "10:45"):
         assert robo.rodada(d=Intocavel(), agora=momento(f"2026-10-22 {hora}")) == motivo
@@ -1040,6 +1054,10 @@ def test_celular_desligado_alerta_de_hora_em_hora_apagando_o_de_antes(monkeypatc
     _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=False)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 13:30")) == "rascunho salvo"
     assert [a for a in avisos if a.startswith(robo.CELULAR_DE_VOLTA)] and robo.ler_estado()["tela_avisada_id"] is None
+    # Cada alerta no registro: o checkup confere o de hora em hora e mostra o que não chegou.
+    assert anotados == [("celular desligado: 1º alerta", True), ("celular desligado: de novo", True),
+                        ("celular desligado: não chegou", False), ("celular desligado: de novo", True),
+                        ("celular de volta: a tela", True)]
 
 
 def test_celular_desligado_na_suspensao_alerta_uma_vez_so(monkeypatch, avisos, apagados):
@@ -1058,6 +1076,7 @@ def test_celular_desconectado_alerta_de_hora_em_hora_ate_voltar(monkeypatch, avi
     # cada 15 min e, de hora em hora, manda de novo, apagando o de antes. Com o celular de volta, o ✅
     # CELULAR DE VOLTA, e a Postagem continua esperando o Retomar Postagem ▶️, como sempre.
     ativar(robo_inicio=0, robo_fim=24)
+    anotados = _alertas_anotados(monkeypatch)
     monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
     no_ar = {"celular": False}
     monkeypatch.setattr(robo.celular_robo, "conectado", lambda: no_ar["celular"])
@@ -1083,6 +1102,9 @@ def test_celular_desconectado_alerta_de_hora_em_hora_ate_voltar(monkeypatch, avi
     assert robo.lembrar_celular_desconectado(momento("2026-10-22 14:30")) is None
     # O Retomar Postagem ▶️ acaba com os alertas (o painel diz o CELULAR DE VOLTA).
     assert robo.fim_do_alerta_desconectado() is True and robo.fim_do_alerta_desconectado() is False
+    assert anotados == [("celular desconectado: 1º alerta", True), ("celular desconectado: de novo", True),
+                        ("celular de volta: o servidor achou o celular", True),
+                        ("celular desconectado: 1º alerta", True), ("celular de volta: o Retomar Postagem", True)]
 
 
 def test_celular_desconectado_sem_pausa_ou_na_suspensao_nao_alerta_de_novo(monkeypatch, avisos, apagados):
