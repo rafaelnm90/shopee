@@ -9,6 +9,7 @@ import pytest
 
 import db
 import edicao_video
+import videos
 from conftest import consultar, inserir
 
 
@@ -71,7 +72,7 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1" in filtro
     # As setinhas entram só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e a volta da
     # cascata (os 25 quadros do arquivo, P130) se repete até o fim.
-    assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro
+    assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro
     cx, cy = edicao_video.CENTRO_DA_SETA
     assert f"[comfoto][seta]overlay=x={cx}-w/2:y={cy}-h/2:shortest=1,format=yuv420p[editado]" in filtro
     assert "[foto][editado]concat=n=2:v=1:a=0[v]" in filtro
@@ -93,10 +94,10 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert ffmpeg[[i for i, parte in enumerate(ffmpeg) if parte == "-i"][-1] + 1].endswith("moldura.png")
     espera = edicao_video.ESPERA_DA_MOLDURA
     assert 1 <= espera <= 2
-    assert ("[5:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1"
+    assert (f"[5:v]{videos.POR_CIMA}[moldura];[semmoldura][moldura]overlay=0:0:shortest=1"
             f":enable='gte(t,{espera:.3f})'[comfoto]") in filtro
     assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
-    assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
 
 def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
@@ -2413,13 +2414,13 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     lado = edicao_video.LARGURA_DA_MINIATURA
     quadrado = (f"scale={lado}:{lado}:force_original_aspect_ratio=decrease,format=rgba,"
                 f"pad={lado}:{lado}:(ow-iw)/2:(oh-ih)/2:color=black@0")
-    assert all(f"[{entrada}:v]{quadrado}[mini{n}]" in filtro for n, entrada in enumerate((2, 5, 6)))
+    assert all(f"[{entrada}:v]{quadrado},{videos.POR_CIMA}[mini{n}]" in filtro for n, entrada in enumerate((2, 5, 6)))
     mx, my = edicao_video.CENTRO_DA_MINIATURA
     lugar = f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1"
     assert f"[corpo][mini0]{lugar}:enable='lt(t,3.000)'[mini0_no_corpo]" in filtro
     assert f"[mini0_no_corpo][mini1]{lugar}:enable='gte(t,3.000)*lt(t,6.000)'[mini1_no_corpo]" in filtro
     assert f"[mini1_no_corpo][mini2]{lugar}:enable='gte(t,6.000)'[semmoldura]" in filtro
-    assert "[3:v]loop=loop=-1:size=25:start=0[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
     # A foto que não abre fica de fora, e as que sobram dividem o vídeo igual.
     monkeypatch.setattr(edicao_video.videos, "imagem_abre", lambda caminho: not caminho.endswith("outra_0.jpg"))
     assert edicao_video.editar("video.mp4", b"foto", destino, outras_fotos=[b"nao abre", b"triangulo"]) == ""
@@ -2436,7 +2437,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda caminho: 0.0)
     assert edicao_video.editar("video.mp4", b"foto", destino, outras_fotos=[b"bola"]) == ""
     ffmpeg = comandos[-1]
-    assert f"[2:v]scale={lado}:-2[mini]" in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 6
+    assert f"[2:v]scale={lado}:-2,{videos.POR_CIMA}[mini]" in ffmpeg[ffmpeg.index("-filter_complex") + 1] and ffmpeg.count("-i") == 6
     # No que vai ao ar, o registro diz; sem a nossa miniatura, não.
     _versoes_de_mentira(monkeypatch)
     pedidas = []

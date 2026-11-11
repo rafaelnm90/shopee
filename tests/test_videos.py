@@ -233,3 +233,83 @@ def test_passagem_entre_as_capas_so_com_o_tempo_dela():
     filtro = suave[suave.index("-filter_complex") + 1]
     assert "fade=t=in:st=0.0167:d=0.300:alpha=1" in filtro and "gte(n,1)" not in filtro
 
+
+
+# --- As cores no celular (P204 1) ---
+
+def _cadeias(comando):
+    """{entrada: o filtro que começa nela} do -filter_complex de um comando do ffmpeg."""
+    filtro = comando[comando.index("-filter_complex") + 1]
+    return {parte.split("]", 1)[0] + "]": parte for parte in filtro.split(";") if parte.startswith("[")}
+
+
+def test_cada_imagem_entra_na_tabela_do_hd_e_o_video_do_criador_fica_como_veio():
+    # P204 1: o celular lê o vídeo em HD na tabela BT.709. Cada imagem (a capa, a do resto da
+    # abertura, a miniatura e as outras fotos, a seta e a moldura) passa por ela antes de entrar no
+    # vídeo, e o arquivo sai com a etiqueta; o vídeo do criador não passa por conversão nenhuma.
+    comando = videos.comando_foto_e_miniatura(
+        "f.jpg", "v.mp4", "d.mp4", 2, 180, (576, 128), True, seta="s.apng", centro_seta=(360, 900),
+        capa="c.png", outras=["o.jpg"], troca=1.0, capa_do_resto="r.png", moldura="m.png", passagem=0.3)
+    cadeias = _cadeias(comando)
+    # A capa, a foto da miniatura, a seta, a outra foto, a capa do resto e a moldura.
+    for entrada in ("[0:v]", "[2:v]", "[3:v]", "[5:v]", "[6:v]", "[7:v]"):
+        assert videos.NA_TABELA_DO_HD in cadeias[entrada], entrada
+    assert videos.NA_TABELA_DO_HD not in cadeias["[1:v]"] and "color_matrix" not in cadeias["[1:v]"]
+    assert comando[-len(videos.ETIQUETA_DAS_CORES) - 3:-3] == videos.ETIQUETA_DAS_CORES
+    so_a_miniatura = videos.comando_foto_e_miniatura("f.jpg", "v.mp4", "d.mp4", 2, 180, (576, 128), False)
+    assert videos.NA_TABELA_DO_HD in _cadeias(so_a_miniatura)["[2:v]"]
+    remontado = videos.comando_cortes_e_ritmo("v.mp4", [(0, 2, 1.0)], "d.mp4", False,
+                                              [("t.png", 0, 1, 10, 10), ("l.png", 1, 2, 10, 10)])
+    assert all(videos.NA_TABELA_DO_HD in _cadeias(remontado)[e] for e in ("[1:v]", "[2:v]"))
+    assert "color_matrix" not in _cadeias(remontado)["[0:v]"]
+    assert remontado[-len(videos.ETIQUETA_DAS_CORES) - 3:-3] == videos.ETIQUETA_DAS_CORES
+
+
+def test_cores_das_imagens_no_video_como_o_celular_le(tmp_path):
+    # P204 1, com o ffmpeg de verdade: lido na tabela do HD, como o celular lê, o rosa da capa e da
+    # miniatura e o vermelho da moldura saem com a cor escolhida (antes, o rosa saía mais claro), o
+    # arquivo leva a etiqueta e o vídeo do criador fica com as cores que veio.
+    import io
+    import json
+    import shutil
+    import subprocess
+
+    from PIL import Image, ImageDraw
+    if not shutil.which("ffmpeg"):
+        return
+    rosa, vermelho = (230, 90, 150), (220, 30, 40)
+
+    def imagem(im, formato="PNG"):
+        saida = io.BytesIO()
+        im.save(saida, formato)
+        return saida.getvalue()
+
+    def quadro(video, segundo):
+        saida = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", video, "-vf",
+                                "scale=in_color_matrix=bt709:out_color_matrix=bt709,format=rgb24", "-frames:v", "1",
+                                "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True, check=True).stdout
+        return Image.open(io.BytesIO(saida)).convert("RGB")
+
+    def perto(cor, esperada, folga=6):
+        return all(abs(a - b) <= folga for a, b in zip(cor, esperada))
+
+    criador = str(tmp_path / "criador.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "smptehdbars=size=720x1280:rate=30:duration=2",
+                    "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p", "-c:v", "libx264", "-crf", "16",
+                    "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", criador], check=True)
+    capa = Image.new("RGB", (720, 1280), (0, 0, 0))
+    ImageDraw.Draw(capa).rectangle([0, 0, 719, 299], fill=rosa)
+    moldura = Image.new("RGBA", (720, 1280), (0, 0, 0, 0))
+    ImageDraw.Draw(moldura).rectangle([100, 900, 620, 1100], outline=vermelho + (255,), width=20)
+    destino = str(tmp_path / "editado.mp4")
+    assert videos.com_foto_e_miniatura(criador, imagem(Image.new("RGB", (400, 400), rosa), "JPEG"), destino,
+                                       segundos=1, capa=imagem(capa), moldura=imagem(moldura)) == ""
+    etiqueta = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=color_space,color_primaries,"
+         "color_transfer", "-of", "json", destino], capture_output=True, text=True).stdout)["streams"][0]
+    assert etiqueta == {"color_space": "bt709", "color_primaries": "bt709", "color_transfer": "bt709"}
+    assert perto(quadro(destino, 0).getpixel((360, 150)), rosa)
+    corpo, fonte = quadro(destino, 2.4), quadro(criador, 1.4)
+    assert perto(corpo.getpixel((576, 128)), rosa) and perto(corpo.getpixel((110, 1000)), vermelho)
+    for ponto in ((50, 400), (300, 400), (650, 400), (400, 1200)):
+        assert perto(corpo.getpixel(ponto), fonte.getpixel(ponto), 4), ponto

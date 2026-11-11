@@ -151,14 +151,28 @@ def tem_audio(caminho):
 
 
 QUADROS_POR_SEGUNDO = 30
-# Cada imagem e o vídeo da edição: em 720x1280, no fundo preto, no mesmo ritmo de quadros.
-TELA_DA_EDICAO = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
+# As cores no celular (P204 1): o celular lê o vídeo em HD na tabela de cores BT.709. Cada imagem
+# que entra no vídeo (a capa, a foto, a miniatura, a seta, a moldura e os textos) é convertida
+# nessa tabela, e o arquivo sai com a etiqueta dela; sem isso, o rosa, o laranja e o vermelho
+# apareciam mais claros e o verde mais escuro que a cor escolhida. O vídeo do criador fica com os
+# valores que veio: só a imagem passa pela conversão.
+NA_TABELA_DO_HD = "scale=out_color_matrix=bt709:out_range=tv"
+ETIQUETA_DAS_CORES = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+                      "-color_range", "tv"]
+_TELA = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO}"
+# O vídeo da edição: em 720x1280, no fundo preto, no mesmo ritmo de quadros.
+TELA_DA_EDICAO = f"{_TELA},format=yuv420p"
+# Cada imagem em tela cheia (a capa, a foto) do mesmo jeito, passando pela cor de verdade (RGB; a
+# foto em JPEG é lida na tabela dela) para a tabela do HD.
+TELA_DA_IMAGEM = f"format=rgb24,{_TELA},{NA_TABELA_DO_HD},format=yuv420p"
+# Cada imagem por cima do vídeo (a miniatura, a seta, a moldura, os textos), com a transparência dela.
+POR_CIMA = f"format=rgba,{NA_TABELA_DO_HD},format=yuva420p"
 # A música de fundo entra e sai devagar, em segundos.
 ENTRADA_DA_MUSICA = 0.3
 SAIDA_DA_MUSICA = 1.5
 
 
-def _capa_do_resto_na_abertura(indice, tela, passagem=0.0):
+def _capa_do_resto_na_abertura(indice, passagem=0.0):
     """
     O filtro que põe a capa do resto da abertura (a entrada `indice`) sobre a do 1º quadro
     ([primeiro]), saindo em [foto] (P129). Sem a `passagem`, ela cobre a do 1º quadro do 2º quadro
@@ -169,9 +183,10 @@ def _capa_do_resto_na_abertura(indice, tela, passagem=0.0):
     if passagem > 0:
         # A passagem começa no meio do caminho entre o 1º e o 2º quadro: o 1º fica com a do 1º quadro inteira.
         comeco = 0.5 / QUADROS_POR_SEGUNDO
-        return (f"[{indice}:v]{tela},format=rgba,fade=t=in:st={comeco:.4f}:d={passagem:.3f}:alpha=1[resto];"
+        return (f"[{indice}:v]format=rgba,{_TELA},fade=t=in:st={comeco:.4f}:d={passagem:.3f}:alpha=1,"
+                f"{NA_TABELA_DO_HD},format=yuva420p[resto];"
                 "[primeiro][resto]overlay=shortest=1,format=yuv420p[foto]")
-    return f"[{indice}:v]{tela}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
+    return f"[{indice}:v]{TELA_DA_IMAGEM}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
 
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
@@ -199,11 +214,10 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     cima do vídeo `espera_da_moldura` segundos depois da abertura, até o fim, por baixo da seta (a
     do cartão do produto, P128, que espera o cartão do app aparecer, P140 2).
     """
-    tela = TELA_DA_EDICAO
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
     # Escolha do Rafael (29/10, P72): DECISOES.md, Shopee Vídeo.
-    filtro = f"[0:v]{tela}[{'primeiro' if capa_do_resto else 'foto'}];[1:v]{tela}[corpo];"
+    filtro = f"[0:v]{TELA_DA_IMAGEM}[{'primeiro' if capa_do_resto else 'foto'}];[1:v]{TELA_DA_EDICAO}[corpo];"
     # A miniatura entrega o corpo do vídeo em [comfoto]; com a moldura, em [semmoldura], e a
     # moldura entra por cima dele, lá no fim, saindo em [comfoto].
     fim = "semmoldura" if moldura else "comfoto"
@@ -222,11 +236,12 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
                           else f"gte(t,{n * troca:.3f})*lt(t,{(n + 1) * troca:.3f})")
                 rotulo = fim if ultima else f"mini{n}_no_corpo"
                 filtro += (f"[{indice}:v]scale={miniatura}:{miniatura}:force_original_aspect_ratio=decrease,"
-                           f"format=rgba,pad={miniatura}:{miniatura}:(ow-iw)/2:(oh-ih)/2:color=black@0[mini{n}];"
+                           f"format=rgba,pad={miniatura}:{miniatura}:(ow-iw)/2:(oh-ih)/2:color=black@0,"
+                           f"{POR_CIMA}[mini{n}];"
                            f"[{anterior}][mini{n}]overlay={lugar}:enable='{janela}'[{rotulo}];")
                 anterior = rotulo
         else:
-            filtro += f"[2:v]scale={miniatura}:-2[mini];[corpo][mini]overlay={lugar}[{fim}];"
+            filtro += f"[2:v]scale={miniatura}:-2,{POR_CIMA}[mini];[corpo][mini]overlay={lugar}[{fim}];"
     else:
         # A entrada da foto em laço continua na lista (os números das outras não mudam), sem uso.
         filtro += f"[corpo]null[{fim}];"
@@ -234,7 +249,7 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     if seta:
         inicio, quadros = pulso_da_seta
         entradas += ["-i", seta]
-        filtro += (f"[3:v]loop=loop=-1:size={quadros}:start={inicio}[seta];"
+        filtro += (f"[3:v]loop=loop=-1:size={quadros}:start={inicio},{POR_CIMA}[seta];"
                    f"[comfoto][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1,"
                    "format=yuv420p[editado];"
                    "[foto][editado]concat=n=2:v=1:a=0[v]")
@@ -260,16 +275,17 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
         # Entra por último, para os números das outras entradas não mudarem.
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-t", str(segundos), "-i", capa_do_resto]
-        filtro += ";" + _capa_do_resto_na_abertura(indice, tela, passagem)
+        filtro += ";" + _capa_do_resto_na_abertura(indice, passagem)
     if moldura:
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-i", moldura]
         # O t é o do corpo do vídeo: a espera conta do fim da abertura.
         quando = f":enable='gte(t,{espera_da_moldura:.3f})'" if espera_da_moldura > 0 else ""
-        filtro += (f";[{indice}:v]format=rgba[moldura];[semmoldura][moldura]overlay=0:0:shortest=1{quando}"
+        filtro += (f";[{indice}:v]{POR_CIMA}[moldura];[semmoldura][moldura]overlay=0:0:shortest=1{quando}"
                    "[comfoto]")
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
-            + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", destino])
+            + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", *ETIQUETA_DAS_CORES, "-movflags", "+faststart",
+               destino])
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
@@ -364,11 +380,11 @@ def abertura_com_passagem(capa, resto, destino, segundos=2, passagem=0.3, espera
             if not imagem_abre(caminhos[-1]):
                 return "a capa não é uma imagem que abre"
         temporario = os.path.join(pasta, "abertura.mp4")
-        filtro = f"[0:v]{TELA_DA_EDICAO}[primeiro];" + _capa_do_resto_na_abertura(1, TELA_DA_EDICAO, passagem)
+        filtro = f"[0:v]{TELA_DA_IMAGEM}[primeiro];" + _capa_do_resto_na_abertura(1, passagem)
         comando = (["ffmpeg", "-v", "error", "-y", "-loop", "1", "-t", str(segundos), "-i", caminhos[0],
                     "-loop", "1", "-t", str(segundos), "-i", caminhos[1], "-filter_complex", filtro,
                     "-map", "[foto]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", temporario])
+                    "-pix_fmt", "yuv420p", *ETIQUETA_DAS_CORES, "-movflags", "+faststart", temporario])
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:
@@ -527,14 +543,16 @@ def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
         entradas += ["-i", imagem]
         # Do início até antes do fim: o letreiro que acaba quando o seguinte começa (as legendas da
         # fala) não fica junto com ele no quadro da troca, um por cima do outro.
-        filtro += (f";[t{i}][{i + 1}:v]overlay=x={x}:y={y}:enable='gte(t,{inicio:.2f})*lt(t,{fim:.2f})',"
+        filtro += (f";[{i + 1}:v]{POR_CIMA}[letreiro{i}];"
+                   f"[t{i}][letreiro{i}]overlay=x={x}:y={y}:enable='gte(t,{inicio:.2f})*lt(t,{fim:.2f})',"
                    f"format=yuv420p[t{i + 1}]")
     saida = ["-map", f"[t{len(letreiros)}]"]
     if com_audio:
         saida += ["-map", "[som]", "-c:a", "aac", "-b:a", "128k"]
     # Qualidade alta aqui: o vídeo remontado ainda passa pela edição do Editor 1 depois.
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
-            + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-movflags", "+faststart", destino])
+            + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *ETIQUETA_DAS_CORES, "-movflags", "+faststart",
+               destino])
 
 
 def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
