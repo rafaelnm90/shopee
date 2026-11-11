@@ -1479,19 +1479,83 @@ def test_motivo_da_tela_apagada_em_palavras_fixas(cr):
     assert cr.interpretar_motivo_da_tela_apagada("  mWakefulness=Awake\n") is None
 
 
+def _adb_do_historico(monkeypatch, cr, historico, pedidos):
+    """O adb de mentira das leituras do histórico, da tela, da tela de bloqueio e da carga."""
+    respostas = {("dumpsys", "batterystats"): (0, historico),
+                 ("dumpsys", "power"): (0, "  mWakefulness=Awake\n  mLastSleepReason=timeout\n"),
+                 ("dumpsys", "activity"): (0, "  KeyguardController:\n    mKeyguardShowing=true\n"),
+                 ("dumpsys", "battery"): (0, BATERIA_NA_TOMADA),
+                 ("settings", "get"): (0, "7\n")}
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or respostas[partes[4:6]])
+    return respostas
+
+
 def test_historico_da_tela_e_da_tomada_lido_pelo_adb_sem_mudar_nada(cr, monkeypatch):
     from datetime import datetime
     assert cr.historico_da_tela_e_da_tomada() is None
     cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
-    monkeypatch.setattr(cr, "datetime", type("Relogio", (datetime,), {
-        "now": classmethod(lambda cls, tz=None: datetime(2026, 11, 11, 15, 0, tzinfo=tz))}))
     pedidos = []
-    respostas = {"batterystats": (0, HISTORICO), "power": (0, "  mLastSleepReason=timeout\n")}
-    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or respostas[partes[5]])
-    linhas = cr.historico_da_tela_e_da_tomada()
-    assert "11/11 06:36 apagada (94%)" in linhas[1] and "fora das 11/11 06:31 às 11/11 08:27" in linhas[2]
+    respostas = _adb_do_historico(monkeypatch, cr, HISTORICO, pedidos)
+    linhas = cr.historico_da_tela_e_da_tomada(agora=datetime(2026, 11, 11, 15, 0))
+    # Como está agora (a tela, a tela de bloqueio e a carga) e o que aconteceu, dos últimos 3 dias.
+    assert linhas[0].startswith("agora: tela acesa, com a tela de bloqueio na frente; no carregador, bateria ")
+    assert linhas[0].endswith("Manter ativado ligado")
+    assert linhas[1] == "o histórico do celular começa em 10/11 20:00 (aqui, só as últimas 72 h)"
+    assert "11/11 06:36 apagada (94%)" in linhas[2] and "fora das 11/11 06:31 às 11/11 08:27" in linhas[3]
     assert linhas[-1] == "a tela apagou pela última vez por: tempo sem uso (ela apagou sozinha)"
-    assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "batterystats", "--history"),
-                       ("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "power")]
-    respostas["batterystats"] = (1, "error: device offline")
+    # Só lendo: nada de tocar no celular nem de gravar os marcos (quem grava é a rodada do robô).
+    assert {partes[4] for partes in pedidos} == {"dumpsys", "settings"}
+    assert cr.marcos_guardados() == []
+    respostas[("dumpsys", "batterystats")] = (1, "error: device offline")
     assert cr.historico_da_tela_e_da_tomada() is None
+
+
+def test_marcos_guardados_no_servidor_sem_repetir_e_por_3_dias(cr):
+    # O celular apaga o próprio histórico; o servidor junta cada leitura ao que já guardou, sem repetir o
+    # que duas leituras trazem nem o estado do começo de um histórico novo (o mesmo marco seguido).
+    from datetime import datetime
+    agora = datetime(2026, 11, 11, 15, 0)
+    antes = [(datetime(2026, 11, 8, 10, 0), "tela apagada", 90),         # mais de 3 dias: sai
+             (datetime(2026, 11, 11, 6, 44), "tela apagada", 82),
+             (datetime(2026, 11, 11, 6, 44), "fora da tomada", 82),
+             (datetime(2026, 11, 11, 8, 14), "na tomada (carregador)", 81),
+             (datetime(2026, 11, 11, 8, 14), "tela acesa", 81)]
+    # O histórico novo do celular, que começou às 11:16: o estado do começo repete a tela acesa e a tomada.
+    novos = [(datetime(2026, 11, 11, 11, 16), "tela acesa", 82),
+             (datetime(2026, 11, 11, 11, 16), "na tomada (carregador)", 82),
+             (datetime(2026, 11, 11, 11, 22), "fora da tomada", 82),
+             (datetime(2026, 11, 11, 11, 22, 20), "na tomada (carregador)", 81)]
+    juntos = cr.juntar_marcos(antes, novos + antes[2:], agora)
+    assert [(f"{q:%d/%m %H:%M}", m) for q, m, _c in juntos] == [
+        ("11/11 06:44", "tela apagada"), ("11/11 06:44", "fora da tomada"),
+        ("11/11 08:14", "tela acesa"), ("11/11 08:14", "na tomada (carregador)"),
+        ("11/11 11:22", "fora da tomada"), ("11/11 11:22", "na tomada (carregador)")]
+    assert cr.juntar_marcos([], [], agora) == []
+
+
+def test_rodada_guarda_o_historico_do_celular_e_o_estado_mostra_o_guardado(cr, monkeypatch):
+    from datetime import datetime
+    assert cr.guardar_marcos_do_celular() is None                       # sem o celular, nada
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    pedidos = []
+    respostas = _adb_do_historico(monkeypatch, cr, HISTORICO, pedidos)
+    assert cr.guardar_marcos_do_celular(datetime(2026, 11, 11, 15, 0)) == 10
+    assert cr.marcos_guardados()[3] == (datetime(2026, 11, 11, 6, 31, 40), "descarregando", 95)
+    # O celular apagou o histórico dele (começa de novo às 12:00, já na tomada): o guardado continua.
+    respostas[("dumpsys", "batterystats")] = (0, """Battery History (0% used, 10 used of 4096KB):
+                    0 (10) RESET:TIME: 2026-11-11-12-00-00
+                    0 (2) 081 c0900020 status=not-charging plug=ac +plugged +screen
+          +1h00m00s000ms (2) 080 c0900020 -screen
+""")
+    assert cr.guardar_marcos_do_celular(datetime(2026, 11, 11, 15, 0)) == 11
+    linhas = cr.historico_da_tela_e_da_tomada(agora=datetime(2026, 11, 11, 15, 0))
+    assert linhas[1] == ("o histórico do celular começa em 11/11 12:00; o guardado no servidor, em 10/11 20:00 "
+                         "(aqui, só as últimas 72 h)")
+    assert linhas[2] == ("tela: 10/11 20:00 acesa (100%); 11/11 06:36 apagada (94%); 11/11 08:27 acesa (81%; a "
+                         "tomada mexeu junto); 11/11 13:00 apagada (80%)")
+    # Sem resposta do celular, o guardado fica como estava.
+    respostas[("dumpsys", "batterystats")] = (1, "error: device offline")
+    assert cr.guardar_marcos_do_celular(datetime(2026, 11, 11, 15, 0)) is None
+    assert len(cr.marcos_guardados()) == 11
+
+

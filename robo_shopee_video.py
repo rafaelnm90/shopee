@@ -8053,6 +8053,12 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
             return _resposta(preparar, "o explorar está tocando no celular", pedido_de_post)
         # Dentro da trava, nenhum preparo está rodando: o "preparando" antigo é de uma rodada morta.
         soltar_preparos_interrompidos(agora)
+        # O histórico da tela e da tomada, que o celular apaga sozinho, guardado no servidor a cada
+        # rodada: a próxima parada da tela mostra o que aconteceu antes dela (android.yml estado).
+        try:
+            celular_robo.guardar_marcos_do_celular(agora)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Histórico da tela e da tomada não guardado: {type(e).__name__}")
         # Antes de escolher o que fazer, a tela do celular (P203 1): sem ela, nada gasta a vez.
         try:
             conferir_a_tela(agora)

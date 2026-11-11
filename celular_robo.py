@@ -1093,6 +1093,15 @@ HORAS_DO_HISTORICO = 24
 PISCADA_DA_TOMADA = timedelta(minutes=2)
 JUNTO_DA_TOMADA = timedelta(minutes=1)
 MARCOS_MOSTRADOS = 60
+# O celular apaga o próprio histórico sozinho (em 11/11/2026, às 15:53, ele começava às 11:16, e a
+# manhã da tela apagada já não estava lá). A cada rodada, o robô junta os marcos novos aos guardados
+# no servidor (guardar_marcos_do_celular), por DIAS_DOS_MARCOS dias, numa chave só deles (a do
+# celular é lida a toda hora), e o estado mostra os guardados com os lidos na hora.
+CHAVE_DOS_MARCOS = "celular_robo_marcos"
+DIAS_DOS_MARCOS = 3
+PRAZO_DO_HISTORICO = 30
+TIPOS_DOS_MARCOS = {**{marco: "tela" for marco in MARCOS_DA_TELA.values()},
+                    **{marco: "carga" for marco in CARGAS.values()}}
 
 
 def _tempo_do_historico(texto):
@@ -1171,6 +1180,65 @@ def inicio_do_historico(texto):
     return None
 
 
+def _tipo_do_marco(marco):
+    """tela, carga ou tomada (os marcos da tomada levam o tipo do carregador no nome)."""
+    return TIPOS_DOS_MARCOS.get(marco, "tomada")
+
+
+def juntar_marcos(guardados, novos, agora=None, dias=DIAS_DOS_MARCOS):
+    """
+    Os marcos guardados com os novos (os dois como [(hora, marco, carga)]), na ordem da hora, sem
+    repetir o que duas leituras do mesmo histórico trazem nem o estado do começo de um histórico novo
+    que só repete o anterior (o mesmo marco do mesmo tipo seguido), só dos últimos `dias`.
+    """
+    limite = (agora or datetime.now(fuso_horario)).replace(tzinfo=None) - timedelta(days=dias)
+    todos = sorted({item for item in set(guardados) | set(novos) if item[0] >= limite},
+                   key=lambda item: (item[0], _tipo_do_marco(item[1]), item[1]))
+    juntos, ultimo = [], {}
+    for quando, marco, carga in todos:
+        tipo = _tipo_do_marco(marco)
+        if ultimo.get(tipo) != marco:
+            ultimo[tipo] = marco
+            juntos.append((quando, marco, carga))
+    return juntos
+
+
+def marcos_guardados():
+    """Os marcos que o robô guardou no servidor (guardar_marcos_do_celular), como [(hora, marco, carga)]."""
+    marcos = []
+    for item in db.ler_config(CHAVE_DOS_MARCOS, []) or []:
+        try:
+            marcos.append((datetime.strptime(item[0], "%Y-%m-%d %H:%M:%S"), str(item[1]), item[2]))
+        except (ValueError, TypeError, IndexError):
+            continue
+    return marcos
+
+
+def _ler_o_historico():
+    """O "dumpsys batterystats --history" do celular conectado; None sem o celular ou sem resposta."""
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "batterystats", "--history", timeout=PRAZO_DO_HISTORICO)
+    return r[1] if av._ok(r) else None
+
+
+def guardar_marcos_do_celular(agora=None):
+    """
+    Lê o histórico do celular e junta os marcos novos aos guardados no servidor (juntar_marcos). Só o
+    robô grava, dentro da trava do celular. Devolve quantos marcos ficaram guardados, ou None sem o
+    celular ou sem resposta (os guardados ficam como estavam).
+    """
+    historico = _ler_o_historico()
+    if historico is None:
+        return None
+    agora = agora or datetime.now(fuso_horario)
+    juntos = juntar_marcos(marcos_guardados(), interpretar_historico(historico, agora, DIAS_DOS_MARCOS * 24), agora)
+    db.salvar_config(CHAVE_DOS_MARCOS, [[f"{quando:%Y-%m-%d %H:%M:%S}", marco, carga]
+                                        for quando, marco, carga in juntos])
+    return len(juntos)
+
+
 def interpretar_motivo_da_tela_apagada(energia_do_android):
     """Do "dumpsys power": por que a tela apagou pela última vez, em palavras fixas; None sem o motivo."""
     achado = MOTIVO_DA_TELA_APAGADA.search(energia_do_android or "")
@@ -1219,12 +1287,13 @@ def _piscadas_da_tomada(marcos):
     return piscadas, longas, contados
 
 
-def descrever_tela_e_tomada(marcos, motivo, inicio=None):
+def descrever_tela_e_tomada(marcos, motivo, inicio=None, guardado_desde=None, horas=HORAS_DO_HISTORICO):
     """
-    Os marcos (interpretar_historico) e o motivo da última tela apagada em linhas curtas, só com horas,
-    números e palavras fixas: desde quando o celular guarda o histórico (inicio), cada vez que a tela
-    acendeu ou apagou (com a carga e a tomada que mexeu junto), as piscadas da tomada contadas com as
-    horas, as saídas mais longas, as mudanças da carga fora das piscadas e o motivo.
+    Os marcos (interpretar_historico ou juntar_marcos) e o motivo da última tela apagada em linhas curtas,
+    só com horas, números e palavras fixas: desde quando o celular guarda o histórico (inicio) e o
+    servidor (guardado_desde), cada vez que a tela acendeu ou apagou (com a carga e a tomada que mexeu
+    junto), as piscadas da tomada contadas com as horas, as saídas mais longas, as mudanças da carga
+    fora das piscadas e o motivo. horas: o tamanho da janela, só para dizer qual é.
     """
     piscadas, longas, contados = _piscadas_da_tomada(marcos)
     saidas = [momento for saida, volta in longas for momento in (saida, volta) if momento]
@@ -1238,9 +1307,10 @@ def descrever_tela_e_tomada(marcos, motivo, inicio=None):
         return f" ({carga}%{resto})" if carga is not None else (f" ({resto[2:]})" if resto else "")
 
     linhas = []
-    if inicio:
-        linhas.append(f"o histórico do celular começa em {inicio:%d/%m %H:%M} (aqui, só as últimas "
-                      f"{HORAS_DO_HISTORICO} h)")
+    desde = ([f"o histórico do celular começa em {inicio:%d/%m %H:%M}"] if inicio else []) + (
+        [f"o guardado no servidor, em {guardado_desde:%d/%m %H:%M}"] if guardado_desde else [])
+    if desde:
+        linhas.append("; ".join(desde) + f" (aqui, só as últimas {horas} h)")
     tela = [f"{q:%d/%m %H:%M} {m.split(' ', 1)[1]}{com_carga(c, junto(q))}"
             for q, m, c in marcos if m in MARCOS_DA_TELA.values()]
     linhas.append("tela: " + ("; ".join(_os_ultimos(tela)) if tela else "não acendeu nem apagou"))
@@ -1266,17 +1336,34 @@ def descrever_tela_e_tomada(marcos, motivo, inicio=None):
     return linhas
 
 
-def historico_da_tela_e_da_tomada():
-    """descrever_tela_e_tomada do celular conectado (as linhas); None sem o celular ou sem resposta."""
-    alvo = endereco()
-    if not alvo or shutil.which("adb") is None:
+def _agora_na_tela(acesa):
+    """A tela (acesa: True, False ou None), a tela de bloqueio e a carga agora, em palavras fixas e números."""
+    bloqueio = tela_de_bloqueio() if acesa else None
+    tela = {True: "acesa", False: "apagada"}.get(acesa, "não lida")
+    if acesa:
+        tela += {True: ", com a tela de bloqueio na frente", False: ", sem a tela de bloqueio"}.get(
+            bloqueio, ", tela de bloqueio não lida")
+    return f"agora: tela {tela}; {descrever_energia(ler_energia())}"
+
+
+def historico_da_tela_e_da_tomada(agora=None):
+    """
+    As linhas do estado sobre a tela e a tomada do celular conectado: como estão agora (_agora_na_tela)
+    e o que aconteceu nos últimos DIAS_DOS_MARCOS dias (descrever_tela_e_tomada), com os marcos que o
+    robô guardou e os do histórico lido agora, sem gravar nada. None sem o celular ou sem resposta.
+    """
+    historico = _ler_o_historico()
+    if historico is None:
         return None
-    historico = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "batterystats", "--history", timeout=60)
-    if not av._ok(historico):
-        return None
-    energia = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "power", timeout=15)
-    motivo = interpretar_motivo_da_tela_apagada(energia[1]) if av._ok(energia) else None
-    return descrever_tela_e_tomada(interpretar_historico(historico[1]), motivo, inicio_do_historico(historico[1]))
+    agora = agora or datetime.now(fuso_horario)
+    guardados = marcos_guardados()
+    horas = DIAS_DOS_MARCOS * 24
+    marcos = juntar_marcos(guardados, interpretar_historico(historico, agora, horas), agora)
+    energia = av._rodar("adb", "-s", endereco(), "shell", "dumpsys", "power", timeout=15)
+    energia = energia[1] if av._ok(energia) else None
+    motivo = interpretar_motivo_da_tela_apagada(energia) if energia else None
+    return [_agora_na_tela(interpretar_tela(energia) if energia else None)] + descrever_tela_e_tomada(
+        marcos, motivo, inicio_do_historico(historico), min((q for q, _m, _c in guardados), default=None), horas)
 
 
 def descrever_estado():
