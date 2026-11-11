@@ -477,6 +477,51 @@ def test_carga_lida_pelo_adb_sem_mudar_nada(cr, monkeypatch):
     assert cr.ler_energia() is None
 
 
+@pytest.mark.parametrize("saida, bloqueio", [
+    ("ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n  KeyguardController:\n"
+     "    mKeyguardShowing=true\n    mAodShowing=false\n    mKeyguardGoingAway=false\n", True),
+    ("  KeyguardController:\n    mKeyguardShowing=false\n    mAodShowing=false\n", False),
+    # Sem o "m" na frente, como em versões mais novas do Android.
+    ("  KeyguardController:\n   KeyguardShowing=true AodShowing=false KeyguardGoingAway=false\n", True),
+    ("  KeyguardController:\n    mAodShowing=false\n", None),
+    ("", None),
+])
+def test_tela_de_bloqueio_pelo_estado_do_android(cr, saida, bloqueio):
+    # Em 11/11/2026, das 08:27 às 09:33, a tela estava acesa no cadeado, e o robô não sabia (P203 1).
+    assert cr.interpretar_bloqueio(saida) is bloqueio
+
+
+def test_tela_de_bloqueio_lida_pelo_adb_sem_mudar_nada(cr, monkeypatch):
+    assert cr.tela_de_bloqueio() is None
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes)
+                        or (0, "  KeyguardController:\n    mKeyguardShowing=true\n"))
+    assert cr.tela_de_bloqueio() is True
+    assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "activity", "activities")]
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, "error: device offline"))
+    assert cr.tela_de_bloqueio() is None
+
+
+def test_acender_a_tela_so_como_o_botao_de_ligar(cr, monkeypatch):
+    # P203 1: acende a tela (a tecla de acordar, que com a tela acesa não faz nada) e lê de novo; nunca
+    # desbloqueia (nem arrasta, nem a tecla de menu, nem o comando que tira a tela de bloqueio).
+    assert cr.acender_tela() is None
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    monkeypatch.setattr(cr.time, "sleep", lambda s: None)
+    pedidos = []
+    respostas = {"keyevent": (0, ""), "dumpsys": (0, "  mWakefulness=Awake\n")}
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes)
+                        or respostas[partes[4] if partes[3] == "shell" and partes[4] == "dumpsys" else partes[5]])
+    assert cr.acender_tela() is True
+    assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "input", "keyevent", "KEYCODE_WAKEUP"),
+                       ("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "power")]
+    respostas["dumpsys"] = (0, "  mWakefulness=Asleep\n")
+    assert cr.acender_tela() is False
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, "error: device offline"))
+    assert cr.acender_tela() is None
+
+
 def test_prazo_anotado_de_hora_em_hora_e_na_hora_pelo_painel(cr, monkeypatch):
     from datetime import datetime, timedelta
     from fuso import fuso_horario

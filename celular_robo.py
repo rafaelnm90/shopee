@@ -1015,6 +1015,47 @@ def ler_energia():
     return interpretar_energia(r[1], manter[1] if av._ok(manter) else "")
 
 
+# No carregador, a tela apagada é acesa pelo robô como o botão de ligar, sem desbloquear nada
+# (P203 1, 11/11/2026; DECISOES.md, Shopee Vídeo): o KEYCODE_WAKEUP só acende (com a tela acesa,
+# não faz nada; não é o botão de ligar, que apagaria). Depois, a tela de bloqueio na frente é lida no
+# "dumpsys activity activities" (a seção KeyguardController, a mesma que as ferramentas de teste do
+# Android leem), só lendo.
+TECLA_DE_ACENDER = "KEYCODE_WAKEUP"
+ESPERA_DA_TELA = 2
+BLOQUEIO_NA_FRENTE = re.compile(r"\bm?KeyguardShowing=(true|false)\b", re.IGNORECASE)
+
+
+def interpretar_bloqueio(atividades):
+    """Do "dumpsys activity activities": True com a tela de bloqueio na frente, False sem ela, None sem o estado."""
+    achado = BLOQUEIO_NA_FRENTE.search(atividades or "")
+    return None if not achado else achado.group(1).lower() == "true"
+
+
+def tela_de_bloqueio():
+    """interpretar_bloqueio do celular conectado; None sem o celular ou sem resposta."""
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "activity", "activities", timeout=30)
+    return interpretar_bloqueio(r[1]) if av._ok(r) else None
+
+
+def acender_tela():
+    """
+    Acende a tela apagada como o botão de ligar, sem desbloquear nada, e lê de novo: True acesa, False
+    ainda apagada, None sem o celular ou sem resposta. A tela de bloqueio é outra leitura
+    (tela_de_bloqueio).
+    """
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", "input", "keyevent", TECLA_DE_ACENDER, timeout=15)
+    if not av._ok(r):
+        return None
+    time.sleep(ESPERA_DA_TELA)
+    return tela_acesa()
+
+
 def descrever_energia(energia):
     """A carga e o Manter ativado em palavras fixas e números (o motivo da parada e o registro)."""
     if not energia:

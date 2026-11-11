@@ -876,53 +876,198 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert robo.assistente.proximo_video("autorais") is None
 
 
-def _tela(monkeypatch, acesa, energia=None):
-    """A tela do celular lida pelo adb (celular_robo.tela_acesa) e a carga, sem o celular de verdade."""
+def _tela(monkeypatch, acesa, energia=None, bloqueio=False, acende=None):
+    """
+    A tela do celular lida pelo adb (celular_robo), sem o celular de verdade: acesa ou apagada, a carga,
+    a tela de bloqueio e o que a tecla de acender faz. Devolve as vezes em que o robô acendeu a tela.
+    """
+    acendeu = []
     monkeypatch.setattr(robo.celular_robo, "tela_acesa", lambda: acesa)
-    monkeypatch.setattr(robo.celular_robo, "ler_energia", (lambda: energia) if acesa is False
-                        else (lambda: pytest.fail("com a tela acesa, a carga não é lida")))
+    monkeypatch.setattr(robo.celular_robo, "ler_energia", lambda: energia)
+    monkeypatch.setattr(robo.celular_robo, "tela_de_bloqueio", lambda: bloqueio)
+    monkeypatch.setattr(robo.celular_robo, "acender_tela", lambda: acendeu.append(1) or acende)
+    return acendeu
 
 
-def test_tela_apagada_para_a_rodada_antes_de_escolher_o_video(monkeypatch, avisos):
+FORA_DO_CARREGADOR = {"carregador": False, "bateria": 41, "manter_ativado": True}
+NO_CARREGADOR = {"carregador": True, "bateria": 81, "manter_ativado": True}
+CARGA_NO_CARREGADOR = "no carregador, bateria 81%, Manter ativado ligado"
+
+
+def _avisos_da_tela(avisos):
+    return [a for a in avisos if isinstance(a, str) and a.startswith(("🔌", "🔒", "⚠️ Robô da Shopee Vídeo: a tela"))]
+
+
+def _registros_da_tela(monkeypatch):
+    """O que o robô anota no registro sobre a tela (o registro de 3 dias apaga as linhas da data dos testes)."""
+    anotados, registrar = [], robo.registro_processos.registrar
+
+    def anotar(quem, processo, resultado, detalhe="", ok=None, **outros):
+        if processo == robo.PROCESSO_DA_TELA:
+            anotados.append((resultado, detalhe, ok))
+        return registrar(quem, processo, resultado, detalhe, ok, **outros)
+
+    monkeypatch.setattr(robo.registro_processos, "registrar", anotar)
+    return anotados
+
+
+def test_tela_apagada_fora_do_carregador_para_antes_de_escolher_e_avisa_uma_vez(monkeypatch, avisos):
     # Em 11/11, das 06:44 às 08:14, seis rodadas escolheram o vídeo, perguntaram à IA e só no celular
-    # apertaram voltar 15 vezes com a tela apagada (o Moto Display). Agora a rodada para antes de tudo,
-    # sem tocar no celular (a tela é lida pelo adb), e o motivo diz se ele saiu do carregador.
+    # apertaram voltar 15 vezes com a tela apagada (o Moto Display). Fora do carregador, o robô não acende
+    # a tela (P203 1): a rodada para antes de escolher o que fazer, sem tocar no celular, e o Rafael recebe
+    # um aviso só, com a bateria.
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
-    _tela(monkeypatch, False, {"carregador": False, "bateria": 41, "manter_ativado": True})
+    acendeu = _tela(monkeypatch, False, FORA_DO_CARREGADOR)
     monkeypatch.setattr(robo, "preparar_rascunho", lambda *a, **k: pytest.fail("com a tela apagada, nada de preparo"))
     motivo = "a tela do celular está apagada (fora do carregador, bateria 41%, Manter ativado ligado)"
-    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == f"rascunho: parado ({motivo})"
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert acendeu == []
     assert consultar("SELECT acao, resultado, passo, motivo FROM shopee_video_tentativas") == (
-        "rascunho", "parou", "tela do celular apagada", motivo)
-    assert "Parou em: tela do celular apagada" in avisos[-1] and motivo in avisos[-1]
-    # Nenhum vídeo da fonte gasto: o mesmo volta quando a tela acender.
+        "rodada", "parou", "tela do celular apagada", motivo)
+    assert len(avisos) == 1 and avisos[0].startswith("🔌") and "bateria 41%" in avisos[0]
+    assert "uma vez só" in avisos[0] and "nada perde a vez" in avisos[0]
+    # Nada gastou a vez: o horário do plano espera, e o vídeo da fonte continua o próximo.
+    assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["feitos"] == 0
     assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    # A rodada seguinte, ainda apagada: sem outro aviso e sem outra linha no histórico.
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert len(avisos) == 1 and consultar("SELECT COUNT(*) FROM shopee_video_tentativas") == (1,)
     assert robo.passo_do_motivo(robo.TELA_APAGADA) == "tela do celular apagada"
 
 
-def test_tela_apagada_sem_a_carga_lida_e_outras_acoes_tambem_param(monkeypatch, avisos):
+def test_tela_apagada_sem_a_carga_lida_nao_acende(monkeypatch, avisos):
     ativar(robo_inicio=0, robo_fim=24)
-    _tela(monkeypatch, False)
-    with pytest.raises(robo.Parada) as parada:
-        robo.conferir_a_tela_acesa()
-    assert parada.value.motivo == f"{robo.TELA_APAGADA} (carga não lida)" and parada.value.antes_de_comecar
-    # O feed (ou qualquer outra ação) também para antes do primeiro toque, com a tentativa anotada.
-    assert robo._agir(Intocavel(), "feed", None, False, robo.ler_config(), momento("2026-10-22 10:00")) == (
-        f"feed: parado ({robo.TELA_APAGADA} (carga não lida))")
-    assert consultar("SELECT acao, resultado, passo FROM shopee_video_tentativas") == (
-        "feed", "parou", "tela do celular apagada")
-    # Com a tela acesa, ou sem a leitura dela (o adb sem resposta), nada muda.
-    for acesa in (True, None):
-        _tela(monkeypatch, acesa)
-        robo.conferir_a_tela_acesa()
+    acendeu = _tela(monkeypatch, False)
+    with pytest.raises(robo.TelaSemUso) as parada:
+        robo.conferir_a_tela()
+    assert parada.value.motivo == f"{robo.TELA_APAGADA} (carga não lida)" and acendeu == []
+    # Com a tela acesa e livre, ou sem a leitura dela (o adb sem resposta), nada muda.
+    for acesa, bloqueio in ((True, False), (None, True), (True, None)):
+        _tela(monkeypatch, acesa, bloqueio=bloqueio)
+        robo.conferir_a_tela()
 
 
-def test_tela_acesa_o_rascunho_sai_como_sempre(monkeypatch, avisos):
+def test_tela_apagada_no_carregador_o_robo_acende_e_segue(monkeypatch, avisos):
+    # P203 1: no carregador, o robô acende a tela como o botão de ligar, sem desbloquear nada, e segue.
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
-    _tela(monkeypatch, True)
+    acendeu = _tela(monkeypatch, False, NO_CARREGADOR, acende=True)
+    registros = _registros_da_tela(monkeypatch)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert acendeu == [1] and _avisos_da_tela(avisos) == []
+    assert registros == [("acesa pelo robô", CARGA_NO_CARREGADOR, True)]
+
+
+def test_tela_que_nao_acende_ou_acende_na_tela_de_bloqueio_para_e_avisa_cada_problema(monkeypatch, avisos):
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    _tela(monkeypatch, False, NO_CARREGADOR, acende=False)
+    motivo = f"{robo.TELA_NAO_ACENDEU} quando o robô tentou ({CARGA_NO_CARREGADOR})"
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert robo.passo_do_motivo(motivo) == "tela do celular apagada"
+    assert len(_avisos_da_tela(avisos)) == 1 and "Aperte o botão de ligar" in avisos[-1]
+    # Acesa pelo robô, na tela de bloqueio: outro problema, outro aviso; o robô não desbloqueia.
+    _tela(monkeypatch, False, NO_CARREGADOR, bloqueio=True, acende=True)
+    motivo = f"{robo.TELA_DE_BLOQUEIO} (o robô não desbloqueia o celular; {CARGA_NO_CARREGADOR})"
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert len(_avisos_da_tela(avisos)) == 2 and avisos[-1].startswith("🔒") and "Desbloqueie" in avisos[-1]
+    assert consultar("SELECT COUNT(*) FROM shopee_video_tentativas") == (2,)
+
+
+def test_tela_de_bloqueio_na_frente_para_a_rodada_e_avisa_uma_vez_ate_sair(monkeypatch, avisos):
+    # Das 08:27 às 09:33 de 11/11, a tela estava acesa no cadeado, com a Shopee por trás, e cada rodada
+    # apertava voltar em vão. O robô não desbloqueia o celular (P203 1): para antes de escolher o que fazer
+    # e avisa uma vez; desbloqueado, segue, e a próxima vez avisa de novo.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    acendeu = _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
+    motivo = f"{robo.TELA_DE_BLOQUEIO} (o robô não desbloqueia o celular; {CARGA_NO_CARREGADOR})"
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert acendeu == [] and len(avisos) == 1 and avisos[0].startswith("🔒")
+    assert consultar("SELECT acao, passo FROM shopee_video_tentativas") == ("rodada", "tela de bloqueio")
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert len(avisos) == 1
+    # Desbloqueado (a leitura do adb sem dizer nada da tela de bloqueio): o rascunho sai, e o fim da
+    # rodada no app diz que a tela voltou.
+    _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=None)
+    registros = _registros_da_tela(monkeypatch)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert robo.ler_estado()["tela_avisada"] == "" and registros == [("de volta depois do aviso", "", True)]
+    # Na próxima vez, o aviso vem de novo.
+    _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=True)
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == motivo
+    assert len(_avisos_da_tela(avisos)) == 2
+
+
+def test_tela_sem_uso_responde_os_pedidos_do_rafael_e_o_aprovado_nao_perde_a_vez(monkeypatch, avisos):
+    ident = _aprovado(monkeypatch)
+    _tela(monkeypatch, False, FORA_DO_CARREGADOR)
+    motivo = "a tela do celular está apagada (fora do carregador, bateria 41%, Manter ativado ligado)"
+    agora = momento("2026-10-22 23:59")
+    antes = robo.pegar(ident)
+    # O aprovado que passou da hora não é tentado: não conta uma tentativa de postar.
+    assert robo.rodada(d=Intocavel(), agora=agora) == motivo
+    assert robo.pegar(ident)["estado"] == "aprovado"
+    assert robo.pegar(ident)["falhas_ao_postar"] == antes["falhas_ao_postar"]
+    assert len(avisos) == 1
+    # Postar Agora 🚀, Preparar 1 Agora ⚡, Gerar Apelação ⚖️ e Testar Caminho 🧭: cada um ganha a resposta.
+    assert robo.rodada(d=Intocavel(), postar=ident, agora=agora) == motivo
+    assert "não postei agora o rascunho que você pediu" in avisos[-1] and motivo in avisos[-1]
+    assert robo.pegar(ident)["estado"] == "aprovado"
+    assert robo.rodada(d=Intocavel(), preparar=True, agora=agora) == motivo
+    assert "não preparei o rascunho que você pediu" in avisos[-1]
+    robo.rodada(d=Intocavel(), saude=True, agora=agora)
+    assert "não consegui ler a Saúde do Vídeo" in avisos[-1] and "Gerar Apelação ⚖️" in avisos[-1]
+    robo.rodada(d=Intocavel(), treino=True, agora=agora)
+    assert "não comecei" in avisos[-1] and "Testar Caminho 🧭" in avisos[-1]
+    # O pedido do Fazer Agora ⏩ sai da lista com o aviso (sem isso, voltaria a cada rodada).
+    assert robo.pedir_agora("saude", agora)[0]
+    robo.rodada(d=Intocavel(), fazer=True, agora=agora)
+    assert "não fiz o que você pediu no Fazer Agora" in avisos[-1] and robo.pedidos_de_agora(agora) == []
+    # O aviso da tela continua um só; cada pedido fica no histórico.
+    assert len(_avisos_da_tela(avisos)) == 1
+    assert consultar("SELECT COUNT(*) FROM shopee_video_tentativas") == (6,)
+
+
+BLOQUEIO_NA_LEITURA = (
+    '<hierarchy><node package="com.android.systemui" resource-id="com.android.systemui:id/notification_panel">'
+    '<node package="com.android.systemui" resource-id="com.android.systemui:id/notification_stack_scroller"/>'
+    '<node package="com.android.systemui" resource-id="com.android.systemui:id/keyguard_status_view"/>'
+    '<node package="com.android.systemui" resource-id="com.android.systemui:id/keyguard_bottom_area"/>'
+    '</node></hierarchy>')
+
+
+def test_tela_de_bloqueio_na_leitura_para_na_hora_sem_apertar_voltar(monkeypatch, avisos):
+    # A tela de bloqueio traz as peças do painel do Android, e o voltar não a fecha: às 09:18 e às 09:33 de
+    # 11/11, o robô apertou voltar 15 vezes em vão. Achada na leitura, o robô para na hora e avisa uma vez.
+    _tela(monkeypatch, True, NO_CARREGADOR)
+
+    class Bloqueado:
+        def __init__(self):
+            self.apertos = []
+
+        def dump_hierarchy(self):
+            return BLOQUEIO_NA_LEITURA
+
+        def press(self, tecla):
+            self.apertos.append(tecla)
+
+    d = Bloqueado()
+    assert robo.tela_de_bloqueio_na_leitura(BLOQUEIO_NA_LEITURA)
+    with pytest.raises(robo.Parada) as parada:
+        robo.tela(d, seguir=True)
+    assert parada.value.motivo.startswith(robo.TELA_DE_BLOQUEIO) and d.apertos == []
+    assert robo.passo_do_motivo(parada.value.motivo) == "tela de bloqueio"
+    assert len(avisos) == 1 and avisos[0].startswith("🔒")
+    with pytest.raises(robo.Parada):
+        robo.voltar(d, "Eu")
+    assert len(avisos) == 1 and d.apertos == []
+    # O painel do Android sem a tela de bloqueio, e a Shopee na frente, não são ela.
+    painel = BLOQUEIO_NA_LEITURA.replace("keyguard_status_view", "qs_frame").replace("keyguard_bottom_area",
+                                                                                     "quick_settings_panel")
+    assert not robo.tela_de_bloqueio_na_leitura(painel) and robo.painel_do_android_aberto(painel)
+    com_a_shopee = BLOQUEIO_NA_LEITURA.replace("<hierarchy>", f'<hierarchy><node package="{robo.ps.PACOTE}"/>')
+    assert not robo.tela_de_bloqueio_na_leitura(com_a_shopee)
 
 
 # --- O Giro na edição (pedido do Rafael, vídeo de 31/10), sem o Realçar (P177 2) ---

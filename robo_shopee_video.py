@@ -43,9 +43,12 @@ Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celul
 privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular desconectado:
 tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
 Postagem e avisa, e o modo assistente volta a mandar as postagens no privado até o
-Rafael tocar em Retomar Postagem ▶️. Com a tela do celular apagada, para antes de começar,
-sem tocar em nada, com a carga e o Manter ativado no motivo (conferir_a_tela_acesa). Na
-Verificação da Shopee para na hora e manda o link da tela do celular no privado. Com a conta de Shopee Vídeo suspensa pela Shopee (o
+Rafael tocar em Retomar Postagem ▶️. Antes de escolher o que fazer, a rodada confere a tela
+do celular pelo adb (conferir_a_tela, P203 1): apagada no carregador, o robô a acende como o
+botão de ligar, sem desbloquear nada; apagada fora do carregador, que não acende ou com a tela
+de bloqueio na frente, a rodada para sem tocar no app e sem gastar a vez de nada, e o Rafael
+recebe um aviso só. Na Verificação da Shopee para na hora e manda o link da tela do celular
+no privado. Com a conta de Shopee Vídeo suspensa pela Shopee (o
 aviso fica nas Notificações do app), não prepara, não posta e não treina até o fim da
 suspensão (o Postar vídeo fica fechado), e o modo assistente espera junto; o resto segue
 no horário de sempre, e com o celular fora da tomada só pula. No fim, os dois voltam
@@ -246,13 +249,11 @@ class Parada(Exception):
     A rodada para aqui. do_video=True quando o problema é do vídeo (a IA não confirmou,
     o produto não foi achado): ele não volta. Sem isso, o vídeo pode ir numa próxima vez.
     caso_guardado=True: quem parou já guardou o caso com a tela da hora (casos_robo).
-    antes_de_comecar=True: a ação nem começou (a tela apagada, conferir_a_tela_acesa).
     """
 
     def __init__(self, motivo, do_video=False):
         super().__init__(motivo)
         self.motivo, self.do_video, self.caso_guardado = motivo, do_video, False
-        self.antes_de_comecar = False
 
 
 class Verificacao(Exception):
@@ -1138,6 +1139,8 @@ LINHAS_DO_HISTORICO = 12
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
     ("a tela do celular está apagada", "tela do celular apagada"),
+    ("a tela do celular não acendeu", "tela do celular apagada"),
+    ("a tela de bloqueio está na frente", "tela de bloqueio"),
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
@@ -1684,6 +1687,8 @@ def tela(d, seguir=False):
     início de qualquer jeito), devolve a tela do app reaberto.
     """
     xml = d.dump_hierarchy()
+    if tela_de_bloqueio_na_leitura(xml):
+        raise parada_na_tela_de_bloqueio()
     if painel_do_android_aberto(xml):
         xml = fechar_o_painel_do_android(d)
     xml = _reler_sem_o_app(d, xml)
@@ -2101,31 +2106,162 @@ def onde_ficou(d):
     return f"app {app}, tela {nome}, tela do celular {ligada}"
 
 
-# A tela do celular apagada (11/11/2026, das 06:44 às 08:14: a leitura trazia só o Moto Display).
-# Cada rodada escolhia o vídeo, perguntava à IA e só no celular apertava voltar 15 vezes em vão. O
-# robô só toca no app com a tela acesa, e o Manter ativado a deixa acesa no carregador (DECISOES.md,
-# Shopee Vídeo): apagada, a ação para antes de começar, sem tocar em nada e sem gastar vídeo da fonte,
-# com o que o celular diz da carga e do Manter ativado no motivo. A tela é lida pelo adb
-# (celular_robo.tela_acesa), sem passar pelo app.
+# A tela do celular antes de cada rodada (P203 1, 11/11/2026). Naquela manhã, das 06:44 às 08:14, a
+# tela estava apagada (a leitura trazia só o Moto Display) e, das 08:27 às 09:33, acesa na tela de
+# bloqueio, com a Shopee por trás: cada rodada tentava o app em vão. Tudo pelo adb, sem passar pelo
+# app. Apagada com o celular no carregador, o robô acende a tela como o botão de ligar, sem
+# desbloquear nada, e a rodada segue. Apagada fora do carregador (a tela apagaria de novo no meio e
+# gastaria a bateria) ou sem a carga lida, que não acende, ou com a tela de bloqueio na frente, a
+# rodada para antes de escolher o que fazer: o plano do dia, os aprovados e os pedidos não gastam a
+# vez, como com o celular desconectado, e o Rafael recebe um aviso só por problema, até a tela voltar.
+# Sem a leitura da tela, a rodada segue como antes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 TELA_APAGADA = "a tela do celular está apagada"
+TELA_NAO_ACENDEU = "a tela do celular não acendeu"
+TELA_DE_BLOQUEIO = "a tela de bloqueio está na frente"
+PROCESSO_DA_TELA = "tela do celular"
+MOTIVOS_DA_TELA = {
+    "fora_do_carregador": TELA_APAGADA + " ({carga})",
+    "nao_acendeu": TELA_NAO_ACENDEU + " quando o robô tentou ({carga})",
+    "bloqueio": TELA_DE_BLOQUEIO + " (o robô não desbloqueia o celular; {carga})",
+}
+ROTULOS_DA_TELA = {"fora_do_carregador": "apagada fora do carregador", "nao_acendeu": "não acendeu",
+                   "bloqueio": "tela de bloqueio"}
+_NADA_PERDE_A_VEZ = ("Até lá, nada sai no celular, e nada perde a vez: os rascunhos do plano voltam espalhados "
+                     "no resto do dia, e os aprovados esperam.")
+AVISOS_DA_TELA = {
+    "fora_do_carregador": (
+        "🔌 Robô da Shopee Vídeo: a tela do celular do robô está apagada ({carga}).\n\n"
+        "Fora do carregador, o robô não acende a tela: ela apagaria de novo no meio e gastaria a bateria. "
+        + _NADA_PERDE_A_VEZ + "\n\n"
+        "Ponha o celular no carregador: na rodada seguinte (em até 15 min) o robô acende a tela sozinho. Se "
+        "aparecer a tela de bloqueio, desbloqueie com a mão. Este aviso vem uma vez só."),
+    "nao_acendeu": (
+        "⚠️ Robô da Shopee Vídeo: a tela do celular do robô está apagada e não acendeu quando o robô tentou "
+        "({carga}). " + _NADA_PERDE_A_VEZ + "\n\n"
+        "Aperte o botão de ligar do celular e, se aparecer a tela de bloqueio, desbloqueie com a mão: o robô "
+        "continua sozinho na rodada seguinte (em até 15 min). Este aviso vem uma vez só."),
+    "bloqueio": (
+        "🔒 Robô da Shopee Vídeo: o celular do robô está na tela de bloqueio ({carga}), e o robô não desbloqueia "
+        "o celular. " + _NADA_PERDE_A_VEZ + "\n\n"
+        "Desbloqueie o celular com a mão e deixe-o no carregador, com o Manter ativado ligado (assim a tela não "
+        "apaga e não bloqueia de novo): o robô continua sozinho na rodada seguinte (em até 15 min). Este aviso "
+        "vem uma vez só."),
+}
 
 
-def conferir_a_tela_acesa():
-    """Parada(TELA_APAGADA, com a carga) com a tela apagada; sem a leitura da tela, a ação segue como antes."""
+class TelaSemUso(Exception):
+    """A tela do celular não deixa a rodada começar (conferir_a_tela): o motivo, o problema e se ele é novo."""
+
+    def __init__(self, motivo, problema, novo):
+        super().__init__(motivo)
+        self.motivo, self.problema, self.novo = motivo, problema, novo
+
+
+def _carga_do_celular():
+    """A carga lida pelo adb (ou None) e a descrição dela, para o motivo e o aviso."""
     try:
-        apagada = celular_robo.tela_acesa() is False
-    except Exception:
-        return
-    if not apagada:
-        return
-    try:
-        energia = celular_robo.descrever_energia(celular_robo.ler_energia())
+        energia = celular_robo.ler_energia()
     except Exception as e:
-        energia = f"carga não lida (erro {type(e).__name__})"
-    parada = Parada(f"{TELA_APAGADA} ({energia})")
-    # Antes do preparo, o rascunho ainda não anotou nada: o _agir anota por ele.
-    parada.antes_de_comecar = True
-    raise parada
+        return None, f"carga não lida (erro {type(e).__name__})"
+    return energia, celular_robo.descrever_energia(energia)
+
+
+def _sem_a_tela(problema, carga, agora=None):
+    """
+    O TelaSemUso do problema, com o registro e o aviso ao Rafael: um só por problema; enquanto ele dura,
+    as rodadas seguintes não avisam de novo, e um problema diferente avisa (o celular posto no
+    carregador que acende na tela de bloqueio, por exemplo). O aviso que não chega tenta de novo.
+    """
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, ROTULOS_DA_TELA[problema], carga, ok=None, agora=agora)
+    novo = ler_estado().get("tela_avisada") != problema
+    if novo and avisar(AVISOS_DA_TELA[problema].format(carga=carga)):
+        gravar_estado(tela_avisada=problema)
+    return TelaSemUso(MOTIVOS_DA_TELA[problema].format(carga=carga), problema, novo)
+
+
+def _tela_de_volta(agora=None):
+    """A tela acesa e sem a tela de bloqueio: o próximo problema dela volta a avisar."""
+    if ler_estado().get("tela_avisada"):
+        gravar_estado(tela_avisada="")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, "de volta depois do aviso", ok=True, agora=agora)
+
+
+def _ler(funcao):
+    """Uma leitura do celular pelo adb: o que ela devolve, ou None quando ela falha."""
+    try:
+        return funcao()
+    except Exception:
+        return None
+
+
+def conferir_a_tela(agora=None):
+    """
+    A tela do celular antes de a rodada escolher o que fazer: TelaSemUso quando ela não deixa tocar no
+    app (o aviso ao Rafael sai daqui); apagada no carregador, o robô a acende. Sem a leitura da tela, a
+    rodada segue como antes; sem a leitura da tela de bloqueio, também (a leitura do app a acha:
+    tela_de_bloqueio_na_leitura).
+    """
+    acesa = _ler(celular_robo.tela_acesa)
+    if acesa is None:
+        return
+    carga = None
+    if not acesa:
+        energia, carga = _carga_do_celular()
+        if not (energia or {}).get("carregador"):
+            raise _sem_a_tela("fora_do_carregador", carga, agora)
+        if not _ler(celular_robo.acender_tela):
+            raise _sem_a_tela("nao_acendeu", carga, agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, "acesa pelo robô", carga, ok=True, agora=agora)
+    bloqueio = _ler(celular_robo.tela_de_bloqueio)
+    if bloqueio:
+        raise _sem_a_tela("bloqueio", carga or _carga_do_celular()[1], agora)
+    if bloqueio is False:
+        _tela_de_volta(agora)
+
+
+def _rodada_sem_a_tela(e, na_hora, preparar, pedido_de_post, treino, saude, pedidos, agora=None):
+    """
+    A rodada que a tela não deixou começar: nada do plano, dos aprovados nem dos pedidos gasta a vez.
+    O histórico anota o 1º aviso de cada problema e cada pedido do Rafael, que ganha a resposta (o
+    pedido do Fazer Agora sai da lista, como com o celular desconectado: sem isso, voltaria a cada
+    rodada).
+    """
+    if e.novo or na_hora:
+        registrar_tentativa("rodada", "parou", e.motivo, agora=agora)
+    if not na_hora:
+        anotar_rodada_sem_limpeza(f"{PROCESSO_DA_TELA}: {ROTULOS_DA_TELA[e.problema]}", agora)
+    if pedidos:
+        tirar_pedido(*(p["atividade"] for p in pedidos))
+        nomes = ", ".join(ATIVIDADES_DO_FAZER_AGORA[p["atividade"]][0] for p in pedidos)
+        avisar(f"⏩ Robô da Shopee Vídeo: não fiz o que você pediu no Fazer Agora ({nomes}): {e.motivo}. Peça de "
+               "novo quando a tela do celular voltar.")
+    elif saude:
+        avisar(f"⚠️ Robô da Shopee Vídeo: não consegui ler a Saúde do Vídeo ({e.motivo}). Toque de novo em "
+               "Gerar Apelação ⚖️ quando a tela do celular voltar.")
+    elif treino:
+        avisar(f"🧭 Treino do robô da Shopee Vídeo: não comecei ({e.motivo}). Toque de novo em Testar Caminho 🧭 "
+               "quando a tela do celular voltar.")
+    return _resposta(preparar, e.motivo, pedido_de_post)
+
+
+# A tela de bloqueio na leitura do app, no meio de uma ação (a rodada começou com ela livre, ou o
+# adb não disse se ela estava na frente). Ela traz também as peças do painel do Android, e o voltar
+# não a fecha: o robô para na hora, com o mesmo aviso de uma vez, em vez de apertar voltar em vão.
+# As peças que só ela tem (e o teclado da senha) são as do Motorola em 11/11/2026, às 09:33.
+PECAS_DA_TELA_DE_BLOQUEIO = ("keyguard_bottom_area", "keyguard_status_view", "keyguard_security_container",
+                             "keyguard_host_view")
+
+
+def tela_de_bloqueio_na_leitura(xml):
+    """A leitura é a tela de bloqueio (ou o teclado da senha), sem nada da Shopee."""
+    texto = str(xml or "")
+    return (f'package="{ps.PACOTE}"' not in texto
+            and any(f'{ps.PACOTE_SISTEMA}:id/{peca}"' in texto for peca in PECAS_DA_TELA_DE_BLOQUEIO))
+
+
+def parada_na_tela_de_bloqueio(agora=None):
+    """A Parada da tela de bloqueio achada na leitura, com o registro e o aviso de uma vez."""
+    return Parada(_sem_a_tela("bloqueio", _carga_do_celular()[1], agora).motivo)
 
 
 def ir_ao_inicio(d):
@@ -7819,6 +7955,11 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
             return _resposta(preparar, "o explorar está tocando no celular", pedido_de_post)
         # Dentro da trava, nenhum preparo está rodando: o "preparando" antigo é de uma rodada morta.
         soltar_preparos_interrompidos(agora)
+        # Antes de escolher o que fazer, a tela do celular (P203 1): sem ela, nada gasta a vez.
+        try:
+            conferir_a_tela(agora)
+        except TelaSemUso as e:
+            return _rodada_sem_a_tela(e, na_hora, preparar, pedido_de_post, treino, saude, pedidos, agora)
         pedida = None
         if treino:
             acao, ident = "treino", None
@@ -7887,6 +8028,8 @@ def deixar_sem_video(d, agora=None):
         voltar(d, "Eu")
         tocar(d, "Eu", 3)
         registro_processos.registrar(REGISTRO, PROCESSO_DO_FIM_DA_RODADA, "no Eu", ok=True, agora=agora)
+        # O app respondeu até o fim: a tela estava livre (P203 1).
+        _tela_de_volta(agora)
     except Verificacao:
         registro_processos.registrar(REGISTRO, PROCESSO_DO_FIM_DA_RODADA, "parado na Verificação", ok=None,
                                      agora=agora)
@@ -7905,8 +8048,6 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
     # O rascunho entra no histórico pelo preparar_rascunho, que sabe qual vídeo tentou.
     produto = ", ".join((pegar(ident) or {}).get("produtos") or []) if ident else ""
     try:
-        # Com a tela apagada, nada começa: nem a escolha do vídeo, nem a IA, nem um toque.
-        conferir_a_tela_acesa()
         if acao == "treino":
             resultado = treinar(d, agora)
             registrar_tentativa("treino", "treino ok" if "OK" in resultado else "treino parou",
@@ -7988,11 +8129,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
         av.abrir_tela(celular=True, verificacao=True)
         return f"{acao}: verificação na tela; parado"
     except Parada as e:
-        # O rascunho que parou no preparo já anotou o caso e a tentativa (preparar_rascunho); o que
-        # parou antes de começar, não. Antes de começar, o caso vai sem a tela: nada lê o celular.
-        anotar = acao != "rascunho" or e.antes_de_comecar
-        if anotar and not e.caso_guardado:
-            _guardar_caso(None if e.antes_de_comecar else d, acao, "parou", e.motivo, ident=ident, agora=agora)
+        if acao != "rascunho" and not e.caso_guardado:
+            _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
         if acao == "postar":
             _nao_saiu_o_post(ident, e.motivo, pedido)
         elif acao == "refazer":
@@ -8002,7 +8140,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
             avisar(f"⚠️ Robô da Shopee Vídeo: não consegui apagar o rascunho ({e.motivo}). Não toquei em mais "
                    "nada; ele voltou para Rascunhos do Robô 📝.")
-        if anotar:
+        if acao != "rascunho":
             registrar_tentativa(acao, "parou", e.motivo, produto, agora)
         if acao == "saude" and pedido:
             avisar(f"⚠️ Robô da Shopee Vídeo: não consegui ler a Saúde do Vídeo ({e.motivo}). Toque de novo em "
