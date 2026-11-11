@@ -1069,6 +1069,119 @@ def descrever_energia(energia):
     return ", ".join(partes)
 
 
+# O que aconteceu com a tela e com a tomada (11/11/2026: a tela apagou às 06:44 e, das 08:27 em diante,
+# ficou na tela de bloqueio). O "dumpsys batterystats --history" do Android guarda, com a hora, quando
+# o celular entrou e saiu da tomada, quando a carga mudou e quando a tela acendeu e apagou; o
+# "dumpsys power" diz por que a tela apagou pela última vez. Só lendo. Do histórico saem só esses
+# marcos, a hora e a carga: os nomes dos apps que ele também traz nunca saem daqui.
+LINHA_DO_HISTORICO = re.compile(r"^\s*(0|\+[0-9dhms]+)\s+\(\d+\)\s+(.*)$")
+TEMPO_DO_HISTORICO = re.compile(r"^\+(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m(?!s))?(?:(\d+)s)?(?:(\d+)ms)?$")
+HORA_DO_HISTORICO = re.compile(r"(?:RESET:)?TIME:\s*(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})")
+CARGA_DO_HISTORICO = re.compile(r"^(\d{3})\b")
+TOMADAS = {"ac": "carregador", "usb": "USB", "wireless": "sem fio", "dock": "base"}
+CARGAS = {"charging": "carregando", "not-charging": "carga em pausa", "full": "carga cheia",
+          "discharging": "descarregando"}
+MARCOS_DA_TELA = {"+screen": "tela acesa", "-screen": "tela apagada"}
+MOTIVO_DA_TELA_APAGADA = re.compile(r"^\s*mLastSleepReason=(\S+)", re.MULTILINE)
+MOTIVOS_DA_TELA_APAGADA = {"timeout": "tempo sem uso (ela apagou sozinha)", "power_button": "o botão de ligar",
+                           "application": "um app pediu", "device_admin": "o bloqueio do aparelho",
+                           "inattentive": "tempo sem uso (ela apagou sozinha)"}
+HORAS_DO_HISTORICO = 24
+MARCOS_MOSTRADOS = 20
+
+
+def _tempo_do_historico(texto):
+    """Os milissegundos de um tempo do histórico ("0" ou "+1h02m03s456ms"); None quando não é um."""
+    if texto == "0":
+        return 0
+    achado = TEMPO_DO_HISTORICO.match(texto)
+    if not achado or not any(achado.groups()):
+        return None
+    dias, horas, minutos, segundos, milis = (int(parte or 0) for parte in achado.groups())
+    return (((dias * 24 + horas) * 60 + minutos) * 60 + segundos) * 1000 + milis
+
+
+def interpretar_historico(texto, agora=None, horas=HORAS_DO_HISTORICO):
+    """
+    Os marcos da tomada, da carga e da tela no "dumpsys batterystats --history", na ordem: [(hora,
+    marco, carga)], hora em datetime (a do celular), marco em palavras fixas e carga em % (None sem
+    ela), só das últimas `horas` e sem repetir o mesmo marco seguido. A hora sai da linha RESET:TIME (e
+    das TIME: seguintes, quando o relógio do celular muda) somada ao tempo de cada linha.
+    """
+    agora = (agora or datetime.now(fuso_horario)).replace(tzinfo=None)
+    marcos, ancora, ultimo = [], None, {}
+    for linha in (texto or "").splitlines():
+        achado = LINHA_DO_HISTORICO.match(linha)
+        if not achado:
+            continue
+        tempo = _tempo_do_historico(achado.group(1))
+        if tempo is None:
+            continue
+        resto = achado.group(2)
+        hora_marcada = HORA_DO_HISTORICO.search(resto)
+        if hora_marcada:
+            try:
+                ancora = (datetime.strptime(hora_marcada.group(1), "%Y-%m-%d-%H-%M-%S"), tempo)
+            except ValueError:
+                pass
+            continue
+        if ancora is None:
+            continue
+        quando = ancora[0] + timedelta(milliseconds=tempo - ancora[1])
+        carga = CARGA_DO_HISTORICO.match(resto)
+        carga = int(carga.group(1)) if carga else None
+        partes = resto.split()
+        tomada = next((p.split("=", 1)[1] for p in partes if p.startswith("plug=")), None)
+        novos = []
+        for parte in partes:
+            if parte == "+plugged":
+                novos.append(("tomada", f"na tomada ({TOMADAS.get(tomada, 'outro tipo')})"))
+            elif parte == "-plugged":
+                novos.append(("tomada", "fora da tomada"))
+            elif parte.startswith("status=") and parte[7:] in CARGAS:
+                novos.append(("carga", CARGAS[parte[7:]]))
+            elif parte in MARCOS_DA_TELA:
+                novos.append(("tela", MARCOS_DA_TELA[parte]))
+        for tipo, marco in novos:
+            if ultimo.get(tipo) == marco:
+                continue
+            ultimo[tipo] = marco
+            if agora - quando <= timedelta(hours=horas):
+                marcos.append((quando, marco, carga))
+    return marcos
+
+
+def interpretar_motivo_da_tela_apagada(energia_do_android):
+    """Do "dumpsys power": por que a tela apagou pela última vez, em palavras fixas; None sem o motivo."""
+    achado = MOTIVO_DA_TELA_APAGADA.search(energia_do_android or "")
+    if not achado:
+        return None
+    return MOTIVOS_DA_TELA_APAGADA.get(achado.group(1), achado.group(1)[:30])
+
+
+def descrever_tela_e_tomada(marcos, motivo):
+    """Os marcos (interpretar_historico) e o motivo da última tela apagada numa linha, só com horas e palavras fixas."""
+    if not marcos:
+        texto = f"nada nas últimas {HORAS_DO_HISTORICO} h do histórico do celular"
+    else:
+        texto = "; ".join(f"{quando:%d/%m %H:%M} {marco}" + (f" ({carga}%)" if carga is not None else "")
+                          for quando, marco, carga in marcos[-MARCOS_MOSTRADOS:])
+    return texto + f" | a tela apagou pela última vez por: {motivo or 'motivo não lido'}"
+
+
+def historico_da_tela_e_da_tomada():
+    """descrever_tela_e_tomada do celular conectado; None sem o celular ou sem resposta."""
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    historico = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "batterystats", "--history", timeout=60)
+    if not av._ok(historico):
+        return None
+    energia = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "power", timeout=15)
+    motivo = interpretar_motivo_da_tela_apagada(energia[1]) if av._ok(energia) else None
+    return descrever_tela_e_tomada(interpretar_historico(historico[1]), motivo)
+
+
 def descrever_estado():
     """
     A ligação com o celular guardado em uma linha, para o android.yml (estado), só com
