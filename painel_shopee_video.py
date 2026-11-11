@@ -231,6 +231,13 @@ async def verificar_robo():
         sem_celular = config.get("robo_pausa_motivo") == robo.MOTIVO_DA_DESCONEXAO
         if not sem_celular:
             robo.consumir_horarios(config, pular=True)
+        else:
+            # Sem o celular: o CELULAR DESCONECTADO de hora em hora, ou o CELULAR DE VOLTA quando o
+            # servidor acha o celular de novo (P205 1: DECISOES.md, Shopee Vídeo).
+            try:
+                await asyncio.to_thread(robo.lembrar_celular_desconectado)
+            except Exception as e:
+                logger.warning(f"⚠️ [Robô Shopee Vídeo] Alerta do celular desconectado não saiu: {type(e).__name__}")
         # Pausado, a limpeza das 4h não roda: o registro diz o porquê ao checkup.
         robo.anotar_limpeza_sem_celular(resultado="celular fora (robô pausado)" if sem_celular else "robô pausado")
         return
@@ -3262,7 +3269,9 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     marcar = (f"\n\n📲 {sem_postei} vídeo(s) que o assistente mandou hoje sem o celular ainda estão sem o "
               f"{assistente.BOTAO_POSTEI}. Se você postou, toque nele na mensagem do vídeo: o robô desconta do plano "
               "de hoje." if sem_postei else "")
-    await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
+    # Os alertas do CELULAR DESCONECTADO param aqui, com o CELULAR DE VOLTA (P205 1).
+    de_volta = f"{robo.CELULAR_DE_VOLTA}\n\n" if robo.fim_do_alerta_desconectado() else ""
+    await message.answer(f"{de_volta}▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
                          f"assistente fica em espera.{motivo_da_queda}{para_tras}{fechados}{marcar}{suspensao}",
                          parse_mode="HTML")
     await mostrar_robo(message, state)
