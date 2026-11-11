@@ -43,8 +43,9 @@ Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celul
 privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular desconectado:
 tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
 Postagem e avisa, e o modo assistente volta a mandar as postagens no privado até o
-Rafael tocar em Retomar Postagem ▶️. Na Verificação da Shopee para na hora e manda o
-link da tela do celular no privado. Com a conta de Shopee Vídeo suspensa pela Shopee (o
+Rafael tocar em Retomar Postagem ▶️. Com a tela do celular apagada, para antes de começar,
+sem tocar em nada, com a carga e o Manter ativado no motivo (conferir_a_tela_acesa). Na
+Verificação da Shopee para na hora e manda o link da tela do celular no privado. Com a conta de Shopee Vídeo suspensa pela Shopee (o
 aviso fica nas Notificações do app), não prepara, não posta e não treina até o fim da
 suspensão (o Postar vídeo fica fechado), e o modo assistente espera junto; o resto segue
 no horário de sempre, e com o celular fora da tomada só pula. No fim, os dois voltam
@@ -245,11 +246,13 @@ class Parada(Exception):
     A rodada para aqui. do_video=True quando o problema é do vídeo (a IA não confirmou,
     o produto não foi achado): ele não volta. Sem isso, o vídeo pode ir numa próxima vez.
     caso_guardado=True: quem parou já guardou o caso com a tela da hora (casos_robo).
+    antes_de_comecar=True: a ação nem começou (a tela apagada, conferir_a_tela_acesa).
     """
 
     def __init__(self, motivo, do_video=False):
         super().__init__(motivo)
         self.motivo, self.do_video, self.caso_guardado = motivo, do_video, False
+        self.antes_de_comecar = False
 
 
 class Verificacao(Exception):
@@ -1134,6 +1137,7 @@ LINHAS_DO_HISTORICO = 12
 # O passo em que parou, achado no motivo (as frases fixas do robô e do postador). A
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
+    ("a tela do celular está apagada", "tela do celular apagada"),
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
@@ -2095,6 +2099,33 @@ def onde_ficou(d):
     except Exception:
         ligada = "?"
     return f"app {app}, tela {nome}, tela do celular {ligada}"
+
+
+# A tela do celular apagada (11/11/2026, das 06:44 às 08:14: a leitura trazia só o Moto Display).
+# Cada rodada escolhia o vídeo, perguntava à IA e só no celular apertava voltar 15 vezes em vão. O
+# robô só toca no app com a tela acesa, e o Manter ativado a deixa acesa no carregador (DECISOES.md,
+# Shopee Vídeo): apagada, a ação para antes de começar, sem tocar em nada e sem gastar vídeo da fonte,
+# com o que o celular diz da carga e do Manter ativado no motivo. A tela é lida pelo adb
+# (celular_robo.tela_acesa), sem passar pelo app.
+TELA_APAGADA = "a tela do celular está apagada"
+
+
+def conferir_a_tela_acesa():
+    """Parada(TELA_APAGADA, com a carga) com a tela apagada; sem a leitura da tela, a ação segue como antes."""
+    try:
+        apagada = celular_robo.tela_acesa() is False
+    except Exception:
+        return
+    if not apagada:
+        return
+    try:
+        energia = celular_robo.descrever_energia(celular_robo.ler_energia())
+    except Exception as e:
+        energia = f"carga não lida (erro {type(e).__name__})"
+    parada = Parada(f"{TELA_APAGADA} ({energia})")
+    # Antes do preparo, o rascunho ainda não anotou nada: o _agir anota por ele.
+    parada.antes_de_comecar = True
+    raise parada
 
 
 def ir_ao_inicio(d):
@@ -7833,6 +7864,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
     # O rascunho entra no histórico pelo preparar_rascunho, que sabe qual vídeo tentou.
     produto = ", ".join((pegar(ident) or {}).get("produtos") or []) if ident else ""
     try:
+        # Com a tela apagada, nada começa: nem a escolha do vídeo, nem a IA, nem um toque.
+        conferir_a_tela_acesa()
         if acao == "treino":
             resultado = treinar(d, agora)
             registrar_tentativa("treino", "treino ok" if "OK" in resultado else "treino parou",
@@ -7914,8 +7947,11 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
         av.abrir_tela(celular=True, verificacao=True)
         return f"{acao}: verificação na tela; parado"
     except Parada as e:
-        if acao != "rascunho" and not e.caso_guardado:
-            _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
+        # O rascunho que parou no preparo já anotou o caso e a tentativa (preparar_rascunho); o que
+        # parou antes de começar, não. Antes de começar, o caso vai sem a tela: nada lê o celular.
+        anotar = acao != "rascunho" or e.antes_de_comecar
+        if anotar and not e.caso_guardado:
+            _guardar_caso(None if e.antes_de_comecar else d, acao, "parou", e.motivo, ident=ident, agora=agora)
         if acao == "postar":
             _nao_saiu_o_post(ident, e.motivo, pedido)
         elif acao == "refazer":
@@ -7925,7 +7961,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
             avisar(f"⚠️ Robô da Shopee Vídeo: não consegui apagar o rascunho ({e.motivo}). Não toquei em mais "
                    "nada; ele voltou para Rascunhos do Robô 📝.")
-        if acao != "rascunho":
+        if anotar:
             registrar_tentativa(acao, "parou", e.motivo, produto, agora)
         if acao == "saude" and pedido:
             avisar(f"⚠️ Robô da Shopee Vídeo: não consegui ler a Saúde do Vídeo ({e.motivo}). Toque de novo em "

@@ -876,6 +876,55 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert robo.assistente.proximo_video("autorais") is None
 
 
+def _tela(monkeypatch, acesa, energia=None):
+    """A tela do celular lida pelo adb (celular_robo.tela_acesa) e a carga, sem o celular de verdade."""
+    monkeypatch.setattr(robo.celular_robo, "tela_acesa", lambda: acesa)
+    monkeypatch.setattr(robo.celular_robo, "ler_energia", (lambda: energia) if acesa is False
+                        else (lambda: pytest.fail("com a tela acesa, a carga não é lida")))
+
+
+def test_tela_apagada_para_a_rodada_antes_de_escolher_o_video(monkeypatch, avisos):
+    # Em 11/11, das 06:44 às 08:14, seis rodadas escolheram o vídeo, perguntaram à IA e só no celular
+    # apertaram voltar 15 vezes com a tela apagada (o Moto Display). Agora a rodada para antes de tudo,
+    # sem tocar no celular (a tela é lida pelo adb), e o motivo diz se ele saiu do carregador.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    _tela(monkeypatch, False, {"carregador": False, "bateria": 41, "manter_ativado": True})
+    monkeypatch.setattr(robo, "preparar_rascunho", lambda *a, **k: pytest.fail("com a tela apagada, nada de preparo"))
+    motivo = "a tela do celular está apagada (fora do carregador, bateria 41%, Manter ativado ligado)"
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59")) == f"rascunho: parado ({motivo})"
+    assert consultar("SELECT acao, resultado, passo, motivo FROM shopee_video_tentativas") == (
+        "rascunho", "parou", "tela do celular apagada", motivo)
+    assert "Parou em: tela do celular apagada" in avisos[-1] and motivo in avisos[-1]
+    # Nenhum vídeo da fonte gasto: o mesmo volta quando a tela acender.
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    assert robo.passo_do_motivo(robo.TELA_APAGADA) == "tela do celular apagada"
+
+
+def test_tela_apagada_sem_a_carga_lida_e_outras_acoes_tambem_param(monkeypatch, avisos):
+    ativar(robo_inicio=0, robo_fim=24)
+    _tela(monkeypatch, False)
+    with pytest.raises(robo.Parada) as parada:
+        robo.conferir_a_tela_acesa()
+    assert parada.value.motivo == f"{robo.TELA_APAGADA} (carga não lida)" and parada.value.antes_de_comecar
+    # O feed (ou qualquer outra ação) também para antes do primeiro toque, com a tentativa anotada.
+    assert robo._agir(Intocavel(), "feed", None, False, robo.ler_config(), momento("2026-10-22 10:00")) == (
+        f"feed: parado ({robo.TELA_APAGADA} (carga não lida))")
+    assert consultar("SELECT acao, resultado, passo FROM shopee_video_tentativas") == (
+        "feed", "parou", "tela do celular apagada")
+    # Com a tela acesa, ou sem a leitura dela (o adb sem resposta), nada muda.
+    for acesa in (True, None):
+        _tela(monkeypatch, acesa)
+        robo.conferir_a_tela_acesa()
+
+
+def test_tela_acesa_o_rascunho_sai_como_sempre(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    _tela(monkeypatch, True)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+
+
 # --- O Giro na edição (pedido do Rafael, vídeo de 31/10), sem o Realçar (P177 2) ---
 
 class ComAvisos(AppDeMentira):

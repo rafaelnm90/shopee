@@ -414,6 +414,69 @@ def test_prazo_do_pareamento_lido_no_celular(cr, monkeypatch, resposta, prazo):
     assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "settings", "get", "global", cr.CONFIG_DO_PRAZO)]
 
 
+BATERIA_NA_TOMADA = ("Current Battery Service state:\n  AC powered: true\n  USB powered: false\n"
+                     "  Wireless powered: false\n  Dock powered: false\n  status: 5\n  level: 100\n  scale: 100\n")
+BATERIA_FORA = ("Current Battery Service state:\n  AC powered: false\n  USB powered: false\n"
+                "  Wireless powered: false\n  status: 3\n  level: 37\n  scale: 100\n")
+
+
+@pytest.mark.parametrize("bateria, manter, energia, texto", [
+    (BATERIA_NA_TOMADA, "7\n", {"carregador": True, "bateria": 100, "manter_ativado": True},
+     "no carregador, bateria 100%, Manter ativado ligado"),
+    (BATERIA_FORA, "0", {"carregador": False, "bateria": 37, "manter_ativado": False},
+     "fora do carregador, bateria 37%, Manter ativado desligado"),
+    (BATERIA_FORA.replace("USB powered: false", "USB powered: true"), "null",
+     {"carregador": True, "bateria": 37, "manter_ativado": False}, "no carregador, bateria 37%, Manter ativado desligado"),
+    ("", "", {"carregador": None, "bateria": None, "manter_ativado": None},
+     "carregador não lido, Manter ativado não lido"),
+])
+def test_carga_e_manter_ativado_lidos_no_celular(cr, bateria, manter, energia, texto):
+    # Com a tela apagada (11/11/2026), o motivo diz se o celular saiu do carregador ou se o
+    # Manter ativado foi desligado.
+    assert cr.interpretar_energia(bateria, manter) == energia
+    assert cr.descrever_energia(energia) == texto
+
+
+@pytest.mark.parametrize("saida, acesa", [
+    ("Power Manager State:\n  mDirty=0x0\n  mWakefulness=Awake\n  mWakefulnessChanging=false\n", True),
+    ("Power Manager State:\n  mWakefulness=Asleep\n  mWakefulnessChanging=false\n", False),
+    # O Moto Display (o relógio da tela apagada) é o Android cochilando.
+    ("Power Manager State:\n  mWakefulness=Dozing\n", False),
+    ("Power Manager State:\n  mWakefulness=Dreaming\n", True),
+    ("Power Manager State:\n  mWakefulnessChanging=false\n", None),
+    ("", None),
+])
+def test_tela_acesa_ou_apagada_pelo_estado_do_android(cr, saida, acesa):
+    assert cr.interpretar_tela(saida) is acesa
+
+
+def test_tela_lida_pelo_adb_sem_mudar_nada(cr, monkeypatch):
+    assert cr.tela_acesa() is None
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar",
+                        lambda *partes, timeout=0: pedidos.append(partes) or (0, "  mWakefulness=Asleep\n"))
+    assert cr.tela_acesa() is False
+    assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "power")]
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, "error: device offline"))
+    assert cr.tela_acesa() is None
+
+
+def test_carga_lida_pelo_adb_sem_mudar_nada(cr, monkeypatch):
+    assert cr.descrever_energia(None) == "carga não lida"
+    assert cr.ler_energia() is None
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-24 16:05:00")
+    pedidos = []
+    respostas = {"battery": (0, BATERIA_FORA), cr.CONFIG_DA_TELA_ACESA: (0, "7")}
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or respostas[partes[-1]])
+    assert cr.ler_energia() == {"carregador": False, "bateria": 37, "manter_ativado": True}
+    # Só lê: a carga e a configuração do Android.
+    assert pedidos == [("adb", "-s", f"{IP}:37000", "shell", "dumpsys", "battery"),
+                       ("adb", "-s", f"{IP}:37000", "shell", "settings", "get", "global", cr.CONFIG_DA_TELA_ACESA)]
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (1, "error: device offline"))
+    assert cr.ler_energia() is None
+
+
 def test_prazo_anotado_de_hora_em_hora_e_na_hora_pelo_painel(cr, monkeypatch):
     from datetime import datetime, timedelta
     from fuso import fuso_horario
