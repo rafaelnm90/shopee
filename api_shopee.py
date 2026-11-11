@@ -311,11 +311,13 @@ ROBO_DO_REGISTRO = "api_shopee"
 PROCESSO_DA_BUSCA_NEGADA = "busca de ofertas negada"
 # O código 10000 é o erro de sistema da própria Shopee: passa sozinho, e a mesma busca, uns
 # segundos depois, costuma dar certo (o checkup de 05/11 mostrou o código da busca negada que
-# aparecia 1 vez por dia; o de 06/11, uma que não passou nem na 2ª). A busca tenta de novo até
-# TENTATIVAS_NO_ERRO_DE_SISTEMA vezes, cada espera maior que a anterior (ESPERA_NO_ERRO_DE_SISTEMA
-# segundos vezes o número da tentativa), e o registro anota quando a nova tentativa salvou a busca.
+# aparecia 1 vez por dia; o de 06/11, uma que não passou nem na 2ª; os de 10/11, umas 10 por dia que
+# não passaram nem na 3ª, enquanto a 3ª salvava mais buscas que a 2ª: o erro dura alguns segundos).
+# A busca tenta de novo até TENTATIVAS_NO_ERRO_DE_SISTEMA vezes, cada espera maior que a anterior
+# (ESPERA_NO_ERRO_DE_SISTEMA segundos vezes o número da tentativa: 3, 6 e 9 s), e o registro anota
+# em que tentativa a busca foi salva.
 CODIGO_DO_ERRO_DE_SISTEMA = "10000"
-TENTATIVAS_NO_ERRO_DE_SISTEMA = 3
+TENTATIVAS_NO_ERRO_DE_SISTEMA = 4
 ESPERA_NO_ERRO_DE_SISTEMA = 3
 PROCESSO_DO_ERRO_DE_SISTEMA = "busca de ofertas: erro de sistema da Shopee"
 
