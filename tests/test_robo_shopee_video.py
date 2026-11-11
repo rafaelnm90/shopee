@@ -3831,6 +3831,54 @@ def test_link_de_video_curte_e_anexa_todos_os_produtos_que_a_ia_confirma(monkeyp
     assert rascunho["links_dos_produtos"] == ["https://s.shopee.com.br/curto-11", ""]
 
 
+def _ver_produtos_com_valor(monkeypatch, *valores):
+    """A troca do Ver Produtos (P57) devolve os produtos do criador com o valor por venda de cada um."""
+    monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", lambda d, video, nomes, *a, **k: [
+        {"nome": nome, "link": "", "valor": valor, "trocado": "", "do_video": True, "item": str(i + 1)}
+        for i, (nome, valor) in enumerate(zip(nomes, valores))])
+
+
+def test_ver_produtos_que_paga_menos_que_o_minimo_fica_de_lado_no_dia(monkeypatch, avisos):
+    # Escolha do Rafael (11/11, P200 1): o vídeo de link de vídeo vai na vez dele e, aberto no celular,
+    # fica de lado só no dia se o produto que paga mais do Ver Produtos pagar menos de R$ 2 por venda.
+    _fonte_de_video(monkeypatch)
+    _ver_produtos_com_valor(monkeypatch, 1.0, 0.5)     # o que paga mais: R$ 1,00 por venda
+    app = AppDoVerProdutos()
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
+    motivo = f"{robo.MOTIVO_VER_PRODUTOS_ABAIXO} (o que paga mais: R$ 1,00 por venda)"
+    assert resultado.startswith(f"rascunho: parado ({motivo}")
+    # Nada anexado, e as curtidas do Ver Produtos saem (a lista continua limpa).
+    assert app.anexados == [] and app.curtidos == set()
+    # Não é falha: a tentativa entra como "de lado", sem caso guardado, e o vídeo volta amanhã.
+    assert consultar("SELECT acao, resultado, passo, motivo FROM shopee_video_tentativas") == (
+        "rascunho", "de lado", "valor por venda", motivo)
+    assert robo.casos_robo.casos() == [] and consultar("SELECT COUNT(*) FROM shopee_video_rascunhos") == (0,)
+    assert "a1" in robo.evitar_hoje(robo.ler_config(), momento("2026-10-22 23:59"))
+    assert robo.proximo_video(robo.ler_config(), robo.evitar_hoje(robo.ler_config(), momento("2026-10-23 10:00")),
+                              momento("2026-10-23 10:00"))["id"] == "a1"
+
+
+def test_ver_produtos_que_paga_o_minimo_segue_como_antes(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch)
+    _ver_produtos_com_valor(monkeypatch, 3.0, 0.5)     # basta um pagar o mínimo: R$ 3,00 por venda
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.anexados == [PRODUTO_A, PRODUTO_B]
+
+
+def test_minimo_do_ver_produtos_vale_com_um_produto_ou_varios():
+    # Com 1 produto, vale o dele; com vários, basta um pagar R$ 2 ou mais. O 0 é a oferta que a API não
+    # achou pelo nome: sem o valor de nenhum, o vídeo segue como antes.
+    with pytest.raises(robo.DeLadoNoDia) as parada:
+        robo.conferir_o_minimo_do_ver_produtos([{"valor": 1.2, "item": "1"}, {"valor": 0, "item": ""}])
+    assert parada.value.do_video and parada.value.motivo.endswith("(o que paga mais: R$ 1,20 por venda)")
+    assert robo.passo_do_motivo(parada.value.motivo) == "valor por venda"
+    robo.conferir_o_minimo_do_ver_produtos([{"valor": 2.0}])
+    robo.conferir_o_minimo_do_ver_produtos([{"valor": 0.5}, {"valor": 3.1}])
+    assert robo.melhor_valor_do_ver_produtos([{"valor": 0}, {"nome": "sem valor"}]) is None
+    robo.conferir_o_minimo_do_ver_produtos([{"valor": 0}])
+
+
 
 def test_ver_produtos_abre_o_ver_mais_e_le_os_escondidos_sem_tocar_nas_recomendacoes(monkeypatch):
     # Escolha do Rafael (28/10, P66): os produtos que o criador esconde no "Ver Mais (N)" entram
