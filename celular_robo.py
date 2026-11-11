@@ -959,6 +959,75 @@ def descrever_prazo(prazo):
     return "sem prazo" if prazo == 0 else f"{prazo} dia(s)"
 
 
+# A tela do celular acesa ou apagada, e a carga e o Manter ativado quando ela está apagada (11/11/2026:
+# das 06:44 às 08:14 a leitura da tela trazia só o Moto Display): no carregador, o Manter ativado deixa
+# a tela sempre acesa (DECISOES.md, Shopee Vídeo). Fora do carregador ela apaga sozinha; no carregador
+# com ele ligado, alguém a apagou no botão. Tudo pelo adb, só lendo: não muda nada no celular e não
+# passa pelo app (o robô confere antes de começar, sem tocar no celular).
+ESTADO_DA_TELA = re.compile(r"^\s*mWakefulness=(\w+)", re.MULTILINE)
+TELA_LIGADA = ("Awake", "Dreaming")
+TELA_DESLIGADA = ("Asleep", "Dozing")
+CONFIG_DA_TELA_ACESA = "stay_on_while_plugged_in"
+
+
+def interpretar_tela(energia_do_android):
+    """Do "dumpsys power": True com a tela acesa, False apagada (ou só o relógio do Motorola), None sem o estado."""
+    estado = ESTADO_DA_TELA.search(energia_do_android or "")
+    if not estado:
+        return None
+    return True if estado.group(1) in TELA_LIGADA else False if estado.group(1) in TELA_DESLIGADA else None
+
+
+def tela_acesa():
+    """interpretar_tela do celular conectado; None sem o celular ou sem resposta."""
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "power", timeout=15)
+    return interpretar_tela(r[1]) if av._ok(r) else None
+LIGADO_NA_ENERGIA = re.compile(r"^\s*(?:AC|USB|Wireless|Dock) powered:\s*true\s*$", re.IGNORECASE | re.MULTILINE)
+NIVEL_DA_BATERIA = re.compile(r"^\s*level:\s*(\d+)\s*$", re.MULTILINE)
+
+
+def interpretar_energia(bateria, manter_ativado):
+    """
+    O que o "dumpsys battery" e a configuração do Manter ativado (CONFIG_DA_TELA_ACESA: 0 ou vazia
+    é desligado; os outros números, os tipos de carregador em que a tela não apaga) dizem:
+    {"carregador": no carregador?, "bateria": %, "manter_ativado": ligado?}, com None no que não veio.
+    """
+    texto = bateria or ""
+    carregador = bool(LIGADO_NA_ENERGIA.search(texto)) if re.search(r"powered:", texto, re.IGNORECASE) else None
+    nivel = NIVEL_DA_BATERIA.search(texto)
+    valor = (manter_ativado or "").strip().lower()
+    manter = int(valor) > 0 if valor.isdigit() else False if valor == "null" else None
+    return {"carregador": carregador, "bateria": int(nivel.group(1)) if nivel else None, "manter_ativado": manter}
+
+
+def ler_energia():
+    """interpretar_energia do celular conectado; None sem o celular ou sem resposta."""
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", "dumpsys", "battery", timeout=15)
+    if not av._ok(r):
+        return None
+    manter = av._rodar("adb", "-s", alvo, "shell", "settings", "get", "global", CONFIG_DA_TELA_ACESA, timeout=15)
+    return interpretar_energia(r[1], manter[1] if av._ok(manter) else "")
+
+
+def descrever_energia(energia):
+    """A carga e o Manter ativado em palavras fixas e números (o motivo da parada e o registro)."""
+    if not energia:
+        return "carga não lida"
+    partes = [{True: "no carregador", False: "fora do carregador"}.get(energia.get("carregador"),
+                                                                         "carregador não lido")]
+    if energia.get("bateria") is not None:
+        partes.append(f"bateria {energia['bateria']}%")
+    partes.append({True: "Manter ativado ligado", False: "Manter ativado desligado"}.get(
+        energia.get("manter_ativado"), "Manter ativado não lido"))
+    return ", ".join(partes)
+
+
 def descrever_estado():
     """
     A ligação com o celular guardado em uma linha, para o android.yml (estado), só com
