@@ -1207,7 +1207,7 @@ PASSOS = (
     ("não achei", "navegar no app"),
     ("erro", "erro inesperado"),
 )
-SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
+SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "de lado": "↪️", "parou": "⚠️", "erro": "❌",
             "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
             "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "curtido": "👍", "descurtido": "💔",
             "refeito": "✏️"}
@@ -2713,11 +2713,45 @@ def proximo_video(config, evitar=(), agora=None):
 # um vídeo, e os produtos ficam no Ver Produtos, que só o celular lê), o de produto sem oferta e o de
 # produto já postado ficam na vez deles, como antes (o primeiro vira rascunho; os outros ficam de
 # lado): um produto antes deles na fila só passa na frente se pagar o mínimo. O registro diz só
-# posições e contagens (o checkup é público); o valor vai no rascunho (coluna valor). Quando o Rafael
-# decidir o vídeo de vários produtos (P200), a regra dele muda. DECISOES.md, Shopee Vídeo.
+# posições e contagens (o checkup é público); o valor vai no rascunho (coluna valor). O de vários
+# produtos passa pelo mínimo depois de aberto no celular (P200 1, conferir_o_minimo_do_ver_produtos).
+# DECISOES.md, Shopee Vídeo.
 VIDEOS_NA_ESCOLHA = 10
 MINIMO_POR_VENDA = 2.0
 PROCESSO_DA_ESCOLHA = "escolha pelo valor por venda"
+# O vídeo de link de vídeo (Ver Produtos, com 1 produto ou vários) vai na vez dele e, aberto no celular,
+# com o valor por venda de cada produto da lista (os do criador e os trocados pela loja que paga mais,
+# trocar_os_do_ver_produtos), fica de lado só no dia se o que paga mais pagar menos de MINIMO_POR_VENDA,
+# antes de anexar (o descurtir do fim tira o que ele curtiu), e o horário passa ao próximo vídeo. Não é
+# falha: sem caso guardado, e a tentativa entra como "de lado". Sem o valor de nenhum (a API não achou
+# nenhum pelo nome), segue como antes. Escolha do Rafael (11/11, P200 1): DECISOES.md, Shopee Vídeo.
+MOTIVO_VER_PRODUTOS_ABAIXO = "os produtos do Ver Produtos pagam menos que o mínimo por venda"
+
+
+class DeLadoNoDia(Parada):
+    """O vídeo fica de lado só hoje pelo que paga (P200 1): o horário passa ao próximo vídeo, sem ser falha."""
+
+    def __init__(self, motivo):
+        super().__init__(motivo, do_video=True)
+
+
+def melhor_valor_do_ver_produtos(produtos):
+    """
+    O que paga mais por venda entre os produtos do Ver Produtos, ou None sem o valor de nenhum: o 0 é a
+    oferta que a API não achou pelo nome (ou sem o preço ou a comissão), não um produto que paga 0.
+    """
+    valores = [p["valor"] for p in produtos or [] if (p.get("valor") or 0) > 0]
+    return max(valores) if valores else None
+
+
+def conferir_o_minimo_do_ver_produtos(produtos):
+    """DeLadoNoDia quando o que paga mais do Ver Produtos paga menos que MINIMO_POR_VENDA (P200 1); senão, nada."""
+    melhor = melhor_valor_do_ver_produtos(produtos)
+    if melhor is None or melhor >= MINIMO_POR_VENDA:
+        return
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA, "Ver Produtos abaixo do mínimo - de lado no dia",
+                                 f"{len(produtos)} produto(s)", ok=None)
+    raise DeLadoNoDia(f"{MOTIVO_VER_PRODUTOS_ABAIXO} (o que paga mais: {assistente._reais(melhor)} por venda)")
 SEM_VIDEO_NA_FONTE = "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
 
 
@@ -2912,10 +2946,15 @@ def preparar_rascunho(d, config, agora=None):
         registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
         raise
     except Parada as e:
-        _guardar_caso(d if celular else None, "rascunho", "pulado" if e.do_video else "parou", e.motivo, video,
-                      ident, agora)
-        _desfazer_reserva(ident, video["id"], e.motivo, e.do_video)
-        registrar_tentativa("rascunho", "pulado" if e.do_video else "parou", e.motivo, _produto_do_video(video), agora)
+        # O de lado no dia pelo que paga (P200 1) não é falha: sem caso, e o vídeo volta amanhã.
+        de_lado = isinstance(e, DeLadoNoDia)
+        resultado = "de lado" if de_lado else "pulado" if e.do_video else "parou"
+        if de_lado:
+            _deixar_de_lado_no_dia([video["id"]], config, agora)
+        else:
+            _guardar_caso(d if celular else None, "rascunho", resultado, e.motivo, video, ident, agora)
+        _desfazer_reserva(ident, video["id"], e.motivo, e.do_video and not de_lado)
+        registrar_tentativa("rascunho", resultado, e.motivo, _produto_do_video(video), agora)
         e.id_video = video["id"]
         if celular and e.motivo.startswith(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU):
             # Com o caso já guardado com a tela da falha: o app aberto há muitas horas é fechado e
@@ -4960,6 +4999,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         if do_ver_produtos and do_ver_produtos[0].get("item") in produtos_ja_postados():
             anotar_onde_ja_foi(do_ver_produtos[0]["item"], "robô")
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
+        # O mínimo por venda, que só o celular deixa ver no vídeo de link de vídeo (P200 1).
+        conferir_o_minimo_do_ver_produtos(do_ver_produtos)
         links_trocados = {p["nome"]: p["link"] for p in do_ver_produtos if p["trocado"]}
         trocados = len(links_trocados)
         # A medição de quais posts levam punição (P146 2) cruza a troca com a Saúde.
