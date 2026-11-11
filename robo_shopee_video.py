@@ -5099,6 +5099,40 @@ def faixa_da_capa(imagem, caixa, cor=None):
     return None
 
 
+# A cor da faixa no post (P204 1): a soma das diferenças das três cores entre a faixa que chegou à
+# grade e a cor da edição. O registro guarda só a faixa de valores em que ela caiu, para o checkup
+# mostrar se a cor chega certa ao celular (com a tabela de cores errada, o rosa e o laranja chegavam
+# a uns 30 dela).
+PROCESSO_DA_COR_DA_CAPA = "cor da capa no post"
+FAIXAS_DA_DIFERENCA_DA_COR = (10, 20, 40)
+
+
+def diferenca_da_cor(imagem, faixa, cor):
+    """
+    A soma das diferenças das três cores entre a cor do meio da faixa (cima, baixo, esquerda,
+    direita) na imagem do PIL, só dos pontos perto da cor (sem as letras), e a cor. None sem nenhum.
+    """
+    import numpy
+    cima, baixo, esquerda, direita = faixa
+    pontos = numpy.asarray(imagem.convert("RGB").crop((esquerda, cima, direita, baixo)), dtype=numpy.int16)
+    pontos = pontos.reshape(-1, 3)
+    alvo = numpy.array(cor, dtype=numpy.int16)
+    perto = pontos[numpy.abs(pontos - alvo).sum(axis=1) <= edicao_video.TOLERANCIA_DO_LARANJA]
+    if not len(perto):
+        return None
+    return int(numpy.abs(numpy.median(perto, axis=0) - alvo).sum())
+
+
+def faixa_da_diferenca_da_cor(diferenca):
+    """O resultado no registro: "até 10 da cor da edição", "de 11 a 20 ...", ... ou "mais de 40 ..."."""
+    de = 0
+    for ate in FAIXAS_DA_DIFERENCA_DA_COR:
+        if diferenca <= ate:
+            return f"até {ate} da cor da edição" if not de else f"de {de} a {ate} da cor da edição"
+        de = ate + 1
+    return f"mais de {FAIXAS_DA_DIFERENCA_DA_COR[-1]} da cor da edição"
+
+
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     """
     O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim);
@@ -6294,6 +6328,10 @@ def marcar_o_post(d, ident, caixa):
                     registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
                                                  "no post com a faixa" if faixa else "no post sem a faixa",
                                                  detalhe, ok=bool(faixa))
+                    diferenca = diferenca_da_cor(imagem, faixa, cor or edicao_video.LARANJA_DA_SHOPEE) if faixa else None
+                    if diferenca is not None:
+                        registro_processos.registrar(REGISTRO, PROCESSO_DA_COR_DA_CAPA,
+                                                     faixa_da_diferenca_da_cor(diferenca))
                 return marca
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A marca da capa do post não saiu: {type(e).__name__}")

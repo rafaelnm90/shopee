@@ -7895,6 +7895,48 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
                                               ("no post sem a faixa", "")]
 
 
+def test_post_anota_a_que_distancia_da_cor_da_edicao_a_faixa_chegou():
+    # P204 1: o vídeo vai na tabela de cores do HD, e o registro diz a que distância da cor da
+    # edição a faixa chegou à grade (com a tabela errada, o rosa chegava a 27 dela, mais claro).
+    from PIL import Image, ImageDraw
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    ev = robo.edicao_video
+    rosa, rosa_lavado = ev.CORES_DO_PRODUTO["rosa"], (240, 105, 148)
+
+    tela = Image.new("RGB", (400, 300), (240, 240, 240))
+    desenho = ImageDraw.Draw(tela)
+    desenho.rectangle([0, 0, 399, 99], fill=rosa_lavado)
+    desenho.rectangle([150, 30, 250, 70], fill=(255, 255, 255))   # as letras ficam de fora da conta
+    assert robo.diferenca_da_cor(tela, (0, 100, 0, 400), rosa) == 27
+    assert robo.diferenca_da_cor(tela, (0, 100, 0, 400), (20, 200, 20)) is None
+    assert [robo.faixa_da_diferenca_da_cor(d) for d in (0, 10, 11, 20, 27, 40, 41)] == [
+        "até 10 da cor da edição", "até 10 da cor da edição", "de 11 a 20 da cor da edição",
+        "de 11 a 20 da cor da edição", "de 21 a 40 da cor da edição", "de 21 a 40 da cor da edição",
+        "mais de 40 da cor da edição"]
+
+    def grade(capa_png):
+        quadro = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        esquerda, direita = ev.LADOS_NA_GRADE
+        cima, baixo = ev.VISIVEL_NA_GRADE
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((esquerda, cima, direita, baixo))
+        quadro.paste(capa.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
+        return type("Celular", (), {"screenshot": lambda self, caminho=None: quadro})()
+
+    capa = ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor", cor=rosa)
+    certo = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1", cor="rosa")
+    assert robo.marcar_o_post(grade(capa), certo, caixa)
+    # A mesma capa como chegava com a tabela errada: o rosa da faixa mais claro, as letras brancas iguais.
+    import numpy
+    pontos = numpy.array(Image.open(io.BytesIO(capa)).convert("RGB"))
+    pontos[(pontos == rosa).all(axis=2)] = rosa_lavado
+    saida = io.BytesIO()
+    Image.fromarray(pontos).save(saida, "PNG")
+    lavado = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1", cor="rosa")
+    assert robo.marcar_o_post(grade(saida.getvalue()), lavado, caixa)
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COR_DA_CAPA, "2000-01-01 00:00:00")
+    assert [r[2] for r in linhas] == ["até 10 da cor da edição", "de 21 a 40 da cor da edição"]
+
+
 def test_post_confere_a_faixa_no_tom_que_o_rascunho_guardou():
     # P174 3: sem a 2ª cor, a faixa vai num tom da cor do produto, e o rascunho guarda o #rrggbb
     # dele; o post procura a faixa nesse tom, não no laranja.
