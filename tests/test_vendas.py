@@ -1,5 +1,6 @@
 """vendas.py e a etiqueta de cada robô nos links: a comissão por canal e por produto."""
 import json
+import string
 from datetime import datetime
 
 import api_shopee
@@ -238,7 +239,10 @@ def test_relatorio_cifrado_so_abre_com_a_chave_do_registro_privado(monkeypatch, 
     db.salvar_config("banco_pedidos", {"1": {"data": "2026-10-27", "status": "COMPLETED", "comissao_total": 4.0,
                                              "etiqueta": "viral", "itens": [{"nome": "Copo Térmico", "comissao": 4.0}]}})
     texto = vendas.cifrado()
-    assert texto.startswith("gAAAAA") and "Copo" not in texto
+    # O cifrado tem só as letras do base64, sorteadas a cada vez: um pedaço curto do nome pode aparecer
+    # nele por acaso. O nome inteiro, com o espaço e o acento que o base64 não tem, nunca.
+    assert texto.startswith("gAAAAA") and set(texto) <= set(string.ascii_letters + string.digits + "-_=")
+    assert "Copo Térmico" not in texto
     aberto = registro_privado.abrir(texto, registro_privado.chave().decode("ascii"))
     assert "# Vendas por canal (P13)" in aberto and "Copo Térmico" in aberto
     assert "# Tendência dos vídeos da fonte (P135)" in aberto
