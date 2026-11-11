@@ -419,7 +419,7 @@ SEM_META = {
     ("shopee_video", "responder comentário"), ("shopee_video", "curtir comentário"),
     ("shopee_video", "espaços livres: "),
     ("shopee_video", "tempo do rascunho"), ("shopee_video", "ver produtos: "),
-    ("shopee_video", "capa no post"), ("shopee_video", "efeitos na edição"),
+    ("shopee_video", "capa no post"), ("shopee_video", "cor da capa no post"), ("shopee_video", "efeitos na edição"),
     ("shopee_video", "outra cor: "), ("shopee_video", "tirar produto no post"),
     ("shopee_video", "preparar 1 agora"), ("shopee_video", "celular: motivo da queda"),
     ("shopee_video", "celular: adb do servidor derrubado à força"),
