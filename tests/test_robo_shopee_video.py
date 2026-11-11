@@ -8374,3 +8374,103 @@ def test_verificacao_no_refazer_para_sem_descurtir(monkeypatch, avisos):
         robo.refazer_no_app(_Tela(), robo.pegar(ident), momento("2026-10-22 15:00"))
     assert not any(p[0] == "descurtir" for p in passos) and robo.ler_estado()["favoritos_limpos"] is False
     assert robo.pegar(ident)["estado"] == "refazer"
+
+
+# --- Editar ✏️ nos rascunhos de Ver Produtos (P202 1) ---
+
+def test_rascunho_de_ver_produtos_guarda_como_curtir_de_novo_e_deixa_editar(monkeypatch, avisos):
+    # P202 1: o rascunho de Ver Produtos também guarda o que o Editar ✏️ precisa e, para o refazer, como curtir
+    # de novo cada produto do post: o do criador sem link (pela lista do vídeo dele) e o trocado com o link.
+    _fonte_de_video(monkeypatch)
+    monkeypatch.setattr(robo.edicao_video, "vale_para", lambda fonte: True)
+    monkeypatch.setattr(robo, "anuncio_do_ver_produtos", lambda nome: {"foto": b"\xff\xd8\xfffoto", "nome": nome})
+
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
+                           anotar=None):
+        with open(destino, "wb") as f:
+            f.write(b"editado")
+        anotar["refazer"] = {"textos": {"nome": produto}, "frase": "", "musica": "", "avisos": False,
+                             "rotulo_de_ia": False, "escolhas": dict(robo.edicao_video.ESCOLHAS_PADRAO)}
+        return "", robo.edicao_video.COM_LEGENDAS, ""
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", editar_para_postar)
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["produtos"] == [PRODUTO_A, PRODUTO_B]
+    assert rascunho["edicao"]["curtir"] == [{"nome": PRODUTO_A, "link": ""}, {"nome": PRODUTO_B, "link": ""}]
+    assert os.path.exists(rascunho["edicao"]["original"]) and robo.pode_editar(rascunho)
+    assert robo.produtos_para_refazer(rascunho) == [{"nome": PRODUTO_A, "link": "", "do_video": True},
+                                                    {"nome": PRODUTO_B, "link": "", "do_video": True}]
+    # O de Ver Produtos de antes (sem como curtir de novo) continua sem o Editar.
+    sem = dict(rascunho, edicao={k: v for k, v in rascunho["edicao"].items() if k != "curtir"})
+    assert not robo.pode_editar(sem) and robo.produtos_para_refazer(sem) == []
+    assert not robo.pode_editar(dict(rascunho, edicao=dict(rascunho["edicao"], curtir=rascunho["edicao"]["curtir"][:1])))
+
+
+def test_refazer_do_ver_produtos_curte_de_novo_pelo_nome_na_lista_do_criador(monkeypatch):
+    # P202 1: no refazer, os produtos do criador são curtidos de novo pelo mesmo caminho do rascunho, a lista do
+    # Ver Produtos do vídeo dele, cada um pelo nome da página; o trocado e o a mais, pelo link deles. Sem a IA,
+    # nunca nas recomendações nem num botão de comprar.
+    _fonte_de_video(monkeypatch)
+    monkeypatch.setattr(robo.ps, "ia_confere_do_criador", lambda *a, **k: pytest.fail("o refazer não pergunta à IA"))
+    pelo_link = []
+
+    def curtir_pelo_link(d, video, produtos, curtidos):
+        pelo_link.extend(p["nome"] for p in produtos)
+        curtidos.extend((p["link"], p["nome"]) for p in produtos)
+        return list(produtos)
+    monkeypatch.setattr(robo, "_curtir_os_produtos", curtir_pelo_link)
+    video = {"id": "a1", "arquivo": "", "link": LINK_DE_VIDEO, "nome": PRODUTO_B, "produtos": [PRODUTO_B]}
+    trocado = {"nome": "Copo Térmico de Outra Loja", "link": "https://s.shopee.com.br/outra", "do_video": True}
+    produtos = [{"nome": PRODUTO_B, "link": "", "do_video": True}, trocado]
+    app, curtidos = AppDoVerProdutos(), []
+    assert robo._curtir_de_novo_pelo_ver_produtos(app, video, produtos, curtidos) == produtos
+    # Só o B: o A foi aberto pela lista e ficou como estava.
+    assert app.ja_curtidos == {PRODUTO_B} and RECOMENDADO not in app.toques
+    assert curtidos == [(robo.NoVerProdutos(PRODUTO_B), PRODUTO_B), (trocado["link"], trocado["nome"])]
+    assert pelo_link == [trocado["nome"]]
+    # O produto que não está mais na lista do criador fica sem a curtida (o refazer para por isso).
+    app = AppDoVerProdutos()
+    assert robo._curtir_de_novo_pelo_ver_produtos(app, video, [{"nome": "Produto Que Saiu Da Lista", "link": "",
+                                                               "do_video": True}], []) == []
+    assert app.ja_curtidos == set()
+
+
+def test_rascunho_de_ver_produtos_editado_e_refeito_no_app_pela_lista_do_criador(monkeypatch, avisos):
+    # P202 1: com o Aprovar do editado, o robô curte de novo pelo caminho do rascunho, refaz no app com os mesmos
+    # produtos, na mesma ordem, e descurte no fim, como hoje.
+    ativar(robo_inicio=0, robo_fim=24)
+    ident = _editavel(monkeypatch)
+    trocado = "Copo Térmico de Outra Loja"
+    robo.atualizar(ident, link=LINK_DE_VIDEO, produtos=[PRODUTO_A, trocado], mais_produtos=[],
+                   links_dos_produtos=["https://s.shopee.com.br/curto-11", "https://s.shopee.com.br/outra"],
+                   edicao=dict(robo.pegar(ident)["edicao"], curtir=[
+                       {"nome": PRODUTO_A, "link": ""}, {"nome": trocado, "link": "https://s.shopee.com.br/outra"}]))
+    assert robo.pode_editar(robo.pegar(ident))
+    nova = os.path.join(robo.PASTA_RASCUNHOS, f"{ident}_nova_2.mp4")
+    with open(nova, "wb") as f:
+        f.write(b"nova")
+    robo.atualizar(ident, estado="refazer", nova_versao={"arquivo": nova, "versao": 2})
+    passos = []
+    _celular_do_refazer(monkeypatch, passos)
+    monkeypatch.setattr(robo, "_curtir_os_produtos", lambda *a, **k: pytest.fail("no Ver Produtos, pela lista"))
+
+    def pela_lista(d, video, produtos, curtidos):
+        passos.append(("curtir pela lista", video["link"], [(p["nome"], p["link"]) for p in produtos]))
+        curtidos.extend((robo.NoVerProdutos(p["nome"]) if not p["link"] else p["link"], p["nome"]) for p in produtos)
+        return list(produtos)
+    monkeypatch.setattr(robo, "_curtir_de_novo_pelo_ver_produtos", pela_lista)
+    assert robo.refazer_no_app(_Tela(), robo.pegar(ident), momento("2026-10-22 15:00")) == (
+        "rascunho editado refeito no app")
+    assert passos[0] == ("curtir pela lista", LINK_DE_VIDEO, [(PRODUTO_A, ""), (trocado, "https://s.shopee.com.br/outra")])
+    assert ("anexar", [PRODUTO_A, trocado], ()) in passos and passos[-1] == ("descurtir", 2)
+    assert robo.pegar(ident)["estado"] == "aprovado"
+    # Sem curtir de novo todos, nada é refeito.
+    outro = _editavel(monkeypatch)
+    robo.atualizar(outro, link=LINK_DE_VIDEO, produtos=[PRODUTO_A], links_dos_produtos=[""], estado="refazer",
+                   nova_versao={"arquivo": nova, "versao": 2},
+                   edicao=dict(robo.pegar(outro)["edicao"], curtir=[{"nome": PRODUTO_A, "link": ""}]))
+    monkeypatch.setattr(robo, "_curtir_de_novo_pelo_ver_produtos", lambda d, video, produtos, curtidos: [])
+    with pytest.raises(robo.Parada) as parada:
+        robo.refazer_no_app(_Tela(), robo.pegar(outro), momento("2026-10-22 15:30"))
+    assert "não consegui curtir de novo 1 de 1" in parada.value.motivo

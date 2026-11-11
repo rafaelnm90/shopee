@@ -5333,6 +5333,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
             a_mais_do_ver = {"itens": _itens(ordem), "capas": guardar_capas(ident, video, ordem),
                              "outras_capas": [n for n, p in enumerate(ordem, 1) if not p.get("do_video") and capa
                                               and mesma_foto(foto_do_produto_do_post(video, p), capa) is False]}
+        if edicao.get("guardado"):
+            # Como o Editar ✏️ curte de novo cada produto do post no refazer (P202 1): o do criador pela
+            # lista do Ver Produtos, pelo nome da página dele; o trocado (P57) e o a mais, pelo link.
+            atualizar(ident, edicao=dict(edicao["guardado"], curtir=[
+                {"nome": nomes[i], "link": links_conhecidos.get(nomes[i], "")} for i in no_post]))
         atualizar(ident, produtos=anexados,
                   links_dos_produtos=links_do_ver_produtos(anexados, [links_conhecidos.get(nomes[i], "")
                                                                       for i in no_post]),
@@ -5417,8 +5422,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
         raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))
     if miniatura is not None and anuncio.get("foto") and edicao_video.SEM_A_MINIATURA not in como:
         miniatura["fotos"] = [anuncio["foto"]] + list(trocam)
-    if edicao is not None and not video.get("de_video"):
-        # O que o Editar ✏️ do rascunho precisa (P192 1); o de Ver Produtos fica sem ele (pode_editar).
+    if edicao is not None:
+        # O que o Editar ✏️ do rascunho precisa (P192 1; também no de Ver Produtos, P202 1).
         edicao["guardado"] = guardar_para_o_editar(copia, video["arquivo"], anuncio.get("foto"), trocam,
                                                    edicao.get("refazer"))
     return como
@@ -5433,7 +5438,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
 # DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_EDITAR = "editar o rascunho"
 PROCESSO_DO_REFAZER = "refazer o rascunho editado"
-SEM_O_QUE_EDITAR = "este rascunho não guardou o que a edição precisa (é de antes do Editar ✏️ ou de Ver Produtos)"
+SEM_O_QUE_EDITAR = "este rascunho não guardou o que a edição precisa (é de antes do Editar ✏️)"
 
 
 def guardar_para_o_editar(copia, original, foto, outras, refazer):
@@ -5474,17 +5479,20 @@ def guardar_para_o_editar(copia, original, foto, outras, refazer):
 
 def pode_editar(rascunho):
     """
-    O rascunho que espera a aprovação deixa o Editar ✏️? Com o que a edição precisa guardado e, no vídeo de link
-    de produto, o link de cada produto anexado (o robô curte cada um de novo para refazer o rascunho no app). A
-    versão de antes de um rascunho refeito não.
+    O rascunho que espera a aprovação deixa o Editar ✏️? Com o que a edição precisa guardado e o jeito de curtir
+    de novo cada produto anexado, para refazer o rascunho no app: no vídeo de link de produto, o link de cada um;
+    no de Ver Produtos (P202 1), o que o rascunho guardou (curtir: o do criador pelo nome, na lista do vídeo
+    dele; o trocado e o a mais pelo link). A versão de antes de um rascunho refeito não.
     """
     guardado = (rascunho or {}).get("edicao") or {}
     nomes = (rascunho or {}).get("produtos") or []
-    return bool(rascunho and rascunho.get("estado") == "rascunho" and not rascunho.get("versao_de")
-                and guardado.get("original") and os.path.exists(guardado["original"])
-                and guardado.get("foto") and os.path.exists(guardado["foto"])
-                and nomes and not rascunho.get("links_dos_produtos") and rascunho.get("link")
-                and len(rascunho.get("mais_produtos") or []) + 1 == len(nomes))
+    if not (rascunho and rascunho.get("estado") == "rascunho" and not rascunho.get("versao_de")
+            and guardado.get("original") and os.path.exists(guardado["original"])
+            and guardado.get("foto") and os.path.exists(guardado["foto"]) and nomes and rascunho.get("link")):
+        return False
+    if rascunho.get("links_dos_produtos") or guardado.get("curtir"):
+        return len(guardado.get("curtir") or []) == len(nomes)
+    return len(rascunho.get("mais_produtos") or []) + 1 == len(nomes)
 
 
 def sem_a_fala(rascunho):
@@ -5899,6 +5907,44 @@ def _produtos_do_video(d, video, vistos, curtidos=None, variacoes=None, fotos=No
                      do_video=True)
     # Os da mesma cor do vídeo primeiro: o 1º anexado dá a foto do começo e da miniatura (P39).
     return [n for n in confirmados if n not in de_outra_cor] + [n for n in confirmados if n in de_outra_cor]
+
+
+def _curtir_de_novo_pelo_ver_produtos(d, video, produtos, curtidos):
+    """
+    O refazer do rascunho de Ver Produtos editado (P202 1), pelo mesmo caminho do rascunho: os produtos do
+    criador (sem link) curtidos de novo na lista do Ver Produtos do vídeo dele, cada um achado pelo nome da
+    página (curtidos recebe (NoVerProdutos, nome), para o descurtir do fim); o trocado pela loja que paga
+    mais (P57) e o produto a mais, pelo link deles (_curtir_os_produtos). Sem a IA: os produtos já foram
+    conferidos no rascunho. Devolve os curtidos, na ordem do post.
+    """
+    faltam = [p["nome"] for p in produtos if not p["link"]]
+    feitos = set()
+    if faltam:
+        _abrir_ver_produtos(d, video)
+        lidos, andamento = [], {}
+        while faltam:
+            achado = _achar_cartao(d, lambda cartao: cartao not in lidos, lidos, andamento)
+            if not achado:
+                break
+            cartao, ponto, xml = achado
+            lidos.append(cartao)
+            if ps.proibido_no_ponto(xml, *ponto):
+                raise Parada(ps.RECUSA)
+            ps.limpar_aviso_rapido(d)
+            d.click(*ponto)
+            pausa(8)
+            xml = tela(d)
+            nome = ps.nome_na_pagina_do_produto(xml)
+            if nome in faltam:
+                _conferir_curtida(ps.curtir_na_pagina(d, xml))
+                curtidos.append((NoVerProdutos(cartao), nome))
+                faltam.remove(nome)
+                feitos.add(nome)
+            d.press("back")
+            pausa(4)
+        _anotar_o_ver_mais(lidos, andamento)
+    feitos.update(p["nome"] for p in _curtir_os_produtos(d, video, [p for p in produtos if p["link"]], curtidos))
+    return [p for p in produtos if p["nome"] in feitos]
 
 
 # O link de vídeo que abre o aviso "Vídeo em Análise" da Shopee: o vídeo do criador ainda não
@@ -6443,12 +6489,24 @@ def apagar_do_app(d, rascunho):
     return "rascunho recusado apagado"
 
 
+def de_ver_produtos(rascunho):
+    """O rascunho é de um vídeo de Ver Produtos (os produtos do criador, um link por produto)?"""
+    return bool(rascunho.get("links_dos_produtos") or (rascunho.get("edicao") or {}).get("curtir"))
+
+
 def produtos_para_refazer(rascunho):
     """
-    Os produtos do rascunho de link de produto na ordem do post, com o link de cada um, para o robô curtir de
-    novo ao refazer o rascunho no app (o 1º é o do vídeo, os outros os produtos a mais); [] sem o link de algum.
+    Os produtos do rascunho na ordem do post, para o robô curtir de novo ao refazer o rascunho no app: no de
+    link de produto, com o link de cada um (o 1º é o do vídeo, os outros os produtos a mais); no de Ver
+    Produtos (P202 1), o que ele guardou: o do criador sem link (o nome da página dele, achado na lista do
+    Ver Produtos) e o trocado e o a mais com o link. [] sem o jeito de curtir algum.
     """
     nomes = list(rascunho.get("produtos") or [])
+    if de_ver_produtos(rascunho):
+        curtir = (rascunho.get("edicao") or {}).get("curtir") or []
+        if not nomes or len(curtir) != len(nomes) or not all(c.get("nome") for c in curtir):
+            return []
+        return [{"nome": c["nome"], "link": c.get("link") or "", "do_video": True} for c in curtir]
     links = [rascunho.get("link") or ""] + [p.get("link") or "" for p in rascunho.get("mais_produtos") or []]
     if not nomes or len(links) != len(nomes) or not all(links):
         return []
@@ -6486,11 +6544,13 @@ def refazer_no_app(d, rascunho, agora=None):
         raise Parada("a nova versão do vídeo não está mais no servidor")
     produtos = produtos_para_refazer(rascunho)
     if not produtos:
-        raise Parada("o rascunho não tem o link de cada produto para refazer no app")
+        raise Parada("o rascunho não tem como curtir de novo cada produto para refazer no app")
     video = dict(video_do_rascunho(rascunho), arquivo=arquivo)
     curtidos, verificacao = [], False
     try:
-        feitos = _curtir_os_produtos(d, video, produtos, curtidos)
+        # No de Ver Produtos, pelo mesmo caminho do rascunho: a lista do vídeo do criador (P202 1).
+        feitos = (_curtir_de_novo_pelo_ver_produtos(d, video, produtos, curtidos) if de_ver_produtos(rascunho)
+                  else _curtir_os_produtos(d, video, produtos, curtidos))
         if len(feitos) != len(produtos):
             raise Parada(f"não consegui curtir de novo {len(produtos) - len(feitos)} de {len(produtos)} produto(s)")
         ir_ao_perfil(d)
