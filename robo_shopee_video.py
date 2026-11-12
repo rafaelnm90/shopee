@@ -5156,18 +5156,50 @@ PROCESSO_DO_BOTAO = "preparar 1 agora"
 # A faixa da capa com a frase vai de um lado ao outro da capa: a cor dela mais estreita que isto da
 # largura do quadro é outra coisa (o selo Fixado da grade, um produto da mesma cor na foto).
 LARGURA_DA_FAIXA_NA_CAPA = 0.6
+# A faixa olhada pela parte de cima do quadro (retomada de 12/11: o post das 02:06, com a faixa na
+# grade e a cor a 5 da edição, saiu "sem a faixa"): a miniatura que a grade mostra vem comprimida, e
+# a frase em duas linhas grandes, com a sacolinha do app por cima, desmonta a faixa achada linha a
+# linha. Sem ela, vale a parte de cima do quadro, onde a capa da grade põe a faixa, na cor dela de
+# um lado ao outro.
+PARTE_DA_FAIXA_OLHADA = 0.85     # da altura da faixa de cima, a partir do alto do quadro
+FAIXA_NA_COR = 0.5               # da parte olhada, na cor da faixa (as letras e a sacolinha ficam de fora)
+COLUNA_NA_COR = 0.25             # de uma coluna da parte olhada, na cor, para ela contar
+
+
+def faixa_de_cima(imagem, caixa, cor):
+    """
+    A faixa de cima do quadro da grade (caixa x1, y1, x2, y2 da imagem do PIL) pela parte em que a
+    capa da grade a põe: (cima, baixo, esquerda, direita) quando a parte olhada tem a cor em
+    FAIXA_NA_COR dos pontos, de um lado ao outro (LARGURA_DA_FAIXA_NA_CAPA); None sem ela.
+    """
+    import numpy
+    x1, y1, x2, y2 = caixa
+    altura_da_faixa = ((edicao_video.PE_DA_FAIXA_DE_CIMA - edicao_video.GRADE_NO_CELULAR[0])
+                       / (edicao_video.GRADE_NO_CELULAR[1] - edicao_video.GRADE_NO_CELULAR[0]))
+    baixo = y1 + round((y2 - y1) * altura_da_faixa * PARTE_DA_FAIXA_OLHADA)
+    if baixo <= y1 or x2 <= x1:
+        return None
+    pontos = numpy.asarray(imagem.convert("RGB").crop((x1, y1, x2, baixo)), dtype=numpy.int16)
+    na_cor = numpy.abs(pontos - numpy.array(cor, dtype=numpy.int16)).sum(axis=2) <= edicao_video.TOLERANCIA_DO_LARANJA
+    if na_cor.mean() < FAIXA_NA_COR:
+        return None
+    colunas = numpy.flatnonzero(na_cor.mean(axis=0) >= COLUNA_NA_COR)
+    if not len(colunas) or colunas[-1] - colunas[0] + 1 < (x2 - x1) * LARGURA_DA_FAIXA_NA_CAPA:
+        return None
+    return (y1, baixo, x1 + int(colunas[0]), x1 + int(colunas[-1]) + 1)
 
 
 def faixa_da_capa(imagem, caixa, cor=None):
     """
     A faixa da capa com a frase (laranja, ou na cor do produto, P159 2) na caixa (x1, y1, x2, y2)
     da imagem do PIL, o quadro da grade: (cima, baixo, esquerda, direita), ou None. Só a que vai de
-    um lado ao outro da caixa (LARGURA_DA_FAIXA_NA_CAPA).
+    um lado ao outro da caixa (LARGURA_DA_FAIXA_NA_CAPA); sem ela achada linha a linha, a da parte
+    de cima do quadro (faixa_de_cima).
     """
     faixa = edicao_video.faixa_laranja(imagem, caixa, cor)
     if faixa and faixa[3] - faixa[2] >= (caixa[2] - caixa[0]) * LARGURA_DA_FAIXA_NA_CAPA:
         return faixa
-    return None
+    return faixa_de_cima(imagem, caixa, tuple(cor) if cor else edicao_video.LARANJA_DA_SHOPEE)
 
 
 # A cor da faixa no post (P204 1): a soma das diferenças das três cores entre a faixa que chegou à
