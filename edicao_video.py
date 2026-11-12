@@ -452,7 +452,7 @@ BRANCO_DA_FAIXA = 240                           # cada uma das três cores a par
 LINHA_DA_FAIXA_BRANCA = 0.98                    # da linha: a linha da faixa, quase toda branca
 FAIXA_BRANCA_MINIMA = 0.03                      # da altura da foto: cada uma das duas faixas
 BORDA_RETA = 0.10                               # no máximo isso de branco nas linhas logo depois da faixa
-TIRA_DOS_LADOS = 0.05                           # da largura: as tiras dos lados da foto entre as faixas
+TIRA_DA_FOTO_NOS_LADOS = 0.05                   # da largura: as tiras dos lados da foto entre as faixas
 BRANCO_NOS_LADOS = 0.5                          # no máximo isso de branco nessas tiras
 PROCESSO_DAS_FAIXAS_BRANCAS = "edição do vídeo: faixas brancas da foto"
 FAIXAS_EM_CIMA_E_EMBAIXO = "tiradas em cima e embaixo"
@@ -660,7 +660,7 @@ def _faixas_brancas(branco):
     if max(por_linha[cima + pula:cima + pula + 4].mean(), por_linha[baixo - pula - 4:baixo - pula].mean()) > BORDA_RETA:
         return None
     meio = branco[cima + pula:baixo - pula]
-    tira = max(1, round(TIRA_DOS_LADOS * largura))
+    tira = max(1, round(TIRA_DA_FOTO_NOS_LADOS * largura))
     if max(meio[:, :tira].mean(), meio[:, -tira:].mean()) > BRANCO_NOS_LADOS:
         return None
     return cima, baixo
