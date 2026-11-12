@@ -2,10 +2,11 @@
 Acesso ao Gemini (Google) para gerar texto e analisar vídeos.
 
 As duas funções tentam os modelos de MODELOS_CASCATA_GEMINI em ordem e passam
-para o próximo quando um falha, estoura a cota ou responde vazio. Modelo sem
-cota ou que não existe fica de fora da cascata por um tempo, para todos os
-robôs (_fora_ate e a chave ia_modelos_fora no banco). A chave fica em
-GEMINI_KEY no .env.
+para o próximo quando um falha, estoura a cota, responde vazio ou passa do
+limite de tempo de cada pedido (LIMITE_DA_RESPOSTA_S). Modelo sem cota, que não
+existe ou que falha depois de muito tempo fica de fora da cascata por um tempo,
+para todos os robôs (_fora_ate e a chave ia_modelos_fora no banco). A chave
+fica em GEMINI_KEY no .env.
 """
 import os
 import re
@@ -14,6 +15,7 @@ import contextlib
 import logging
 import time
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from google import genai
@@ -70,6 +72,15 @@ _fora_ate = {}                      # modelo -> time.time() em que volta
 CHAVE_DA_PAUSA = "ia_modelos_fora"  # {modelo: time.time() em que volta}
 ESPERA_COTA_S = 10 * 60             # cota estourada sem prazo informado
 ESPERA_MODELO_INEXISTENTE_S = 6 * 3600
+# Cada pedido a um modelo tem um limite de tempo: o modelo com problema no Google pode segurar o
+# pedido por muitos minutos (12/11: o título de 2 rascunhos levou 21 min, com um modelo da cascata
+# dando erro do servidor, e uma rodada do robô da Shopee Vídeo passou dos 30 min dela). Passado o
+# limite, vale o próximo modelo da cascata.
+LIMITE_DA_RESPOSTA_S = 4 * 60
+# O modelo que falha depois de muito tempo (o limite acima, ou um erro do servidor que demora) fica
+# de fora da cascata por um tempo, como o sem cota, para todos os robôs; o erro rápido não tira.
+DEMORA_QUE_TIRA_DA_VEZ_S = 60
+ESPERA_MODELO_LENTO_S = 15 * 60
 
 
 def _segundos_ate_virada_da_cota():
@@ -131,9 +142,25 @@ def _modelos_da_vez():
     return livres or list(MODELOS_CASCATA_GEMINI)
 
 
-def _tirar_da_vez(modelo, erro_txt):
-    """Tira o modelo da cascata conforme o erro, neste robô e no banco. True se tirou."""
-    fora = tempo_fora(erro_txt)
+def tempo_fora_pela_demora(segundos):
+    """(segundos, motivo) que o modelo que falhou depois de `segundos` fica de fora, ou None se falhou rápido."""
+    if segundos >= DEMORA_QUE_TIRA_DA_VEZ_S:
+        return ESPERA_MODELO_LENTO_S, "lento"
+    return None
+
+
+def limite_da_resposta():
+    """A configuração de cada pedido aos modelos: o limite de tempo (LIMITE_DA_RESPOSTA_S)."""
+    from google.genai import types
+    return types.GenerateContentConfig(http_options=types.HttpOptions(timeout=LIMITE_DA_RESPOSTA_S * 1000))
+
+
+def _tirar_da_vez(modelo, erro_txt, segundos=0.0):
+    """
+    Tira o modelo da cascata conforme o erro, ou porque falhou depois de `segundos` demais,
+    neste robô e no banco. True se tirou.
+    """
+    fora = tempo_fora(erro_txt) or tempo_fora_pela_demora(segundos)
     if fora is None:
         return False
     segundos, motivo = fora
@@ -154,20 +181,34 @@ ULTIMO_ERRO_IA = None
 # Vídeo passou do limite dela sem dizer onde o tempo foi. Só o robô, que faz uma análise de cada
 # vez, lê (o bot_mestre pode fazer duas juntas e misturar as somas).
 TEMPOS_DA_IA = {"analises": 0, "envio": 0.0, "processamento": 0.0, "resposta": 0.0, "modelos": 0}
+# O pedido mais demorado a um modelo desde o último zerar_tempos_da_ia(): {"modelo", "segundos",
+# "resultado"} (o resultado em palavras fixas: "respondeu", "vazio" ou "erro" com o tipo), ou None.
+# Em 12/11, os 21 min de 2 títulos não diziam qual modelo segurou o pedido.
+MAIS_LENTO = None
 
 
 def zerar_tempos_da_ia():
+    global MAIS_LENTO
     TEMPOS_DA_IA.update(analises=0, envio=0.0, processamento=0.0, resposta=0.0, modelos=0)
+    MAIS_LENTO = None
+
+
+def _anotar_o_mais_lento(modelo, segundos, resultado):
+    global MAIS_LENTO
+    if MAIS_LENTO is None or segundos > MAIS_LENTO["segundos"]:
+        MAIS_LENTO = {"modelo": modelo, "segundos": segundos, "resultado": resultado}
 
 
 @contextlib.contextmanager
 def _medir(parte):
-    """Soma em TEMPOS_DA_IA[parte] o tempo do bloco, com erro ou sem."""
+    """Soma em TEMPOS_DA_IA[parte] o tempo do bloco, com erro ou sem; a medida (.segundos) fica com o bloco."""
+    medida = SimpleNamespace(segundos=0.0)
     comeco = time.monotonic()
     try:
-        yield
+        yield medida
     finally:
-        TEMPOS_DA_IA[parte] += time.monotonic() - comeco
+        medida.segundos = time.monotonic() - comeco
+        TEMPOS_DA_IA[parte] += medida.segundos
 
 
 # Os códigos do Google (finish_reason e block_reason) de resposta vazia pelo conteúdo do
@@ -239,21 +280,23 @@ async def gerar_texto_gemini(prompt, imagens=None):
         from google.genai import types
         conteudo = [*(types.Part.from_bytes(data=dados, mime_type=tipo) for dados, tipo in imagens), prompt]
     for modelo_nome in _modelos_da_vez():
+        comeco = time.monotonic()
         try:
             logger.debug(f"⏳ [IA] Consultando motor: {modelo_nome}...")
-            
+
             response = await asyncio.to_thread(
                 client_genai.models.generate_content,
                 model=modelo_nome,
-                contents=conteudo
+                contents=conteudo,
+                config=limite_da_resposta(),
             )
-            
+
             if response and response.text:
                 logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
                 return response.text.strip()
-                
+
         except Exception as e:
-            if not _tirar_da_vez(modelo_nome, str(e)):
+            if not _tirar_da_vez(modelo_nome, str(e), time.monotonic() - comeco):
                 logger.warning(f"⚠️ [IA] Erro no modelo {modelo_nome}: {str(e)[:80]}...")
             continue
 
@@ -313,11 +356,13 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
             codigos, categorias = set(), set()   # o que o Google disse nessas recusas
             for modelo_nome in _modelos_da_vez():
                 TEMPOS_DA_IA["modelos"] += 1
+                medida = SimpleNamespace(segundos=0.0)
                 try:
-                    with _medir("resposta"):
+                    with _medir("resposta") as medida:
                         response = client_genai.models.generate_content(
                             model=modelo_nome,
-                            contents=[video_gemini, *partes_das_imagens, prompt]
+                            contents=[video_gemini, *partes_das_imagens, prompt],
+                            config=limite_da_resposta(),
                         )
 
                     texto = None
@@ -326,6 +371,7 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
                     except Exception as erro_texto:
                         falhas.append(f"{modelo_nome}: .text falhou ({erro_texto})")
 
+                    _anotar_o_mais_lento(modelo_nome, medida.segundos, "respondeu" if texto else "vazio")
                     if texto:
                         logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
                         return texto.strip()
@@ -341,8 +387,9 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
 
                 except Exception as erro_modelo:
                     erro_txt = str(erro_modelo)
+                    _anotar_o_mais_lento(modelo_nome, medida.segundos, f"erro {type(erro_modelo).__name__}")
                     falhas.append(f"{modelo_nome}: {type(erro_modelo).__name__} {erro_txt[:150]}")
-                    if not _tirar_da_vez(modelo_nome, erro_txt):
+                    if not _tirar_da_vez(modelo_nome, erro_txt, medida.segundos):
                         logger.warning(f"⚠️ [IA] Erro em {modelo_nome}: {type(erro_modelo).__name__} → {erro_txt[:200]}")
                     continue
 

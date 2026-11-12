@@ -3421,18 +3421,21 @@ def _anotar_lentidao_da_ia(segundos):
     """
     Os textos da IA que passaram de LENTIDAO_DA_IA vão ao registro com onde o tempo foi, como
     "15 min: 2 análises, envio 70 s, processamento do Google 12 min, resposta 90 s (3 modelos),
-    fora da IA 20 s" (só números).
+    fora da IA 20 s; o mais lento: gemini-x, 60 s, respondeu" (só números, o nome do modelo e o
+    resultado em palavras fixas).
     """
     if segundos < LENTIDAO_DA_IA:
         return
     tempos = ps.api_gemini.TEMPOS_DA_IA
     na_ia = tempos["envio"] + tempos["processamento"] + tempos["resposta"]
+    lento = ps.api_gemini.MAIS_LENTO
     registro_processos.registrar(
         REGISTRO, "título da IA", "demorou",
         f"{_duracao(segundos)}: {tempos['analises']} análise{'s' if tempos['analises'] != 1 else ''}, "
         f"envio {_duracao(tempos['envio'])}, processamento do Google {_duracao(tempos['processamento'])}, "
         f"resposta {_duracao(tempos['resposta'])} ({tempos['modelos']} modelo{'s' if tempos['modelos'] != 1 else ''}), "
-        f"fora da IA {_duracao(max(segundos - na_ia, 0))}")
+        f"fora da IA {_duracao(max(segundos - na_ia, 0))}"
+        + (f"; o mais lento: {lento['modelo']}, {_duracao(lento['segundos'])}, {lento['resultado']}" if lento else ""))
 
 
 def _duracao(segundos):

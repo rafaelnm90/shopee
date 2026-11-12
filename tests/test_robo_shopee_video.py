@@ -7281,6 +7281,9 @@ def test_titulo_da_ia_lento_diz_onde_o_tempo_foi(monkeypatch):
     async def textos_do_video(arquivo, nome):
         robo.ps.api_gemini.TEMPOS_DA_IA.update(analises=2, envio=70.0, processamento=720.0, resposta=90.0,
                                                modelos=3)
+        if relogio.agora == 0:
+            # 12/11: os 21 min de 2 títulos não diziam qual modelo segurou o pedido.
+            robo.ps.api_gemini.MAIS_LENTO = {"modelo": "gemini-x", "segundos": 600.0, "resultado": "erro ServerError"}
         relogio.agora += next(duracoes)
         return {"titulo": "Mala de bordo", "violacao": False}
     monkeypatch.setattr(robo.assistente, "textos_do_video", textos_do_video)
@@ -7289,7 +7292,7 @@ def test_titulo_da_ia_lento_diz_onde_o_tempo_foi(monkeypatch):
     linhas = [(r[2], r[3]) for r in robo.registro_processos.sequencia("shopee_video", "título da IA",
                                                                       "2000-01-01 00:00:00")]
     assert ("demorou", "15 min: 2 análises, envio 70 s, processamento do Google 12 min, resposta 90 s "
-                       "(3 modelos), fora da IA 20 s") in linhas
+                       "(3 modelos), fora da IA 20 s; o mais lento: gemini-x, 10 min, erro ServerError") in linhas
     # A rápida não vai ao registro como lenta, e cada texto zera as somas da IA.
     assert robo._textos_da_ia({"arquivo": "v.mp4", "nome": "Mala"})["titulo"] == "Mala de bordo"
     linhas = [r[2] for r in robo.registro_processos.sequencia("shopee_video", "título da IA", "2000-01-01 00:00:00")]
