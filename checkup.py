@@ -548,7 +548,9 @@ def rotinas_do_dia(agora=None, inicios=()):
     resultado = {}
     for canal, lista in saidas.items():
         lista.sort()
-        intervalos = [b[0] - a[0] for a, b in zip(lista, lista[1:])]
+        # O Bom Dia, a Boa Noite e as campanhas saem na hora deles, sem esperar os 10 min da
+        # anterior (rotinas.sem_espera): o intervalo antes deles não conta.
+        intervalos = [b[0] - a[0] for a, b in zip(lista, lista[1:]) if not rotinas.sem_espera(b[1])]
         # O mesmo assunto em seguida que a regra deixa (sem outro assunto marcado no dia, ou só
         # depois do fim da janela dela) não conta; o bot anota a hora e o porquê de cada um.
         sem_outro = em_seguida_sem_outro(canal, agora)
@@ -1485,7 +1487,8 @@ def rodadas_na_hora_do_descurtir(agora=None):
 def rotinas_coladas(agora=None):
     """
     As rotinas de texto de hoje que saíram a menos de INTERVALO_CURTO_ROTINA min da
-    anterior no mesmo canal: {canal: [(HH:MM, tipo, HH:MM, tipo)]}, pelo histórico do bot.
+    anterior no mesmo canal: {canal: [(HH:MM, tipo, HH:MM, tipo)]}, pelo histórico do bot. O Bom
+    Dia, a Boa Noite e as campanhas não esperam a anterior (rotinas.sem_espera) e não contam.
     """
     agora = _agora(agora)
     config = db.ler_config("config_rotina", {}) or {}
@@ -1500,7 +1503,7 @@ def rotinas_coladas(agora=None):
     for canal, lista in saidas.items():
         lista.sort()
         resultado[canal] = [(a[1], a[2], b[1], b[2]) for a, b in zip(lista, lista[1:])
-                            if b[0] - a[0] < INTERVALO_CURTO_ROTINA]
+                            if b[0] - a[0] < INTERVALO_CURTO_ROTINA and not rotinas.sem_espera(b[2])]
     return resultado
 
 

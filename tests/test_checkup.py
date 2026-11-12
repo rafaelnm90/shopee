@@ -626,6 +626,26 @@ def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
     assert "Rotinas do canal principal: 1 vez(es) o mesmo assunto em seguida" in pontos
 
 
+def test_campanha_bom_dia_e_boa_noite_nao_esperam_a_anterior_e_nao_contam_no_espacamento():
+    # Checkup de 11/11: a campanha do 11.11 do Grupo Público saiu às 15:05, 5 min depois de uma
+    # rotina. Pela regra de 27/10, o Bom Dia, a Boa Noite e as campanhas não esperam os 10 min da
+    # anterior; a rotina que sai logo depois de uma delas, sim.
+    import rotinas
+    db.salvar_config("config_rotina", {"historico_diario": {"data": "2026-10-23", "contagem": {
+        "promo_principal_publico": ["15:00"], "campanha_pub_0_23.10": ["15:05"],
+        "incentivo": ["07:58", "12:00"], "bom_dia": ["08:00"], "campanha_0_23.10": ["12:04"],
+        "link_grupo": ["12:09"],
+    }}})
+    r = checkup.rotinas_do_dia(AGORA)
+    assert (r["Grupo Público"]["curtos"], r["Grupo Público"]["menor"]) == (0, None)
+    # No principal, só a rotina das 12:09, 5 min depois da campanha, fica perto demais.
+    assert (r["canal principal"]["curtos"], r["canal principal"]["menor"]) == (1, 5)
+    assert checkup.rotinas_coladas(AGORA) == {"canal principal": [("12:04", "campanha_0_23.10", "12:09", "link_grupo")],
+                                              "Viral": [], "Grupo Público": []}
+    assert rotinas.sem_espera("bom_dia") and rotinas.sem_espera("campanha_pub_0_11.11")
+    assert not rotinas.sem_espera("incentivo")
+
+
 def test_rotina_fora_da_janela_do_painel_e_cobrada():
     # P84 e P85 (29/10): cada rotina sai na janela dela e não espera o vídeo além do fim; o
     # espaçamento ainda pode empurrar a que saiu no fim da janela, até FOLGA_DA_JANELA min.
