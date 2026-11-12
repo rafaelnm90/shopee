@@ -425,12 +425,13 @@ ESCALA_NA_MINIATURA = 0.5
 # como nos outros posts, longe da frase. A foto quase do formato do lugar (quase quadrado: a quadrada
 # perde só uns 1% de cada lado) aumenta sem deformar, perdendo no máximo CORTE_MAXIMO_AO_TAMPAR dela; a
 # outra estica só até ESTICAR_ATE na direção em que falta, e o que ainda faltar fica com a própria
-# foto desfocada (DESFOQUE_DO_FUNDO) atrás dela, com a foto no pé e no meio da largura.
+# foto desfocada (DESFOQUE_DO_FUNDO) atrás dela, com a foto no meio do desfocado.
 # No vídeo aberto, que corta mais dos lados (VISIVEL_NO_APP), a faixa de cima vai de um lado ao outro
 # do que o app mostra, e a foto, inteira, fica logo abaixo dela, no maior tamanho que cabe acima do
 # cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO), com o fio (FIO_DA_CAPA)
-# logo abaixo do pé dela. Pedidos do Rafael (P139 2, P168, P169 1, P171, o print de 07/11 às 02:49,
-# P188 2, P189 B, P196 1 e P198 1): DECISOES.md, Shopee Vídeo.
+# logo abaixo do pé dela. Nas duas capas, a foto colada num quadrado branco perde antes as faixas
+# brancas de enchimento (sem_faixas_brancas). Pedidos do Rafael (P139 2, P168, P169 1, P171, o print
+# de 07/11 às 02:49, P188 2, P189 B, P196 1, P198 1, P206 1 e P207 1): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
 # O que a grade do perfil mostra no Motorola do Rafael (print de 06/11, 21:09): o quadro em 3:4 com
 # a largura toda. Com a foto menor que isso, a grade mostra o preto em volta dela (P168).
@@ -441,6 +442,21 @@ PE_DA_FOTO_NA_GRADE = GRADE_NO_CELULAR[1] - FIO_NA_GRADE   # daqui ao fim do qua
 CORTE_MAXIMO_AO_TAMPAR = 0.07                   # da foto aumentada; mais que isso, ela estica
 ESTICAR_ATE = 0.15                              # da altura ou da largura da foto
 DESFOQUE_DO_FUNDO = 24                          # o raio do desfoque da foto atrás, em px
+# A faixa branca de enchimento da foto do anúncio: a foto deitada colada num quadrado branco, com uma
+# faixa toda branca em cima e outra embaixo, ou a foto em pé, com as faixas dos lados. Antes das capas,
+# as faixas saem, e a foto que fica tampa o lugar dela como as outras (P168 e P169 1). A foto de fundo
+# branco não tem faixa: o produto fica no meio, com o branco em volta, e a foto não começa numa borda
+# reta de um lado ao outro logo depois do branco. Pedidos do Rafael (print de 11/11 às 20:33, P206 1 e
+# P207 1): DECISOES.md, Shopee Vídeo.
+BRANCO_DA_FAIXA = 240                           # cada uma das três cores a partir disso (o JPEG suja o branco)
+LINHA_DA_FAIXA_BRANCA = 0.98                    # da linha: a linha da faixa, quase toda branca
+FAIXA_BRANCA_MINIMA = 0.03                      # da altura da foto: cada uma das duas faixas
+BORDA_RETA = 0.10                               # no máximo isso de branco nas linhas logo depois da faixa
+TIRA_DOS_LADOS = 0.05                           # da largura: as tiras dos lados da foto entre as faixas
+BRANCO_NOS_LADOS = 0.5                          # no máximo isso de branco nessas tiras
+PROCESSO_DAS_FAIXAS_BRANCAS = "edição do vídeo: faixas brancas da foto"
+FAIXAS_EM_CIMA_E_EMBAIXO = "tiradas em cima e embaixo"
+FAIXAS_DOS_LADOS = "tiradas dos lados"
 # A maior e a menor letra da frase: a maior que cabe na faixa, mas não passa de 92, para ficar
 # harmônica (com até 120, as duas linhas enchiam a faixa toda). Pedido do Rafael (print de 07/11,
 # 02:49): DECISOES.md, Shopee Vídeo.
@@ -599,7 +615,7 @@ def _foto_que_tampa_esticando(foto, largura, altura):
     A foto (bytes) no PIL, em RGB, tampando um retângulo de largura x altura px sem cortar nada
     dela (P169 1): no maior tamanho que cabe, esticada só até ESTICAR_ATE na direção em que falta;
     o que ainda faltar fica com a própria foto desfocada, aumentada até tampar, atrás dela, com a
-    foto no pé e no meio da largura. None se não abre.
+    foto no meio, na altura e na largura (P206 1). None se não abre.
     """
     import io
 
@@ -615,8 +631,77 @@ def _foto_que_tampa_esticando(foto, largura, altura):
     if tamanho == (largura, altura):
         return esticada
     fundo = ImageOps.fit(imagem, (largura, altura)).filter(ImageFilter.GaussianBlur(DESFOQUE_DO_FUNDO))
-    fundo.paste(esticada, ((largura - tamanho[0]) // 2, altura - tamanho[1]))
+    # A foto no meio do desfocado, com ele por igual dos dois lados. Pedido do Rafael (11/11, P206 1):
+    # DECISOES.md, Shopee Vídeo.
+    fundo.paste(esticada, ((largura - tamanho[0]) // 2, (altura - tamanho[1]) // 2))
     return fundo
+
+
+def _faixas_brancas(branco):
+    """
+    (começo, fim) das linhas da foto entre a faixa branca de cima e a de baixo, ou None sem as duas:
+    branco é a matriz (numpy, linhas x colunas) de quais pontos são brancos. A faixa são as linhas da
+    beirada quase todas brancas (cada uma com FAIXA_BRANCA_MINIMA da altura, pelo menos); a foto começa
+    numa borda reta (as linhas logo depois da faixa quase sem branco) e vai de um lado ao outro (as
+    tiras dos lados sem muito branco).
+    """
+    por_linha = branco.mean(axis=1)
+    altura, largura = branco.shape
+    cima = 0
+    while cima < altura and por_linha[cima] >= LINHA_DA_FAIXA_BRANCA:
+        cima += 1
+    baixo = altura
+    while baixo > cima and por_linha[baixo - 1] >= LINHA_DA_FAIXA_BRANCA:
+        baixo -= 1
+    pula = max(2, round(0.005 * altura))        # a passagem borrada do JPEG entre a faixa e a foto
+    if (min(cima, altura - baixo) < FAIXA_BRANCA_MINIMA * altura or baixo - cima < 0.3 * altura
+            or baixo - cima <= 2 * (pula + 4)):
+        return None
+    if max(por_linha[cima + pula:cima + pula + 4].mean(), por_linha[baixo - pula - 4:baixo - pula].mean()) > BORDA_RETA:
+        return None
+    meio = branco[cima + pula:baixo - pula]
+    tira = max(1, round(TIRA_DOS_LADOS * largura))
+    if max(meio[:, :tira].mean(), meio[:, -tira:].mean()) > BRANCO_NOS_LADOS:
+        return None
+    return cima, baixo
+
+
+def faixas_brancas(foto):
+    """
+    Onde a foto do anúncio (bytes) tem as faixas brancas de enchimento, com a caixa (esquerda, cima,
+    direita, baixo) da foto sem elas: (FAIXAS_EM_CIMA_E_EMBAIXO, caixa) na foto deitada colada num
+    quadrado branco, (FAIXAS_DOS_LADOS, caixa) na foto em pé (P207 1); None sem as faixas (a foto de
+    fundo branco também) ou com a foto que não abre.
+    """
+    import io
+
+    import numpy
+    from PIL import Image
+    try:
+        imagem = Image.open(io.BytesIO(foto or b"")).convert("RGB")
+    except Exception:
+        return None
+    branco = (numpy.asarray(imagem) >= BRANCO_DA_FAIXA).all(axis=2)
+    linhas = _faixas_brancas(branco)
+    if linhas:
+        return FAIXAS_EM_CIMA_E_EMBAIXO, (0, linhas[0], imagem.width, linhas[1])
+    colunas = _faixas_brancas(branco.T)
+    if colunas:
+        return FAIXAS_DOS_LADOS, (colunas[0], 0, colunas[1], imagem.height)
+    return None
+
+
+def sem_faixas_brancas(foto):
+    """A foto do anúncio (bytes) sem as faixas brancas de enchimento (faixas_brancas), em PNG; sem elas, a foto como veio."""
+    import io
+
+    from PIL import Image
+    achadas = faixas_brancas(foto)
+    if not achadas:
+        return foto
+    saida = io.BytesIO()
+    Image.open(io.BytesIO(foto)).convert("RGB").crop(achadas[1]).save(saida, "PNG")
+    return saida.getvalue()
 
 
 def miniatura_com_moldura(foto, largura=LARGURA_DA_MINIATURA, cor=None):
@@ -745,9 +830,13 @@ def lugar_da_foto(no_video=False):
 
 
 def _foto_da_grade(foto):
-    """A foto (bytes) como ela fica na capa da grade (lugar_da_foto: P168 e P169 1), no PIL, em RGB; None se não abre."""
+    """
+    A foto (bytes) como ela fica na capa da grade (sem as faixas brancas de enchimento, P206 1 e P207 1;
+    lugar_da_foto: P168 e P169 1), no PIL, em RGB; None se não abre.
+    """
     x1, cima, x2, baixo = lugar_da_foto()
     largura, altura = x2 - x1, baixo - cima
+    foto = sem_faixas_brancas(foto)
     return _foto_que_tampa(foto, largura, altura) or _foto_que_tampa_esticando(foto, largura, altura)
 
 
@@ -856,20 +945,23 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
     a foto inteira logo abaixo dela, acima do cartão do produto, com o fio logo abaixo do pé dela (P189
     B). A faixa e o fio vão na cor do produto (P159 2; sem ela, o laranja da Shopee) ou, quando ela some
     no fundo da foto, na 2ª cor do produto (segunda, RGB) ou num tom da cor (cor_da_faixa, P173 e P174
-    3), com a letra que contrasta. Nada da foto fica coberto (P139 2). None sem a chamada, com a foto
-    que não abre ou com a chamada que não cabe nem na menor letra.
+    3), com a letra que contrasta. Nada da foto fica coberto (P139 2). Nas duas capas, a foto colada num
+    quadrado branco entra sem as faixas brancas de enchimento (sem_faixas_brancas, P206 1 e P207 1).
+    None sem a chamada, com a foto que não abre ou com a chamada que não cabe nem na menor letra.
     """
     import matplotlib
     from PIL import Image, ImageDraw
     chamada = " ".join((chamada or "").split())
     if not chamada:
         return None
+    foto = sem_faixas_brancas(foto)
     x1, cima, x2, baixo = lugar_da_foto(no_video)
     if no_video:
         imagem = _foto_que_cabe(foto, x2 - x1, baixo - cima)
     else:
         # Na grade, a foto tampa o lugar todo: a quase do formato dele aumentada (P168), a outra
-        # esticada até ESTICAR_ATE e com a própria foto desfocada no que ainda faltar (P169 1).
+        # esticada até ESTICAR_ATE e com a própria foto desfocada no que ainda faltar, no meio dele
+        # (P169 1 e P206 1).
         imagem = _foto_que_tampa(foto, x2 - x1, baixo - cima) or _foto_que_tampa_esticando(foto, x2 - x1, baixo - cima)
     if not imagem:
         return None
@@ -2748,6 +2840,11 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
             registro_processos.registrar("shopee_video", PROCESSO_DAS_LETRAS_DA_FOTO, letras, "",
                                          ok=letras != SEM_RESPOSTA_DAS_LETRAS)
             anotar["letras"] = LETRAS_ANOTADAS.get(letras, "")
+        # A foto colada num quadrado branco entra nas capas sem as faixas brancas de enchimento (P206 1
+        # e P207 1): o registro conta quantas e de que lado.
+        faixas = faixas_brancas(foto)
+        if faixas:
+            registro_processos.registrar("shopee_video", PROCESSO_DAS_FAIXAS_BRANCAS, faixas[0], "", ok=None)
         capa = _capa_da_vez(foto, frase, cor=cor, segunda=segunda)
         faixa = cor_da_faixa(foto, cor, segunda) if capa else None
         if faixa and faixa != (cor or LARANJA_DA_SHOPEE):
