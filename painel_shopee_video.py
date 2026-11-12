@@ -1021,16 +1021,19 @@ def texto_edicao(config):
         f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
         "no canto de cima à direita e as setinhas vermelhas em cascata, apontando para o cartão do produto, embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
-        "(a foto do produto, um quadro ou um texto), a nossa miniatura fica de fora; se a coisa dele fica logo "
-        "abaixo do canto, ela diminui (até 2/3 do tamanho) para ficar acima dela. O lado da miniatura (ou sem ela), "
+        "(a foto do produto, um quadro ou um texto), a nossa miniatura vai inteira para o outro canto de cima, se "
+        "ele estiver livre; com os dois ocupados, ela fica de fora ou, se a coisa dele fica logo abaixo do canto, "
+        "diminui (até 2/3 do tamanho) para ficar acima dela. O lado da miniatura (ou sem ela), "
         f"a cor das setinhas e o que vai ou não por cima do vídeo você escolhe em {BOTAO_ITENS}.\n\n"
         "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
         "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto, uma vantagem que o vídeo "
         "mostra e, no fim, uma chamada para o produto anexado embaixo, numa caixa vermelha, em CAIXA ALTA (escritos pela IA, "
         "sem marca e sem preço: o preço e o desconto aparecem no cartão do produto, sempre atualizados), em letra "
-        "média, no alto, logo abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto, o "
-        "rosto nem os quadros que o criador pôs por cima; sem lugar livre, ou se o vídeo já tem legenda própria "
-        "(os quadros do criador com a foto do produto não contam), ele vai sem os nossos textos.\n"
+        "média, no alto, logo abaixo da miniatura ou num dos lados, onde a IA vê que não cobrem o produto nem o "
+        "rosto; cada um vai ao lugar que, na hora em que ele aparece, está livre do que o criador pôs por cima (o "
+        "texto, a foto ou o quadro dele), e o que não tem lugar livre na hora dele sai, sem tirar os outros. Sem "
+        "lugar livre do produto e do rosto, ou se o vídeo já tem legenda própria (os quadros do criador com a foto "
+        "do produto não contam), ele vai sem os nossos textos.\n"
         "🎨 <b>A cor de cada vídeo</b>: a caixa do nome e da vantagem, a moldura da miniatura e o fio e a faixa "
         "da capa vão na cor principal do produto, que a IA diz vendo o vídeo (no produto de várias cores, a que "
         "mais aparece nele), com a letra branca ou preta, a de mais destaque; no produto vermelho, ficam as de "
@@ -1091,10 +1094,11 @@ def texto_itens(config):
         f"<b>Agora</b>\n{linhas_dos_itens(escolhas_da_edicao(config))}\n\n"
         "<b>O que cada botão faz</b>\n"
         f"➡️ <b>{BOTAO_MINIATURA_DIREITA}</b>: a miniatura da foto do anúncio no canto de cima à direita, a de "
-        "sempre.\n"
+        "sempre (se o criador pôs coisa ali, ela vai para o canto da esquerda, se ele estiver livre).\n"
         f"⬅️ <b>{BOTAO_MINIATURA_ESQUERDA}</b>: a miniatura no canto de cima à esquerda. Os textos que iam no alto "
         "à esquerda (o nome, a vantagem e a chamada) passam para a direita, e a IA confere o canto da esquerda (se o "
-        "criador pôs coisa ali, a miniatura diminui ou fica de fora, como no da direita).\n"
+        "criador pôs coisa ali, a miniatura vai para o da direita, se ele estiver livre; com os dois ocupados, ela "
+        "diminui ou fica de fora).\n"
         f"🚫 <b>{BOTAO_SEM_MINIATURA}</b>: os vídeos vão sem a miniatura.\n"
         f"💬 <b>{liga['legenda'][0]}</b> / <b>{liga['legenda'][1]}</b>: as palavras faladas no vídeo, escritas "
         f"{onde_vai_a_legenda}.\n"
@@ -1580,10 +1584,17 @@ def _linha_dos_textos(textos):
 
 
 def _linha_do_lugar(resumo, com_textos):
-    """[a linha do lugar dos textos na legenda do exemplo], ou [] sem nada a dizer."""
+    """
+    [a linha do lugar dos textos na legenda do exemplo], ou [] sem nada a dizer; com os textos que desviaram do
+    que o criador pôs por cima (P212 1), quantos mudaram de lugar e quantos saíram.
+    """
+    criador = resumo.get("texto_do_criador") or {}
     if not com_textos:
         if resumo.get("texto_no_video"):
             return ["📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela."]
+        if criador.get("sairam"):
+            return ["📍 Sem texto na tela: o que o criador pôs por cima ocupava os lugares livres na hora de cada "
+                    "texto."]
         return (["📍 Sem texto na tela: a IA não achou lugar que não cubra o rosto ou o produto."]
                 if resumo.get("lugar") == edicao_video.SEM_LUGAR else [])
     lugar = {"alto": "no alto, ao lado da miniatura", "meio": "logo abaixo da miniatura",
@@ -1591,8 +1602,12 @@ def _linha_do_lugar(resumo, com_textos):
              "direita": "do lado direito, no meio da altura"}.get(resumo.get("lugar"))
     if not lugar:
         return []
+    desvios = ""
+    if criador:
+        desvios = (f"; para não cobrir o que o criador pôs por cima: {criador.get('mudaram', 0)} em outro lugar, "
+                   f"{criador.get('sairam', 0)} fora")
     return [f"📍 Lugar do texto: {lugar}"
-            + (" (a IA escolheu)" if resumo.get("lugar_da_ia") else " (o padrão: a IA não disse)")]
+            + (" (a IA escolheu)" if resumo.get("lugar_da_ia") else " (o padrão: a IA não disse)") + desvios]
 
 
 def _momento(segundos):
@@ -1665,9 +1680,14 @@ def legenda_das_versoes(nome, resumo, indice, editor):
     if not gancho and editor == 2 and not resumo.get("textos_da_ia", True):
         linhas.append("⚠️ A IA não escreveu o nome, a vantagem e a chamada desta vez.")
     largura = edicao_video.largura_da_miniatura(resumo.get("miniatura", True))
-    # O lado da miniatura é o do painel (Itens do Vídeo 🧩, P192 1).
+    # O lado da miniatura é o do painel (Itens do Vídeo 🧩, P192 1), ou o outro canto de cima, quando o do painel
+    # tem coisa do criador e o outro está livre (P213 1).
     lado = resumo.get("lado", edicao_video.MINIATURA_A_DIREITA)
     canto = "esquerda" if lado == edicao_video.MINIATURA_A_ESQUERDA else "direita"
+    do_painel = resumo.get("lado_do_painel", lado)
+    if not gancho and largura and do_painel not in (lado, edicao_video.SEM_MINIATURA):
+        linhas.append(f"🖼️ A miniatura foi para o canto de cima à {canto} (neste vídeo e nas versões): o criador já "
+                      "tinha posto coisa no canto do painel.")
     if not gancho and lado == edicao_video.SEM_MINIATURA:
         linhas.append(f"🖼️ Sem a nossa miniatura (neste vídeo e nas versões): ela está desligada em {BOTAO_ITENS}.")
     elif not gancho and not largura:

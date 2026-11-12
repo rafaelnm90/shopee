@@ -477,13 +477,17 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "(Editor 2, só o vídeo original, sem cortes)" in texto and "em teste" not in texto
     # Pedido do Rafael (vídeo de 28/10): o 1º vídeo é o original, sem cortes; as versões são modificadas.
     assert "vídeo original, sem cortar nada nem mudar a velocidade" in texto
-    # Escolhas do Rafael (29/10, P81 e P82): a nossa miniatura fica de fora quando o criador já pôs
-    # coisa no canto dela, e os quadros dele com a foto do produto não tiram as nossas legendas.
+    # Escolhas do Rafael (29/10, P81 e P82): a nossa miniatura não cobre o que o criador já pôs no canto
+    # dela, e os quadros dele com a foto do produto não tiram as nossas legendas.
     assert "ou se o vídeo já tem legenda própria (os quadros do criador com a foto do produto não contam)" in texto
-    assert "nem os quadros que o criador pôs por cima" in texto
-    assert "a nossa miniatura fica de fora" in texto
-    # Escolha do Rafael (29/10, P97): com a coisa do criador logo abaixo do canto, ela diminui.
-    assert "se a coisa dele fica logo abaixo do canto, ela diminui (até 2/3 do tamanho)" in texto
+    # P212 1 (12/11): cada texto vai ao lugar livre do que o criador pôs por cima na hora em que aparece.
+    assert ("cada um vai ao lugar que, na hora em que ele aparece, está livre do que o criador pôs por cima (o "
+            "texto, a foto ou o quadro dele), e o que não tem lugar livre na hora dele sai, sem tirar os outros") in texto
+    # P213 1 (12/11): com o canto ocupado, a miniatura vai inteira para o outro canto de cima, se ele estiver livre;
+    # com os dois ocupados, fica de fora ou, com a coisa dele logo abaixo do canto, diminui (P97).
+    assert "a nossa miniatura vai inteira para o outro canto de cima, se ele estiver livre" in texto
+    assert ("com os dois ocupados, ela fica de fora ou, se a coisa dele fica logo abaixo do canto, diminui (até 2/3 "
+            "do tamanho)") in texto
     assert ("O exemplo de cada editor</b>: primeiro o vídeo original, inteiro e sem cortes, só com as edições do "
             "editor, como vai ao ar; depois até 2 versões modificadas dele") in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
@@ -1757,6 +1761,21 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
         resumo.update(miniatura=miniatura)
         legenda = sv.legenda_das_versoes("Copo", resumo, 0, 2)
         assert (frase in legenda) if frase else "🖼️" not in legenda
+    # Escolhas do Rafael (12/11, P212 1 e P213 1): o exemplo diz quantos textos desviaram do que o criador pôs por
+    # cima e quando a miniatura foi para o outro canto de cima.
+    for versao in resumo["versoes"]:
+        versao["textos"] = ["Copo Térmico"]
+    resumo.update(lugar="alto", texto_no_video=False, miniatura=sempre, texto_do_criador={"mudaram": 1, "sairam": 1})
+    assert ("Lugar do texto: no alto, ao lado da miniatura (a IA escolheu); para não cobrir o que o criador pôs por "
+            "cima: 1 em outro lugar, 1 fora") in sv.legenda_das_versoes("Copo", resumo, 1, 2)
+    for versao in resumo["versoes"]:
+        versao["textos"] = []
+    assert ("📍 Sem texto na tela: o que o criador pôs por cima ocupava os lugares livres na hora de cada texto."
+            in sv.legenda_das_versoes("Copo", resumo, 1, 2))
+    assert "outro canto" not in sv.legenda_das_versoes("Copo", resumo, 0, 2)
+    resumo.update(lado="esquerda", lado_do_painel="direita")
+    legenda = sv.legenda_das_versoes("Copo", resumo, 0, 2)
+    assert "🖼️ A miniatura foi para o canto de cima à esquerda (neste vídeo e nas versões)" in legenda
     # Os botões de antes do Editor 2 e do 4 valem como o Editor 2.
     assert sv.BOTOES_ANTIGOS_EDITOR_2 == ["Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 4 🎬"]
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
