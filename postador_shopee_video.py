@@ -322,8 +322,9 @@ NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 NOME_DA_FOTO = "busca_pela_foto"
 EXTENSOES_DA_FOTO = (("jpg", b"\xff\xd8\xff"), ("png", b"\x89PNG"))
 SEGUNDOS_DEPOIS_DO_PASSO = 3
-# O arrasto devagar, como um dedo: rápido demais, o app toma por um toque ou um deslize.
-SEGUNDOS_DO_ARRASTO = 0.8
+# O arrasto devagar, como um dedo: rápido demais, o app toma por um toque ou um deslize, e a
+# fileira dos produtos da tela final rola sem embalo (produtos_na_fileira).
+SEGUNDOS_DO_ARRASTO = 1.0
 # Os passos do gesto de dois dedos (uns 5 ms cada): devagar como os dedos de uma pessoa.
 PASSOS_DOS_DEDOS = 100
 MAXIMO_ESPERA = 60
@@ -1669,7 +1670,6 @@ def ajustar_rotulo_de_ia(d, ligado):
 FILEIRA_DOS_PRODUTOS = "rv_product"
 ROLAGENS_DA_FILEIRA = 12
 ARRASTO_DA_FILEIRA = (70, 30)
-SEGUNDOS_DO_ARRASTO = 1.0
 
 
 def produtos_na_fileira(xml):
