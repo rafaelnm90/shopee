@@ -1664,6 +1664,33 @@ def test_a_ia_so_confirma_a_mesma_cor_da_foto(monkeypatch):
     assert "podem ser outra variação" not in ps.PROMPT_PRODUTO_COM_FOTO
 
 
+def test_anuncio_de_varias_cores_vale_pela_cor_do_video_em_todas_as_conferencias(monkeypatch):
+    # Escolha do Rafael (12/11, P209 1): num vídeo de 12/11, a IA deu como outra cor o anúncio que a
+    # criadora vinculou, vendido em várias cores com as do vídeo entre elas, e o vídeo foi pulado. A
+    # foto com as cores do anúncio juntas vale pela cor do vídeo em todos os pedidos que conferem a
+    # cor; o anúncio só de outras cores continua outra cor (P142 1).
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(" ".join(prompt.split()))
+        return '{"confere": true, "outra_cor": false, "iguais": [1], "motivo": "o mesmo produto"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Tapete de banheiro")
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: b"\xff\xd8foto")
+    video = {"arquivo": "v.mp4", "link": "x"}
+    assert ps.ia_confere_do_criador(video, "Tapete", b"\xff\xd8pagina")[:2] == (True, False)
+    assert ps.ia_confere_item(video, b"\x89PNGrecorte")[0]
+    assert ps.ia_confere_iguais(video, "Tapete", [("Tapete A", b"\xff\xd8a")], capa=b"\xff\xd8capa")[0] == [0]
+    assert ps.ia_confere_produto(video, [], avisar=False)[0]
+    assert ps.ia_confere_produto(video, [], avisar=False, capa=b"\xff\xd8capa")[0]
+    assert len(pedidos) == 5 * ps.VEZES_DA_IA
+    regra = " ".join(ps.VARIAS_CORES_NA_FOTO.split())
+    assert all(regra in pedido for pedido in pedidos)
+    assert "vale a cor do vídeo" in regra and "é a mesma cor, e não outra cor nem variação" in regra
+    assert "se não está, é outra cor" in regra
+
+
 # A linha das ordens de Minhas Curtidas, como no Motorola (07/11/2026).
 ORDENS = ('<node text="Relevância" class="android.widget.TextView" bounds="[50,528][220,575]" />'
           '<node text="Mais Recente" class="android.widget.TextView" bounds="[300,528][511,576]" />')
