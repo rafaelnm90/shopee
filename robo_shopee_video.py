@@ -5543,8 +5543,9 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     de Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Com a edição ligada,
     só vai vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo;
     sem a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou ou a busca que a API da
-    Shopee negou deixam tentar de novo depois. Bebida alcoólica (alcool=True) abre com a capa dos avisos da Shopee no lugar da
-    foto, e sem a edição ela não tem como levar os avisos: fica de lado. Devolve como o vídeo
+    Shopee negou deixam tentar de novo depois. Bebida alcoólica (alcool=True) abre com a
+    capa dos avisos da Shopee no lugar da foto, e sem a edição ela não tem como levar os
+    avisos: fica de lado. Devolve como o vídeo
     saiu (o jeito de edicao_video.editar_para_postar; "" sem a edição). outras: as fotos de capa
     dos outros produtos do post, na ordem, no rascunho com produtos a mais (o mesmo item): com
     elas, a miniatura troca entre as fotos diferentes (fotos_da_miniatura, P103). Com a capa com
