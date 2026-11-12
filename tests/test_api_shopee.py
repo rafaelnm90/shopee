@@ -552,13 +552,21 @@ def test_busca_com_erro_de_sistema_da_shopee_tenta_mais_uma_vez(monkeypatch):
     assert esperas == [3, 6, 3, 6, 9]
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ? ORDER BY rowid DESC LIMIT 1",
                      api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA) == ("deu certo na 4ª tentativa",)
-    # O erro de sistema quatro vezes seguidas desiste e anota como antes; outro código não tenta de novo.
-    corpos[:] = [erro, erro, erro, erro]
-    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 13
+    # O checkup de 11/11 mostrou 9 buscas que não passaram nem na 4ª, com a 4ª salvando 3: ela tenta
+    # até a 6ª vez, cada espera maior que a anterior.
+    corpos[:] = [erro] * 5 + [certo]
+    esperas.clear()
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [{"itemId": 1}] and len(sessao.postados) == 15
+    assert esperas == [3, 6, 9, 12, 15]
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ? ORDER BY rowid DESC LIMIT 1",
+                     api_shopee.PROCESSO_DO_ERRO_DE_SISTEMA) == ("deu certo na 6ª tentativa",)
+    # O erro de sistema seis vezes seguidas desiste e anota como antes; outro código não tenta de novo.
+    corpos[:] = [erro] * 6
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 21
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      api_shopee.PROCESSO_DA_BUSCA_NEGADA) == ("código 10.000",)
     corpos[:] = [{"errors": [{"message": "limite", "extensions": {"code": 10030}}]}]
-    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 14
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 22
 
 
 def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):
