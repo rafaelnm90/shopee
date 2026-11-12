@@ -149,6 +149,17 @@ Assista ao vídeo inteiro e diga se o produto mostrado no vídeo é esse produto
 ou pelo menos o mesmo tipo de produto: vídeo de vestido infantil com link de vestido infantil confere; \
 vídeo de vestido com link de fibra de cabelo não confere).
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
+# O anúncio que vende o produto em várias cores mostra as opções juntas na foto (lado a lado ou
+# empilhadas) e vale pela cor do vídeo, não pelas outras que aparecem com ela: com a cor do vídeo
+# entre as da foto, é a mesma cor (o comprador escolhe a cor no anúncio); só com outras cores,
+# continua outra cor (P142 1). Vai em todos os pedidos à IA que conferem a cor. Num vídeo de
+# 12/11, a IA deu como outra cor o anúncio vinculado pela criadora, vendido em várias cores com
+# as do vídeo entre elas, e o vídeo foi pulado. Escolha do Rafael (12/11, P209 1): DECISOES.md,
+# Shopee Vídeo.
+VARIAS_CORES_NA_FOTO = ("Na foto com o produto em várias cores (as opções do anúncio, lado a lado ou empilhadas), "
+                        "vale a cor do vídeo: se a cor do produto no vídeo (ou as cores, quando o vídeo mostra mais de "
+                        "uma) está entre as da foto, é a mesma cor, e não outra cor nem variação; se não está, é outra "
+                        "cor.")
 # Com a foto do anúncio (a da API de afiliado), a IA compara o item, não só o tipo: a
 # Shopee pune o "produto irrelevante" (24/10/2026) quando o anexado não é o do vídeo, e
 # outra cor não confirma. Pedidos do Rafael (P13 e P19): DECISOES.md, Shopee Vídeo.
@@ -158,7 +169,7 @@ A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro, compare com a foto e diga se o vídeo mostra o mesmo produto do anúncio: \
 o mesmo item, da mesma cor e estampa da foto. \
 Outro produto do mesmo tipo com outro formato ou modelo, o mesmo produto em outra cor ou estampa, só \
-um acessório dele, ou um vídeo em que o produto da foto não aparece, não confere.
+um acessório dele, ou um vídeo em que o produto da foto não aparece, não confere. """ + VARIAS_CORES_NA_FOTO + """
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
 # O anúncio de outra loja, na troca de loja e nos produtos a mais, vale quando é o mesmo
 # produto do vídeo, mesmo com outra foto de capa (cada loja usa a sua): a capa do anúncio do
@@ -220,7 +231,8 @@ A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro e diga se ele mostra o mesmo produto do anúncio de outra loja: o mesmo item, da mesma \
 marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} Outro produto do mesmo tipo com outro formato ou \
 modelo, {outra_medida}, {outra_versao}, o mesmo produto em outra cor ou estampa, só um acessório dele, ou um \
-vídeo em que o produto não aparece, não confere. Na dúvida, não. {detalhes} {imitacao}
+vídeo em que o produto não aparece, não confere. Na dúvida, não. {detalhes} """ + VARIAS_CORES_NA_FOTO + """ \
+{imitacao}
 Responda só com um JSON, nesta ordem: {{"produto_do_video": "a marca, o painel e o desenho do produto do vídeo", \
 "diferencas": "o que o produto do anúncio de outra loja tem de diferente, ou nada", "confere": true ou false, \
 "motivo": "uma frase curta"}}"""
@@ -233,7 +245,8 @@ produtos curtidos (a foto pequena, o nome e o preço).
 A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
 Assista ao vídeo inteiro, compare com a imagem e diga se o vídeo mostra o mesmo produto: o mesmo \
 item, da mesma cor e estampa. Outro produto do mesmo tipo, outro modelo, o mesmo produto em outra \
-cor, só um acessório dele, ou um vídeo em que o produto da imagem não aparece, não confere.
+cor, só um acessório dele, ou um vídeo em que o produto da imagem não aparece, não confere. \
+""" + VARIAS_CORES_NA_FOTO + """
 Responda só com um JSON: {"confere": true ou false, "motivo": "uma frase curta"}"""
 # Os produtos a mais (P59): as fotos dos anúncios achados pela busca pela foto, de uma vez,
 # com o vídeo e a capa do anúncio do post. A mesma régua da foto do anúncio: o mesmo item, da
@@ -251,7 +264,7 @@ da mesma marca e modelo, da mesma cor e estampa. {capa_pode_ser_outra} O mesmo i
 que em outra cor ou estampa, é uma variação: ponha o número dele em "outra_cor", e não em "iguais". Outro \
 produto do mesmo tipo, de outra marca, com outro formato ou modelo, {outra_medida}, {outra_versao}, outra \
 quantidade no kit, só um acessório dele, ou um anúncio cujo produto não aparece no vídeo, não é o mesmo produto \
-nem variação. Na dúvida, não é. {detalhes} {imitacao}
+nem variação. Na dúvida, não é. {detalhes} """ + VARIAS_CORES_NA_FOTO + """ {imitacao}
 Responda só com um JSON, nesta ordem: {{"produto_do_video": "a marca, o painel e o desenho do produto do vídeo", \
 "diferencas": "para cada anúncio, o número e o que o produto dele tem de diferente do produto do vídeo", \
 "iguais": [os números dos anúncios que são o mesmo produto, da mesma cor], "outra_cor": [os números dos \
@@ -269,7 +282,7 @@ modelo. O mesmo modelo em outra cor ou estampa é uma variação: confere, com "
 mesmo tipo, de outra marca, com outro formato ou modelo, {outra_medida}, {outra_versao}, só um acessório dele, ou \
 um produto que não aparece no vídeo, não confere. Na dúvida, não confere.
 Compare os detalhes do produto que se veem no vídeo e na foto, não o fundo nem a arrumação da foto: a marca ou o \
-logotipo, o painel e os controles, e o formato e o desenho do corpo.
+logotipo, o painel e os controles, e o formato e o desenho do corpo. """ + VARIAS_CORES_NA_FOTO + """
 Responda só com um JSON: {{"confere": true ou false, "outra_cor": true ou false, "motivo": "uma frase curta"}}"""
 # Na página do produto (HalfPdpActivity), a foto do anúncio fica no quadro dela (imageProduct, ou
 # o player viewPDPVideoPlayer quando o 1º item do anúncio é um vídeo), abaixo da barra de cima da
