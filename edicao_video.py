@@ -133,6 +133,36 @@ CONTORNO_DA_LEGENDA = 3
 # DECISOES.md, Shopee Vídeo.
 # Um trecho mais curto que isto passa rápido demais para ler e sai.
 MINIMO_NA_TELA = 0.4
+# A legenda da fala grande, no meio da tela, como no vídeo da criadora que o Rafael mostrou em 12/11:
+# em CAIXA ALTA, na letra grossa estreitada (ESTREITA_NO_MEIO), branca com contorno preto e sombra,
+# numa linha só de até PALAVRAS_NO_MEIO palavras, no tempo da fala, centralizada no que fica livre à
+# esquerda da coluna dos ícones do app. A fala vai em pedaços curtos, no ritmo dela: o pedaço curto não
+# sai, fica MINIMO_NO_MEIO na tela, e o seguinte espera por ele. Pedidos do Rafael (12/11): a letra é
+# a mesma do começo ao fim do vídeo e muda de um vídeo para outro: a maior (até LETRA_NO_MEIO[0]) em
+# que a palavra mais comprida da fala cabe numa linha (até MENOR_LETRA_NO_MEIO) e, até LETRA_NO_MEIO[1],
+# a que tampa o produto em menos trechos da fala; e a altura muda dentro do vídeo, de um trecho da
+# fala para outro, quando no meio ela tamparia o produto: a IA diz, em cada trecho, a parte da altura
+# da tela que o produto ocupa, e a legenda vai à altura mais perto de CENTRO_NO_MEIO que não o tampa,
+# sem cobrir os textos da tela, a miniatura, a barra de busca do app e as setinhas (ou o cartão do
+# produto, sem elas), com FOLGA_NO_MEIO de cada um; sem altura livre, a que menos o tampa. Em teste
+# por 3 dias, de 12/11 a 15/11 (P211): depois o Rafael escolhe entre ela e a de embaixo com a letra
+# maior (a opção 1 da P211); com LEGENDA_NO_MEIO = False, volta a de embaixo. DECISOES.md, Shopee Vídeo.
+LEGENDA_NO_MEIO = True
+LETRA_NO_MEIO = (60, 48)                # a maior e a menor para não tampar o produto
+MENOR_LETRA_NO_MEIO = 36                # a menor para a palavra mais comprida caber numa linha
+ESTREITA_NO_MEIO = 0.85                 # a largura das letras
+PALAVRAS_NO_MEIO = 4
+CONTORNO_NO_MEIO = 6
+SOMBRA_NO_MEIO = (4, 5)                 # para a direita e para baixo
+COR_DA_SOMBRA = (0, 0, 0, 200)
+CENTRO_NO_MEIO = 646                    # a altura do meio da legenda, sem o produto no caminho
+ESQUERDA_NO_MEIO = VISIVEL_NO_APP[0] + 12
+MINIMO_NO_MEIO = 0.3
+# O topo das setinhas que aparece (sem a margem transparente do arquivo; o tests/test_edicao_video.py
+# confere no arquivo), sem o Rótulo de IA.
+TOPO_DAS_SETINHAS = 740
+FOLGA_NO_MEIO = 8
+PASSO_NO_MEIO = 16                      # entre as alturas tentadas, a partir do meio
 PROCESSO_DAS_LEGENDAS = "edição do vídeo: legendas da fala"
 # Uns minutos bastam para um vídeo curto; depois disso a edição desiste (e o vídeo fica para depois).
 ESPERA_MAXIMA = 300
@@ -1392,6 +1422,7 @@ LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
 LETRA_DOS_TEXTOS = (36, 28)         # a maior e a menor
 SEGUNDOS_DE_CADA_TEXTO = 3.0
 FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
+BORDA_DOS_TEXTOS = (28, 18)         # da caixa até as letras, dos lados e em cima e embaixo
 FUNDO_DA_CHAMADA = VERMELHO_DO_DESTAQUE + (230,)
 # A chamada vai em CAIXA ALTA (P140 2), mais larga que em minúsculas: a letra dela pode descer até
 # esta, para caber nas mesmas linhas (a maiúscula desta letra tem a altura da minúscula da menor
@@ -1528,8 +1559,12 @@ _LEGENDAS_NO_PROMPT = (
     "que foi dito, palavra por palavra, do começo ao fim da fala: sem resumir, sem encurtar, sem trocar palavras "
     "e sem pular nenhuma frase. Siga o áudio, não a imagem: cada frase dita entra uma vez, na ordem e no tempo "
     "em que foi dita, mesmo quando a imagem se repete. Um trecho por frase (ou pedaço de frase) dita de uma vez, "
-    "do tamanho que for: as longas são divididas na tela. Como "
-    "[{{\"inicio\": 0.0, \"fim\": 2.0, \"texto\": \"...\"}}]; [] se ninguém fala, se só tem música ou "
+    "do tamanho que for: as longas são divididas na tela. Em cada trecho, diga também a parte da altura da tela "
+    "que o produto ocupa enquanto ele é dito: \"produto\", [topo, base], em porcentagem da altura do vídeo, "
+    "contando da borda de cima, do ponto mais alto ao mais baixo em que o produto aparece nesse trecho; [] se "
+    "o produto não aparece nele. Como "
+    "[{{\"inicio\": 0.0, \"fim\": 2.0, \"texto\": \"...\", \"produto\": [35, 80]}}]; [] se ninguém fala, "
+    "se só tem música ou "
     "canto, ou se a fala não é em português. Diga também se o próprio vídeo já mostra o que as pessoas falam "
     "escrito na tela (legenda da fala): \"legenda_no_video\", true ou false.\n"
 )
@@ -1710,13 +1745,13 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None, linhas_maximas=
         if len(linhas) <= linhas_maximas and all(rascunho.textlength(t, font=fonte) <= limite for t in linhas):
             break
     altura_da_linha = round(tamanho * 1.25)
-    largura = round(max(rascunho.textlength(t, font=fonte) for t in linhas)) + 2 * 28
-    altura = altura_da_linha * len(linhas) + 2 * 18
+    largura = round(max(rascunho.textlength(t, font=fonte) for t in linhas)) + 2 * BORDA_DOS_TEXTOS[0]
+    altura = altura_da_linha * len(linhas) + 2 * BORDA_DOS_TEXTOS[1]
     imagem = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
     desenho = ImageDraw.Draw(imagem)
     desenho.rounded_rectangle((0, 0, largura - 1, altura - 1), radius=22, fill=fundo)
     for i, texto_da_linha in enumerate(linhas):
-        desenho.text((largura / 2, 18 + altura_da_linha * (i + 0.5)), texto_da_linha, font=fonte,
+        desenho.text((largura / 2, BORDA_DOS_TEXTOS[1] + altura_da_linha * (i + 0.5)), texto_da_linha, font=fonte,
                      fill=letra_que_contrasta(fundo), anchor="mm")
     saida = io.BytesIO()
     imagem.save(saida, format="PNG")
@@ -1911,6 +1946,9 @@ def _nome_lugar_e_falas(dados, duracao=0.0):
     legendas = _legendas(dados.get("legendas"))
     if legendas is not None:
         textos["legendas"] = legendas
+    produto = _produto_nas_legendas(dados.get("legendas"))
+    if produto:
+        textos["produto_na_fala"] = produto
     if isinstance(dados.get("legenda_no_video"), bool):
         textos["legenda_no_video"] = dados["legenda_no_video"]
     return textos
@@ -2324,26 +2362,51 @@ def _falas(bruto):
     return falas
 
 
+def _trecho_da_fala(trecho):
+    """(início, fim, texto) de um trecho da fala que a IA deu, se ele é certo: com o começo antes do fim e o
+    texto com as letras do português (o trecho com letra de outra língua sai); senão, None."""
+    if not isinstance(trecho, dict):
+        return None
+    try:
+        inicio, fim = float(trecho.get("inicio")), float(trecho.get("fim"))
+    except (TypeError, ValueError):
+        return None
+    texto = _so_letras(str(trecho.get("texto") or ""), 10 ** 6)
+    if texto and fim > inicio >= 0 and not letras_fora_do_portugues(texto):
+        return inicio, fim, texto
+    return None
+
+
 def _legendas(bruto):
     """
-    As legendas da fala que a IA deu ([(início, fim, texto)], em ordem), só os trechos certos: com o
-    começo antes do fim e o texto com as letras do português (o trecho com letra de outra língua sai);
-    None quando a lista não veio.
+    As legendas da fala que a IA deu ([(início, fim, texto)], em ordem), só os trechos certos
+    (_trecho_da_fala); None quando a lista não veio.
     """
     if not isinstance(bruto, list):
         return None
-    legendas = []
-    for trecho in bruto:
-        if not isinstance(trecho, dict):
+    return sorted(trecho for trecho in map(_trecho_da_fala, bruto) if trecho)
+
+
+def _produto_nas_legendas(bruto):
+    """
+    {texto do trecho: [topo, base]}: a faixa da altura da tela que o produto ocupa enquanto cada trecho certo
+    da fala é dito (_trecho_da_fala), em % da altura, contando de cima, como a IA diz no "produto" de cada
+    um ([topo, base] ou {"topo", "base"}); o trecho sem o produto na tela fica de fora. O mesmo texto dito
+    duas vezes fica com a faixa que junta as duas. A legenda do meio usa para não tampar o produto
+    (_letreiros_no_meio, pedido do Rafael de 12/11).
+    """
+    faixas = {}
+    for trecho in bruto if isinstance(bruto, list) else ():
+        certo = _trecho_da_fala(trecho)
+        valor = trecho.get("produto") if certo else None
+        if isinstance(valor, dict):
+            valor = [valor.get("topo"), valor.get("base")]
+        if not faixa_do_produto(valor):
             continue
-        try:
-            inicio, fim = float(trecho.get("inicio")), float(trecho.get("fim"))
-        except (TypeError, ValueError):
-            continue
-        texto = _so_letras(str(trecho.get("texto") or ""), 10 ** 6)
-        if texto and fim > inicio >= 0 and not letras_fora_do_portugues(texto):
-            legendas.append((inicio, fim, texto))
-    return sorted(legendas)
+        topo, base = float(valor[0]), float(valor[1])
+        antes = faixas.get(certo[2])
+        faixas[certo[2]] = [min(topo, antes[0]), max(base, antes[1])] if antes else [topo, base]
+    return faixas
 
 
 # Por que o vídeo vai sem as legendas da fala (textos fixos: o registro e o checkup contam por eles).
@@ -2501,16 +2564,19 @@ def _linhas_da_legenda(texto, fonte, rascunho):
     return linhas, all(rascunho.textlength(t, font=fonte) <= limite for t in linhas)
 
 
-def legenda_da_fala(texto):
+def legenda_da_fala(texto, tamanho=None):
     """
     A legenda (PNG com fundo transparente, bytes): letras brancas com contorno preto, sem caixa,
     centralizadas, na maior letra de LETRA_DA_LEGENDA em que o texto cabe em LINHAS_DA_LEGENDA linhas
-    da largura dela. None quando nem a menor letra cabe (o trecho é dividido antes).
+    da largura dela. None quando nem a menor letra cabe (o trecho é dividido antes). Com
+    LEGENDA_NO_MEIO, a grande do meio (_legenda_no_meio), na letra `tamanho` do vídeo.
     """
     import io
 
     import matplotlib
     from PIL import Image, ImageDraw, ImageFont
+    if LEGENDA_NO_MEIO:
+        return _legenda_no_meio(texto, tamanho)
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
     rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     maior, menor = LETRA_DA_LEGENDA
@@ -2533,6 +2599,84 @@ def legenda_da_fala(texto):
     saida = io.BytesIO()
     imagem.save(saida, format="PNG")
     return saida.getvalue()
+
+
+@functools.lru_cache(maxsize=32)
+def _fonte_no_meio(tamanho):
+    """A letra da legenda do meio neste tamanho (a DejaVu Sans Bold do matplotlib)."""
+    import matplotlib
+    from PIL import ImageFont
+    return ImageFont.truetype(os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf"), tamanho)
+
+
+def _medida_no_meio(linha, tamanho):
+    """
+    (esquerda, largura) da linha na legenda do meio, na letra `tamanho`, antes de estreitar: onde o
+    contorno começa, a partir do começo do texto, e a largura com o contorno e a sombra.
+    """
+    from PIL import Image, ImageDraw
+    rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    esquerda, _topo, direita, _pe = rascunho.textbbox((0, 0), linha, font=_fonte_no_meio(tamanho), anchor="ls",
+                                                      stroke_width=CONTORNO_NO_MEIO + 1)
+    return esquerda, direita - esquerda + SOMBRA_NO_MEIO[0] + 2
+
+
+def _cabe_no_meio(linha, tamanho):
+    """A linha cabe, estreitada, entre ESQUERDA_NO_MEIO e DIREITA_DA_LEGENDA na letra `tamanho`."""
+    return _medida_no_meio(linha, tamanho)[1] * ESTREITA_NO_MEIO <= DIREITA_DA_LEGENDA - ESQUERDA_NO_MEIO
+
+
+def letra_das_palavras(textos):
+    """
+    A maior letra da legenda do meio (de LETRA_NO_MEIO[0] para baixo, de 2 em 2, até MENOR_LETRA_NO_MEIO)
+    em que a palavra mais comprida dos textos cabe numa linha.
+    """
+    palavras = {palavra for texto in textos for palavra in texto.upper().split()}
+    for tamanho in range(LETRA_NO_MEIO[0], MENOR_LETRA_NO_MEIO - 1, -2):
+        if all(_cabe_no_meio(palavra, tamanho) for palavra in palavras):
+            return tamanho
+    return MENOR_LETRA_NO_MEIO
+
+
+def _legenda_no_meio(texto, tamanho=None):
+    """
+    A legenda grande do meio (LEGENDA_NO_MEIO; PNG com fundo transparente, bytes): o texto em CAIXA ALTA,
+    numa linha só de até PALAVRAS_NO_MEIO palavras, na letra `tamanho` (sem ela, a maior de LETRA_NO_MEIO
+    em que a linha cabe) entre ESQUERDA_NO_MEIO e DIREITA_DA_LEGENDA, estreitada, branca com contorno preto
+    e a sombra. A altura da imagem é a da letra (com os acentos e a parte de baixo do "Ç"), a mesma em
+    todas as legendas da mesma letra. None quando não cabe (o trecho é dividido antes); a palavra sozinha
+    que não cabe vai encolhida até caber, para nenhuma palavra ficar de fora.
+    """
+    from PIL import Image, ImageDraw
+    palavras = texto.upper().split()
+    if not palavras or len(palavras) > PALAVRAS_NO_MEIO:
+        return None
+    linha = " ".join(palavras)
+    tamanhos = [tamanho] if tamanho else range(LETRA_NO_MEIO[0], LETRA_NO_MEIO[1] - 1, -2)
+    for tamanho in tamanhos:
+        if _cabe_no_meio(linha, tamanho):
+            break
+    else:
+        if len(palavras) > 1:
+            return None
+    fonte = _fonte_no_meio(tamanho)
+    esquerda, larga = _medida_no_meio(linha, tamanho)
+    acima, abaixo = fonte.getmetrics()
+    folga = CONTORNO_NO_MEIO + 2
+    dx, dy = SOMBRA_NO_MEIO
+    altura = acima + abaixo + 2 * folga + dy
+    imagem = Image.new("RGBA", (larga, altura), (0, 0, 0, 0))
+    desenho = ImageDraw.Draw(imagem)
+    comeco = (1 - esquerda, folga + acima)
+    desenho.text((comeco[0] + dx, comeco[1] + dy), linha, font=fonte, fill=COR_DA_SOMBRA, anchor="ls",
+                 stroke_width=CONTORNO_NO_MEIO + 1, stroke_fill=COR_DA_SOMBRA)
+    desenho.text(comeco, linha, font=fonte, fill="white", anchor="ls", stroke_width=CONTORNO_NO_MEIO,
+                 stroke_fill="black")
+    limite = DIREITA_DA_LEGENDA - ESQUERDA_NO_MEIO
+    escala = min(1.0, limite / (larga * ESTREITA_NO_MEIO))
+    imagem = imagem.resize((min(limite, max(1, round(larga * ESTREITA_NO_MEIO * escala))),
+                            max(1, round(altura * escala))), Image.LANCZOS)
+    return _png(imagem)
 
 
 # Ao dividir um trecho em dois, o corte depois de uma vírgula ou de um ponto vale esta parte do tamanho
@@ -2565,15 +2709,16 @@ def _ponto_de_corte(palavras):
     return melhor
 
 
-def pedacos_da_legenda(inicio, fim, texto, tempos=None):
+def pedacos_da_legenda(inicio, fim, texto, tempos=None, tamanho=None):
     """
-    [(início, fim, texto, imagem)] do trecho: o que não cabe numa legenda (LINHAS_DA_LEGENDA linhas) é
-    dividido em dois pelas palavras (_ponto_de_corte), até caber; nenhuma palavra fica de fora (só a
-    palavra sozinha que nem a menor letra cabe). Com os tempos de cada palavra no áudio ([(início, fim)],
-    legendas_no_tempo_da_fala), a 2ª parte começa quando a 1ª palavra dela é dita; sem eles, o tempo é
-    repartido pelo tamanho de cada parte.
+    [(início, fim, texto, imagem)] do trecho: o que não cabe numa legenda (LINHAS_DA_LEGENDA linhas; no
+    meio, uma linha de até PALAVRAS_NO_MEIO palavras) é dividido em dois pelas palavras (_ponto_de_corte),
+    até caber; nenhuma palavra fica de fora (embaixo, só a palavra sozinha que nem a menor letra cabe).
+    Com os tempos de cada palavra no áudio ([(início, fim)], legendas_no_tempo_da_fala), a 2ª parte começa
+    quando a 1ª palavra dela é dita; sem eles, o tempo é repartido pelo tamanho de cada parte. tamanho: a
+    letra da legenda do meio no vídeo (letra_das_palavras).
     """
-    imagem = legenda_da_fala(texto)
+    imagem = legenda_da_fala(texto, tamanho)
     palavras = texto.split()
     if imagem or len(palavras) < 2:
         return [(inicio, fim, texto, imagem)] if imagem else []
@@ -2581,26 +2726,31 @@ def pedacos_da_legenda(inicio, fim, texto, tempos=None):
     primeira, segunda = " ".join(palavras[:meio]), " ".join(palavras[meio:])
     if tempos and len(tempos) == len(palavras):
         corte = min(max(tempos[meio][0], inicio), fim)
-        return (pedacos_da_legenda(inicio, corte, primeira, tempos[:meio])
-                + pedacos_da_legenda(corte, fim, segunda, tempos[meio:]))
+        return (pedacos_da_legenda(inicio, corte, primeira, tempos[:meio], tamanho)
+                + pedacos_da_legenda(corte, fim, segunda, tempos[meio:], tamanho))
     corte = inicio + (fim - inicio) * len(primeira) / (len(primeira) + len(segunda))
-    return pedacos_da_legenda(inicio, corte, primeira) + pedacos_da_legenda(corte, fim, segunda)
+    return (pedacos_da_legenda(inicio, corte, primeira, tamanho=tamanho)
+            + pedacos_da_legenda(corte, fim, segunda, tamanho=tamanho))
 
 
-def _trechos_que_cabem(inicio, fim, texto, tempos=None):
+def _trechos_que_cabem(inicio, fim, texto, tempos=None, tamanho=None):
     """[(início, fim, imagem)] do trecho, já dividido em legendas que cabem (pedacos_da_legenda)."""
-    return [(comeco, final, imagem) for comeco, final, _texto, imagem in pedacos_da_legenda(inicio, fim, texto, tempos)]
+    return [(comeco, final, imagem)
+            for comeco, final, _texto, imagem in pedacos_da_legenda(inicio, fim, texto, tempos, tamanho)]
 
 
-def letreiros_da_fala(legendas, duracao, subida=0):
+def letreiros_da_fala(legendas, duracao, subida=0, produto=None, ocupados=(), setinhas=True, anotar=None):
     """
     [(imagem, início, fim, x, y)]: as legendas da fala no vídeo, cada uma até a seguinte começar,
     dentro da duração do vídeo; o trecho curto demais para ler (MINIMO_NA_TELA) sai. O pé de cada uma
     fica em PE_DA_LEGENDA (subida px mais alto: o vídeo com o Rótulo de IA, SUBIDA_COM_O_ROTULO_DE_IA),
-    e ela vai centralizada entre ESQUERDA_DA_LEGENDA e DIREITA_DA_LEGENDA.
+    e ela vai centralizada entre ESQUERDA_DA_LEGENDA e DIREITA_DA_LEGENDA. Com LEGENDA_NO_MEIO, a grande
+    do meio (_letreiros_no_meio), com produto, ocupados, setinhas e anotar.
     legendas: [(início, fim, texto)], ou com os tempos de cada palavra no áudio no 4º lugar
     (legendas_no_tempo_da_fala).
     """
+    if LEGENDA_NO_MEIO:
+        return _letreiros_no_meio(legendas, duracao, subida, produto, ocupados, setinhas, anotar)
     pedacos = []
     for inicio, fim, texto, *tempos in sorted(legendas, key=lambda legenda: legenda[:2]):
         pedacos += _trechos_que_cabem(max(0.0, inicio), min(duracao, fim), texto, tempos[0] if tempos else None)
@@ -2610,10 +2760,166 @@ def letreiros_da_fala(legendas, duracao, subida=0):
             fim = min(fim, pedacos[i + 1][0])
         if fim - inicio < MINIMO_NA_TELA:
             continue
-        # A largura e a altura estão no cabeçalho do PNG (bytes 16 a 24).
-        largura, altura = int.from_bytes(imagem[16:20], "big"), int.from_bytes(imagem[20:24], "big")
+        largura, altura = _medidas_do_png(imagem)
         x = ESQUERDA_DA_LEGENDA + (DIREITA_DA_LEGENDA - ESQUERDA_DA_LEGENDA - largura) // 2
         letreiros.append((imagem, round(inicio, 2), round(fim, 2), x, PE_DA_LEGENDA - subida - altura))
+    return letreiros
+
+
+def _medidas_do_png(imagem):
+    """(largura, altura) do PNG, que estão no cabeçalho dele (bytes 16 a 24)."""
+    return int.from_bytes(imagem[16:20], "big"), int.from_bytes(imagem[20:24], "big")
+
+
+def faixa_do_produto(valor):
+    """(topo, base) em px na tela de 720x1280 da faixa [topo, base] da IA, em % da altura; None sem ela."""
+    if not isinstance(valor, (list, tuple)) or len(valor) != 2:
+        return None
+    try:
+        topo, base = float(valor[0]), float(valor[1])
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= topo < base <= 100:
+        return None
+    return round(topo * TELA[1] / 100), round(base * TELA[1] / 100)
+
+
+def ocupados_na_tela(letreiros=(), miniatura=0, lado=MINIATURA_A_DIREITA):
+    """
+    [(x1, y1, x2, y2, início, fim, miolo)]: o que a legenda do meio não pode cobrir, além da barra de busca e
+    das setinhas: os textos da tela ([(imagem, início, fim, x, y)], no tempo deles; o miolo é onde ficam as
+    letras, dentro da BORDA_DOS_TEXTOS da caixa) e a miniatura da largura `miniatura` (largura_da_miniatura),
+    no canto do lado dela, o vídeo todo (o miolo é ela inteira).
+    """
+    ocupados = []
+    for imagem, inicio, fim, x, y in letreiros:
+        largura, altura = _medidas_do_png(imagem)
+        lado_x, lado_y = BORDA_DOS_TEXTOS
+        ocupados.append((x, y, x + largura, y + altura, inicio, fim,
+                         (x + lado_x, y + lado_y, x + largura - lado_x, y + altura - lado_y)))
+    largura = largura_da_miniatura(miniatura)
+    if largura and lado != SEM_MINIATURA:
+        cx, cy = centro_da_miniatura(largura, lado)
+        caixa = (cx - largura // 2, cy - largura // 2, cx + largura - largura // 2, cy + largura - largura // 2)
+        ocupados.append(caixa + (0.0, float("inf"), caixa))
+    return ocupados
+
+
+def _altura_no_meio(pedacos, faixa, ocupados, teto, piso):
+    """
+    (centro, quanto tampa): a altura do meio das legendas de um trecho da fala (pedacos: [(início, fim,
+    imagem, x, largura, altura)]), a mais perto de CENTRO_NO_MEIO, de PASSO_NO_MEIO em PASSO_NO_MEIO, que
+    não cobre o que está ocupado no tempo de cada uma (ocupados_na_tela) nem passa de teto e piso, e que tampa
+    menos a faixa do produto (topo, base em px; None sem ela); quanto tampa, em px de altura. Sem altura livre
+    (o texto mais comprido num lado da tela, com o Rótulo de IA), a que menos cobre o miolo do que está
+    ocupado: as letras dos textos da tela e a miniatura.
+    """
+    maior = max(altura for *_resto, altura in pedacos)
+    alturas = [CENTRO_NO_MEIO]
+    for passo in range(PASSO_NO_MEIO, TELA[1], PASSO_NO_MEIO):
+        alturas += [CENTRO_NO_MEIO - passo, CENTRO_NO_MEIO + passo]
+
+    def tampa(centro):
+        if not faixa:
+            return 0
+        return max(0, min(centro + maior - maior // 2, faixa[1] + FOLGA_NO_MEIO)
+                   - max(centro - maior // 2, faixa[0] - FOLGA_NO_MEIO))
+
+    def entre_teto_e_piso(centro):
+        return centro - maior // 2 >= teto and centro + maior - maior // 2 <= piso
+
+    def cabe(centro):
+        if not entre_teto_e_piso(centro):
+            return False
+        for inicio, fim, _imagem, x, largura, altura in pedacos:
+            y = centro - altura // 2
+            for x1, y1, x2, y2, de, ate, *_miolo in ocupados:
+                if (inicio < ate and de < fim and x < x2 + FOLGA_NO_MEIO and x1 - FOLGA_NO_MEIO < x + largura
+                        and y < y2 + FOLGA_NO_MEIO and y1 - FOLGA_NO_MEIO < y + altura):
+                    return False
+        return True
+
+    def cobre(centro):
+        total = 0
+        for inicio, fim, _imagem, x, largura, altura in pedacos:
+            y = centro - altura // 2
+            for x1, y1, x2, y2, de, ate, *miolo in ocupados:
+                if inicio < ate and de < fim:
+                    x1, y1, x2, y2 = miolo[0] if miolo else (x1, y1, x2, y2)
+                    total += (max(0, min(x + largura, x2) - max(x, x1))
+                              * max(0, min(y + altura, y2) - max(y, y1)))
+        return total
+    livres = [centro for centro in alturas if cabe(centro)]
+    if livres:
+        centro = min(livres, key=lambda centro: (tampa(centro), alturas.index(centro)))
+    else:
+        entre = [centro for centro in alturas if entre_teto_e_piso(centro)] or [CENTRO_NO_MEIO]
+        centro = min(entre, key=lambda centro: (cobre(centro), tampa(centro), alturas.index(centro)))
+    return centro, tampa(centro)
+
+
+def _no_meio_nesta_letra(trechos, duracao, tamanho, produto, ocupados, teto, piso):
+    """
+    (letreiros, trechos que tampam o produto, letreiros fora do meio) da legenda do meio na letra
+    `tamanho`: cada trecho da fala dividido em legendas que cabem, cada uma no tempo dela (a curta fica
+    MINIMO_NO_MEIO, e a seguinte espera), e todas as do trecho na altura dele (_altura_no_meio).
+    """
+    pedacos = []
+    for n, (inicio, fim, texto, *tempos) in enumerate(trechos):
+        pedacos += [(n, comeco, final, imagem) for comeco, final, imagem in
+                    _trechos_que_cabem(max(0.0, inicio), min(duracao, fim), texto, tempos[0] if tempos else None,
+                                       tamanho)]
+    no_tempo, livre = {}, 0.0
+    for i, (n, inicio, fim, imagem) in enumerate(pedacos):
+        if i + 1 < len(pedacos):
+            fim = min(fim, pedacos[i + 1][1])
+        inicio = max(inicio, livre)
+        # Só sai o pedaço que ficaria depois do fim do vídeo (a folga é a do arredondamento).
+        if duracao - inicio < MINIMO_NO_MEIO - 0.001:
+            continue
+        fim = min(max(fim, inicio + MINIMO_NO_MEIO), duracao)
+        livre = fim
+        largura, altura = _medidas_do_png(imagem)
+        # Todas no mesmo eixo, o meio do que fica livre à esquerda dos ícones do app: não pulam de lado.
+        x = ESQUERDA_NO_MEIO + (DIREITA_DA_LEGENDA - ESQUERDA_NO_MEIO - largura) // 2
+        no_tempo.setdefault(n, []).append((round(inicio, 2), round(fim, 2), imagem, x, largura, altura))
+    letreiros, tampam, fora = [], 0, 0
+    for n, deste in no_tempo.items():
+        centro, tampa = _altura_no_meio(deste, faixa_do_produto(produto.get(trechos[n][2])), ocupados, teto, piso)
+        tampam += tampa > 0
+        fora += len(deste) if centro != CENTRO_NO_MEIO else 0
+        letreiros += [(imagem, inicio, fim, x, centro - altura // 2)
+                      for inicio, fim, imagem, x, _largura, altura in deste]
+    return letreiros, tampam, fora
+
+
+def _letreiros_no_meio(legendas, duracao, subida=0, produto=None, ocupados=(), setinhas=True, anotar=None):
+    """
+    As legendas grandes do meio (LEGENDA_NO_MEIO), como letreiros_da_fala: na mesma letra do começo ao fim
+    do vídeo, a maior em que a palavra mais comprida cabe (letra_das_palavras) ou, até LETRA_NO_MEIO[1], a
+    que tampa o produto em menos trechos da fala; cada trecho na altura que não tampa o produto
+    (_altura_no_meio). produto: {texto do trecho: [topo, base]}, a faixa da altura da tela que o produto
+    ocupa enquanto o trecho é dito, em % (a IA diz, produto_na_fala). ocupados: o que a legenda não cobre
+    (ocupados_na_tela). Fica entre a barra de busca do app e as setinhas (sem elas, o cartão do produto), que
+    sobem com o Rótulo de IA (subida). Em anotar (dict), a letra, as legendas fora do meio e os trechos em
+    que ela tampa o produto, para o registro.
+    """
+    trechos = sorted(legendas, key=lambda legenda: legenda[:2])
+    produto = produto if isinstance(produto, dict) else {}
+    teto = FIM_DA_BARRA_DE_BUSCA + FOLGA_NO_MEIO
+    piso = (TOPO_DAS_SETINHAS if setinhas else COMECO_DO_CARTAO_DO_PRODUTO) - subida - FOLGA_NO_MEIO
+    maior = letra_das_palavras([texto for _inicio, _fim, texto, *_tempos in trechos])
+    tamanhos = [maior] + (list(range(maior - 2, LETRA_NO_MEIO[1] - 1, -2)) if produto else [])
+    melhor = None
+    for tamanho in tamanhos:
+        letreiros, tampam, fora = _no_meio_nesta_letra(trechos, duracao, tamanho, produto, ocupados, teto, piso)
+        if melhor is None or tampam < melhor[1]:
+            melhor = (tamanho, tampam, fora, letreiros)
+        if not tampam:
+            break
+    tamanho, tampam, fora, letreiros = melhor
+    if anotar is not None:
+        anotar.update({"letra": tamanho, "fora_do_meio": fora, "tampam": tampam})
     return letreiros
 
 
@@ -2679,7 +2985,8 @@ def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA):
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-             capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+             capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+             produto_na_fala=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -2687,35 +2994,45 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     isso fica para as versões modificadas do exemplo (pedido do Rafael de 28/10/2026:
     DECISOES.md, Shopee Vídeo). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA;
     SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
-    vídeo inteiro. As legendas da fala ([(início, fim, texto)], P118) vão embaixo, à direita da seta.
+    vídeo inteiro. As legendas da fala ([(início, fim, texto)], P118) vão embaixo, à direita da seta (ou
+    grandes no meio da tela, LEGENDA_NO_MEIO).
     Com rotulo_de_ia=True, a legenda da fala, as setinhas e a moldura sobem com o cartão do app.
     Com a cor do produto (RGB, P159 2), a caixa do nome e da vantagem e a moldura da miniatura vão nela.
     As escolhas do painel (escolhas_certas; None, as de sempre, P192 1) vão à edição (editar).
+    produto_na_fala: onde o produto fica em cada trecho da fala (da IA), para a legenda do meio não o tampar.
     Devolve (motivo, resumo {original, lugar, textos, legendas}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
     if not original:
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
-                                 musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia, cor, escolhas)
+                                 musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia, cor, escolhas,
+                                 produto_na_fala)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
                           musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False,
-                          cor=None, escolhas=None):
+                          cor=None, escolhas=None, produto_na_fala=None):
     """
     O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
-    Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta.
+    Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta, ou
+    grandes no meio da tela (LEGENDA_NO_MEIO, o teste da P211), sem cobrir os textos da tela e a
+    miniatura e, quando dá, sem tampar o produto (produto_na_fala, da IA: _letreiros_no_meio).
     """
     escolhas = escolhas_certas(escolhas)
     caixa = caixa_dos_textos(cor)
     letreiros, textos = _letreiros([(nome, caixa), (vantagem, caixa), (chamada, FUNDO_DA_CHAMADA)], lugar, original,
                                    escolhas["miniatura"])
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
-    da_fala = letreiros_da_fala(legendas, original, subida) if legendas else []
+    no_meio = {}
+    da_fala = (letreiros_da_fala(legendas, original, subida, produto_na_fala,
+                                 ocupados_na_tela(letreiros, miniatura, escolhas["miniatura"]), escolhas["setinhas"],
+                                 no_meio) if legendas else [])
     letreiros += da_fala
     resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura,
               "legendas": len(da_fala)}
+    if no_meio:
+        resumo["no_meio"] = no_meio
     if not letreiros:
         return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
                        escolhas=escolhas), resumo)
@@ -2897,7 +3214,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
-                                    miniatura, outras_fotos, legendas, rotulo_de_ia, cor=cor, escolhas=escolhas)
+                                    miniatura, outras_fotos, legendas, rotulo_de_ia, cor=cor, escolhas=escolhas,
+                                    produto_na_fala=textos.get("produto_na_fala"))
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -2907,8 +3225,12 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         # por segundo): a legenda é a fala inteira (pedido do Rafael, 02/11).
         palavras = sum(len(texto.split()) for _inicio, _fim, texto, *_tempos in legendas)
         segundos = sum(max(0.0, fim - inicio) for inicio, fim, *_resto in legendas)
+        no_meio = resumo.get("no_meio") or {}
         registro_processos.registrar("shopee_video", PROCESSO_DAS_LEGENDAS, "postas" if postas else "sem as legendas",
                                      f"{postas} trecho(s), {palavras} palavra(s) em {segundos:.0f} s de fala"
+                                     + (f", no meio: letra {no_meio['letra']}, {no_meio['fora_do_meio']} fora do "
+                                        f"meio, {no_meio['tampam']} trecho(s) da fala por cima do produto"
+                                        if no_meio and postas else "")
                                      if postas else sem_legendas or "nenhum trecho cabe", ok=True if postas else None)
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         detalhe = ""
@@ -2929,7 +3251,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
 # O que o Editar ✏️ guarda dos textos da IA de cada rascunho (P192 1): o que a edição usa, sem a frase da
 # capa, que vai à parte.
 TEXTOS_GUARDADOS = ("nome", "vantagem", "chamada", "lugar", "texto_no_video", "canto_ocupado", "por_cima",
-                    "lado_olhado", "legendas", "legenda_no_video", "cor", "cor_2")
+                    "lado_olhado", "legendas", "legenda_no_video", "cor", "cor_2", "produto_na_fala")
 
 
 def textos_para_guardar(textos):
@@ -2986,7 +3308,8 @@ def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=No
     motivo, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                               textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
                               miniatura, outras_fotos if miniatura else (), legendas,
-                              bool((guardado or {}).get("rotulo_de_ia")), cor=cor, escolhas=escolhas)
+                              bool((guardado or {}).get("rotulo_de_ia")), cor=cor, escolhas=escolhas,
+                              produto_na_fala=textos.get("produto_na_fala"))
     if motivo:
         return motivo, ""
     como = ((COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA)
@@ -3302,7 +3625,7 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                       lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None):
+                       lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
@@ -3324,7 +3647,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
                                                 musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas,
-                                                cor=cor, escolhas=escolhas)
+                                                cor=cor, escolhas=escolhas, produto_na_fala=produto_na_fala)
     resumo = {"original": original, "inteiro": original, "lugar": lugar, "miniatura": miniatura,
               "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
@@ -3383,7 +3706,8 @@ def exemplo_editor_2(destino):
         textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos),
         miniatura_no_video(textos, escolhas["miniatura"]),
         legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0] if escolhas["legenda"] else [],
-        cor=cor_do_produto(textos.get("cor")), escolhas=escolhas), escolhas)
+        cor=cor_do_produto(textos.get("cor")), escolhas=escolhas, produto_na_fala=textos.get("produto_na_fala")),
+        escolhas)
 
 
 def _abertura_do_exemplo(capa, no_video):

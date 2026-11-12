@@ -198,6 +198,8 @@ def test_com_o_rotulo_de_ia_a_moldura_as_setinhas_e_a_legenda_sobem_com_o_cartao
     import io
 
     from PIL import Image
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     subida = edicao_video.SUBIDA_COM_O_ROTULO_DE_IA
     assert 30 <= subida <= 50
     de_sempre = Image.open(io.BytesIO(edicao_video.moldura_do_cartao())).getchannel("A").getbbox()
@@ -725,7 +727,7 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None):
+                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -2930,9 +2932,11 @@ def test_a_seta_tem_o_tamanho_que_a_legenda_usa():
         assert seta.size == edicao_video.TAMANHO_DA_SETA
 
 
-def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela():
+def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela(monkeypatch):
     # O pé da legenda na altura do pé da seta (logo abaixo vem o cartão do produto), em letra
     # pequena, sem cobrir a seta e dentro do que o app mostra.
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     letreiros = edicao_video.letreiros_da_fala([(1.0, 3.0, "Olha que lindo esse vestido")], 10.0)
     assert len(letreiros) == 1
     imagem, inicio, fim, x, y = letreiros[0]
@@ -2960,7 +2964,9 @@ def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela():
     assert _medidas(curta)[1] < edicao_video.LETRA_DOS_TEXTOS[0] * 2
 
 
-def test_trecho_que_nao_cabe_em_duas_linhas_e_dividido_com_o_tempo_repartido():
+def test_trecho_que_nao_cabe_em_duas_linhas_e_dividido_com_o_tempo_repartido(monkeypatch):
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     texto = ("Esse aqui é o melhor organizador que eu já comprei na Shopee, cabe tudo dentro e ainda "
              "fica bonito na bancada da cozinha")
     letreiros = edicao_video.letreiros_da_fala([(2.0, 8.0, texto)], 20.0)
@@ -2992,7 +2998,9 @@ def test_fala_longa_vira_varias_legendas_sem_perder_nenhuma_palavra():
     assert edicao_video._ponto_de_corte("um dois três quatro".split()) == 2
 
 
-def test_legenda_quebra_nas_pausas_sem_separar_o_nome_do_produto():
+def test_legenda_quebra_nas_pausas_sem_separar_o_nome_do_produto(monkeypatch):
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     # Vídeo do Rafael das 14:47 de 10/11: a fala comprida foi dividida em "com esse kit de / banho de" e
     # "verniz para seus cabelos. / Clica no link e compre já!", com o nome do produto cortado entre duas
     # legendas. Escolha dele (P199 1): a troca de legenda não separa "banho de verniz", e nem ela nem a
@@ -3031,11 +3039,234 @@ def test_o_pedido_da_ia_quer_a_fala_inteira_palavra_por_palavra():
     assert "trechos curtos" not in pedido and "caracteres, como [" not in pedido
 
 
-def test_legendas_que_se_encostam_cortam_e_a_curta_demais_sai():
+def test_legendas_que_se_encostam_cortam_e_a_curta_demais_sai(monkeypatch):
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     letreiros = edicao_video.letreiros_da_fala(
         [(0.0, 3.0, "Primeira fala"), (2.5, 2.7, "rápida"), (2.7, 6.0, "Segunda fala"), (9.5, 14.0, "Fim")], 11.0)
     # A primeira acaba quando a seguinte começa; a de 0,2 s sai; a última fica dentro do vídeo.
     assert [(inicio, fim) for _, inicio, fim, _, _ in letreiros] == [(0.0, 2.5), (2.7, 6.0), (9.5, 11.0)]
+
+
+# A legenda grande do meio (em teste de 12/11 a 15/11, P211), com os pedidos do Rafael de 12/11.
+FALA_DO_TECIDO = [(1.0, 4.0, "É toda estampada, com tema de cogumelo."),
+                  (4.5, 9.0, "Esse aqui é o melhor organizador que eu já comprei, cabe tudo dentro")]
+
+
+def _caixa(letreiro):
+    """(x1, y1, x2, y2) de um letreiro (imagem, início, fim, x, y) na tela."""
+    imagem, _inicio, _fim, x, y = letreiro
+    largura, altura = _medidas(imagem)
+    return x, y, x + largura, y + altura
+
+
+def _se_cruzam(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def test_legenda_do_meio_grande_em_caixa_alta_numa_linha(monkeypatch):
+    # Como no vídeo da criadora que o Rafael mostrou em 12/11: em CAIXA ALTA, numa linha só de até 4
+    # palavras, bem maior que a de embaixo, no meio da altura da tela e centralizada no que fica livre à
+    # esquerda da coluna dos ícones do app, todas no mesmo eixo.
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", True)
+    pedacos = [pedaco for inicio, fim, texto in FALA_DO_TECIDO
+               for pedaco in edicao_video.pedacos_da_legenda(inicio, fim, texto, tamanho=60)]
+    assert " ".join(texto for _i, _f, texto, _imagem in pedacos) == " ".join(texto for *_r, texto in FALA_DO_TECIDO)
+    assert all(1 <= len(texto.split()) <= edicao_video.PALAVRAS_NO_MEIO for _i, _f, texto, _imagem in pedacos)
+    assert edicao_video.legenda_da_fala("toda estampada", 60) == edicao_video.legenda_da_fala("TODA ESTAMPADA", 60)
+    assert edicao_video.legenda_da_fala("um dois três quatro cinco", 60) is None
+    anotado = {}
+    letreiros = edicao_video.letreiros_da_fala(FALA_DO_TECIDO, 20.0, anotar=anotado)
+    assert anotado == {"letra": edicao_video.LETRA_NO_MEIO[0], "fora_do_meio": 0, "tampam": 0}
+    for letreiro in letreiros:
+        x1, y1, x2, y2 = _caixa(letreiro)
+        assert (y1 + y2) // 2 in (edicao_video.CENTRO_NO_MEIO, edicao_video.CENTRO_NO_MEIO + 1)
+        assert edicao_video.VISIVEL_NO_APP[0] < x1 and x2 <= edicao_video.DIREITA_DA_LEGENDA
+        meio = (edicao_video.ESQUERDA_NO_MEIO + edicao_video.DIREITA_DA_LEGENDA) / 2
+        assert abs((x1 + x2) / 2 - meio) <= 1
+        # Bem maior que a de embaixo (a letra de 60 px, uma linha).
+        assert y2 - y1 > 2 * edicao_video.LETRA_DA_LEGENDA[0] + 2 * edicao_video.CONTORNO_DA_LEGENDA
+    assert len({x2 - x1 for x1, _y1, x2, _y2 in map(_caixa, letreiros)}) > 1
+
+
+def test_no_meio_a_letra_e_a_mesma_no_video_todo_e_muda_de_um_video_para_outro(monkeypatch):
+    # Pedido do Rafael (12/11): "Dentro de um vídeo, sempre manter o mesmo tamanho"; de um vídeo para outro,
+    # o tamanho pode mudar. A letra é a maior em que a palavra mais comprida da fala cabe numa linha.
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", True)
+    curtas, comprida = {}, {}
+    de_palavras_curtas = edicao_video.letreiros_da_fala(FALA_DO_TECIDO, 20.0, anotar=curtas)
+    com_palavra_comprida = edicao_video.letreiros_da_fala(
+        FALA_DO_TECIDO + [(9.5, 12.0, "Extraordinariamente confortável")], 20.0, anotar=comprida)
+    assert curtas["letra"] == edicao_video.LETRA_NO_MEIO[0] > comprida["letra"] >= edicao_video.MENOR_LETRA_NO_MEIO
+    for letreiros in (de_palavras_curtas, com_palavra_comprida):
+        assert len({_medidas(imagem)[1] for imagem, *_resto in letreiros}) == 1
+    assert _medidas(com_palavra_comprida[0][0])[1] < _medidas(de_palavras_curtas[0][0])[1]
+    # A palavra comprida cabe na letra do vídeo, sem encolher.
+    assert edicao_video._cabe_no_meio("EXTRAORDINARIAMENTE", comprida["letra"])
+    assert not edicao_video._cabe_no_meio("EXTRAORDINARIAMENTE", comprida["letra"] + 2)
+
+
+def test_no_meio_a_legenda_sai_de_cima_do_produto(monkeypatch):
+    # Pedido do Rafael (12/11): "dentro de um mesmo vídeo ele pode se adaptar em uma posição melhor,
+    # dependendo se atrapalhar a mostrar o produto". A IA diz, em cada trecho da fala, a faixa da altura da
+    # tela que o produto ocupa; a legenda do trecho vai à altura mais perto do meio que não o tampa.
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", True)
+    primeiro = FALA_DO_TECIDO[0][2]
+    anotado = {}
+    letreiros = edicao_video.letreiros_da_fala(FALA_DO_TECIDO, 20.0, produto={primeiro: [45, 60]}, anotar=anotado)
+    topo, base = edicao_video.faixa_do_produto([45, 60])
+    assert (topo, base) == (576, 768)
+    do_primeiro = [letreiro for letreiro in letreiros if letreiro[1] < 4.0]
+    do_segundo = [letreiro for letreiro in letreiros if letreiro[1] >= 4.0]
+    for letreiro in do_primeiro:
+        _x1, y1, _x2, y2 = _caixa(letreiro)
+        assert y2 <= topo - edicao_video.FOLGA_NO_MEIO or y1 >= base + edicao_video.FOLGA_NO_MEIO
+    # Todas as do trecho na mesma altura; o trecho sem o produto no caminho fica no meio.
+    assert len({y for *_resto, y in do_primeiro}) == 1
+    assert {(y1 + y2) // 2 for _x1, y1, _x2, y2 in map(_caixa, do_segundo)} <= {
+        edicao_video.CENTRO_NO_MEIO, edicao_video.CENTRO_NO_MEIO + 1}
+    assert anotado == {"letra": 60, "fora_do_meio": len(do_primeiro), "tampam": 0}
+    # Sem altura livre (o produto na tela toda), ela fica no meio, e o registro conta o trecho.
+    anotado = {}
+    edicao_video.letreiros_da_fala(FALA_DO_TECIDO, 20.0, produto={primeiro: [5, 98]}, anotar=anotado)
+    assert anotado == {"letra": 60, "fora_do_meio": 0, "tampam": 1}
+    # Com o produto do alto da tela até embaixo, a letra de 60 px não cabe acima dele, e uma menor cabe: a
+    # do vídeo todo fica a maior que cabe, acima do produto.
+    anotado = {}
+    letreiros = edicao_video.letreiros_da_fala(FALA_DO_TECIDO, 20.0, produto={primeiro: [19.5, 98]}, anotar=anotado)
+    topo = edicao_video.faixa_do_produto([19.5, 98])[0]
+    assert edicao_video.LETRA_NO_MEIO[1] <= anotado["letra"] < 60 and anotado["tampam"] == 0
+    assert len({_medidas(imagem)[1] for imagem, *_resto in letreiros}) == 1
+    for letreiro in letreiros:
+        if letreiro[1] < 4.0:
+            assert edicao_video.FIM_DA_BARRA_DE_BUSCA < _caixa(letreiro)[1]
+            assert _caixa(letreiro)[3] <= topo - edicao_video.FOLGA_NO_MEIO
+
+
+def test_no_meio_a_legenda_nao_cobre_os_textos_da_tela_a_miniatura_nem_as_setinhas(monkeypatch):
+    # A legenda do meio nunca cobre os nossos textos da tela (no tempo deles), a miniatura, a barra de busca
+    # do app e as setinhas, que sobem com o Rótulo de IA (sem as setinhas, o cartão do produto).
+    from PIL import Image, ImageSequence
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", True)
+    with Image.open(edicao_video.SETA) as seta:
+        topo = min(q.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()[1]
+                   for q in ImageSequence.Iterator(seta) if q.convert("RGBA").getchannel("A").getbbox())
+        topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - seta.size[1] // 2 + topo
+    assert edicao_video.TOPO_DAS_SETINHAS <= topo_da_seta
+    fala = [(0.5, 3.0, "Olha que lindo esse vestido"), (6.0, 8.0, "não amassa e seca rapidinho")]
+    # Os textos da tela num dos lados (o mais comprido: a vantagem de até 36 letras, em 5 linhas), no alto e
+    # no meio: a legenda não cobre nenhum, nem a miniatura.
+    textos = ("Mantém gelado o dia todo", "Tecido macio que não amassa fácil")
+    for lugar in ("direita", "esquerda", "alto", "meio"):
+        for texto in textos:
+            da_tela, _textos = edicao_video._letreiros([(texto, edicao_video.FUNDO_DOS_TEXTOS)], lugar, 10.0)
+            for subida in (0, edicao_video.SUBIDA_COM_O_ROTULO_DE_IA):
+                ocupados = edicao_video.ocupados_na_tela(da_tela, True, edicao_video.MINIATURA_A_DIREITA)
+                for letreiro in edicao_video.letreiros_da_fala(fala, 10.0, subida, ocupados=ocupados):
+                    caixa = _caixa(letreiro)
+                    assert edicao_video.FIM_DA_BARRA_DE_BUSCA < caixa[1]
+                    assert caixa[3] <= edicao_video.TOPO_DAS_SETINHAS - subida
+                    for x1, y1, x2, y2, de, ate, miolo in ocupados:
+                        if not (letreiro[1] < ate and de < letreiro[2]):
+                            continue
+                        # Só o texto de 5 linhas num lado, com o Rótulo de IA, não deixa altura livre: aí
+                        # a legenda cobre só a beirada da caixa dele, sem chegar às letras nem à miniatura.
+                        if subida and texto == textos[1] and lugar in ("direita", "esquerda"):
+                            assert not _se_cruzam(caixa, miolo), (lugar, texto, subida)
+                        else:
+                            assert not _se_cruzam(caixa, (x1, y1, x2, y2)), (lugar, texto, subida)
+    ocupados = ([(0, 560, 720, 720, 0.0, 3.0)]
+                + edicao_video.ocupados_na_tela((), True, edicao_video.MINIATURA_A_DIREITA))
+    letreiros = edicao_video.letreiros_da_fala(fala, 10.0, ocupados=ocupados)
+    antes = [_caixa(letreiro) for letreiro in letreiros if letreiro[1] < 3.0]
+    depois = [_caixa(letreiro) for letreiro in letreiros if letreiro[1] >= 6.0]
+    assert antes and all(not _se_cruzam(caixa, ocupados[0][:4]) and not _se_cruzam(caixa, ocupados[1][6])
+                         for caixa in antes)
+    assert {(y1 + y2) // 2 for _x1, y1, _x2, y2 in depois} <= {
+        edicao_video.CENTRO_NO_MEIO, edicao_video.CENTRO_NO_MEIO + 1}
+    # Sem as setinhas, ela pode descer até perto do cartão do produto.
+    baixo = [(0, 300, 720, 640, 0.0, 10.0)]
+    sem = edicao_video.letreiros_da_fala(fala, 10.0, ocupados=baixo, setinhas=False)
+    assert all(_caixa(letreiro)[1] >= 640 and _caixa(letreiro)[3] <= edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
+               for letreiro in sem)
+    com = edicao_video.letreiros_da_fala(fala, 10.0, ocupados=baixo)
+    assert all(_caixa(letreiro)[3] <= edicao_video.TOPO_DAS_SETINHAS for letreiro in com)
+
+
+def test_no_meio_o_pedaco_curto_fica_e_nenhuma_palavra_sai(monkeypatch):
+    # No meio, a fala vai em pedaços curtos: o curto não sai (como embaixo), fica MINIMO_NO_MEIO na tela, e o
+    # seguinte espera por ele. Só sai o que ficaria depois do fim do vídeo.
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", True)
+    letreiros = edicao_video.letreiros_da_fala(
+        [(0.0, 3.0, "Primeira fala"), (2.5, 2.7, "rápida"), (2.7, 6.0, "Segunda fala"), (9.5, 14.0, "Fim")], 11.0)
+    assert [(inicio, fim) for _, inicio, fim, _, _ in letreiros] == [(0.0, 2.5), (2.5, 2.8), (2.8, 6.0), (9.5, 11.0)]
+    assert [(inicio, fim) for _, inicio, fim, _, _ in edicao_video.letreiros_da_fala(
+        [(0.0, 3.0, "Primeira fala"), (10.8, 11.5, "tchau")], 11.0)] == [(0.0, 3.0)]
+    # Fala rápida, palavra por palavra no áudio: todas as palavras entram, uma legenda depois da outra.
+    palavras = "olha só que coisa mais linda esse vestido de festa com renda e brilho".split()
+    tempos = [(1.0 + n * 0.12, 1.1 + n * 0.12) for n in range(len(palavras))]
+    texto = " ".join(palavras)
+    pedacos = edicao_video.pedacos_da_legenda(1.0, 3.0, texto, tempos, 60)
+    assert " ".join(parte for _i, _f, parte, _imagem in pedacos) == texto
+    letreiros = edicao_video.letreiros_da_fala([(1.0, 3.0, texto, tempos)], 10.0)
+    assert len(letreiros) == len(pedacos)
+    for (_, inicio, fim, _, _), (_, seguinte, _, _, _) in zip(letreiros, letreiros[1:]):
+        assert fim - inicio >= edicao_video.MINIMO_NO_MEIO - 0.01 and fim <= seguinte
+
+
+def test_a_ia_diz_onde_fica_o_produto_em_cada_trecho_da_fala():
+    # A IA diz, em cada trecho da fala, a parte da altura da tela que o produto ocupa (pedido do Rafael de
+    # 12/11, para a legenda do meio não tampar o produto). O que vem errado fica de fora; o mesmo texto dito
+    # duas vezes fica com a faixa que junta as duas.
+    import json
+    assert '"produto"' in edicao_video.PROMPT_DOS_TEXTOS and "[topo, base]" in edicao_video.PROMPT_DOS_TEXTOS
+    textos = edicao_video._nome_lugar_e_falas({"legendas": [
+        {"inicio": 0.0, "fim": 2.0, "texto": "Olha só", "produto": [35, 80]},
+        {"inicio": 2.0, "fim": 4.0, "texto": "que lindo", "produto": {"topo": 10, "base": 50}},
+        {"inicio": 4.0, "fim": 5.0, "texto": "tchau", "produto": []},
+        {"inicio": 5.0, "fim": 6.0, "texto": "Olha só", "produto": [20, 60]},
+        {"inicio": 6.0, "fim": 7.0, "texto": "errado", "produto": [80, 30]},
+        {"inicio": 7.0, "fim": 8.0, "texto": "fora", "produto": [-5, 130]},
+        {"inicio": 9.0, "fim": 8.5, "texto": "sem tempo", "produto": [10, 20]}]})
+    assert textos["produto_na_fala"] == {"Olha só": [20.0, 80.0], "que lindo": [10.0, 50.0]}
+    assert "produto_na_fala" not in edicao_video._nome_lugar_e_falas({"legendas": [
+        {"inicio": 0.0, "fim": 2.0, "texto": "Olha só"}]})
+    # O Editar ✏️ guarda e volta igual.
+    guardado = json.loads(json.dumps(edicao_video.textos_para_guardar(textos)))
+    assert edicao_video._textos_guardados(guardado)["produto_na_fala"] == textos["produto_na_fala"]
+    assert edicao_video.faixa_do_produto([10, 50]) == (128, 640) and edicao_video.faixa_do_produto(None) is None
+
+
+def test_o_que_vai_ao_ar_e_o_editar_levam_a_faixa_do_produto_a_legenda_do_meio(monkeypatch, tmp_path):
+    import registro_processos as rp
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", True)
+    montados, _editados = _versoes_de_mentira(monkeypatch)
+    fala = [(0.5, 2.0, "Olha só esse vestido"), (3.0, 4.5, "o tecido é bem leve")]
+    produto = {"Olha só esse vestido": [45, 60]}
+    _textos_da_tela(monkeypatch, {"nome": "Vestido", "vantagem": "Tecido leve", "chamada": "Toque aqui embaixo",
+                                  "lugar": "alto", "legendas": fala, "legenda_no_video": False,
+                                  "produto_na_fala": produto})
+    anotado = {}
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vestido", anotar=anotado)[:2] == (
+        "", edicao_video.COM_LEGENDAS + edicao_video.COM_AS_LEGENDAS_DA_FALA)
+    postas = montados[-1][1] - 3
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [(
+        "postas", f"{postas} trecho(s), 9 palavra(s) em 3 s de fala, no meio: letra 60, 2 fora do meio, "
+                  "0 trecho(s) da fala por cima do produto")]
+    # O Editar ✏️ refaz com a mesma faixa do produto.
+    recebidos = []
+
+    def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+                 produto_na_fala=None):
+        recebidos.append(produto_na_fala)
+        return "", {"textos": [nome], "legendas": len(legendas)}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    edicao_video.refazer_para_postar("v.mp4", b"foto", destino, anotado["refazer"])
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vestido")
+    assert recebidos == [produto, produto]
 
 
 # As palavras de um vídeo no áudio (o reconhecimento de voz, em segundos) e as legendas da IA com o tempo
@@ -3045,7 +3276,9 @@ AUDIO_DO_VESTIDO = [(1.0, 1.3, "Olha"), (1.3, 1.5, "só"), (1.5, 1.8, "esse"), (
 FALA_DO_VESTIDO = [(0.5, 2.0, "Olha só esse vestido,"), (2.0, 4.0, "não amassa e seca rapidinho.")]
 
 
-def test_as_legendas_da_fala_seguem_o_tempo_do_audio():
+def test_as_legendas_da_fala_seguem_o_tempo_do_audio(monkeypatch):
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     no_tempo, achadas, total = edicao_video.legendas_no_tempo_da_fala(FALA_DO_VESTIDO, AUDIO_DO_VESTIDO)
     # A palavra que o áudio não reconheceu ("rapidinho") fica depois da última achada.
     assert (achadas, total) == (8, 9)
@@ -3144,6 +3377,8 @@ def test_os_dois_pedidos_a_ia_trazem_as_legendas_da_fala(monkeypatch):
 
 def test_o_que_vai_ao_ar_leva_as_legendas_da_fala_e_o_registro_conta(monkeypatch, tmp_path):
     import registro_processos as rp
+    # A legenda de embaixo (LEGENDA_NO_MEIO desligada; a do meio, em teste desde 12/11, tem os testes dela).
+    monkeypatch.setattr(edicao_video, "LEGENDA_NO_MEIO", False)
     montados, editados = _versoes_de_mentira(monkeypatch)
     fala = [(0.5, 2.0, "Olha só esse vestido"), (3.0, 4.5, "o tecido é bem leve")]
     _textos_da_tela(monkeypatch, {"nome": "Vestido", "vantagem": "Tecido leve", "chamada": "Toque aqui embaixo",
@@ -3189,7 +3424,7 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
     recebidas = []
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None):
+                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None):
         recebidas.append(list(legendas))
         return "", {"versoes": []}
 
@@ -3404,7 +3639,8 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
                         lambda foto, frase, no_video=False, cor=None, segunda=None: capas.append(cor) or b"capa")
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+                 produto_na_fala=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3590,7 +3826,8 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
                         or b"capa")
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+                 produto_na_fala=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3789,7 +4026,8 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
     recebidos = []
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+                 produto_na_fala=None):
         recebidos.append({"miniatura": miniatura, "legendas": list(legendas), "escolhas": escolhas})
         return "", {"textos": [nome], "legendas": len(legendas)}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3827,7 +4065,8 @@ def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(mon
     recebidos = []
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
-                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None):
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+                 produto_na_fala=None):
         recebidos.append({"nome": nome, "lugar": lugar, "musica": musica, "capa": capa, "miniatura": miniatura,
                           "outras": list(outras_fotos), "legendas": [legenda[:3] for legenda in legendas],
                           "rotulo": rotulo_de_ia, "cor": cor, "escolhas": escolhas})
