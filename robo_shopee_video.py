@@ -6369,6 +6369,21 @@ MOTIVO_DAS_VISUALIZACOES = "as capas dos posts não casaram com a grade do Perfi
 LADOS_DA_CAPA = {True: "o 1º quadro na grade (a faixa de lado a lado)",
                  False: "outro quadro na grade (a faixa só no meio)"}
 COR_NA_CAPA = "na cor do produto"
+# A faixa que não aparece na grade (checkup de 11/11: o post das 21:37, o 1º de um rascunho feito
+# depois da P204 1, sem a causa no registro): a capa pode ainda estar carregando, e o robô olha de
+# novo; sem ela no fim, o registro diz quanto do quadro tem a cor da faixa, e o caso guarda o print da
+# grade e os quadros do vídeo para o checkup do Claude.
+MOTIVO_DA_CAPA_SEM_A_FAIXA = "a faixa da capa não apareceu na grade do Perfil"
+
+
+def parte_na_cor(imagem, caixa, cor):
+    """Quanto da caixa (x1, y1, x2, y2) da imagem do PIL tem a cor (até TOLERANCIA_DO_LARANJA), de 0 a 1."""
+    import numpy
+    pontos = numpy.asarray(imagem.convert("RGB").crop(caixa), dtype=numpy.int16)
+    if not pontos.size:
+        return 0.0
+    perto = numpy.abs(pontos - numpy.array(cor, dtype=numpy.int16)).sum(axis=2) <= edicao_video.TOLERANCIA_DO_LARANJA
+    return float(perto.mean())
 
 
 def marcar_o_post(d, ident, caixa):
@@ -6376,34 +6391,48 @@ def marcar_o_post(d, ident, caixa):
     Guarda no rascunho a marca da capa do vídeo que acabou de ir ao ar (o quadro da grade em
     caixa). Sem a marca (a capa não carregou, o print falhou), o vídeo fica fora da medição, e o
     checkup conta. Com a capa com a frase (P125), o registro diz se a faixa da frase chegou à grade
-    e se a grade pegou o 1º quadro do vídeo (P129). Nada aqui segura o post nem o link.
+    e se a grade pegou o 1º quadro do vídeo (P129); sem a faixa, o robô olha de novo, e o que
+    continuar sem ela guarda o caso. Nada aqui segura o post nem o link.
     """
     try:
+        rascunho = pegar(ident) or {}
+        chamada = bool(rascunho.get("chamada"))
+        # A faixa vai na cor que a edição usou: a do produto (P159 2) ou a do lugar dela (P173, P174 3).
+        cor = edicao_video.cor_guardada(rascunho.get("cor")) if chamada else None
+        vista = None
         for tentativa in range(TENTATIVAS_DA_MARCA):
             if tentativa:
                 pausa(PAUSA_DA_MARCA)
             imagem = d.screenshot()
             marca = visualizacoes.marca_da_capa(imagem, caixa)
-            if marca:
-                atualizar(ident, marca=marca)
-                rascunho = pegar(ident) or {}
-                if rascunho.get("chamada"):
-                    # A faixa vai na cor que a edição usou: a do produto (P159 2) ou a do lugar dela (P173, P174 3).
-                    cor = edicao_video.cor_guardada(rascunho.get("cor"))
-                    faixa = faixa_da_capa(imagem, caixa, cor)
-                    lados = edicao_video.faixa_nos_lados(imagem, caixa, cor) if faixa else None
-                    # O registro diz também se a faixa procurada era a da cor do produto ou a de
-                    # sempre: o checkup separa a 1ª capa colorida que chega à grade.
-                    detalhe = "; ".join(filter(None, (LADOS_DA_CAPA.get(lados, ""),
-                                                      COR_NA_CAPA if cor else "")))
-                    registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
-                                                 "no post com a faixa" if faixa else "no post sem a faixa",
-                                                 detalhe, ok=bool(faixa))
-                    diferenca = diferenca_da_cor(imagem, faixa, cor or edicao_video.LARANJA_DA_SHOPEE) if faixa else None
-                    if diferenca is not None:
-                        registro_processos.registrar(REGISTRO, PROCESSO_DA_COR_DA_CAPA,
-                                                     faixa_da_diferenca_da_cor(diferenca))
-                return marca
+            if not marca:
+                continue
+            faixa = faixa_da_capa(imagem, caixa, cor) if chamada else None
+            vista = (imagem, marca, faixa)
+            if faixa or not chamada:
+                break
+        if not vista:
+            return None
+        imagem, marca, faixa = vista
+        atualizar(ident, marca=marca)
+        if chamada:
+            lados = edicao_video.faixa_nos_lados(imagem, caixa, cor) if faixa else None
+            # O registro diz também se a faixa procurada era a da cor do produto ou a de
+            # sempre: o checkup separa a 1ª capa colorida que chega à grade.
+            partes = [LADOS_DA_CAPA.get(lados, ""), COR_NA_CAPA if cor else ""]
+            if not faixa:
+                na_cor = parte_na_cor(imagem, caixa, cor or edicao_video.LARANJA_DA_SHOPEE)
+                partes.append(f"{round(100 * na_cor)}% do quadro na cor da faixa")
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_CAPA,
+                                         "no post com a faixa" if faixa else "no post sem a faixa",
+                                         "; ".join(filter(None, partes)), ok=bool(faixa))
+            diferenca = diferenca_da_cor(imagem, faixa, cor or edicao_video.LARANJA_DA_SHOPEE) if faixa else None
+            if diferenca is not None:
+                registro_processos.registrar(REGISTRO, PROCESSO_DA_COR_DA_CAPA,
+                                             faixa_da_diferenca_da_cor(diferenca))
+            if not faixa:
+                _guardar_caso(d, "postar", "capa sem a faixa", MOTIVO_DA_CAPA_SEM_A_FAIXA, ident=ident)
+        return marca
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A marca da capa do post não saiu: {type(e).__name__}")
     return None
