@@ -1775,6 +1775,16 @@ def test_foto_colada_num_quadrado_branco_perde_as_faixas_brancas_nas_capas():
         assert edicao_video.sem_faixas_brancas(foto) is foto
 
 
+def test_foto_com_uma_coluna_branca_na_beirada_tambem_perde_as_faixas_brancas():
+    # A foto da loja às vezes tem uma coluna branca fina na beirada (a sobra do recorte): as tiras
+    # dos lados conferidas (5% da largura) passam dela e acham a foto. Em 12/11, a constante dessas
+    # tiras tinha o mesmo nome da tira da conferência da faixa na grade (0,8%), que valia por cima.
+    foto = _listrada(1000, 680)
+    foto.paste((255, 255, 255), (990, 0, 1000, 680))
+    onde, caixa = edicao_video.faixas_brancas(_colada_no_branco(foto, (0, 160)))
+    assert onde == edicao_video.FAIXAS_EM_CIMA_E_EMBAIXO and abs(caixa[1] - 160) <= 2 and abs(caixa[3] - 840) <= 2
+
+
 def test_edicao_anota_as_faixas_brancas_tiradas_da_foto(monkeypatch, tmp_path):
     # O registro conta as fotos que perdem as faixas brancas antes das capas (P206 1 e P207 1), para o
     # checkup mostrar; a foto sem as faixas não anota nada.
