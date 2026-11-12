@@ -565,6 +565,24 @@ def test_capa_com_chamada_comeca_desligada_mostra_a_medicao_e_liga_pelo_painel(b
     assert msg.saidas[-1].startswith("✂️ <b>Edição dos Vídeos</b>")
 
 
+def test_tela_da_capa_cabe_numa_mensagem_com_a_medicao_mais_longa(bm):
+    # A tela da Capa com Chamada vai numa mensagem só, e o Telegram recusa a que passa de 4096
+    # letras (sem as marcas de HTML). Com a explicação das faixas brancas (P206 1 e P207 1), a tela
+    # passaria do limite: ela tem de caber com a medição mais longa (números grandes nas duas idades),
+    # ligada e desligada, com folga.
+    import re
+    sv = _painel(bm)
+    grupo = {"videos": 9999, "lidos": 9999,
+             "idades": {dias: (9999, 1234567.5) for dias in sv.robo.visualizacoes.IDADES_DA_COMPARACAO}}
+    medicao = {"com": grupo, "sem": grupo, "sem_marca": 9999}
+    for config in (sv.ler_config(), {**sv.ler_config(), "capa_com_chamada": True,
+                                     "capa_com_chamada_desde": "2026-10-29 10:00:00"}):
+        texto = sv.texto_capa(config, medicao)
+        assert "Com 1 dia(s) de postado" in texto and "faixas brancas" in texto
+        visivel = re.sub(r"<[^>]+>", "", texto)
+        assert len(visivel.encode("utf-16-le")) // 2 <= sv.TAMANHO_DA_MENSAGEM - 200, len(visivel)
+
+
 def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypatch):
     sv, est = _painel(bm), Est()
     monkeypatch.setattr(sv.edicao_video, "exemplo_capa", lambda: (
