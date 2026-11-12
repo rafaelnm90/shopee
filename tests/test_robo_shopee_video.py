@@ -1314,7 +1314,7 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9):
     async def produtos_do_link(link):
         return [{"nome": FOLHAS, "preco": preco, "comissao": 5.0, "imagem": "https://cf.shopee.com.br/capa"}], link
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         pedidos["busca"].append((termo, limite, sort_type))
         return ofertas
 
@@ -1445,7 +1445,7 @@ def _troca_do_ver_produtos(monkeypatch, ofertas_pelo_nome, busca, confirma=(), c
         oferta = ofertas_pelo_nome.get(nome)
         return (100, True, oferta) if oferta else (0, False, {})
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         pedidos["busca"].append((termo, sort_type))
         return busca.get(termo, [])
 
@@ -1590,7 +1590,7 @@ def test_sem_produto_que_pague_mais_fica_o_do_link(monkeypatch):
             == "Kit Folhas Prontas Facial Depilsam Ouro")
 
     # Um erro na busca nunca derruba o rascunho: fica o produto do link.
-    async def quebrada(termo, limite=10, sort_type=2):
+    async def quebrada(termo, limite=10, sort_type=2, negada_levanta=False):
         raise ConnectionError("sem rede")
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", quebrada)
     assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
@@ -2000,6 +2000,31 @@ def test_sem_o_produto_do_video_achado_o_video_fica_de_lado_com_o_aviso(monkeypa
     assert not procurou
 
 
+async def _busca_negada(termo, limite=10, sort_type=2, negada_levanta=False):
+    """A busca da API de afiliado negada pelo erro de sistema da Shopee em todas as tentativas."""
+    if negada_levanta:
+        raise robo.api_shopee.BuscaNegada("código 10.000")
+    return []
+
+
+def test_busca_negada_no_produto_do_video_nao_deixa_o_video_de_lado(monkeypatch, avisos):
+    # 12/11: a API de afiliado negou buscas com o erro de sistema da Shopee (código 10000) mesmo depois
+    # das tentativas, e a busca negada parecia a busca que não achou nada: o vídeo ficava de lado de vez.
+    # A busca negada não é do vídeo: a rodada para e o vídeo volta mais tarde (como na P182 1).
+    _ate_os_textos_da_ia(monkeypatch, alcool=False)
+    _ia_que_ve_outro_produto(monkeypatch)
+    monkeypatch.setattr(robo, "achar_o_produto_do_video", ACHAR)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", _busca_negada)
+    monkeypatch.setattr(robo.ps, "ia_diz_o_produto_do_video", lambda video: "pingente de trevo")
+    with pytest.raises(robo.Parada) as parada:
+        robo._preparar(None, robo.criar("video:1"), {"id": "video:1", "arquivo": "v.mp4", "link": LINK}, "viral")
+    assert parada.value.motivo == robo.motivo_da_busca_negada("código 10.000") and not parada.value.do_video
+    assert robo.passo_do_motivo(parada.value.motivo) == "busca negada pela Shopee"
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
+                     robo.PROCESSO_DO_PRODUTO_ACHADO) == ("não achado - a busca foi negada pela Shopee", "código 10.000")
+    assert not any(isinstance(a, str) and "Procurei o produto do vídeo" in a for a in avisos)
+
+
 def test_bebida_alcoolica_em_espera_fica_de_lado_antes_dos_produtos_a_mais(monkeypatch, avisos):
     # Escolha do Rafael (31/10, P111): a página oficial das diretrizes da Shopee Vídeo ainda
     # proíbe divulgar bebida alcoólica. Até ela trazer a regra nova, o vídeo de bebida alcoólica
@@ -2046,7 +2071,7 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
             arquivo.write(b"editado")
         return "", robo.edicao_video.COM_LEGENDAS, ""
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         buscas.append((termo, sort_type))
         return [{"productName": "Capinha Transparente Celular", "imageUrl": "https://cf.shopee.com.br/outra",
                  "priceMin": "9.90"},
@@ -2073,6 +2098,25 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
     assert fotos[-1][0] is None and not os.path.exists(copia) and parada.value.do_video
     assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
                      robo.PROCESSO_DA_EDICAO) == ("vídeo de lado", "a foto do anúncio não veio")
+
+
+def test_ver_produtos_com_a_busca_da_foto_negada_volta_mais_tarde(monkeypatch, tmp_path):
+    # 12/11 às 10:13: a busca da foto do 1º produto de um vídeo de Ver Produtos foi negada pela API
+    # (código 10000), e o vídeo ficou de lado de vez, como se o anúncio não existisse. A busca negada
+    # não é do vídeo: ele volta mais tarde.
+    original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
+    with open(original, "wb") as arquivo:
+        arquivo.write(b"video")
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", _busca_negada)
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", lambda *a, **k: pytest.fail("sem a foto não edita"))
+    ativar(edicao_ligada=True)
+    video = {"arquivo": original, "link": LINK, "de_video": True}
+    with pytest.raises(robo.Parada) as parada:
+        robo.copiar_para_o_rascunho(video, "viral", copia, ["Vestido Infantil Estampado Gatinho Verão Menina"])
+    assert parada.value.motivo == robo.motivo_da_busca_negada("código 10.000") and not parada.value.do_video
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
+                     robo.PROCESSO_DA_FOTO_DO_VER_PRODUTOS) == ("a busca foi negada pela Shopee", "código 10.000")
+    assert not os.path.exists(copia)
 
 
 NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"
@@ -4078,7 +4122,7 @@ def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B), outra_cor=()):
         return '{"confere": %s, "outra_cor": %s, "motivo": "a IA viu no vídeo"}' % (
             "true" if confere else "false", "true" if cor else "false")
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         # A API acha o 1º produto pelo nome; o 2º, não (o rascunho diz que falta o link dele).
         return [{"itemId": 11, "productName": PRODUTO_A, "productLink": "https://shopee.com.br/product/1/11"}]
 
@@ -4402,7 +4446,7 @@ def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypa
     cortina_b = "Cortina Jacquard 2,00m x 1,35m Sala E Quarto Cozinha Semi Blackout"
     etiquetas = []
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         assert sort_type == 1
         return [{"itemId": 7, "productName": cortina_a, "productLink": "https://shopee.com.br/product/1/7"}]
 
@@ -4418,7 +4462,7 @@ def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypa
     # Com os dois anúncios na busca, cada produto fica com o seu.
     outra = {"itemId": 8, "productName": cortina_b, "productLink": "https://shopee.com.br/product/1/8"}
 
-    async def buscar_os_dois(termo, limite=10, sort_type=2):
+    async def buscar_os_dois(termo, limite=10, sort_type=2, negada_levanta=False):
         return [{"itemId": 7, "productName": cortina_a, "productLink": "https://shopee.com.br/product/1/7"}, outra]
 
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar_os_dois)
@@ -4426,7 +4470,7 @@ def test_link_de_cada_produto_do_ver_produtos_nunca_troca_um_pelo_outro(monkeypa
         "https://s.shopee.com.br/curto-8", "https://s.shopee.com.br/curto-7"]
 
     # A API fora: o rascunho sai, sem os links (o Rafael confere pelo vídeo original).
-    async def fora(termo, limite=10, sort_type=2):
+    async def fora(termo, limite=10, sort_type=2, negada_levanta=False):
         raise RuntimeError("fora do ar")
 
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", fora)
@@ -4450,7 +4494,7 @@ def test_o_0_do_selo_colado_no_nome_nao_atrapalha_a_busca_na_api(monkeypatch):
     nome = "Tênis Feminino Slip On Casual Conforto Esportivo Amortecedor"
     termos = []
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         termos.append(termo)
         if termo.startswith("0"):
             return []
@@ -4479,7 +4523,7 @@ def test_a_foto_do_ver_produtos_que_nao_vem_fica_no_registro_com_o_porque(monkey
         "quebrada": [{"itemId": 3, "productName": nome, "imageUrl": "https://cf.shopee.com.br/quebrada"}]}
     vez = []
 
-    async def buscar(termo, limite=10, sort_type=2):
+    async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         return respostas[vez[-1]]
 
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
@@ -6310,7 +6354,7 @@ def test_ver_produtos_vai_ao_canal_com_cada_produto_achado_na_api_pelo_nome(monk
     async def link_para_converter(link):
         return "https://sv.shopee.com.br/share-video/xyz?jumpType=1"
 
-    async def buscar(termo, limite=10, app_id=None, app_secret=None, sort_type=2):
+    async def buscar(termo, limite=10, app_id=None, app_secret=None, sort_type=2, negada_levanta=False):
         return ofertas
 
     async def converter(endereco, etiqueta="geral", **kw):
@@ -6335,7 +6379,7 @@ def test_ver_produtos_vai_ao_canal_pelo_link_de_cada_produto_no_rascunho(monkeyp
             return "https://shopee.com.br/Produto-i.7.41"
         return "https://sv.shopee.com.br/share-video/xyz?jumpType=1"
 
-    async def buscar(termo, limite=10, app_id=None, app_secret=None, sort_type=2):
+    async def buscar(termo, limite=10, app_id=None, app_secret=None, sort_type=2, negada_levanta=False):
         return [{"itemId": 3, "productName": "Brinco Argola Dourado Grande",
                  "productLink": "https://shopee.com.br/product/1/3"}]
 
@@ -6400,7 +6444,7 @@ def test_candidatos_da_foto_ate_20_por_cento_mais_caros_do_que_paga_mais_para_o_
 def test_oferta_do_cartao_e_a_de_mesmo_nome_e_mesmo_preco(monkeypatch):
     pedidos = []
 
-    async def buscar(termo, limite=20, sort_type=1):
+    async def buscar(termo, limite=20, sort_type=1, negada_levanta=False):
         pedidos.append((termo, sort_type))
         return [{"productName": "Garrafa Térmica Inox 1 Litro Preta", "priceMin": "79.90", "itemId": 1},
                 {"productName": "Outra Coisa Qualquer De Cozinha", "priceMin": "49.90", "itemId": 2},
@@ -6422,7 +6466,7 @@ def test_oferta_do_cartao_e_a_de_mesmo_nome_e_mesmo_preco(monkeypatch):
     assert robo.oferta_do_cartao(dict(cartao, nome="Garrafa Térmica Inox 1 Litro Azul"), perdas) == {}
     assert perdas["nome parecido"] == 1
 
-    async def nada(termo, limite=20, sort_type=1):
+    async def nada(termo, limite=20, sort_type=1, negada_levanta=False):
         return []
 
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", nada)
@@ -6433,7 +6477,7 @@ def test_oferta_do_cartao_e_o_anuncio_do_cartao_entre_lojas_de_titulo_copiado(mo
     # Lojas diferentes copiam o mesmo título, e o 1º da busca com aquele nome e preço pode ser o
     # anúncio do próprio post: vale o de taxa de comissão e preço mais perto dos do cartão; no
     # empate, o mais relevante.
-    async def buscar(termo, limite=20, sort_type=1):
+    async def buscar(termo, limite=20, sort_type=1, negada_levanta=False):
         nome = "Garrafa Térmica Inox 1 Litro Preta"
         return [{"productName": nome, "priceMin": "49.90", "commissionRate": "0.08", "itemId": 7},
                 {"productName": nome, "priceMin": "50.50", "commissionRate": "0.12", "itemId": 8},

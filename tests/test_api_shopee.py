@@ -569,6 +569,39 @@ def test_busca_com_erro_de_sistema_da_shopee_tenta_mais_uma_vez(monkeypatch):
     assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 22
 
 
+def test_busca_negada_levanta_so_para_quem_pede(monkeypatch):
+    # 12/11: o robô da Shopee Vídeo deixou um vídeo de lado de vez porque a busca negada pela API (o erro
+    # de sistema da Shopee, que não passou em nenhuma das tentativas) parecia a busca que não achou nada.
+    # Quem pede (negada_levanta=True) recebe BuscaNegada; os outros continuam com a lista vazia.
+    erro = {"errors": [{"message": "System error", "extensions": {"code": 10000}}]}
+    _api_que_responde(monkeypatch)
+    sessao = api_shopee.aiohttp.ClientSession
+    respostas = []
+
+    def post(url, headers=None, data=None):
+        status, corpo = respostas.pop(0)
+        return _Resposta(status, corpo=corpo)
+    sessao.post = post
+    respostas[:] = [(200, erro)] * api_shopee.TENTATIVAS_NO_ERRO_DE_SISTEMA
+    with pytest.raises(api_shopee.BuscaNegada, match="código 10.000"):
+        rodar(api_shopee.buscar_ofertas_shopee("garrafa", negada_levanta=True))
+    respostas[:] = [(200, erro)] * api_shopee.TENTATIVAS_NO_ERRO_DE_SISTEMA
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == []
+    respostas[:] = [(500, None)]
+    with pytest.raises(api_shopee.BuscaNegada, match="status 500"):
+        rodar(api_shopee.buscar_ofertas_shopee("garrafa", negada_levanta=True))
+    # A busca que respondeu sem nada continua vazia, sem levantar.
+    respostas[:] = [(200, {"data": {"productOfferV2": {"nodes": []}}})]
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa", negada_levanta=True)) == []
+    _api_que_responde(monkeypatch, erro=OSError("caiu"))
+    with pytest.raises(api_shopee.BuscaNegada, match="OSError"):
+        rodar(api_shopee.buscar_ofertas_shopee("garrafa", negada_levanta=True))
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_ID", None)
+    with pytest.raises(api_shopee.BuscaNegada, match="sem as chaves"):
+        rodar(api_shopee.buscar_ofertas_shopee("garrafa", negada_levanta=True))
+    assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == []
+
+
 def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):
     _api_que_responde(monkeypatch, erro=OSError("caiu"))
     assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == PRODUTO
