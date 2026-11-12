@@ -8033,6 +8033,44 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
                                               ("no post sem a faixa", "0% do quadro na cor da faixa")]
 
 
+def test_post_acha_a_faixa_na_miniatura_comprimida_com_a_frase_em_duas_linhas():
+    # Retomada de 12/11: o post das 02:06 chegou à grade com a faixa azul e a frase em duas linhas, e a
+    # cor a 5 da edição, mas saiu "sem a faixa": a miniatura que a grade mostra vem comprimida, e a
+    # faixa achada linha a linha se desmonta. Sem ela, vale a parte de cima do quadro, na cor de lado a
+    # lado; o quadro sem a faixa continua sem ela.
+    from PIL import Image
+    ev = robo.edicao_video
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    foto = Image.new("RGB", (800, 800))
+    foto.putdata([(200 + x // 16, 120 + y // 10, 60) for y in range(800) for x in range(800)])
+    saida = io.BytesIO()
+    foto.save(saida, "JPEG")
+    azul = ev.cor_guardada("azul")
+
+    def comprimida(capa_png):
+        # A miniatura da grade: a capa em metade do tamanho do quadro, em JPEG fraco, esticada no quadro.
+        quadro = Image.open(io.BytesIO(capa_png)).convert("RGB").crop(
+            (0, ev.GRADE_NO_CELULAR[0], ev.TELA[0], ev.GRADE_NO_CELULAR[1]))
+        miniatura = io.BytesIO()
+        quadro.resize((LARGURA_DO_QUADRO // 2, ALTURA_DO_QUADRO // 2)).save(miniatura, "JPEG", quality=20)
+        tela = Image.new("RGB", (1080, 2400), (255, 255, 255))
+        tela.paste(Image.open(io.BytesIO(miniatura.getvalue())).convert("RGB").resize(
+            (LARGURA_DO_QUADRO, ALTURA_DO_QUADRO), Image.BILINEAR), caixa[:2])
+        return tela
+
+    com = comprimida(ev.capa_com_chamada(saida.getvalue(), "Vestido jeans", cor=azul))
+    faixa = robo.faixa_da_capa(com, caixa, azul)
+    assert faixa and faixa[0] == caixa[1] and faixa[3] - faixa[2] >= LARGURA_DO_QUADRO * robo.LARGURA_DA_FAIXA_NA_CAPA
+    assert robo.diferenca_da_cor(com, faixa, azul) <= 20
+    assert robo.faixa_da_capa(comprimida(ev.foto_em_tela_cheia(saida.getvalue())), caixa, azul) is None
+    # No post, o registro diz que a faixa chegou, sem outra olhada nem caso.
+    rascunho = _rascunho("postado", postado_em="2026-11-12 02:06:00", chamada="1", cor="azul")
+    celular = type("Celular", (), {"screenshot": lambda self, caminho=None: com})()
+    assert robo.marcar_o_post(celular, rascunho, caixa)
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [r[2] for r in linhas] == ["no post com a faixa"]
+
+
 def test_post_sem_a_faixa_olha_de_novo_e_guarda_o_caso(monkeypatch):
     # Checkup de 11/11: o post das 21:37 chegou à grade sem a faixa, e nada dizia por quê. A capa que
     # ainda carrega ganha outra olhada; a que continua sem a faixa vai ao registro com quanto do quadro
