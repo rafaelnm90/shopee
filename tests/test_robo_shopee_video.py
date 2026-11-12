@@ -8027,9 +8027,52 @@ def test_post_confere_a_faixa_da_capa_na_cor_do_produto():
     sem_a_cor = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
     assert robo.marcar_o_post(grade(capa), sem_a_cor, caixa)
     linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
-    # O registro diz quando a faixa procurada era a da cor do produto (a 1ª capa colorida na grade).
+    # O registro diz quando a faixa procurada era a da cor do produto (a 1ª capa colorida na grade); sem
+    # a faixa, quanto do quadro tem a cor dela (aqui, a faixa verde procurada no laranja: nada).
     assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", f"{robo.LADOS_DA_CAPA[True]}; {robo.COR_NA_CAPA}"),
-                                              ("no post sem a faixa", "")]
+                                              ("no post sem a faixa", "0% do quadro na cor da faixa")]
+
+
+def test_post_sem_a_faixa_olha_de_novo_e_guarda_o_caso(monkeypatch):
+    # Checkup de 11/11: o post das 21:37 chegou à grade sem a faixa, e nada dizia por quê. A capa que
+    # ainda carrega ganha outra olhada; a que continua sem a faixa vai ao registro com quanto do quadro
+    # tem a cor dela, e o caso guarda o print da grade e os quadros do vídeo para o checkup.
+    from PIL import Image
+    caixa = (722, 1210, 722 + LARGURA_DO_QUADRO, 1210 + ALTURA_DO_QUADRO)
+    ev = robo.edicao_video
+    casos = []
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: casos.append((acao, resultado,
+                                                                                                    motivo)))
+
+    def tela(capa_png):
+        imagem = Image.new("RGB", (1080, 2400), (240, 240, 240))
+        esquerda, direita = ev.LADOS_NA_GRADE
+        cima, baixo = ev.VISIVEL_NA_GRADE
+        capa = Image.open(io.BytesIO(capa_png)).convert("RGB").crop((esquerda, cima, direita, baixo))
+        imagem.paste(capa.resize((LARGURA_DO_QUADRO, ALTURA_DO_QUADRO)), caixa[:2])
+        return imagem
+
+    def celular(*prints):
+        fila = list(prints)
+        return type("Celular", (), {"screenshot": lambda self, caminho=None: fila.pop(0) if len(fila) > 1 else fila[0]})()
+
+    capa = tela(ev.capa_com_chamada(_foto_do_anuncio(), "Alivia a dor"))
+    sem_faixa = tela(ev.foto_em_tela_cheia(_foto_do_anuncio()))
+    # A capa que chega na 2ª olhada: com a faixa, e a marca dela.
+    devagar = _rascunho("postado", postado_em="2026-10-31 10:00:00", chamada="1")
+    assert robo.marcar_o_post(celular(sem_faixa, capa), devagar, caixa) == robo.visualizacoes.marca_da_capa(capa, caixa)
+    # A que não chega nem na última: o registro com quanto do quadro tem a cor, e o caso.
+    nunca = _rascunho("postado", postado_em="2026-10-31 11:00:00", chamada="1")
+    assert robo.marcar_o_post(celular(sem_faixa), nunca, caixa) == robo.pegar(nunca)["marca"]
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_CAPA, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [("no post com a faixa", robo.LADOS_DA_CAPA[True]),
+                                              ("no post sem a faixa", "0% do quadro na cor da faixa")]
+    assert casos == [("postar", "capa sem a faixa", robo.MOTIVO_DA_CAPA_SEM_A_FAIXA)]
+    # Sem a capa com a frase, nada de outra olhada nem de caso.
+    sem_chamada = _rascunho("postado", postado_em="2026-10-31 12:00:00")
+    assert robo.marcar_o_post(celular(sem_faixa, capa), sem_chamada, caixa) == robo.visualizacoes.marca_da_capa(
+        sem_faixa, caixa)
+    assert len(casos) == 1
 
 
 def test_post_anota_a_que_distancia_da_cor_da_edicao_a_faixa_chegou():
