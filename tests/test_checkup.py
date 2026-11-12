@@ -45,6 +45,8 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.HORARIO_DO_ROBO_SV == robo.ps.HORARIO_DAS_RODADAS
     assert checkup.CHAVE_SEGUIDORES_SV == robo.CHAVE_SEGUIDORES
     assert checkup.CHAVE_TENTATIVAS_POR_DIA_SV == robo.CHAVE_TENTATIVAS_POR_DIA
+    assert checkup.PROCESSO_DO_ALERTA_SV == robo.PROCESSO_DO_ALERTA
+    assert checkup.O_DE_ANTES_FICOU_SV == robo.O_DE_ANTES_FICOU
 
 
 def test_erro_ligado_ao_lugar_do_codigo_sem_o_texto():
@@ -189,6 +191,25 @@ def test_processo_que_mais_falha_que_acerta_vira_ponto_de_atencao():
     assert processos[("baixador", "pedido TikTok")]["ultima_falha"] == "22:20"
     assert pontos == ["baixador: pedido Shopee (vídeo): 4 falha(s) e 1 acerto(s) "
                       "(mais comum: não entregue - a Shopee demorou, 4x; a última às 20:20)"]
+
+
+def test_alerta_do_celular_de_antes_que_ficou_no_privado_vira_ponto_de_atencao():
+    # P205 1 (11/11): o alerta do celular que volta de hora em hora apaga do privado o de antes; o
+    # registro diz se ele saiu, e o checkup aponta o que ficou.
+    import registro_processos as rp
+    sv, alerta = "shopee_video", checkup.PROCESSO_DO_ALERTA_SV
+    rp.registrar(sv, alerta, "celular desligado: 1º alerta", ok=True, agora=AGORA - timedelta(hours=3))
+    rp.registrar(sv, alerta, "celular desligado: de novo", "o de antes saiu do privado", ok=True,
+                 agora=AGORA - timedelta(hours=2))
+    sem_robo = {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []}
+    assert checkup.pontos_de_atencao([], {}, {}, sem_robo, {}, ("x", 1.0, 1), AGORA,
+                                     checkup.processos_do_dia(AGORA)) == []
+    for horas in (1, 0):
+        rp.registrar(sv, alerta, "celular desligado: de novo", checkup.O_DE_ANTES_FICOU_SV, ok=True,
+                     agora=AGORA - timedelta(hours=horas))
+    pontos = checkup.pontos_de_atencao([], {}, {}, sem_robo, {}, ("x", 1.0, 1), AGORA, checkup.processos_do_dia(AGORA))
+    assert pontos == ["shopee_video: alerta do celular: 2 vez(es) o alerta de antes ficou no privado "
+                      "(pela P205 1, ele sai quando vem o novo)"]
 
 
 def _filas_de_teste():
