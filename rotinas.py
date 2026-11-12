@@ -2,7 +2,7 @@
 Em que canal sai cada rotina de texto (mensagens geradas pela IA: bom dia,
 convites, divulgação dos outros canais) e quais rotinas o código conhece. Usado
 pelo bot_mestre, que agenda e dispara as rotinas, e pelo checkup do dia, que
-confere o espaçamento e a ordem dos assuntos em cada canal.
+confere o espaçamento e a ordem dos assuntos em cada canal (pelas mesmas regras: sem_espera).
 """
 # Cada uma tem o seu texto no bot_mestre.disparar_mensagem (o tests/test_rotinas.py confere).
 ROTINAS_PRINCIPAIS = ("bom_dia", "boa_noite", "incentivo", "link_grupo", "divulgar_gem", "promo_viral",
@@ -38,3 +38,12 @@ def conhecida(tipo):
     """
     tipo = str(tipo)
     return tipo in ROTINAS_PRINCIPAIS + ROTINAS_VIRAIS + ROTINAS_PUBLICO or tipo.startswith("campanha_")
+
+
+def sem_espera(tipo):
+    """
+    A rotina sai na hora dela, sem esperar o vídeo da fila (a intercalação), a de outro assunto
+    nem os 10 min da anterior no canal: o Bom Dia, a Boa Noite e as campanhas das datas duplas.
+    Escolhas do Rafael (23/10 e 27/10): DECISOES.md, Trabalho com o Claude.
+    """
+    return tipo in ("bom_dia", "boa_noite") or str(tipo).startswith("campanha_")

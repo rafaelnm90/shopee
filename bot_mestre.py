@@ -2602,7 +2602,7 @@ async def _disparar_mensagem(tipo, forcar=False):
     # Intercalação: não posta dois textos seguidos se ainda há vídeo do dia na fila. A rotina
     # espera o vídeo até limite_da_espera_pelo_video; passado ele, sai mesmo depois de outro
     # texto. Decisão do Rafael (P84): DECISOES.md, Trabalho com o Claude.
-    if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+    if not forcar and not rotinas.sem_espera(tipo):
         estoque_videos = contar_videos_pendentes(chat_destino)
         if obter_ultimo_post(chat_destino) == "texto" and estoque_videos > 0:
             limite, motivo_do_limite = limite_da_espera_pelo_video(tipo, dados_rotina, canal_rotina, agora_tz)
@@ -2624,7 +2624,7 @@ async def _disparar_mensagem(tipo, forcar=False):
     # depois do fim, esta sai na hora, anotada também.
     # Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
     em_seguida = None
-    if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+    if not forcar and not rotinas.sem_espera(tipo):
         if assunto_anterior_no_canal(dados_rotina, canal_rotina, hoje_str) == tipo:
             depois_de = proxima_de_outro_assunto(tipo, canal_rotina, agora_tz)
             fim_da_janela = (janela_de_hoje(dados_rotina[tipo], agora_tz)[1]
@@ -2645,7 +2645,7 @@ async def _disparar_mensagem(tipo, forcar=False):
                 return
     
     # Espaçamento no canal: a menos de MINUTOS_ENTRE_ROTINAS da última, espera completar.
-    if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+    if not forcar and not rotinas.sem_espera(tipo):
         minutos = minutos_desde_a_ultima_no_canal(dados_rotina, canal_rotina, agora_tz)
         if minutos is not None and 0 <= minutos < MINUTOS_ENTRE_ROTINAS:
             novo_horario = agora_tz + timedelta(minutes=MINUTOS_ENTRE_ROTINAS - minutos + random.randint(1, 10))
