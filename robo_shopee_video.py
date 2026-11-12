@@ -1143,6 +1143,7 @@ PASSOS = (
     ("a tela de bloqueio está na frente", "tela de bloqueio"),
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
+    ("a API da Shopee negou a busca", "busca negada pela Shopee"),
     ("não está respondendo", "app travado"),
     ("edição do vídeo não saiu", "edição do vídeo"),
     ("bebida alcoólica só vai", "edição do vídeo"),
@@ -3284,6 +3285,16 @@ def _desfazer_reserva(ident, id_video, motivo, do_video):
 
 
 MOTIVO_DA_RODADA_INTERROMPIDA = "a rodada foi interrompida no meio do preparo"
+# A busca da API de afiliado que ficou sem resposta (api_shopee.BuscaNegada: o erro de sistema da
+# Shopee que não passou em nenhuma tentativa, a API fora do ar) não é do vídeo: ele volta mais tarde,
+# como nas outras falhas que não são do vídeo (P182 1). Sem isso, a busca negada parecia a busca que
+# não achou nada, e o vídeo ficava de lado de vez (12/11, um vídeo de Ver Produtos às 10:13).
+MOTIVO_DA_BUSCA_NEGADA = "a API da Shopee negou a busca do produto"
+
+
+def motivo_da_busca_negada(erro):
+    """O motivo da Parada pela busca negada, com o código do erro da API ou o tipo da falha."""
+    return f"{MOTIVO_DA_BUSCA_NEGADA} ({erro}); o vídeo volta mais tarde"
 
 
 def soltar_preparos_interrompidos(agora=None):
@@ -3994,10 +4005,13 @@ def achar_o_produto_do_video(video):
     """
     O produto que o vídeo mostra, achado na Shopee e conferido pela IA como o produto do link é:
     {nome, link, comissao, preco, valor, vendas, imagem, item, vistos}, com o link curto que o
-    celular abre; None quando não acha. Um erro aqui só deixa o vídeo de lado, como antes.
+    celular abre; None quando não acha. Um erro aqui só deixa o vídeo de lado, como antes; a busca
+    que a API da Shopee nega sobe (api_shopee.BuscaNegada), porque não é do vídeo.
     """
     try:
         return _achar_o_produto_do_video(video)
+    except api_shopee.BuscaNegada:
+        raise
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A busca do produto do vídeo deu erro: {type(e).__name__}")
         registro_processos.registrar(REGISTRO, PROCESSO_DO_PRODUTO_ACHADO, f"não achado - erro ({type(e).__name__})")
@@ -4012,7 +4026,12 @@ def _achar_o_produto_do_video(video):
     if not busca:
         anotar("não achado - a IA não disse o produto")
         return None
-    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(busca, limite=OFERTAS_NA_BUSCA, sort_type=1))
+    try:
+        ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(busca, limite=OFERTAS_NA_BUSCA, sort_type=1,
+                                                               negada_levanta=True))
+    except api_shopee.BuscaNegada as e:
+        anotar("não achado - a busca foi negada pela Shopee", str(e), ok=False)
+        raise
     candidatos = candidatos_do_achado(ofertas, fora=item_do_link(video["link"]))
     if not candidatos:
         anotar("não achado - a busca não trouxe nada")
@@ -5316,8 +5335,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
             ok, motivo = ps.ia_confere_produto(video, vistos, avisar=False)
             if not ok and motivo.startswith(ps.MOTIVO_OUTRO_PRODUTO):
                 # O produto do link não é o do vídeo: o robô procura o do vídeo na Shopee, com a
-                # mesma conferência dupla da IA (P158 2).
-                achado = achar_o_produto_do_video(video)
+                # mesma conferência dupla da IA (P158 2). A busca negada pela API não é do vídeo.
+                try:
+                    achado = achar_o_produto_do_video(video)
+                except api_shopee.BuscaNegada as e:
+                    raise Parada(motivo_da_busca_negada(e))
                 if not achado:
                     avisar(f"{ps.AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: {vistos[-1] if vistos else ''}\n"
                            "Procurei o produto do vídeo na Shopee, e a IA não confirmou nenhum.")
@@ -5520,8 +5542,8 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     o Editor 2 não sai, com o Editor 1, sem legendas (edicao_video.editar_para_postar). No vídeo
     de Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Com a edição ligada,
     só vai vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo;
-    sem a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou deixa tentar de novo
-    depois. Bebida alcoólica (alcool=True) abre com a capa dos avisos da Shopee no lugar da
+    sem a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou ou a busca que a API da
+    Shopee negou deixam tentar de novo depois. Bebida alcoólica (alcool=True) abre com a capa dos avisos da Shopee no lugar da
     foto, e sem a edição ela não tem como levar os avisos: fica de lado. Devolve como o vídeo
     saiu (o jeito de edicao_video.editar_para_postar; "" sem a edição). outras: as fotos de capa
     dos outros produtos do post, na ordem, no rascunho com produtos a mais (o mesmo item): com
@@ -5546,7 +5568,10 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     if video.get("de_video") and link_do_1o:
         anuncio = ps.anuncio_do_produto(dict(video, link=link_do_1o))
     elif video.get("de_video"):
-        anuncio = anuncio_do_ver_produtos(nomes[0]) if nomes else {}
+        try:
+            anuncio = anuncio_do_ver_produtos(nomes[0]) if nomes else {}
+        except api_shopee.BuscaNegada as e:
+            raise Parada(motivo_da_busca_negada(e))
     else:
         anuncio = ps.anuncio_do_produto(video)
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
@@ -5775,14 +5800,15 @@ def com_a_foto_na_miniatura(itens, fotos_da_miniatura):
     return ficam
 
 
-def _oferta_parecida(nome):
+def _oferta_parecida(nome, negada_levanta=False):
     """
     (quanto o nome parece, se é o mesmo nome, a oferta) da busca pelo nome na API, por
     relevância: a de nome igual (ou cortado, ps.nome_na_pagina), senão a de nome mais
-    parecido; no empate, a mais relevante. (0, False, {}) sem nenhuma.
+    parecido; no empate, a mais relevante. (0, False, {}) sem nenhuma. Com negada_levanta=True,
+    a busca que a API nega levanta api_shopee.BuscaNegada em vez de parecer vazia.
     """
     ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(nome), limite=OFERTAS_NA_BUSCA,
-                                                           sort_type=1))
+                                                           sort_type=1, negada_levanta=negada_levanta))
     notas = [(ps.nome_na_pagina(oferta.get("productName") or "", nome),
               ps.parecido_entre([oferta.get("productName") or ""], nome)[0], -i) for i, oferta in enumerate(ofertas)]
     exato, parecido, melhor = max(notas, default=(False, 0, None))
@@ -5870,11 +5896,12 @@ def anuncio_do_ver_produtos(nome):
     pelo nome (a oferta de nome mais parecido, com pelo menos PARECIDO_DA_FOTO% das palavras,
     como em oferta_pelo_nome). {} quando não acha, e foto None quando ela não baixa: o vídeo
     fica de lado (só vídeo editado vai). A IA já conferiu esse produto com o vídeo, e o nome
-    fica o do app (o que ela conferiu).
+    fica o do app (o que ela conferiu). A busca que a API nega sobe (api_shopee.BuscaNegada):
+    não é do vídeo, que volta mais tarde.
     Escolha do Rafael (25/10, P39): DECISOES.md, Shopee Vídeo.
     """
     try:
-        parecido, _exato, oferta = _oferta_parecida(nome)
+        parecido, _exato, oferta = _oferta_parecida(nome, negada_levanta=True)
         if not oferta or parecido < PARECIDO_DA_FOTO:
             registro_processos.registrar(REGISTRO, PROCESSO_DA_FOTO_DO_VER_PRODUTOS,
                                          "nome pouco parecido" if oferta else "nenhuma oferta na busca",
@@ -5885,6 +5912,10 @@ def anuncio_do_ver_produtos(nome):
                                      "achada" if foto else "a foto não baixou", f"{parecido}% das palavras",
                                      ok=bool(foto))
         return {"foto": foto, "nome": nome}
+    except api_shopee.BuscaNegada as e:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_FOTO_DO_VER_PRODUTOS, "a busca foi negada pela Shopee",
+                                     str(e), ok=False)
+        raise
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto do produto do Ver Produtos não veio: {type(e).__name__}")
         registro_processos.registrar(REGISTRO, PROCESSO_DA_FOTO_DO_VER_PRODUTOS, "a busca falhou",

@@ -357,10 +357,28 @@ def _registrar_busca_negada(erros):
         logger.error(f"❌ [API Shopee] Não anotou a busca negada: {type(e).__name__}")
 
 
-async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None, sort_type=2):
+class BuscaNegada(Exception):
+    """
+    A busca de ofertas ficou sem a resposta da API (negada, como o erro de sistema da Shopee que não
+    passou em nenhuma tentativa, fora do ar ou sem as chaves): não é o mesmo que a busca não achar
+    nada. Só quem pede (negada_levanta=True) a recebe; os outros continuam com a lista vazia.
+    """
+
+
+def _sem_ofertas(negada_levanta, motivo):
+    """A lista vazia da busca que falhou, ou BuscaNegada(motivo) para quem pediu."""
+    if negada_levanta:
+        raise BuscaNegada(motivo)
+    return []
+
+
+async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None, sort_type=2,
+                                negada_levanta=False):
     """
     Busca produtos na Shopee por palavra-chave. Devolve a lista de produtos
-    (nodes da API) ou lista vazia em qualquer erro.
+    (nodes da API) ou lista vazia em qualquer erro; com negada_levanta=True, a
+    busca que fica sem a resposta da API levanta BuscaNegada (o robô da Shopee
+    Vídeo não deixa um vídeo de lado por uma falha da API).
 
     sort_type: 1=relevância, 2=mais vendidos, 3=preço maior, 4=preço menor,
     5=maior comissão. O padrão 2 é o do garimpo de ofertas. O buscador usa 1,
@@ -372,7 +390,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
 
     if not cred_id or not cred_secret:
         logger.warning("⏳ [API Shopee] Chaves financeiras ausentes.")
-        return []
+        return _sem_ofertas(negada_levanta, "sem as chaves")
 
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     payload = {
@@ -408,7 +426,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
             async with aiohttp.ClientSession() as session:
                 async with session.post(endpoint, headers=headers, data=payload_json) as response:
                     if response.status != 200:
-                        return []
+                        return _sem_ofertas(negada_levanta, f"status {response.status}")
                     dados = await response.json()
             erros = dados.get("errors")
             if (erros and _codigo_do_erro(erros) == CODIGO_DO_ERRO_DE_SISTEMA
@@ -419,14 +437,16 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
             if erros:
                 logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
                 _registrar_busca_negada(erros)
-                return []
+                return _sem_ofertas(negada_levanta, rotulo_do_codigo(_codigo_do_erro(erros)))
             if tentativa > 1:
                 _registrar_nova_tentativa(tentativa)
             return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
+        except BuscaNegada:
+            raise
         except Exception as e:
             logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
-            return []
-    return []
+            return _sem_ofertas(negada_levanta, type(e).__name__)
+    return _sem_ofertas(negada_levanta, "sem resposta")
 
 
 def _registrar_nova_tentativa(tentativa):
