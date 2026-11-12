@@ -113,6 +113,10 @@ HORA_DO_DESCURTIR_SV = 4
 # A rodada da hora do descurtir que não chegou à limpeza, com o porquê (o mesmo do
 # robo_shopee_video.PROCESSO_SEM_LIMPEZA; o tests/test_checkup.py confere).
 PROCESSO_SEM_LIMPEZA_SV = "hora do descurtir: rodada sem a limpeza"
+# O alerta do celular de antes que ficou no privado: pela P205 1 ele sai quando vem o novo (os mesmos
+# textos do robo_shopee_video.PROCESSO_DO_ALERTA e O_DE_ANTES_FICOU; o tests/test_checkup.py confere).
+PROCESSO_DO_ALERTA_SV = "alerta do celular"
+O_DE_ANTES_FICOU_SV = "o de antes ficou no privado"
 
 
 def mascarar(texto):
@@ -1824,6 +1828,11 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             pontos.append(f"{robo}: {processo}: {p['falhas']} falha(s) e {p['ok']} acerto(s) "
                           f"(mais comum: {resultado}{f' - {detalhe}' if detalhe else ''}, {qtd}x"
                           f"{_a_ultima_falha(p, '; ', '')})")
+    alertas = (processos or {}).get(("shopee_video", PROCESSO_DO_ALERTA_SV), {}).get("resultados", [])
+    ficou = sum(qtd for _resultado, detalhe, _ok, qtd in alertas if detalhe == O_DE_ANTES_FICOU_SV)
+    if ficou:
+        pontos.append(f"shopee_video: {PROCESSO_DO_ALERTA_SV}: {ficou} vez(es) o alerta de antes ficou no privado "
+                      "(pela P205 1, ele sai quando vem o novo)")
     for canal, r in (rotinas_hoje or {}).items():
         if r["curtos"]:
             pontos.append(f"Rotinas do {canal}: {r['curtos']} intervalo(s) abaixo de {INTERVALO_CURTO_ROTINA} min "
