@@ -727,7 +727,8 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None):
+                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None,
+                           lugares=None, por_cima=()):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -2714,11 +2715,13 @@ def test_canto_so_com_o_que_foi_filmado_nao_tira_a_miniatura(monkeypatch, tmp_pa
 def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, tmp_path):
     # Print do Rafael (29/10): num rascunho, a legenda do criador, centralizada logo abaixo da
     # barra de busca, passava por baixo da ponta da nossa miniatura, e a IA tinha dito que o
-    # canto estava livre (P81). Ela diz também onde fica cada coisa que o criador pôs no alto
-    # da tela, e a miniatura não passa por nenhuma, com a folga: diminui para ficar acima dela
-    # (P97) ou, quando nem com 2/3 do tamanho cabe, sai.
+    # canto estava livre (P81). Ela diz também onde fica cada coisa que o criador pôs por cima
+    # do vídeo (desde a P212 1, em qualquer parte da tela e com o tempo), e a miniatura não passa
+    # por nenhuma, com a folga: diminui para ficar acima dela (P97) ou, quando nem com 2/3 do
+    # tamanho cabe, sai. A lista de antes, só do alto e sem o tempo, ainda é lida.
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
-        assert "\"por_cima_no_alto\"" in prompt and "em qualquer momento" in prompt
+        assert "\"por_cima_do_video\"" in prompt and "em qualquer parte da tela" in prompt
+        assert "em qualquer momento do vídeo" in prompt
     legenda = {"esquerda": 29, "direita": 69, "topo": 11, "base": 14}
     textos = edicao_video._nome_lugar_e_falas({"canto_ocupado": False, "por_cima_no_alto": [legenda]})
     assert textos == {"canto_ocupado": False, "por_cima": [(29.0, 69.0, 11.0, 14.0)]}
@@ -2831,10 +2834,12 @@ def test_os_quadros_do_criador_nao_tiram_as_nossas_legendas():
     # Escolha do Rafael (29/10, P82): a IA contava como texto próprio do vídeo (P52) os quadros
     # que o criador pôs por cima com a foto do produto (as cores, a quantidade), e as nossas
     # legendas saíam (4 de 9 rascunhos editados em 29/10). O texto dentro deles não conta mais,
-    # e as legendas entram onde não os cobrem; a IA também diz se o canto da miniatura está livre.
+    # e as legendas entram onde não os cobrem, no momento de cada uma (P212 1: a IA diz onde e
+    # quando eles aparecem); a IA também diz se o canto da miniatura está livre.
     for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
         assert "nem o texto dentro das fotos e quadros do produto que o vídeo pôs por cima" in prompt
-        assert "sem cobrir, em nenhum momento, as fotos, quadros ou textos" in prompt
+        assert "Aqui não contam as fotos, quadros e textos que o próprio vídeo pôs por cima da imagem" in prompt
+        assert "\"por_cima_do_video\"" in prompt
         assert "\"canto_ocupado\"" in prompt and "não contam marca d'água, logo nem nome do perfil" in prompt
     assert edicao_video._nome_lugar_e_falas({"canto_ocupado": True, "texto_no_video": "sim"}) == {
         "canto_ocupado": True}
@@ -2885,14 +2890,14 @@ def test_texto_do_criador_so_no_fim_nao_tira_os_nossos_textos(monkeypatch):
 def test_o_que_foi_filmado_nao_conta_como_coisa_do_criador():
     # Rascunho dos fones de 02/11: a IA contou o nome escrito na capa de uma revista em cima da
     # mesa como texto do criador no canto da nossa miniatura (P81), e a miniatura saiu. Só conta
-    # o que o criador acrescentou por cima na edição; o lugar dos nossos textos não cobre o que
-    # ele pôs por cima em nenhum momento (P52 e P82).
+    # o que o criador acrescentou por cima na edição; cada texto nosso não cobre o que ele pôs
+    # por cima no momento em que o texto aparece (P52, P82 e P212 1).
     for pedir in (edicao_video.prompt_dos_textos, edicao_video.prompt_das_versoes):
         texto = pedir("Fone")
         assert edicao_video._O_QUE_FOI_FILMADO_NAO_CONTA in texto
         assert "uma revista ou a tela de um celular" in texto and "nunca contam" in texto
         assert "as coisas filmadas também não" in texto and "nome do perfil nem as coisas filmadas" in texto
-        assert "sem cobrir, em nenhum momento, as fotos, quadros ou textos" in texto
+        assert "onde e quando aparecem, em qualquer parte da tela" in texto
         assert '"textos_do_video": []' in texto and '"texto_no_video"' not in texto
 
 
@@ -2905,14 +2910,17 @@ def test_o_registro_diz_por_que_a_miniatura_ficou_menor_ou_de_fora(monkeypatch, 
     base = {"nome": "Fone", "vantagem": "Encaixe firme", "chamada": "Toque aqui embaixo", "lugar": "alto"}
     _textos_da_tela(monkeypatch, dict(base, canto_ocupado=True))
     assert edicao_video.SEM_A_MINIATURA in edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone")[1]
-    _textos_da_tela(monkeypatch, dict(base, canto_ocupado=True, por_cima=[(55.0, 95.0, 25.0, 30.0)]))
+    # O porquê de ela não ir ao outro canto de cima também (P213 1).
+    _textos_da_tela(monkeypatch, dict(base, canto_ocupado=True, outro_canto_ocupado=True,
+                                      por_cima=[(55.0, 95.0, 25.0, 30.0)]))
     assert edicao_video.COM_A_MINIATURA_MENOR in edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone")[1]
     # Com o canto livre, a miniatura vai inteira, e nada é anotado.
     _textos_da_tela(monkeypatch, dict(base, canto_ocupado=False))
     edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone")
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_CANTO, "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in registro] == [
-        ("de fora", edicao_video.CANTO_SEM_DIZER_ONDE), ("menor", "a coisa do criador no alto começa a 25% da altura")]
+        ("de fora", f"{edicao_video.CANTO_SEM_DIZER_ONDE}; {edicao_video.OUTRO_CANTO_SEM_RESPOSTA}"),
+        ("menor", f"a coisa do criador no alto começa a 25% da altura; {edicao_video.OUTRO_CANTO_OCUPADO}")]
     # O texto próprio na maior parte do tempo diz quanto, no detalhe do registro da edição.
     _textos_da_tela(monkeypatch, dict(base, texto_no_video=True, parte_com_texto=0.76))
     assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Fone") == (
@@ -3260,7 +3268,7 @@ def test_o_que_vai_ao_ar_e_o_editar_levam_a_faixa_do_produto_a_legenda_do_meio(m
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 produto_na_fala=None):
+                 produto_na_fala=None, lugares=None, por_cima=()):
         recebidos.append(produto_na_fala)
         return "", {"textos": [nome], "legendas": len(legendas)}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3424,7 +3432,8 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
     recebidas = []
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None):
+                           lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, produto_na_fala=None,
+                           lugares=None, por_cima=()):
         recebidas.append(list(legendas))
         return "", {"versoes": []}
 
@@ -3640,7 +3649,7 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 produto_na_fala=None):
+                 produto_na_fala=None, lugares=None, por_cima=()):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3827,7 +3836,7 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 produto_na_fala=None):
+                 produto_na_fala=None, lugares=None, por_cima=()):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3984,7 +3993,13 @@ def test_miniatura_a_esquerda_leva_os_textos_do_alto_para_a_direita_e_a_ia_olha_
     assert de_sempre[3] == margem
     pedido = edicao_video.prompt_dos_textos("Bolsa", edicao_video.MINIATURA_A_ESQUERDA)
     assert "o canto de cima à esquerda do vídeo (de uns 5% a 38% da largura" in pedido
-    assert "\"alto\" (no topo, à direita, a partir de uns 35% da largura" in pedido
+    # A IA diz o alto dos dois lados (P213 1), e o "alto" dos nossos textos é o do lado oposto à miniatura.
+    assert "\"alto_direita\" (no topo, à direita, a partir de uns 35% da largura" in pedido
+    assert "E o mesmo do canto de cima à direita (de uns 62% a 95% da largura, na mesma altura)" in pedido
+    lugares = {"lugares": ["alto_esquerda", "alto_direita", "meio"]}
+    assert edicao_video.lugares_dos_textos(lugares, edicao_video.MINIATURA_A_ESQUERDA) == ["alto", "meio"]
+    assert edicao_video.lugares_dos_textos(lugares) == ["alto", "meio"]
+    assert edicao_video.lugares_dos_textos({"lugares": ["alto_direita"]}) == []
     assert "o canto de cima à direita do vídeo (de uns 62% a 95% da largura" in edicao_video.prompt_dos_textos("Bolsa")
     # A coisa do criador no canto da esquerda tira a miniatura da esquerda, não a da direita.
     no_canto_da_esquerda = {"canto_ocupado": False, "por_cima": [(8.0, 30.0, 10.0, 20.0)]}
@@ -4027,7 +4042,7 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 produto_na_fala=None):
+                 produto_na_fala=None, lugares=None, por_cima=()):
         recebidos.append({"miniatura": miniatura, "legendas": list(legendas), "escolhas": escolhas})
         return "", {"textos": [nome], "legendas": len(legendas)}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -4066,7 +4081,7 @@ def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(mon
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 produto_na_fala=None):
+                 produto_na_fala=None, lugares=None, por_cima=()):
         recebidos.append({"nome": nome, "lugar": lugar, "musica": musica, "capa": capa, "miniatura": miniatura,
                           "outras": list(outras_fotos), "legendas": [legenda[:3] for legenda in legendas],
                           "rotulo": rotulo_de_ia, "cor": cor, "escolhas": escolhas})
@@ -4101,3 +4116,209 @@ def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(mon
     # Sem a miniatura.
     edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado, [], edicao_video.SEM_MINIATURA, True)
     assert recebidos[-1]["miniatura"] == 0 and recebidos[-1]["legendas"] == [(0.5, 2.0, "Olha só essa bolsa")]
+
+
+# --- Os textos da tela desviam do que o criador pôs por cima (P212 1) e a miniatura vai ao outro canto (P213 1) ---
+
+# No vídeo da garrafinha (19:37 de 12/11), o criador tinha frases no alto no começo e no fim, e o nome e a chamada
+# ficaram em cima delas: o lugar único da IA valia para os 3 textos.
+FRASE_NO_COMECO = (10.0, 60.0, 12.0, 19.0, 0.0, 2.0)
+FRASE_NO_FIM = (10.0, 60.0, 12.0, 19.0, 9.0, 12.0)
+QUADRO_NO_FIM = (15.0, 60.0, 26.0, 37.0, 9.0, 12.0)
+
+
+def test_cada_texto_desvia_do_que_o_criador_pos_por_cima_no_momento_dele():
+    # Escolha do Rafael (12/11, P212 1): cada texto nosso vai ao primeiro lugar livre (da lista da IA, do melhor para
+    # o pior) do que o criador pôs por cima no momento em que o texto aparece; sem nenhum, só ele sai.
+    textos = [("Garrafinha infantil", edicao_video.FUNDO_DOS_TEXTOS), ("Não vaza na mochila", edicao_video.FUNDO_DOS_TEXTOS),
+              ("Garanta a sua aqui", edicao_video.FUNDO_DA_CHAMADA)]
+    anotado = {}
+    letreiros, postos = edicao_video._letreiros(textos, "alto", 12.0, edicao_video.MINIATURA_A_DIREITA, ["alto", "meio"],
+                                                [FRASE_NO_COMECO, FRASE_NO_FIM, QUADRO_NO_FIM], anotado)
+    # O nome (de 0,3 a 3,3 s) cruza a frase do começo no alto e vai ao meio; a vantagem (4,3 a 7,3 s) fica no alto;
+    # a chamada (8,3 a 11,3 s) cruzaria a frase do fim no alto e o quadro no meio, e sai.
+    assert postos == ["Garrafinha infantil", "Não vaza na mochila"] and anotado == {"mudaram": 1, "sairam": 1}
+    alto, meio = edicao_video.LUGARES_DOS_TEXTOS["alto"][1], edicao_video.LUGARES_DOS_TEXTOS["meio"][1]
+    assert [(inicio, y) for _imagem, inicio, _fim, _x, y in letreiros] == [(0.3, meio), (4.3, alto)]
+    # Nenhum fica por cima de nada do criador no tempo dele.
+    for imagem, inicio, fim, x, y in letreiros:
+        largura, altura = _medidas(imagem)
+        assert not edicao_video._cobre_o_criador((x, y, x + largura, y + altura), inicio, fim,
+                                                 [FRASE_NO_COMECO, FRASE_NO_FIM, QUADRO_NO_FIM])
+    # A folga do tempo: a frase que some 0,2 s antes do texto aparecer ainda conta (a IA acerta o tempo só mais ou
+    # menos); a que some 0,5 s antes, não.
+    caixa = (68, 150, 400, 230)
+    assert edicao_video._cobre_o_criador(caixa, 2.2, 5.0, [FRASE_NO_COMECO])
+    assert not edicao_video._cobre_o_criador(caixa, 2.5, 5.0, [FRASE_NO_COMECO])
+    # Sem nada do criador, ou só com o que veio sem o tempo (os rascunhos de antes), todos no 1º lugar.
+    for por_cima in ((), [FRASE_NO_COMECO[:4]]):
+        anotado = {}
+        letreiros, postos = edicao_video._letreiros(textos, "alto", 12.0, lugares=["alto", "meio"], por_cima=por_cima,
+                                                    anotar=anotado)
+        assert len(postos) == 3 and {y for *_resto, y in letreiros} == {alto} and anotado == {}
+    # A lista vazia da IA (nenhum lugar livre do produto e do rosto, P47) não põe nenhum.
+    assert edicao_video._letreiros(textos, "alto", 12.0, lugares=[]) == ([], [])
+
+
+def test_a_ia_diz_os_lugares_livres_e_onde_e_quando_o_criador_pos_coisa_por_cima():
+    # P212 1: a IA diz a lista dos lugares livres do produto e do rosto (o alto dos dois lados, P213 1) e, de cada
+    # coisa que o criador pôs por cima, onde e quando ela aparece.
+    textos = edicao_video._nome_lugar_e_falas({
+        "lugares": ["meio", "alto_esquerda", "meio", "embaixo", {"x": 1}], "outro_canto_ocupado": False,
+        "por_cima_do_video": [
+            {"esquerda": 10, "direita": 60, "topo": 12, "base": 19, "inicio": 0, "fim": 2},
+            {"esquerda": 0.5, "direita": 0.1, "topo": 0.6, "base": 0.7},
+            {"esquerda": 5, "direita": 9, "topo": 1, "base": 2, "inicio": 3, "fim": 1},
+            {"esquerda": "x"}, "texto"]})
+    assert textos["lugares"] == ["meio", "alto_esquerda"] and textos["outro_canto_ocupado"] is False
+    # A que veio sem o tempo certo conta o vídeo inteiro.
+    ate = edicao_video.ATE_O_FIM
+    assert textos["por_cima"] == [(10.0, 60.0, 12.0, 19.0, 0.0, 2.0), (10.0, 50.0, 60.0, 70.0, 0.0, ate),
+                                  (5.0, 9.0, 1.0, 2.0, 0.0, ate)]
+    assert edicao_video.lugar_dos_textos(textos) == "meio"
+    # Com a miniatura à esquerda, o alto da esquerda é dela: fica o meio.
+    assert edicao_video.lugares_dos_textos(textos, edicao_video.MINIATURA_A_ESQUERDA) == ["meio"]
+    # Nenhum lugar livre do produto e do rosto (P47): sem os textos.
+    assert edicao_video.lugar_dos_textos(edicao_video._nome_lugar_e_falas({"lugares": []})) == edicao_video.SEM_LUGAR
+    assert edicao_video.lugar_dos_textos({"lugares": ["alto_esquerda"]}, edicao_video.MINIATURA_A_ESQUERDA) == (
+        edicao_video.SEM_LUGAR)
+    # A lista só com nomes que não existem vale como sem a lista: o lugar único, se veio.
+    assert edicao_video._nome_lugar_e_falas({"lugares": ["embaixo"], "lugar": "meio"}) == {"lugar": "meio"}
+    # O texto próprio na maior parte do tempo (P52) continua tirando os nossos.
+    assert edicao_video.lugar_dos_textos({"lugares": ["meio"], "texto_no_video": True}) == edicao_video.SEM_LUGAR
+    # O que o Editar ✏️ guarda volta igual.
+    guardado = edicao_video._textos_guardados(edicao_video.textos_para_guardar(textos))
+    assert guardado["por_cima"] == textos["por_cima"] and guardado["lugares"] == textos["lugares"]
+    assert guardado["outro_canto_ocupado"] is False
+
+
+def test_o_que_vai_ao_ar_desvia_os_textos_e_o_registro_conta(monkeypatch, tmp_path):
+    # P212 1 no que vai ao ar: o nome muda de lugar, a chamada sai, e o registro diz quantos.
+    import registro_processos as rp
+    montados, _editados = _versoes_de_mentira(monkeypatch)
+    base = {"nome": "Garrafinha infantil", "vantagem": "Não vaza na mochila", "chamada": "Garanta a sua aqui",
+            "lugares": ["alto_esquerda", "meio"], "canto_ocupado": False, "outro_canto_ocupado": False}
+    _textos_da_tela(monkeypatch, dict(base, por_cima=[FRASE_NO_COMECO, FRASE_NO_FIM, QUADRO_NO_FIM]))
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Garrafa") == (
+        "", edicao_video.COM_LEGENDAS, "")
+    assert montados[-1][1] == 2
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_TEXTO_DO_CRIADOR, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("algum saiu", "1 em outro lugar, 1 fora (sem lugar livre na hora dele)")]
+    # O registro diz também, em todo vídeo, se a IA respondeu com a lista e com o tempo das coisas do criador.
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DOS_LUGARES, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [(edicao_video.COM_A_LISTA, edicao_video.COM_O_TEMPO)]
+    # Com o criador por cima dos dois lugares o vídeo todo, nenhum texto entra, e o detalhe diz por quê.
+    tudo = [caixa[:4] + (0.0, 12.0) for caixa in (FRASE_NO_COMECO, QUADRO_NO_FIM)]
+    _textos_da_tela(monkeypatch, dict(base, por_cima=tudo))
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Garrafa") == (
+        "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_LUGAR_PELO_CRIADOR)
+    # Sem nada do criador por cima, nada é anotado.
+    _textos_da_tela(monkeypatch, base)
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Garrafa")
+    assert len(rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_TEXTO_DO_CRIADOR, "2000-01-01 00:00:00")) == 2
+    assert montados[-1][1] == 3
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DOS_LUGARES, "2000-01-01 00:00:00")
+    assert (registro[-1][2], registro[-1][3]) == (edicao_video.COM_A_LISTA, edicao_video.NADA_DO_CRIADOR)
+    # A resposta só com o lugar único (sem a lista) e as coisas do criador sem o tempo também ficam no registro.
+    _textos_da_tela(monkeypatch, {"nome": "Garrafinha infantil", "lugar": "alto", "por_cima": [FRASE_NO_COMECO[:4]]})
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Garrafa")
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DOS_LUGARES, "2000-01-01 00:00:00")
+    assert (registro[-1][2], registro[-1][3]) == (edicao_video.SEM_A_LISTA, edicao_video.SEM_O_TEMPO)
+
+
+# A cor do produto que o criador pôs no canto de cima à direita, o vídeo todo (P213 1).
+CORES_NO_CANTO_DA_DIREITA = (70.0, 95.0, 10.0, 20.0, 0.0, 30.0)
+
+
+def test_a_miniatura_vai_para_o_outro_canto_de_cima_quando_o_dela_tem_coisa_do_criador(monkeypatch):
+    # Escolha do Rafael (12/11, P213 1): com coisa do criador no canto da miniatura, ela vai inteira para o outro
+    # canto de cima, quando a IA diz que ele está livre e a pergunta só sobre ele confirma; senão, fica como antes
+    # (diminui ou sai, P81 e P97).
+    perguntas, respostas = [], []
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia", lambda video, prompt: perguntas.append(prompt) or respostas.pop(0))
+    direita, esquerda = edicao_video.MINIATURA_A_DIREITA, edicao_video.MINIATURA_A_ESQUERDA
+    ocupado = {"canto_ocupado": True, "outro_canto_ocupado": False, "por_cima": [CORES_NO_CANTO_DA_DIREITA]}
+    respostas.append({"por_cima_na_edicao": False})
+    textos = dict(ocupado)
+    assert edicao_video.canto_da_miniatura("v.mp4", textos, direita) == esquerda and "outro_canto" not in textos
+    assert "canto de cima à esquerda" in perguntas[-1] and "da borda até uns 45%" in perguntas[-1]
+    # No outro canto, ela cabe inteira: nada do criador passa por ela lá.
+    assert edicao_video.miniatura_no_video(textos, esquerda) == edicao_video.LARGURA_DA_MINIATURA
+    # A pergunta só sobre o outro canto viu coisa do criador, ou não respondeu: fica no do painel.
+    for resposta, porque in (({"por_cima_na_edicao": True}, edicao_video.OUTRO_CANTO_NA_2A_PERGUNTA),
+                             ({}, edicao_video.OUTRO_CANTO_SEM_A_2A)):
+        respostas.append(resposta)
+        textos = dict(ocupado)
+        assert edicao_video.canto_da_miniatura("v.mp4", textos, direita) == direita and textos["outro_canto"] == porque
+    # Sem perguntar de novo: o outro canto ocupado, coisa do criador passando pela miniatura lá, a IA sem dizer do
+    # outro canto, o canto do painel livre, sem a miniatura ou sem a resposta da IA.
+    perguntas.clear()
+    no_canto_da_esquerda = (8.0, 30.0, 10.0, 20.0, 0.0, 30.0)
+    for textos, lado, porque in (
+            (dict(ocupado, outro_canto_ocupado=True), direita, edicao_video.OUTRO_CANTO_OCUPADO),
+            (dict(ocupado, por_cima=[CORES_NO_CANTO_DA_DIREITA, no_canto_da_esquerda]), direita,
+             edicao_video.OUTRO_CANTO_OCUPADO),
+            ({"canto_ocupado": True}, direita, edicao_video.OUTRO_CANTO_SEM_RESPOSTA),
+            ({"canto_ocupado": False, "outro_canto_ocupado": False}, direita, None),
+            (dict(ocupado), edicao_video.SEM_MINIATURA, None), ({}, direita, None)):
+        assert edicao_video.canto_da_miniatura("v.mp4", textos, lado) == lado and textos.get("outro_canto") == porque
+    assert perguntas == []
+    # Com a miniatura à esquerda no painel, o outro canto é o da direita.
+    respostas.append({"por_cima_na_edicao": False})
+    textos = {"canto_ocupado": True, "outro_canto_ocupado": False, "lado_olhado": esquerda,
+              "por_cima": [no_canto_da_esquerda]}
+    assert edicao_video.canto_da_miniatura("v.mp4", textos, esquerda) == direita
+    assert "canto de cima à direita" in perguntas[-1]
+    # O outro_canto_ocupado vale só para o outro canto: dito sem onde, a miniatura não vai para lá (P81).
+    assert edicao_video.miniatura_no_video({"outro_canto_ocupado": True}, esquerda) == 0
+    assert edicao_video.miniatura_no_video({"outro_canto_ocupado": True}) == edicao_video.LARGURA_DA_MINIATURA
+
+
+def test_no_outro_canto_os_textos_do_alto_trocam_de_lado_e_o_editar_guarda_o_canto(monkeypatch, tmp_path):
+    # P213 1 no que vai ao ar: a miniatura vai ao canto da esquerda, os nossos textos do alto vão para a direita, o
+    # jeito e o registro dizem, e o Editar ✏️ guarda o canto em que ela saiu.
+    import registro_processos as rp
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Garrafa", "vantagem": "Leve", "chamada": "Toque aqui",
+                                  "lugares": ["alto_esquerda", "alto_direita", "meio"], "canto_ocupado": True,
+                                  "outro_canto_ocupado": False, "por_cima": [CORES_NO_CANTO_DA_DIREITA]})
+    perguntas = []
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia",
+                        lambda video, prompt: perguntas.append(prompt) or {"por_cima_na_edicao": False})
+    recebidos = []
+
+    def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
+                 capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
+                 produto_na_fala=None, lugares=None, por_cima=()):
+        recebidos.append({"lugar": lugar, "lugares": lugares, "por_cima": list(por_cima), "miniatura": miniatura,
+                          "lado": escolhas["miniatura"]})
+        return "", {"textos": [nome], "legendas": 0}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    anotado = {}
+    destino = str(tmp_path / "rascunho.mp4")
+    motivo, como, _detalhe = edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Garrafa", anotar=anotado,
+                                                             escolhas=edicao_video.ESCOLHAS_PADRAO)
+    assert motivo == "" and len(perguntas) == 1
+    assert recebidos[-1] == {"lugar": "alto", "lugares": ["alto", "meio"], "por_cima": [CORES_NO_CANTO_DA_DIREITA],
+                             "miniatura": edicao_video.LARGURA_DA_MINIATURA, "lado": edicao_video.MINIATURA_A_ESQUERDA}
+    assert edicao_video.COM_A_MINIATURA_NO_OUTRO_CANTO in como and edicao_video.COM_A_MINIATURA_A_ESQUERDA not in como
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_CANTO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [
+        (edicao_video.MINIATURA_NO_OUTRO_CANTO, "o do painel: a coisa do criador no alto começa a 10% da altura")]
+    # O "alto" com a miniatura à esquerda é o da direita, ao lado dela.
+    letreiros, _postos = edicao_video._letreiros([("Garrafa", edicao_video.FUNDO_DOS_TEXTOS)], "alto", 10.0,
+                                                 edicao_video.MINIATURA_A_ESQUERDA, ["alto"])
+    imagem, _inicio, _fim, x, _y = letreiros[0]
+    assert x + _medidas(imagem)[0] == edicao_video.TELA[0] - edicao_video.LUGARES_DOS_TEXTOS["alto"][0]
+    # O Editar ✏️ refaz no canto guardado, sem perguntar à IA; o lado que o Rafael escolhe nele vale como escolhido.
+    import json
+    guardado = json.loads(json.dumps(anotado["refazer"]))
+    assert guardado["escolhas"]["miniatura"] == edicao_video.MINIATURA_A_ESQUERDA
+    perguntas.clear()
+    assert edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado)[0] == ""
+    assert recebidos[-1] == recebidos[0] and perguntas == []
+    assert edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado, lado=edicao_video.MINIATURA_A_DIREITA,
+                                            legenda=False)[0] == ""
+    assert recebidos[-1]["lado"] == edicao_video.MINIATURA_A_DIREITA and recebidos[-1]["miniatura"] == 0
+    assert recebidos[-1]["lugares"] == ["alto", "meio"] and perguntas == []
