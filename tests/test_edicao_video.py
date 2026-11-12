@@ -1646,7 +1646,9 @@ def test_capa_da_grade_com_a_foto_que_nao_e_quadrada_estica_ate_15_e_o_resto_fic
     # P169 1 (vídeo do Rafael das 23:29 de 06/11): a foto que não é quase do formato do lugar (com o
     # fio fino embaixo, P196 1, o lugar é quase quadrado) estica só até 15% na direção em que falta e,
     # se ainda não tampar, o que faltar fica com a própria foto desfocada; nada de preto no que a grade
-    # mostra, e nada da foto é cortado. O fio de baixo vai até o fim do quadro.
+    # mostra, e nada da foto é cortado. O fio de baixo vai até o fim do quadro. A foto fica no meio do
+    # desfocado, com ele por igual dos dois lados (P206 1, 11/11: no exemplo, a foto embaixo e o
+    # desfocado só em cima).
     import io
 
     from PIL import Image
@@ -1671,17 +1673,25 @@ def test_capa_da_grade_com_a_foto_que_nao_e_quadrada_estica_ate_15_e_o_resto_fic
                        for y in range(alto, pe_da_grade, 3)), tamanho
         escala = min(largura / imagem.width, altura / imagem.height)
         esticada = (round(min(largura, imagem.width * escala * 1.15)), round(min(altura, imagem.height * escala * 1.15)))
-        # A foto inteira, esticada no máximo 15%, no pé do lugar dela e no meio da largura.
-        x, y = (largura - esticada[0]) // 2, cima + altura - esticada[1]
+        # A foto inteira, esticada no máximo 15%, no meio do lugar dela, na altura e na largura.
+        x, y = (largura - esticada[0]) // 2, cima + (altura - esticada[1]) // 2
         assert capa.crop((x, y, x + esticada[0], y + esticada[1])).tobytes() == imagem.resize(esticada,
                                                                                              Image.LANCZOS).tobytes()
         assert max(esticada[0] / (imagem.width * escala), esticada[1] / (imagem.height * escala)) <= 1.15 + 0.01
         if esticada == (largura, altura):
             continue
-        # O resto, a própria foto desfocada: as listras se misturam, sem o laranja nem o azul puros.
-        fora = (0, cima, 720, y) if esticada[0] == largura else (0, cima, x, baixo)
-        pontos = [capa.getpixel((px, py)) for px in range(fora[0], fora[2], 2) for py in range(fora[1], fora[3], 2)]
-        assert pontos and not any(p in ((200, 120, 40), (40, 90, 200)) for p in pontos), tamanho
+        # O resto, a própria foto desfocada, dos dois lados dela, por igual (no máximo 1 px de diferença):
+        # as listras se misturam, sem o laranja nem o azul puros.
+        if esticada[0] == largura:
+            fora = ((0, cima, 720, y), (0, y + esticada[1], 720, baixo))
+            sobras = (y - cima, baixo - y - esticada[1])
+        else:
+            fora = ((0, cima, x, baixo), (x + esticada[0], cima, 720, baixo))
+            sobras = (x, largura - x - esticada[0])
+        assert min(sobras) > 0 and abs(sobras[0] - sobras[1]) <= 1, (tamanho, sobras)
+        for x1_fora, y1_fora, x2_fora, y2_fora in fora:
+            pontos = [capa.getpixel((px, py)) for px in range(x1_fora, x2_fora, 2) for py in range(y1_fora, y2_fora, 2)]
+            assert pontos and not any(p in ((200, 120, 40), (40, 90, 200)) for p in pontos), tamanho
     # A foto mais larga que a quadrada, que não tampa perdendo só 7%, estica até tampar, sem desfocado
     # (no máximo 15%).
     foto, imagem = listrada(880, 800)
@@ -1690,6 +1700,109 @@ def test_capa_da_grade_com_a_foto_que_nao_e_quadrada_estica_ate_15_e_o_resto_fic
     assert capa.crop((0, cima, 720, baixo)).tobytes() == imagem.resize((largura, altura), Image.LANCZOS).tobytes()
     assert _cor_de(capa, (360, cima - 1), edicao_video.LARANJA_DA_SHOPEE)
     assert _cor_de(capa, (3, 1279), edicao_video.LARANJA_DA_SHOPEE)
+def _listrada(largura, altura):
+    """Uma foto sem branco nenhum (listras laranja e azuis), de largura x altura px."""
+    from PIL import Image
+    imagem = Image.new("RGB", (largura, altura), (200, 120, 40))
+    for x in range(0, largura, 40):
+        imagem.paste((40, 90, 200), (x, 0, x + 20, altura))
+    return imagem
+
+
+def _jpeg(imagem):
+    saida = io.BytesIO()
+    imagem.save(saida, "JPEG", quality=90)
+    return saida.getvalue()
+
+
+def _colada_no_branco(foto, lugar, lado=1000):
+    """A foto (PIL) colada num quadrado branco de lado px, no lugar (x, y), em JPEG, como as lojas fazem."""
+    from PIL import Image
+    quadrado = Image.new("RGB", (lado, lado), "white")
+    quadrado.paste(foto, lugar)
+    return _jpeg(quadrado)
+
+
+def test_foto_colada_num_quadrado_branco_perde_as_faixas_brancas_nas_capas():
+    # Print do Rafael de 11/11 às 20:33 (a mesa e cadeiras): a foto deitada, colada pela loja num
+    # quadrado branco, ia à capa com uma faixa branca em cima e outra embaixo. Escolha dele (P206 1 e
+    # P207 1): as faixas saem antes das duas capas, também as dos lados na foto em pé, e a foto que
+    # fica tampa o lugar como as outras (até 15% esticada e o resto desfocado, no meio). A foto de
+    # fundo branco (o produto no meio, com o branco em volta, como o banho de verniz do print) fica
+    # como está.
+    from PIL import Image, ImageDraw
+
+    com_faixas = _colada_no_branco(_listrada(1000, 680), (0, 160))
+    onde, caixa = edicao_video.faixas_brancas(com_faixas)
+    assert onde == edicao_video.FAIXAS_EM_CIMA_E_EMBAIXO
+    assert (caixa[0], caixa[2]) == (0, 1000) and abs(caixa[1] - 160) <= 2 and abs(caixa[3] - 840) <= 2, caixa
+    sem = edicao_video.sem_faixas_brancas(com_faixas)
+    assert Image.open(io.BytesIO(sem)).width == 1000 and abs(Image.open(io.BytesIO(sem)).height - 680) <= 4
+    # As duas capas saem da foto sem as faixas: as mesmas da foto que já veio sem elas.
+    for no_video in (False, True):
+        assert (edicao_video.capa_com_chamada(com_faixas, "Mesa e cadeiras", no_video=no_video)
+                == edicao_video.capa_com_chamada(sem, "Mesa e cadeiras", no_video=no_video)), no_video
+
+    def linhas_brancas(capa, x1, x2, y1, y2):
+        return [y for y in range(y1, y2, 2) if all(min(capa.getpixel((x, y))) > 235 for x in range(x1, x2, 8))]
+    # Na grade, nenhuma linha branca no lugar da foto (antes, as faixas iam de uma beirada à outra).
+    x1, cima, x2, baixo = edicao_video.lugar_da_foto()
+    grade = Image.open(io.BytesIO(edicao_video.capa_com_chamada(com_faixas, "Mesa e cadeiras"))).convert("RGB")
+    assert not linhas_brancas(grade, x1, x2, cima, baixo)
+    # No vídeo aberto, a foto inteira logo abaixo da faixa de cima, sem o branco em cima dela.
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    aberto = Image.open(io.BytesIO(edicao_video.capa_com_chamada(com_faixas, "Mesa e cadeiras", no_video=True)))
+    assert not linhas_brancas(aberto.convert("RGB"), esquerda + 4, direita - 4, cima, cima + 400)
+    # A cor da faixa olha a foto como ela fica na capa: a faixa branca (o produto branco) não some mais
+    # nas faixas brancas de enchimento, que saíram.
+    branco = edicao_video.CORES_DO_PRODUTO["branco"]
+    assert edicao_video.cor_da_faixa(com_faixas, branco) == edicao_video.cor_da_faixa(sem, branco) == branco
+    # A foto em pé, colada no quadrado branco: as faixas dos lados saem (P207 1).
+    em_pe = _colada_no_branco(_listrada(600, 1000), (200, 0))
+    onde, caixa = edicao_video.faixas_brancas(em_pe)
+    assert onde == edicao_video.FAIXAS_DOS_LADOS
+    assert (caixa[1], caixa[3]) == (0, 1000) and abs(caixa[0] - 200) <= 2 and abs(caixa[2] - 800) <= 2, caixa
+    # Ficam como estão: a foto de fundo branco (o produto no meio, com o branco em volta, e o produto
+    # largo, de uma beirada à outra, sem borda reta), a faixa só em cima, a faixa fina (menos de 3% da
+    # foto), a foto sem branco e a foto que não abre.
+    fundo_branco = Image.new("RGB", (1000, 1000), "white")
+    ImageDraw.Draw(fundo_branco).ellipse((300, 250, 700, 750), fill=(200, 120, 40))
+    largo = Image.new("RGB", (1000, 1000), "white")
+    ImageDraw.Draw(largo).ellipse((-40, 300, 1040, 700), fill=(40, 90, 200))
+    for foto in (_jpeg(fundo_branco), _jpeg(largo), _colada_no_branco(_listrada(1000, 840), (0, 160)),
+                 _colada_no_branco(_listrada(1000, 960), (0, 20)), _jpeg(_listrada(1000, 1000)), b"nao e imagem"):
+        assert edicao_video.faixas_brancas(foto) is None
+        assert edicao_video.sem_faixas_brancas(foto) is foto
+
+
+def test_edicao_anota_as_faixas_brancas_tiradas_da_foto(monkeypatch, tmp_path):
+    # O registro conta as fotos que perdem as faixas brancas antes das capas (P206 1 e P207 1), para o
+    # checkup mostrar; a foto sem as faixas não anota nada.
+    import api_gemini
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Mesa de jantar", "vantagem": "Para 4 pessoas", "capa": "Mesa e cadeiras",
+                                  "lugar": "alto"})
+
+    async def ia(prompt, imagens=None):
+        return '{"letras": false}'
+
+    async def ia_do_video(video, prompt):
+        return None
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", ia)
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", ia_do_video)
+    monkeypatch.setattr(edicao_video, "capa_com_chamada", lambda *a, **k: b"capa")
+    monkeypatch.setattr(edicao_video, "editar_2", lambda *a, **k: ("", {"textos": ["Mesa"], "legendas": 0}))
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {edicao_video.CHAVE_DA_CAPA: True})
+    fotos = (_colada_no_branco(_listrada(1000, 680), (0, 160)), _foto_jpg(),
+             _colada_no_branco(_listrada(600, 1000), (200, 0)))
+    for foto in fotos:
+        edicao_video.editar_para_postar("v.mp4", foto, str(tmp_path / "r.mp4"), "Mesa", anotar={})
+    linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DAS_FAIXAS_BRANCAS,
+                                                       "2000-01-01 00:00:00")
+    assert [r[2] for r in linhas] == [edicao_video.FAIXAS_EM_CIMA_E_EMBAIXO, edicao_video.FAIXAS_DOS_LADOS]
+
+
 def test_foto_em_tela_cheia_como_o_ffmpeg_punha_antes_da_moldura():
     # Vídeo do Rafael das 22:01 de 01/11 (P119): sem a capa, a foto do começo é a do anúncio no
     # maior tamanho que cabe na tela, no meio, no fundo preto (o FILTRO_720P), também a que não é
