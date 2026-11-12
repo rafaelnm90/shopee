@@ -2160,12 +2160,16 @@ ALERTA_DE_NOVO = timedelta(hours=1)
 DE_HORA_EM_HORA = ("Este alerta volta de hora em hora enquanto isso durar (o de antes sai daqui), e o "
                    f"{CELULAR_DE_VOLTA} avisa quando acabar.")
 UMA_VEZ_NA_SUSPENSAO = "Com a conta suspensa, este alerta vem uma vez só."
-# Cada alerta no registro (o checkup confere o de hora em hora e mostra o que não chegou ao Rafael).
+# Cada alerta no registro (o checkup confere o de hora em hora, mostra o que não chegou ao Rafael e
+# aponta o alerta de antes que ficou no privado). O detalhe diz o que houve com o de antes, no alerta
+# que chegou (vazio quando não havia um).
 PROCESSO_DO_ALERTA = "alerta do celular"
+O_DE_ANTES_SAIU = "o de antes saiu do privado"
+O_DE_ANTES_FICOU = "o de antes ficou no privado"
 
 
-def _anotar_alerta(resultado, ok=True, agora=None):
-    registro_processos.registrar(REGISTRO, PROCESSO_DO_ALERTA, resultado, ok=ok, agora=agora)
+def _anotar_alerta(resultado, ok=True, agora=None, detalhe=""):
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_ALERTA, resultado, detalhe, ok=ok, agora=agora)
 
 
 class TelaSemUso(Exception):
@@ -2198,12 +2202,16 @@ def _alertar(texto, anterior=None):
     """
     Manda um alerta do celular e, se ele chegou, apaga do privado o de antes (anterior: o id dele; o
     Telegram só deixa apagar até 48 h). Devolve o id do novo, ou None quando ele não chegou (o de antes
-    fica, e o alerta tenta de novo na vez seguinte).
+    fica, e o alerta tenta de novo na vez seguinte), e o detalhe do registro sobre o de antes:
+    O_DE_ANTES_SAIU, O_DE_ANTES_FICOU (o Telegram recusou, ou ele foi sem o id) ou vazio (o novo não
+    chegou, ou não havia um).
     """
     ident = avisar_com_id(texto)
-    if ident and isinstance(anterior, int) and not isinstance(anterior, bool):
-        avisar_rafael.apagar_mensagem(anterior)
-    return ident
+    if not ident or not anterior:
+        return ident, ""
+    if isinstance(anterior, bool) or not isinstance(anterior, int):
+        return ident, O_DE_ANTES_FICOU
+    return ident, O_DE_ANTES_SAIU if avisar_rafael.apagar_mensagem(anterior) else O_DE_ANTES_FICOU
 
 
 def _hora_de_alertar(ultimo, agora=None):
@@ -2228,12 +2236,13 @@ def _sem_a_tela(problema, carga, agora=None):
     na_suspensao = suspensa(ler_config(), agora)
     if novo or (not na_suspensao and _hora_de_alertar(estado.get("tela_avisada_em"), agora)):
         fecho = UMA_VEZ_NA_SUSPENSAO if na_suspensao else DE_HORA_EM_HORA
-        ident = _alertar(f"{CELULAR_DESLIGADO}\n\n{AVISOS_DA_TELA[problema].format(carga=carga)}\n\n{fecho}",
-                         estado.get("tela_avisada_id"))
+        ident, o_de_antes = _alertar(
+            f"{CELULAR_DESLIGADO}\n\n{AVISOS_DA_TELA[problema].format(carga=carga)}\n\n{fecho}",
+            estado.get("tela_avisada_id"))
         if ident:
             gravar_estado(tela_avisada=problema, tela_avisada_em=_momento(agora), tela_avisada_id=ident)
         _anotar_alerta(("celular desligado: 1º alerta" if novo else "celular desligado: de novo") if ident
-                       else "celular desligado: não chegou", ok=bool(ident), agora=agora)
+                       else "celular desligado: não chegou", ok=bool(ident), agora=agora, detalhe=o_de_antes)
     return TelaSemUso(MOTIVOS_DA_TELA[problema].format(carga=carga), problema, novo)
 
 
@@ -8036,12 +8045,12 @@ def pausar_por_desconexao(motivo, agora=None):
                                                                 robo_pausa_motivo=MOTIVO_DA_DESCONEXAO))
     logger.warning(f"⚠️ [Robô Shopee Vídeo] Celular desconectado ({motivo}): Postagem pausada.")
     anterior = (ler_estado().get("alerta_desconectado") or {}).get("id")
-    ident = _alertar(_alerta_desconectado(motivo), anterior)
+    ident, o_de_antes = _alertar(_alerta_desconectado(motivo), anterior)
     # Sem o alerta (o Telegram fora), a hora fica vazia, e o painel tenta de novo em 15 min.
     gravar_estado(alerta_desconectado={"motivo": motivo, "em": _momento(agora) if ident else "",
                                        "id": ident or anterior})
     _anotar_alerta("celular desconectado: 1º alerta" if ident else "celular desconectado: não chegou",
-                   ok=bool(ident), agora=agora)
+                   ok=bool(ident), agora=agora, detalhe=o_de_antes)
 
 
 def fim_do_alerta_desconectado(como="o Retomar Postagem", agora=None):
@@ -8076,12 +8085,12 @@ def lembrar_celular_desconectado(agora=None):
         return "de volta"
     if not _hora_de_alertar(alerta.get("em"), agora):
         return None
-    ident = _alertar(_alerta_desconectado(alerta.get("motivo") or "sem o motivo"), alerta.get("id"))
+    ident, o_de_antes = _alertar(_alerta_desconectado(alerta.get("motivo") or "sem o motivo"), alerta.get("id"))
     if not ident:
         _anotar_alerta("celular desconectado: não chegou", ok=False, agora=agora)
         return "alerta não chegou"
     gravar_estado(alerta_desconectado={**alerta, "em": _momento(agora), "id": ident})
-    _anotar_alerta("celular desconectado: de novo", agora=agora)
+    _anotar_alerta("celular desconectado: de novo", agora=agora, detalhe=o_de_antes)
     return "alertado de novo"
 
 

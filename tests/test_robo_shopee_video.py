@@ -924,12 +924,12 @@ def _registros_da_tela(monkeypatch):
 
 
 def _alertas_anotados(monkeypatch):
-    """Os alertas do celular no registro (P205 1), como (resultado, ok)."""
+    """Os alertas do celular no registro (P205 1), como (resultado, detalhe, ok)."""
     anotados, registrar = [], robo.registro_processos.registrar
 
     def anotar(quem, processo, resultado, detalhe="", ok=None, **outros):
         if processo == robo.PROCESSO_DO_ALERTA:
-            anotados.append((resultado, ok))
+            anotados.append((resultado, detalhe, ok))
         return registrar(quem, processo, resultado, detalhe, ok, **outros)
 
     monkeypatch.setattr(robo.registro_processos, "registrar", anotar)
@@ -1054,10 +1054,12 @@ def test_celular_desligado_alerta_de_hora_em_hora_apagando_o_de_antes(monkeypatc
     _tela(monkeypatch, True, NO_CARREGADOR, bloqueio=False)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 13:30")) == "rascunho salvo"
     assert [a for a in avisos if a.startswith(robo.CELULAR_DE_VOLTA)] and robo.ler_estado()["tela_avisada_id"] is None
-    # Cada alerta no registro: o checkup confere o de hora em hora e mostra o que não chegou.
-    assert anotados == [("celular desligado: 1º alerta", True), ("celular desligado: de novo", True),
-                        ("celular desligado: não chegou", False), ("celular desligado: de novo", True),
-                        ("celular de volta: a tela", True)]
+    # Cada alerta no registro: o checkup confere o de hora em hora, mostra o que não chegou e aponta o
+    # alerta de antes que ficou no privado.
+    saiu = robo.O_DE_ANTES_SAIU
+    assert anotados == [("celular desligado: 1º alerta", "", True), ("celular desligado: de novo", saiu, True),
+                        ("celular desligado: não chegou", "", False), ("celular desligado: de novo", saiu, True),
+                        ("celular de volta: a tela", "", True)]
 
 
 def test_celular_desligado_na_suspensao_alerta_uma_vez_so(monkeypatch, avisos, apagados):
@@ -1102,9 +1104,24 @@ def test_celular_desconectado_alerta_de_hora_em_hora_ate_voltar(monkeypatch, avi
     assert robo.lembrar_celular_desconectado(momento("2026-10-22 14:30")) is None
     # O Retomar Postagem ▶️ acaba com os alertas (o painel diz o CELULAR DE VOLTA).
     assert robo.fim_do_alerta_desconectado() is True and robo.fim_do_alerta_desconectado() is False
-    assert anotados == [("celular desconectado: 1º alerta", True), ("celular desconectado: de novo", True),
-                        ("celular de volta: o servidor achou o celular", True),
-                        ("celular desconectado: 1º alerta", True), ("celular de volta: o Retomar Postagem", True)]
+    assert anotados == [("celular desconectado: 1º alerta", "", True),
+                        ("celular desconectado: de novo", robo.O_DE_ANTES_SAIU, True),
+                        ("celular de volta: o servidor achou o celular", "", True),
+                        ("celular desconectado: 1º alerta", "", True), ("celular de volta: o Retomar Postagem", "", True)]
+
+
+def test_alerta_do_celular_anota_quando_o_de_antes_fica_no_privado(monkeypatch, avisos):
+    # P205 1: o registro de cada alerta diz se o de antes saiu do privado, e o checkup aponta o que ficou:
+    # o Telegram recusa apagar (só deixa até 48 h), ou o de antes foi sem o id.
+    ativar(robo_inicio=0, robo_fim=24, robo_pausado=True, robo_pausa_motivo=robo.MOTIVO_DA_DESCONEXAO)
+    anotados = _alertas_anotados(monkeypatch)
+    monkeypatch.setattr(robo.celular_robo, "pareando_agora", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.avisar_rafael, "apagar_mensagem", lambda ident: False)
+    for anterior in (7, True):
+        robo.gravar_estado(alerta_desconectado={"motivo": "x", "em": "2026-10-22 09:00:00", "id": anterior})
+        assert robo.lembrar_celular_desconectado(momento("2026-10-22 10:00")) == "alertado de novo"
+    assert anotados == [("celular desconectado: de novo", robo.O_DE_ANTES_FICOU, True)] * 2
 
 
 def test_celular_desconectado_sem_pausa_ou_na_suspensao_nao_alerta_de_novo(monkeypatch, avisos, apagados):
