@@ -1080,6 +1080,10 @@ def linhas_dos_itens(escolhas):
 def texto_itens(config):
     """A tela dos Itens do Vídeo. Escolhas do Rafael (10/11, P191 1 e P192 1): DECISOES.md, Shopee Vídeo."""
     liga = {chave: (liga, desliga) for chave, _nome, liga, desliga in ITENS_DE_LIGAR}
+    # A legenda grande do meio está em teste até 15/11 (P211): DECISOES.md, Shopee Vídeo.
+    onde_vai_a_legenda = ("grandes, no meio da tela, na mesma letra no vídeo todo e mudando de altura quando "
+                          "cobriria o produto (em teste até 15/11)" if edicao_video.LEGENDA_NO_MEIO
+                          else "embaixo, ao lado das setinhas")
     return (
         "🧩 <b>Itens do Vídeo</b>\n"
         "O que vai por cima dos próximos vídeos editados (rascunhos do robô e modo assistente) e dos exemplos dos "
@@ -1093,7 +1097,7 @@ def texto_itens(config):
         "criador pôs coisa ali, a miniatura diminui ou fica de fora, como no da direita).\n"
         f"🚫 <b>{BOTAO_SEM_MINIATURA}</b>: os vídeos vão sem a miniatura.\n"
         f"💬 <b>{liga['legenda'][0]}</b> / <b>{liga['legenda'][1]}</b>: as palavras faladas no vídeo, escritas "
-        "embaixo, ao lado das setinhas.\n"
+        f"{onde_vai_a_legenda}.\n"
         f"⬇️ <b>{liga['setinhas'][0]}</b> / <b>{liga['setinhas'][1]}</b>: as setinhas em cascata, apontando para "
         "o cartão do produto.\n"
         f"🔲 <b>{liga['moldura'][0]}</b> / <b>{liga['moldura'][1]}</b>: a moldura em volta do cartão do produto "
