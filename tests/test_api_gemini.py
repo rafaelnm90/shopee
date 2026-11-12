@@ -17,11 +17,12 @@ def gemini(monkeypatch):
     """Cascata de 3 modelos com respostas falsas: erro (texto) ou o texto devolvido."""
     monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["a", "b", "c"])
     monkeypatch.setattr(ia, "_fora_ate", {})
-    estado = SimpleNamespace(respostas={}, chamadas=[], conteudos=[])
+    estado = SimpleNamespace(respostas={}, chamadas=[], conteudos=[], configs=[])
 
-    def generate_content(model, contents):
+    def generate_content(model, contents, config=None):
         estado.chamadas.append(model)
         estado.conteudos.append(contents)
+        estado.configs.append(config)
         resposta = estado.respostas.get(model, "ok")
         if resposta.startswith(("429", "404", "500")):
             raise RuntimeError(resposta)
@@ -79,6 +80,42 @@ def test_erro_comum_nao_tira_da_cascata(gemini):
     rodar(ia.gerar_texto_gemini("p"))
     rodar(ia.gerar_texto_gemini("p"))
     assert gemini.chamadas == ["a", "b", "a", "b"]
+
+
+class _RelogioDaIA:
+    """O time do api_gemini com o monotonic de mentira, em marcas dadas (o do asyncio continua o de verdade)."""
+    def __init__(self, marcas):
+        self.marcas = iter(marcas)
+
+    def monotonic(self):
+        return next(self.marcas)
+
+    def __getattr__(self, nome):
+        return getattr(time, nome)
+
+
+def test_cada_pedido_aos_modelos_tem_limite_de_tempo(video_no_gemini):
+    # 12/11: sem limite, o modelo com problema no Google segurava o pedido até o Google desistir (o
+    # título de 2 rascunhos levou 21 min). Cada pedido leva o limite; passado ele, vale o próximo modelo.
+    assert rodar(ia.gerar_texto_gemini("p")) == "ok"
+    assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "ok"
+    assert [config.http_options.timeout for config in video_no_gemini.configs] == [ia.LIMITE_DA_RESPOSTA_S * 1000] * 2
+
+
+def test_modelo_que_falha_depois_de_muito_tempo_fica_de_fora_um_tempo(gemini, monkeypatch):
+    # O erro do servidor que vem depois de minutos (ou o limite de tempo) tira o modelo da cascata por
+    # ESPERA_MODELO_LENTO_S, para todos os robôs, como o sem cota; o erro rápido continua sem tirar.
+    import db
+    gemini.respostas = {"a": "500 INTERNAL", "b": "texto do b"}
+    monkeypatch.setattr(ia, "time", _RelogioDaIA([0.0, 300.0, 300.0, 310.0]))
+    assert rodar(ia.gerar_texto_gemini("p")) == "texto do b"
+    monkeypatch.setattr(ia, "time", time)
+    assert rodar(ia.gerar_texto_gemini("p")) == "texto do b"
+    assert gemini.chamadas == ["a", "b", "b"]
+    volta = db.ler_config(ia.CHAVE_DA_PAUSA)["a"]
+    assert time.time() + ia.ESPERA_MODELO_LENTO_S - 60 < volta <= time.time() + ia.ESPERA_MODELO_LENTO_S
+    assert ia.tempo_fora_pela_demora(ia.DEMORA_QUE_TIRA_DA_VEZ_S - 1) is None
+    assert ia.tempo_fora_pela_demora(ia.LIMITE_DA_RESPOSTA_S) == (ia.ESPERA_MODELO_LENTO_S, "lento")
 
 
 def test_todos_de_fora_tenta_todos_mesmo_assim(gemini):
@@ -155,11 +192,12 @@ def video_no_gemini(monkeypatch):
     monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["a", "b", "c"])
     monkeypatch.setattr(ia, "_fora_ate", {})
     monkeypatch.setattr(ia, "ULTIMO_ERRO_IA", None)
-    estado = SimpleNamespace(respostas={}, conteudos=[])
+    estado = SimpleNamespace(respostas={}, conteudos=[], configs=[])
     arquivo = SimpleNamespace(name="files/1", state=SimpleNamespace(name="ACTIVE"))
 
-    def generate_content(model, contents):
+    def generate_content(model, contents, config=None):
         estado.conteudos.append(contents)
+        estado.configs.append(config)
         resposta = estado.respostas.get(model, "ok")
         if resposta.startswith(("429", "404", "500")):
             raise RuntimeError(resposta)
@@ -258,5 +296,14 @@ def test_analise_do_video_mede_o_envio_o_processamento_e_a_resposta(video_no_gem
     ia.zerar_tempos_da_ia()
     assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "ok"
     assert ia.TEMPOS_DA_IA == {"analises": 1, "envio": 30.0, "processamento": 600.0, "resposta": 70.0, "modelos": 2}
+    # 12/11: os 21 min de 2 títulos não diziam qual modelo segurou o pedido. O mais demorado fica anotado.
+    assert ia.MAIS_LENTO == {"modelo": "b", "segundos": 60.0, "resultado": "respondeu"}
     ia.zerar_tempos_da_ia()
     assert ia.TEMPOS_DA_IA == {"analises": 0, "envio": 0.0, "processamento": 0.0, "resposta": 0.0, "modelos": 0}
+    assert ia.MAIS_LENTO is None
+    # O que falha devagar também conta, com o tipo do erro, e sai da cascata por um tempo.
+    video_no_gemini.respostas = {"a": "500 instável", "b": "ok"}
+    marcas = iter([0.0, 1.0, 1.0, 2.0, 2.0, 302.0, 302.0, 312.0])
+    assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "ok"
+    assert ia.MAIS_LENTO == {"modelo": "a", "segundos": 300.0, "resultado": "erro RuntimeError"}
+    assert ia._modelos_da_vez() == ["b", "c"]
