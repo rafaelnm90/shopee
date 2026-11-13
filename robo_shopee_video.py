@@ -1791,7 +1791,14 @@ def reabrir_o_app_antigo_ou_sem_memoria(d, motivo):
     pela_memoria = memoria is not None and memoria[0] > MEMORIA_PARA_REABRIR
     if not pelo_tempo and not pela_memoria:
         return False
-    processo = PROCESSO_DO_APP_REABERTO if produto else PROCESSO_DA_PAGINA_EM_BRANCO
+
+    def anotar(resultado, detalhe, ok):
+        # Cada problema no registro dele, com o nome fixo que o checkup conhece.
+        if produto:
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_APP_REABERTO, resultado, detalhe, ok=ok)
+        else:
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_PAGINA_EM_BRANCO, resultado, detalhe, ok=ok)
+
     leituras = ([f"o app aberto há {faixa_do_app_aberto(minutos)}"] if minutos is not None else []) + (
         [f"a memória do app {faixa_da_memoria_do_app(memoria[0])}"] if memoria else [])
     detalhe = (" e ".join(razao for razao, vale in (("pelo tempo aberto", pelo_tempo), ("pela memória", pela_memoria))
@@ -1806,12 +1813,12 @@ def reabrir_o_app_antigo_ou_sem_memoria(d, motivo):
         # O celular que não responde no meio (o adb que cai) não muda o que a parada já decidiu: o
         # resto dela segue, e a próxima rodada começa do início do app, como sempre.
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Não consegui fechar e reabrir o app: {type(e).__name__}")
-        registro_processos.registrar(REGISTRO, processo, "não reabriu", f"{detalhe}; {type(e).__name__}", ok=False)
+        anotar("não reabriu", f"{detalhe}; {type(e).__name__}", ok=False)
         return False
     if verificacao:
-        registro_processos.registrar(REGISTRO, processo, "a Verificação apareceu", detalhe, ok=False)
+        anotar("a Verificação apareceu", detalhe, ok=False)
         raise Verificacao()
-    registro_processos.registrar(REGISTRO, processo, "fechado e reaberto", detalhe, ok=True)
+    anotar("fechado e reaberto", detalhe, ok=True)
     return True
 
 
