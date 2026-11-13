@@ -189,6 +189,11 @@ def _linhas_dos_produtos_a_mais(pedidos, postados, desde, ate):
 
 # O relatório privado (P13): os produtos que mais renderam e os dias da semana.
 PRODUTOS_NO_RELATORIO_PRIVADO = 25
+# A origem de cada produto vendido, pelo tipo de canal que a Shopee informa (channelType: a Shopee Vídeo,
+# os links das redes, a live): diz se o que vende vem dos vídeos e de quais produtos (P223). Os pedidos
+# guardados antes de o bot ler o campo ficam como não informada.
+PRODUTOS_POR_ORIGEM = 5
+SEM_ORIGEM = "(não informada)"
 DIAS_DA_SEMANA = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
 
 
@@ -272,6 +277,21 @@ def relatorio_privado(pedidos, agora):
           cancelados_por_canal.get(nome, 0)) for nome, c in _ordenados(canais)]
         + [(NOMES_DOS_CANAIS.get(nome, nome), 0, _reais(0), "0%", _reais(0), n)
            for nome, n in sorted(cancelados_por_canal.items()) if nome not in canais])
+    origens = {}
+    for p in validos.values():
+        for item in p.get("itens") or []:
+            conta = origens.setdefault(item.get("tipo") or SEM_ORIGEM, {"qtd": 0, "comissao": 0.0, "produtos": {}})
+            valor = float(item.get("comissao") or 0)
+            conta["qtd"] += int(item.get("qtd") or 1)
+            conta["comissao"] += valor
+            nome = (item.get("nome") or item.get("id") or "?")[:60]
+            conta["produtos"][nome] = conta["produtos"].get(nome, 0.0) + valor
+    linhas += ["", "## Por origem da venda (o tipo de canal que a Shopee informa em cada produto)", ""] + _tabela(
+        ("origem", "unidades", "comissão", f"os {PRODUTOS_POR_ORIGEM} que mais renderam"),
+        [(tipo, c["qtd"], _reais(c["comissao"]),
+          "; ".join(f"{nome} {_reais(valor)}" for nome, valor in
+                    sorted(c["produtos"].items(), key=lambda x: (-x[1], x[0]))[:PRODUTOS_POR_ORIGEM]))
+         for tipo, c in sorted(origens.items(), key=lambda x: (-x[1]["comissao"], x[0]))])
     linhas += ["", "## Por etiqueta completa", ""] + _tabela(
         ("etiqueta", "pedidos", "comissão"), [(nome, c["pedidos"], _reais(c["comissao"]))
                                                for nome, c in _ordenados(etiquetas)])
