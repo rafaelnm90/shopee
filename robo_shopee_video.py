@@ -2698,6 +2698,11 @@ def abrir_saude(d, agora=None):
     ir_ao_perfil(d)
     anotar_seguidores(tela(d), agora)
     botao, espera, _quadro = CAMINHO_CENTRO_DO_CRIADOR[0]
+    # O Perfil mostra o alto (os números e o Postar vídeo) antes do resto, que vem pela rede: em
+    # 13/11, às 00:28, o Centro do criador ainda não estava na tela 8 s depois do toque no Perfil.
+    # O robô relê a tela por até ESPERA_A_MAIS_NO_CAMINHO antes de dar a leitura por parada.
+    if not esperar_na_tela(d, botao, ESPERA_A_MAIS_NO_CAMINHO):
+        raise Parada(f"não achei {botao} na tela")
     tocar(d, botao, espera)
     xml, ponto = None, None
     voltas = max(1, ESPERA_DA_SAUDE // 3)
@@ -3674,6 +3679,28 @@ def _marcar(d):
     return marcados
 
 
+def _abrir_meus_favoritos(d):
+    """
+    Do início do app: Eu → Criadores & Afiliados → Meus favoritos. Devolve como a lista abriu
+    (pagina_dos_favoritos: "com produtos" ou "vazia"); sem ela, a rodada para.
+    """
+    ir_ao_inicio(d)
+    tocar(d, "Eu", 5)
+    if not esperar_na_tela(d, CRIADORES_E_AFILIADOS, 9):
+        ps.rolar(d)
+        pausa(2)
+        if not tem(tela(d), CRIADORES_E_AFILIADOS):
+            raise Parada("não achei Criadores & Afiliados na aba Eu")
+    tocar(d, CRIADORES_E_AFILIADOS, 6)
+    if not esperar_na_tela(d, ABA_DE_AFILIADO, 12) or not tem(tela(d), MEUS_FAVORITOS):
+        raise Parada("a área de Criadores & Afiliados não abriu com Meus favoritos")
+    tocar(d, MEUS_FAVORITOS, 6)
+    pagina = pagina_dos_favoritos(d)
+    if pagina is None:
+        raise Parada("Meus favoritos não abriu (nem produtos, nem o filtro da lista)")
+    return pagina
+
+
 def descurtir_tudo(d, agora=None):
     """
     A rotina das 4h: tira de Meus favoritos (a lista de afiliado, a do Minhas Curtidas) tudo o
@@ -3696,27 +3723,14 @@ def _descurtir_os_de_afiliado(d, agora=None):
     inválido (que saiu da loja), que o Like não tira, fica: sobrando só ele, a lista acabou. Só
     números no registro, nunca o nome dos produtos. (o que dizer, se a lista acabou)
     """
-    ir_ao_inicio(d)
-    tocar(d, "Eu", 5)
-    if not esperar_na_tela(d, CRIADORES_E_AFILIADOS, 9):
-        ps.rolar(d)
-        pausa(2)
-        if not tem(tela(d), CRIADORES_E_AFILIADOS):
-            raise Parada("não achei Criadores & Afiliados na aba Eu")
-    tocar(d, CRIADORES_E_AFILIADOS, 6)
-    if not esperar_na_tela(d, ABA_DE_AFILIADO, 12) or not tem(tela(d), MEUS_FAVORITOS):
-        raise Parada("a área de Criadores & Afiliados não abriu com Meus favoritos")
-    tocar(d, MEUS_FAVORITOS, 6)
-    pagina = pagina_dos_favoritos(d)
-    if pagina is None:
-        raise Parada("Meus favoritos não abriu (nem produtos, nem o filtro da lista)")
+    pagina = _abrir_meus_favoritos(d)
     fora = "" if na_hora_do_descurtir(agora) else FORA_DA_HORA
     if pagina == "vazia":
         registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", fora, ok=True)
         gravar_estado(favoritos_limpos=True)
         ir_ao_inicio(d)
         return "nada curtido em Meus favoritos", True
-    removidos, acabou, invalidos = 0, False, 0
+    removidos, acabou, invalidos, reaberta = 0, False, 0, False
     for _volta in range(VOLTAS_DO_DESCURTIR):
         xml = tela(d)
         if not caixas_de_marcar(xml)[1]:
@@ -3746,6 +3760,16 @@ def _descurtir_os_de_afiliado(d, agora=None):
             if invalidos:
                 acabou = True
                 break
+            if not reaberta:
+                # A lista da tela pode estar velha: em 13/11, às 04:13, o 1º Like tirou os 2 produtos e
+                # limpou a marcação, mas eles continuaram na tela, e o 2º Like, neles, não fez nada (na
+                # rodada seguinte, a lista aberta de novo só tinha 1 inválido). Antes de dar por
+                # parada, o robô abre a lista de novo uma vez, e ela vem como a Shopee guardou.
+                reaberta = True
+                if _abrir_meus_favoritos(d) == "vazia":
+                    acabou = True
+                    break
+                continue
             raise Parada(f"toquei em Like, mas os produtos marcados continuaram em Meus favoritos "
                          f"({marcados} marcado(s); {produtos_invalidos(xml)} inválido(s) na tela)")
         # O inválido marcado junto continua marcado depois do Like: não conta como tirado.
@@ -3757,6 +3781,7 @@ def _descurtir_os_de_afiliado(d, agora=None):
     gravar_estado(descurtir_continuar=not acabou, favoritos_limpos=acabou)
     ir_ao_inicio(d)
     ficam = f"; {invalidos} inválido(s) ficam" if invalidos else ""
+    ficam += "; a lista aberta de novo" if reaberta else ""
     registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "descurtido" if acabou else "continua depois",
                                  f"{removidos} produto(s){ficam}" + (f"; {fora}" if fora else ""),
                                  ok=True if acabou else None)
