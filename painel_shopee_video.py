@@ -1018,7 +1018,7 @@ def texto_edicao(config):
     return (
         "✂️ <b>Edição dos Vídeos</b>\n"
         f"<b>Editor 1 sem legendas</b>: o robô edita o vídeo como você faz no LumaFusion: a foto do anúncio do "
-        f"produto nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela "
+        f"produto nos primeiros {_tempo_da_foto()} s e, até o fim do vídeo, uma miniatura dela "
         "no canto de cima à direita e as setinhas vermelhas em cascata, apontando para o cartão do produto, embaixo à "
         "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
         "(a foto do produto, um quadro ou um texto), a nossa miniatura vai inteira para o outro canto de cima, se "
@@ -1169,7 +1169,7 @@ def texto_capa(config, medicao):
         "miniatura continuam na cor do produto.\n\n"
         "<b>O número de visualizações</b>: fica embaixo, em cima da foto, como nos outros posts do perfil, longe da "
         "frase (escolha sua, P196). Nos vídeos fixados, o selo Fixado cobre o começo da frase.\n\n"
-        f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos, no lugar "
+        f"<b>Como ela entra</b>: no próprio vídeo, nos primeiros {_tempo_da_foto()} s, no lugar "
         "da foto do anúncio: o app usa o 1º quadro do vídeo como capa da grade, e todo post sai com a frase, mesmo "
         "com o app lento. Logo depois, ela dá lugar à capa do vídeo aberto: a mesma faixa, com a frase parada no "
         "alto (escolha sua, P189), e a foto inteira logo abaixo, acima do cartão do produto. A passagem suave "
@@ -1575,6 +1575,11 @@ def _segundos(valor):
     return f"{valor:.0f} s".replace(".", ",")
 
 
+def _tempo_da_foto():
+    """Os segundos da foto do começo do vídeo editado como se escrevem (1,5; P221 1)."""
+    return f"{edicao_video.SEGUNDOS_DA_FOTO:g}".replace(".", ",")
+
+
 def _linha_dos_textos(textos):
     return "🔤 Textos na tela: " + ", ".join(f"“{html_escape(t)}”" for t in textos)
 
@@ -1663,7 +1668,7 @@ def legenda_das_versoes(nome, resumo, indice, editor):
                       + (" e segue dali; o que vinha antes vai para o fim" if gancho[0] >= 0.5 else ""))
     else:
         linhas.append(_linha_do_original(editor))
-    linhas.append(f"⏱️ {_segundos(versao.get('remontado', 0))} (mais os {edicao_video.SEGUNDOS_DA_FOTO} s da foto)"
+    linhas.append(f"⏱️ {_segundos(versao.get('remontado', 0))} (mais os {_tempo_da_foto()} s da foto)"
                   + _tamanho_da_versao(versoes, indice, resumo.get("inteiro")))
     if gancho:
         linhas += _linhas_da_remontagem(resumo.get("remontagem") or {})
