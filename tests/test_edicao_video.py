@@ -360,13 +360,13 @@ def test_capa_da_bebida_alcoolica_tem_a_foto_e_os_tres_avisos(monkeypatch, tmp_p
     comandos = _programas(monkeypatch)
     destino = tmp_path / "editado.mp4"
     assert edicao_video.editar(str(tmp_path / "v.mp4"), _foto_jpg(), str(destino), avisos=True) == ""
-    ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
+    ffmpeg = _edicoes(comandos)[0]
     assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
     comandos.clear()
     # Sem os avisos, a abertura é a foto do anúncio em tela cheia, montada à parte: a foto que vai
     # ao ffmpeg é a da miniatura, com a moldura (P115), e a do começo vai sem ela (P119).
     assert edicao_video.editar(str(tmp_path / "v.mp4"), _foto_jpg(), str(destino)) == ""
-    ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
+    ffmpeg = _edicoes(comandos)[0]
     assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
 
 
@@ -403,13 +403,69 @@ def test_video_sem_som_sai_sem_som(monkeypatch, tmp_path):
 def test_sem_foto_foto_que_nao_abre_ou_ffmpeg_falhou_nao_deixa_arquivo(monkeypatch, tmp_path):
     destino = str(tmp_path / "r.mp4")
     assert edicao_video.editar("video.mp4", None, destino) == "a foto do anúncio não veio"
-    # Uma imagem que não abre prenderia o ffmpeg em laço: nem chega a ele.
+    # Uma imagem que não abre prenderia o ffmpeg em laço: nem chega a ele (só a medida do som do vídeo, P222 1).
     comandos = _programas(monkeypatch, largura_da_foto="0")
     assert edicao_video.editar("video.mp4", b"x", destino) == "a foto do anúncio não é uma imagem que abre"
-    assert all(c[0] == "ffprobe" for c in comandos)
+    assert comandos and all(c[0] == "ffprobe" for c in comandos if c not in _medidas_do_som(comandos))
     _programas(monkeypatch, codigo_ffmpeg=1)
     assert edicao_video.editar("video.mp4", b"foto", destino) == "o ffmpeg falhou (código 1)"
     assert not os.path.exists(destino)
+
+
+def _medidas_do_som(comandos):
+    """Os comandos do ffmpeg que só medem o volume do som do vídeo (videos.volume_do_som, P222 1)."""
+    return [c for c in comandos if c[0] == "ffmpeg" and "loudnorm=print_format=json" in c]
+
+
+def _edicoes(comandos):
+    """Os comandos do ffmpeg que editam o vídeo, sem os que só medem o som."""
+    return [c for c in comandos if c[0] == "ffmpeg" and c not in _medidas_do_som(comandos)]
+
+
+def test_ganho_do_som_leva_ao_volume_das_musicas_com_teto_na_subida():
+    # Escolha do Rafael (13/11, P222 1): todo vídeo editado sai no volume das nossas músicas (-16 LUFS), sem
+    # estourar; o baixinho sobe no máximo 10 dB, e a diferença que não se ouve (menos de 1 dB) fica como veio.
+    ganho = edicao_video.ganho_do_som
+    assert (ganho(-20.0), ganho(-10.0), ganho(-30.0), ganho(-16.5), ganho(-15.2), ganho(-14.9), ganho(None)) == (
+        4.0, -6.0, 10.0, 0.0, 0.0, -1.1, 0.0)
+
+
+def test_editar_iguala_o_volume_do_som_e_o_registro_conta(monkeypatch, tmp_path):
+    # P222 1: a edição mede o som do vídeo e o leva ao volume das nossas músicas; com a música de fundo (o vídeo
+    # mudo, P55), ela é o som, e nada é medido. O que vai ao ar anota quanto o som subiu ou desceu.
+    import registro_processos as rp
+    pedidos, medidos = [], []
+    monkeypatch.setattr(edicao_video.videos, "volume_do_som", lambda video, *a, **k: medidos.append(video) or -26.0)
+    monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura",
+                        lambda video, foto, destino, *args, **opcoes: pedidos.append(opcoes.get("ganho")) or "")
+    anotado = {}
+    assert edicao_video.editar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), anotar=anotado) == ""
+    assert pedidos == [10.0] and anotado["volume"] == {"medido": -26.0, "ganho": 10.0}
+    medidos.clear()
+    assert edicao_video.editar("v.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), musica="m.m4a") == ""
+    assert pedidos[-1] == 0.0 and medidos == []
+    # No que vai ao ar (o Editor 2 e o Editor 1 de reserva), o registro diz quanto o som subiu ou desceu.
+    montados, _editados = _versoes_de_mentira(monkeypatch)
+    volumes = [{"medido": -26.0, "ganho": 10.0}, {"medido": -9.0, "ganho": -7.0}, {"medido": -15.6, "ganho": 0.0}]
+
+    def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+        if anotar is not None:
+            anotar["volume"] = volumes.pop(0)
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa", "vantagem": "Leve", "falas": [], "lugar": "alto"})
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")[0] == ""
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")[0] == ""
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo",
+                        lambda video, trechos, destino, letreiros=(), espera=300: "o ffmpeg falhou")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")[1] == edicao_video.SO_COM_O_EDITOR_1
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_VOLUME, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [
+        ("subiu", "+10.0 dB (no limite da subida); o som estava em -26.0 LUFS"),
+        ("desceu", "-7.0 dB; o som estava em -9.0 LUFS"),
+        ("ficou como veio", "+0.0 dB; o som estava em -15.6 LUFS")]
 
 
 def test_ffmpeg_que_demora_demais_desiste(monkeypatch, tmp_path):

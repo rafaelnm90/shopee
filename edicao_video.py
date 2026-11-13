@@ -168,6 +168,14 @@ MUSICAS = (("animada", "musica_animada.m4a"), ("calma", "musica_calma.m4a"),
            ("divertida", "musica_divertida.m4a"))
 PASTA_DA_MIDIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia")
 MUSICA_DA_VEZ = "musica_de_fundo_da_vez"
+# O som de cada vídeo editado vai ao volume das nossas músicas de fundo (-16 LUFS, o das redes, P55),
+# sem estourar: o que veio baixinho sobe no máximo SUBIDA_MAXIMA_DO_SOM (para não aumentar o chiado), e a
+# diferença menor que DIFERENCA_QUE_NAO_SE_OUVE fica como veio. O registro anota quanto cada um subiu ou
+# desceu (PROCESSO_DO_VOLUME). Escolha do Rafael (13/11, P222 1): DECISOES.md, Shopee Vídeo.
+VOLUME_DAS_MUSICAS = -16.0
+SUBIDA_MAXIMA_DO_SOM = 10.0
+DIFERENCA_QUE_NAO_SE_OUVE = 1.0
+PROCESSO_DO_VOLUME = "edição do vídeo: volume do som"
 
 
 def ligada():
@@ -194,6 +202,32 @@ def musicas_de_fundo(video, quantas=1):
 
 def _caminho(musica):
     return musica[1] if musica else None
+
+
+def ganho_do_som(medido):
+    """
+    Quantos dB o som do vídeo (medido em LUFS: videos.volume_do_som) sobe ou desce para chegar ao
+    VOLUME_DAS_MUSICAS, subindo no máximo SUBIDA_MAXIMA_DO_SOM; 0 sem a medida ou quando a diferença não se
+    ouve (P222 1).
+    """
+    if medido is None:
+        return 0.0
+    ganho = VOLUME_DAS_MUSICAS - medido
+    if abs(ganho) < DIFERENCA_QUE_NAO_SE_OUVE:
+        return 0.0
+    return round(min(ganho, SUBIDA_MAXIMA_DO_SOM), 1)
+
+
+def _registrar_o_volume(volume):
+    """O registro de quanto o som do vídeo subiu ou desceu (volume: o "volume" que editar anota, P222 1)."""
+    if not volume:
+        return
+    ganho = volume.get("ganho") or 0.0
+    resultado = "subiu" if ganho > 0 else "desceu" if ganho < 0 else "ficou como veio"
+    limite = " (no limite da subida)" if ganho >= SUBIDA_MAXIMA_DO_SOM else ""
+    registro_processos.registrar("shopee_video", PROCESSO_DO_VOLUME, resultado,
+                                 f"{ganho:+.1f} dB{limite}; o som estava em {volume.get('medido', 0.0):.1f} LUFS",
+                                 ok=None)
 
 
 def vale_para(fonte):
@@ -1288,7 +1322,9 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     P192 1): a miniatura à direita, à esquerda ou sem ela, as setinhas e a moldura do cartão com ou
     sem, e a cor das duas (cor_do_destaque). As setinhas e a moldura somem enquanto uma coisa que o
     criador pôs por cima (por_cima, P212 1) passa pelo lugar delas (tempos_sob_o_criador, P218 1);
-    anotar (dict), quando vem, recebe esses trechos em "sob_o_criador".
+    anotar (dict), quando vem, recebe esses trechos em "sob_o_criador". Sem a música, o som do vídeo vai ao
+    volume das nossas músicas, sem estourar (ganho_do_som, P222 1), e anotar recebe em "volume" o som
+    medido (LUFS) e o ganho (dB).
     """
     escolhas = escolhas_certas(escolhas)
     lado = escolhas["miniatura"]
@@ -1312,6 +1348,13 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     sem_moldura = tempos_sob_o_criador(linhas_da_moldura(subida), por_cima) if moldura else []
     if anotar is not None and (sem_seta or sem_moldura):
         anotar["sob_o_criador"] = {"setinhas": sem_seta, "moldura": sem_moldura}
+    # O som do vídeo no volume das nossas músicas, sem estourar (P222 1); com a música de fundo, ela é o som.
+    ganho = 0.0
+    if not musica:
+        medido = videos.volume_do_som(video)
+        ganho = ganho_do_som(medido)
+        if anotar is not None and medido is not None:
+            anotar["volume"] = {"medido": round(medido, 1), "ganho": ganho}
     with contextlib.ExitStack() as pilha:
         seta = None
         if escolhas["setinhas"]:
@@ -1325,7 +1368,7 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
                                            PULSO_DA_SETA, capa, musica, outras=outras_fotos, moldura=moldura,
                                            espera_da_moldura=ESPERA_DA_MOLDURA,
                                            passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0,
-                                           sem_seta=sem_seta, sem_moldura=sem_moldura)
+                                           sem_seta=sem_seta, sem_moldura=sem_moldura, ganho=ganho)
 
 
 def largura_da_miniatura(miniatura):
@@ -3306,7 +3349,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     canto de cima, se ele estiver livre (P213 1: canto_da_miniatura; o jeito leva
     COM_A_MINIATURA_NO_OUTRO_CANTO, e o Editar ✏️ guarda o canto em que ela saiu), e os textos da tela ficam
     sempre no alto, ao lado da miniatura, e o que, na hora dele, cobriria o que o criador pôs por cima, o
-    produto ou um rosto não aparece (P220 1). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+    produto ou um rosto não aparece (P220 1). O som do vídeo vai ao volume das nossas músicas, sem estourar, e o
+    registro anota quanto ele subiu ou desceu (P222 1). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
     """
     escolhas = escolhas_certas(escolhas_do_painel() if escolhas is None else escolhas)
     lado = escolhas["miniatura"]
@@ -3435,6 +3479,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                                      if postas else sem_legendas or "nenhum trecho cabe", ok=True if postas else None)
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         _registrar_o_que_sumiu(resumo.get("sob_o_criador"), resumo.get("original") or 0.0)
+        _registrar_o_volume(resumo.get("volume"))
         fora = resumo.get("nao_entraram") or {}
         if fora:
             # Os textos da tela que não entraram por cobrir, na hora deles, o que o criador pôs por cima, o
@@ -3458,6 +3503,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                       cor=cor, escolhas=escolhas, por_cima=textos.get("por_cima", ()), anotar=sob)
     if not motivo_1:
         _registrar_o_que_sumiu(sob.get("sob_o_criador"))
+        _registrar_o_volume(sob.get("volume"))
     return motivo_1, SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}"
 
 
