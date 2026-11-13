@@ -1581,29 +1581,27 @@ def _linha_dos_textos(textos):
 
 def _linha_do_lugar(resumo, com_textos):
     """
-    [a linha do lugar dos textos na legenda do exemplo], ou [] sem nada a dizer; com os textos que desviaram do
-    que o criador pôs por cima (P212 1), quantos mudaram de lugar e quantos saíram.
+    [a linha do lugar dos textos na legenda do exemplo], ou [] sem nada a dizer: o lugar fixo, no alto, ao lado
+    da miniatura (P220 1), e quantos textos não entraram por cobrir, na hora deles, o que o criador pôs por cima,
+    o produto ou um rosto.
     """
-    criador = resumo.get("texto_do_criador") or {}
+    fora = resumo.get("nao_entraram") or {}
     if not com_textos:
         if resumo.get("texto_no_video"):
             return ["📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela."]
-        if criador.get("sairam"):
-            return ["📍 Sem texto na tela: o que o criador pôs por cima ocupava os lugares livres na hora de cada "
-                    "texto."]
-        return (["📍 Sem texto na tela: a IA não achou lugar que não cubra o rosto ou o produto."]
-                if resumo.get("lugar") == edicao_video.SEM_LUGAR else [])
-    lugar = {"alto": "no alto, ao lado da miniatura", "meio": "logo abaixo da miniatura",
-             "esquerda": "do lado esquerdo, no meio da altura",
-             "direita": "do lado direito, no meio da altura"}.get(resumo.get("lugar"))
-    if not lugar:
+        if fora:
+            return ["📍 Sem texto na tela: na hora de cada texto, o lugar fixo dele (no alto, ao lado da miniatura) "
+                    "cobria o produto, um rosto ou o que o criador pôs por cima."]
         return []
-    desvios = ""
-    if criador:
-        desvios = (f"; para não cobrir o que o criador pôs por cima: {criador.get('mudaram', 0)} em outro lugar, "
-                   f"{criador.get('sairam', 0)} fora")
-    return [f"📍 Lugar do texto: {lugar}"
-            + (" (a IA escolheu)" if resumo.get("lugar_da_ia") else " (o padrão: a IA não disse)") + desvios]
+    if resumo.get("lugar") != edicao_video.LUGAR_PADRAO:
+        return []
+    de_fora = ""
+    if fora:
+        de_fora = (f"; não entraram: {fora.get('pelo_criador', 0)} pelo que o criador pôs por cima, "
+                   f"{fora.get('pelo_produto', 0)} pelo produto ou um rosto")
+    return ["📍 Lugar do texto: no alto, ao lado da miniatura (fixo"
+            + ("; a IA conferiu o produto e o rosto)" if resumo.get("lugar_da_ia")
+               else "; a IA não disse onde estão o produto e o rosto)") + de_fora]
 
 
 def _momento(segundos):
