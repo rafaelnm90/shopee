@@ -59,6 +59,21 @@ async def dimensoes(caminho, timeout=None):
         return None, None
 
 
+def quadro_na_tela(caminho, segundos, timeout=60):
+    """
+    O quadro do vídeo nesse segundo como ele fica na edição (720x1280, no fundo preto: FILTRO_720P), em PNG
+    (bytes); None quando não sai.
+    """
+    try:
+        feito = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, segundos):.2f}", "-i", caminho,
+                                "-frames:v", "1", "-vf", f"{FILTRO_720P},setsar=1", "-f", "image2pipe",
+                                "-vcodec", "png", "-"], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    saida = getattr(feito, "stdout", b"") or b""
+    return saida if getattr(feito, "returncode", 1) == 0 and saida.startswith(b"\x89PNG") else None
+
+
 def quadros(caminho, pasta, quantos=4, largura=360, timeout=20):
     """
     Grava em pasta quantos quadros do vídeo (quadro_1.jpg...), espalhados do começo ao fim,
