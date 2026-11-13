@@ -961,7 +961,9 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     if avisar:
         avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, "
                                    f"e a foto do 1º da lista não confere com o vídeo: {nome}")
-    return False, f"{MOTIVO_FORA_DE_MINHAS_CURTIDAS} ({motivo}): nada adicionado (aviso no privado)"
+    # O começo escrito por inteiro (MOTIVO_FORA_DE_MINHAS_CURTIDAS): o investigar_robo lê no código a forma
+    # dos motivos que pode mostrar no log público.
+    return False, f"o produto do vídeo não está na lista, nem pela foto do 1º ({motivo}): nada adicionado (aviso no privado)"
 
 
 # Os sinais do nome do produto que o registro do anexar mostra, em rótulos fixos (o checkup é
