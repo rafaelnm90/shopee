@@ -213,6 +213,29 @@ def test_relatorio_privado_por_canal_etiqueta_semana_dia_hora_e_produto():
     assert "Nenhum pedido com etiqueta ainda." in vendas.relatorio_privado({}, AGORA)
 
 
+def test_relatorio_privado_separa_as_vendas_pela_origem_que_a_shopee_informa():
+    # P223 (13/11): para saber se o que vende vem da Shopee Vídeo e de quais produtos, o relatório
+    # privado soma cada produto vendido pela origem (o channelType de cada item), sem os cancelados; o
+    # pedido guardado antes de o bot ler o campo fica como não informada.
+    pedidos = {
+        "1": {"data": "2026-10-27", "status": "COMPLETED", "comissao_total": 6.0, "etiqueta": "",
+              "itens": [{"id": "1", "nome": "Copo Térmico", "qtd": 2, "comissao": 4.0, "tipo": "Shopee Video"},
+                        {"id": "2", "nome": "Panela", "qtd": 1, "comissao": 2.0, "tipo": "Social Media"}]},
+        "2": {"data": "2026-10-28", "status": "PENDING", "comissao_total": 3.0, "etiqueta": "viral",
+              "itens": [{"id": "3", "nome": "Garrafa", "qtd": 1, "comissao": 3.0, "tipo": "Shopee Video"}]},
+        "3": {"data": "2026-10-29", "status": "CANCELLED", "comissao_total": 9.0, "etiqueta": "",
+              "itens": [{"id": "1", "nome": "Copo Térmico", "qtd": 1, "comissao": 9.0, "tipo": "Shopee Video"}]},
+        "4": {"data": "2026-10-30", "status": "COMPLETED", "comissao_total": 1.0, "etiqueta": "",
+              "itens": [{"id": "4", "nome": "Toalha", "qtd": 1, "comissao": 1.0}]},
+    }
+    texto = vendas.relatorio_privado(pedidos, AGORA)
+    assert "## Por origem da venda (o tipo de canal que a Shopee informa em cada produto)" in texto
+    assert "| Shopee Video | 3 | R$ 7,00 | Copo Térmico R$ 4,00; Garrafa R$ 3,00 |" in texto
+    assert "| Social Media | 1 | R$ 2,00 | Panela R$ 2,00 |" in texto
+    assert f"| {vendas.SEM_ORIGEM} | 1 | R$ 1,00 | Toalha R$ 1,00 |" in texto
+    assert texto.index("| Shopee Video |") < texto.index("| Social Media |") < texto.index(f"| {vendas.SEM_ORIGEM} |")
+
+
 def test_pedido_guarda_a_hora_da_compra(bm):
     # P13: a conta por hora precisa da hora da compra, que a API manda (purchaseTime). O pedido
     # novo a guarda, e o que já estava no banco sem ela ganha a hora quando a Shopee o manda de novo.
