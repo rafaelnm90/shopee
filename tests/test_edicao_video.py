@@ -726,7 +726,7 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                            lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None,
-                           por_cima=()):
+                           por_cima=(), nos_momentos=None):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -2873,10 +2873,11 @@ def test_texto_do_criador_so_no_fim_nao_tira_os_nossos_textos(monkeypatch):
     # As versões do exemplo seguem a mesma conta.
     respostas.append('{"nome": "Fone", "lugar": "meio", "textos_do_video": [{"inicio": 24, "fim": 99}]}')
     assert edicao_video.textos_das_versoes("v.mp4", "Fone Marca X")["texto_no_video"] is False
-    # Sem nenhum trecho, a duração nem é lida, e o vídeo leva os nossos textos.
+    # Sem nenhum trecho, a duração só é lida para os momentos dos nossos textos (13/11), não para essa conta, e o
+    # vídeo leva os nossos textos.
     duracoes.clear()
     respostas.append('{"nome": "Fone", "lugar": "alto", "textos_do_video": []}')
-    assert "texto_no_video" not in edicao_video.textos_da_tela("v.mp4", "Fone Marca X") and duracoes == []
+    assert "texto_no_video" not in edicao_video.textos_da_tela("v.mp4", "Fone Marca X") and len(duracoes) == 1
     # Os trechos: o que passa do fim do vídeo é cortado, e o que veio errado fica de fora.
     assert edicao_video._trechos_com_texto([{"inicio": 3, "fim": 1}, {"inicio": "x", "fim": 2}, "texto",
                                             {"inicio": -1, "fim": 2}, {"inicio": 2, "fim": 4.5}]) == [(2.0, 4.5)]
@@ -3233,7 +3234,7 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                            lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None,
-                           por_cima=()):
+                           por_cima=(), nos_momentos=None):
         recebidas.append(list(legendas))
         return "", {"versoes": []}
 
@@ -3449,7 +3450,7 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=()):
+                 lugares=None, por_cima=(), nos_momentos=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3636,7 +3637,7 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=()):
+                 lugares=None, por_cima=(), nos_momentos=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3842,7 +3843,7 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=()):
+                 lugares=None, por_cima=(), nos_momentos=None):
         recebidos.append({"miniatura": miniatura, "legendas": list(legendas), "escolhas": escolhas})
         return "", {"textos": [nome], "legendas": len(legendas)}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3881,7 +3882,7 @@ def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(mon
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=()):
+                 lugares=None, por_cima=(), nos_momentos=None):
         recebidos.append({"nome": nome, "lugar": lugar, "musica": musica, "capa": capa, "miniatura": miniatura,
                           "outras": list(outras_fotos), "legendas": [legenda[:3] for legenda in legendas],
                           "rotulo": rotulo_de_ia, "cor": cor, "escolhas": escolhas})
@@ -4027,6 +4028,138 @@ def test_o_que_vai_ao_ar_desvia_os_textos_e_o_registro_conta(monkeypatch, tmp_pa
     assert (registro[-1][2], registro[-1][3]) == (edicao_video.SEM_A_LISTA, edicao_video.SEM_O_TEMPO)
 
 
+# --- Cada texto da tela no lugar livre do produto no momento dele (pedido do Rafael de 13/11) ---
+
+# No vídeo do celular de 13/11, a pessoa mexia o celular na mão: o lugar livre na maior parte do vídeo (a esquerda)
+# estava em cima do celular na hora da vantagem e da chamada. Os 3 textos de um vídeo de 12 s entram de 0,3 a 3,3 s,
+# de 4,3 a 7,3 s e de 8,3 a 11,3 s.
+MOMENTOS_DO_CELULAR = [(0.3, 3.3, ["esquerda"]), (4.3, 7.3, ["alto", "meio"]), (8.3, 11.3, [])]
+
+
+def test_cada_texto_vai_ao_lugar_livre_do_produto_no_momento_dele():
+    # Pedido do Rafael (13/11): "para cada legenda de chamada ele pode ficar em um lugar diferente". Cada texto vai
+    # ao 1º lugar livre do produto e do rosto no momento dele; sem nenhum livre na hora dele, só ele sai.
+    textos = [("Celular", edicao_video.FUNDO_DOS_TEXTOS), ("Tela grande", edicao_video.FUNDO_DOS_TEXTOS),
+              ("Garanta o seu aqui", edicao_video.FUNDO_DA_CHAMADA)]
+    lugares = edicao_video.LUGARES_DOS_TEXTOS
+    criador, hora = {}, {}
+    letreiros, postos = edicao_video._letreiros(textos, "esquerda", 12.0, edicao_video.MINIATURA_A_DIREITA,
+                                                ["esquerda", "alto"], (), criador, MOMENTOS_DO_CELULAR, hora)
+    assert postos == ["Celular", "Tela grande"]
+    assert [(inicio, y) for _imagem, inicio, _fim, _x, y in letreiros] == [(0.3, lugares["esquerda"][1]),
+                                                                           (4.3, lugares["alto"][1])]
+    # A vantagem foi a outro lugar e a chamada saiu pelo produto, não pelo criador.
+    assert hora == {"mudaram": 1, "sairam": 1} and criador == {}
+    # Sem os momentos (os rascunhos de antes), os 3 ficam no 1º lugar do vídeo todo, como no vídeo do celular.
+    letreiros, postos = edicao_video._letreiros(textos, "esquerda", 12.0, lugares=["esquerda", "alto"])
+    assert len(postos) == 3 and {y for *_resto, y in letreiros} == {lugares["esquerda"][1]}
+    # O que o criador pôs por cima continua valendo dentro dos lugares do momento (P212 1): com a frase dele no
+    # alto na hora da vantagem, ela vai ao meio.
+    frase_no_alto = (10.0, 60.0, 12.0, 19.0, 4.0, 7.0)
+    criador, hora = {}, {}
+    letreiros, postos = edicao_video._letreiros(textos, "esquerda", 12.0, lugares=["esquerda", "alto"],
+                                                por_cima=[frase_no_alto], anotar=criador,
+                                                nos_momentos=MOMENTOS_DO_CELULAR, na_hora=hora)
+    assert [y for *_resto, y in letreiros] == [lugares["esquerda"][1], lugares["meio"][1]]
+    assert criador == {"mudaram": 1, "sairam": 0} and hora == {"mudaram": 1, "sairam": 1}
+    # O texto cujo tempo não cruza nenhum momento fica com os lugares do vídeo todo; o que cruza dois fica só com
+    # os livres nos dois.
+    assert edicao_video._lugares_na_hora(12.0, 14.0, MOMENTOS_DO_CELULAR) is None
+    assert edicao_video._lugares_na_hora(3.0, 5.0, [(0.3, 3.3, ["meio", "esquerda"]), (4.3, 7.3, ["esquerda"])]) == [
+        "esquerda"]
+
+
+def test_a_ia_diz_os_lugares_livres_no_momento_de_cada_texto(monkeypatch):
+    # Os momentos que a IA recebe são os mesmos em que os textos entram (horarios_dos_textos).
+    momentos = edicao_video.momentos_dos_textos(21.0)
+    assert momentos == [(0.3, 3.3), (7.3, 10.3), (14.3, 17.3)]
+    assert momentos == [(i, f) for _t, i, f in edicao_video.horarios_dos_textos(["a", "b", "c"], 21.0)]
+    assert edicao_video.momentos_dos_textos(0.0) == []
+    pedido = edicao_video.prompt_dos_textos("Celular", edicao_video.MINIATURA_A_DIREITA, momentos)
+    assert "o 3º (a chamada) de 14,3 s a 17,3 s" in pedido and '"lugares_nos_momentos": [[' in pedido
+    assert "lugares_nos_momentos" in edicao_video.prompt_das_versoes("Celular", edicao_video.MINIATURA_A_DIREITA,
+                                                                     momentos)
+    # Sem a duração, o pedido fica como antes, só com os lugares do vídeo todo.
+    assert "lugares_nos_momentos" not in edicao_video.prompt_dos_textos("Celular")
+    # A resposta vira os lugares de cada momento, com o tempo dele, só os nomes que existem.
+    textos = edicao_video._nome_lugar_e_falas({"lugares": ["esquerda"], "lugares_nos_momentos": [
+        ["esquerda"], ["alto_esquerda", "embaixo", "alto_esquerda"], []]}, 0.0, momentos)
+    assert textos["lugares_nos_momentos"] == [[0.3, 3.3, ["esquerda"]], [7.3, 10.3, ["alto_esquerda"]],
+                                              [14.3, 17.3, []]]
+    # Com a miniatura à esquerda, o alto da esquerda é dela.
+    assert edicao_video.lugares_nos_momentos(textos, edicao_video.MINIATURA_A_ESQUERDA) == [
+        (0.3, 3.3, ["esquerda"]), (7.3, 10.3, []), (14.3, 17.3, [])]
+    assert edicao_video.lugares_nos_momentos(textos)[1] == (7.3, 10.3, ["alto"])
+    # Outro número de momentos, um momento só com nomes que não existem ou sem os momentos do pedido: fica de fora,
+    # e os textos ficam com os lugares do vídeo todo.
+    for bruto, pedidos in (([["esquerda"], ["meio"]], momentos), ([["esquerda"], ["embaixo"], []], momentos),
+                           ("esquerda", momentos), ([["esquerda"], ["meio"], []], [])):
+        assert "lugares_nos_momentos" not in edicao_video._nome_lugar_e_falas(
+            {"lugares": ["meio"], "lugares_nos_momentos": bruto}, 0.0, pedidos)
+    assert edicao_video.lugares_nos_momentos({"lugares": ["meio"]}) is None
+    # Nenhum lugar livre no vídeo todo, mas um livre no momento de um texto: esse texto entra (P47 vale na hora de
+    # cada texto); nenhum em lugar nenhum, sem os textos; o texto próprio do vídeo (P52) continua tirando os nossos.
+    sem_no_todo = dict(textos, lugares=[])
+    assert edicao_video.lugar_dos_textos(sem_no_todo) == "esquerda"
+    vazio = dict(sem_no_todo, lugares_nos_momentos=[[0.3, 3.3, []], [7.3, 10.3, []], [14.3, 17.3, []]])
+    assert edicao_video.lugar_dos_textos(vazio) == edicao_video.SEM_LUGAR
+    assert edicao_video.lugar_dos_textos(dict(textos, texto_no_video=True)) == edicao_video.SEM_LUGAR
+    # O que o Editar ✏️ guarda volta igual.
+    guardado = edicao_video._textos_guardados(edicao_video.textos_para_guardar(textos))
+    assert guardado["lugares_nos_momentos"] == textos["lugares_nos_momentos"]
+    assert edicao_video.lugares_nos_momentos(guardado) == edicao_video.lugares_nos_momentos(textos)
+    # No caminho de verdade, a IA recebe os momentos do vídeo e a resposta volta com o tempo de cada um.
+    pedidos = []
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 21.0)
+    monkeypatch.setattr(edicao_video, "_resposta_da_ia", lambda video, prompt: pedidos.append(prompt) or {
+        "nome": "Celular", "lugares": ["esquerda"], "lugares_nos_momentos": [["esquerda"], ["alto_esquerda"], []]})
+    monkeypatch.setattr(edicao_video, "_conferir_o_canto", lambda video, textos, olhado: textos)
+    monkeypatch.setattr(edicao_video, "_revisar_ortografia", lambda textos: textos)
+    textos = edicao_video.textos_da_tela("v.mp4", "Celular")
+    assert "o 2º (a vantagem) de 7,3 s a 10,3 s" in pedidos[0]
+    assert textos["lugares_nos_momentos"] == [[0.3, 3.3, ["esquerda"]], [7.3, 10.3, ["alto_esquerda"]],
+                                              [14.3, 17.3, []]]
+
+
+def test_o_que_vai_ao_ar_poe_cada_texto_no_lugar_livre_do_momento_e_o_registro_conta(monkeypatch, tmp_path):
+    import registro_processos as rp
+    montados, _editados = _versoes_de_mentira(monkeypatch)
+    base = {"nome": "Celular", "vantagem": "Tela grande", "chamada": "Garanta o seu aqui",
+            "lugares": ["esquerda", "alto_esquerda"], "canto_ocupado": False, "outro_canto_ocupado": False,
+            "lugares_nos_momentos": [[0.3, 3.3, ["esquerda"]], [4.3, 7.3, ["alto_esquerda"]], [8.3, 11.3, []]]}
+    _textos_da_tela(monkeypatch, base)
+    destino = str(tmp_path / "rascunho.mp4")
+    anotado = {}
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Celular", anotar=anotado) == (
+        "", edicao_video.COM_LEGENDAS, "")
+    # O nome e a vantagem entram, cada um no lugar livre na hora dele; a chamada sai.
+    assert montados[-1][1] == 2
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DA_HORA_DOS_TEXTOS, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [
+        ("algum saiu", "1 em outro lugar, 1 fora (o produto ou um rosto em todos os lugares na hora dele)")]
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DOS_LUGARES, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == [edicao_video.COM_OS_MOMENTOS]
+    # O Editar ✏️ do rascunho guarda os lugares de cada momento, para refazer igual.
+    assert anotado["refazer"]["textos"]["lugares_nos_momentos"] == base["lugares_nos_momentos"]
+    # Com o produto em todos os lugares na hora de cada texto, nenhum entra, e o detalhe diz por quê.
+    _textos_da_tela(monkeypatch, dict(base, lugares_nos_momentos=[[0.3, 3.3, []], [4.3, 7.3, []], [8.3, 11.3, []]]))
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Celular") == (
+        "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_LUGAR_NA_HORA)
+    # Com os 3 livres no 1º lugar do vídeo todo, nada muda e nada é anotado.
+    _textos_da_tela(monkeypatch, dict(base, lugares_nos_momentos=[[0.3, 3.3, ["esquerda"]]] * 3))
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Celular")
+    assert montados[-1][1] == 3
+    assert len(rp.sequencia("shopee_video", edicao_video.PROCESSO_DA_HORA_DOS_TEXTOS, "2000-01-01 00:00:00")) == 2
+    # O Editar ✏️ refaz o 1º rascunho com os lugares de cada momento que ele guardou, sem perguntar à IA.
+    import json
+    recebidos = []
+    monkeypatch.setattr(edicao_video, "editar_2", lambda *args, nos_momentos=None, **opcoes: (
+        recebidos.append(nos_momentos) or ("", {"textos": [], "legendas": 0})))
+    guardado = json.loads(json.dumps(anotado["refazer"]))
+    assert edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado)[0] == ""
+    assert recebidos == [[(0.3, 3.3, ["esquerda"]), (4.3, 7.3, ["alto"]), (8.3, 11.3, [])]]
+
+
 # A cor do produto que o criador pôs no canto de cima à direita, o vídeo todo (P213 1).
 CORES_NO_CANTO_DA_DIREITA = (70.0, 95.0, 10.0, 20.0, 0.0, 30.0)
 
@@ -4090,7 +4223,7 @@ def test_no_outro_canto_os_textos_do_alto_trocam_de_lado_e_o_editar_guarda_o_can
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=()):
+                 lugares=None, por_cima=(), nos_momentos=None):
         recebidos.append({"lugar": lugar, "lugares": lugares, "por_cima": list(por_cima), "miniatura": miniatura,
                           "lado": escolhas["miniatura"]})
         return "", {"textos": [nome], "legendas": 0}
