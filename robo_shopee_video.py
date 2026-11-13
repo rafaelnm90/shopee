@@ -1718,8 +1718,9 @@ def fechar_e_reabrir(d, xml):
     A Shopee continua sem responder depois dos Aguardar: toca em Fechar app no aviso do
     Android e abre a Shopee de novo. Devolve a tela do app reaberto. A Verificação que
     aparecer depois para a rodada como sempre (o Rafael recebe o link da tela); o app
-    ainda travado também para. Fora este aviso e do produto que não fica com o app aberto há
-    muitas horas (reabrir_o_app_aberto_ha_muito_tempo, P193 1), o robô nunca fecha o app.
+    ainda travado também para. Fora este aviso, do produto que não fica com o app aberto há
+    muitas horas e do app sem memória (reabrir_o_app_antigo_ou_sem_memoria, P193 1 e P215 1), o
+    robô nunca fecha o app.
     Escolha do Rafael (24/10, P15): DECISOES.md, Shopee Vídeo.
     """
     fechar = ps.achar(xml, "@aerr_close")
@@ -1748,32 +1749,69 @@ def fechar_e_reabrir(d, xml):
 # Escolha do Rafael (10/11, P193 1): o produto que não fica na tela final depois do Feito, nem na 2ª
 # vez, com o app da Shopee aberto há mais de HORAS_DO_APP_ABERTO, faz o robô fechar e reabrir o app
 # (em 10/11, das 05:44 às 06:24, 3 produtos seguidos não ficaram com o app aberto havia 16 h e a
-# memória dele perto do teto do celular). O caso guarda antes a tela da falha; o vídeo volta mais
-# tarde, como sempre (P182 1); a Verificação que aparecer na volta para tudo e avisa. Com o app aberto
-# há menos tempo, nada muda. DECISOES.md, Shopee Vídeo.
+# memória dele perto do teto do celular). Escolha do Rafael (12/11, P215 1): com a memória do Java do
+# app acima de MEMORIA_PARA_REABRIR, o primeiro problema dele também fecha e reabre o app, mesmo
+# aberto há menos tempo: o produto que não ficou e a página em branco por falta de memória (a tela
+# que não mostrou o que devia, pagina_em_branco). Em 12/11, às 20:52 e às 21:11 o produto não ficou
+# com o app aberto havia 11 h e 410 a 460 MB, e às 08:58 e às 21:26 a página abriu em branco com o
+# Java no teto dos 512 MB; os 11 produtos que ficaram de primeira no dia tinham menos de 400 MB. O caso
+# guarda antes a tela da falha; o vídeo volta mais tarde, como sempre (P182 1); a Verificação que
+# aparecer na volta para tudo e avisa. DECISOES.md, Shopee Vídeo.
 HORAS_DO_APP_ABERTO = 12
+MEMORIA_PARA_REABRIR = 400
 PROCESSO_DO_APP_REABERTO = "app reaberto: produto que não ficou"
+PROCESSO_DA_PAGINA_EM_BRANCO = "app reaberto: página em branco"
+# A tela que não mostrou o que devia: o começo dos motivos do tocar, do voltar_ate e dos "não achei"
+# de cada passo, e o meio do motivo do seguir ("depois de X, a tela não mostrou Y").
+COMECOS_DA_PAGINA_EM_BRANCO = ("não achei ", "não consegui voltar até ")
+MEIO_DA_PAGINA_EM_BRANCO = ", a tela não mostrou "
 
 
-def reabrir_o_app_aberto_ha_muito_tempo(d):
+def pagina_em_branco(motivo):
+    """A parada é da tela que não mostrou o que devia (o botão, a página ou a volta até ela)?"""
+    texto = str(motivo or "")
+    return texto.startswith(COMECOS_DA_PAGINA_EM_BRANCO) or MEIO_DA_PAGINA_EM_BRANCO in texto
+
+
+def reabrir_o_app_antigo_ou_sem_memoria(d, motivo):
     """
-    Depois do produto que não ficou (MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU): com o app aberto há mais de
-    HORAS_DO_APP_ABERTO, fecha a Shopee e abre de novo. Devolve se reabriu. Sem a leitura de há
-    quanto tempo o app está aberto, não fecha. A Verificação na volta para (Verificacao).
+    Depois da parada, com o caso já guardado: fecha a Shopee e abre de novo quando o problema é do
+    app. O produto que não ficou depois do Feito (MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU) reabre com o app
+    aberto há mais de HORAS_DO_APP_ABERTO (P193 1) ou com a memória do Java dele acima de
+    MEMORIA_PARA_REABRIR (P215 1); a página em branco (pagina_em_branco), só pela memória (P215 1).
+    Devolve se reabriu. Outra parada, ou sem as leituras do celular, não fecha nada. A Verificação
+    na volta para (Verificacao).
     """
-    minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
-    if minutos is None or minutos <= HORAS_DO_APP_ABERTO * 60:
+    produto = str(motivo or "").startswith(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU)
+    if not produto and not pagina_em_branco(motivo):
         return False
-    aberto_ha = f"o app aberto há {faixa_do_app_aberto(minutos)}"
-    d.app_stop(ps.PACOTE)
-    pausa(4)
-    d.app_start(ps.PACOTE, wait=True)
-    pausa(ESPERA_DEPOIS_DE_REABRIR)
-    if ps.eh_verificacao(d.dump_hierarchy()):
-        registro_processos.registrar(REGISTRO, PROCESSO_DO_APP_REABERTO, "a Verificação apareceu", aberto_ha,
-                                     ok=False)
+    minutos = casos_robo.minutos_do_app(d, ps.PACOTE)
+    memoria = casos_robo.memoria_do_app(d, ps.PACOTE)
+    pelo_tempo = produto and minutos is not None and minutos > HORAS_DO_APP_ABERTO * 60
+    pela_memoria = memoria is not None and memoria[0] > MEMORIA_PARA_REABRIR
+    if not pelo_tempo and not pela_memoria:
+        return False
+    processo = PROCESSO_DO_APP_REABERTO if produto else PROCESSO_DA_PAGINA_EM_BRANCO
+    leituras = ([f"o app aberto há {faixa_do_app_aberto(minutos)}"] if minutos is not None else []) + (
+        [f"a memória do app {faixa_da_memoria_do_app(memoria[0])}"] if memoria else [])
+    detalhe = (" e ".join(razao for razao, vale in (("pelo tempo aberto", pelo_tempo), ("pela memória", pela_memoria))
+                          if vale) + ": " + "; ".join(leituras))
+    try:
+        d.app_stop(ps.PACOTE)
+        pausa(4)
+        d.app_start(ps.PACOTE, wait=True)
+        pausa(ESPERA_DEPOIS_DE_REABRIR)
+        verificacao = ps.eh_verificacao(d.dump_hierarchy())
+    except Exception as e:
+        # O celular que não responde no meio (o adb que cai) não muda o que a parada já decidiu: o
+        # resto dela segue, e a próxima rodada começa do início do app, como sempre.
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não consegui fechar e reabrir o app: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, processo, "não reabriu", f"{detalhe}; {type(e).__name__}", ok=False)
+        return False
+    if verificacao:
+        registro_processos.registrar(REGISTRO, processo, "a Verificação apareceu", detalhe, ok=False)
         raise Verificacao()
-    registro_processos.registrar(REGISTRO, PROCESSO_DO_APP_REABERTO, "fechado e reaberto", aberto_ha, ok=True)
+    registro_processos.registrar(REGISTRO, processo, "fechado e reaberto", detalhe, ok=True)
     return True
 
 
@@ -3164,11 +3202,11 @@ def preparar_rascunho(d, config, agora=None):
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video and not de_lado)
         registrar_tentativa("rascunho", resultado, e.motivo, _produto_do_video(video), agora)
         e.id_video = video["id"]
-        if celular and e.motivo.startswith(MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU):
-            # Com o caso já guardado com a tela da falha: o app aberto há muitas horas é fechado e
-            # reaberto (P193 1), e o descurtir do fim já vai no app novo.
+        if celular:
+            # Com o caso já guardado com a tela da falha: o app aberto há muitas horas ou sem memória
+            # é fechado e reaberto (P193 1 e P215 1), e o descurtir do fim já vai no app novo.
             try:
-                reabrir_o_app_aberto_ha_muito_tempo(d)
+                reabrir_o_app_antigo_ou_sem_memoria(d, e.motivo)
             except Verificacao:
                 if curtidos:
                     gravar_estado(favoritos_limpos=False)
@@ -8455,6 +8493,14 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
     except Parada as e:
         if acao != "rascunho" and not e.caso_guardado:
             _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
+        verificacao = False
+        if acao != "rascunho":
+            # Com o caso já guardado com a tela da falha: a página em branco do app sem memória fecha
+            # e reabre a Shopee (P215 1); a do rascunho já foi no preparar_rascunho.
+            try:
+                reabrir_o_app_antigo_ou_sem_memoria(d, e.motivo)
+            except Verificacao:
+                verificacao = True
         if acao == "postar":
             _nao_saiu_o_post(ident, e.motivo, pedido)
         elif acao == "refazer":
@@ -8472,6 +8518,10 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
         _limpeza_de_novo(acao)
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None), e.do_video)
         _avisar_que_nao_saiu(acao, preparar, config, agora)
+        if verificacao:
+            logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela depois de reabrir o app: parado.")
+            av.abrir_tela(celular=True, verificacao=True)
+            return f"{acao}: verificação na tela; parado"
         return _resposta(preparar, f"{acao}: parado ({e.motivo})")
     except Exception as e:
         # Erro que ninguém previu: a rodada termina com o tipo dele, e o celular fica
