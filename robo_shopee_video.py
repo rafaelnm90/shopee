@@ -5013,6 +5013,13 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais):
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora", "não anexou", ok=None)
         voltar_a_tela_final(d)
         return False
+    if not ok and str(motivo or "").startswith(ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS):
+        # O produto curtido que a lista de Minhas Curtidas não mostra, nem pela foto do 1º: a lista do
+        # Adicionar Produto às vezes demora a mostrar o curtido agora (às 05:54 de 13/11, vazia nas 4
+        # leituras; pouco depois das 8h, já o mostrava). A falha é da hora, não do vídeo: ele volta mais
+        # tarde, como o produto que não fica depois do Feito (P182 1). Escolha do Rafael (13/11, P216 1):
+        # DECISOES.md, Shopee Vídeo.
+        raise Parada(motivo)
     _conferir((ok, motivo))
     limpar_aviso_do_app(d)
     # A tela de logo depois do Feito vai para o caso e, em rótulos fixos, para o registro do produto

@@ -7066,6 +7066,39 @@ def test_video_do_produto_que_nao_fica_na_tela_final_volta_mais_tarde(monkeypatc
     assert [r["id_video"] for r in robo.listar("rascunho")] == ["a1"]
 
 
+def test_video_cujo_produto_nao_aparece_em_minhas_curtidas_volta_mais_tarde(monkeypatch, avisos):
+    # P216 1 (13/11): às 05:54, o produto curtido pouco antes não apareceu em Minhas Curtidas (a lista
+    # vazia nas 4 leituras) nem pela foto do 1º da lista, e o vídeo ficou de lado de vez; pouco depois
+    # das 8h, a lista já o mostrava. A falha é da hora, não do vídeo: ele volta mais tarde, como o
+    # produto que não fica depois do Feito (P182 1).
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
+    adicionar = robo.ps.adicionar_produto
+    fora = (f"{robo.ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS} (a lista não tem produto para conferir): nada adicionado "
+            "(aviso no privado)")
+    monkeypatch.setattr(robo.ps, "adicionar_produto", lambda *a, **k: (False, fora))
+    resultado = robo.rodada(d=AppQueReabreALegenda(), agora=agora)
+    assert robo.ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS in resultado and robo.esperando_aprovacao() == []
+    assert robo.listar("pulado") == [] and robo.proximo_video(robo.ler_config())["id"] == "a1"
+    assert robo.passo_do_motivo(fora) == "anexar o produto"
+    # Na rodada seguinte, com o produto na lista, o mesmo vídeo vira rascunho.
+    monkeypatch.setattr(robo.ps, "adicionar_produto", adicionar)
+    assert robo.rodada(d=AppQueReabreALegenda(), agora=agora) == "rascunho salvo"
+    assert [r["id_video"] for r in robo.listar("rascunho")] == ["a1"]
+
+
+def test_outra_falha_do_adicionar_continua_deixando_o_video_de_lado(monkeypatch, avisos):
+    # Só o produto que a lista de Minhas Curtidas não mostra volta mais tarde (P216 1); o Adicionar
+    # coberto por outro app continua como estava.
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo.ps, "adicionar_produto",
+                        lambda *a, **k: (False, "o Adicionar do produto está coberto por outro app: nada tocado"))
+    with pytest.raises(robo.Parada) as parada:
+        _anexar_no_app(AppQueReabreALegenda())
+    assert parada.value.do_video
+
+
 def test_tela_de_logo_depois_do_feito_vai_para_o_caso(monkeypatch, avisos):
     # O caso de 07/11 só tinha a tela de 30 s depois do Feito: um aviso do app na tela já tinha
     # sumido. A tela lida logo depois do Feito entra entre as ações do caso.
