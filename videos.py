@@ -7,7 +7,8 @@ Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
 das falhas do robô da Shopee Vídeo (casos_robo). A foto do produto no começo, com a
 miniatura e a seta por cima (com_foto_e_miniatura), é a edição dos vídeos do Rafael
 (edicao_video); o vídeo remontado sem as partes paradas, com trechos acelerados ou em
-câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela. O vídeo
+câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela; o volume
+do som (volume_do_som) leva o som de cada vídeo ao das músicas de fundo. O vídeo
 sem som nenhum (mudo) ganha uma música da Shopee na hora de postar (assistente_shopee_video).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
@@ -15,8 +16,11 @@ Um lugar só para que um ajuste no tratamento valha para todos os canais
 """
 import asyncio
 import hashlib
+import json
 import logging
+import math
 import os
+import re
 import subprocess
 import tempfile
 
@@ -189,6 +193,18 @@ def _capa_do_resto_na_abertura(indice, passagem=0.0):
     return f"[{indice}:v]{TELA_DA_IMAGEM}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
 
 
+# O som que sobe passa pelo limitador, que segura os picos neste nível (-2 dBFS, com folga para o
+# que a compressão do áudio aumenta), para não estourar (P222 1: DECISOES.md, Shopee Vídeo).
+PICO_DO_SOM = 0.79
+
+
+def _ajuste_do_som(ganho):
+    """O filtro que muda o volume do som em `ganho` dB (P222 1); o que sobe passa pelo limitador; nada sem ganho."""
+    if not ganho:
+        return ""
+    return f",volume={ganho:.2f}dB" + (f",alimiter=limit={PICO_DO_SOM}:level=disabled" if ganho > 0 else "")
+
+
 def _fora_dos_trechos(trechos):
     """A expressão do ffmpeg que vale 1 fora dos trechos [(início, fim)] (em segundos) e 0 dentro deles."""
     return "not(" + "+".join(f"between(t,{inicio:.3f},{fim:.3f})" for inicio, fim in trechos) + ")"
@@ -197,7 +213,7 @@ def _fora_dos_trechos(trechos):
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
                              outras=(), troca=0.0, capa_do_resto=None, moldura=None, espera_da_moldura=0.0,
-                             passagem=0.0, sem_seta=(), sem_moldura=()):
+                             passagem=0.0, sem_seta=(), sem_moldura=(), ganho=0.0):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -220,6 +236,8 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     do cartão do produto, P128, que espera o cartão do app aparecer, P140 2). A seta e a moldura
     somem nos trechos de `sem_seta` e de `sem_moldura` ([(início, fim)], em segundos do corpo do
     vídeo, depois da abertura): o tempo em que o criador pôs alguma coisa no lugar delas (P218 1).
+    Com o `ganho` (dB), o som do vídeo sobe ou desce esse tanto, sem estourar (_ajuste_do_som, P222 1);
+    a música, quando vem, já está no volume certo.
     """
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
@@ -273,7 +291,7 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     elif com_audio:
         silencio = 4 if seta else 3
         entradas += ["-f", "lavfi", "-t", str(segundos), "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
-        filtro += (";[1:a]aresample=44100,aformat=channel_layouts=stereo[som];"
+        filtro += (f";[1:a]aresample=44100,aformat=channel_layouts=stereo{_ajuste_do_som(ganho)}[som];"
                    f"[{silencio}:a][som]concat=n=2:v=0:a=1[a]")
         saida += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
     if miniatura:
@@ -301,7 +319,7 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
                          centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=(),
                          moldura=None, espera_da_moldura=0.0, passagem=0.0, sem_seta=(),
-                         sem_moldura=()):
+                         sem_moldura=(), ganho=0.0):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
@@ -313,7 +331,8 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
     igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Com a `moldura`
     (bytes de uma imagem do tamanho da tela, transparente fora dela), ela vai por cima do vídeo
     `espera_da_moldura` segundos depois da abertura; a que não abre fica de fora. A seta e a moldura
-    somem nos trechos de `sem_seta` e de `sem_moldura` (P218 1). Devolve "" quando
+    somem nos trechos de `sem_seta` e de `sem_moldura` (P218 1). Com o `ganho` (dB), o som do vídeo
+    sobe ou desce esse tanto, sem estourar (P222 1). Devolve "" quando
     deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
@@ -364,7 +383,7 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                                            musica if total > segundos else None, total,
                                            caminhos_das_outras if troca else (), troca, caminho_do_resto,
                                            caminho_da_moldura, espera_da_moldura, passagem, sem_seta,
-                                           sem_moldura)
+                                           sem_moldura, ganho)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:
@@ -473,6 +492,27 @@ def som_por_janela(caminho, janela=0.5, timeout=120):
         rms = float(numpy.sqrt(numpy.mean(pedaco ** 2))) if len(pedaco) else 0.0
         volumes.append(max(-100.0, float(20 * numpy.log10(rms / 32768))) if rms > 0 else -100.0)
     return volumes
+
+
+def volume_do_som(caminho, timeout=120):
+    """
+    O volume do som do vídeo em LUFS (a medida das redes, EBU R128, do começo ao fim), pelo loudnorm do
+    ffmpeg; None sem a trilha de áudio, no silêncio ou quando não dá para medir (P222 1).
+    """
+    try:
+        feito = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", caminho, "-vn", "-af",
+                                "loudnorm=print_format=json", "-f", "null", "-"], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if feito.returncode != 0:
+        return None
+    erro = getattr(feito, "stderr", b"") or b""
+    blocos = re.findall(r"\{[^{}]*\}", erro.decode("utf-8", "replace") if isinstance(erro, bytes) else str(erro))
+    try:
+        medido = float(json.loads(blocos[-1]).get("input_i")) if blocos else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return medido if medido is not None and math.isfinite(medido) else None
 
 
 # Abaixo disto do começo ao fim, o vídeo é mudo: o silêncio digital fica em -100 e o chiado
