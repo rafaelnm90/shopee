@@ -7,7 +7,8 @@ Logo depois de postar, o robô da Shopee Vídeo (robo_shopee_video) guarda a mar
 novo, e uma vez por dia acha cada vídeo dele na grade pela marca e anota o número. Aqui ficam a
 marca (um dHash de 64 bits do miolo do quadro na tela: só o desenho da capa, nunca a imagem), o
 casamento dos quadros da grade com os vídeos e a comparação dos vídeos com e sem a chamada, que o
-painel (Capa com Chamada 🏷️, no privado, com os números) e o checkup (só em %) mostram.
+painel (Capa com Chamada 🏷️, no privado, com os números) e o checkup (só em %) mostram. Do mesmo jeito, o
+checkup compara a foto do começo de 1,5 s com a de 2 s de antes (escolha do Rafael de 13/11/2026, P221 1).
 """
 import statistics
 from datetime import datetime
@@ -94,12 +95,13 @@ def vistas_com_a_idade(postado_em, leituras, dias):
     return melhor[1] if melhor else None
 
 
-def comparar(videos, desde=None):
+def comparar(videos, desde=None, grupo=None):
     """
     A comparação da capa com chamada. videos: os postados pelo robô, [{"postado_em",
     "chamada", "marca", "vistas"}]; desde: o momento em que o Rafael ligou a capa (só os de
     depois entram; com ela ligada, a chamada vai em todos, P100, e os sem são os que ficaram
-    sem a vantagem da IA).
+    sem a vantagem da IA). grupo: a função que diz se o vídeo vai no grupo "com" (verdadeiro) ou no
+    "sem"; sem ela, a chamada diz (comparar_a_foto usa a foto do começo).
     Devolve {"com": grupo, "sem": grupo, "sem_marca": n}: cada grupo é {"videos", "lidos",
     "idades": {dias: (quantos, mediana ou None)}}, e sem_marca conta os postados sem a marca da
     capa desde o primeiro que a teve (os de antes da medição nunca a tiveram).
@@ -110,7 +112,7 @@ def comparar(videos, desde=None):
     inicio = min((v["postado_em"] or "" for v in com_marca), default=None)
     grupos = {"com": [], "sem": []}
     for video in com_marca:
-        grupos["com" if video.get("chamada") else "sem"].append(video)
+        grupos["com" if (grupo(video) if grupo else video.get("chamada")) else "sem"].append(video)
     resultado = {"sem_marca": sum(1 for v in videos if not v.get("marca") and inicio
                                   and (v.get("postado_em") or "") >= inicio)}
     for nome, lista in grupos.items():
@@ -129,3 +131,25 @@ def diferenca_em_porcento(medicao, dias):
     if com is None or not sem:
         return None
     return round((com - sem) * 100 / sem)
+
+
+def comparar_a_foto(videos):
+    """
+    A comparação da foto do começo (P221 1), como a da capa com chamada: no grupo "com", os vídeos que anotaram o
+    tempo da foto (segundos_da_foto, os feitos depois da P221 1, com 1,5 s); no "sem", os de antes, que não o
+    anotavam e foram com 2 s. O vídeo que foi sem a edição (segundos_da_foto "0", sem a foto) fica de fora.
+    videos: [{"postado_em", "segundos_da_foto", "marca", "vistas"}]. Devolve o mesmo que comparar e, em
+    "segundos", os tempos anotados nos do grupo "com", como se escrevem ("1,5"), do menor para o maior.
+    """
+    com_a_foto = [v for v in videos if (v.get("segundos_da_foto") or "") != "0"]
+    medicao = comparar(com_a_foto, grupo=lambda video: bool(video.get("segundos_da_foto")))
+    anotados = {v["segundos_da_foto"] for v in com_a_foto if v.get("segundos_da_foto")}
+    medicao["segundos"] = [s.replace(".", ",") for s in sorted(anotados, key=_numero)]
+    return medicao
+
+
+def _numero(texto):
+    try:
+        return float(texto)
+    except ValueError:
+        return 0.0

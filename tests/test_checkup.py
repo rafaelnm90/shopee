@@ -1246,6 +1246,25 @@ def test_medicao_da_capa_com_chamada_so_com_contagens_e_porcento():
     assert "1234" not in linha and "1851" not in linha and "9999" not in linha
 
 
+def test_medicao_da_foto_do_comeco_so_com_contagens_e_porcento():
+    # Escolha do Rafael (13/11, P221 1): o checkup compara as visualizações dos vídeos com a foto do começo de
+    # 1,5 s com as dos de 2 s de antes, como a capa com chamada (P76). O log é público: só contagens e %.
+    import robo_shopee_video as robo
+    vazio = checkup.foto_do_comeco_da_shopee_video(AGORA)
+    assert checkup._linha_da_foto_do_comeco(vazio).startswith("Foto do começo (P221 1): com 1,5 s 0, com 2 s 0")
+    for postado, segundos, vistas in (
+            ("2026-10-26 09:00:00", "", [["2026-10-27 09:30:00", 1234]]),
+            ("2026-10-26 10:00:00", "1.5", [["2026-10-27 10:00:00", 1851]]),
+            ("2026-10-26 11:00:00", "0", [["2026-10-27 11:00:00", 9999]])):
+        robo.atualizar(robo.criar("v", AGORA - timedelta(days=3)), estado="postado", postado_em=postado,
+                       marca="a", vistas=vistas, segundos_da_foto=segundos)
+    linha = checkup._linha_da_foto_do_comeco(checkup.foto_do_comeco_da_shopee_video(AGORA))
+    assert linha == ("Foto do começo (P221 1): com 1,5 s 1, com 2 s 1 (postados com a marca da capa; lidos 1 e 1) | "
+                     "com 1 dia(s): a de 1,5 s +50% (1 com 1,5 s, 1 com 2 s) | "
+                     "com 3 dia(s): sem comparação ainda (0 com 1,5 s, 0 com 2 s)")
+    assert "1234" not in linha and "1851" not in linha and "9999" not in linha
+
+
 def test_o_que_espera_o_rafael_sai_dos_pontos_de_atencao():
     # P146 5: o que depende de algo que só o Rafael faz (os chips novos dos Autorais) vai para
     # "Esperando o Rafael", conferido pelos números do dia; resolvida a causa, volta a contar.

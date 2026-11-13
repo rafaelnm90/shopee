@@ -1203,6 +1203,46 @@ def _linha_da_capa_com_chamada(medicao):
     return " | ".join(partes)
 
 
+def foto_do_comeco_da_shopee_video(agora=None):
+    """
+    A medição da foto do começo de 1,5 s da Shopee Vídeo (P221 1): os postados nestes últimos dias com a foto de
+    1,5 s e com a de 2 s de antes, os sem a marca da capa e a comparação das visualizações em cada idade
+    (visualizacoes_shopee_video.comparar_a_foto). O checkup só mostra contagens e %.
+    """
+    limite = (_agora(agora) - timedelta(days=DIAS_DA_COMPARACAO_DA_CAPA)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT postado_em, segundos_da_foto, marca, vistas FROM shopee_video_rascunhos "
+                "WHERE estado = 'postado' AND postado_em >= ?", (limite,)).fetchall()
+    except sqlite3.OperationalError:
+        # A tabela sem a coluna (o robô a cria na rodada seguinte ao deploy): ainda não há o que comparar.
+        linhas = []
+    videos = []
+    for postado_em, segundos, marca, vistas in linhas:
+        try:
+            vistas = json.loads(vistas or "[]")
+        except ValueError:
+            vistas = []
+        videos.append({"postado_em": postado_em, "segundos_da_foto": segundos or "", "marca": marca,
+                       "vistas": vistas})
+    return visualizacoes_shopee_video.comparar_a_foto(videos)
+
+
+def _linha_da_foto_do_comeco(medicao):
+    """A linha da medição da foto do começo (P221 1) no checkup: só contagens e a diferença em %."""
+    curta, antes = medicao["com"], medicao["sem"]
+    nova = (" e ".join(medicao["segundos"]) or "1,5") + " s"
+    partes = [f"Foto do começo (P221 1): com {nova} {curta['videos']}, com 2 s {antes['videos']} "
+              f"(postados com a marca da capa; lidos {curta['lidos']} e {antes['lidos']})"]
+    for dias in visualizacoes_shopee_video.IDADES_DA_COMPARACAO:
+        diferenca = visualizacoes_shopee_video.diferenca_em_porcento(medicao, dias)
+        comparado = f"a de {nova} {diferenca:+d}%" if diferenca is not None else "sem comparação ainda"
+        partes.append(f"com {dias} dia(s): {comparado} ({curta['idades'][dias][0]} com {nova}, "
+                      f"{antes['idades'][dias][0]} com 2 s)")
+    return " | ".join(partes)
+
+
 def aprovados_postados(agora=None):
     """
     Os aprovados que foram ao ar nas últimas 24 h: [(aprovado HH:MM, previsto HH:MM,
@@ -2054,6 +2094,7 @@ def main():
     print(_linha_dos_produtos_a_mais(produtos_a_mais_da_shopee_video(agora)))
     print(linha_das_punicoes_por_post(apelacoes_shopee_video.punicoes_por_tipo_de_post()))
     print(_linha_da_capa_com_chamada(capa_com_chamada_da_shopee_video(agora)))
+    print(_linha_da_foto_do_comeco(foto_do_comeco_da_shopee_video(agora)))
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))

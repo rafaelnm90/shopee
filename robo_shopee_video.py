@@ -919,7 +919,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
            "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor", "edicao",
-           "nova_versao", "versao_de", "no_app_em")
+           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -969,10 +969,14 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # apagada do app como um recusado e não conta como rascunho do dia.
 # no_app_em: quando o rascunho foi salvo no app pela última vez (refeito pelo Editar ✏️); vazio é o
 # criado_em. A lista do app vem por ele (posicao_no_app).
+# segundos_da_foto: o tempo da foto do começo do vídeo editado ("1.5"; "0" no que foi sem a edição); vazio nos
+# de antes da P221 1, que foram com 2 s. A medição da foto do começo compara as visualizações pelos dois
+# (visualizacoes_shopee_video.comparar_a_foto).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
-                 "postar_agora_em", "letras", "valor", "edicao", "nova_versao", "versao_de", "no_app_em")
+                 "postar_agora_em", "letras", "valor", "edicao", "nova_versao", "versao_de", "no_app_em",
+                 "segundos_da_foto")
 
 
 def _criar_tabela(con):
@@ -5527,7 +5531,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
               chamada="1" if edicao_video.COM_A_CHAMADA in (como or "") else "", cor=edicao.get("cor", ""),
-              letras=edicao.get("letras", ""), edicao=edicao.get("guardado") or {})
+              letras=edicao.get("letras", ""), edicao=edicao.get("guardado") or {},
+              segundos_da_foto=segundos_da_foto(edicao))
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
@@ -5670,6 +5675,16 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
         edicao["guardado"] = guardar_para_o_editar(copia, video["arquivo"], anuncio.get("foto"), trocam,
                                                    edicao.get("refazer"))
     return como
+
+
+def segundos_da_foto(edicao):
+    """
+    O tempo da foto do começo do vídeo do rascunho, para a coluna segundos_da_foto (P221 1): o que a edição usou
+    (o edicao_video.editar_para_postar o guarda no "refazer" do anotar, edicao), em texto ("1.5"), ou "0" no
+    vídeo que foi sem a edição, sem a foto.
+    """
+    segundos = ((edicao or {}).get("refazer") or {}).get("segundos_da_foto")
+    return f"{segundos:g}" if segundos else "0"
 
 
 # --- Editar ✏️ (P191 1 e P192 1) ---

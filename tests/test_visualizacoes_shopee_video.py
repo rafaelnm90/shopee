@@ -65,3 +65,24 @@ def test_comparar_usa_a_leitura_mais_perto_de_cada_idade():
     # Ligada a capa (P77), só os vídeos postados depois entram: os dois grupos dos mesmos dias.
     depois = vsv.comparar(videos, desde="2026-10-27 00:00:00")
     assert (depois["sem"]["videos"], depois["com"]["videos"], depois["sem_marca"]) == (0, 2, 1)
+
+
+def test_comparar_a_foto_separa_os_de_1_5_s_dos_de_2_s_de_antes():
+    # Escolha do Rafael (13/11, P221 1): a foto do começo de 1,5 s comparada com a de 2 s, como a capa com chamada.
+    # Os de antes não anotavam o tempo da foto (foram com 2 s); o que foi sem a edição ("0", sem a foto) fica de fora.
+    videos = [
+        {"postado_em": "2026-11-10 10:00:00", "segundos_da_foto": "", "marca": "a",
+         "vistas": [["2026-11-11 10:00:00", 200]]},
+        {"postado_em": "2026-11-11 10:00:00", "segundos_da_foto": None, "marca": "b",
+         "vistas": [["2026-11-12 10:00:00", 100]]},
+        {"postado_em": "2026-11-14 10:00:00", "segundos_da_foto": "1.5", "marca": "c",
+         "vistas": [["2026-11-15 10:00:00", 180]]},
+        {"postado_em": "2026-11-14 12:00:00", "segundos_da_foto": "0", "marca": "d",
+         "vistas": [["2026-11-15 12:00:00", 9999]]},
+    ]
+    medicao = vsv.comparar_a_foto(videos)
+    assert medicao["com"] == {"videos": 1, "lidos": 1, "idades": {1: (1, 180), 3: (0, None)}}
+    assert medicao["sem"] == {"videos": 2, "lidos": 2, "idades": {1: (2, 150.0), 3: (0, None)}}
+    assert medicao["segundos"] == ["1,5"] and vsv.diferenca_em_porcento(medicao, 1) == 20
+    vazio = vsv.comparar_a_foto([])
+    assert vazio["segundos"] == [] and vsv.diferenca_em_porcento(vazio, 1) is None
