@@ -2136,6 +2136,117 @@ def lugar_dos_textos(textos):
     return SEM_LUGAR if textos.get("texto_no_video") else LUGAR_PADRAO
 
 
+# A IA erra o lugar do produto quando o diz em palavras: no rascunho do filtro de café de 13/11, ela deu o alto
+# como ocupado pelo produto ou um rosto nos 3 momentos, e nenhum dos nossos textos entrou, com o alto livre no
+# vídeo todo (pedido do Rafael: "Pq não veio legenda de incentivo?"). Como a do canto da miniatura
+# (_conferir_o_canto), uma 2ª pergunta confere cada momento em que ela deu o alto dos textos como ocupado: ela
+# vê os quadros do momento com o retângulo dos textos desenhado e diz só se ele cobre o produto ou um rosto.
+# Livre em todos os quadros, o texto do momento entra; coberto, ou sem a resposta, vale a 1ª (P220 1).
+# DECISOES.md, Shopee Vídeo.
+QUADROS_DO_ALTO = 3                     # quadros de cada momento conferido, espalhados nele
+# O retângulo dos nossos textos no alto, com a miniatura à direita (x1, y1, x2, y2, em px do vídeo de 720x1280):
+# o maior texto, de 2 linhas, mede uns 396 x 126 px a partir de LUGARES_DOS_TEXTOS["alto"].
+CAIXA_DO_ALTO = (68, 150, 470, 280)
+VERMELHO_DA_CONFERENCIA = (255, 0, 0)
+PROMPT_DO_ALTO = (
+    "Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.\n"
+    "Cada imagem é um momento do vídeo, com {quadros} quadros dele lado a lado. O retângulo vermelho é onde vai "
+    "entrar um texto nosso por cima do vídeo. Diga, para cada imagem, na ordem, se em algum dos quadros dela o "
+    "retângulo vermelho fica em cima de alguma parte do produto ({nome}) ou do rosto de alguém. O fundo, a mesa, "
+    "as mãos e as outras coisas da cena que não são o produto nem um rosto não contam.\n"
+    "Responda só com um JSON: {{\"cobre\": [true ou false para cada imagem, na ordem]}}"
+)
+PROCESSO_DO_ALTO = "edição do vídeo: alto conferido nos quadros"
+ALTO_LIVRE, ALTO_OCUPADO, ALTO_LIVRE_EM_PARTE = "livre", "ocupado", "livre em parte"
+ALTO_SEM_RESPOSTA = "a 2ª pergunta ficou sem resposta"
+
+
+def caixa_do_alto(lado=MINIATURA_A_DIREITA):
+    """O retângulo dos nossos textos no alto (CAIXA_DO_ALTO), do lado oposto ao da miniatura (lado)."""
+    x1, y1, x2, y2 = CAIXA_DO_ALTO
+    return (TELA[0] - x2, y1, TELA[0] - x1, y2) if lado == MINIATURA_A_ESQUERDA else CAIXA_DO_ALTO
+
+
+def _quadros_do_momento(video, inicio, fim, caixa):
+    """
+    A imagem (PNG, bytes) com QUADROS_DO_ALTO quadros do vídeo entre início e fim (em segundos), lado a lado, cada
+    um como fica na edição (videos.quadro_na_tela) e com a caixa (x1, y1, x2, y2, em px) desenhada em vermelho,
+    para a 2ª pergunta do alto; None quando algum quadro não sai.
+    """
+    import io
+
+    from PIL import Image, ImageDraw
+    largura, altura = TELA[0] // 2, TELA[1] // 2
+    folha = Image.new("RGB", (largura * QUADROS_DO_ALTO, altura), "black")
+    for n in range(QUADROS_DO_ALTO):
+        png = videos.quadro_na_tela(video, inicio + (fim - inicio) * (n + 0.5) / QUADROS_DO_ALTO)
+        try:
+            quadro = Image.open(io.BytesIO(png or b"")).convert("RGB")
+        except Exception:
+            return None
+        ImageDraw.Draw(quadro).rectangle(caixa, outline=VERMELHO_DA_CONFERENCIA, width=8)
+        folha.paste(quadro.resize((largura, altura)), (largura * n, 0))
+    saida = io.BytesIO()
+    folha.save(saida, "PNG")
+    return saida.getvalue()
+
+
+def conferir_o_alto(video, textos, lado=MINIATURA_A_DIREITA, nome=""):
+    """
+    Confere nos quadros (_quadros_do_momento e PROMPT_DO_ALTO) os momentos dos nossos textos em que a IA deu o alto
+    do lado dos textos (o oposto ao da miniatura, lado) como ocupado pelo produto ou um rosto: o momento em que a 2ª
+    pergunta vê o retângulo livre em todos os quadros ganha o alto entre os livres. Sem os lugares de cada momento,
+    os 3 momentos (momentos_dos_textos) partem da lista do vídeo todo. Muda textos["lugares_nos_momentos"] só com a
+    resposta e devolve (conferidos, livres): quantos momentos foram conferidos e em quantos o alto estava livre
+    (None sem a resposta); (0, 0) sem nada a conferir.
+    """
+    alto = "alto_direita" if lado == MINIATURA_A_ESQUERDA else "alto_esquerda"
+    momentos = []
+    for item in textos.get("lugares_nos_momentos") or ():
+        try:
+            momentos.append([float(item[0]), float(item[1]), list(item[2])])
+        except (TypeError, ValueError, IndexError):
+            momentos = []
+            break
+    if not momentos and isinstance(textos.get("lugares"), list):
+        momentos = [[inicio, fim, list(textos["lugares"])] for inicio, fim in momentos_dos_textos(videos.duracao(video))]
+    ocupados = [momento for momento in momentos if alto not in momento[2]]
+    if not ocupados:
+        return 0, 0
+    caixa = caixa_do_alto(lado)
+    imagens = []
+    for inicio, fim, _livres in ocupados:
+        imagem = _quadros_do_momento(video, inicio, fim, caixa)
+        if imagem is None:
+            return len(ocupados), None
+        imagens.append((imagem, "image/png"))
+    resposta = _json_das_fotos(PROMPT_DO_ALTO.format(quadros=QUADROS_DO_ALTO, nome=nome or "o produto anunciado"),
+                               imagens) or {}
+    cobre = resposta.get("cobre")
+    if not isinstance(cobre, list) or len(cobre) != len(ocupados) or not all(isinstance(c, bool) for c in cobre):
+        return len(ocupados), None
+    for momento, coberto in zip(ocupados, cobre):
+        if not coberto:
+            momento[2].append(alto)
+    textos["lugares_nos_momentos"] = momentos
+    return len(ocupados), cobre.count(False)
+
+
+def resultado_do_alto(conferidos, livres):
+    """(resultado, detalhe) da 2ª pergunta do alto, para o registro (PROCESSO_DO_ALTO): só textos fixos e números."""
+    if livres is None:
+        return ALTO_SEM_RESPOSTA, f"{conferidos} momento(s) a conferir"
+    resultado = ALTO_LIVRE if livres == conferidos else ALTO_OCUPADO if not livres else ALTO_LIVRE_EM_PARTE
+    return resultado, f"{livres} de {conferidos} momento(s) com o alto livre nos quadros"
+
+
+def _momentos_conferidos(video, textos, lado=MINIATURA_A_DIREITA, nome=""):
+    """Os lugares de cada momento (lugares_nos_momentos) depois da 2ª pergunta do alto (conferir_o_alto)."""
+    if lugar_dos_textos(textos) != SEM_LUGAR and any(textos.get(chave) for chave in TEXTOS_DA_TELA):
+        conferir_o_alto(video, textos, lado, nome)
+    return lugares_nos_momentos(textos, lado)
+
+
 # "Na maior parte do tempo" (P52): o texto próprio do vídeo na tela em mais da metade dele.
 PARTE_COM_TEXTO_PROPRIO = 0.5
 
@@ -3449,6 +3560,14 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                                      por_que_a_miniatura(textos, canto)
                                      + (f"; {textos['outro_canto']}" if textos.get("outro_canto") else ""))
     avisado = _avisado(avisos, bool(capa), musica, miniatura, outras_fotos, escolhas, cor, lado)
+    # O alto dos textos que a IA deu como ocupado pelo produto ou um rosto em algum momento é conferido nos quadros,
+    # com o retângulo dos textos desenhado (conferir_o_alto); o registro conta o que a 2ª pergunta viu. O Editar ✏️
+    # guarda os lugares já conferidos.
+    if lugar_dos_textos(textos) != SEM_LUGAR and any(textos.get(chave) for chave in TEXTOS_DA_TELA):
+        conferidos, livres = conferir_o_alto(video, textos, canto, produto)
+        if conferidos:
+            resultado, detalhe = resultado_do_alto(conferidos, livres)
+            registro_processos.registrar("shopee_video", PROCESSO_DO_ALTO, resultado, detalhe, ok=None)
     # As legendas da fala (P118): só o que alguém fala, num vídeo que ainda não a tem escrita na tela,
     # no tempo do áudio, palavra por palavra; nenhuma com ela desligada no painel (P192 1).
     if not escolhas["legenda"]:
@@ -3996,7 +4115,7 @@ def exemplo_editor_2(destino):
         legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0] if escolhas["legenda"] else [],
         cor=cor_do_produto(textos.get("cor")), escolhas=escolhas,
         lugares=lugares_dos_textos(textos, escolhas["miniatura"]), por_cima=textos.get("por_cima", ()),
-        nos_momentos=lugares_nos_momentos(textos, escolhas["miniatura"])),
+        nos_momentos=_momentos_conferidos(arquivo, textos, escolhas["miniatura"], produto)),
         escolhas_do_painel())
 
 
