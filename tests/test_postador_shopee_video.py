@@ -1796,6 +1796,70 @@ def test_curtido_que_nao_chega_segue_para_a_rolagem_e_a_ultima_chance(monkeypatc
     assert ("não anexado", "nem pelo nome nem pela foto do 1º da lista") in _anexar_linhas()
 
 
+# A tela da lista que o app não carregou, como no Motorola em 13/11/2026 às 17:57.
+TELA_ERRO_DE_CARREGAMENTO = _com_as_ordens("""<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node text="" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" clickable="false">
+    <node text="Adicionar Produto" class="android.widget.TextView" bounds="[400,150][740,200]" />
+    <node text="Minhas Curtidas" class="android.view.ViewGroup" clickable="true" bounds="[300,410][510,460]" />
+    <node text="Erro de Carregamento" class="android.widget.TextView" bounds="[334,1343][747,1396]" />
+    <node text="Por favor, tente novamente mais tarde." class="android.widget.TextView"
+          bounds="[223,1412][857,1465]" />
+    <node text="" class="android.view.ViewGroup" clickable="true" bounds="[310,1530][770,1620]">
+      <node text="Atualizar" class="android.widget.TextView" bounds="[466,1554][615,1596]" />
+    </node>
+  </node>
+</hierarchy>""")
+ATUALIZAR = (540, 1575)
+
+
+class ListaComErroDeCarregamento(AparelhoComPrint):
+    """
+    Minhas Curtidas que dá o "Erro de Carregamento" depois da `erro_na`ª volta a Mais Recente e só volta
+    com `volta_com` toques no Atualizar; depois do toque num Adicionar, a janela de editar o nome.
+    """
+
+    def __init__(self, lista, nome_na_janela, erro_na=3, volta_com=1):
+        super().__init__(tela=lista, nome_na_janela=nome_na_janela)
+        self.erro_na, self.volta_com = erro_na, volta_com
+
+    def dump_hierarchy(self):
+        if any(toque not in (RELEVANCIA, MAIS_RECENTE, ATUALIZAR) for toque in self.toques):
+            return self.janela
+        if self.toques.count(MAIS_RECENTE) >= self.erro_na and self.toques.count(ATUALIZAR) < self.volta_com:
+            return TELA_ERRO_DE_CARREGAMENTO
+        return self.tela
+
+
+def test_erro_de_carregamento_na_lista_toca_no_atualizar_e_a_ultima_chance_ve_a_lista(monkeypatch):
+    # 13/11/2026, 17:57: na 3ª leitura de novo de Minhas Curtidas, o app deu "Erro de Carregamento", e a
+    # última chance (a IA com a foto do 1º da lista) ficou sem produto para conferir. O robô toca no
+    # Atualizar do app, a lista volta, e a última chance confere o 1º; o registro diz o que houve.
+    _avisos(monkeypatch)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    monkeypatch.setattr(ps, "rolar", lambda d, para_cima=False: None)
+    _ia_da_foto(monkeypatch, confere=True)
+    anexados = []
+    aparelho = ListaComErroDeCarregamento(_com_as_ordens(_lista(FIBRA, PANELA)), FIBRA)
+    ok, _ = ps.adicionar_produto(aparelho, {"produto": VESTIDO, "arquivo": "video.mp4"}, anexados)
+    assert ok and anexados == [FIBRA]
+    assert aparelho.toques.count(ATUALIZAR) == 1
+    linhas = _anexar_linhas()
+    assert (ps.ERRO_NA_LISTA, "Atualizar tocado 1x: a lista voltou") in linhas
+    assert ("anexado", "o 1º da lista, pela IA" + ps.forma_do_nome(FIBRA)) in linhas
+    assert not any(d.endswith("com o Erro de Carregamento") for _r, d in linhas)
+    # O erro que continua depois dos toques no Atualizar: o vídeo volta mais tarde (P216 1), e o registro diz.
+    aparelho = ListaComErroDeCarregamento(_com_as_ordens(_lista(FIBRA, PANELA)), FIBRA, volta_com=99)
+    ok, motivo = ps.adicionar_produto(aparelho, {"produto": VESTIDO, "arquivo": "video.mp4"}, [])
+    assert not ok and motivo.startswith(ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS)
+    assert aparelho.toques.count(ATUALIZAR) == 2 * ps.VEZES_DO_ATUALIZAR
+    linhas = _anexar_linhas()
+    assert (ps.ERRO_NA_LISTA, f"Atualizar tocado {ps.VEZES_DO_ATUALIZAR}x: continuou com o erro") in linhas
+    assert any(r == "lista lida de novo" and d.endswith("com o Erro de Carregamento") for r, d in linhas)
+    assert any(r == "nome não achado em Minhas Curtidas" and d.endswith("com o Erro de Carregamento")
+               for r, d in linhas)
+
+
 def test_produto_a_mais_nao_espera_a_lista_de_novo(monkeypatch):
     # O produto a mais (P59) que não está na lista só fica de fora, sem as pausas.
     _avisos(monkeypatch)
