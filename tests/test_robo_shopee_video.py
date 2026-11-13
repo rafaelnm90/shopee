@@ -6332,7 +6332,8 @@ def test_rascunho_que_nao_sai_deixa_o_caso_completo_para_o_checkup(monkeypatch, 
     assert len(casos) == 1 and casos[0].endswith("-rascunho")
     with open(os.path.join(robo.casos_robo.PASTA, casos[0], "caso.json"), encoding="utf-8") as f:
         caso = json.load(f)
-    assert (caso["resultado"], caso["passo"]) == ("pulado", "anexar o produto")
+    # O produto que não aparece em Minhas Curtidas faz o vídeo voltar mais tarde (P216 1): a rodada para.
+    assert (caso["resultado"], caso["passo"]) == ("parou", "anexar o produto")
     assert caso["rascunho"]["titulo"] == TITULO and caso["rascunho"]["produtos"] == [VESTIDO]
     assert caso["video"]["link"] == LINK and os.path.exists(os.path.join(robo.casos_robo.PASTA, casos[0], "tela.xml"))
 
