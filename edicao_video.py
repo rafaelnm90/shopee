@@ -2136,17 +2136,21 @@ def lugar_dos_textos(textos):
     return SEM_LUGAR if textos.get("texto_no_video") else LUGAR_PADRAO
 
 
-# A IA erra o lugar do produto quando o diz em palavras: no rascunho do filtro de café de 13/11, ela deu o alto
-# como ocupado pelo produto ou um rosto nos 3 momentos, e nenhum dos nossos textos entrou, com o alto livre no
-# vídeo todo (pedido do Rafael: "Pq não veio legenda de incentivo?"). Como a do canto da miniatura
+# A IA erra o lugar do produto quando o diz em palavras: no rascunho de 13/11 que o Rafael mostrou, ela deu o
+# alto como ocupado pelo produto ou um rosto nos 3 momentos, e nenhum dos nossos textos entrou, com o alto livre
+# no vídeo todo (pergunta dele: "Pq não veio legenda de incentivo?"). Como a do canto da miniatura
 # (_conferir_o_canto), uma 2ª pergunta confere cada momento em que ela deu o alto dos textos como ocupado: ela
 # vê os quadros do momento com o retângulo dos textos desenhado e diz só se ele cobre o produto ou um rosto.
 # Livre em todos os quadros, o texto do momento entra; coberto, ou sem a resposta, vale a 1ª (P220 1).
 # DECISOES.md, Shopee Vídeo.
 QUADROS_DO_ALTO = 3                     # quadros de cada momento conferido, espalhados nele
-# O retângulo dos nossos textos no alto, com a miniatura à direita (x1, y1, x2, y2, em px do vídeo de 720x1280):
-# o maior texto, de 2 linhas, mede uns 396 x 126 px a partir de LUGARES_DOS_TEXTOS["alto"].
-CAIXA_DO_ALTO = (68, 150, 470, 280)
+# A folha de cada momento vai à IA em JPEG, com a cor inteira em cada ponto (sem a subamostragem), para o
+# retângulo ficar nítido: uns 100 a 150 KB, um quinto do PNG.
+QUALIDADE_DOS_QUADROS = 85
+# O retângulo dos nossos textos no alto, com a miniatura à direita (x1, y1, x2, y2, em px do vídeo de 720x1280),
+# com uma folga de uns 5 px: o maior texto mede uns 396 x 141 px a partir de LUGARES_DOS_TEXTOS["alto"] (o que
+# não cabe em 2 linhas fica com 3, na letra menor).
+CAIXA_DO_ALTO = (68, 150, 470, 296)
 VERMELHO_DA_CONFERENCIA = (255, 0, 0)
 PROMPT_DO_ALTO = (
     "Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.\n"
@@ -2169,7 +2173,7 @@ def caixa_do_alto(lado=MINIATURA_A_DIREITA):
 
 def _quadros_do_momento(video, inicio, fim, caixa):
     """
-    A imagem (PNG, bytes) com QUADROS_DO_ALTO quadros do vídeo entre início e fim (em segundos), lado a lado, cada
+    A imagem (JPEG, bytes) com QUADROS_DO_ALTO quadros do vídeo entre início e fim (em segundos), lado a lado, cada
     um como fica na edição (videos.quadro_na_tela) e com a caixa (x1, y1, x2, y2, em px) desenhada em vermelho,
     para a 2ª pergunta do alto; None quando algum quadro não sai.
     """
@@ -2187,7 +2191,7 @@ def _quadros_do_momento(video, inicio, fim, caixa):
         ImageDraw.Draw(quadro).rectangle(caixa, outline=VERMELHO_DA_CONFERENCIA, width=8)
         folha.paste(quadro.resize((largura, altura)), (largura * n, 0))
     saida = io.BytesIO()
-    folha.save(saida, "PNG")
+    folha.save(saida, "JPEG", quality=QUALIDADE_DOS_QUADROS, subsampling=0)
     return saida.getvalue()
 
 
@@ -2219,7 +2223,7 @@ def conferir_o_alto(video, textos, lado=MINIATURA_A_DIREITA, nome=""):
         imagem = _quadros_do_momento(video, inicio, fim, caixa)
         if imagem is None:
             return len(ocupados), None
-        imagens.append((imagem, "image/png"))
+        imagens.append((imagem, "image/jpeg"))
     resposta = _json_das_fotos(PROMPT_DO_ALTO.format(quadros=QUADROS_DO_ALTO, nome=nome or "o produto anunciado"),
                                imagens) or {}
     cobre = resposta.get("cobre")

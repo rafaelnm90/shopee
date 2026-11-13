@@ -4476,35 +4476,35 @@ def _ia_do_alto(monkeypatch, resposta):
 
     monkeypatch.setattr(api_gemini, "gerar_texto_gemini", ia)
     monkeypatch.setattr(edicao_video, "_quadros_do_momento",
-                        lambda video, inicio, fim, caixa: quadros.append((inicio, fim, caixa)) or b"\x89PNG quadros")
+                        lambda video, inicio, fim, caixa: quadros.append((inicio, fim, caixa)) or b"\xff\xd8 quadros")
     return pedidos, quadros
 
 
 def test_o_alto_que_a_ia_deu_como_ocupado_e_conferido_nos_quadros(monkeypatch):
-    # Vídeo do Rafael de 13/11 ("Pq não veio legenda de incentivo?"): no rascunho do filtro de café, a IA deu o alto
+    # Vídeo do Rafael de 13/11 ("Pq não veio legenda de incentivo?"): no rascunho que ele mostrou, a IA deu o alto
     # como ocupado pelo produto nos 3 momentos, e nenhum texto entrou, com o alto livre no vídeo todo. O momento em
     # que ela deu o alto dos textos como ocupado é conferido nos quadros, com o retângulo dos textos desenhado: o
     # livre ganha o alto, o coberto continua sem ele (P220 1).
     pedidos, quadros = _ia_do_alto(monkeypatch, '{"cobre": [false, true]}')
-    textos = {"nome": "Filtro", "lugares": ["alto_esquerda", "meio"],
+    textos = {"nome": "Organizador", "lugares": ["alto_esquerda", "meio"],
               "lugares_nos_momentos": [[0.3, 2.4, ["meio"]], [2.9, 5.0, ["alto_esquerda"]], [5.5, 7.6, []]]}
-    assert edicao_video.conferir_o_alto("v.mp4", textos, edicao_video.MINIATURA_A_DIREITA, "Filtro de café") == (2, 1)
+    assert edicao_video.conferir_o_alto("v.mp4", textos, edicao_video.MINIATURA_A_DIREITA, "Organizador de gaveta") == (2, 1)
     assert textos["lugares_nos_momentos"] == [[0.3, 2.4, ["meio", "alto_esquerda"]], [2.9, 5.0, ["alto_esquerda"]],
                                               [5.5, 7.6, []]]
     assert quadros == [(0.3, 2.4, edicao_video.CAIXA_DO_ALTO), (5.5, 7.6, edicao_video.CAIXA_DO_ALTO)]
     prompt, imagens = pedidos[-1]
-    assert "Filtro de café" in prompt and len(imagens) == 2 and imagens[0][1] == "image/png"
+    assert "Organizador de gaveta" in prompt and len(imagens) == 2 and imagens[0][1] == "image/jpeg"
     assert edicao_video.resultado_do_alto(2, 1) == (edicao_video.ALTO_LIVRE_EM_PARTE,
                                                     "1 de 2 momento(s) com o alto livre nos quadros")
     # Com a miniatura à esquerda, os textos vão ao alto da direita, e o retângulo também.
-    textos = {"nome": "Filtro", "lugares_nos_momentos": [[0.3, 2.4, ["alto_esquerda"]]]}
+    textos = {"nome": "Organizador", "lugares_nos_momentos": [[0.3, 2.4, ["alto_esquerda"]]]}
     _ia_do_alto(monkeypatch, '{"cobre": [false]}')
     assert edicao_video.conferir_o_alto("v.mp4", textos, edicao_video.MINIATURA_A_ESQUERDA) == (1, 1)
     assert textos["lugares_nos_momentos"] == [[0.3, 2.4, ["alto_esquerda", "alto_direita"]]]
-    assert edicao_video.caixa_do_alto(edicao_video.MINIATURA_A_ESQUERDA) == (250, 150, 652, 280)
+    assert edicao_video.caixa_do_alto(edicao_video.MINIATURA_A_ESQUERDA) == (250, 150, 652, 296)
     # Sem a resposta (ou com outro número de respostas), vale a 1ª e o registro diz.
     for resposta in (None, '{"cobre": [false, false]}', '{"cobre": "não"}'):
-        textos = {"nome": "Filtro", "lugares_nos_momentos": [[0.3, 2.4, ["meio"]]]}
+        textos = {"nome": "Organizador", "lugares_nos_momentos": [[0.3, 2.4, ["meio"]]]}
         _ia_do_alto(monkeypatch, resposta)
         assert edicao_video.conferir_o_alto("v.mp4", textos) == (1, None)
         assert textos["lugares_nos_momentos"] == [[0.3, 2.4, ["meio"]]]
@@ -4512,22 +4512,24 @@ def test_o_alto_que_a_ia_deu_como_ocupado_e_conferido_nos_quadros(monkeypatch):
     # Sem os lugares de cada momento, os 3 momentos partem da lista do vídeo todo.
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 9.0)
     pedidos, quadros = _ia_do_alto(monkeypatch, '{"cobre": [false, false, false]}')
-    textos = {"nome": "Filtro", "lugares": ["meio"]}
+    textos = {"nome": "Organizador", "lugares": ["meio"]}
     assert edicao_video.conferir_o_alto("v.mp4", textos) == (3, 3)
     assert [livres for _inicio, _fim, livres in textos["lugares_nos_momentos"]] == [["meio", "alto_esquerda"]] * 3
     assert edicao_video.resultado_do_alto(3, 3) == (edicao_video.ALTO_LIVRE, "3 de 3 momento(s) com o alto livre nos quadros")
     # Com o alto livre em todos os momentos pela 1ª, nada é perguntado.
     pedidos, quadros = _ia_do_alto(monkeypatch, '{"cobre": [true]}')
-    textos = {"nome": "Filtro", "lugares_nos_momentos": [[0.3, 2.4, ["alto_esquerda"]]]}
+    textos = {"nome": "Organizador", "lugares_nos_momentos": [[0.3, 2.4, ["alto_esquerda"]]]}
     assert edicao_video.conferir_o_alto("v.mp4", textos) == (0, 0) and pedidos == [] and quadros == []
 
 
 def test_o_retangulo_da_conferencia_cobre_os_maiores_textos_do_alto():
-    # O retângulo desenhado nos quadros é onde os nossos textos do alto ficam: os maiores, de 2 linhas, cabem nele.
+    # O retângulo desenhado nos quadros é onde os nossos textos do alto ficam: os maiores cabem nele, também o que
+    # não cabe em 2 linhas e fica com 3, na letra menor.
     caixa = edicao_video.caixa_dos_textos(None)
     for lado in (edicao_video.MINIATURA_A_DIREITA, edicao_video.MINIATURA_A_ESQUERDA):
         x1, y1, x2, y2 = edicao_video.caixa_do_alto(lado)
-        for texto, fundo in (("Filtro de café reutilizável inox", caixa), ("Malha super fina, sem filtro de papel", caixa),
+        for texto, fundo in (("Organizador de gaveta modular", caixa), ("Cabe tudo e deixa a gaveta arrumada", caixa),
+                             ("Mantém tudo organizado no dia a dia", caixa),
                              ("GARANTA O SEU AQUI EMBAIXO AGORA MESMO", edicao_video.FUNDO_DA_CHAMADA)):
             imagem, x, y = edicao_video._letreiro_no_lugar(texto, fundo, "alto", lado)
             largura, altura = _medidas(imagem)
@@ -4563,7 +4565,7 @@ def test_quadros_do_momento_de_verdade_com_o_retangulo(tmp_path):
 
 
 def test_o_que_vai_ao_ar_confere_o_alto_ocupado_e_o_texto_entra(monkeypatch, tmp_path):
-    # O caso do filtro de café no que vai ao ar: a 1ª resposta deu o alto como ocupado nos 3 momentos; a 2ª
+    # O caso do vídeo de 13/11 no que vai ao ar: a 1ª resposta deu o alto como ocupado nos 3 momentos; a 2ª
     # pergunta o viu livre nos quadros, os 3 textos entram, o registro conta, e o Editar ✏️ guarda os lugares já
     # conferidos.
     import json
@@ -4571,13 +4573,13 @@ def test_o_que_vai_ao_ar_confere_o_alto_ocupado_e_o_texto_entra(monkeypatch, tmp
     import registro_processos as rp
     montados, _editados = _versoes_de_mentira(monkeypatch)
     _textos_da_tela(monkeypatch, {
-        "nome": "Filtro reutilizável", "vantagem": "Dispensa filtro de papel", "chamada": "Garanta o seu aqui",
+        "nome": "Organizador modular", "vantagem": "Cabe tudo na gaveta", "chamada": "Garanta o seu aqui",
         "lugares": ["alto_esquerda", "meio"], "canto_ocupado": False, "outro_canto_ocupado": False,
         "lugares_nos_momentos": [[0.3, 3.8, ["meio"]], [4.3, 7.8, ["meio"]], [8.3, 11.8, []]]})
     _ia_do_alto(monkeypatch, '{"cobre": [false, false, false]}')
     anotado = {}
     destino = str(tmp_path / "rascunho.mp4")
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Filtro", anotar=anotado) == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Organizador", anotar=anotado) == (
         "", edicao_video.COM_LEGENDAS, "")
     assert montados[-1][1] == 3
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_ALTO, "2000-01-01 00:00:00")
@@ -4587,7 +4589,7 @@ def test_o_que_vai_ao_ar_confere_o_alto_ocupado_e_o_texto_entra(monkeypatch, tmp
     assert all("alto_esquerda" in livres for _i, _f, livres in guardado["textos"]["lugares_nos_momentos"])
     # Com o alto coberto pelo produto nos quadros, os textos continuam de fora, como a 1ª disse.
     _ia_do_alto(monkeypatch, '{"cobre": [true, true, true]}')
-    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Filtro") == (
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Organizador") == (
         "", edicao_video.SEM_LEGENDAS_NA_TELA, edicao_video.SEM_O_LUGAR_FIXO)
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_ALTO, "2000-01-01 00:00:00")
     assert (registro[-1][2], registro[-1][3]) == (edicao_video.ALTO_OCUPADO, "0 de 3 momento(s) com o alto livre nos quadros")
