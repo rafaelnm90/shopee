@@ -2633,10 +2633,10 @@ def _linhas_da_legenda(texto, cabe):
     """
     As linhas do texto quebradas na largura da legenda (só no espaço comum; cabe(linha) diz se a linha
     cabe nela). Em duas linhas, a quebra que cabe vem de preferência depois de um ponto ou de uma vírgula
-    e nunca deixa palavra de ligação no fim da 1ª ("Tratamento potente / e duradouro"); entre as iguais,
-    a da 1ª linha mais comprida. Escolha do Rafael (10/11, P199 1): DECISOES.md, Shopee Vídeo. O texto
-    que não cabe em duas linhas vai quebrado palavra a palavra, e a legenda tenta a letra menor ou é
-    dividida antes.
+    e sem palavra de ligação no fim da 1ª ("Tratamento potente / e duradouro"; a que só cabe com ela fica
+    para a letra_e_linhas_da_legenda tentar a letra menor); entre as iguais, a da 1ª linha mais comprida.
+    Escolha do Rafael (10/11, P199 1): DECISOES.md, Shopee Vídeo. O texto que não cabe em duas linhas vai
+    quebrado palavra a palavra, e a legenda tenta a letra menor ou é dividida antes.
     """
     palavras = texto.split()
     if palavras and cabe(" ".join(palavras)):
