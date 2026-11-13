@@ -189,10 +189,15 @@ def _capa_do_resto_na_abertura(indice, passagem=0.0):
     return f"[{indice}:v]{TELA_DA_IMAGEM}[resto];[primeiro][resto]overlay=enable='gte(n,1)':shortest=1[foto]"
 
 
+def _fora_dos_trechos(trechos):
+    """A expressão do ffmpeg que vale 1 fora dos trechos [(início, fim)] (em segundos) e 0 dentro deles."""
+    return "not(" + "+".join(f"between(t,{inicio:.3f},{fim:.3f})" for inicio, fim in trechos) + ")"
+
+
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
                              outras=(), troca=0.0, capa_do_resto=None, moldura=None, espera_da_moldura=0.0,
-                             passagem=0.0):
+                             passagem=0.0, sem_seta=(), sem_moldura=()):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
@@ -212,7 +217,9 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     `passagem` (segundos), a `capa` se desfaz nela nesse tempo, sem o pulo (P175 1). Com a
     `moldura` (o caminho de uma imagem do tamanho da tela, com o fundo transparente), ela vai por
     cima do vídeo `espera_da_moldura` segundos depois da abertura, até o fim, por baixo da seta (a
-    do cartão do produto, P128, que espera o cartão do app aparecer, P140 2).
+    do cartão do produto, P128, que espera o cartão do app aparecer, P140 2). A seta e a moldura
+    somem nos trechos de `sem_seta` e de `sem_moldura` ([(início, fim)], em segundos do corpo do
+    vídeo, depois da abertura): o tempo em que o criador pôs alguma coisa no lugar delas (P218 1).
     """
     # A foto vai no fundo preto do FILTRO_720P: o app usa o primeiro quadro como capa na grade
     # do perfil, e o número de visualizações, em letras brancas, só se lê no escuro.
@@ -250,7 +257,8 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
         inicio, quadros = pulso_da_seta
         entradas += ["-i", seta]
         filtro += (f"[3:v]loop=loop=-1:size={quadros}:start={inicio},{POR_CIMA}[seta];"
-                   f"[comfoto][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1,"
+                   f"[comfoto][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1"
+                   + (f":enable='{_fora_dos_trechos(sem_seta)}'" if sem_seta else "") + ","
                    "format=yuv420p[editado];"
                    "[foto][editado]concat=n=2:v=1:a=0[v]")
     else:
@@ -280,7 +288,9 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
         indice = entradas.count("-i")
         entradas += ["-loop", "1", "-i", moldura]
         # O t é o do corpo do vídeo: a espera conta do fim da abertura.
-        quando = f":enable='gte(t,{espera_da_moldura:.3f})'" if espera_da_moldura > 0 else ""
+        condicoes = ([f"gte(t,{espera_da_moldura:.3f})"] if espera_da_moldura > 0 else []) + (
+            [_fora_dos_trechos(sem_moldura)] if sem_moldura else [])
+        quando = f":enable='{'*'.join(condicoes)}'" if condicoes else ""
         filtro += (f";[{indice}:v]{POR_CIMA}[moldura];[semmoldura][moldura]overlay=0:0:shortest=1{quando}"
                    "[comfoto]")
     return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
@@ -290,7 +300,8 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
                          centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=(),
-                         moldura=None, espera_da_moldura=0.0, passagem=0.0):
+                         moldura=None, espera_da_moldura=0.0, passagem=0.0, sem_seta=(),
+                         sem_moldura=()):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
@@ -301,7 +312,8 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
     ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
     igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Com a `moldura`
     (bytes de uma imagem do tamanho da tela, transparente fora dela), ela vai por cima do vídeo
-    `espera_da_moldura` segundos depois da abertura; a que não abre fica de fora. Devolve "" quando
+    `espera_da_moldura` segundos depois da abertura; a que não abre fica de fora. A seta e a moldura
+    somem nos trechos de `sem_seta` e de `sem_moldura` (P218 1). Devolve "" quando
     deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
@@ -351,7 +363,8 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa,
                                            musica if total > segundos else None, total,
                                            caminhos_das_outras if troca else (), troca, caminho_do_resto,
-                                           caminho_da_moldura, espera_da_moldura, passagem)
+                                           caminho_da_moldura, espera_da_moldura, passagem, sem_seta,
+                                           sem_moldura)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

@@ -78,6 +78,10 @@ CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
 SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "setas_em_cascata.apng")
 MARGEM_DA_SETA = 10
 CENTRO_DA_SETA = (142, 796)
+# O que se vê das setinhas no vídeo de 720x1280 (x1, y1, x2, y2: com o contorno e a sombra, em todos os
+# quadros do arquivo, sem a margem transparente; o tests/test_edicao_video.py confere no arquivo), sem a
+# subida do Rótulo de IA: o lugar delas que o que o criador pôs por cima não pode cruzar (P218 1).
+CAIXA_DAS_SETINHAS = (95, 741, 192, 866)
 # O que o app da Shopee mostra do vídeo de 720x1280 num celular de tela 20:9, medido no
 # celular do Rafael (vídeo de 28/10, P71): ele enche a tela e corta uns 47 px de cada lado
 # (fica visível de x 47 a 673), a barra de busca do alto vai até y 140 e o cartão do produto
@@ -1267,7 +1271,7 @@ def _faixa_da_capa(capa, faixa, lados=None):
 
 
 def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-           rotulo_de_ia=False, cor=None, escolhas=None):
+           rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
@@ -1282,7 +1286,9 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     cartão sobem SUBIDA_COM_O_ROTULO_DE_IA, como o cartão do app. Com a cor do produto (RGB, P159
     2), a moldura da miniatura vai nela. As escolhas do painel (escolhas_certas; None, as de sempre,
     P192 1): a miniatura à direita, à esquerda ou sem ela, as setinhas e a moldura do cartão com ou
-    sem, e a cor das duas (cor_do_destaque).
+    sem, e a cor das duas (cor_do_destaque). As setinhas e a moldura somem enquanto uma coisa que o
+    criador pôs por cima (por_cima, P212 1) passa pelo lugar delas (tempos_sob_o_criador, P218 1);
+    anotar (dict), quando vem, recebe esses trechos em "sob_o_criador".
     """
     escolhas = escolhas_certas(escolhas)
     lado = escolhas["miniatura"]
@@ -1302,6 +1308,10 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     destaque = cor_do_destaque(escolhas, cor)
     moldura = moldura_do_cartao(rotulo_de_ia, destaque) if escolhas["moldura"] else None
+    sem_seta = tempos_sob_o_criador([caixa_das_setinhas(subida)], por_cima) if escolhas["setinhas"] else []
+    sem_moldura = tempos_sob_o_criador(linhas_da_moldura(subida), por_cima) if moldura else []
+    if anotar is not None and (sem_seta or sem_moldura):
+        anotar["sob_o_criador"] = {"setinhas": sem_seta, "moldura": sem_moldura}
     with contextlib.ExitStack() as pilha:
         seta = None
         if escolhas["setinhas"]:
@@ -1314,7 +1324,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
                                            (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
                                            PULSO_DA_SETA, capa, musica, outras=outras_fotos, moldura=moldura,
                                            espera_da_moldura=ESPERA_DA_MOLDURA,
-                                           passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0)
+                                           passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0,
+                                           sem_seta=sem_seta, sem_moldura=sem_moldura)
 
 
 def largura_da_miniatura(miniatura):
@@ -2892,15 +2903,64 @@ def _cobre_o_criador(caixa, inicio, fim, do_criador):
     alguma das coisas do criador (do_criador: [(esquerda, direita, topo, base, início, fim)], em % do vídeo e em
     segundos), com as folgas FOLGA_DO_CRIADOR e FOLGA_NO_TEMPO_DO_CRIADOR? P212 1.
     """
-    x1, y1, x2, y2 = caixa
-    largura, altura = TELA
-    for esquerda, direita, topo, base, comeco, termino in (coisa[:6] for coisa in do_criador):
+    for coisa in do_criador:
+        comeco, termino = coisa[4:6]
         if comeco - FOLGA_NO_TEMPO_DO_CRIADOR >= fim or termino + FOLGA_NO_TEMPO_DO_CRIADOR <= inicio:
             continue
-        if (esquerda * largura / 100 - FOLGA_DO_CRIADOR < x2 and direita * largura / 100 + FOLGA_DO_CRIADOR > x1
-                and topo * altura / 100 - FOLGA_DO_CRIADOR < y2 and base * altura / 100 + FOLGA_DO_CRIADOR > y1):
+        if _cruza_a_caixa(coisa, caixa):
             return True
     return False
+
+
+def _cruza_a_caixa(coisa, caixa):
+    """
+    A coisa do criador ((esquerda, direita, topo, base, ...), em % do vídeo) passa pela caixa (x1, y1, x2, y2, em
+    px do vídeo de 720x1280), com a folga FOLGA_DO_CRIADOR (a IA acerta o lugar só mais ou menos)?
+    """
+    esquerda, direita, topo, base = coisa[:4]
+    x1, y1, x2, y2 = caixa
+    largura, altura = TELA
+    return (esquerda * largura / 100 - FOLGA_DO_CRIADOR < x2 and direita * largura / 100 + FOLGA_DO_CRIADOR > x1
+            and topo * altura / 100 - FOLGA_DO_CRIADOR < y2 and base * altura / 100 + FOLGA_DO_CRIADOR > y1)
+
+
+# As setinhas e a moldura do cartão somem enquanto uma coisa que o criador pôs por cima do vídeo passa pelo
+# lugar delas, e voltam depois: no rascunho do creme de cabelo (vídeo do Rafael das 13:10 de 13/11), as
+# setinhas ficavam em cima do começo da 2ª linha da frase da criadora. O lugar e o tempo vêm da mesma resposta
+# da IA que desvia os nossos textos (por_cima, P212 1), com as mesmas folgas; a moldura conta pelas 4 linhas
+# dela (a coisa do criador dentro do cartão fica embaixo dele, no app). Escolha do Rafael (13/11, P218 1):
+# DECISOES.md, Shopee Vídeo.
+def caixa_das_setinhas(subida=0):
+    """O que se vê das setinhas (x1, y1, x2, y2, em px do vídeo de 720x1280), com a subida do Rótulo de IA."""
+    x1, y1, x2, y2 = CAIXA_DAS_SETINHAS
+    return x1, y1 - subida, x2, y2 - subida
+
+
+def linhas_da_moldura(subida=0):
+    """As 4 linhas da moldura do cartão (x1, y1, x2, y2, em px do vídeo de 720x1280): em cima, embaixo e dos lados."""
+    x1, y1, x2, y2 = CARTAO_DO_PRODUTO
+    y1, y2 = y1 - subida, y2 - subida
+    fora, folga = FOLGA_DO_CARTAO + GROSSURA_DA_MOLDURA_DO_CARTAO, FOLGA_DO_CARTAO
+    return [(x1 - fora, y1 - fora, x2 + fora, y1 - folga), (x1 - fora, y2 + folga, x2 + fora, y2 + fora),
+            (x1 - fora, y1 - fora, x1 - folga, y2 + fora), (x2 + folga, y1 - fora, x2 + fora, y2 + fora)]
+
+
+def tempos_sob_o_criador(caixas, por_cima):
+    """
+    [(início, fim)] em segundos do vídeo, em ordem e sem se sobrepor, em que alguma coisa do criador (por_cima;
+    só as que têm o tempo, como nos textos) passa por alguma das caixas (px do vídeo de 720x1280), com as folgas
+    de lugar e de tempo da P212 1: o tempo em que as setinhas ou a moldura somem (P218 1).
+    """
+    trechos = sorted((max(0.0, coisa[4] - FOLGA_NO_TEMPO_DO_CRIADOR), coisa[5] + FOLGA_NO_TEMPO_DO_CRIADOR)
+                     for coisa in por_cima or () if len(coisa) >= 6
+                     and any(_cruza_a_caixa(coisa, caixa) for caixa in caixas))
+    juntos = []
+    for inicio, fim in trechos:
+        if juntos and inicio <= juntos[-1][1]:
+            juntos[-1] = (juntos[-1][0], max(juntos[-1][1], fim))
+        else:
+            juntos.append((inicio, fim))
+    return juntos
 
 
 def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA, lugares=None, por_cima=(), anotar=None):
@@ -2974,7 +3034,8 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
     O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
     Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta. Os textos da
     tela desviam do que o criador pôs por cima no momento de cada um (lugares e por_cima, P212 1), e
-    resumo["texto_do_criador"] diz quantos mudaram de lugar e quantos saíram.
+    resumo["texto_do_criador"] diz quantos mudaram de lugar e quantos saíram; as setinhas e a moldura
+    somem enquanto o que ele pôs passa pelo lugar delas, e resumo["sob_o_criador"] diz quando (P218 1).
     """
     escolhas = escolhas_certas(escolhas)
     caixa = caixa_dos_textos(cor)
@@ -2990,7 +3051,7 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
         resumo["texto_do_criador"] = criador
     if not letreiros:
         return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
-                       escolhas=escolhas), resumo)
+                       escolhas=escolhas, por_cima=por_cima, anotar=resumo), resumo)
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
@@ -2998,7 +3059,7 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
         if motivo:
             return motivo, resumo
         return (editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
-                       escolhas=escolhas), resumo)
+                       escolhas=escolhas, por_cima=por_cima, anotar=resumo), resumo)
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -3031,9 +3092,31 @@ SEM_LUGAR_PELO_CRIADOR = "o que o criador pôs por cima ocupava os lugares livre
 PROCESSO_DO_TEXTO_DO_CRIADOR = "edição do vídeo: texto do criador"
 # Se a IA respondeu com a lista dos lugares (P212 1), em cada vídeo que vai ao ar.
 PROCESSO_DOS_LUGARES = "edição do vídeo: lugares dos textos"
+# As setinhas e a moldura do cartão que sumiram enquanto o que o criador pôs por cima passava pelo lugar
+# delas (P218 1): em quantos trechos e por quantos segundos do vídeo.
+PROCESSO_SOB_O_CRIADOR = "edição do vídeo: setinhas e moldura sob o criador"
 COM_A_LISTA, SEM_A_LISTA = "com a lista da IA", "sem a lista da IA"
 NADA_DO_CRIADOR = "nada do criador por cima"
 COM_O_TEMPO, SEM_O_TEMPO = "o que o criador pôs por cima, com o tempo", "o que o criador pôs por cima, sem o tempo"
+
+
+def _registrar_o_que_sumiu(sob, duracao=0.0):
+    """
+    O registro das setinhas e da moldura que sumiram sob o que o criador pôs por cima (sob: o "sob_o_criador"
+    de editar, P218 1), com os segundos dentro do vídeo (duracao; sem ela, só os trechos).
+    """
+    setinhas, moldura = (sob or {}).get("setinhas") or [], (sob or {}).get("moldura") or []
+    if not (setinhas or moldura):
+        return
+
+    def quanto(trechos):
+        segundos = sum(max(0.0, min(fim, duracao) - inicio) for inicio, fim in trechos) if duracao else 0.0
+        return f"{len(trechos)} trecho(s)" + (f", {segundos:.0f} s" if duracao else "")
+    resultado = ("as setinhas e a moldura sumiram" if setinhas and moldura
+                 else "as setinhas sumiram" if setinhas else "a moldura sumiu")
+    detalhe = "; ".join(f"{nome}: {quanto(trechos)}" for nome, trechos in (("setinhas", setinhas), ("moldura", moldura))
+                        if trechos)
+    registro_processos.registrar("shopee_video", PROCESSO_SOB_O_CRIADOR, resultado, detalhe, ok=None)
 
 
 def _avisado(avisos, com_capa, musica, miniatura, outras_fotos, escolhas, cor, painel=None):
@@ -3218,6 +3301,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                                      f"{postas} trecho(s), {palavras} palavra(s) em {segundos:.0f} s de fala"
                                      if postas else sem_legendas or "nenhum trecho cabe", ok=True if postas else None)
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
+        _registrar_o_que_sumiu(resumo.get("sob_o_criador"), resumo.get("original") or 0.0)
         criador = resumo.get("texto_do_criador") or {}
         if criador:
             # Os textos da tela que desviaram do que o criador pôs por cima (P212 1).
@@ -3237,9 +3321,12 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         elif criador.get("sairam") and not resumo.get("textos"):
             detalhe = SEM_LUGAR_PELO_CRIADOR
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
-    return (editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
-                   escolhas=escolhas),
-            SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}")
+    sob = {}
+    motivo_1 = editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia,
+                      cor=cor, escolhas=escolhas, por_cima=textos.get("por_cima", ()), anotar=sob)
+    if not motivo_1:
+        _registrar_o_que_sumiu(sob.get("sob_o_criador"))
+    return motivo_1, SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}"
 
 
 # O que o Editar ✏️ guarda dos textos da IA de cada rascunho (P192 1): o que a edição usa, sem a frase da
