@@ -1691,6 +1691,37 @@ def test_anuncio_de_varias_cores_vale_pela_cor_do_video_em_todas_as_conferencias
     assert "se não está, é outra cor" in regra
 
 
+def test_a_ia_confere_so_pelo_que_o_video_e_o_anuncio_mostram_sem_o_que_sabe_de_lancamentos(monkeypatch):
+    # Escolha do Rafael (13/11, P217 1): num vídeo de 13/11, a IA deixou de lado o celular de uma
+    # marca conhecida porque o modelo "ainda não foi lançado", e o vídeo mostrava o mesmo modelo
+    # do anúncio. O conhecimento dela para numa data: em todo pedido que confere o produto (com
+    # e sem a foto, com a capa do post, o item da lista, os produtos a mais e os do criador), ela
+    # compara só o que o vídeo e o anúncio mostram; a réplica fica com o Rafael na aprovação.
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append(" ".join(prompt.split()))
+        return '{"confere": true, "outra_cor": false, "iguais": [1], "motivo": "o mesmo produto"}'
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(ps, "nome_do_produto", lambda video: "Celular modelo novo")
+    fotos = iter([b"\xff\xd8foto", b"\xff\xd8foto", None])
+    monkeypatch.setattr(ps, "foto_do_produto", lambda video: next(fotos))
+    video = {"arquivo": "v.mp4", "link": "x"}
+    assert ps.ia_confere_do_criador(video, "Celular", b"\xff\xd8pagina")[:2] == (True, False)
+    assert ps.ia_confere_item(video, b"\x89PNGrecorte")[0]
+    assert ps.ia_confere_iguais(video, "Celular", [("Celular A", b"\xff\xd8a")], capa=b"\xff\xd8capa")[0] == [0]
+    assert ps.ia_confere_produto(video, [], avisar=False)[0]
+    assert ps.ia_confere_produto(video, [], avisar=False, capa=b"\xff\xd8capa")[0]
+    assert ps.ia_confere_produto(video, [], avisar=False)[0]
+    assert len(pedidos) == 6 * ps.VEZES_DA_IA
+    assert sum("O link que vai junto com o vídeo leva a este produto" in pedido for pedido in pedidos) == ps.VEZES_DA_IA
+    regra = " ".join(ps.SO_O_QUE_SE_VE.split())
+    assert all(regra in pedido for pedido in pedidos)
+    assert "lançamentos" in regra and "pode estar desatualizado" in regra
+    assert "nunca é motivo para dizer que não confere" in regra
+
+
 # A linha das ordens de Minhas Curtidas, como no Motorola (07/11/2026).
 ORDENS = ('<node text="Relevância" class="android.widget.TextView" bounds="[50,528][220,575]" />'
           '<node text="Mais Recente" class="android.widget.TextView" bounds="[300,528][511,576]" />')
