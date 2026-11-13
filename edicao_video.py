@@ -1398,9 +1398,11 @@ MINIMO_DO_REMONTADO = 8
 # - "meio": logo abaixo da miniatura (que vai até y 330), centralizado;
 # - "esquerda" e "direita": nos lados, numa caixa estreita de até 3 linhas, no meio da
 #   altura: acima da seta (que começa em y 726) e da coluna de botões do app à direita.
-# Nenhum lugar livre do rosto e do produto (SEM_LUGAR), o vídeo vai sem os textos (escolha
-# do Rafael, P47: no vídeo do conjunto, o alto cobriu o rosto da modelo e o meio cobriria o
-# conjunto).
+# Os nossos textos vão sempre ao "alto", ao lado da miniatura, e nunca mudam de lugar: o que, na hora dele,
+# cobriria o produto, um rosto ou o que o criador pôs por cima não aparece (escolha do Rafael, 13/11, P220 1:
+# DECISOES.md, Shopee Vídeo). Os outros lugares ficam como os nomes da lista da IA (_LUGAR_NO_PROMPT), que diz
+# se o alto está livre. SEM_LUGAR: o vídeo vai sem os textos (o texto próprio do vídeo na maior parte do
+# tempo, P52).
 LUGARES_DOS_TEXTOS = {"alto": (68, 150, 340, 2), "meio": (None, 340, 480, 2),
                       "esquerda": (64, 400, 170, 3), "direita": (-64, 400, 170, 3)}
 LUGAR_PADRAO = "alto"
@@ -1499,12 +1501,12 @@ _O_QUE_FOI_FILMADO_NAO_CONTA = (
 )
 # Os lugares em que os nossos textos não cobrem o produto nem o rosto de alguém, na maior parte do
 # vídeo, do melhor para o pior, com o alto dos dois lados (a miniatura pode ir ao outro canto, P213 1).
-# O que o criador pôs por cima do vídeo fica para a pergunta de onde e quando (_POR_CIMA_NO_PROMPT):
-# cada texto nosso vai ao primeiro desses lugares que está livre do que é dele no momento em que o
-# texto aparece, e sem nenhum, só esse texto sai (escolha do Rafael, 12/11, P212 1: no vídeo da
-# garrafinha, o lugar único da IA pôs o nome e a chamada em cima das frases do criador no alto). Os
-# quadros e as fotos do criador também contam (P82). Nenhum lugar livre do produto e do rosto, o vídeo
-# vai sem os textos (P47). DECISOES.md, Shopee Vídeo.
+# Os nossos textos ficam sempre no alto do lado oposto ao da miniatura (P220 1): sem os lugares de cada
+# momento (_LUGARES_NOS_MOMENTOS_NO_PROMPT), o texto só entra quando esse alto está nesta lista (P47). O que o
+# criador pôs por cima do vídeo fica para a pergunta de onde e quando (_POR_CIMA_NO_PROMPT): o texto que, no
+# tempo dele, cobriria uma dessas coisas não aparece (P212 1 e P220 1: no vídeo da garrafinha, o nome e a
+# chamada tinham ficado em cima das frases do criador no alto). Os quadros e as fotos do criador também
+# contam (P82). DECISOES.md, Shopee Vídeo.
 _LUGAR_NO_PROMPT = (
     "Diga em que lugares os textos podem ficar sem cobrir o produto nem o rosto de alguém, na maior parte do "
     "vídeo: \"lugares\", a lista dos lugares livres, do melhor para o pior, entre estes: \"alto_esquerda\" (no "
@@ -1515,6 +1517,20 @@ _LUGAR_NO_PROMPT = (
     "fotos, quadros e textos que o próprio vídeo pôs por cima da imagem: diga onde e quando eles aparecem na "
     "pergunta deles, abaixo.\n"
 )
+# O produto e as pessoas se mexem: o lugar livre na maior parte do vídeo pode estar em cima do produto na hora
+# de um texto (no vídeo do celular de 13/11, a vantagem e a chamada ficaram em cima do celular, que a pessoa
+# mexia na mão). A IA recebe os momentos em que os nossos textos entram (momentos_dos_textos, os mesmos do
+# horarios_dos_textos) e diz os lugares livres do produto e do rosto em cada um; o texto cujo lugar fixo, o
+# alto, não está livre no momento dele não aparece (_letreiros). Escolha do Rafael (13/11, P220 1):
+# DECISOES.md, Shopee Vídeo.
+_LUGARES_NOS_MOMENTOS_NO_PROMPT = (
+    "Os textos da tela (o nome, a vantagem e a chamada) entram um de cada vez, nestes momentos do vídeo: "
+    "{momentos} (em segundos desde o começo do vídeo). Como o produto e as pessoas se mexem, diga também, para "
+    "cada um desses momentos, na mesma ordem, os lugares da lista acima que ficam livres do produto e do rosto de "
+    "alguém durante todo aquele momento, do melhor para o pior: \"lugares_nos_momentos\", uma lista com a lista "
+    "de lugares de cada momento, como {exemplo}; [] no momento em que todos cobrem o produto ou um rosto.\n"
+)
+EXEMPLO_DOS_MOMENTOS = [["alto_esquerda", "meio"], ["esquerda"], ["alto_esquerda"]]
 # Vídeo que já tem texto próprio na tela na maior parte do tempo vai sem as nossas legendas
 # (escolha do Rafael, P52). A IA diz os trechos em que o texto do criador aparece, e a conta do
 # tempo é feita aqui (parte_com_texto_proprio): no rascunho dos fones de 02/11, ela tinha dito
@@ -1576,8 +1592,8 @@ _LEGENDAS_NO_PROMPT = (
     "escrito na tela (legenda da fala): \"legenda_no_video\", true ou false.\n"
 )
 _FALAS_E_LUGAR_NO_PROMPT = (_FALAS_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT
-                            + _TEXTO_NO_VIDEO_NO_PROMPT + _POR_CIMA_NO_PROMPT + _CANTO_NO_PROMPT
-                            + _LEGENDAS_NO_PROMPT)
+                            + "{lugares_nos_momentos}" + _TEXTO_NO_VIDEO_NO_PROMPT + _POR_CIMA_NO_PROMPT
+                            + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT)
 # Os textos do vídeo que vai ao ar: o original, sem cortes (as falas só importam nas versões).
 PROMPT_DOS_TEXTOS = (
     "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
@@ -1587,10 +1603,11 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
-    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + _TEXTO_NO_VIDEO_NO_PROMPT
-    + _POR_CIMA_NO_PROMPT + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + "{lugares_nos_momentos}"
+    + _TEXTO_NO_VIDEO_NO_PROMPT + _POR_CIMA_NO_PROMPT + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
-    "\"cor\": \"...\", \"cor_2\": \"...\", \"lugares\": [\"alto_esquerda\", \"meio\"], \"textos_do_video\": [], "
+    "\"cor\": \"...\", \"cor_2\": \"...\", \"lugares\": [\"alto_esquerda\", \"meio\"], {chave_dos_momentos}"
+    "\"textos_do_video\": [], "
     "\"por_cima_do_video\": [], \"canto_ocupado\": false, \"outro_canto_ocupado\": false, \"legendas\": [], "
     "\"legenda_no_video\": false}}"
 )
@@ -1919,13 +1936,14 @@ def _resposta_da_ia(video, prompt):
     return dados if isinstance(dados, dict) else {}
 
 
-def _nome_lugar_e_falas(dados, duracao=0.0):
+def _nome_lugar_e_falas(dados, duracao=0.0, momentos=()):
     """
-    O nome, os lugares livres do produto e do rosto (P212 1; sem a lista, o lugar único), a cor do produto (P159 2)
-    e a 2ª cor (P173), as falas, se o vídeo já tem texto próprio na tela na maior parte do tempo (pelos trechos que
-    a IA deu e a duracao do vídeo, em segundos; com a parte do tempo em "parte_com_texto"), onde e quando o
-    criador pôs coisa por cima ("por_cima", P212 1) e se o canto da nossa miniatura e o outro canto de cima têm
-    coisa dele (P81 e P213 1), da resposta da IA, só os que vieram certos.
+    O nome, os lugares livres do produto e do rosto (P212 1; sem a lista, o lugar único) e os de cada momento dos
+    nossos textos (momentos, os do pedido: "lugares_nos_momentos", P220 1), a cor do produto
+    (P159 2) e a 2ª cor (P173), as falas, se o vídeo já tem texto próprio na tela na maior parte do tempo (pelos
+    trechos que a IA deu e a duracao do vídeo, em segundos; com a parte do tempo em "parte_com_texto"), onde e
+    quando o criador pôs coisa por cima ("por_cima", P212 1) e se o canto da nossa miniatura e o outro canto de
+    cima têm coisa dele (P81 e P213 1), da resposta da IA, só os que vieram certos.
     """
     textos = {}
     nome = _texto_certo(str(dados.get("nome") or ""), MAXIMO_DO_NOME)
@@ -1937,6 +1955,9 @@ def _nome_lugar_e_falas(dados, duracao=0.0):
         textos["lugares"] = lugares
     elif dados.get("lugar") in LUGARES_DOS_TEXTOS or dados.get("lugar") == SEM_LUGAR:
         textos["lugar"] = dados["lugar"]
+    nos_momentos = _lugares_da_ia_nos_momentos(dados.get("lugares_nos_momentos"), momentos)
+    if nos_momentos is not None:
+        textos["lugares_nos_momentos"] = nos_momentos
     cor = " ".join(str(dados.get("cor") or "").lower().split())
     if cor in CORES_DO_PRODUTO or cor in CORES_DE_SEMPRE:
         textos["cor"] = cor
@@ -1982,33 +2003,88 @@ def _lugares_da_ia(bruto):
     return lugares if lugares or not bruto else None
 
 
+# Os nossos textos, no máximo 3, um de cada vez (horarios_dos_textos).
+TEXTOS_DA_TELA = ("nome", "vantagem", "chamada")
+
+
+def momentos_dos_textos(duracao):
+    """
+    [(início, fim)], em segundos, em que os nossos 3 textos entram num vídeo de duracao segundos (os mesmos do
+    horarios_dos_textos), para a IA dizer os lugares livres do produto e do rosto em cada um (P220 1); [] sem a
+    duração.
+    """
+    if not duracao:
+        return []
+    return [(inicio, fim) for _texto, inicio, fim in horarios_dos_textos(list(TEXTOS_DA_TELA), duracao)]
+
+
+def _lugares_da_ia_nos_momentos(bruto, momentos):
+    """
+    [[início, fim, [lugares]]]: os lugares livres do produto e do rosto que a IA deu para cada momento dos nossos
+    textos (momentos: [(início, fim)], os do pedido), na ordem dela e sem repetir (_lugares_da_ia); [] num momento
+    em que nenhum está livre. None sem os momentos, quando a lista não veio, veio com outro número de momentos ou
+    com um momento só de nomes que não existem: vale a lista do vídeo todo.
+    """
+    if not momentos or not isinstance(bruto, list) or len(bruto) != len(momentos):
+        return None
+    nos_momentos = []
+    for (inicio, fim), lugares in zip(momentos, bruto):
+        lugares = _lugares_da_ia(lugares)
+        if lugares is None:
+            return None
+        nos_momentos.append([inicio, fim, lugares])
+    return nos_momentos
+
+
+def _no_lado(lugares, lado):
+    """
+    Os lugares da IA (LUGARES_DA_IA) com a miniatura no lado (o deste vídeo, que pode ser o outro canto, P213 1):
+    o alto do lado oposto ao dela vira o "alto", e o do lado dela fica de fora; sem a miniatura, vale o alto da
+    esquerda, o de sempre.
+    """
+    alto = "alto_direita" if lado == MINIATURA_A_ESQUERDA else "alto_esquerda"
+    return ["alto" if lugar == alto else lugar for lugar in lugares if lugar == alto or lugar in LUGARES_DOS_TEXTOS]
+
+
 def lugares_dos_textos(textos, lado=MINIATURA_A_DIREITA):
     """
-    Os lugares dos nossos textos neste vídeo (LUGARES_DOS_TEXTOS), do melhor para o pior, pela lista da IA
-    ("lugares", P212 1), com a miniatura no lado (o deste vídeo, que pode ser o outro canto, P213 1): o alto do
-    lado oposto ao dela vira o "alto", e o do lado dela fica de fora; sem a miniatura, vale o alto da esquerda,
-    o de sempre. None quando a IA não deu a lista (os rascunhos guardados antes da P212 1 têm só o "lugar"); []
-    quando nenhum fica livre do produto e do rosto (P47).
+    Os lugares livres do produto e do rosto na maior parte deste vídeo (LUGARES_DOS_TEXTOS), do melhor para o
+    pior, pela lista da IA ("lugares", P212 1), com a miniatura no lado (_no_lado); nos rascunhos guardados antes
+    da P212 1, o lugar único que a IA deu. [] quando nenhum fica livre (P47); None quando a IA não disse.
     """
-    if "lugares" not in textos:
-        return None
-    alto = "alto_direita" if lado == MINIATURA_A_ESQUERDA else "alto_esquerda"
-    return ["alto" if lugar == alto else lugar for lugar in textos["lugares"]
-            if lugar == alto or lugar in LUGARES_DOS_TEXTOS]
+    if "lugares" in textos:
+        return _no_lado(textos["lugares"], lado)
+    if textos.get("lugar") == SEM_LUGAR:
+        return []
+    return [textos["lugar"]] if textos.get("lugar") in LUGARES_DOS_TEXTOS else None
 
 
-def lugar_dos_textos(textos, lado=MINIATURA_A_DIREITA):
+def lugares_nos_momentos(textos, lado=MINIATURA_A_DIREITA):
     """
-    O lugar das nossas legendas pela resposta da IA: nenhum quando o vídeo já tem texto na tela (P52) ou
-    nenhum lugar fica livre do produto e do rosto (P47); com a lista da IA, o 1º dela com a miniatura no lado
-    (lugares_dos_textos), e sem ela, o lugar único dos rascunhos de antes.
+    [(início, fim, [lugares])]: os lugares livres do produto e do rosto no momento de cada texto nosso, pela IA
+    ("lugares_nos_momentos", P220 1), com a miniatura no lado (_no_lado). None sem eles (os rascunhos de antes,
+    ou a IA não respondeu): vale a lista do vídeo todo (lugares_dos_textos).
     """
-    if textos.get("texto_no_video"):
-        return SEM_LUGAR
-    lugares = lugares_dos_textos(textos, lado)
-    if lugares is None:
-        return textos.get("lugar")
-    return lugares[0] if lugares else SEM_LUGAR
+    momentos = []
+    for item in textos.get("lugares_nos_momentos") or ():
+        try:
+            inicio, fim, lugares = float(item[0]), float(item[1]), item[2]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not isinstance(lugares, (list, tuple)):
+            return None
+        momentos.append((inicio, fim, _no_lado(lugares, lado)))
+    return momentos or None
+
+
+def lugar_dos_textos(textos):
+    """
+    O lugar das nossas legendas: sempre o alto, ao lado da miniatura, em todo vídeo (escolha do Rafael, 13/11,
+    P220 1; com a miniatura à esquerda, o alto passa para a direita: _letreiro_no_lugar), e nenhum quando o
+    vídeo já tem texto próprio na tela na maior parte do tempo (P52). Quais textos entram, pelo produto, o rosto
+    e o que o criador pôs por cima na hora de cada um, _letreiros diz.
+    """
+    return SEM_LUGAR if textos.get("texto_no_video") else LUGAR_PADRAO
 
 
 # "Na maior parte do tempo" (P52): o texto próprio do vídeo na tela em mais da metade dele.
@@ -2051,9 +2127,9 @@ def parte_com_texto_proprio(trechos, duracao):
     return total / duracao
 
 
-def _duracao_para_os_trechos(video, dados):
-    """A duração do vídeo, lida só quando a IA deu trechos com texto próprio (0 sem eles)."""
-    return videos.duracao(video) if dados.get("textos_do_video") else 0.0
+def _duracao_dos_trechos(duracao, dados):
+    """A duração do vídeo para a conta dos trechos com texto próprio: só quando a IA deu trechos (0 sem eles)."""
+    return duracao if dados.get("textos_do_video") else 0.0
 
 
 def _caixa_da_ia(item):
@@ -2442,14 +2518,39 @@ def _lado_no_prompt(lado):
             "outro_canto_no_prompt": nomes[1], "outro_de": outro_comeco, "outro_ate": outro_fim}
 
 
-def prompt_dos_textos(nome, lado=MINIATURA_A_DIREITA):
-    """O pedido dos textos do vídeo que vai ao ar, com o canto do lado da miniatura (P192 1)."""
-    return PROMPT_DOS_TEXTOS.format(nome=nome, **_lado_no_prompt(lado_olhado(lado)))
+def _em_segundos(segundos):
+    """Os segundos como o pedido à IA diz (0,3)."""
+    return f"{segundos:.1f}".replace(".", ",")
 
 
-def prompt_das_versoes(nome, lado=MINIATURA_A_DIREITA):
-    """O pedido dos textos do exemplo com as versões, com o canto do lado da miniatura (P192 1)."""
-    return PROMPT_DAS_VERSOES.format(nome=nome, **_lado_no_prompt(lado_olhado(lado)))
+def _momentos_no_prompt(momentos):
+    """
+    O que os pedidos à IA dizem dos momentos dos nossos textos (momentos: [(início, fim)], momentos_dos_textos),
+    para ela dizer os lugares livres em cada um (P220 1); nada sem os momentos.
+    """
+    import json
+
+    if not momentos:
+        return {"lugares_nos_momentos": "", "chave_dos_momentos": ""}
+    ditos = [f"o {n}º ({texto}) de {_em_segundos(inicio)} s a {_em_segundos(fim)} s"
+             for n, ((inicio, fim), texto) in enumerate(zip(momentos, ("o nome", "a vantagem", "a chamada")), 1)]
+    lista = ", ".join(ditos[:-1]) + " e " + ditos[-1] if len(ditos) > 1 else ditos[0]
+    exemplo = json.dumps(EXEMPLO_DOS_MOMENTOS[:len(momentos)], ensure_ascii=False)
+    return {"lugares_nos_momentos": _LUGARES_NOS_MOMENTOS_NO_PROMPT.format(momentos=lista, exemplo=exemplo),
+            "chave_dos_momentos": f"\"lugares_nos_momentos\": {exemplo}, "}
+
+
+def prompt_dos_textos(nome, lado=MINIATURA_A_DIREITA, momentos=()):
+    """
+    O pedido dos textos do vídeo que vai ao ar, com o canto do lado da miniatura (P192 1) e os momentos dos nossos
+    textos (momentos_dos_textos; sem eles, só os lugares do vídeo todo).
+    """
+    return PROMPT_DOS_TEXTOS.format(nome=nome, **_lado_no_prompt(lado_olhado(lado)), **_momentos_no_prompt(momentos))
+
+
+def prompt_das_versoes(nome, lado=MINIATURA_A_DIREITA, momentos=()):
+    """O pedido dos textos do exemplo com as versões, com o canto do lado da miniatura (P192 1) e os momentos."""
+    return PROMPT_DAS_VERSOES.format(nome=nome, **_lado_no_prompt(lado_olhado(lado)), **_momentos_no_prompt(momentos))
 
 
 def lado_olhado(lado):
@@ -2459,15 +2560,17 @@ def lado_olhado(lado):
 
 def textos_da_tela(video, nome, lado=MINIATURA_A_DIREITA):
     """
-    {"nome", "vantagem", "capa", "chamada", "lugares", "texto_no_video", "parte_com_texto",
+    {"nome", "vantagem", "capa", "chamada", "lugares", "lugares_nos_momentos", "texto_no_video", "parte_com_texto",
     "canto_ocupado", "outro_canto_ocupado", "por_cima"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem
     resposta. Com a frase da capa pedida de novo, "capa_de_novo" (e, sem ela, "sem_a_capa") diz
     por quê (_com_a_frase_da_capa). A IA olha o canto do lado da miniatura (lado, escolha do painel,
     P192 1), e "lado_olhado" guarda o da esquerda (sem ele, foi o da direita, o de sempre).
     """
     olhado = lado_olhado(lado)
-    dados = _resposta_da_ia(video, prompt_dos_textos(nome, olhado))
-    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados)))
+    duracao = videos.duracao(video)
+    momentos = momentos_dos_textos(duracao)
+    dados = _resposta_da_ia(video, prompt_dos_textos(nome, olhado, momentos))
+    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_dos_trechos(duracao, dados), momentos))
     # Só este pedido traz a frase da capa; sem resposta da IA, não há o que pedir de novo.
     if dados:
         if olhado != MINIATURA_A_DIREITA:
@@ -2927,9 +3030,9 @@ def _cruza_a_caixa(coisa, caixa):
 # As setinhas e a moldura do cartão somem enquanto uma coisa que o criador pôs por cima do vídeo passa pelo
 # lugar delas, e voltam depois: no rascunho do creme de cabelo (vídeo do Rafael das 13:10 de 13/11), as
 # setinhas ficavam em cima do começo da 2ª linha da frase da criadora. O lugar e o tempo vêm da mesma resposta
-# da IA que desvia os nossos textos (por_cima, P212 1), com as mesmas folgas; a moldura conta pelas 4 linhas
-# dela (a coisa do criador dentro do cartão fica embaixo dele, no app). Escolha do Rafael (13/11, P218 1):
-# DECISOES.md, Shopee Vídeo.
+# da IA que diz o que o criador pôs por cima (por_cima, P212 1), com as mesmas folgas; a moldura conta pelas 4
+# linhas dela (a coisa do criador dentro do cartão fica embaixo dele, no app). Escolha do Rafael (13/11,
+# P218 1): DECISOES.md, Shopee Vídeo.
 def caixa_das_setinhas(subida=0):
     """O que se vê das setinhas (x1, y1, x2, y2, em px do vídeo de 720x1280), com a subida do Rótulo de IA."""
     x1, y1, x2, y2 = CAIXA_DAS_SETINHAS
@@ -2963,16 +3066,43 @@ def tempos_sob_o_criador(caixas, por_cima):
     return juntos
 
 
-def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA, lugares=None, por_cima=(), anotar=None):
+def _lugares_na_hora(inicio, fim, nos_momentos):
     """
-    ([(imagem, início, fim, x, y)], textos que entraram): os textos ([(texto, fundo)], na
-    ordem; vazios e repetidos saem) um de cada vez no vídeo remontado, no lugar escolhido. Com a
-    miniatura à esquerda (lado, P192 1), o "alto" passa para a direita, ao lado dela.
-    Com os lugares (de LUGARES_DOS_TEXTOS, do melhor para o pior: lugares_dos_textos), cada texto vai ao
-    primeiro em que não cobre, no tempo dele, nenhuma das coisas que o criador pôs por cima do vídeo (por_cima,
-    as que têm o tempo: _por_cima_do_video), e sem nenhum, só ele sai; os outros ficam no tempo deles (escolha
-    do Rafael, 12/11, P212 1: DECISOES.md, Shopee Vídeo). anotar (dict) recebe quantos "mudaram" do 1º lugar
-    para outro e quantos "sairam", quando algum mudou ou saiu.
+    Os lugares livres do produto e do rosto no tempo de um texto (de início a fim, em segundos), pelos momentos
+    da IA (nos_momentos: [(início, fim, [lugares])], lugares_nos_momentos): os livres em todos os momentos que
+    cruzam esse tempo, na ordem do 1º deles; None quando nenhum cruza.
+    """
+    na_hora = None
+    for comeco, termino, lugares in nos_momentos or ():
+        if comeco < fim and termino > inicio:
+            na_hora = list(lugares) if na_hora is None else [lugar for lugar in na_hora if lugar in lugares]
+    return na_hora
+
+
+def _livre_na_hora(lugar, inicio, fim, nos_momentos=None, lugares=None):
+    """
+    O lugar fica livre do produto e do rosto no tempo de um texto (de início a fim, em segundos)? Pelos livres
+    dos momentos da IA que cruzam esse tempo (nos_momentos, _lugares_na_hora); sem eles, pelos livres na maior
+    parte do vídeo (lugares, lugares_dos_textos); sem nenhum dos dois (a IA não disse), livre.
+    """
+    livres = _lugares_na_hora(inicio, fim, nos_momentos)
+    if livres is None:
+        livres = lugares
+    return livres is None or lugar in livres
+
+
+def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA, lugares=None, por_cima=(), anotar=None,
+               nos_momentos=None):
+    """
+    ([(imagem, início, fim, x, y)], textos que entraram): os textos ([(texto, fundo)], na ordem; vazios e
+    repetidos saem) um de cada vez no vídeo remontado, todos no mesmo lugar (lugar: o de LUGARES_DOS_TEXTOS que
+    lugar_dos_textos dá, sempre o alto, ao lado da miniatura; com ela à esquerda, lado, P192 1, o "alto" passa
+    para a direita), sem nunca mudar de lugar. O texto que, no tempo dele, cobriria uma das coisas que o criador
+    pôs por cima do vídeo (por_cima, as que têm o tempo: _por_cima_do_video) ou cairia em cima do produto ou de
+    um rosto (o lugar fora dos livres do momento dele, nos_momentos: lugares_nos_momentos; sem eles, dos livres
+    na maior parte do vídeo, lugares: lugares_dos_textos) não aparece, e os outros aparecem no tempo deles
+    (escolha do Rafael, 13/11, P220 1: DECISOES.md, Shopee Vídeo). anotar (dict) recebe quantos não entraram
+    "pelo_criador" e "pelo_produto" (o produto ou um rosto), quando algum.
     """
     fundos = {}
     for texto, fundo in textos:
@@ -2980,43 +3110,43 @@ def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA, lugares=None, p
             fundos[texto] = fundo
     if lugar == SEM_LUGAR:
         return [], []
-    candidatos = list(lugares) if lugares is not None else [lugar]
     # Só as coisas do criador com o tempo: as dos rascunhos de antes da P212 1 vieram sem ele, e a IA já tinha
     # escolhido o lugar fora delas.
     do_criador = [coisa for coisa in por_cima or () if len(coisa) >= 6]
-    letreiros, postos, mudaram, sairam = [], [], 0, 0
+    letreiros, postos, pelo_criador, pelo_produto = [], [], 0, 0
     for texto, inicio, fim in horarios_dos_textos(list(fundos), duracao):
-        for vez, nome in enumerate(candidatos):
-            imagem, x, y = _letreiro_no_lugar(texto, fundos[texto], nome, lado)
-            largura, altura = _medidas_do_png(imagem)
-            if not _cobre_o_criador((x, y, x + largura, y + altura), inicio, fim, do_criador):
-                letreiros.append((imagem, inicio, fim, x, y))
-                postos.append(texto)
-                mudaram += vez > 0
-                break
+        imagem, x, y = _letreiro_no_lugar(texto, fundos[texto], lugar, lado)
+        largura, altura = _medidas_do_png(imagem)
+        if _cobre_o_criador((x, y, x + largura, y + altura), inicio, fim, do_criador):
+            pelo_criador += 1
+        elif not _livre_na_hora(lugar, inicio, fim, nos_momentos, lugares):
+            pelo_produto += 1
         else:
-            sairam += 1
-    if anotar is not None and (mudaram or sairam):
-        anotar.update({"mudaram": mudaram, "sairam": sairam})
+            letreiros.append((imagem, inicio, fim, x, y))
+            postos.append(texto)
+    if anotar is not None and (pelo_criador or pelo_produto):
+        anotar.update({"pelo_criador": pelo_criador, "pelo_produto": pelo_produto})
     return letreiros, postos
 
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
              capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-             lugares=None, por_cima=()):
+             lugares=None, por_cima=(), nos_momentos=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
     alcoólica no lugar da foto; sem eles, a capa, quando vem). Nada é cortado nem acelerado:
     isso fica para as versões modificadas do exemplo (pedido do Rafael de 28/10/2026:
-    DECISOES.md, Shopee Vídeo). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, da IA;
-    SEM_LUGAR = sem os textos; sem ela, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
+    DECISOES.md, Shopee Vídeo). lugar: onde vão os textos (um de LUGARES_DOS_TEXTOS, lugar_dos_textos;
+    SEM_LUGAR = sem os textos; sem ele, LUGAR_PADRAO). Com a musica (caminho), ela é o som do
     vídeo inteiro. As legendas da fala ([(início, fim, texto)], P118) vão embaixo, à direita da seta.
     Com rotulo_de_ia=True, a legenda da fala, as setinhas e a moldura sobem com o cartão do app.
     Com a cor do produto (RGB, P159 2), a caixa do nome e da vantagem e a moldura da miniatura vão nela.
     As escolhas do painel (escolhas_certas; None, as de sempre, P192 1) vão à edição (editar).
-    Com os lugares (lugares_dos_textos) e o que o criador pôs por cima (por_cima, com o tempo), cada texto da
-    tela vai ao lugar livre no momento dele, e o que não tem nenhum sai (P212 1, _letreiros).
+    Os textos da tela ficam sempre no mesmo lugar, e o que, na hora dele, cobriria o que o criador pôs por cima
+    (por_cima, com o tempo) ou o produto ou um rosto (fora dos lugares livres do momento dele, nos_momentos:
+    lugares_nos_momentos; sem eles, dos livres na maior parte do vídeo, lugares: lugares_dos_textos) não
+    aparece (P220 1, _letreiros).
     Devolve (motivo, resumo {original, lugar, textos, legendas}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
@@ -3024,31 +3154,31 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
                                  musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia, cor, escolhas,
-                                 lugares, por_cima)
+                                 lugares, por_cima, nos_momentos)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
                           musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False,
-                          cor=None, escolhas=None, lugares=None, por_cima=()):
+                          cor=None, escolhas=None, lugares=None, por_cima=(), nos_momentos=None):
     """
     O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
-    Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta. Os textos da
-    tela desviam do que o criador pôs por cima no momento de cada um (lugares e por_cima, P212 1), e
-    resumo["texto_do_criador"] diz quantos mudaram de lugar e quantos saíram; as setinhas e a moldura
-    somem enquanto o que ele pôs passa pelo lugar delas, e resumo["sob_o_criador"] diz quando (P218 1).
+    Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta. O texto da
+    tela que, na hora dele, cobriria o que o criador pôs por cima, o produto ou um rosto não aparece (lugares,
+    por_cima e nos_momentos, P220 1), e resumo["nao_entraram"] diz quantos e por quê; as setinhas e a moldura
+    somem enquanto o que o criador pôs passa pelo lugar delas, e resumo["sob_o_criador"] diz quando (P218 1).
     """
     escolhas = escolhas_certas(escolhas)
     caixa = caixa_dos_textos(cor)
-    criador = {}
+    fora = {}
     letreiros, textos = _letreiros([(nome, caixa), (vantagem, caixa), (chamada, FUNDO_DA_CHAMADA)], lugar, original,
-                                   escolhas["miniatura"], lugares, por_cima, criador)
+                                   escolhas["miniatura"], lugares, por_cima, fora, nos_momentos)
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     da_fala = letreiros_da_fala(legendas, original, subida) if legendas else []
     letreiros += da_fala
     resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura,
               "legendas": len(da_fala)}
-    if criador:
-        resumo["texto_do_criador"] = criador
+    if fora:
+        resumo["nao_entraram"] = fora
     if not letreiros:
         return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
                        escolhas=escolhas, por_cima=por_cima, anotar=resumo), resumo)
@@ -3083,19 +3213,20 @@ SEM_AS_SETINHAS = ", sem as setinhas"
 SEM_A_MOLDURA_DO_CARTAO = ", sem a moldura do cartão"
 LEGENDAS_DESLIGADAS = "a legenda da fala desligada no painel"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
-SEM_LUGAR_LIVRE = "a IA não viu lugar livre do produto e do rosto para os textos"
 TEXTO_JA_NO_VIDEO = "o vídeo já tem texto próprio na tela"
 SEM_OS_TEXTOS_DA_IA = "a IA não deu o nome, a vantagem e a chamada"
-SEM_LUGAR_PELO_CRIADOR = "o que o criador pôs por cima ocupava os lugares livres na hora de cada texto"
-# Os textos da tela que desviaram do que o criador pôs por cima (P212 1): quantos mudaram de lugar e
-# quantos saíram por falta de lugar livre no momento deles.
-PROCESSO_DO_TEXTO_DO_CRIADOR = "edição do vídeo: texto do criador"
-# Se a IA respondeu com a lista dos lugares (P212 1), em cada vídeo que vai ao ar.
+SEM_O_LUGAR_FIXO = "na hora de cada texto, o lugar fixo dele cobria o produto, um rosto ou o que o criador pôs"
+# Os textos da tela que não entraram por cobrir, na hora deles, o que o criador pôs por cima ou o produto ou
+# um rosto (P220 1): quantos de cada um, em cada vídeo em que algum ficou de fora.
+PROCESSO_DOS_TEXTOS_DE_FORA = "edição do vídeo: textos que não entraram"
+# Se a IA respondeu com a lista dos lugares livres do produto e do rosto (P212 1) e com a de cada momento dos
+# nossos textos (P220 1), em cada vídeo que vai ao ar.
 PROCESSO_DOS_LUGARES = "edição do vídeo: lugares dos textos"
 # As setinhas e a moldura do cartão que sumiram enquanto o que o criador pôs por cima passava pelo lugar
 # delas (P218 1): em quantos trechos e por quantos segundos do vídeo.
 PROCESSO_SOB_O_CRIADOR = "edição do vídeo: setinhas e moldura sob o criador"
 COM_A_LISTA, SEM_A_LISTA = "com a lista da IA", "sem a lista da IA"
+COM_OS_MOMENTOS = "com os lugares de cada momento"
 NADA_DO_CRIADOR = "nada do criador por cima"
 COM_O_TEMPO, SEM_O_TEMPO = "o que o criador pôs por cima, com o tempo", "o que o criador pôs por cima, sem o tempo"
 
@@ -3173,9 +3304,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     sem ela), se vão a legenda da fala, as setinhas e a moldura do cartão, e a cor das duas; o jeito
     leva as que mudam o vídeo. Com coisa do criador no canto do painel, a miniatura vai inteira ao outro
     canto de cima, se ele estiver livre (P213 1: canto_da_miniatura; o jeito leva
-    COM_A_MINIATURA_NO_OUTRO_CANTO, e o Editar ✏️ guarda o canto em que ela saiu), e cada texto da tela
-    vai ao lugar livre do que o criador pôs por cima no momento dele (P212 1). Escolhas do Rafael:
-    DECISOES.md, Shopee Vídeo.
+    COM_A_MINIATURA_NO_OUTRO_CANTO, e o Editar ✏️ guarda o canto em que ela saiu), e os textos da tela ficam
+    sempre no alto, ao lado da miniatura, e o que, na hora dele, cobriria o que o criador pôs por cima, o
+    produto ou um rosto não aparece (P220 1). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
     """
     escolhas = escolhas_certas(escolhas_do_painel() if escolhas is None else escolhas)
     lado = escolhas["miniatura"]
@@ -3193,11 +3324,12 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     if textos:
         registro_processos.registrar("shopee_video", PROCESSO_DA_COR, textos.get("cor") if cor else COM_AS_CORES_DE_SEMPRE,
                                      "" if cor else (textos.get("cor") or "a IA não disse a cor"), ok=None)
-        # Se a IA deu a lista dos lugares e o tempo do que o criador pôs por cima (P212 1): o checkup confere
-        # que o pedido novo é seguido, mesmo nos vídeos em que nenhum texto precisou desviar.
+        # Se a IA deu os lugares livres (do vídeo todo e de cada momento) e o tempo do que o criador pôs por
+        # cima (P212 1 e P220 1): o checkup confere que o pedido é seguido, mesmo nos vídeos em que todos entraram.
         coisas = textos.get("por_cima", ())
         registro_processos.registrar("shopee_video", PROCESSO_DOS_LUGARES,
-                                     COM_A_LISTA if "lugares" in textos else SEM_A_LISTA,
+                                     COM_OS_MOMENTOS if "lugares_nos_momentos" in textos
+                                     else COM_A_LISTA if "lugares" in textos else SEM_A_LISTA,
                                      NADA_DO_CRIADOR if not coisas
                                      else COM_O_TEMPO if any(len(coisa) >= 6 for coisa in coisas) else SEM_O_TEMPO,
                                      ok=None)
@@ -3284,10 +3416,11 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                              "rotulo_de_ia": bool(rotulo_de_ia), "escolhas": escolhas}
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                                    textos.get("chamada", ""), lugar_dos_textos(textos, canto), avisos, musica,
+                                    textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica,
                                     abertura, miniatura, outras_fotos, legendas, rotulo_de_ia, cor=cor,
                                     escolhas=escolhas, lugares=lugares_dos_textos(textos, canto),
-                                    por_cima=textos.get("por_cima", ()))
+                                    por_cima=textos.get("por_cima", ()),
+                                    nos_momentos=lugares_nos_momentos(textos, canto))
     except Exception as e:
         # O erro no meio do Editor 2 também deixa o vídeo ir com o Editor 1.
         motivo_2, resumo = f"erro ({type(e).__name__})", {}
@@ -3302,24 +3435,23 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                                      if postas else sem_legendas or "nenhum trecho cabe", ok=True if postas else None)
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         _registrar_o_que_sumiu(resumo.get("sob_o_criador"), resumo.get("original") or 0.0)
-        criador = resumo.get("texto_do_criador") or {}
-        if criador:
-            # Os textos da tela que desviaram do que o criador pôs por cima (P212 1).
-            registro_processos.registrar("shopee_video", PROCESSO_DO_TEXTO_DO_CRIADOR,
-                                         "algum saiu" if criador.get("sairam") else "mudaram de lugar",
-                                         f"{criador.get('mudaram', 0)} em outro lugar, {criador.get('sairam', 0)} "
-                                         "fora (sem lugar livre na hora dele)", ok=None)
+        fora = resumo.get("nao_entraram") or {}
+        if fora:
+            # Os textos da tela que não entraram por cobrir, na hora deles, o que o criador pôs por cima, o
+            # produto ou um rosto (P220 1).
+            registro_processos.registrar("shopee_video", PROCESSO_DOS_TEXTOS_DE_FORA,
+                                         "algum ficou de fora" if resumo.get("textos") else "nenhum entrou",
+                                         f"{fora.get('pelo_criador', 0)} pelo que o criador pôs por cima, "
+                                         f"{fora.get('pelo_produto', 0)} pelo produto ou um rosto", ok=None)
         detalhe = ""
         if textos.get("texto_no_video"):
             # Com a parte do tempo em que o texto do criador fica na tela (P52: mais da metade).
             detalhe = TEXTO_JA_NO_VIDEO + (f" ({textos['parte_com_texto']:.0%} do tempo)"
                                            if "parte_com_texto" in textos else "")
-        elif resumo.get("lugar") == SEM_LUGAR:
-            detalhe = SEM_LUGAR_LIVRE
         elif not (textos.get("nome") or textos.get("vantagem") or textos.get("chamada")):
             detalhe = SEM_OS_TEXTOS_DA_IA
-        elif criador.get("sairam") and not resumo.get("textos"):
-            detalhe = SEM_LUGAR_PELO_CRIADOR
+        elif fora and not resumo.get("textos"):
+            detalhe = SEM_O_LUGAR_FIXO
         return "", (COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA) + avisado, detalhe
     sob = {}
     motivo_1 = editar(video, foto, destino, avisos, musica, abertura, miniatura, outras_fotos, rotulo_de_ia,
@@ -3332,7 +3464,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
 # O que o Editar ✏️ guarda dos textos da IA de cada rascunho (P192 1): o que a edição usa, sem a frase da
 # capa, que vai à parte.
 TEXTOS_GUARDADOS = ("nome", "vantagem", "chamada", "lugar", "texto_no_video", "canto_ocupado", "por_cima",
-                    "lado_olhado", "legendas", "legenda_no_video", "cor", "cor_2", "lugares", "outro_canto_ocupado")
+                    "lado_olhado", "legendas", "legenda_no_video", "cor", "cor_2", "lugares", "outro_canto_ocupado",
+                    "lugares_nos_momentos")
 
 
 def textos_para_guardar(textos):
@@ -3365,8 +3498,9 @@ def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=No
     capa com a frase, os textos, as setinhas, a moldura e a cor ficam as do rascunho. Com a miniatura do
     outro lado, ela diminui ou fica de fora pelo que o criador pôs no alto (P81 e P97): o lado que o Rafael
     escolhe aqui vale, sem ir sozinha ao outro canto (P213 1 é para o rascunho que o robô prepara; o lado
-    guardado já é o canto em que ela saiu). Os textos da tela desviam do que o criador pôs por cima como no
-    rascunho (P212 1). Devolve (motivo, como): motivo "" quando saiu.
+    guardado já é o canto em que ela saiu). Os textos da tela ficam no alto, ao lado da miniatura, e o que
+    cobriria, na hora dele, o que o criador pôs por cima, o produto ou um rosto não aparece, como no rascunho
+    (P220 1). Devolve (motivo, como): motivo "" quando saiu.
     """
     escolhas = escolhas_certas((guardado or {}).get("escolhas"))
     if lado in LADOS_DA_MINIATURA:
@@ -3390,10 +3524,11 @@ def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=No
     if escolhas["legenda"]:
         legendas = legendas_no_tempo(video, legendas_da_fala(textos)[0])[0]
     motivo, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                              textos.get("chamada", ""), lugar_dos_textos(textos, canto), avisos, musica, abertura,
+                              textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica, abertura,
                               miniatura, outras_fotos if miniatura else (), legendas,
                               bool((guardado or {}).get("rotulo_de_ia")), cor=cor, escolhas=escolhas,
-                              lugares=lugares_dos_textos(textos, canto), por_cima=textos.get("por_cima", ()))
+                              lugares=lugares_dos_textos(textos, canto), por_cima=textos.get("por_cima", ()),
+                              nos_momentos=lugares_nos_momentos(textos, canto))
     if motivo:
         return motivo, ""
     como = ((COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA)
@@ -3531,8 +3666,9 @@ PROMPT_DAS_VERSOES = (
     "\"cor_2\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], "
-    "\"lugares\": [\"alto_esquerda\", \"meio\"], \"textos_do_video\": [], \"por_cima_do_video\": [], "
-    "\"canto_ocupado\": false, \"outro_canto_ocupado\": false, \"legendas\": [], \"legenda_no_video\": false}}"
+    "\"lugares\": [\"alto_esquerda\", \"meio\"], {chave_dos_momentos}\"textos_do_video\": [], "
+    "\"por_cima_do_video\": [], \"canto_ocupado\": false, \"outro_canto_ocupado\": false, \"legendas\": [], "
+    "\"legenda_no_video\": false}}"
 )
 
 
@@ -3543,8 +3679,10 @@ def textos_das_versoes(video, nome, lado=MINIATURA_A_DIREITA):
     certo; {} quando ela não respondeu. A IA olha o canto do lado da miniatura (lado, P192 1).
     """
     olhado = lado_olhado(lado)
-    dados = _resposta_da_ia(video, prompt_das_versoes(nome, olhado))
-    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_para_os_trechos(video, dados)))
+    duracao = videos.duracao(video)
+    momentos = momentos_dos_textos(duracao)
+    dados = _resposta_da_ia(video, prompt_das_versoes(nome, olhado, momentos))
+    textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_dos_trechos(duracao, dados), momentos))
     if dados and olhado != MINIATURA_A_DIREITA:
         textos["lado_olhado"] = olhado
     versoes = []
@@ -3709,7 +3847,8 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
 
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
-                       lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None, por_cima=()):
+                       lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None, por_cima=(),
+                       nos_momentos=None):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
@@ -3717,10 +3856,11 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     ritmo), com os seus textos (a vantagem do gancho, o nome e a chamada da versão, nessa ordem)
     e com o Editor 1 por cima. versoes_da_ia = [{"vantagem", "chamada", "inicio", "fim"}]. Com a cor
     do produto (RGB, P159 2), a caixa do nome e da vantagem e a moldura da miniatura vão nela, como
-    no vídeo que vai ao ar. No completo, os textos desviam do que o criador pôs por cima no momento de cada um
-    (lugares e por_cima, P212 1), como no que vai ao ar; nas versões remontadas, o tempo muda, e todos vão
-    no lugar. Devolve (motivo, resumo): motivo "" quando todos saíram; o que a
-    remontagem muda nas versões fica em resumo["remontagem"].
+    no vídeo que vai ao ar. Os textos ficam sempre no mesmo lugar (P220 1): no completo, o que, na hora dele,
+    cobriria o que o criador pôs por cima (por_cima), o produto ou um rosto (nos_momentos; sem eles, lugares)
+    não aparece, como no que vai ao ar; nas versões remontadas, o tempo muda, e só conta a lista do vídeo todo
+    (lugares). Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas versões fica
+    em resumo["remontagem"].
     """
     original = videos.duracao(video)
     if not original:
@@ -3733,19 +3873,20 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
                                                 musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas,
-                                                cor=cor, escolhas=escolhas, lugares=lugares, por_cima=por_cima)
+                                                cor=cor, escolhas=escolhas, lugares=lugares, por_cima=por_cima,
+                                                nos_momentos=nos_momentos)
     resumo = {"original": original, "inteiro": original, "lugar": lugar, "miniatura": miniatura,
               "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala),
               "versoes": [_resumo_do_completo(completo, original, do_completo["textos"], vantagem, musicas[0])]}
-    if do_completo.get("texto_do_criador"):
-        resumo["texto_do_criador"] = do_completo["texto_do_criador"]
+    if do_completo.get("nao_entraram"):
+        resumo["nao_entraram"] = do_completo["nao_entraram"]
     if motivo:
         return motivo, resumo
     lado = escolhas_certas(escolhas)["miniatura"]
     return _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, lambda plano, da_ia: _letreiros(
         [(da_ia.get("vantagem", ""), caixa), (nome, caixa), (da_ia.get("chamada", ""), FUNDO_DA_CHAMADA)],
-        lugar, _segundos_remontados(plano["trechos"]), lado), musicas[1:], miniatura, cor, escolhas)
+        lugar, _segundos_remontados(plano["trechos"]), lado, lugares), musicas[1:], miniatura, cor, escolhas)
 
 
 def _exemplo_das_versoes(destino, lista, editar_versoes, escolhas=None):
@@ -3794,11 +3935,12 @@ def exemplo_editor_2(destino):
     """
     return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto, escolhas: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
-        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos, escolhas["miniatura"]),
+        textos.get("chamada", ""), textos.get("falas"), lugar_dos_textos(textos),
         miniatura_no_video(textos, escolhas["miniatura"]),
         legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0] if escolhas["legenda"] else [],
         cor=cor_do_produto(textos.get("cor")), escolhas=escolhas,
-        lugares=lugares_dos_textos(textos, escolhas["miniatura"]), por_cima=textos.get("por_cima", ())),
+        lugares=lugares_dos_textos(textos, escolhas["miniatura"]), por_cima=textos.get("por_cima", ()),
+        nos_momentos=lugares_nos_momentos(textos, escolhas["miniatura"])),
         escolhas_do_painel())
 
 
