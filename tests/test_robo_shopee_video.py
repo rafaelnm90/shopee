@@ -5516,6 +5516,32 @@ def test_saude_que_demora_a_carregar_e_esperada():
         robo.abrir_saude(SaudeDevagar({"centro": 50}))
 
 
+class PerfilSemOCentroAinda(AppDaSaude):
+    """O Perfil que mostra o alto (os números e o Postar vídeo) antes do Centro do criador, que vem pela rede."""
+
+    def __init__(self, leituras_sem_o_centro):
+        super().__init__()
+        self.sem_o_centro = leituras_sem_o_centro
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.atual == "perfil" and self.sem_o_centro > 0:
+            self.sem_o_centro -= 1
+            return [no for no in nos if 'text="Centro do criador"' not in no]
+        return nos
+
+
+def test_saude_espera_o_centro_do_criador_que_chega_depois_do_alto_do_perfil():
+    # 13/11, 00:28: o Perfil em Shopee Vídeo abriu (os números e o Postar vídeo na tela), mas o
+    # Centro do criador ainda não estava lá, e a leitura da Saúde parou na 1ª leitura. O robô
+    # relê a tela até ele chegar; sem ele de jeito nenhum, para como antes.
+    app = PerfilSemOCentroAinda(3)
+    robo.abrir_saude(app)
+    assert app.atual == "saude" and "Centro do criador" in app.toques
+    with pytest.raises(robo.Parada, match="não achei Centro do criador na tela"):
+        robo.abrir_saude(PerfilSemOCentroAinda(50))
+
+
 # O Centro do criador e a Saúde do Vídeo do app de agora (vídeo do Rafael de 04/11/2026): o
 # Creator Center sem o quadro, com "Ao vivo: ..." e "Vídeo: ..." no alto, e a Account Health
 # com as abas Live e Vídeo (a Live com os pontos das lives).
@@ -6067,6 +6093,68 @@ def test_like_que_nao_tira_para_e_diz_onde(monkeypatch, avisos):
     assert "continuaram em Meus favoritos (3 marcado(s); 0 inválido(s) na tela)" in resultado
     assert len(app.favoritos) == 3 and not robo.lista_limpa()
     assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
+    # Antes de parar, abriu a lista de novo uma vez (a tela podia estar velha).
+    assert app.toques.count("Meus favoritos") == 2
+
+
+class ListaVelhaDepoisDoLike(AppDosFavoritos):
+    """
+    Meus favoritos como o Motorola mostrou em 13/11 às 04:13: o Like tira os marcados da lista
+    guardada e limpa a marcação, mas a lista da tela continua a mesma até ser aberta de novo; a
+    caixa de baixo marca os da tela, e o Like nos que já saíram não faz nada (continuam marcados).
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.na_tela = None
+
+    def _visiveis(self):
+        lista = self.favoritos if self.na_tela is None else self.na_tela
+        return lista[self.topo:self.topo + 5]
+
+    def click(self, x, y):
+        tocados = {el["texto"] for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])}
+        if self.atual == "afiliado" and "Meus favoritos" in tocados:
+            super().click(x, y)
+            self.na_tela = list(self.favoritos)
+            return
+        if self.atual == "favoritos" and 30 <= x <= 96 and 2290 <= y <= 2356:
+            self.marcados = list(self._visiveis())
+            self.toques.append((x, y))
+            return
+        if self.atual == "favoritos" and "Like" in tocados:
+            tirados = [f for f in self.marcados if f in self.favoritos and f not in self.invalidos]
+            if tirados:
+                self.favoritos = [f for f in self.favoritos if f not in tirados]
+                self.marcados = [f for f in self.marcados if f in self.invalidos]
+            self.toques.append("Like")
+            return
+        return super().click(x, y)
+
+
+def _registro_da_limpeza():
+    with robo.db.conexao() as con:
+        return [tuple(linha) for linha in con.execute(
+            "SELECT resultado, detalhe FROM registro_processos WHERE processo = 'descurtir tudo (4h)' ORDER BY id")]
+
+
+def test_lista_velha_depois_do_like_e_aberta_de_novo_antes_de_parar(monkeypatch, avisos):
+    # 13/11, 04:13: o 1º Like tirou os 2 produtos de Meus favoritos e limpou a marcação, mas a tela
+    # continuou com eles; o robô os marcou de novo, o 2º Like não fez nada, e a limpeza parou ("os
+    # produtos marcados continuaram"). Na rodada seguinte, a lista aberta de novo só tinha 1
+    # inválido. Antes de dar por parada, o robô abre a lista de novo uma vez.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = ListaVelhaDepoisDoLike(favoritos=2)
+    resultado = robo.rodada(d=app, agora=momento("2026-11-13 04:12"))
+    assert resultado.startswith("2 produto(s) descurtido(s) em Meus favoritos") and "continuaram" not in resultado
+    assert app.favoritos == [] and robo.lista_limpa() and app.toques.count("Meus favoritos") == 2
+    assert _registro_da_limpeza()[-1] == ("descurtido", "2 produto(s); a lista aberta de novo")
+    # Sobrando só o inválido na lista aberta de novo, a lista acabou, como na rodada das 04:27.
+    robo.gravar_estado(favoritos_limpos=False, descurtir_em=None, descurtir_continuar=False)
+    app = ListaVelhaDepoisDoLike(favoritos=3, invalidos=(2,))
+    resultado = robo.rodada(d=app, agora=momento("2026-11-14 04:12"))
+    assert resultado.startswith("2 produto(s) descurtido(s) em Meus favoritos; 1 inválido(s) ficam")
+    assert app.favoritos == ["Produto 2"] and robo.lista_limpa()
 
 
 def _anexar_espiao(monkeypatch):
