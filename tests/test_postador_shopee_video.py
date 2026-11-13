@@ -1655,6 +1655,8 @@ def test_ultima_chance_recusada_pela_ia_nao_anexa_e_avisa(monkeypatch):
     assert len(avisos) == 1 and VESTIDO in avisos[0] and "o item da imagem" not in motivo
     assert robo.passo_do_motivo(motivo) == "anexar o produto"
     assert ("não anexado", "nem pelo nome nem pela foto do 1º da lista") in _anexar_linhas()
+    # O robô reconhece este motivo pelo começo dele, e o vídeo volta mais tarde (P216 1).
+    assert motivo.startswith(ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS)
 
 
 def test_a_ia_so_confirma_a_mesma_cor_da_foto(monkeypatch):
