@@ -327,6 +327,14 @@ ESPERA_DA_LISTA = 9
 # ordem (Relevância e de volta a Mais Recente), antes de rolar a lista e da última chance.
 ESPERAS_PARA_REABRIR_A_LISTA = (0, 30, 60)
 ORDEM_PARA_REABRIR, ORDEM_DA_LISTA = "Relevância", "Mais Recente"
+# A lista do Adicionar Produto que o app não carrega: a tela "Erro de Carregamento", com o botão
+# Atualizar do próprio app. Em 13/11/2026, às 17:57, a 3ª leitura de novo da lista caiu nela, e a última
+# chance ficou sem o 1º da lista para a IA conferir (o registro dizia "0 na lista"). O robô toca no
+# Atualizar, como uma pessoa, até VEZES_DO_ATUALIZAR vezes, e o registro diz se a lista voltou.
+ERRO_DE_CARREGAMENTO, BOTAO_ATUALIZAR = "Erro de Carregamento", "Atualizar"
+VEZES_DO_ATUALIZAR = 2
+PROCESSO_DO_ANEXAR = "anexar o produto"
+ERRO_NA_LISTA = "Erro de Carregamento na lista"
 # Quantas vezes o passo curtir rola a página completa do produto atrás do coração.
 ROLAGENS_DO_CORACAO = 2
 # Quantas vezes a IA confere o produto do link com o vídeo: ela já recusou um vídeo que
@@ -889,7 +897,7 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
             anexados.append(nome)
         return ok, motivo
     esperar_a_lista(d)
-    tela = d.dump_hierarchy()
+    tela = atualizar_a_lista(d, d.dump_hierarchy())
     na_lista = produtos_da_lista(tela)
     topo = na_lista[:max(no_topo, 1)]
     escolhido = no_topo_pelo_nome(topo, nome)
@@ -907,7 +915,9 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
         escolhido = no_topo_pelo_nome(topo, nome)
         registro_processos.registrar("shopee_video", "anexar o produto", "lista lida de novo",
                                      f"{vez}ª vez, {espera} s depois: "
-                                     + ("o produto no topo" if escolhido else "ainda fora do topo"), ok=None)
+                                     + ("o produto no topo" if escolhido else "ainda fora do topo")
+                                     + ("; com o Erro de Carregamento" if com_erro_de_carregamento(tela) else ""),
+                                     ok=None)
         if escolhido:
             return _tocar_em_adicionar(d, tela, escolhido["botao"], escolhido["nome"],
                                        f"no topo, pelo nome, com a lista lida de novo ({vez}ª vez)", anexados)
@@ -950,7 +960,8 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
                                  + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else "")
                                  + topo_txt
                                  + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else "")
-                                 + ("" if rolar_a_lista else "; lista limpa"), ok=None)
+                                 + ("" if rolar_a_lista else "; lista limpa")
+                                 + ("; com o Erro de Carregamento" if com_erro_de_carregamento(tela) else ""), ok=None)
     if not ultima_chance:
         return False, "o produto a mais não está na lista: nada adicionado"
     ok, motivo = _pelo_primeiro_com_a_ia(d, video, rolagens, anexados)
@@ -1009,7 +1020,7 @@ def _pelo_primeiro_com_a_ia(d, video, rolagens, anexados):
     for _ in range(rolagens):
         rolar(d, para_cima=True)
         time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
-    tela = d.dump_hierarchy()
+    tela = atualizar_a_lista(d, d.dump_hierarchy())
     primeiros = produtos_da_lista(tela)
     if not primeiros:
         return False, "a lista não tem produto para conferir"
@@ -1220,7 +1231,38 @@ def reabrir_a_lista(d, espera):
         d.click(x, y)
         time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
     esperar_a_lista(d)
-    return d.dump_hierarchy()
+    return atualizar_a_lista(d, d.dump_hierarchy())
+
+
+def com_erro_de_carregamento(xml):
+    """A tela mostra o "Erro de Carregamento" do app (a lista do Adicionar Produto que não carregou)?"""
+    return any(_normal(el["texto"]) == _normal(ERRO_DE_CARREGAMENTO) for el in elementos(xml))
+
+
+def atualizar_a_lista(d, tela):
+    """
+    Na tela "Erro de Carregamento" (com_erro_de_carregamento), toca no Atualizar do app e espera a lista, até
+    VEZES_DO_ATUALIZAR vezes, e anota se ela voltou. Devolve a tela de depois; sem o erro, a mesma tela.
+    """
+    vezes = 0
+    while com_erro_de_carregamento(tela) and vezes < VEZES_DO_ATUALIZAR:
+        ponto = achar(tela, BOTAO_ATUALIZAR)
+        if not ponto:
+            break
+        x, y = ponto
+        if proibido_no_ponto(tela, x, y):
+            break
+        d.click(x, y)
+        vezes += 1
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+        esperar_a_lista(d)
+        tela = d.dump_hierarchy()
+    if vezes:
+        registro_processos.registrar("shopee_video", PROCESSO_DO_ANEXAR, ERRO_NA_LISTA,
+                                     f"Atualizar tocado {vezes}x: "
+                                     + ("continuou com o erro" if com_erro_de_carregamento(tela) else "a lista voltou"),
+                                     ok=None)
+    return tela
 
 
 def esperar_a_lista(d):
