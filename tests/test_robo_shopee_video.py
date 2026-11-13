@@ -1703,13 +1703,14 @@ def test_produtos_ja_postados_pelo_robo_e_pelo_assistente():
                      robo.PROCESSO_DO_JA_POSTADO) == (robo.EM_NENHUM,)
 
 
-def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor="", letras=None):
+def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor="", letras=None, refazer=None):
     """
     O editar_para_postar de mentira: guarda (vídeo, foto, produto, avisos) e grava o editado. Com a
     capa (bytes), o vídeo abre com a capa com a frase, como na capa com chamada ligada (P125). Com
     rotulos (lista), guarda se o vídeo vai com o Rótulo de IA. Com a cor (o nome), a edição diz que
     usou a cor do produto (P159 2). Com letras ("1" ou "0"), a edição diz se a foto do anúncio da
-    capa tem letras (P181 2).
+    capa tem letras (P181 2). Com refazer (dict), a edição guarda o que o Editar ✏️ precisa (P192 1),
+    como o tempo da foto do começo (P221 1).
     """
     def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
                            anotar=None):
@@ -1718,6 +1719,8 @@ def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor="
             anotar["cor"] = cor
             if letras is not None:
                 anotar["letras"] = letras
+            if refazer is not None:
+                anotar["refazer"] = dict(refazer)
         if rotulos is not None:
             rotulos.append(rotulo_de_ia)
         motivo, como, detalhe = respostas.pop(0) if respostas else ("", robo.edicao_video.COM_LEGENDAS, "")
@@ -1808,6 +1811,25 @@ def test_rascunho_guarda_a_cor_do_produto_que_a_edicao_usou(monkeypatch, avisos)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     assert robo.esperando_aprovacao()[0]["cor"] == "verde"
+
+
+def test_rascunho_guarda_o_tempo_da_foto_do_comeco(monkeypatch, avisos):
+    # Escolha do Rafael (13/11, P221 1): a foto do começo fica 1,5 s, e o rascunho guarda o tempo dela, para a
+    # medição comparar as visualizações com as dos vídeos de 2 s de antes; o que vai sem a edição, sem a foto, "0".
+    _fonte(monkeypatch)
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", _editar_para_postar(
+        [], refazer={"segundos_da_foto": robo.edicao_video.SEGUNDOS_DA_FOTO}))
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["segundos_da_foto"] == "1.5"
+    assert robo.segundos_da_foto({}) == "0" and robo.segundos_da_foto({"refazer": {"segundos_da_foto": 2.0}}) == "2"
 
 
 def test_rascunho_guarda_se_a_foto_da_capa_tem_letras(monkeypatch, avisos):
