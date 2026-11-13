@@ -7059,13 +7059,13 @@ class AppAbertoHaHoras(AppQueReabreALegenda):
         self.comandos.append(["abrir", pacote])
 
 
-def _app_reaberto():
+def _app_reaberto(processo=robo.PROCESSO_DO_APP_REABERTO):
     import sqlite3
     try:
         with robo.db.conexao() as con:
             return [tuple(linha) for linha in con.execute(
                 "SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ? ORDER BY id",
-                (robo.PROCESSO_DO_APP_REABERTO,))]
+                (processo,))]
     except sqlite3.OperationalError:
         return []
 
@@ -7089,16 +7089,16 @@ def test_app_aberto_ha_mais_de_12_horas_e_reaberto_depois_do_produto_que_nao_fic
     assert app.comandos.count(["fechar", robo.ps.PACOTE]) == 1
     assert ["abrir", robo.ps.PACOTE] in app.comandos[app.comandos.index(["fechar", robo.ps.PACOTE]):]
     assert ordem[:2] == ["caso", "fechar"]
-    assert _app_reaberto() == [("fechado e reaberto", "o app aberto há 12 a 24 h", 1)]
+    assert _app_reaberto() == [("fechado e reaberto", "pelo tempo aberto: o app aberto há 12 a 24 h", 1)]
     assert robo.listar("pulado") == [] and robo.proximo_video(robo.ler_config())["id"] == "a1"
 
 
 def test_app_aberto_ha_pouco_tempo_ou_sem_a_leitura_nao_e_fechado(monkeypatch, avisos):
     # P193 1: só com o app aberto há mais de 12 h; com menos, ou sem saber, o robô não fecha o app
-    # (P15: fora do aviso de app travado, ele nunca fecha).
+    # (P15: fora do aviso de app travado e do app sem memória, P215 1, ele nunca fecha).
     for etime in ("11:59:00", "12:00:00", None):
         app = AppAbertoHaHoras(etime=etime)
-        assert robo.reabrir_o_app_aberto_ha_muito_tempo(app) is False, etime
+        assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU) is False, etime
         assert not any(c[0] in ("fechar", "abrir") for c in app.comandos), etime
     assert _app_reaberto() == []
     # O produto que não fica com o app aberto há pouco tempo também não fecha nada na rodada.
@@ -7114,8 +7114,161 @@ def test_verificacao_depois_de_reabrir_o_app_aberto_ha_horas_para_e_avisa(monkey
     app = AppAbertoHaHoras(etime="1-02:03:04")
     monkeypatch.setattr(robo.ps, "eh_verificacao", lambda xml: ["abrir", robo.ps.PACOTE] in app.comandos)
     with pytest.raises(robo.Verificacao):
-        robo.reabrir_o_app_aberto_ha_muito_tempo(app)
-    assert _app_reaberto() == [("a Verificação apareceu", "o app aberto há mais de 1 dia", 0)]
+        robo.reabrir_o_app_antigo_ou_sem_memoria(app, robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU)
+    assert _app_reaberto() == [("a Verificação apareceu", "pelo tempo aberto: o app aberto há mais de 1 dia", 0)]
+
+
+class AppSemMemoria(AppAbertoHaHoras):
+    """O app aberto há etime com o Java dele em usada MB (a linha Dalvik Heap do dumpsys meminfo)."""
+
+    def __init__(self, perdidos=None, etime="11:00:00", usada=460):
+        super().__init__(perdidos, etime)
+        self.usada = usada
+
+    def shell(self, partes):
+        if partes[:2] == ["dumpsys", "meminfo"]:
+            self.comandos.append(partes)
+            saida = (f"  Dalvik Heap   480000   470000      100     2000   500000   524288   {self.usada * 1024}"
+                     f"     {524288 - self.usada * 1024}\n") if self.usada is not None else ""
+            return type("R", (), {"output": saida})()
+        return super().shell(partes)
+
+
+def _guardar_e_fechar_em_ordem(monkeypatch, app):
+    """A ordem do caso guardado e do app fechado (o caso tem de guardar antes a tela da falha)."""
+    ordem = []
+    guardar = robo.casos_robo.guardar
+    monkeypatch.setattr(robo.casos_robo, "guardar", lambda d, *a, **k: ordem.append("caso") or guardar(d, *a, **k))
+    parar = app.app_stop
+    monkeypatch.setattr(app, "app_stop", lambda pacote: ordem.append("fechar") or parar(pacote))
+    return ordem
+
+
+PELA_MEMORIA = "pela memória: o app aberto há 6 a 12 h; a memória do app 450 MB ou mais"
+
+
+def test_app_sem_memoria_e_reaberto_no_produto_que_nao_ficou_mesmo_aberto_ha_menos_de_12_horas(monkeypatch, avisos):
+    # Escolha do Rafael (12/11, P215 1): às 20:52 e às 21:11 de 12/11, o produto não ficou depois do
+    # Feito (nem na 2ª vez) com o app aberto havia 11 h e o Java dele em 410 a 460 MB; os 11 que ficaram
+    # de primeira tinham menos de 400 MB. Com a memória acima de 400 MB, o robô guarda o caso, fecha e
+    # reabre a Shopee, mesmo com o app aberto há menos de 12 h; o vídeo volta mais tarde (P182 1).
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = AppSemMemoria(perdidos=5, etime="11:00:00", usada=460)
+    ordem = _guardar_e_fechar_em_ordem(monkeypatch, app)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU in resultado and robo.esperando_aprovacao() == []
+    assert app.comandos.count(["fechar", robo.ps.PACOTE]) == 1 and ordem[:2] == ["caso", "fechar"]
+    assert ["abrir", robo.ps.PACOTE] in app.comandos[app.comandos.index(["fechar", robo.ps.PACOTE]):]
+    assert _app_reaberto() == [("fechado e reaberto", PELA_MEMORIA, 1)]
+    assert robo.listar("pulado") == [] and robo.proximo_video(robo.ler_config())["id"] == "a1"
+    # Com as 12 h e a memória alta, as duas razões ficam no registro.
+    app = AppSemMemoria(etime="13:00:00", usada=430)
+    assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU) is True
+    assert _app_reaberto()[-1] == ("fechado e reaberto", "pelo tempo aberto e pela memória: o app aberto há 12 a 24 h; "
+                                   "a memória do app 400 a 450 MB", 1)
+
+
+def test_app_com_400_mb_ou_menos_e_aberto_ha_menos_de_12_horas_nao_e_fechado(monkeypatch, avisos):
+    # P215 1: só com a memória acima de 400 MB (ou, no produto que não ficou, com o app aberto há
+    # mais de 12 h, P193 1); com 400 MB ou menos, ou sem a leitura, o robô não fecha o app (P15).
+    for usada in (380, 400, None):
+        app = AppSemMemoria(etime="11:00:00", usada=usada)
+        assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU) is False, usada
+        assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, "não achei Criadores & Afiliados na tela") is False, usada
+        assert not any(c[0] in ("fechar", "abrir") for c in app.comandos), usada
+    assert _app_reaberto() == [] and _app_reaberto(robo.PROCESSO_DA_PAGINA_EM_BRANCO) == []
+
+
+def test_pagina_em_branco_do_app_sem_memoria_fecha_e_reabre_o_app(monkeypatch, avisos):
+    # P215 1: às 08:58 e às 21:26 de 12/11, o app da Shopee ficou sem memória (o Java no teto dos
+    # 512 MB, o OutOfMemoryError no log) e a página abriu em branco: o robô parou em "navegar no app"
+    # e o app só voltou ao normal depois. Com a memória acima de 400 MB, a tela que não mostrou o que
+    # devia fecha e reabre a Shopee; abaixo, só para, como antes, mesmo com o app aberto há mais de
+    # 12 h (as horas valem só para o produto que não ficou, P193 1).
+    em_branco = ["não achei Criadores & Afiliados na tela", "depois de Eu, a tela não mostrou Criadores & Afiliados",
+                 "não consegui voltar até Eu (só as barras do Android)", "não achei Meus Favoritos na aba Eu",
+                 "não achei o campo de comentar no vídeo do post"]
+    outros = ["a IA viu outro produto no vídeo (1ª vez)", robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU,
+              "não consegui deixar marcado só o vídeo mais novo na galeria", "rodada foi interrompida", "", None]
+    assert all(robo.pagina_em_branco(motivo) for motivo in em_branco)
+    assert not any(robo.pagina_em_branco(motivo) for motivo in outros)
+    for motivo in em_branco:
+        app = AppSemMemoria(etime="11:00:00", usada=505)
+        assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, motivo) is True, motivo
+        assert app.comandos.count(["fechar", robo.ps.PACOTE]) == 1, motivo
+    assert _app_reaberto(robo.PROCESSO_DA_PAGINA_EM_BRANCO) == [("fechado e reaberto", PELA_MEMORIA, 1)] * len(em_branco)
+    assert _app_reaberto() == []
+    # Abaixo dos 400 MB, a página em branco só para, mesmo com o app aberto há mais de 1 dia.
+    app = AppSemMemoria(etime="1-02:00:00", usada=390)
+    assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, em_branco[0]) is False
+    assert ["fechar", robo.ps.PACOTE] not in app.comandos
+    # A parada que não é do app nem lê o celular.
+    app = AppSemMemoria(usada=505)
+    assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, outros[0]) is False and app.comandos == []
+    # O celular que cai no meio do fechar não para nada além da parada que já houve: só o registro.
+    app = AppSemMemoria(usada=505)
+
+    def caiu(pacote):
+        raise ConnectionError("caiu")
+
+    monkeypatch.setattr(app, "app_stop", caiu)
+    assert robo.reabrir_o_app_antigo_ou_sem_memoria(app, em_branco[0]) is False
+    assert _app_reaberto(robo.PROCESSO_DA_PAGINA_EM_BRANCO)[-1] == ("não reabriu", f"{PELA_MEMORIA}; ConnectionError", 0)
+    # A Verificação depois de reabrir para e avisa, como sempre.
+    app = AppSemMemoria(usada=505)
+    monkeypatch.setattr(robo.ps, "eh_verificacao", lambda xml: ["abrir", robo.ps.PACOTE] in app.comandos)
+    with pytest.raises(robo.Verificacao):
+        robo.reabrir_o_app_antigo_ou_sem_memoria(app, em_branco[1])
+    assert _app_reaberto(robo.PROCESSO_DA_PAGINA_EM_BRANCO)[-1] == ("a Verificação apareceu", PELA_MEMORIA, 0)
+
+
+def test_pagina_em_branco_no_rascunho_guarda_o_caso_e_reabre_o_app_sem_memoria(monkeypatch, avisos):
+    # P215 1, como às 21:26 de 12/11: no meio do rascunho, a página do app abriu em branco com o Java
+    # no teto. O caso guarda a tela da falha, e só depois o robô fecha e reabre a Shopee; o vídeo
+    # volta mais tarde, como em toda parada que não é dele.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+
+    def em_branco(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
+        celular.append(True)
+        raise robo.Parada("não achei Criadores & Afiliados na tela")
+
+    monkeypatch.setattr(robo, "_preparar", em_branco)
+    app = AppSemMemoria(usada=505)
+    ordem = _guardar_e_fechar_em_ordem(monkeypatch, app)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert "não achei Criadores & Afiliados na tela" in resultado and ordem[:2] == ["caso", "fechar"]
+    assert _app_reaberto(robo.PROCESSO_DA_PAGINA_EM_BRANCO) == [("fechado e reaberto", PELA_MEMORIA, 1)]
+    assert robo.listar("pulado") == [] and robo.proximo_video(robo.ler_config())["id"] == "a1"
+
+
+def test_pagina_em_branco_fora_do_rascunho_reabre_o_app_sem_memoria_e_a_verificacao_para(monkeypatch, avisos):
+    # P215 1: a página em branco na resposta aos comentários (ou no post, na Saúde, no feed) também
+    # fecha e reabre a Shopee com a memória acima de 400 MB, depois de guardar o caso; a resposta fica
+    # para a próxima, como antes. A Verificação na volta para tudo e abre a tela para o Rafael.
+    abertas = []
+    monkeypatch.setattr(robo.av, "abrir_tela", lambda celular=False, verificacao=False: abertas.append(verificacao))
+
+    def em_branco(d, agora=None):
+        raise robo.Parada("depois de Eu, a tela não mostrou Notificações")
+
+    monkeypatch.setattr(robo, "responder_comentarios", em_branco)
+    app = AppSemMemoria(usada=505)
+    ordem = _guardar_e_fechar_em_ordem(monkeypatch, app)
+    agora = momento("2026-10-22 15:00")
+    resultado = robo._agir(app, "responder", None, False, robo.ler_config(), agora)
+    assert resultado.endswith("parado (depois de Eu, a tela não mostrou Notificações)") and abertas == []
+    assert ordem[:2] == ["caso", "fechar"]
+    assert _app_reaberto(robo.PROCESSO_DA_PAGINA_EM_BRANCO) == [("fechado e reaberto", PELA_MEMORIA, 1)]
+    app = AppSemMemoria(usada=505)
+    monkeypatch.setattr(robo.ps, "eh_verificacao", lambda xml: ["abrir", robo.ps.PACOTE] in app.comandos)
+    assert robo._agir(app, "responder", None, False, robo.ler_config(), agora) == "responder: verificação na tela; parado"
+    assert abertas == [True]
+    # Abaixo dos 400 MB, só para, sem fechar o app.
+    app = AppSemMemoria(usada=350)
+    assert "parado" in robo._agir(app, "responder", None, False, robo.ler_config(), agora)
+    assert ["fechar", robo.ps.PACOTE] not in app.comandos
 
 
 class AppQueAvisaNoFeito(AppQueReabreALegenda):

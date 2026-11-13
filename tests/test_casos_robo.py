@@ -94,6 +94,28 @@ class CelularComLog(Celular):
         return type("R", (), {"output": saida})()
 
 
+class CelularSemMemoria(Celular):
+    """O celular com o Java do app perto do teto (a linha Dalvik Heap do dumpsys meminfo, em KB)."""
+
+    def shell(self, partes):
+        if partes[:2] == ["dumpsys", "meminfo"]:
+            return type("R", (), {"output": "  Dalvik Heap   480000   470000      100     2000   500000   524288"
+                                            "   471040    53248\n"})()
+        return super().shell(partes)
+
+
+def test_caso_guarda_a_memoria_do_app():
+    # P215 1: às 08:58 e às 21:26 de 12/11, a página do app abriu em branco com o Java dele no teto
+    # (512 MB no Motorola). O caso guarda a memória do Java do app, (usada, tamanho) em MB, para a
+    # página em branco com a memória abaixo do limite também mostrar quanto o app tinha.
+    pasta = casos_robo.guardar(CelularSemMemoria(), "rascunho", "parou", "não achei Criadores & Afiliados na tela",
+                               "navegar no app", agora=AGORA)
+    assert _caso(pasta)["app"]["memoria_mb"] == [460, 512]
+    # Sem a leitura, fica vazia.
+    pasta = casos_robo.guardar(Celular(), "rascunho", "parou", "não achei Eu na tela", "navegar no app", agora=AGORA)
+    assert _caso(pasta)["app"]["memoria_mb"] is None
+
+
 def test_caso_guarda_o_log_do_app_dos_ultimos_minutos_e_a_versao(monkeypatch):
     # 09/11, das 13:08 às 13:37: o app não deixou o produto na tela final depois do Feito em 4 vídeos
     # seguidos, sem aviso na tela. O caso guarda o log do Android dos processos do app e as linhas

@@ -400,6 +400,9 @@ def _tela_do_celular(d, pasta, agora=None):
         app["sem_print"] = type(e).__name__
     # Depois da tela e do print, para eles ficarem o mais perto possível da falha.
     if app.get("pacote"):
+        # A memória do Java do app, (usada, tamanho) em MB: a página em branco do app sem memória
+        # (P215 1) e o produto que não fica depois do Feito vêm com ela perto do teto.
+        app["memoria_mb"] = memoria_do_app(d, app["pacote"])
         app["versao"] = versao_do_app(d, app["pacote"])
         log = log_do_app(d, app["pacote"], agora)
         if log:
