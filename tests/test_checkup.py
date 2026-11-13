@@ -1265,6 +1265,35 @@ def test_medicao_da_foto_do_comeco_so_com_contagens_e_porcento():
     assert "1234" not in linha and "1851" not in linha and "9999" not in linha
 
 
+def test_lugares_da_ia_nos_rascunhos_com_o_alto_ocupado_so_com_os_nomes_fixos():
+    # P220 1: o texto nosso que, na hora dele, cairia em cima do produto ou de um rosto (pelos lugares livres de
+    # cada momento que a IA deu) não aparece. No rascunho do filtro de café de 13/11, nenhum dos 3 entrou com o
+    # alto livre no vídeo: o checkup mostra o que a IA respondeu, só com os nomes fixos dos lugares (o log é
+    # público).
+    import edicao_video
+    import robo_shopee_video as robo
+    assert checkup.LUGARES_DA_IA_SV == edicao_video.LUGARES_DA_IA
+    assert checkup.MINIATURA_A_ESQUERDA_SV == edicao_video.MINIATURA_A_ESQUERDA
+    livre = [[0.0, 3.0, ["alto_esquerda", "meio"]], [3.0, 6.0, ["alto_esquerda"]], [6.0, 9.0, ["alto_esquerda"]]]
+    ocupado = [[0.0, 2.6, ["meio", "Filtro de cafe da loja"]], [2.6, 5.3, ["meio"]], [5.3, 7.9, []]]
+    esquerda = [[0.0, 4.0, ["alto_esquerda"]], [4.0, 8.0, ["alto_direita"]]]
+    for hora, momentos, lado in (("16:30", livre, "direita"), ("16:56", ocupado, "direita"),
+                                 ("17:20", esquerda, "esquerda")):
+        ident = robo.criar("v", AGORA - timedelta(hours=2))
+        robo.atualizar(ident, criado_em=f"{(AGORA - timedelta(hours=2)).strftime('%Y-%m-%d')} {hora}:00",
+                       edicao={"textos": {"nome": "Filtro", "lugares": ["alto_esquerda", "meio"],
+                                          "lugares_nos_momentos": momentos},
+                               "escolhas": {"miniatura": lado}})
+    achados = checkup.lugares_da_ia_nos_rascunhos(AGORA)
+    assert [(hora, alto) for hora, alto, _video, _momentos in achados] == [("16:56", "alto_esquerda"),
+                                                                           ("17:20", "alto_direita")]
+    linhas = checkup._linhas_dos_lugares_da_ia(achados)
+    assert linhas[0] == "Lugares da IA nos rascunhos com o alto ocupado em algum momento (24 h): 2"
+    assert linhas[1] == ("   16:56 (os textos no alto_esquerda): vídeo todo: alto_esquerda, meio | momentos: "
+                         "0.0-2.6 s: meio | 2.6-5.3 s: meio | 5.3-7.9 s: nenhum")
+    assert "Filtro" not in "\n".join(linhas)
+
+
 def test_o_que_espera_o_rafael_sai_dos_pontos_de_atencao():
     # P146 5: o que depende de algo que só o Rafael faz (os chips novos dos Autorais) vai para
     # "Esperando o Rafael", conferido pelos números do dia; resolvida a causa, volta a contar.

@@ -1243,6 +1243,67 @@ def _linha_da_foto_do_comeco(medicao):
     return " | ".join(partes)
 
 
+# Os lugares livres do produto e do rosto que a IA deu em cada rascunho (P212 1 e P220 1), para achar por que um
+# texto nosso ficou de fora: os nomes da lista dela (os mesmos de edicao_video.LUGARES_DA_IA, conferidos no
+# teste), e nada além deles vai ao log.
+LUGARES_DA_IA_SV = ("alto_esquerda", "alto_direita", "meio", "esquerda", "direita")
+MINIATURA_A_ESQUERDA_SV = "esquerda"
+
+
+def _so_os_lugares(lista):
+    """Os nomes da lista da IA (LUGARES_DA_IA_SV), na ordem; o que não for um deles fica de fora."""
+    return [lugar for lugar in lista or () if isinstance(lugar, str) and lugar in LUGARES_DA_IA_SV]
+
+
+def lugares_da_ia_nos_rascunhos(agora=None):
+    """
+    Os rascunhos das últimas 24 h em que a IA deu os lugares de cada momento dos nossos textos (P220 1) e, em
+    algum momento, o alto do lado dos textos (o oposto ao da miniatura) não estava entre os livres, ou seja, em
+    que algum texto pode ter ficado de fora pelo produto ou um rosto: [(HH:MM do rascunho, o alto dos textos,
+    os livres no vídeo todo, [(início, fim, os livres no momento)])]. Só os nomes fixos dos lugares e números.
+    """
+    desde = _momento(_agora(agora) - timedelta(hours=24))
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute("SELECT criado_em, edicao FROM shopee_video_rascunhos WHERE criado_em >= ? "
+                                     "AND edicao IS NOT NULL AND edicao != '' ORDER BY criado_em", (desde,)).fetchall()
+    except sqlite3.OperationalError:
+        linhas = []
+    achados = []
+    for criado_em, edicao in linhas:
+        try:
+            guardado = json.loads(edicao or "{}")
+        except ValueError:
+            continue
+        textos = (guardado or {}).get("textos") or {}
+        momentos = []
+        for item in textos.get("lugares_nos_momentos") or ():
+            try:
+                momentos.append((float(item[0]), float(item[1]), _so_os_lugares(item[2])))
+            except (TypeError, ValueError, IndexError):
+                momentos = []
+                break
+        if not momentos:
+            continue
+        lado = ((guardado.get("escolhas") or {}).get("miniatura")) or ""
+        alto = "alto_direita" if lado == MINIATURA_A_ESQUERDA_SV else "alto_esquerda"
+        if all(alto in livres for _inicio, _fim, livres in momentos):
+            continue
+        achados.append(((criado_em or "")[11:16], alto, _so_os_lugares(textos.get("lugares")), momentos))
+    return achados
+
+
+def _linhas_dos_lugares_da_ia(achados):
+    """As linhas dos lugares da IA nos rascunhos com algum texto de fora pelo produto ou um rosto (P220 1)."""
+    linhas = [f"Lugares da IA nos rascunhos com o alto ocupado em algum momento (24 h): {len(achados)}"]
+    for hora, alto, no_video, momentos in achados:
+        nos_momentos = " | ".join(f"{inicio:.1f}-{fim:.1f} s: {', '.join(livres) or 'nenhum'}"
+                                  for inicio, fim, livres in momentos)
+        linhas.append(f"   {hora} (os textos no {alto}): vídeo todo: {', '.join(no_video) or 'nenhum'} | "
+                      f"momentos: {nos_momentos}")
+    return linhas
+
+
 def aprovados_postados(agora=None):
     """
     Os aprovados que foram ao ar nas últimas 24 h: [(aprovado HH:MM, previsto HH:MM,
@@ -2095,6 +2156,8 @@ def main():
     print(linha_das_punicoes_por_post(apelacoes_shopee_video.punicoes_por_tipo_de_post()))
     print(_linha_da_capa_com_chamada(capa_com_chamada_da_shopee_video(agora)))
     print(_linha_da_foto_do_comeco(foto_do_comeco_da_shopee_video(agora)))
+    for linha in _linhas_dos_lugares_da_ia(lugares_da_ia_nos_rascunhos(agora)):
+        print(linha)
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
