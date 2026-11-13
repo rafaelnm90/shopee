@@ -1726,7 +1726,7 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     assert "(o que ele mostra" not in segunda and "“Tampa firme”" in segunda
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in segunda
     assert "rendeu o vídeo original e mais 1 versão modificada, diferentes de verdade" in segunda
-    assert "Lugar do texto: no alto, ao lado da miniatura (a IA escolheu)" in segunda
+    assert "Lugar do texto: no alto, ao lado da miniatura (fixo; a IA conferiu o produto e o rosto)" in segunda
     assert "compare com o Editor 1 sem Legendas 👀" in segunda
     assert not any(os.path.exists(m[1]) for m in msg.midias)
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
@@ -1740,15 +1740,19 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
     assert "A IA não escreveu o nome, a vantagem e a chamada" in primeira
     assert "Nenhuma parte parada para tirar" in segunda
     assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in segunda
-    # Escolha do Rafael (P47): os lados também valem e, sem lugar livre, o vídeo vai sem texto.
-    resumo.update(lugar="direita")
-    assert "Lugar do texto: do lado direito, no meio da altura (a IA escolheu)" in sv.legenda_das_versoes(
-        "Copo", resumo, 1, 2)
+    # Escolha do Rafael (13/11, P220 1): os textos ficam sempre no alto; sem a lista da IA, ela não conferiu, e sem
+    # nenhum texto (o alto ocupado na hora de cada um, P47), a legenda diz por quê.
+    resumo.update(lugar_da_ia=False)
+    assert ("Lugar do texto: no alto, ao lado da miniatura (fixo; a IA não disse onde estão o produto e o rosto)"
+            in sv.legenda_das_versoes("Copo", resumo, 1, 2))
     for versao in resumo["versoes"]:
         versao["textos"] = []
-    resumo.update(lugar="nenhum")
+    resumo.update(lugar_da_ia=True, nao_entraram={"pelo_criador": 0, "pelo_produto": 3})
     legenda = sv.legenda_das_versoes("Copo", resumo, 1, 2)
-    assert "Sem texto na tela: a IA não achou lugar" in legenda and "Textos na tela" not in legenda
+    assert ("📍 Sem texto na tela: na hora de cada texto, o lugar fixo dele (no alto, ao lado da miniatura) cobria o "
+            "produto, um rosto ou o que o criador pôs por cima.") in legenda and "Textos na tela" not in legenda
+    resumo.pop("nao_entraram")
+    assert "📍" not in sv.legenda_das_versoes("Copo", resumo, 1, 2)
     # Escolha do Rafael (P52): o vídeo que já tem texto próprio na tela vai sem as nossas legendas.
     resumo.update(texto_no_video=True)
     assert "📍 Sem as nossas legendas: o vídeo já tem texto próprio na tela." in sv.legenda_das_versoes(
@@ -1761,17 +1765,19 @@ def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, M
         resumo.update(miniatura=miniatura)
         legenda = sv.legenda_das_versoes("Copo", resumo, 0, 2)
         assert (frase in legenda) if frase else "🖼️" not in legenda
-    # Escolhas do Rafael (12/11, P212 1 e P213 1): o exemplo diz quantos textos desviaram do que o criador pôs por
-    # cima e quando a miniatura foi para o outro canto de cima.
+    # Escolhas do Rafael (13/11, P220 1, e 12/11, P213 1): o exemplo diz quantos textos não entraram por cobrir, na
+    # hora deles, o que o criador pôs por cima, o produto ou um rosto, e quando a miniatura foi para o outro canto.
     for versao in resumo["versoes"]:
         versao["textos"] = ["Copo Térmico"]
-    resumo.update(lugar="alto", texto_no_video=False, miniatura=sempre, texto_do_criador={"mudaram": 1, "sairam": 1})
-    assert ("Lugar do texto: no alto, ao lado da miniatura (a IA escolheu); para não cobrir o que o criador pôs por "
-            "cima: 1 em outro lugar, 1 fora") in sv.legenda_das_versoes("Copo", resumo, 1, 2)
+    resumo.update(lugar="alto", texto_no_video=False, miniatura=sempre,
+                  nao_entraram={"pelo_criador": 1, "pelo_produto": 1})
+    assert ("Lugar do texto: no alto, ao lado da miniatura (fixo; a IA conferiu o produto e o rosto); não entraram: "
+            "1 pelo que o criador pôs por cima, 1 pelo produto ou um rosto") in sv.legenda_das_versoes(
+        "Copo", resumo, 1, 2)
     for versao in resumo["versoes"]:
         versao["textos"] = []
-    assert ("📍 Sem texto na tela: o que o criador pôs por cima ocupava os lugares livres na hora de cada texto."
-            in sv.legenda_das_versoes("Copo", resumo, 1, 2))
+    assert ("📍 Sem texto na tela: na hora de cada texto, o lugar fixo dele (no alto, ao lado da miniatura) cobria o "
+            "produto, um rosto ou o que o criador pôs por cima.") in sv.legenda_das_versoes("Copo", resumo, 1, 2)
     assert "outro canto" not in sv.legenda_das_versoes("Copo", resumo, 0, 2)
     resumo.update(lado="esquerda", lado_do_painel="direita")
     legenda = sv.legenda_das_versoes("Copo", resumo, 0, 2)
