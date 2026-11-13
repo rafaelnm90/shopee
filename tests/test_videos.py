@@ -313,3 +313,73 @@ def test_cores_das_imagens_no_video_como_o_celular_le(tmp_path):
     assert perto(corpo.getpixel((576, 128)), rosa) and perto(corpo.getpixel((110, 1000)), vermelho)
     for ponto in ((50, 400), (300, 400), (650, 400), (400, 1200)):
         assert perto(corpo.getpixel(ponto), fonte.getpixel(ponto), 4), ponto
+
+
+# --- O volume do som de cada vídeo editado (P222 1) ---
+
+def _som(caminho):
+    """(volume em LUFS, pico em dBTP) do som do arquivo, pelo loudnorm do ffmpeg de verdade."""
+    import json
+    import re
+    import subprocess
+    saida = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", caminho, "-vn", "-af",
+                            "loudnorm=print_format=json", "-f", "null", "-"], capture_output=True, text=True).stderr
+    dados = json.loads(re.findall(r"\{[^{}]*\}", saida)[-1])
+    return float(dados["input_i"]), float(dados["input_tp"])
+
+
+def _video_com_som(caminho, som, segundos=4):
+    """Um vídeo cinza com o som que o lavfi faz (som: a fonte de áudio do lavfi)."""
+    import subprocess
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=gray:s=360x640:d={segundos}",
+                    "-f", "lavfi", "-i", som, "-shortest", "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k", caminho],
+                   check=True)
+
+
+def test_volume_do_som_em_lufs_e_o_ganho_sem_estourar(tmp_path):
+    # Escolha do Rafael (13/11, P222 1): o som de cada vídeo editado vai ao volume das nossas músicas. A medida é a
+    # das redes (LUFS), e o som que sobe passa pelo limitador, sem estourar.
+    import io
+    import shutil
+    import subprocess
+
+    from PIL import Image
+    if not shutil.which("ffmpeg"):
+        return
+    baixo, alto = str(tmp_path / "baixo.mp4"), str(tmp_path / "alto.mp4")
+    _video_com_som(baixo, "sine=frequency=440:duration=4:sample_rate=44100,volume=0.1")
+    _video_com_som(alto, "sine=frequency=440:duration=4:sample_rate=44100,volume=0.316")
+    medido_baixo, medido_alto = videos.volume_do_som(baixo), videos.volume_do_som(alto)
+    assert abs((medido_alto - medido_baixo) - 10.0) < 0.5
+    # Sem a trilha de áudio, no silêncio ou no arquivo que não abre, não há medida (o vídeo fica como veio).
+    mudo, silencio = str(tmp_path / "mudo.mp4"), str(tmp_path / "silencio.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=360x640:d=2", mudo], check=True)
+    _video_com_som(silencio, "anullsrc=channel_layout=stereo:sample_rate=44100", 2)
+    assert videos.volume_do_som(mudo) is None and videos.volume_do_som(silencio) is None
+    assert videos.volume_do_som(str(tmp_path / "nao_existe.mp4")) is None
+    # O ganho leva o som até onde se pede: +6 dB no baixinho.
+    saida = io.BytesIO()
+    Image.new("RGB", (400, 400), (200, 120, 40)).save(saida, "JPEG")
+    foto, destino = saida.getvalue(), str(tmp_path / "editado.mp4")
+    assert videos.com_foto_e_miniatura(baixo, foto, destino, segundos=1, ganho=6.0) == ""
+    assert abs(_som(destino)[0] - (medido_baixo + 6.0)) < 1.0
+    # Com picos que estourariam (+10 dB num som que já chega perto do máximo), o limitador os segura abaixo de 0.
+    picos = str(tmp_path / "picos.mp4")
+    _video_com_som(picos, "aevalsrc=0.02*sin(2*PI*440*t)+0.9*lt(mod(t\\,1)\\,0.002):s=44100:d=4")
+    assert videos.com_foto_e_miniatura(picos, foto, destino, segundos=1, ganho=10.0) == ""
+    assert _som(destino)[1] < 0.0
+
+
+def test_o_ganho_entra_no_som_do_video_e_nao_na_musica():
+    # P222 1: o som do vídeo sobe ou desce o ganho, e o que sobe passa pelo limitador; a música de fundo, que já
+    # está no volume certo, fica como está.
+    def filtro(comando):
+        return comando[comando.index("-filter_complex") + 1]
+
+    base = dict(foto="f.jpg", video="v.mp4", destino="d.mp4", segundos=2, miniatura=180, centro=(576, 128),
+                com_audio=True)
+    assert (f"volume=6.00dB,alimiter=limit={videos.PICO_DO_SOM}:level=disabled[som]"
+            in filtro(videos.comando_foto_e_miniatura(**base, ganho=6.0)))
+    assert "volume=-4.00dB[som]" in filtro(videos.comando_foto_e_miniatura(**base, ganho=-4.0))
+    assert "volume=" not in filtro(videos.comando_foto_e_miniatura(**base))
+    assert "volume=" not in filtro(videos.comando_foto_e_miniatura(**base, musica="m.m4a", total=10.0, ganho=6.0))
