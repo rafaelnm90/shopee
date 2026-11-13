@@ -228,7 +228,7 @@ def test_com_o_rotulo_de_ia_a_moldura_as_setinhas_e_a_legenda_sobem_com_o_cartao
         return ""
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         vistos.append(rotulo_de_ia)
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
@@ -279,10 +279,11 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
         escuros = [p for p in recorte if max(p) < 90]
         return len(vermelhos) / len(recorte), escuros
 
-    # Na foto (os 2 primeiros segundos), nada de seta; ela começa a se desenhar com o vídeo.
-    assert onde_fica_a_seta(1.9) == (0, [])
+    # Na foto (os primeiros SEGUNDOS_DA_FOTO), nada de seta; ela começa a se desenhar com o vídeo.
+    foto_s = edicao_video.SEGUNDOS_DA_FOTO
+    assert onde_fica_a_seta(foto_s - 0.1) == (0, [])
     # A moldura do cartão do produto (P128) também só entra no vídeo, e só ESPERA_DA_MOLDURA (1,5 s)
-    # depois da abertura, com o cartão do app já na tela (P140 2): aos 3 s, ainda não; aos 4 s, sim.
+    # depois da abertura, com o cartão do app já na tela (P140 2): 1 s depois da foto, ainda não; 2 s, sim.
     def na_moldura(segundo):
         quadro = tmp_path / f"moldura_{segundo}.ppm"
         subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
@@ -293,13 +294,13 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
         x = x1 - edicao_video.FOLGA_DO_CARTAO - edicao_video.GROSSURA_DA_MOLDURA_DO_CARTAO // 2
         return [tela.getpixel((x, y)) for y in range(y1 + 20, y2 - 20, 10)]
     cor = edicao_video.VERMELHO_DO_DESTAQUE
-    for segundo in (1.0, 3.0):
+    for segundo in (1.0, foto_s + 1.0):
         assert not [p for p in na_moldura(segundo) if sum(abs(a - b) for a, b in zip(p, cor)) < 70], segundo
-    assert all(sum(abs(a - b) for a, b in zip(p, cor)) < 70 for p in na_moldura(4.0))
-    vermelho, escuros = onde_fica_a_seta(2.6)
+    assert all(sum(abs(a - b) for a, b in zip(p, cor)) < 70 for p in na_moldura(foto_s + 2.0))
+    vermelho, escuros = onde_fica_a_seta(foto_s + 0.6)
     assert vermelho > 0 and not escuros
-    # 7,5 s: depois do fim do arquivo, já na volta repetida da cascata (uma setinha acesa por inteiro).
-    vermelho, escuros = onde_fica_a_seta(7.5)
+    # 5,5 s de vídeo: depois do fim do arquivo, já na volta repetida da cascata (uma setinha acesa por inteiro).
+    vermelho, escuros = onde_fica_a_seta(foto_s + 5.5)
     assert vermelho > 0.02 and not escuros
 
 
@@ -449,7 +450,7 @@ def test_editar_iguala_o_volume_do_som_e_o_registro_conta(monkeypatch, tmp_path)
     volumes = [{"medido": -26.0, "ganho": 10.0}, {"medido": -9.0, "ganho": -7.0}, {"medido": -15.6, "ganho": 0.0}]
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         if anotar is not None:
             anotar["volume"] = volumes.pop(0)
         return ""
@@ -466,6 +467,45 @@ def test_editar_iguala_o_volume_do_som_e_o_registro_conta(monkeypatch, tmp_path)
         ("subiu", "+10.0 dB (no limite da subida); o som estava em -26.0 LUFS"),
         ("desceu", "-7.0 dB; o som estava em -9.0 LUFS"),
         ("ficou como veio", "+0.0 dB; o som estava em -15.6 LUFS")]
+
+
+def test_a_foto_do_comeco_fica_1_5_s_com_o_giro_inteiro_em_cima_dela(monkeypatch, tmp_path):
+    # Escolha do Rafael (13/11, P221 1): o Giro que o robô põe no começo do vídeo cai entre uns 0,7 e 1,1 s; a foto
+    # fica 1,5 s, com o Giro inteiro em cima dela, e o vídeo do criador começa meio segundo antes dos 2 s de antes.
+    assert 1.1 < edicao_video.SEGUNDOS_DA_FOTO == 1.5 < edicao_video.SEGUNDOS_DA_FOTO_SEM_ANOTACAO == 2.0
+    comandos = _programas(monkeypatch)
+    monkeypatch.setattr(edicao_video.videos, "volume_do_som", lambda video, *a, **k: None)
+    assert edicao_video.editar("video.mp4", _foto_jpg(), str(tmp_path / "r.mp4")) == ""
+    texto = " ".join(_edicoes(comandos)[-1])
+    # A foto e o silêncio dela (o som do vídeo começa depois da foto), os dois com 1,5 s.
+    assert "-loop 1 -t 1.5 -i" in texto and "-t 1.5 -i anullsrc" in texto
+    # O Editar ✏️ de um rascunho refaz a foto com o tempo com que ele foi feito.
+    assert edicao_video.editar("video.mp4", _foto_jpg(), str(tmp_path / "r.mp4"), segundos=2.0) == ""
+    assert "-loop 1 -t 2.0 -i" in " ".join(_edicoes(comandos)[-1])
+
+
+def test_o_rascunho_guarda_o_tempo_da_foto_e_o_editar_refaz_com_ele(monkeypatch, tmp_path):
+    # P221 1: o rascunho guarda o tempo da foto do começo; o Editar ✏️ refaz o vídeo com ele, e o rascunho de antes
+    # da P221 1, que não o guardou, com os 2 s com que foi feito.
+    import json
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa", "vantagem": "Leve", "falas": [], "lugar": "alto"})
+    pedidos = []
+
+    def editar_2(video, foto, destino, *args, segundos=None, **opcoes):
+        pedidos.append(segundos)
+        return "", {"textos": ["Bolsa"], "legendas": 0}
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    anotado = {}
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", anotar=anotado)[0] == ""
+    guardado = json.loads(json.dumps(anotado["refazer"]))
+    assert guardado["segundos_da_foto"] == 1.5
+    assert edicao_video.refazer_para_postar("v.mp4", b"foto", destino, guardado)[0] == ""
+    de_antes = {chave: valor for chave, valor in guardado.items() if chave != "segundos_da_foto"}
+    assert edicao_video.refazer_para_postar("v.mp4", b"foto", destino, de_antes)[0] == ""
+    # O que vai ao ar usa o tempo de agora (o editar põe SEGUNDOS_DA_FOTO no lugar do None).
+    assert pedidos == [None, 1.5, 2.0]
 
 
 def test_ffmpeg_que_demora_demais_desiste(monkeypatch, tmp_path):
@@ -948,7 +988,7 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     monkeypatch.setattr(edicao_video, "editar",
                         lambda video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True,
                                outras_fotos=(), rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(),
-                               anotar=None: "")
+                               anotar=None, segundos=None: "")
     montados = []
 
     def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
@@ -1084,7 +1124,7 @@ def _versoes_de_mentira(monkeypatch, musicas=None):
         return ""
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         editados.append((os.path.basename(video), os.path.basename(destino)))
         if musicas is not None:
             musicas.append(os.path.basename(musica) if musica else None)
@@ -1250,7 +1290,7 @@ def test_bebida_alcoolica_vai_ao_ar_com_os_avisos_no_editor_2_e_no_editor_1(monk
     avisos = []
 
     def editar(video, foto, destino, com_avisos=False, musica=None, capa=None, miniatura=True,
-               outras_fotos=(), rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               outras_fotos=(), rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         avisos.append(com_avisos)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -1499,9 +1539,9 @@ def test_comando_com_musica_poe_ela_no_video_inteiro_em_laco(monkeypatch, tmp_pa
     texto = " ".join(ffmpeg)
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
     assert "-stream_loop -1 -i musica.m4a" in texto and "anullsrc" not in texto
-    # A música é a 5ª entrada (foto, vídeo, miniatura, seta), do começo da foto ao fim: 2 + 10 s.
-    assert "[4:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:12.000" in filtro
-    assert "afade=t=in:d=0.3" in filtro and "afade=t=out:st=10.500:d=1.5[a]" in filtro
+    # A música é a 5ª entrada (foto, vídeo, miniatura, seta), do começo da foto ao fim: 1,5 + 10 s (P221 1).
+    assert "[4:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:11.500" in filtro
+    assert "afade=t=in:d=0.3" in filtro and "afade=t=out:st=10.000:d=1.5[a]" in filtro
     assert "[1:a]" not in filtro and "[a]" in ffmpeg
 
 
@@ -1518,7 +1558,7 @@ def test_edicao_de_verdade_do_video_sem_som_sai_com_a_musica(tmp_path):
     musica = os.path.join(edicao_video.PASTA_DA_MIDIA, "musica_calma.m4a")
     assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), musica=musica) == ""
     assert not edicao_video.videos.mudo(str(destino))
-    assert abs(edicao_video.videos.duracao(str(destino)) - 5.0) < 0.3
+    assert abs(edicao_video.videos.duracao(str(destino)) - (edicao_video.SEGUNDOS_DA_FOTO + 3.0)) < 0.3
 
 
 # --- A capa com chamada (escolha do Rafael, 29/10, P76) ---
@@ -2065,7 +2105,8 @@ def test_abertura_de_verdade_tem_a_capa_da_grade_so_no_1o_quadro(tmp_path, monke
 
     ponto = (edicao_video.VISIVEL_NO_APP[0] // 2, (edicao_video.PE_DA_FOTO_NA_GRADE + edicao_video.TELA[1]) // 2)
     assert _cor_de(quadro(0), ponto, edicao_video.LARANJA_DA_SHOPEE)
-    for numero in (1, 30, 58):
+    # Até o penúltimo quadro da foto (P221 1: 1,5 s, 45 quadros).
+    for numero in (1, 30, round(edicao_video.SEGUNDOS_DA_FOTO * 30) - 2):
         assert max(quadro(numero).getpixel(ponto)) < 40, numero
 
 
@@ -2097,7 +2138,7 @@ def test_abertura_de_verdade_com_a_passagem_suave_entre_as_capas(tmp_path):
     vermelho = [quadro(numero).getpixel(ponto)[0] for numero in (2, 5, 8)]
     assert vermelho[0] > vermelho[1] > vermelho[2] > 40, vermelho          # a faixa vai sumindo aos poucos
     fim = round(edicao_video.PASSAGEM_DA_CAPA * 30) + 2
-    for numero in (fim, 30, 58):
+    for numero in (fim, 30, round(edicao_video.SEGUNDOS_DA_FOTO * 30) - 2):
         assert max(quadro(numero).getpixel(ponto)) < 40, numero
 
 
@@ -2157,7 +2198,7 @@ def test_capa_com_chamada_so_vai_ao_ar_ligada_e_nunca_na_bebida_alcoolica(monkey
     capas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         capas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2202,7 +2243,7 @@ def test_capa_com_a_frase_abre_o_video_no_robo_e_no_assistente(monkeypatch, tmp_
     aberturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         aberturas.append(capa)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2298,7 +2339,7 @@ def test_capa_com_chamada_vai_em_todos_os_videos(monkeypatch, tmp_path):
     capas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         capas.append(capa is not None)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2638,7 +2679,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     pedidas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         pedidas.append(list(outras_fotos))
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2697,7 +2738,7 @@ def test_sem_a_nossa_miniatura_quando_o_criador_ja_pos_coisa_no_canto(monkeypatc
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2768,7 +2809,7 @@ def test_canto_so_com_o_que_foi_filmado_nao_tira_a_miniatura(monkeypatch, tmp_pa
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2813,7 +2854,7 @@ def test_a_miniatura_sai_quando_a_legenda_do_criador_passa_por_ela(monkeypatch, 
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -2882,7 +2923,7 @@ def test_a_miniatura_diminui_para_caber_acima_do_que_o_criador_pos(monkeypatch, 
     miniaturas = []
 
     def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+               rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
         miniaturas.append(miniatura)
         return ""
     monkeypatch.setattr(edicao_video, "editar", editar)
@@ -3521,7 +3562,7 @@ def test_video_que_vai_ao_ar_leva_a_cor_do_produto_e_o_registro_conta(monkeypatc
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=(), nos_momentos=None):
+                 lugares=None, por_cima=(), nos_momentos=None, segundos=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3708,7 +3749,7 @@ def test_video_com_a_faixa_que_some_na_foto_guarda_a_cor_em_que_ela_saiu(monkeyp
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=(), nos_momentos=None):
+                 lugares=None, por_cima=(), nos_momentos=None, segundos=None):
         editores.append(cor)
         return "", {"textos": [nome], "legendas": 0}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3914,7 +3955,7 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=(), nos_momentos=None):
+                 lugares=None, por_cima=(), nos_momentos=None, segundos=None):
         recebidos.append({"miniatura": miniatura, "legendas": list(legendas), "escolhas": escolhas})
         return "", {"textos": [nome], "legendas": len(legendas)}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
@@ -3953,7 +3994,7 @@ def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(mon
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=(), nos_momentos=None):
+                 lugares=None, por_cima=(), nos_momentos=None, segundos=None):
         recebidos.append({"nome": nome, "lugar": lugar, "musica": musica, "capa": capa, "miniatura": miniatura,
                           "outras": list(outras_fotos), "legendas": [legenda[:3] for legenda in legendas],
                           "rotulo": rotulo_de_ia, "cor": cor, "escolhas": escolhas})
@@ -4390,7 +4431,7 @@ def test_no_outro_canto_os_textos_do_alto_trocam_de_lado_e_o_editar_guarda_o_can
 
     def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
                  capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-                 lugares=None, por_cima=(), nos_momentos=None):
+                 lugares=None, por_cima=(), nos_momentos=None, segundos=None):
         recebidos.append({"lugar": lugar, "lugares": lugares, "por_cima": list(por_cima), "miniatura": miniatura,
                           "lado": escolhas["miniatura"]})
         return "", {"textos": [nome], "legendas": 0}

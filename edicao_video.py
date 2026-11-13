@@ -40,8 +40,12 @@ import videos
 
 # Todas as fontes do robô, na ordem em que o exemplo procura um vídeo.
 FONTES_COM_EDICAO = tuple(assistente.FONTES)
-# A foto do produto sozinha antes do vídeo, em segundos.
-SEGUNDOS_DA_FOTO = 2
+# A foto do produto sozinha antes do vídeo, em segundos: o Giro que o robô põe no começo do vídeo no app
+# (robo_shopee_video.por_o_giro) cai entre uns 0,7 e 1,1 s e fica inteiro em cima da foto, e o vídeo do
+# criador começa logo depois. Escolha do Rafael (13/11, P221 1): DECISOES.md, Shopee Vídeo.
+SEGUNDOS_DA_FOTO = 1.5
+# Os rascunhos feitos antes da P221 1 não guardaram o tempo da foto: foram com 2 s, e o Editar ✏️ os refaz assim.
+SEGUNDOS_DA_FOTO_SEM_ANOTACAO = 2.0
 # A passagem da capa da grade (o 1º quadro, que o app usa na grade) para a do vídeo aberto (P129):
 # em vez do pulo de um quadro para o outro, que o app mostra como uma piscada porque segura o 1º
 # quadro enquanto o vídeo começa, a da grade fica inteira no 1º quadro e se desfaz na do vídeo
@@ -1305,7 +1309,7 @@ def _faixa_da_capa(capa, faixa, lados=None):
 
 
 def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura=True, outras_fotos=(),
-           rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None):
+           rotulo_de_ia=False, cor=None, escolhas=None, por_cima=(), anotar=None, segundos=None):
     """
     O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
     Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto;
@@ -1324,10 +1328,12 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     criador pôs por cima (por_cima, P212 1) passa pelo lugar delas (tempos_sob_o_criador, P218 1);
     anotar (dict), quando vem, recebe esses trechos em "sob_o_criador". Sem a música, o som do vídeo vai ao
     volume das nossas músicas, sem estourar (ganho_do_som, P222 1), e anotar recebe em "volume" o som
-    medido (LUFS) e o ganho (dB).
+    medido (LUFS) e o ganho (dB). A foto (ou a capa) abre o vídeo por segundos (sem eles, SEGUNDOS_DA_FOTO;
+    o Editar ✏️ de um rascunho usa o tempo com que ele foi feito, P221 1).
     """
     escolhas = escolhas_certas(escolhas)
     lado = escolhas["miniatura"]
+    segundos = SEGUNDOS_DA_FOTO if segundos is None else segundos
     if avisos and foto:
         capa = capa_com_avisos(foto)
         if not capa:
@@ -1362,7 +1368,7 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
             pasta = (pilha.enter_context(tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))))
                      if destaque != VERMELHO_DO_DESTAQUE else "")
             seta = seta_na_cor(destaque, os.path.join(pasta, "setinhas.apng"))
-        return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, largura,
+        return videos.com_foto_e_miniatura(video, foto, destino, segundos, largura,
                                            centro_da_miniatura(largura, lado), seta,
                                            (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
                                            PULSO_DA_SETA, capa, musica, outras=outras_fotos, moldura=moldura,
@@ -3174,7 +3180,7 @@ def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA, lugares=None, p
 
 def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None, avisos=False, musica=None,
              capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False, cor=None, escolhas=None,
-             lugares=None, por_cima=(), nos_momentos=None):
+             lugares=None, por_cima=(), nos_momentos=None, segundos=None):
     """
     O Editor 2 em destino: o vídeo original, inteiro, na ordem e na velocidade dele, com os
     textos da tela por cima, e depois o Editor 1 (com avisos=True, a capa dos avisos da bebida
@@ -3189,7 +3195,7 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
     Os textos da tela ficam sempre no mesmo lugar, e o que, na hora dele, cobriria o que o criador pôs por cima
     (por_cima, com o tempo) ou o produto ou um rosto (fora dos lugares livres do momento dele, nos_momentos:
     lugares_nos_momentos; sem eles, dos livres na maior parte do vídeo, lugares: lugares_dos_textos) não
-    aparece (P220 1, _letreiros).
+    aparece (P220 1, _letreiros). A foto abre o vídeo por segundos (sem eles, SEGUNDOS_DA_FOTO, P221 1).
     Devolve (motivo, resumo {original, lugar, textos, legendas}): motivo "" quando deu certo.
     """
     original = videos.duracao(video)
@@ -3197,12 +3203,12 @@ def editar_2(video, foto, destino, nome="", vantagem="", chamada="", lugar=None,
         return "o vídeo não abre", {}
     return _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, _lugar(lugar), avisos,
                                  musica, capa, miniatura, outras_fotos, legendas, rotulo_de_ia, cor, escolhas,
-                                 lugares, por_cima, nos_momentos)
+                                 lugares, por_cima, nos_momentos, segundos)
 
 
 def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamada, lugar, avisos=False,
                           musica=None, capa=None, miniatura=True, outras_fotos=(), legendas=(), rotulo_de_ia=False,
-                          cor=None, escolhas=None, lugares=None, por_cima=(), nos_momentos=None):
+                          cor=None, escolhas=None, lugares=None, por_cima=(), nos_momentos=None, segundos=None):
     """
     O Editor 2 em destino, com a duração do vídeo já medida (editar_2_e_versoes usa no 1º vídeo).
     Com as legendas da fala ([(início, fim, texto)], P118), elas vão embaixo, à direita da seta. O texto da
@@ -3224,7 +3230,7 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
         resumo["nao_entraram"] = fora
     if not letreiros:
         return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
-                       escolhas=escolhas, por_cima=por_cima, anotar=resumo), resumo)
+                       escolhas=escolhas, por_cima=por_cima, anotar=resumo, segundos=segundos), resumo)
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "com_textos.mp4")
         # O vídeo inteiro numa parte só, na velocidade dele: só os textos entram por cima.
@@ -3232,7 +3238,7 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
         if motivo:
             return motivo, resumo
         return (editar(corpo, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
-                       escolhas=escolhas, por_cima=por_cima, anotar=resumo), resumo)
+                       escolhas=escolhas, por_cima=por_cima, anotar=resumo, segundos=segundos), resumo)
 
 
 # Como saiu o vídeo que vai ao ar, para o registro (textos fixos: o checkup conta por eles).
@@ -3455,9 +3461,11 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                                      detalhe_do_tempo, ok=tempo_das_legendas == PELO_AUDIO)
     if anotar is not None:
         # O que o Editar ✏️ do rascunho precisa para refazer a edição sem perguntar de novo à IA (P192 1).
+        # O tempo da foto do começo também: o Editar ✏️ a refaz com ele, e a medição da P221 1 separa os posts.
         anotar["refazer"] = {"textos": textos_para_guardar(textos), "frase": frase if capa else "",
                              "musica": musica_da_vez[0] if musica_da_vez else "", "avisos": bool(avisos),
-                             "rotulo_de_ia": bool(rotulo_de_ia), "escolhas": escolhas}
+                             "rotulo_de_ia": bool(rotulo_de_ia), "escolhas": escolhas,
+                             "segundos_da_foto": SEGUNDOS_DA_FOTO}
     try:
         motivo_2, resumo = editar_2(video, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
                                     textos.get("chamada", ""), lugar_dos_textos(textos), avisos, musica,
@@ -3546,7 +3554,8 @@ def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=No
     escolhe aqui vale, sem ir sozinha ao outro canto (P213 1 é para o rascunho que o robô prepara; o lado
     guardado já é o canto em que ela saiu). Os textos da tela ficam no alto, ao lado da miniatura, e o que
     cobriria, na hora dele, o que o criador pôs por cima, o produto ou um rosto não aparece, como no rascunho
-    (P220 1). Devolve (motivo, como): motivo "" quando saiu.
+    (P220 1). A foto do começo fica o tempo com que o rascunho foi feito (P221 1; o de antes dela não o guardou e
+    foi com SEGUNDOS_DA_FOTO_SEM_ANOTACAO). Devolve (motivo, como): motivo "" quando saiu.
     """
     escolhas = escolhas_certas((guardado or {}).get("escolhas"))
     if lado in LADOS_DA_MINIATURA:
@@ -3574,7 +3583,8 @@ def refazer_para_postar(video, foto, destino, guardado, outras_fotos=(), lado=No
                               miniatura, outras_fotos if miniatura else (), legendas,
                               bool((guardado or {}).get("rotulo_de_ia")), cor=cor, escolhas=escolhas,
                               lugares=lugares_dos_textos(textos, canto), por_cima=textos.get("por_cima", ()),
-                              nos_momentos=lugares_nos_momentos(textos, canto))
+                              nos_momentos=lugares_nos_momentos(textos, canto),
+                              segundos=(guardado or {}).get("segundos_da_foto") or SEGUNDOS_DA_FOTO_SEM_ANOTACAO)
     if motivo:
         return motivo, ""
     como = ((COM_LEGENDAS if resumo.get("textos") else SEM_LEGENDAS_NA_TELA)
