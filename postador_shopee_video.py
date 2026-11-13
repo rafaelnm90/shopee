@@ -124,6 +124,9 @@ LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo: a tela antes de salvar o rascunho.
 LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo: a tela antes de postar. Confira o vídeo, o título "
                         "e o produto: só posto com o seu OK.")
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado ao vídeo."
+# O começo do motivo do produto do vídeo que a lista de Minhas Curtidas não mostra, nem pela foto do
+# 1º dela: o robô deixa esse vídeo voltar mais tarde (P216 1).
+MOTIVO_FORA_DE_MINHAS_CURTIDAS = "o produto do vídeo não está na lista, nem pela foto do 1º"
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
                     "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
 # O vídeo com o produto do link que não é o do vídeo fica de lado, e o robô passa ao próximo (os
@@ -958,7 +961,7 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     if avisar:
         avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, "
                                    f"e a foto do 1º da lista não confere com o vídeo: {nome}")
-    return False, f"o produto do vídeo não está na lista, nem pela foto do 1º ({motivo}): nada adicionado (aviso no privado)"
+    return False, f"{MOTIVO_FORA_DE_MINHAS_CURTIDAS} ({motivo}): nada adicionado (aviso no privado)"
 
 
 # Os sinais do nome do produto que o registro do anexar mostra, em rótulos fixos (o checkup é
