@@ -127,6 +127,9 @@ AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado 
 # O começo do motivo do produto do vídeo que a lista de Minhas Curtidas não mostra, nem pela foto do
 # 1º dela: o robô deixa esse vídeo voltar mais tarde (P216 1).
 MOTIVO_FORA_DE_MINHAS_CURTIDAS = "o produto do vídeo não está na lista, nem pela foto do 1º"
+# A lista de Minhas Curtidas sem nenhum produto na última chance (P18): o curtido agora que ainda não chegou à
+# lista; com outros produtos nela, é o próprio anúncio que não entra (P225 1).
+MOTIVO_DA_LISTA_VAZIA = "a lista não tem produto para conferir"
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
                     "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
 # O vídeo com o produto do link que não é o do vídeo fica de lado, e o robô passa ao próximo (os
@@ -970,11 +973,16 @@ def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True, ul
     registro_processos.registrar("shopee_video", "anexar o produto", "não anexado",
                                  "nem pelo nome nem pela foto do 1º da lista", ok=False)
     if avisar:
-        avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, "
-                                   f"e a foto do 1º da lista não confere com o vídeo: {nome}")
+        avisar_rafael.mandar_texto(aviso_fora_de_minhas_curtidas(nome))
     # O começo escrito por inteiro (MOTIVO_FORA_DE_MINHAS_CURTIDAS): o investigar_robo lê no código a forma
     # dos motivos que pode mostrar no log público.
     return False, f"o produto do vídeo não está na lista, nem pela foto do 1º ({motivo}): nada adicionado (aviso no privado)"
+
+
+def aviso_fora_de_minhas_curtidas(nome):
+    """O aviso no privado do produto do vídeo que não entrou em Minhas Curtidas, nem pela foto do 1º da lista."""
+    return (f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, e a foto do 1º da lista não "
+            f"confere com o vídeo: {nome}")
 
 
 # Os sinais do nome do produto que o registro do anexar mostra, em rótulos fixos (o checkup é
@@ -1023,7 +1031,7 @@ def _pelo_primeiro_com_a_ia(d, video, rolagens, anexados):
     tela = atualizar_a_lista(d, d.dump_hierarchy())
     primeiros = produtos_da_lista(tela)
     if not primeiros:
-        return False, "a lista não tem produto para conferir"
+        return False, MOTIVO_DA_LISTA_VAZIA
     primeiro = primeiros[0]
     imagem = recorte_da_tela(d, primeiro["bloco"]["caixa"])
     if not imagem:
