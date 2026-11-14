@@ -1596,7 +1596,9 @@ def test_capa_da_grade_com_a_frase_em_cima_e_so_o_fio_fino_embaixo():
     x1, cima, x2, baixo = edicao_video.lugar_da_foto()
     alto, pe_da_grade = edicao_video.GRADE_NO_CELULAR
     assert (x1, cima, x2, baixo) == (0, edicao_video.PE_DA_FAIXA_DE_CIMA, 720, edicao_video.PE_DA_FOTO_NA_GRADE)
-    assert alto < cima < baixo < pe_da_grade and pe_da_grade - baixo == edicao_video.FIO_NA_GRADE == 16
+    # O fio com uma vez e meia a grossura da P196 1 à vista na grade (print de 14/11, 09:34, P226 3): a grade corta
+    # uns 6 px a mais embaixo, e ficam uns 15 px da cor.
+    assert alto < cima < baixo < pe_da_grade and pe_da_grade - baixo == edicao_video.FIO_NA_GRADE == 21
     # A foto tampa o lugar todo, de uma beirada à outra.
     assert capa.crop((0, cima, 720, baixo)).tobytes() == edicao_video._foto_da_grade(_foto_jpg()).tobytes()
     # A faixa de cima vem do alto do quadro até a foto, e o fio de baixo vai da foto até o fim do
@@ -1631,9 +1633,10 @@ def test_capa_da_grade_com_a_frase_em_cima_e_so_o_fio_fino_embaixo():
 def test_capa_da_grade_so_com_o_fio_fino_embaixo_e_o_numero_em_cima_da_foto():
     # Vídeo do Rafael das 11:54 de 10/11: "tanto a capa qnto o vídeo tivesse esse padrão com apenas um
     # fio pequeno embaixo, não pode destoar tanto assim não"; com as imagens das opções no print do
-    # perfil, "P196 1". No pedaço que a grade mostra, a cor da faixa embaixo é só o fio de 16 px; no
-    # lugar do número de visualizações, a foto, como nos outros posts; e a foto quadrada tampa o lugar
-    # perdendo só uns 1% de cada lado, sem esticar.
+    # perfil, "P196 1". No pedaço que a grade mostra, a cor da faixa embaixo é só o fio (com uma vez e
+    # meia a grossura da P196 1, pelo print de 14/11 às 09:34, P226 3); no lugar do número de
+    # visualizações, a foto, como nos outros posts; e a foto quadrada tampa o lugar perdendo menos de 1%
+    # de cada lado, sem esticar.
     import io
 
     from PIL import Image
@@ -1643,7 +1646,7 @@ def test_capa_da_grade_so_com_o_fio_fino_embaixo_e_o_numero_em_cima_da_foto():
     laranja = edicao_video.LARANJA_DA_SHOPEE
     linhas_na_cor = [y for y in range(edicao_video.PE_DA_FAIXA_DE_CIMA - alto, grade.height)
                      if all(_cor_de(grade, (x, y), laranja) for x in (0, 360, 719))]
-    assert linhas_na_cor == list(range(grade.height - 16, grade.height))
+    assert linhas_na_cor == list(range(grade.height - edicao_video.FIO_NA_GRADE, grade.height))
     nx1, ny1, nx2, ny2 = edicao_video.NUMERO_DA_GRADE
     assert all(_cor_de(grade, (x, y - alto), (200, 120, 40)) for x in range(nx1, nx2, 8) for y in range(ny1, ny2, 8))
     # A quadrada perde só uns 1% de cada lado: tampa sem esticar, com a mesma escala nos dois sentidos.

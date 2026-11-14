@@ -491,7 +491,10 @@ FIO_DA_CAPA = 8
 # a largura toda. Com a foto menor que isso, a grade mostra o preto em volta dela (P168).
 GRADE_NO_CELULAR = (160, 1120)                  # de cima a baixo, em y, de x 0 a 720
 PE_DA_FAIXA_DE_CIMA = 368                       # a faixa de cima das duas capas: a frase em duas linhas grandes
-FIO_NA_GRADE = 16                               # o que a grade mostra da cor embaixo da foto (P196 1)
+# O fio de baixo da capa da grade (P196 1): a cor vai de PE_DA_FOTO_NA_GRADE ao fim do quadro. A grade do
+# Motorola do Rafael corta uns 6 px a mais embaixo que GRADE_NO_CELULAR (print de 14/11, 09:34): com 21, ficam uns
+# 15 px da cor à vista, uma vez e meia o fio da P196 1. Escolha do Rafael (14/11, P226 3): DECISOES.md, Shopee Vídeo.
+FIO_NA_GRADE = 21
 PE_DA_FOTO_NA_GRADE = GRADE_NO_CELULAR[1] - FIO_NA_GRADE   # daqui ao fim do quadro, a cor do fio
 CORTE_MAXIMO_AO_TAMPAR = 0.07                   # da foto aumentada; mais que isso, ela estica
 ESTICAR_ATE = 0.15                              # da altura ou da largura da foto
