@@ -4179,8 +4179,11 @@ def trocar_os_do_ver_produtos(d, video, nomes, fotos, vistos, curtidos, prazo, d
                    "foto": fotos.get(nome), "imagem": oferta.get("imageUrl") or "", "item": str(oferta.get("itemId") or ""),
                    "preco": assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))}
         if nome not in de_outra_cor:
-            produto = _trocar_um_do_ver_produtos(d, video, produto, oferta, fotos.get(nome), vistos, curtidos,
-                                                 prazo) or produto
+            trocado = _trocar_um_do_ver_produtos(d, video, produto, oferta, fotos.get(nome), vistos, curtidos, prazo)
+            if trocado:
+                # O do criador continua curtido e entra no lugar do trocado que não entra em Minhas Curtidas
+                # (P225 1).
+                produto = dict(trocado, original=produto)
         produtos.append(produto)
     return (sorted((p for p in produtos if p["nome"] not in de_outra_cor), key=lambda p: -p["valor"])
             + sorted((p for p in produtos if p["nome"] in de_outra_cor), key=lambda p: -p["valor"]))
@@ -4718,6 +4721,39 @@ def _curtir_os_produtos(d, video, produtos, curtidos):
     return feitos[::-1]
 
 
+def produto_do_criador(nome, link, original, item=None):
+    """
+    O produto do link do post (o do criador) como o rascunho o leva, de reserva do trocado pelo da loja que paga
+    mais (P225 1): {nome, link, do_video, preco, comissao, valor, item}; original: o que a API disse dele (preco e
+    comissao); item: o número dele já conhecido (sem ele, pelo link).
+    """
+    preco, comissao = (original or {}).get("preco") or 0, (original or {}).get("comissao") or 0
+    return {"nome": nome, "link": link, "do_video": True, "preco": preco, "comissao": comissao,
+            "valor": valor_por_venda(preco, comissao), "item": item or item_do_link(link)}
+
+
+def curtir_de_reserva(d, video, produto, curtidos):
+    """
+    Curte pela página dele o produto do criador de reserva do trocado pela loja que paga mais (P225 1), antes dos
+    produtos do post: ele fica abaixo deles em Minhas Curtidas. True quando curtiu (curtidos recebe (link, nome),
+    para o descurtir do fim); a curtida que não pega só deixa o rascunho sem a reserva, e o registro diz por quê.
+    """
+    ir_ao_inicio(d)
+    ps.limpar_aviso_rapido(d)
+    ps.abrir_link(d, produto["link"])
+    curtiu = _esperar_a_pagina_do_produto(d, a_mais=True) and ps.curtir(d, dict(video, link=produto["link"]))
+    pausa(3)
+    if not curtiu or not curtiu[0]:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_COMISSAO, "sem o do criador de reserva",
+                                     "loja de férias" if curtiu is False else "não curtiu", ok=None)
+        return False
+    if curtiu[1] == ps.CURTIDO_DE_ANTES:
+        gravar_estado(favoritos_limpos=False)
+    curtidos.append((produto["link"], produto["nome"]))
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_COMISSAO, "o do criador curtido de reserva", ok=None)
+    return True
+
+
 CAMINHO_DOS_PRODUTOS_A_MAIS = "Shopee Vídeo 🎬 → Robô Automático 🤖 → Produtos a Mais 🛍️"
 
 
@@ -4978,7 +5014,8 @@ MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU = ("o produto anexado pelo Adicionar não ficou
 ESPERA_LOGO_DEPOIS_DO_FEITO, ESPERA_DEPOIS_DO_FEITO = 1, 6
 
 
-def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
+                       voltaram=None):
     """
     Anexa os produtos curtidos, na ordem de nomes (o 1º pelo Adicionar produto, os outros
     pelo Adicionar Mais). O produto a mais (a posição está em a_mais, P59) que não anexa, ou
@@ -4988,9 +5025,13 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
     anexados, e mais os curtidos_de_fora (o de outra cor que saiu antes de anexar continua
     curtido no alto). Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado
     rolando a lista inteira (P27). O 1º anexado é conferido na tela final depois do Feito e,
-    sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO).
+    sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO). do_criador ({posição: nome}): o
+    produto do criador, também curtido, de cada produto trocado pelo da loja que paga mais (P33 e P57); o
+    trocado que não entra em Minhas Curtidas, com outros produtos na lista, dá lugar a ele, e voltaram (set)
+    recebe a posição (_anexar_um, P225 1).
     """
     anexados, no_post = [], []
+    do_criador = do_criador or {}
     _AVISO_DO_FEITO.update(texto="", logo="")
     for i, nome in enumerate(nomes):
         if i in a_mais and prazo is not None and time.monotonic() > prazo:
@@ -4999,9 +5040,17 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
             continue
         primeiro = not anexados
         for vez in range(1, (VEZES_DO_PRIMEIRO_PRODUTO if primeiro else 1) + 1):
-            if not _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados) + curtidos_de_fora, limpa,
-                              i in a_mais):
+            anexado = _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados) + curtidos_de_fora, limpa,
+                                 i in a_mais, do_criador.get(i, ""))
+            if not anexado:
                 break
+            if voltaram is not None:
+                # O do criador no lugar do trocado: pelo caminho do trocado que não entrou na lista, ou achado
+                # pelo nome parecido no lugar do trocado (P225 1).
+                if anexado == VOLTOU_AO_CRIADOR or _foi_o_do_criador(anexados[-1], nome, do_criador.get(i, "")):
+                    voltaram.add(i)
+                else:
+                    voltaram.discard(i)
             if not primeiro or primeiro_na_tela_final(d, vez, anexados[0] if anexados else nome):
                 no_post.append(i)
                 break
@@ -5015,19 +5064,35 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
     return anexados, no_post
 
 
-def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais):
+def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais, criador=""):
     """
     Um produto: o caminho até Minhas Curtidas, o Adicionar dele e o Feito. False quando é um
-    produto a mais que não anexou: ele fica de fora, e o robô volta à tela final.
+    produto a mais que não anexou: ele fica de fora, e o robô volta à tela final. Com o criador (o
+    nome do produto do criador, também curtido, do produto trocado pelo da loja que paga mais), o
+    trocado que não entra em Minhas Curtidas, com outros produtos na lista, dá lugar a ele
+    (_o_do_criador_no_lugar, P225 1), e a volta é VOLTOU_AO_CRIADOR; senão, True.
     """
     seguir(d, CAMINHO_PRODUTO if not anexados else CAMINHO_MAIS_UM_PRODUTO)
     ok, motivo = ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=no_topo,
-                                      rolar_a_lista=not limpa, ultima_chance=not a_mais, avisar=not a_mais)
+                                      rolar_a_lista=not limpa, ultima_chance=not a_mais,
+                                      avisar=not a_mais and not criador)
     if not ok and a_mais:
         registro_processos.registrar(REGISTRO, PROCESSO_DOS_ESPACOS, "produto a mais de fora", "não anexou", ok=None)
         voltar_a_tela_final(d)
         return False
-    if not ok and str(motivo or "").startswith(ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS):
+    fora = not ok and str(motivo or "").startswith(ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS)
+    voltou = False
+    if fora and criador:
+        # O trocado que não entrou em Minhas Curtidas: com outros produtos na lista, é o anúncio dele que o app
+        # não deixa pôr no vídeo, e o do criador fica no lugar; com a lista vazia, é a lista atrasada (P216 1).
+        voltou = ps.MOTIVO_DA_LISTA_VAZIA not in motivo and _o_do_criador_no_lugar(d, video, criador, anexados,
+                                                                                  no_topo, limpa)
+        if voltou:
+            ok, fora = True, False
+        else:
+            # O aviso que o adicionar_produto daria, sem o do criador no lugar.
+            avisar(ps.aviso_fora_de_minhas_curtidas(nome))
+    if fora:
         # O produto curtido que a lista de Minhas Curtidas não mostra, nem pela foto do 1º: a lista do
         # Adicionar Produto às vezes demora a mostrar o curtido agora (às 05:54 de 13/11, vazia nas 4
         # leituras; pouco depois das 8h, já o mostrava). A falha é da hora, não do vídeo: ele volta mais
@@ -5048,7 +5113,52 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais):
         # Só anota: a leitura que falha não para o rascunho (a conferência da tela final relê).
         _AVISO_DO_FEITO["logo"] = ""
     time.sleep(ESPERA_DEPOIS_DO_FEITO - ESPERA_LOGO_DEPOIS_DO_FEITO)
-    return True
+    return VOLTOU_AO_CRIADOR if voltou else True
+
+
+# O produto trocado pelo mesmo item da loja que paga mais (P33, no link de produto; P57, no Ver Produtos) que
+# não entra em Minhas Curtidas, com outros produtos curtidos na lista: às 22:34, 22:48 e 23:03 de 13/11, o kit
+# da outra loja nunca apareceu nela, nas 3 vezes, e às 23:17 um produto que não foi trocado apareceu logo depois
+# de curtido. Não é a lista atrasada (essa fica vazia, P216 1): é o anúncio que o app não deixa pôr no vídeo. O
+# produto do criador, curtido também antes da edição (no Ver Produtos, ele já é curtido pela lista), entra no
+# lugar dele na mesma rodada; a foto do começo do vídeo e a miniatura, já feitas, continuam as do anúncio da
+# outra loja, o mesmo item que a IA conferiu. Sem o do criador na lista, o vídeo volta mais tarde, como na
+# P216 1. Escolha do Rafael (14/11, P225 1): DECISOES.md, Shopee Vídeo.
+VOLTOU_AO_CRIADOR = "o do criador no lugar do trocado"
+
+
+def _o_do_criador_no_lugar(d, video, criador, anexados, no_topo, limpa):
+    """
+    O produto do criador (criador: o nome dele) procurado pelo nome em Minhas Curtidas e anexado no lugar do
+    trocado pela loja que paga mais que não entrou nela (P225 1), sem a última chance pela foto: o do criador já
+    está curtido há minutos. True quando anexou; o registro e o aviso no privado dizem o que houve.
+    """
+    ok, _motivo = ps.adicionar_produto(d, dict(video, produto=criador), anexados, no_topo=no_topo,
+                                       rolar_a_lista=not limpa, ultima_chance=False, avisar=False)
+    registro_processos.registrar(REGISTRO, "anexar o produto",
+                                 "voltou ao produto do criador" if ok else "nem o do criador na lista",
+                                 "o trocado pela loja que paga mais não entrou em Minhas Curtidas, com outros "
+                                 "produtos na lista", ok=ok)
+    if ok:
+        avisar("🤖 Robô da Shopee Vídeo: o produto que eu troquei pelo de outra loja, que paga mais por venda, não "
+               "entrou em Minhas Curtidas (a lista mostrava os outros curtidos). Como você escolheu, voltei ao produto "
+               f"do criador neste rascunho.\n\nProduto: {criador}\n\nA foto do começo do vídeo e a miniatura "
+               "continuam as do anúncio da outra loja, o mesmo produto que a IA conferiu com o vídeo.")
+    return ok
+
+
+def _foi_o_do_criador(na_lista, trocado, criador):
+    """
+    O produto anexado (na_lista: o nome que a lista mostrou) é o do criador, e não o trocado pela loja que paga
+    mais? Pelo nome mais parecido com o de cada um: o nome igual ou cortado vale 100, e o empate fica com o
+    trocado, o procurado (P225 1).
+    """
+    if not criador or not na_lista:
+        return False
+
+    def nota(nome):
+        return 100 if ps.nome_na_pagina(na_lista, nome) else ps.parecido_entre([na_lista], nome)[0]
+    return nota(criador) > nota(trocado)
 
 
 def como_ficou_logo_depois_do_feito(xml):
@@ -5368,6 +5478,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     variacoes, recusados = [], []
     # No Ver Produtos, o link curto de cada produto trocado pelo da loja que paga mais (P57).
     links_trocados, trocados = {}, 0
+    # No link de produto trocado pelo da loja que paga mais (P33), o produto do criador, de reserva (P225 1),
+    # e se ele foi curtido.
+    do_criador, reserva = None, False
     if video.get("de_video"):
         celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
@@ -5412,6 +5525,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # (P146 2, apelacoes_shopee_video.punicoes_por_tipo_de_post) cruza isso com a Saúde.
         atualizar(ident, trocado="1" if troca else "0")
         if troca:
+            # O produto do criador fica de reserva: curtido antes da edição, ele entra no lugar do trocado que
+            # não entra em Minhas Curtidas (P225 1).
+            do_criador = produto_do_criador(nome, video["link"], original, video.get("item_do_link"))
             video["link"] = troca["link"]
             nome = ps.nome_do_produto(video) or troca["nome"]
             vistos.extend(troca["vistos"])
@@ -5486,6 +5602,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         # DECISOES.md, Shopee Vídeo.
         celular.append(True)
         mais = espacos_livres(d, video, principal, original, vistos, prazo, inicio, recusados)
+        # O do criador de reserva vai antes: curtido primeiro, fica abaixo dos do post em Minhas Curtidas (P225 1).
+        reserva = bool(do_criador) and curtir_de_reserva(d, video, do_criador, curtidos)
         produtos = _curtir_os_produtos(d, video, ordem_do_post(principal, mais), curtidos)
         video["link"] = produtos[0]["link"]
         nomes = [p["nome"] for p in produtos]
@@ -5535,8 +5653,14 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     if do_ver_produtos is not None:
         por_nome = {p["nome"]: p for p in do_ver_produtos}
         do_ver_produtos = [por_nome[n] for n in nomes]
-    # O do criador trocado pelo da loja que paga mais (P57) também continua curtido no alto.
-    curtidos_de_fora = antes - len(nomes) + trocados
+    # O do criador trocado pelo da loja que paga mais (P57) também continua curtido no alto, como o de reserva do
+    # link de produto (P225 1).
+    curtidos_de_fora = antes - len(nomes) + trocados + (1 if reserva else 0)
+    # O do criador de cada produto trocado, que entra no lugar dele quando ele não entra em Minhas Curtidas (P225 1).
+    if produtos:
+        no_lugar = {i: do_criador["nome"] for i, p in enumerate(produtos) if reserva and p.get("do_video")}
+    else:
+        no_lugar = {i: p["trocado"] for i, p in enumerate(do_ver_produtos or []) if p.get("trocado")}
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
@@ -5560,8 +5684,18 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado rolando a
     # lista inteira; o topo continua conferido. Escolha do Rafael (P27): DECISOES.md, Shopee Vídeo.
     a_mais = {i for i, produto in enumerate(produtos or do_ver_produtos or []) if not produto.get("do_video")}
+    voltaram = set()
     anexados, no_post = anexar_os_produtos(d, video, nomes, a_mais, lista_limpa(),
-                                           inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60, curtidos_de_fora)
+                                           inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60, curtidos_de_fora,
+                                           no_lugar, voltaram)
+    if voltaram:
+        # O post leva o do criador no lugar do trocado que não entrou em Minhas Curtidas (P225 1): o link, o
+        # número do produto e a medição da troca (P146 2) passam a ser os dele.
+        lista = produtos or do_ver_produtos
+        for i in voltaram:
+            lista[i] = do_criador if produtos else lista[i]["original"]
+            nomes[i] = lista[i]["nome"]
+        atualizar(ident, trocado="1" if any(lista[i].get("trocado") for i in no_post) else "0")
     # A legenda vai depois dos produtos: em foco nas idas à lista de Minhas Curtidas, o 1º
     # produto às vezes não fica (VEZES_DO_PRIMEIRO_PRODUTO).
     escrever_a_legenda(d, textos["titulo"])

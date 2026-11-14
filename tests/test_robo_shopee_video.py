@@ -1547,7 +1547,8 @@ def test_ver_produtos_com_o_produto_trocado_leva_o_link_e_a_foto_da_troca(monkey
         robo.shutil.copyfile(video["arquivo"], copia)
         return ""
 
-    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
+                  voltaram=None):
         anexar.update(nomes=list(nomes), de_fora=curtidos_de_fora)
         return list(nomes), list(range(len(nomes)))
 
@@ -4335,7 +4336,8 @@ def test_rascunho_de_ver_produtos_com_produto_a_mais_leva_o_album_e_a_medicao(mo
 
     anexar = {}
 
-    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
+                  voltaram=None):
         anexar.update(nomes=list(nomes), a_mais=set(a_mais))
         return list(nomes), list(range(len(nomes)))
 
@@ -7144,6 +7146,149 @@ def test_outra_falha_do_adicionar_continua_deixando_o_video_de_lado(monkeypatch,
     assert parada.value.do_video
 
 
+# O mesmo vestido da outra loja que paga mais por venda (P33), com o nome do anúncio mais comprido (a página de
+# mentira mostra o nome do vestido, que vale como o nome cortado pelo app).
+OUTRA_LOJA = VESTIDO + " Loja Dois"
+FORA_COM_OUTROS_NA_LISTA = (f"{robo.ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS} (a foto do 1º da lista não é o produto do "
+                            "vídeo (1ª vez)): nada adicionado (aviso no privado)")
+
+
+def _troca_que_nao_entra(monkeypatch, do_criador=True, motivo_do_trocado=FORA_COM_OUTROS_NA_LISTA):
+    """
+    O vídeo do vestido com a troca pela loja que paga mais (P33) cujo anúncio não entra em Minhas Curtidas (P225 1):
+    o adicionar do trocado dá motivo_do_trocado; o do criador, o de verdade (sem do_criador, também não entra).
+    Devolve os pedidos ao adicionar: (produto, última chance, aviso).
+    """
+    _fonte(monkeypatch)
+
+    async def produtos_do_link(link):
+        return [{"nome": OUTRA_LOJA if "mais" in link else VESTIDO, "preco": 59.9,
+                 "comissao": 15.0 if "mais" in link else 10.0}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(robo, "trocar_pela_maior_comissao",
+                        lambda video: {"nome": OUTRA_LOJA, "link": "https://s.shopee.com.br/mais", "comissao": 15.0,
+                                       "preco": 59.9, "valor": 8.99, "antes": 10.0, "valor_antes": 5.99,
+                                       "vistos": ["mesmo vestido"]})
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "77" if "mais" in link else "2")
+    adicionar, pedidos = robo.ps.adicionar_produto, []
+
+    def adicionar_produto(d, video, anexados=None, **opcoes):
+        pedidos.append((video["produto"], opcoes.get("ultima_chance"), opcoes.get("avisar")))
+        if video["produto"] == OUTRA_LOJA:
+            return False, motivo_do_trocado
+        if not do_criador:
+            return False, "o produto a mais não está na lista: nada adicionado"
+        return adicionar(d, video, anexados, **opcoes)
+
+    monkeypatch.setattr(robo.ps, "adicionar_produto", adicionar_produto)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    return pedidos
+
+
+def test_trocado_que_nao_entra_em_minhas_curtidas_da_lugar_ao_do_criador_na_mesma_rodada(monkeypatch, avisos):
+    # Escolha do Rafael (14/11, P225 1): às 22:34, 22:48 e 23:03 de 13/11, o kit trocado pelo de outra loja que paga
+    # mais (P33) nunca entrou em Minhas Curtidas, com os outros curtidos na lista, e o vídeo gastou as 3 tentativas.
+    # O do criador, curtido de reserva antes da edição, entra no lugar dele, e o rascunho sai na mesma rodada.
+    pedidos = _troca_que_nao_entra(monkeypatch)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    # O trocado vai sem o aviso de nada adicionado; o do criador, pelo nome, sem a última chance pela foto.
+    assert pedidos == [(OUTRA_LOJA, True, False), (VESTIDO, False, False)]
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["link"] == LINK and rascunho["produtos"] == [VESTIDO]
+    assert rascunho["itens"] == [{"item": "2", "a_mais": False}]
+    # A medição de quais posts levam punição (P146 2) conta o post como sem troca: o produto é o do criador.
+    assert robo.pegar(rascunho["id"])["trocado"] == "0"
+    textos = [a for a in avisos if isinstance(a, str)]
+    assert any("voltei ao produto do criador" in a and VESTIDO in a for a in textos)
+    assert not any(robo.ps.AVISO_SEM_PRODUTO in a for a in textos)
+    assert _registro_do_anexar() == [("voltou ao produto do criador", "o trocado pela loja que paga mais não entrou "
+                                      "em Minhas Curtidas, com outros produtos na lista")]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["o do criador curtido de reserva"]
+
+
+def test_trocado_fora_com_a_lista_vazia_ou_sem_o_do_criador_volta_mais_tarde(monkeypatch, avisos):
+    # Com a lista vazia, é a lista atrasada (P216 1): nada de trocar, o vídeo volta mais tarde, com o aviso de
+    # sempre. Sem o do criador na lista também, o vídeo volta mais tarde.
+    vazia = (f"{robo.ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS} ({robo.ps.MOTIVO_DA_LISTA_VAZIA}): nada adicionado (aviso no "
+             "privado)")
+    pedidos = _troca_que_nao_entra(monkeypatch, motivo_do_trocado=vazia)
+    resultado = robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert robo.ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS in resultado and robo.esperando_aprovacao() == []
+    assert pedidos == [(OUTRA_LOJA, True, False)]
+    assert sum(robo.ps.AVISO_SEM_PRODUTO in a for a in avisos if isinstance(a, str)) == 1
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+
+    avisos.clear()
+    pedidos = _troca_que_nao_entra(monkeypatch, do_criador=False)
+    resultado = robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert robo.ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS in resultado and robo.esperando_aprovacao() == []
+    assert pedidos == [(OUTRA_LOJA, True, False), (VESTIDO, False, False)]
+    assert sum(robo.ps.AVISO_SEM_PRODUTO in a for a in avisos if isinstance(a, str)) == 1
+    assert ("nem o do criador na lista", "o trocado pela loja que paga mais não entrou em Minhas Curtidas, com "
+            "outros produtos na lista") in _registro_do_anexar()
+
+
+def test_produto_anexado_pelo_nome_do_criador_conta_como_a_volta():
+    # O nome do do criador pode ser parecido o bastante com o do trocado para o topo da lista o achar no lugar dele
+    # (P225 1): o anexado conta pelo nome mais parecido; o empate fica com o trocado, o procurado.
+    criador, trocado = "Kit Cestos Organizadores de Tecido com Alças", "Kit 3 Cestos Organizadores Dobráveis Loja Dois"
+    assert robo._foi_o_do_criador(criador, trocado, criador)
+    assert not robo._foi_o_do_criador(trocado, trocado, criador)
+    assert not robo._foi_o_do_criador(VESTIDO, VESTIDO, VESTIDO)
+    assert not robo._foi_o_do_criador(criador, trocado, "")
+
+
+def test_ver_produtos_com_o_trocado_fora_de_minhas_curtidas_leva_o_do_criador(monkeypatch, avisos):
+    # No Ver Produtos, o do criador do produto trocado (P57) já fica curtido no alto: o trocado que não entra em
+    # Minhas Curtidas dá lugar a ele (P225 1), e o rascunho sai com o do criador, sem o link da troca.
+    _fonte_de_video(monkeypatch)
+    trocado, link = PRODUTO_B + " Loja Dois", "https://s.shopee.com.br/troca"
+    do_criador = {"nome": PRODUTO_B, "link": "", "valor": 4.0, "trocado": "", "do_video": True}
+
+    def trocar(d, video, nomes, fotos, vistos, curtidos, prazo, de_outra_cor=()):
+        curtidos.append((link, trocado))
+        return [{"nome": trocado, "link": link, "valor": 9.0, "trocado": PRODUTO_B, "comissao": 12.0, "antes": 8.0,
+                 "valor_antes": 4.0, "do_video": True, "original": do_criador},
+                {"nome": PRODUTO_A, "link": "", "valor": 2.0, "trocado": "", "do_video": True}]
+
+    anexar = {}
+
+    def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
+                  voltaram=None):
+        anexar.update(nomes=list(nomes), no_lugar=dict(do_criador or {}))
+        voltaram.add(0)
+        return [PRODUTO_B, PRODUTO_A], [0, 1]
+
+    def copiar(video, fonte, copia, nomes=(), alcool=False, outras=(), miniatura=None, rotulo_de_ia=False,
+               link_do_1o=None, **_opcoes):
+        robo.shutil.copyfile(video["arquivo"], copia)
+        return ""
+
+    monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", trocar)
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar)
+    monkeypatch.setattr(robo, "anexar_os_produtos", anexar_os)
+    monkeypatch.setattr(robo.ps, "conferir_tela_final", lambda d, video: (True, "conferida"))
+    assert robo.rodada(preparar=True, d=AppDoVerProdutos(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert anexar == {"nomes": [trocado, PRODUTO_A], "no_lugar": {0: PRODUTO_B}}
+    rascunho = robo.pegar(1)
+    assert rascunho["produtos"] == [PRODUTO_B, PRODUTO_A] and rascunho["trocado"] == "0"
+    assert rascunho["links_dos_produtos"] == ["", "https://s.shopee.com.br/curto-11"]
+
+
+def test_troca_do_ver_produtos_guarda_o_do_criador_que_saiu(monkeypatch):
+    # O trocado guarda o do criador que saiu: é ele que volta quando o trocado não entra em Minhas Curtidas (P225 1).
+    trocado = {"nome": PRODUTO_B + " Loja Dois", "link": "https://s.shopee.com.br/troca", "valor": 9.0,
+               "trocado": PRODUTO_B, "do_video": True}
+    monkeypatch.setattr(robo, "trocar_os_do_ver_produtos", TROCAR_OS_DO_VER_PRODUTOS)
+    monkeypatch.setattr(robo, "_oferta_parecida", lambda nome: (100, True, {"itemId": 5, "priceMin": 20}))
+    monkeypatch.setattr(robo, "_trocar_um_do_ver_produtos", lambda d, video, produto, *a: dict(trocado))
+    produtos = robo.trocar_os_do_ver_produtos(None, {}, [PRODUTO_B], {PRODUTO_B: b"foto"}, [], [], 0)
+    assert produtos[0]["nome"] == trocado["nome"] and produtos[0]["original"]["nome"] == PRODUTO_B
+    assert produtos[0]["original"]["trocado"] == "" and produtos[0]["original"]["foto"] == b"foto"
+
+
 def test_tela_de_logo_depois_do_feito_vai_para_o_caso(monkeypatch, avisos):
     # O caso de 07/11 só tinha a tela de 30 s depois do Feito: um aviso do app na tela já tinha
     # sumido. A tela lida logo depois do Feito entra entre as ações do caso.
@@ -8869,7 +9014,8 @@ def _celular_do_refazer(monkeypatch, passos, anexados=None):
         monkeypatch.setattr(robo, nome, lambda *a, **k: None)
     monkeypatch.setattr(robo, "seguir", lambda d, caminho: None)
 
-    def anexar(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0):
+    def anexar(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
+               voltaram=None):
         passos.append(("anexar", list(nomes), tuple(a_mais)))
         feitos = list(range(len(nomes))) if anexados is None else anexados
         return [nomes[i] for i in feitos], feitos
