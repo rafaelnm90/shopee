@@ -1374,6 +1374,56 @@ def tentativas_recentes(horas, agora=None):
             for acao, resultado, passo, qtd, primeiro, ultimo in linhas]
 
 
+# O vídeo que parou no rascunho por uma falha que não é dele (o "parou") volta nas rodadas seguintes, até
+# as tentativas a mais do horário (P182 1 e P216 1, no anexar o produto; a rodada interrompida também). O
+# checkup conta, pelo id do vídeo de cada tentativa, quantos voltaram e quantos viraram rascunho; as
+# tentativas sem o vídeo (de antes de ele ser anotado) não contam.
+HORAS_DOS_QUE_VOLTAM = 24
+
+
+def videos_que_voltam(agora=None):
+    """
+    Os vídeos que pararam no rascunho nas últimas HORAS_DOS_QUE_VOLTAM horas, por passo (o da primeira
+    parada de cada um): {passo: [parados, voltaram, viraram rascunho, ainda não voltaram]}. Voltou: teve
+    outra tentativa do rascunho depois da parada; virou rascunho: uma delas salvou. Só passos e contagens.
+    """
+    agora = _agora(agora)
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT video, resultado, passo FROM shopee_video_tentativas WHERE acao = 'rascunho' "
+                "AND momento >= ? AND COALESCE(video, '') != '' ORDER BY momento, id",
+                (_momento(agora - timedelta(hours=HORAS_DOS_QUE_VOLTAM)),)).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    parada, depois = {}, {}
+    for video, resultado, passo in linhas:
+        if video in parada:
+            depois[video].append(resultado)
+        elif resultado == "parou":
+            parada[video], depois[video] = passo or "?", []
+    por_passo = {}
+    for video, passo in parada.items():
+        contas = por_passo.setdefault(passo, [0, 0, 0, 0])
+        contas[0] += 1
+        contas[1] += bool(depois[video])
+        contas[2] += "salvo" in depois[video]
+        contas[3] += not depois[video]
+    return por_passo
+
+
+def _linhas_dos_que_voltam(por_passo):
+    """As linhas de videos_que_voltam: o total e, embaixo, cada passo (o de mais paradas primeiro)."""
+    def contas(numeros):
+        parados, voltaram, viraram, faltam = numeros
+        return f"{parados} | voltaram {voltaram} | viraram rascunho {viraram} | ainda não voltaram {faltam}"
+    total = [sum(c[i] for c in por_passo.values()) for i in range(4)]
+    linhas = [f"Vídeos que pararam no rascunho e voltam nas rodadas seguintes (P182 1 e P216 1; "
+              f"{HORAS_DOS_QUE_VOLTAM} h): " + (contas(total) if por_passo else "nenhum")]
+    linhas += [f"   {passo}: {contas(c)}" for passo, c in sorted(por_passo.items(), key=lambda p: (-p[1][0], p[0]))]
+    return linhas
+
+
 def aprovados_atrasados(agora=None):
     """
     Os rascunhos que o Rafael aprovou e passaram da hora de ir ao ar há mais de
@@ -2143,6 +2193,8 @@ def main():
                                               f"{int(CELULAR_FORA_MAXIMO.total_seconds() // 3600)} h agora"))
     for tentativa in robo_sv.get("linhas", []):
         print(_linha_da_tentativa(tentativa))
+    for linha in _linhas_dos_que_voltam(videos_que_voltam(agora)):
+        print(linha)
     print(f"Aprovados que passaram da hora de ir ao ar: {robo_sv['atrasados']}"
           + (f" (o mais atrasado há {robo_sv['minutos_de_atraso']} min)" if robo_sv["atrasados"] else ""))
     for aprovado, previsto, postado, atraso, no_meio in robo_sv.get("postados", []):

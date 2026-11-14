@@ -4198,8 +4198,8 @@ def test_ver_produtos_que_paga_menos_que_o_minimo_fica_de_lado_no_dia(monkeypatc
     # Nada anexado, e as curtidas do Ver Produtos saem (a lista continua limpa).
     assert app.anexados == [] and app.curtidos == set()
     # Não é falha: a tentativa entra como "de lado", sem caso guardado, e o vídeo volta amanhã.
-    assert consultar("SELECT acao, resultado, passo, motivo FROM shopee_video_tentativas") == (
-        "rascunho", "de lado", "valor por venda", motivo)
+    assert consultar("SELECT acao, resultado, passo, motivo, video FROM shopee_video_tentativas") == (
+        "rascunho", "de lado", "valor por venda", motivo, "a1")
     assert robo.casos_robo.casos() == [] and consultar("SELECT COUNT(*) FROM shopee_video_rascunhos") == (0,)
     assert "a1" in robo.evitar_hoje(robo.ler_config(), momento("2026-10-22 23:59"))
     assert robo.proximo_video(robo.ler_config(), robo.evitar_hoje(robo.ler_config(), momento("2026-10-23 10:00")),
@@ -5755,6 +5755,8 @@ def test_preparo_interrompido_pelo_reinicio_volta_para_a_fila_na_rodada_seguinte
     assert robo.pegar(preso) is None and robo.pegar(novo)["estado"] == "preparando"
     assert "video:9" not in robo.ids_usados()
     assert robo.tentativas_desde("2026-10-24 00:00:00")[0]["passo"] == "rodada interrompida"
+    # O vídeo também volta nas rodadas seguintes: a tentativa guarda qual era, para o checkup contar a volta.
+    assert consultar("SELECT video FROM shopee_video_tentativas") == ("video:9",)
 
 
 def test_preparo_interrompido_guarda_o_caso_com_os_passos_da_rodada_que_morreu():
@@ -7087,6 +7089,26 @@ def test_video_do_produto_que_nao_fica_na_tela_final_volta_mais_tarde(monkeypatc
     # Na rodada seguinte, com o app de volta ao normal, o mesmo vídeo vira rascunho.
     assert robo.rodada(d=AppQueReabreALegenda(), agora=agora) == "rascunho salvo"
     assert [r["id_video"] for r in robo.listar("rascunho")] == ["a1"]
+    # Cada tentativa guarda o vídeo: o checkup conta se o que parou voltou e virou rascunho, que o produto
+    # anotado não diz (ele muda com a troca de loja, P33).
+    assert _tentativas_do_rascunho() == [("parou", "anexar o produto", "a1"), ("salvo", "", "a1")]
+
+
+def _tentativas_do_rascunho():
+    with robo.db.conexao() as conexao:
+        return [tuple(linha) for linha in conexao.execute(
+            "SELECT resultado, passo, video FROM shopee_video_tentativas WHERE acao = 'rascunho' ORDER BY id")]
+
+
+def test_tabela_antiga_das_tentativas_ganha_a_coluna_do_video():
+    # 13/11: o banco do servidor tem a tabela sem a coluna do vídeo; a tentativa nova a cria, e as de antes ficam.
+    inserir("CREATE TABLE shopee_video_tentativas (id INTEGER PRIMARY KEY AUTOINCREMENT, momento TEXT, acao TEXT, "
+            "resultado TEXT, passo TEXT, motivo TEXT, produto TEXT)")
+    inserir("INSERT INTO shopee_video_tentativas (momento, acao, resultado, passo, motivo, produto) "
+            "VALUES ('2026-10-22 09:00:00', 'rascunho', 'salvo', '', '', 'Organizador de gaveta')")
+    robo.registrar_tentativa("rascunho", "parou", robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU, "Organizador de gaveta",
+                             momento("2026-10-22 10:00"), "a1")
+    assert _tentativas_do_rascunho() == [("salvo", "", None), ("parou", "anexar o produto", "a1")]
 
 
 def test_video_cujo_produto_nao_aparece_em_minhas_curtidas_volta_mais_tarde(monkeypatch, avisos):

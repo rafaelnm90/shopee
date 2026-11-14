@@ -1231,9 +1231,13 @@ NOMES_DOS_RESULTADOS = {"descurtido": "limpeza dos favoritos", "curtido": "curti
 
 
 def _criar_tabela_tentativas(con):
+    # O vídeo de cada tentativa do rascunho (o id da fonte): o checkup conta se o vídeo que parou no anexar
+    # voltou numa rodada seguinte e virou rascunho (P182 1 e P216 1); o produto anotado muda com a troca de loja.
     con.execute("CREATE TABLE IF NOT EXISTS shopee_video_tentativas ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, momento TEXT, acao TEXT, resultado TEXT, "
-                "passo TEXT, motivo TEXT, produto TEXT)")
+                "passo TEXT, motivo TEXT, produto TEXT, video TEXT)")
+    if "video" not in {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_tentativas)")}:
+        con.execute("ALTER TABLE shopee_video_tentativas ADD COLUMN video TEXT")
 
 
 def passo_do_motivo(motivo):
@@ -1244,15 +1248,18 @@ def passo_do_motivo(motivo):
     return next((passo for trecho, passo in PASSOS if trecho.casefold() in texto), "outro")
 
 
-def registrar_tentativa(acao, resultado, motivo="", produto="", agora=None):
-    """Guarda uma tentativa no histórico; as com mais de DIAS_DO_HISTORICO dias saem."""
+def registrar_tentativa(acao, resultado, motivo="", produto="", agora=None, video=""):
+    """
+    Guarda uma tentativa no histórico (video: o id da fonte, nas do rascunho); as com mais de DIAS_DO_HISTORICO
+    dias saem.
+    """
     try:
         with db.conexao() as con:
             _criar_tabela_tentativas(con)
-            con.execute("INSERT INTO shopee_video_tentativas (momento, acao, resultado, passo, motivo, produto) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
+            con.execute("INSERT INTO shopee_video_tentativas (momento, acao, resultado, passo, motivo, produto, video) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (_momento(agora), acao, resultado, passo_do_motivo(motivo), str(motivo or ""),
-                         str(produto or "")))
+                         str(produto or ""), str(video or "")))
             corte = _momento(agora_br(agora) - timedelta(days=DIAS_DO_HISTORICO))
             con.execute("DELETE FROM shopee_video_tentativas WHERE momento < ?", (corte,))
     except Exception as e:
@@ -3176,7 +3183,7 @@ def preparar_rascunho(d, config, agora=None):
             motivo = PRODUTO_JA_POSTADO
             anotar_onde_ja_foi(video["item_do_link"], "robô")
         atualizar(criar(video["id"], agora), estado="pulado", motivo=motivo)
-        registrar_tentativa("rascunho", "pulado", motivo, agora=agora)
+        registrar_tentativa("rascunho", "pulado", motivo, agora=agora, video=video["id"])
     else:
         resultado = (f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de "
                      "afiliado ou já postados")
@@ -3195,7 +3202,7 @@ def preparar_rascunho(d, config, agora=None):
         _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora, curtidos, celular)
     except Suspensa as e:
         _desfazer_reserva(ident, video["id"], "conta suspensa", False)
-        registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora)
+        registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora, video["id"])
         if curtidos:
             gravar_estado(favoritos_limpos=False)
         raise
@@ -3205,7 +3212,8 @@ def preparar_rascunho(d, config, agora=None):
         if curtidos:
             # Na Verificação o robô para sem descurtir: a curtida fica para as 4h.
             gravar_estado(favoritos_limpos=False)
-        registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
+        registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora,
+                            video["id"])
         raise
     except Parada as e:
         # O de lado no dia pelo que paga (P200 1) não é falha: sem caso, e o vídeo volta amanhã.
@@ -3216,7 +3224,7 @@ def preparar_rascunho(d, config, agora=None):
         else:
             _guardar_caso(d if celular else None, "rascunho", resultado, e.motivo, video, ident, agora)
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video and not de_lado)
-        registrar_tentativa("rascunho", resultado, e.motivo, _produto_do_video(video), agora)
+        registrar_tentativa("rascunho", resultado, e.motivo, _produto_do_video(video), agora, video["id"])
         e.id_video = video["id"]
         if celular:
             # Com o caso já guardado com a tela da falha: o app aberto há muitas horas ou sem memória
@@ -3233,12 +3241,14 @@ def preparar_rascunho(d, config, agora=None):
         _guardar_caso(d if celular else None, "rascunho", "erro", f"erro inesperado ({type(e).__name__})", video,
                       ident, agora)
         _desfazer_reserva(ident, video["id"], type(e).__name__, False)
-        registrar_tentativa("rascunho", "erro", f"erro inesperado ({type(e).__name__})", _produto_do_video(video), agora)
+        registrar_tentativa("rascunho", "erro", f"erro inesperado ({type(e).__name__})", _produto_do_video(video), agora,
+                            video["id"])
         e.id_video = video["id"]
         descurtir_no_fim(d, video, curtidos)
         raise
     produtos = (pegar(ident) or {}).get("produtos") or []
-    registrar_tentativa("rascunho", "salvo", produto=", ".join(produtos) or _produto_do_video(video), agora=agora)
+    registrar_tentativa("rascunho", "salvo", produto=", ".join(produtos) or _produto_do_video(video), agora=agora,
+                        video=video["id"])
     registro_processos.registrar(REGISTRO, PROCESSO_DO_TEMPO, faixa_do_tempo(time.monotonic() - comeco),
                                  f"{max(len(produtos), 1)} produto(s)")
     descurtir_no_fim(d, video, curtidos)
@@ -3365,7 +3375,7 @@ def soltar_preparos_interrompidos(agora=None):
         # diz onde ela parou. Sem o celular: quem vai usá-lo agora é a rodada de agora.
         _guardar_caso(None, "rascunho", "parou", MOTIVO_DA_RODADA_INTERROMPIDA, ident=rascunho["id"], agora=agora)
         _desfazer_reserva(rascunho["id"], rascunho["id_video"], "a rodada foi interrompida", False)
-        registrar_tentativa("rascunho", "parou", MOTIVO_DA_RODADA_INTERROMPIDA, agora=agora)
+        registrar_tentativa("rascunho", "parou", MOTIVO_DA_RODADA_INTERROMPIDA, agora=agora, video=rascunho["id_video"])
         registro_processos.registrar(REGISTRO, "preparo interrompido", "solto", "o vídeo voltou para a fila", ok=False)
     estado = estado_do_dia(ler_config(), agora)
     if estado.get("em_preparo"):

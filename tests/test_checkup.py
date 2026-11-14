@@ -325,6 +325,42 @@ def test_robo_da_shopee_video_horarios_vencidos_e_tentativas_ruins():
     assert "Fone X" not in str(r)
 
 
+def test_checkup_conta_os_videos_que_pararam_e_voltaram_pelo_id_do_video():
+    # 13/11: o vídeo que parou no anexar volta nas rodadas seguintes (P182 1 e P216 1), mas o checkup não dizia
+    # se ele voltou e virou rascunho: a tentativa não guardava o vídeo, e o produto anotado muda com a troca de
+    # loja (o parou leva o produto do link; o salvo, o da loja que paga mais).
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+
+    def tentativa(horas, resultado, motivo="", produto="", video=""):
+        robo.registrar_tentativa("rascunho", resultado, motivo, produto, AGORA - timedelta(hours=horas), video)
+
+    nao_ficou = robo.MOTIVO_DO_PRIMEIRO_QUE_NAO_FICOU
+    tentativa(30, "parou", nao_ficou, "Organizador de gaveta", "v0")              # fora das 24 h
+    tentativa(10, "parou", nao_ficou, "Organizador de gaveta", "v1")
+    tentativa(9.75, "parou", nao_ficou, "Organizador de gaveta", "v1")            # voltou e parou de novo
+    tentativa(9.5, "salvo", produto="Organizador de gaveta (outra loja)", video="v1")
+    tentativa(5, "parou", f"{ps.MOTIVO_FORA_DE_MINHAS_CURTIDAS}: nada adicionado", "Garrafa", "v2")
+    tentativa(4.75, "pulado", "a IA viu outro produto no vídeo", "Garrafa", "v2")  # voltou, sem virar rascunho
+    tentativa(1, "parou", "não consegui voltar até Eu", "Toalha", "v3")           # ainda não voltou
+    tentativa(2, "salvo", produto="Panela", video="v4")                            # sem parada: não conta
+    tentativa(3, "parou", nao_ficou, "Copo")                                       # sem o vídeo: não conta
+    robo.registrar_tentativa("postar", "parou", nao_ficou, "Copo", AGORA - timedelta(hours=3), "v5")  # outra ação
+    por_passo = checkup.videos_que_voltam(AGORA)
+    assert por_passo == {"anexar o produto": [2, 2, 1, 0], "navegar no app": [1, 0, 0, 1]}
+    assert checkup._linhas_dos_que_voltam(por_passo) == [
+        "Vídeos que pararam no rascunho e voltam nas rodadas seguintes (P182 1 e P216 1; 24 h): 3 | voltaram 2 | "
+        "viraram rascunho 1 | ainda não voltaram 1",
+        "   anexar o produto: 2 | voltaram 2 | viraram rascunho 1 | ainda não voltaram 0",
+        "   navegar no app: 1 | voltaram 0 | viraram rascunho 0 | ainda não voltaram 1"]
+    assert checkup._linhas_dos_que_voltam({}) == [
+        "Vídeos que pararam no rascunho e voltam nas rodadas seguintes (P182 1 e P216 1; 24 h): nenhum"]
+
+
+def test_videos_que_voltam_sem_a_tabela_nao_derruba_o_checkup():
+    assert checkup.videos_que_voltam(AGORA) == {}
+
+
 def test_checkup_mostra_a_faixa_do_painel_e_com_que_o_plano_do_dia_foi_feito():
     # 06/11: o plano saiu com 1 rascunho com 8 pontos, e o checkup não mostrava a faixa que o robô
     # leu nem com que faixa e pontos o plano foi feito.
