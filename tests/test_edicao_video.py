@@ -4268,15 +4268,15 @@ def test_setinhas_e_moldura_somem_so_enquanto_o_que_o_criador_pos_passa_por_elas
     # criador pôs passa por ela) somem só no tempo em que a coisa dele está naquele lugar, e voltam depois.
     sob = edicao_video.tempos_sob_o_criador
     setinhas, moldura = [edicao_video.caixa_das_setinhas()], edicao_video.linhas_da_moldura()
-    folga = edicao_video.FOLGA_NO_TEMPO_DO_CRIADOR
+    folga, espera = edicao_video.FOLGA_NO_TEMPO_DO_CRIADOR, edicao_video.ESPERA_DEPOIS_DO_CRIADOR
     tudo = [FRASE_SOBRE_AS_SETINHAS, LEGENDA_SOBRE_A_MOLDURA, DENTRO_DO_CARTAO, FRASE_NO_COMECO, QUADRO_NO_FIM]
-    assert sob(setinhas, tudo) == [(2.0 - folga, 9.0 + folga)]
-    assert sob(moldura, tudo) == [(4.0 - folga, 6.0 + folga)]
+    assert sob(setinhas, tudo) == [(2.0 - folga, 9.0 + espera)]
+    assert sob(moldura, tudo) == [(4.0 - folga, 6.0 + espera)]
     # O que fica longe delas, o que fica dentro do cartão e o que veio sem o tempo (rascunhos de antes da P212 1)
     # não tiram nada; os trechos que se encostam viram um só.
     assert sob(setinhas + moldura, [DENTRO_DO_CARTAO, FRASE_NO_COMECO, FRASE_SOBRE_AS_SETINHAS[:4]]) == []
     seguida = FRASE_SOBRE_AS_SETINHAS[:4] + (8.8, 11.0)
-    assert sob(setinhas, [FRASE_SOBRE_AS_SETINHAS, seguida]) == [(2.0 - folga, 11.0 + folga)]
+    assert sob(setinhas, [FRASE_SOBRE_AS_SETINHAS, seguida]) == [(2.0 - folga, 11.0 + espera)]
     # A edição leva os trechos ao ffmpeg e anota o que sumiu; sem as setinhas ou sem a moldura no painel, nada delas.
     pedidos = []
 
@@ -4286,8 +4286,14 @@ def test_setinhas_e_moldura_somem_so_enquanto_o_que_o_criador_pos_passa_por_elas
     monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura", com_foto_e_miniatura)
     destino, anotado = str(tmp_path / "r.mp4"), {}
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, por_cima=tudo, anotar=anotado) == ""
-    assert pedidos[-1] == ([(2.0 - folga, 9.0 + folga)], [(4.0 - folga, 6.0 + folga)])
-    assert anotado == {"sob_o_criador": {"setinhas": [(2.0 - folga, 9.0 + folga)], "moldura": [(4.0 - folga, 6.0 + folga)]}}
+    assert pedidos[-1] == ([(2.0 - folga, 9.0 + espera)], [(4.0 - folga, 6.0 + espera)])
+    assert anotado == {"sob_o_criador": {"setinhas": [(2.0 - folga, 9.0 + espera)],
+                                         "moldura": [(4.0 - folga, 6.0 + espera)]}}
+    # O que o Editor 2 já anotou da legenda da fala (P224 1) continua junto.
+    anotado = {"sob_o_criador": {"legenda": [(10.5, 12.0)]}}
+    assert edicao_video.editar("v.mp4", _foto_jpg(), destino, por_cima=tudo, anotar=anotado) == ""
+    assert anotado["sob_o_criador"] == {"legenda": [(10.5, 12.0)], "setinhas": [(2.0 - folga, 9.0 + espera)],
+                                        "moldura": [(4.0 - folga, 6.0 + espera)]}
     sem_nada = dict(edicao_video.ESCOLHAS_PADRAO, setinhas=False, moldura=False)
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas=sem_nada, por_cima=tudo) == ""
     assert pedidos[-1] == ([], [])
@@ -4349,8 +4355,8 @@ def test_o_que_vai_ao_ar_tira_as_setinhas_sob_o_criador_e_o_registro_conta(monke
     _textos_da_tela(monkeypatch, dict(base, por_cima=[FRASE_SOBRE_AS_SETINHAS]))
     destino = str(tmp_path / "rascunho.mp4")
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Creme")[0] == ""
-    folga = edicao_video.FOLGA_NO_TEMPO_DO_CRIADOR
-    assert pedidos[-1] == ([(2.0 - folga, 9.0 + folga)], [])
+    folga, espera = edicao_video.FOLGA_NO_TEMPO_DO_CRIADOR, edicao_video.ESPERA_DEPOIS_DO_CRIADOR
+    assert pedidos[-1] == ([(2.0 - folga, 9.0 + espera)], [])
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_SOB_O_CRIADOR, "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in registro] == [("as setinhas sumiram", "setinhas: 1 trecho(s), 8 s")]
     # Sem nada do criador no lugar delas, nada é anotado.
@@ -4363,9 +4369,70 @@ def test_o_que_vai_ao_ar_tira_as_setinhas_sob_o_criador_e_o_registro_conta(monke
     _textos_da_tela(monkeypatch, dict(base, por_cima=[LEGENDA_SOBRE_A_MOLDURA]))
     assert edicao_video.editar_para_postar("v.mp4", _foto_jpg(), destino, "Creme")[1].startswith(
         edicao_video.SO_COM_O_EDITOR_1)
-    assert pedidos[-1] == ([], [(4.0 - folga, 6.0 + folga)])
+    assert pedidos[-1] == ([], [(4.0 - folga, 6.0 + espera)])
     registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_SOB_O_CRIADOR, "2000-01-01 00:00:00")
     assert (registro[-1][2], registro[-1][3]) == ("a moldura sumiu", "moldura: 1 trecho(s)")
+
+
+# O texto que a criadora escreveu na altura da nossa legenda da fala, nos últimos segundos do vídeo: o "Corre pro
+# carrinho" do vídeo do quadro do leão (vídeo do Rafael de 14/11, 08:15).
+TEXTO_NA_ALTURA_DA_LEGENDA = (30.0, 90.0, 63.0, 68.0, 10.8, 12.0)
+
+
+def test_legenda_da_fala_some_so_enquanto_o_texto_do_criador_passa_por_ela():
+    # Escolha do Rafael (14/11, P224 1): no vídeo do quadro do leão, nos últimos 2 s, a nossa legenda da fala ficou
+    # na mesma altura do texto da criadora, e as letras se misturavam. Ela some nesse tempo, como as setinhas
+    # (P218 1), e a parte de fora dele continua.
+    letreiros = edicao_video.letreiros_da_fala([(1.0, 4.0, "olha que lindo esse quadro"),
+                                                (9.0, 12.0, "corre pro carrinho")], 12.5)
+    assert [(letreiro[1], letreiro[2]) for letreiro in letreiros] == [(1.0, 4.0), (9.0, 12.0)]
+    folga = edicao_video.FOLGA_NO_TEMPO_DO_CRIADOR
+    ficam, sumiram = edicao_video.fala_fora_do_criador(letreiros, [TEXTO_NA_ALTURA_DA_LEGENDA, FRASE_NO_COMECO])
+    assert ficam == [letreiros[0], (letreiros[1][0], 9.0, round(10.8 - folga, 2)) + letreiros[1][3:]]
+    assert sumiram == [(10.8 - folga, 12.0)]
+    # O que o criador pôs longe dela (a frase no alto), o que veio sem o tempo e nada do criador não tiram nada.
+    assert edicao_video.fala_fora_do_criador(letreiros, [FRASE_NO_COMECO, TEXTO_NA_ALTURA_DA_LEGENDA[:4]]) == (
+        letreiros, [])
+    assert edicao_video.fala_fora_do_criador(letreiros, ()) == (letreiros, [])
+    # No meio de uma legenda, ficam as duas pontas; a ponta mais curta que MINIMO_NA_TELA sai.
+    meio = TEXTO_NA_ALTURA_DA_LEGENDA[:4] + (2.0, 2.2)
+    ficam, sumiram = edicao_video.fala_fora_do_criador(letreiros, [meio])
+    assert [(letreiro[1], letreiro[2]) for letreiro in ficam] == [(1.0, 1.7), (3.2, 4.0), (9.0, 12.0)]
+    quase_no_comeco = TEXTO_NA_ALTURA_DA_LEGENDA[:4] + (9.4, 12.0)
+    ficam, _ = edicao_video.fala_fora_do_criador(letreiros, [quase_no_comeco])
+    assert ficam == [letreiros[0]]
+
+
+def test_setinhas_esperam_o_texto_do_criador_sair_de_verdade():
+    # Pedido junto da P224 1: no vídeo do quadro do leão, a IA deu o fim do texto da criadora uns 0,7 s antes da
+    # hora, e as setinhas voltavam com ele ainda na tela. Agora elas esperam até depois do fim de verdade.
+    fim_da_ia = 11.3
+    frase = FRASE_SOBRE_AS_SETINHAS[:4] + (9.0, fim_da_ia)
+    trechos = edicao_video.tempos_sob_o_criador([edicao_video.caixa_das_setinhas()], [frase])
+    assert len(trechos) == 1 and trechos[0][1] >= fim_da_ia + 0.7
+    # O começo continua com a folga de sempre.
+    assert trechos[0][0] == 9.0 - edicao_video.FOLGA_NO_TEMPO_DO_CRIADOR
+
+
+def test_o_que_vai_ao_ar_tira_a_legenda_da_fala_sob_o_criador_e_o_registro_conta(monkeypatch, tmp_path):
+    # P224 1 no que vai ao ar: o Editor 2 tira a legenda da fala do tempo em que o texto do criador passa pelo
+    # lugar dela, e o registro diz em quantos trechos e por quantos segundos.
+    import registro_processos as rp
+    montados, _editados = _versoes_de_mentira(monkeypatch)
+    fala = [(0.5, 2.0, "Olha só esse vestido"), (3.0, 4.5, "o tecido é bem leve")]
+    texto_da_criadora = TEXTO_NA_ALTURA_DA_LEGENDA[:4] + (3.2, 4.5)
+    _textos_da_tela(monkeypatch, {"nome": "Vestido", "vantagem": "Tecido leve", "chamada": "Toque aqui embaixo",
+                                  "lugar": "alto", "legendas": fala, "legenda_no_video": False,
+                                  "por_cima": [texto_da_criadora]})
+    destino = str(tmp_path / "rascunho.mp4")
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Vestido") == (
+        "", edicao_video.COM_LEGENDAS + edicao_video.COM_AS_LEGENDAS_DA_FALA, "")
+    # Os 3 textos da tela e só a 1ª legenda: a 2ª fica toda no tempo do texto da criadora.
+    assert montados == [([(0.0, 12.0, 1.0)], 4)]
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_SOB_O_CRIADOR, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("a legenda da fala sumiu", "legenda: 1 trecho(s), 2 s")]
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DAS_LEGENDAS, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("postas", "1 trecho(s), 9 palavra(s) em 3 s de fala")]
 
 
 # A cor do produto que o criador pôs no canto de cima à direita, o vídeo todo (P213 1).

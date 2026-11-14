@@ -148,6 +148,11 @@ ENTRE_AS_LINHAS = 1.12              # da base de uma linha à da outra, em taman
 # DECISOES.md, Shopee Vídeo.
 # Um trecho mais curto que isto passa rápido demais para ler e sai.
 MINIMO_NA_TELA = 0.4
+# A legenda da fala some enquanto uma coisa que o criador pôs por cima do vídeo passa pelo lugar dela, como
+# as setinhas e a moldura do cartão (tempos_sob_o_criador): no vídeo do quadro do leão (vídeo do Rafael de
+# 14/11, 08:15), nos últimos 2 s, a nossa legenda ficou na mesma altura do texto que a criadora escreveu, e as
+# letras se misturavam. A parte da legenda fora desse tempo continua; a que sobra mais curta que
+# MINIMO_NA_TELA sai. Escolha do Rafael (14/11, P224 1): DECISOES.md, Shopee Vídeo.
 PROCESSO_DAS_LEGENDAS = "edição do vídeo: legendas da fala"
 # Uns minutos bastam para um vídeo curto; depois disso a edição desiste (e o vídeo fica para depois).
 ESPERA_MAXIMA = 300
@@ -1353,7 +1358,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     sem_seta = tempos_sob_o_criador([caixa_das_setinhas(subida)], por_cima) if escolhas["setinhas"] else []
     sem_moldura = tempos_sob_o_criador(linhas_da_moldura(subida), por_cima) if moldura else []
     if anotar is not None and (sem_seta or sem_moldura):
-        anotar["sob_o_criador"] = {"setinhas": sem_seta, "moldura": sem_moldura}
+        # Junto do que o Editor 2 já anotou da legenda da fala (P224 1).
+        anotar.setdefault("sob_o_criador", {}).update(setinhas=sem_seta, moldura=sem_moldura)
     # O som do vídeo no volume das nossas músicas, sem estourar (P222 1); com a música de fundo, ela é o som.
     ganho = 0.0
     if not musica:
@@ -1464,6 +1470,11 @@ LUGARES_DA_IA = ("alto_esquerda", "alto_direita", "meio", "esquerda", "direita")
 # com esta folga, em px do vídeo de 720x1280 e em segundos.
 FOLGA_DO_CRIADOR = 24
 FOLGA_NO_TEMPO_DO_CRIADOR = 0.3
+# O que some sob a coisa do criador (as setinhas, a moldura do cartão e a legenda da fala:
+# tempos_sob_o_criador) espera mais um pouco depois do fim dela para voltar: a IA dá esse fim um pouco cedo, e
+# no vídeo do quadro do leão (14/11) as setinhas voltariam uns 0,4 s antes de o texto da criadora sair da tela,
+# com a folga de FOLGA_NO_TEMPO_DO_CRIADOR. Pedido do Rafael junto da P224 1: DECISOES.md, Shopee Vídeo.
+ESPERA_DEPOIS_DO_CRIADOR = 1.0
 TOPO_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][1]
 LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
 LETRA_DOS_TEXTOS = (36, 28)         # a maior e a menor
@@ -3216,18 +3227,54 @@ def tempos_sob_o_criador(caixas, por_cima):
     """
     [(início, fim)] em segundos do vídeo, em ordem e sem se sobrepor, em que alguma coisa do criador (por_cima;
     só as que têm o tempo, como nos textos) passa por alguma das caixas (px do vídeo de 720x1280), com as folgas
-    de lugar e de tempo da P212 1: o tempo em que as setinhas ou a moldura somem (P218 1).
+    de lugar e de tempo da P212 1 e, no fim, a espera de ESPERA_DEPOIS_DO_CRIADOR: o tempo em que as setinhas
+    ou a moldura (P218 1) ou a legenda da fala (P224 1) somem.
     """
-    trechos = sorted((max(0.0, coisa[4] - FOLGA_NO_TEMPO_DO_CRIADOR), coisa[5] + FOLGA_NO_TEMPO_DO_CRIADOR)
-                     for coisa in por_cima or () if len(coisa) >= 6
-                     and any(_cruza_a_caixa(coisa, caixa) for caixa in caixas))
+    return _trechos_juntos((max(0.0, coisa[4] - FOLGA_NO_TEMPO_DO_CRIADOR), coisa[5] + ESPERA_DEPOIS_DO_CRIADOR)
+                           for coisa in por_cima or () if len(coisa) >= 6
+                           and any(_cruza_a_caixa(coisa, caixa) for caixa in caixas))
+
+
+def _trechos_juntos(trechos):
+    """[(início, fim)] em ordem, com os que se encostam ou se sobrepõem num só."""
     juntos = []
-    for inicio, fim in trechos:
+    for inicio, fim in sorted(trechos):
         if juntos and inicio <= juntos[-1][1]:
             juntos[-1] = (juntos[-1][0], max(juntos[-1][1], fim))
         else:
             juntos.append((inicio, fim))
     return juntos
+
+
+def fala_fora_do_criador(letreiros, por_cima):
+    """
+    (letreiros, trechos): as legendas da fala ([(imagem, início, fim, x, y)], letreiros_da_fala) sem o tempo em
+    que alguma coisa do criador (por_cima, as que têm o tempo) passa pelo lugar de cada uma, como as setinhas
+    (tempos_sob_o_criador): a parte de fora desse tempo continua, e a que sobra mais curta que MINIMO_NA_TELA sai.
+    trechos: [(início, fim)] em que alguma legenda sumiu, em ordem e sem se sobrepor. Escolha do Rafael (14/11,
+    P224 1): DECISOES.md, Shopee Vídeo.
+    """
+    do_criador = [coisa for coisa in por_cima or () if len(coisa) >= 6]
+    if not do_criador:
+        return list(letreiros), []
+    ficam, sumiram = [], []
+    for letreiro in letreiros:
+        imagem, inicio, fim, x, y = letreiro
+        largura, altura = _medidas_do_png(imagem)
+        sob = [(de, ate) for de, ate in tempos_sob_o_criador([(x, y, x + largura, y + altura)], do_criador)
+               if de < fim and ate > inicio]
+        if not sob:
+            ficam.append(letreiro)
+            continue
+        comeco = inicio
+        for de, ate in sob:
+            if de - comeco >= MINIMO_NA_TELA:
+                ficam.append((imagem, comeco, round(de, 2), x, y))
+            sumiram.append((max(de, inicio), min(ate, fim)))
+            comeco = max(comeco, round(ate, 2))
+        if fim - comeco >= MINIMO_NA_TELA:
+            ficam.append((imagem, comeco, fim, x, y))
+    return ficam, _trechos_juntos(sumiram)
 
 
 def _lugares_na_hora(inicio, fim, nos_momentos):
@@ -3338,11 +3385,15 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
                                    escolhas["miniatura"], lugares, por_cima, fora, nos_momentos)
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     da_fala = letreiros_da_fala(legendas, original, subida) if legendas else []
+    # A legenda da fala some enquanto o que o criador pôs por cima passa pelo lugar dela (P224 1).
+    da_fala, sem_fala = fala_fora_do_criador(da_fala, por_cima)
     letreiros += da_fala
     resumo = {"original": original, "lugar": lugar, "textos": textos, "miniatura": miniatura,
               "legendas": len(da_fala)}
     if fora:
         resumo["nao_entraram"] = fora
+    if sem_fala:
+        resumo["sob_o_criador"] = {"legenda": sem_fala}
     if not letreiros:
         return (editar(video, foto, destino, avisos, musica, capa, miniatura, outras_fotos, rotulo_de_ia, cor=cor,
                        escolhas=escolhas, por_cima=por_cima, anotar=resumo, segundos=segundos), resumo)
@@ -3386,9 +3437,12 @@ PROCESSO_DOS_TEXTOS_DE_FORA = "edição do vídeo: textos que não entraram"
 # Se a IA respondeu com a lista dos lugares livres do produto e do rosto (P212 1) e com a de cada momento dos
 # nossos textos (P220 1), em cada vídeo que vai ao ar.
 PROCESSO_DOS_LUGARES = "edição do vídeo: lugares dos textos"
-# As setinhas e a moldura do cartão que sumiram enquanto o que o criador pôs por cima passava pelo lugar
-# delas (P218 1): em quantos trechos e por quantos segundos do vídeo.
-PROCESSO_SOB_O_CRIADOR = "edição do vídeo: setinhas e moldura sob o criador"
+# As setinhas e a moldura do cartão (P218 1) e a legenda da fala (P224 1) que sumiram enquanto o que o criador
+# pôs por cima passava pelo lugar delas: em quantos trechos e por quantos segundos do vídeo.
+PROCESSO_SOB_O_CRIADOR = "edição do vídeo: setinhas, moldura e legenda sob o criador"
+# O que pode sumir sob o criador: a chave no "sob_o_criador" da edição, o nome no detalhe e no resultado.
+SOMEM_SOB_O_CRIADOR = (("setinhas", "setinhas", "as setinhas"), ("moldura", "moldura", "a moldura"),
+                       ("legenda", "legenda", "a legenda da fala"))
 COM_A_LISTA, SEM_A_LISTA = "com a lista da IA", "sem a lista da IA"
 COM_OS_MOMENTOS = "com os lugares de cada momento"
 NADA_DO_CRIADOR = "nada do criador por cima"
@@ -3397,20 +3451,22 @@ COM_O_TEMPO, SEM_O_TEMPO = "o que o criador pôs por cima, com o tempo", "o que 
 
 def _registrar_o_que_sumiu(sob, duracao=0.0):
     """
-    O registro das setinhas e da moldura que sumiram sob o que o criador pôs por cima (sob: o "sob_o_criador"
-    de editar, P218 1), com os segundos dentro do vídeo (duracao; sem ela, só os trechos).
+    O registro das setinhas, da moldura (P218 1) e da legenda da fala (P224 1) que sumiram sob o que o criador pôs
+    por cima (sob: o "sob_o_criador" de editar e do Editor 2), com os segundos dentro do vídeo (duracao; sem ela,
+    só os trechos).
     """
-    setinhas, moldura = (sob or {}).get("setinhas") or [], (sob or {}).get("moldura") or []
-    if not (setinhas or moldura):
+    sumiram = [(nome, artigo, (sob or {}).get(chave)) for chave, nome, artigo in SOMEM_SOB_O_CRIADOR
+               if (sob or {}).get(chave)]
+    if not sumiram:
         return
 
     def quanto(trechos):
         segundos = sum(max(0.0, min(fim, duracao) - inicio) for inicio, fim in trechos) if duracao else 0.0
         return f"{len(trechos)} trecho(s)" + (f", {segundos:.0f} s" if duracao else "")
-    resultado = ("as setinhas e a moldura sumiram" if setinhas and moldura
-                 else "as setinhas sumiram" if setinhas else "a moldura sumiu")
-    detalhe = "; ".join(f"{nome}: {quanto(trechos)}" for nome, trechos in (("setinhas", setinhas), ("moldura", moldura))
-                        if trechos)
+    nomes = [artigo for _nome, artigo, _trechos in sumiram]
+    juntos = nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1]
+    resultado = juntos + (" sumiram" if len(nomes) > 1 or nomes[0].startswith("as ") else " sumiu")
+    detalhe = "; ".join(f"{nome}: {quanto(trechos)}" for nome, _artigo, trechos in sumiram)
     registro_processos.registrar("shopee_video", PROCESSO_SOB_O_CRIADOR, resultado, detalhe, ok=None)
 
 
