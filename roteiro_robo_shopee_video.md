@@ -697,6 +697,31 @@ verificação 20 s depois de o robô abrir o app, como no Android virtual. Se a 
 ficar instável, a troca é um computador velho ligado em casa, com o celular no cabo
 USB; o resto do plano não muda.
 
+## Google Flow (P229, mapeado em 15/11/2026)
+
+O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
+`com.google.android.apps.labs.whisk`). Mapeado pelo explorar, sem gerar nada. O
+`flow_shopee_video.py` segue este caminho.
+
+- Abre pelo ícone "Flow" da tela inicial. O início tem os atalhos Editar vídeo, Editar
+  foto, Usar avatar e Animar foto (este abre direto o seletor de fotos do Android) e a
+  lista Projetos, com o botão Novo. O projeto novo ganha o nome do dia e da hora
+  ("nov. 15, 08:23 AM"); o do robô fica na lista.
+- No projeto: Pesquisar, Criar e Enviar embaixo. O Criar abre o pedido com o teclado:
+  os modos Imagem, Vídeo e Agente, a caixa "O que você quer fazer?", o + (Adicionar
+  mídia), o botão do modelo ("Omni 1.2 Flash", o formato e "x1") e o Gerar (a seta).
+- O + abre Capturar, Imagens e Biblioteca. Imagens abre o seletor de fotos do Android
+  (sem pedir permissão): a foto mais nova vem primeiro em Recentes ("Item Foto criado
+  em ..."); tocada, ela fica marcada e o Adicionar (1) embaixo a põe no pedido, como uma
+  miniatura acima da caixa do pedido (e o Flow a guarda no projeto).
+- O botão do modelo abre as opções, com o custo em cima ("A geração vai usar N créditos
+  de IA"): 16:9 ou 9:16, 360p ou 720p, x1 a x4, a duração (8 s) e a lista dos modelos,
+  cada um com o custo de um vídeo de 8 s em 720p: Omni 1.2 Flash 24 (o marcado), Omni
+  1.1 Flash 12 e Veo 3.1 - Lite 10. O Gerar fica à vista com as opções abertas.
+- O voltar com a lista dos modelos aberta fecha o pedido inteiro, de volta ao projeto.
+- Falta mapear: o que aparece depois do Gerar, o vídeo pronto e como baixá-lo (o teste
+  guarda a tela de minuto em minuto depois do Gerar).
+
 ## O que não se faz
 
 Disfarçar o Android para a Shopee não se faz: localização falsa, dados de sensor
