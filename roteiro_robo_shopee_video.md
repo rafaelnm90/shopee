@@ -735,8 +735,11 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   (Download, Movies, DCIM ou Pictures), e o robô procura o .mp4 mais novo que a marca que
   ele cria antes do toque. O Baixar abre a janela "Baixar vídeo" (vista no 1º Baixar de
   verdade, 15/11/2026): "720p Tamanho original" já marcado, "1080p Aumentar a resolução" e
-  o 4K apagado, com "Assine um plano com IA do Google"; o robô só toca no Baixar da janela
-  com o tamanho original marcado (o vídeo como foi gerado, sem custo) e nunca nas outras.
+  o 4K apagado, com "Assine um plano com IA do Google". No plano Pro do Rafael, o 1080p fica
+  livre e sem custo na tela: o robô marca o 1080p, confere que ficou marcado e toca no Baixar
+  da janela; sem o 1080p, ou com plano ou crédito na linha dele, baixa no tamanho original.
+  Nunca toca no 4K nem no plano. O 1080p é aumentado na hora do Baixar e pode levar uns
+  minutos (o robô espera até 5 min).
 - O Estender (embaixo do vídeo aberto) abre "Qual é a próxima etapa?" com "Estender 8s" e a
   duração na barra (6 s 18 créditos, 8 s 24, 10 s 30, no Omni 1.2 Flash, visto no celular do
   Rafael em 15/11). O vídeo estendido fica junto do original no mesmo quadro do projeto

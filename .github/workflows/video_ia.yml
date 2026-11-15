@@ -26,7 +26,7 @@ permissions:
 jobs:
   video_ia:
     runs-on: ubuntu-latest
-    timeout-minutes: 32
+    timeout-minutes: 47
     steps:
       - name: Vídeo de IA no servidor
         uses: appleboy/ssh-action@master
@@ -34,8 +34,9 @@ jobs:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
-          # O flow espera o robô soltar o celular (até 15 min) e olha a tela por 6 min depois do Gerar.
-          command_timeout: 30m
+          # O flow espera o robô soltar o celular (até 15 min), olha a tela por até 10 min depois do
+          # Gerar e espera o Baixar no 1080p por até 5 min.
+          command_timeout: 45m
           script: |
             cd ~/shopee
             case "${{ inputs.acao }}" in

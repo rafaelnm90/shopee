@@ -15,7 +15,8 @@ Criar → Vídeo → + (Adicionar mídia) → Imagens → a foto no seletor do A
 o custo em créditos) → Gerar. Depois do Gerar (mapeado no 1º vídeo, 15/11/2026): o vídeo novo
 aparece no projeto como "N% Gerando…" e, pronto, com o título que o Flow dá; o teste abre o
 mais novo pelo filtro Vídeos, confere no título que ele é do modelo do teste, toca em Mais opções
-→ Baixar e traz o arquivo do celular para o servidor. Com o celular já solto, a IA confere o
+→ Baixar (na janela da resolução, o 1080p quando ele vem sem custo; sem isso, o tamanho
+original) e traz o arquivo do celular para o servidor. Com o celular já solto, a IA confere o
 produto do vídeo com a foto do anúncio, e o vídeo vai ao privado do Rafael com o modelo, o
 custo, o produto, a cena e a conferência. O vídeo que não fica pronto ou não sai num teste é
 baixado e mandado no próximo, sem gerar outro.
@@ -75,13 +76,25 @@ VIDEO_ABERTO = re.compile(r"^v[íi]deo\b.*\b\d+ de \d+", re.I | re.S)
 # um arquivo vazio criado antes do toque: o vídeo baixado é o .mp4 mais novo que ela.
 PASTAS_DO_BAIXAR = ("/sdcard/Download", "/sdcard/Movies", "/sdcard/DCIM", "/sdcard/Pictures")
 MARCA_DO_BAIXAR = "/sdcard/Download/.flow_antes_do_baixar"
-ESPERA_DO_BAIXAR = 90
-# Depois do Baixar do menu, o tempo para a janela da resolução aparecer (sem ela, o download já começou).
+# O 1080p é o vídeo aumentado pelo Flow na hora do Baixar e pode levar uns minutos: o robô espera
+# até ESPERA_DO_BAIXAR, mas segue assim que o arquivo para de crescer.
+ESPERA_DO_BAIXAR = 5 * 60
+# Depois do Baixar do menu, o tempo para a janela da resolução aparecer (sem ela, o download já
+# começou) e, na janela, para a escolha ficar marcada.
 ESPERA_DA_JANELA_DO_BAIXAR = 8
+# Depois do Baixar da janela, o tempo para ela fechar (no 1080p, o Flow pode mostrar nela o andamento antes).
+ESPERA_PARA_A_JANELA_FECHAR = 30
 # Depois do toque na miniatura de uma versão, o tempo para o título do vídeo aberto mudar.
 ESPERA_DA_VERSAO = 6
-# Um tamanho maior no Baixar pode gastar crédito: se o Flow perguntar o tamanho (ou o Android pedir
-# uma permissão), o robô para sem escolher nada.
+# A janela "Baixar vídeo" (mapeada em 15/11/2026) vem com o "720p Tamanho original" marcado; o
+# "1080p Aumentar a resolução" fica livre no plano Pro e o 4K pede outro plano. O robô baixa no
+# 1080p e só quando a linha dele não fala em plano nem em crédito, e a janela não fala em crédito;
+# sem isso, no tamanho original. Nunca toca no 4K nem no plano. Pedido do Rafael (P229):
+# DECISOES.md, Shopee Vídeo.
+CUSTO_OU_PLANO = re.compile(r"cr[ée]dito|assin|plano|premium|ultra", re.I)
+CREDITO = re.compile(r"cr[ée]dito", re.I)
+# Fora dessa janela, outra pergunta de tamanho depois do Baixar (ou uma permissão do Android) para
+# o robô: ele não escolhe nada que não foi mapeado.
 ESCOLHA_NO_BAIXAR = re.compile(r"1080p|\b4k\b|upscal|aumentar|ampliar|melhorad", re.I)
 PACOTES_DE_PERMISSAO = ("com.android.permissioncontroller", "com.google.android.permissioncontroller")
 # O projeto do robô no Flow: o Rafael o renomeou para "Shopee Video" (15/11/2026) e pediu que
@@ -535,13 +548,15 @@ def arquivos_novos(d):
     achados = []
     for linha in saida.splitlines():
         partes = linha.strip().split(" ", 2)
-        if len(partes) == 3 and partes[0].isdigit() and partes[1].isdigit():
+        # O arquivo com ponto na frente (o ".pending-…" do Android) ainda está sendo gravado.
+        if len(partes) == 3 and partes[0].isdigit() and partes[1].isdigit() \
+                and not os.path.basename(partes[2]).startswith("."):
             achados.append((int(partes[0]), int(partes[1]), partes[2]))
     return [(caminho, tamanho) for _, tamanho, caminho in sorted(achados, reverse=True)]
 
 
 def pede_escolha(xml):
-    """Depois do Baixar, o Flow pergunta o tamanho ou o Android pede uma permissão? O robô não escolhe."""
+    """Depois da janela da resolução, o Flow pergunta outra coisa do tamanho ou o Android pede uma permissão? O robô não escolhe."""
     for el in ps.elementos(xml):
         if el["pacote"] in PACOTES_DE_PERMISSAO:
             return True
@@ -550,46 +565,88 @@ def pede_escolha(xml):
     return False
 
 
-def resolucao_do_baixar(xml):
+def _centro(el):
+    x1, y1, x2, y2 = el["caixa"]
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def janela_do_baixar(xml):
     """
-    A janela "Baixar vídeo" (mapeada em 15/11/2026): "720p Tamanho original" vem marcado, "1080p
-    Aumentar a resolução" e o 4K ("Assine um plano com IA do Google") ficam desmarcados. O centro do
-    botão Baixar da janela com o tamanho original marcado; "" com a janela aberta sem ele marcado;
-    None sem a janela.
+    A janela "Baixar vídeo": {"original", "1080p", "baixar"}; None sem ela. "original" e "1080p" são
+    {"centro" (o botão redondo da linha), "marcada"}; o "1080p" é None quando falta, quando a linha
+    dele fala em plano ou crédito ou quando a janela fala em crédito. "baixar" é o centro do botão
+    Baixar da janela (None sem ele).
     """
     elementos = [el for el in ps.elementos(xml) if el["pacote"] == PACOTE]
-    original = next((el for el in elementos if "tamanho original" in (el["descricao"] or el["texto"]).casefold()), None)
+
+    def texto(el):
+        return " ".join(f"{el['texto']} {el['descricao']}".split()).casefold()
+
+    def linha(achou):
+        el = next((el for el in elementos if achou(texto(el))), None)
+        if not el:
+            return None
+        x1, y1, x2, y2 = el["caixa"]
+        na_linha = [outro for outro in elementos if x1 <= outro["caixa"][0] and outro["caixa"][2] <= x2
+                    and y1 <= outro["caixa"][1] and outro["caixa"][3] <= y2]
+        redondo = next((outro for outro in na_linha if outro["classe"] == "RadioButton"), None)
+        if not redondo:
+            return None
+        return {"centro": _centro(redondo), "marcada": redondo["marcado"],
+                "texto": " ".join(texto(outro) for outro in na_linha)}
+
+    original = linha(lambda t: "tamanho original" in t)
     if not original:
         return None
-    _, y1, _, y2 = original["caixa"]
-    marcado = any(el["classe"] == "RadioButton" and el["marcado"] and y1 <= (el["caixa"][1] + el["caixa"][3]) // 2 <= y2
-                  for el in elementos)
-    botao = next((el for el in elementos if el["classe"] == "Button"
-                  and " ".join((el["descricao"] or el["texto"]).split()).casefold() == "baixar"), None)
-    if not marcado or not botao:
-        return ""
-    x1, b1, x2, b2 = botao["caixa"]
-    return (x1 + x2) // 2, (b1 + b2) // 2
+    maior = linha(lambda t: t.startswith("1080p"))
+    if maior and (CUSTO_OU_PLANO.search(maior["texto"]) or any(CREDITO.search(texto(el)) for el in elementos)):
+        maior = None
+    botao = next((el for el in elementos if el["classe"] == "Button" and texto(el) == "baixar"), None)
+    return {"original": original, "1080p": maior, "baixar": _centro(botao) if botao else None}
+
+
+def escolher_a_resolucao(d, xml):
+    """
+    Na janela do Baixar: marca o 1080p quando ele está livre (sem plano nem crédito na tela), confere
+    que ficou marcado e toca no Baixar da janela; sem o 1080p livre, baixa no tamanho original, que
+    vem marcado. A resolução escolhida ("1080p" ou "720p"). Nunca toca no 4K nem no plano. Pedido do
+    Rafael (P229): DECISOES.md, Shopee Vídeo.
+    """
+    janela = janela_do_baixar(xml)
+    if janela["1080p"] and not janela["1080p"]["marcada"]:
+        d.click(*janela["1080p"]["centro"])
+        xml = esperar(d, lambda x: bool(((janela_do_baixar(x) or {}).get("1080p") or {}).get("marcada")),
+                      ESPERA_DA_JANELA_DO_BAIXAR)
+        if not xml:
+            raise Parada("baixar: o 1080p não ficou marcado; o robô não baixa sem conferir a resolução")
+        janela = janela_do_baixar(xml)
+    if janela["1080p"] and janela["1080p"]["marcada"]:
+        escolhida = "1080p"
+    elif janela["original"]["marcada"]:
+        escolhida = "720p"
+    else:
+        raise Parada("baixar: nem o 1080p nem o tamanho original estão marcados; o robô não escolhe outra resolução")
+    if not janela["baixar"]:
+        raise Parada("baixar: a janela da resolução não tem o botão Baixar")
+    d.click(*janela["baixar"])
+    if not esperar(d, lambda x: janela_do_baixar(x) is None, ESPERA_PARA_A_JANELA_FECHAR):
+        raise Parada("baixar: a janela da resolução não fechou depois do Baixar")
+    return escolhida
 
 
 def baixar(d):
     """
-    No vídeo aberto: Mais opções → Baixar → (na janela da resolução, o tamanho original, que já vem
-    marcado e é o vídeo como foi gerado, sem custo) Baixar. O caminho do arquivo no celular, quando ele
-    para de crescer. O robô nunca toca no 1080p (aumentar a resolução), no 4K nem no plano: sem o
-    original marcado, ou com outra escolha na tela, para.
+    No vídeo aberto: Mais opções → Baixar → (na janela da resolução, o 1080p quando ele vem sem
+    custo; sem isso, o tamanho original) Baixar. (O caminho do arquivo no celular, quando ele para de
+    crescer; a resolução escolhida, "" quando o Flow baixou sem perguntar.)
     """
     d.shell(["touch", MARCA_DO_BAIXAR])
     # A hora do arquivo baixado tem de passar a da marca.
     time.sleep(1.1)
     tocar(d, "Mais opções", "mais opções do vídeo")
     tocar(d, "Baixar", "baixar")
-    janela = esperar(d, lambda x: resolucao_do_baixar(x) is not None, ESPERA_DA_JANELA_DO_BAIXAR)
-    if janela:
-        ponto = resolucao_do_baixar(janela)
-        if not ponto:
-            raise Parada("baixar: o tamanho original não está marcado; o robô não escolhe outra resolução")
-        d.click(*ponto)
+    janela = esperar(d, lambda x: janela_do_baixar(x) is not None, ESPERA_DA_JANELA_DO_BAIXAR)
+    resolucao = escolher_a_resolucao(d, janela) if janela else ""
     fim, anterior = time.monotonic() + ESPERA_DO_BAIXAR, None
     while True:
         xml = _tela(d)
@@ -597,7 +654,7 @@ def baixar(d):
             raise Parada("baixar: o Flow pediu uma escolha (tamanho ou permissão); o robô não escolhe pelo Rafael")
         novos = arquivos_novos(d)
         if novos and novos[0][1] > 0 and novos[0] == anterior:
-            return novos[0][0]
+            return novos[0][0], resolucao
         anterior = novos[0] if novos else None
         if time.monotonic() >= fim:
             raise Parada("baixar: o arquivo do vídeo não apareceu no celular")
@@ -658,6 +715,11 @@ def legenda_do_video(teste, modelo, custo, conferencia):
               f"📦 Produto: {teste.get('nome', '')}",
               f"🎥 Cena: {teste.get('cena', '')}",
               f"🔎 A IA conferiu: {conferido}"]
+    video = (teste.get("videos") or {}).get(modelo) or {}
+    resolucao = {"1080p": "1080p (aumentada pelo Flow no Baixar)", "720p": "720p (o tamanho original)"}.get(
+        video.get("resolucao"))
+    if resolucao:
+        linhas.append(f"📐 Resolução: {resolucao}" + (f", {video['tamanho']}" if video.get("tamanho") else ""))
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     linhas.append("Nada foi postado: o vídeo é só para você comparar os modelos.")
@@ -751,9 +813,13 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
         abrir_o_video_novo(d, modelo)
         print("Flow: vídeo aberto (o modelo conferido no título)")
         local = os.path.join(PASTA, f"video_{numero_do_modelo(modelo)}.mp4")
-        puxar(d, baixar(d), local)
-        marcar_video(modelo, estado="baixado", arquivo=local)
-        print(f"Flow: vídeo baixado ({os.path.getsize(local) / 1e6:.1f} MB, {videos.duracao(local):.0f} s)")
+        remoto, resolucao = baixar(d)
+        puxar(d, remoto, local)
+        largura, altura = asyncio.run(videos.dimensoes(local, timeout=30))
+        marcar_video(modelo, estado="baixado", arquivo=local, resolucao=resolucao,
+                     tamanho=f"{largura}x{altura}" if largura and altura else "")
+        print(f"Flow: vídeo baixado ({resolucao or 'sem a janela da resolução'}, "
+              f"{os.path.getsize(local) / 1e6:.1f} MB, {videos.duracao(local):.0f} s)")
         return 0
     except Parada as e:
         casos_robo.guardar(d, "flow", "parou", str(e), passo="flow")
