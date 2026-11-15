@@ -844,3 +844,92 @@ def test_versoes_sem_a_do_modelo_do_teste_nao_baixam(celular):
     assert flow.teste() == 1
     assert not celular.baixado and celular.mandados == []
     assert ("parou", "baixar: o vídeo mais novo não é do modelo do teste") in celular.guardados
+
+
+# --- A produção: 1 vídeo de IA por dia, que vira rascunho do robô (P232 1) ---
+
+def _escolhido():
+    return {"id": "v1", "link": "https://s.shopee.com.br/abc", "nome": "Copo Térmico Inox", "foto": _jpeg(),
+            "estilo": "comedia", "prompt": "The exact stainless steel tumbler from the photo, a funny kitchen scene.",
+            "cena": "O copo na bancada da cozinha.", "item": "456", "valor": 3.5}
+
+
+def test_producao_gera_no_omni_1_2_baixa_e_confere_sem_mandar_ao_privado(celular, capsys):
+    # Escolha do Rafael (15/11, P232 1): 1 vídeo por dia no Omni 1.2 Flash, que vira rascunho do robô.
+    atual = flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    assert atual["estado"] == "escolhido" and (atual["modelo"], atual["custo"]) == ("Omni 1.2 Flash", 24)
+    assert atual["foto"].endswith("producao_2026-11-16.jpg") and atual["id_video"] == "v1"
+    assert flow.estilos_recentes()[-1] == "comedia"
+    assert flow.producao_no_celular(celular, atual) is True
+    assert celular.geracoes == 1 and celular.modelo == "Omni 1.2 Flash"
+    atual = flow.producao()
+    assert atual["estado"] == "baixado" and atual["arquivo"].endswith("producao_2026-11-16.mp4")
+    assert atual["gerado_em"] and atual["custo"] == 24
+    assert flow.video_pronto() is None
+    assert flow.conferir_a_producao() == "pronto"
+    assert flow.video_pronto()["conferencia"]["mesmo"] is True
+    # A foto sai da galeria, e nada vai ao privado: o vídeo vira um rascunho do robô.
+    assert any(partes[:2] == ["rm", "-f"] for partes in celular.comandos) and celular.mandados == []
+    saida = capsys.readouterr().out
+    assert "Gerar tocado (Omni 1.2 Flash, 24 créditos)" in saida and "Copo" not in saida and "tumbler" not in saida
+
+
+def test_producao_com_outro_produto_no_video_e_descartada(celular, monkeypatch):
+    async def conferir(caminho, prompt, imagens=None):
+        return '{"mesmo_produto": false, "diferencas": "a tampa é outra", "defeitos": ""}'
+
+    monkeypatch.setattr(flow.api_gemini, "analisar_video_gemini", conferir)
+    atual = flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    assert flow.producao_no_celular(celular, atual) is True
+    assert flow.conferir_a_producao() == "descartado" and flow.video_pronto() is None
+    assert "o produto muda: a tampa é outra" in flow.legenda_da_producao(flow.producao())
+
+
+def test_producao_ja_gerada_so_baixa_sem_gerar_outro(celular):
+    flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    flow.guardar_producao(estado="gerando", gerado_em="2026-11-16 08:00:00")
+    celular.gerado, celular.modelo_do_video = True, "Omni 1.2 Flash"
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    assert celular.geracoes == 0 and flow.producao()["estado"] == "baixado"
+
+
+def test_producao_parada_no_flow_guarda_o_caso(celular, monkeypatch):
+    monkeypatch.setattr(flow, "ESPERA_DO_GERANDO", 0.05)
+    celular.falha_ao_gerar = True
+    atual = flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    with pytest.raises(flow.Parada):
+        flow.producao_no_celular(celular, atual)
+    assert ("parou", "gerar: o Flow não mostrou o vídeo sendo gerado") in celular.guardados
+    assert flow.producao()["estado"] == "gerando"
+
+
+def test_producao_nova_tira_os_arquivos_da_de_antes(celular):
+    flow.comecar_producao("2026-11-15", _escolhido(), 1)
+    antiga = flow.producao()["foto"]
+    flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    import os
+    assert not os.path.exists(antiga) and os.path.exists(flow.producao()["foto"])
+
+
+def test_legenda_da_producao_e_bebida_em_espera_no_pedido(monkeypatch):
+    legenda = flow.legenda_da_producao({"modelo": "Omni 1.2 Flash", "custo": 24, "estilo": "fala",
+                                        "cena": "Uma moça mostra o copo.",
+                                        "conferencia": {"mesmo": True, "diferencas": "", "defeitos": "a mão muda"}})
+    for trecho in ("Omni 1.2 Flash (24 créditos de IA)", "pessoa falando do produto", "Uma moça mostra o copo.",
+                   "o produto é o mesmo da foto do anúncio", "O que parece IA: a mão muda"):
+        assert trecho in legenda
+    # Bebida alcoólica em espera (P111): a IA diz que a foto não serve, antes de gastar o crédito do vídeo.
+    pedidos = []
+
+    async def ia(prompt, imagens=None):
+        pedidos.append(prompt)
+        return json.dumps({"serve": False, "motivo": "bebida", "estilo": "", "prompt": "", "cena": ""})
+
+    monkeypatch.setattr(flow.ps, "anuncio_do_produto", lambda video: {"foto": _jpeg(), "nome": "Vinho Tinto"})
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", ia)
+    monkeypatch.setattr(flow.assistente, "BEBIDA_EM_ESPERA", True)
+    assert flow.pedido_para_o_produto("https://s.shopee.com.br/vinho") is None
+    assert flow.TRECHO_DA_BEBIDA in pedidos[0]
+    monkeypatch.setattr(flow.assistente, "BEBIDA_EM_ESPERA", False)
+    flow.pedido_para_o_produto("https://s.shopee.com.br/vinho")
+    assert flow.TRECHO_DA_BEBIDA not in pedidos[1]

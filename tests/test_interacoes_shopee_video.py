@@ -319,6 +319,8 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.random, "uniform", lambda a, b: 0)
     # A limpeza das 4h que volta no mesmo dia (P137) tem testes próprios: no banco novo do teste, ela nunca rodou.
     monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
+    # O vídeo de IA do dia (P232 1) tem testes próprios (test_robo_shopee_video).
+    monkeypatch.setattr(robo, "video_de_ia_pendente", lambda config, agora=None: False)
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
 
 

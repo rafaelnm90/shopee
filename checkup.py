@@ -434,6 +434,7 @@ SEM_META = {
     ("shopee_video", "editar o rascunho"), ("shopee_video", "refazer o rascunho editado"),
     ("shopee_video", "horário sem rascunho"), ("shopee_video", "plano de hoje refeito"),
     ("shopee_video", "tela do celular"), ("shopee_video", "alerta do celular"),
+    ("shopee_video", "vídeo de IA do dia"),
     ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
 }
 
@@ -1494,7 +1495,8 @@ PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário"
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
                         "preparo interrompido", "próprio post:")
-ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("post_antigo",), ("rascunho", "postar", "comentar_post", "refazer")
+# O vídeo de IA do dia no Flow (P232 1) usa o celular como um preparo.
+ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("post_antigo",), ("rascunho", "postar", "comentar_post", "refazer", "video_ia")
 # Apagar um rascunho recusado não é preparo, mas conta na hora do descurtir. Decisão do Rafael:
 # DECISOES.md, Shopee Vídeo.
 ACOES_EM_QUALQUER_HORARIO = ("apagar",)
