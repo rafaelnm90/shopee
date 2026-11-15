@@ -434,13 +434,19 @@ def montar_o_pedido(d, prompt, modelo, custo):
     if not atual:
         raise Parada("modelo: o botão do modelo não apareceu")
     tocar(d, f"{atual} x", "abrir o modelo")
-    for opcao in ("9:16", "720p", "x1"):
-        tocar(d, opcao, f"opção {opcao}")
+    # O Flow abre no último modelo usado, e as opções mudam com o modelo: primeiro o modelo, depois
+    # as opções dele. O Veo 3.1 - Lite não tem a escolha da resolução (visto em 15/11/2026); o custo
+    # conferido antes do Gerar pega a resolução errada nos modelos que a têm.
     if atual != modelo:
         tocar(d, atual, "lista de modelos")
         tocar(d, modelo, "escolher o modelo")
         if not esperar(d, lambda x: modelo_no_pedido(x) == modelo):
             raise Parada("modelo: o escolhido não ficou marcado")
+    xml = _tela(d)
+    for opcao in ("9:16", "720p", "x1"):
+        if opcao == "720p" and not (ps.achar(xml, "720p") or ps.achar(xml, "360p")):
+            continue
+        tocar(d, opcao, f"opção {opcao}")
     return esperar(d, lambda x: custo_na_tela(x) is not None) or _tela(d)
 
 

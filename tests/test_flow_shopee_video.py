@@ -175,9 +175,11 @@ class Flow:
                 nos += [((259, 1400, 823, 1460), _no((259, 1400, 823, 1460), desc="A geração vai usar ", clicavel=False), ""),
                         ((535, 1460, 823, 1520), _no((535, 1460, 823, 1520), "android.widget.Button",
                                                       f"{self.custos[self.modelo]} créditos de IA"), ""),
-                        ((540, 1550, 1051, 1650), _no((540, 1550, 1051, 1650), desc="9:16\nGuia 2 de 2"), ""),
-                        ((540, 1660, 1051, 1760), _no((540, 1660, 1051, 1760), desc="720p\nGuia 2 de 2"), ""),
-                        ((29, 1770, 284, 1870), _no((29, 1770, 284, 1870), desc="x1\nGuia 1 de 4"), ""),
+                        ((540, 1550, 1051, 1650), _no((540, 1550, 1051, 1650), desc="9:16\nGuia 2 de 2"), "")]
+                # Como no app (15/11): o Veo 3.1 - Lite não tem a escolha da resolução.
+                if self.modelo != "Veo 3.1 - Lite":
+                    nos.append(((540, 1660, 1051, 1760), _no((540, 1660, 1051, 1760), desc="720p\nGuia 2 de 2"), ""))
+                nos += [((29, 1770, 284, 1870), _no((29, 1770, 284, 1870), desc="x1\nGuia 1 de 4"), ""),
                         ((24, 2244, 1056, 2370), _no((24, 2244, 1056, 2370), desc=self.modelo), "lista")]
             if self.lista:
                 nos += [((24, 1880, 1056, 1990), _no((24, 1880, 1056, 1990), desc="Omni 1.1 Flash\n12 créditos / video"),
@@ -489,6 +491,16 @@ def test_arquivos_novos_do_baixar():
 
     assert flow.arquivos_novos(Celular()) == [("/sdcard/Download/Vídeo com espaço.mp4", 2048),
                                               ("/sdcard/Download/velho.mp4", 100)]
+
+
+def test_flow_aberto_no_veo_lite_troca_o_modelo_antes_das_opcoes(celular):
+    # O vídeo 2 do teste (15/11): o Flow abriu no último modelo usado, o Veo 3.1 - Lite, que não tem
+    # a escolha da resolução; o robô parava procurando o 720p. Agora escolhe o modelo e depois as opções.
+    celular.modelo = "Veo 3.1 - Lite"
+    flow.guardar(teste=celular.teste)
+    assert flow.no_celular(celular.teste, "Omni 1.1 Flash", 12, sem_gerar=False) == 0
+    assert celular.gerado and celular.modelo_do_video == "Omni 1.1 Flash"
+    assert not any(resultado == "parou" for resultado, _ in celular.guardados)
 
 
 def test_custo_diferente_na_tela_nao_gera(celular, capsys):
