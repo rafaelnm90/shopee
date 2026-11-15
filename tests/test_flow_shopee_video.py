@@ -285,6 +285,25 @@ def test_escolhe_o_primeiro_produto_com_foto_boa_e_o_log_nao_tem_o_produto(bm, m
     assert flow.teste_guardado()["foto"].endswith("foto_do_teste.jpg")
 
 
+def test_foto_contada_com_as_opcoes_do_modelo_abertas():
+    # Como no ensaio de 15/11: com as opções abertas, a caixa do pedido ocupa a tela toda, e a
+    # miniatura da foto fica dentro dela, acima do +.
+    aberta = ('<hierarchy>' + _no((0, 950, 1080, 2394), "android.widget.EditText", texto="The exact product, slow push-in.")
+              + _no((63, 992, 210, 1118), "android.widget.ImageView")
+              + _no((42, 1643, 168, 1769), "android.widget.Button", "Adicionar mídia")
+              + _no((573, 1643, 870, 1769), "android.widget.Button", "Veo 3.1 - Lite\nx1")
+              + _no((536, 1866, 820, 1929), "android.widget.Button", "10 créditos de IA") + '</hierarchy>')
+    assert flow.fotos_no_pedido(aberta) == 1
+    assert flow.pronto_para_gerar(aberta, "The exact product, slow push-in.", "Veo 3.1 - Lite", 10) == ""
+    # Sem as opções: a miniatura acima da caixa do pedido, e o + embaixo dela.
+    fechada = ('<hierarchy>' + _no((66, 1950, 213, 2076), "android.widget.ImageView")
+               + _no((45, 2076, 1035, 2202), "android.widget.EditText")
+               + _no((45, 2202, 171, 2328), "android.widget.Button", "Adicionar mídia") + '</hierarchy>')
+    assert flow.fotos_no_pedido(fechada) == 1
+    duas = fechada.replace('</hierarchy>', _no((230, 1950, 377, 2076), "android.widget.ImageView") + '</hierarchy>')
+    assert flow.fotos_no_pedido(duas) == 2
+
+
 def test_leitura_das_telas():
     folha = ('<hierarchy>' + _no((535, 1460, 823, 1520), "android.widget.Button", "24 créditos de IA")
              + _no((548, 1200, 867, 1300), "android.widget.Button", "Omni 1.2 Flash\nx1")

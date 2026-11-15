@@ -283,13 +283,19 @@ def texto_do_pedido(xml):
 
 
 def fotos_no_pedido(xml):
-    """Quantas miniaturas de foto o pedido tem: as imagens tocáveis do app logo acima da caixa do pedido."""
-    caixa = next((el["caixa"] for el in ps.elementos(xml)
-                  if el["pacote"] == PACOTE and el["classe"] == "EditText"), None)
-    if not caixa:
+    """
+    Quantas miniaturas de foto o pedido tem: as imagens tocáveis do app, sem descrição, logo acima do
+    + (Adicionar mídia). Com as opções do modelo abertas, a caixa do pedido ocupa a tela toda e a
+    miniatura fica dentro dela (visto no ensaio de 15/11); o + fica abaixo da miniatura nos dois jeitos.
+    """
+    elementos = ps.elementos(xml)
+    mais = next((el["caixa"] for el in elementos
+                 if el["pacote"] == PACOTE and el["descricao"] == "Adicionar mídia"), None)
+    if not mais:
         return 0
-    return sum(1 for el in ps.elementos(xml) if el["pacote"] == PACOTE and el["classe"] == "ImageView"
-               and el["clicavel"] and caixa[1] - 300 <= el["caixa"][3] <= caixa[1] + 10)
+    return sum(1 for el in elementos
+               if el["pacote"] == PACOTE and el["classe"] == "ImageView" and el["clicavel"] and not el["descricao"]
+               and 60 <= el["caixa"][2] - el["caixa"][0] <= 300 and mais[1] - 900 <= el["caixa"][3] <= mais[1])
 
 
 def foto_no_pedido(xml):
