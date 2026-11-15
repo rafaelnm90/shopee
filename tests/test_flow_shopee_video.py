@@ -19,11 +19,13 @@ MENU_DO_VIDEO = (("Gostei", 278, ""), ("Renomear", 425, ""), ("Reutilizar comand
                  ("Compartilhar no YouTube", 1055, ""), ("Enviar feedback", 1202, ""))
 
 
-def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid="", marcado=False):
+def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid="", marcado=False,
+        foco=False):
     x1, y1, x2, y2 = caixa
     return (f'<node index="0" text={quoteattr(texto)} resource-id={quoteattr(rid)} class="{classe}" '
             f'package="{pacote}" content-desc={quoteattr(desc)} clickable="{str(clicavel).lower()}" '
-            f'checked="{str(marcado).lower()}" visible-to-user="true" bounds="[{x1},{y1}][{x2},{y2}]" />')
+            f'checked="{str(marcado).lower()}" focused="{str(foco).lower()}" visible-to-user="true" '
+            f'bounds="[{x1},{y1}][{x2},{y2}]" />')
 
 
 class Campo:
@@ -31,7 +33,12 @@ class Campo:
         self.celular, self.exists = celular, True
 
     def set_text(self, texto):
-        self.celular.texto = texto
+        # O campo em foco: o nome do projeto no Renomear, ou o texto do pedido.
+        if self.celular.tela == "renomear":
+            if not self.celular.nome_nao_entra:
+                self.celular.nome_no_campo = texto
+        else:
+            self.celular.texto = texto
 
 
 class Resposta:
@@ -60,8 +67,12 @@ class Flow:
         self.original_marcado, self.maior_marcado, self.toques_proibidos = True, False, []
         self.sem_1080p = self.custo_no_1080p = self.aviso_de_credito = self.maior_nao_marca = False
         self.geracoes, self.puxados = 0, []
-        # O projeto do robô na lista do início (o Rafael o renomeou em 15/11) e os toques fora dele.
-        self.projeto_do_robo, self.fora_do_projeto = "Shopee Video", []
+        # A lista do início, de cima para baixo (o projeto novo entra no alto), quantos projetos cabem na
+        # tela e quanto ela rolou; o projeto aberto, o nome no campo do Renomear e os toques fora do
+        # projeto do robô (o Novo e outro projeto). O do robô o Rafael renomeou em 15/11.
+        self.projetos, self.cabem, self.rolagem = ["nov. 15, 12:09\u202fPM", "Shopee Video"], 4, 0
+        self.aberto, self.nome_no_campo, self.nome_nao_entra = "", "", False
+        self.fora_do_projeto = []
         # As versões do vídeo aberto (o modelo de cada uma) e a que aparece; vazio = só a do vídeo gerado.
         self.versoes, self.versao = [], 0
         # Como no app (15/11): a coluna das versões só aparece algumas leituras depois do player.
@@ -69,10 +80,18 @@ class Flow:
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
-        self.tela = "inicio"
+        self.tela, self.rolagem = "inicio", 0
 
     def screen_on(self):
         pass
+
+    def window_size(self):
+        return 1080, 2400
+
+    def swipe(self, x1, y1, x2, y2, duracao=0):
+        # O dedo de baixo para cima desce a lista do início, 3 projetos por vez, até o fim dela.
+        if self.tela == "inicio" and y2 < y1:
+            self.rolagem = min(self.rolagem + 3, max(0, len(self.projetos) - self.cabem))
 
     def __call__(self, **seletor):
         return Campo(self)
@@ -95,18 +114,35 @@ class Flow:
         """(caixa, xml do nó, o que o toque faz) da tela de agora."""
         nos = []
         if self.tela == "inicio":
-            nos += [((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "novo"),
-                    ((42, 900, 1038, 1080), _no((42, 900, 1038, 1080), desc="O título do projeto é nov. 15, 12:09 PM",
-                                                 clicavel=False), "outro")]
-            if self.projeto_do_robo:
-                # Como no Flow (15/11): a descrição diz o título e quantos vídeos e imagens o projeto tem.
-                nos.append(((42, 1100, 1038, 1300), _no((42, 1100, 1038, 1300), clicavel=False,
-                                                        desc=f"O título do projeto é {self.projeto_do_robo}, 1 vídeo, 4 imagens"),
-                            "projeto"))
+            nos.append(((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "novo"))
+            for i, nome in enumerate(self.projetos[self.rolagem:self.rolagem + self.cabem]):
+                # Como no Flow (15/11): a descrição diz o título e, com algo dentro, quantos vídeos e
+                # imagens o projeto tem; cada linha tem o seu Mais opções à direita.
+                y = 1076 + 273 * i
+                desc = f"O título do projeto é {nome}" + (", 1 vídeo, 4 imagens" if nome == "Shopee Video" else "")
+                nos += [((42, y, 891, y + 252), _no((42, y, 891, y + 252), desc=desc, clicavel=False), f"abrir:{nome}"),
+                        ((912, y + 63, 1038, y + 189), _no((912, y + 63, 1038, y + 189), "android.widget.Button",
+                                                           "Mais opções"), "proibido")]
             if self.termos:
-                nos.append(((0, 1400, 1080, 1500), _no((0, 1400, 1080, 1500), texto="Aceitar os Termos de Serviço"), ""))
+                nos.append(((0, 2300, 1080, 2400), _no((0, 2300, 1080, 2400), texto="Aceitar os Termos de Serviço"), ""))
+        elif self.tela == "menu_projeto":
+            # O menu do Mais opções do alto do projeto (15/11): o robô só pode tocar no Renomear.
+            nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "projeto"))
+            nos += [((565, y1, 975, y2), _no((565, y1, 975, y2), "android.widget.Button", nome), acao)
+                    for nome, y1, y2, acao in (("Renomear", 278, 383, "renomear"), ("Grade: Grande", 383, 488, ""),
+                                                ("Ver lixeira", 530, 635, "proibido"),
+                                                ("Excluir projeto", 677, 782, "proibido"))]
+        elif self.tela == "renomear":
+            # O Renomear (15/11): o nome num campo no alto, em foco, com o ✓ e o ✕ sem descrição ao lado.
+            nos += [((0, 152, 1080, 278), _no((0, 152, 1080, 278), "android.widget.EditText", texto=self.nome_no_campo,
+                                               foco=True), ""),
+                    ((765, 152, 891, 278), _no((765, 152, 891, 278), "android.widget.Button"), "ok_nome"),
+                    ((912, 152, 1038, 278), _no((912, 152, 1038, 278), "android.widget.Button"), "cancelar_nome")]
         elif self.tela == "projeto":
-            nos += [((0, 152, 1080, 278), _no((0, 152, 1080, 278), desc=self.projeto_do_robo, clicavel=False), ""),
+            nos += [((0, 152, 1080, 278), _no((0, 152, 1080, 278), desc=self.aberto, clicavel=False), ""),
+                    ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Voltar"), "inicio"),
+                    ((912, 152, 1038, 278), _no((912, 152, 1038, 278), "android.widget.Button", "Mais opções"),
+                     "menu_projeto"),
                     ((42, 330, 191, 425), _no((42, 330, 191, 425), "android.widget.Button", "Tudo", clicavel=False), ""),
                     ((500, 330, 737, 425), _no((500, 330, 737, 425), "android.widget.Button", "Vídeos", clicavel=False),
                      "filtro"),
@@ -232,8 +268,24 @@ class Flow:
                 self.gerado, self.gerando_leituras, self.modelo_do_video = True, self.leituras_ao_gerar, self.modelo
         elif acao.startswith("versao:"):
             self.versao = int(acao.split(":")[1])
-        elif acao in ("novo", "outro"):
-            self.fora_do_projeto.append(acao)
+        elif acao.startswith("abrir:"):
+            self.aberto, self.tela = acao.split(":", 1)[1], "projeto"
+            if self.aberto != "Shopee Video":
+                self.fora_do_projeto.append("outro")
+        elif acao == "novo":
+            # Como no Flow (15/11): o Novo cria um projeto vazio com o nome do dia e já o abre.
+            self.projetos.insert(0, "nov. 15, 4:30\u202fPM")
+            self.aberto, self.tela = "nov. 15, 4:30\u202fPM", "projeto"
+            self.fora_do_projeto.append("novo")
+        elif acao in ("inicio", "menu_projeto"):
+            self.tela = acao
+        elif acao == "renomear":
+            self.tela, self.nome_no_campo = "renomear", self.aberto
+        elif acao == "ok_nome":
+            self.projetos[self.projetos.index(self.aberto)] = self.nome_no_campo
+            self.aberto, self.tela = self.nome_no_campo, "projeto"
+        elif acao == "cancelar_nome":
+            self.tela = "projeto"
         elif acao == "filtro":
             self.filtro = True
         elif acao == "antes":
@@ -267,6 +319,7 @@ def celular(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(flow.casos_robo, "guardar",
                         lambda d, acao, resultado, motivo, passo="", **extra: guardados.append((resultado, motivo)) or "caso")
     monkeypatch.setattr(flow, "ESPERA_DA_TELA", 0.2)
+    monkeypatch.setattr(flow, "ESPERA_DA_LISTA", 0.2)
     monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
     monkeypatch.setattr(flow, "ESPERA_DA_VERSAO", 0.2)
     monkeypatch.setattr(flow, "PASTA", str(tmp_path / "flow"))
@@ -698,14 +751,59 @@ def test_leitura_das_telas():
     assert flow.custo_na_tela('<hierarchy></hierarchy>') is None
 
 
-def test_sem_o_projeto_shopee_video_para_sem_criar_outro(celular):
-    # O Rafael renomeou o projeto do robô para Shopee Video e pediu tudo nele (15/11): sem ele na lista,
-    # o robô não cria um projeto novo nem entra em outro.
-    celular.projeto_do_robo = ""
-    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=False) == 1
-    assert celular.fora_do_projeto == [] and not celular.gerado
-    assert ("parou", "abrir o Flow: o projeto Shopee Video não está na lista; o robô não cria outro") \
-        in celular.guardados
+def test_sem_o_projeto_shopee_video_cria_um_com_o_nome_e_usa(celular, capsys):
+    # Pedido do Rafael (15/11): sem o projeto Shopee Video na lista (apagado), o robô cria outro com esse
+    # nome e o usa de padrão. O Novo abre um projeto vazio com o nome do dia; o Renomear o troca.
+    celular.projetos.remove("Shopee Video")
+    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=True) == 0
+    assert celular.projetos == ["Shopee Video", "nov. 15, 12:09\u202fPM"]
+    assert celular.fora_do_projeto == ["novo"] and celular.toques_proibidos == []
+    assert celular.aberto == "Shopee Video" and celular.foto and celular.texto == celular.teste["prompt"]
+    assert db.ler_config(flow.CHAVE, {})["projeto_criado_em"][:10] == flow.agora()[:10]
+    assert f"o projeto {flow.PROJETO_DO_ROBO} não estava na lista; criado" in capsys.readouterr().out
+
+
+def test_projeto_ja_criado_hoje_nao_vira_outro(celular):
+    # O projeto criado que não ficou com o nome (ou que sumiu de novo) não vira outro no mesmo dia.
+    celular.projetos.remove("Shopee Video")
+    flow.guardar(projeto_criado_em=flow.agora())
+    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=True) == 1
+    assert celular.fora_do_projeto == [] and celular.projetos == ["nov. 15, 12:09\u202fPM"]
+    assert any("já criou um projeto hoje" in motivo for _, motivo in celular.guardados)
+
+
+def test_nome_que_nao_entra_no_campo_nao_e_confirmado(celular):
+    celular.projetos.remove("Shopee Video")
+    celular.nome_nao_entra = True
+    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=True) == 1
+    assert (828, 215) not in celular.toques and celular.projetos[0] == "nov. 15, 4:30\u202fPM"
+    assert ("parou", "renomear o projeto: o nome não entrou no campo") in celular.guardados
+    assert not celular.gerado and celular.toques_proibidos == []
+
+
+def test_projeto_mais_abaixo_na_lista_e_achado_rolando_sem_criar_outro(celular):
+    # O projeto novo entra no alto da lista e empurra o do robô para baixo, para fora da tela.
+    celular.projetos[:0] = [f"nov. {dia}, 10:00\u202fAM" for dia in range(16, 22)]
+    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=True) == 0
+    assert celular.fora_do_projeto == [] and celular.aberto == "Shopee Video" and celular.rolagem == 4
+    assert len(celular.projetos) == 8
+
+
+def test_leitura_do_alto_do_projeto_e_do_renomear():
+    # Como no Flow (15/11): o título do projeto no alto; no Renomear, o campo com o ✓ e o ✕ à direita.
+    projeto = ('<hierarchy>' + _no((0, 152, 1080, 278), desc="Shopee Video", clicavel=False)
+               + _no((42, 152, 168, 278), "android.widget.Button", "Voltar")
+               + _no((912, 152, 1038, 278), "android.widget.Button", "Mais opções")
+               + _no((0, 466, 537, 1422), desc="Copo na mesa, 1 item")
+               + _no((891, 1300, 1017, 1400), "android.widget.Button", "Mais opções") + '</hierarchy>')
+    assert flow.titulo_do_projeto(projeto) == "Shopee Video"
+    assert flow.botao_do_alto(projeto, "Mais opções") == (975, 215)
+    renomear = ('<hierarchy>' + _no((0, 152, 1080, 278), "android.widget.EditText", texto="nov. 15", foco=True)
+                + _no((912, 152, 1038, 278), "android.widget.Button") + _no((765, 152, 891, 278), "android.widget.Button")
+                + _no((400, 1200, 680, 1300), "android.widget.Button") + '</hierarchy>')
+    assert flow.campo_do_nome(renomear)["texto"] == "nov. 15"
+    assert flow.botoes_do_nome(renomear) == [(828, 215), (975, 215)]
+    assert flow.titulo_do_projeto(renomear) == "" and flow.botoes_do_nome(projeto) == []
 
 
 def test_video_com_a_versao_estendida_escolhe_a_do_modelo_do_teste(celular):

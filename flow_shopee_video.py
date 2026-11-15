@@ -106,9 +106,20 @@ BOTAO_DO_BAIXAR = re.compile(r"(?:aumentar (?:a )?resolu[çc][ãa]o e )?baixar")
 ESCOLHA_NO_BAIXAR = re.compile(r"1080p|\b4k\b|upscal|aumentar|ampliar|melhorad", re.I)
 PACOTES_DE_PERMISSAO = ("com.android.permissioncontroller", "com.google.android.permissioncontroller")
 # O projeto do robô no Flow: o Rafael o renomeou para "Shopee Video" (15/11/2026) e pediu que
-# todos os vídeos fiquem só nele, para não bagunçar. O robô nunca cria outro: sem ele na lista,
-# para. Pedido do Rafael (P229): DECISOES.md, Shopee Vídeo.
+# todos os vídeos fiquem só nele, para não bagunçar. Sem ele em lugar nenhum da lista (o Rafael
+# pode tê-lo apagado), o robô cria outro com esse nome e o usa de padrão, no máximo um por dia.
+# Pedido do Rafael (P229): DECISOES.md, Shopee Vídeo.
 PROJETO_DO_ROBO = "Shopee Video"
+# A lista do início põe o projeto novo no alto e empurra os outros para baixo: o robô rola até o
+# fim (até a lista parar de andar, no máximo ROLADAS_DA_LISTA vezes) antes de dar o projeto por sumido,
+# esperando cada tela da lista até ESPERA_DA_LISTA s.
+ROLADAS_DA_LISTA = 10
+ESPERA_DA_LISTA = 8
+# O alto do projeto aberto (mapeado em 15/11/2026, entre y 152 e 278): o título, o Voltar e o Mais
+# opções; no Renomear, o campo do nome com o ✓ e o ✕ ao lado. O menu do Mais opções tem Renomear,
+# Grade, Ver lixeira e Excluir projeto: o robô só toca no Renomear, nunca no Excluir nem na lixeira.
+ALTO_DO_PROJETO = 330
+PROIBIDO_NO_MENU_DO_PROJETO = re.compile(r"excluir|lixeira", re.I)
 CUSTO_NA_TELA = re.compile(r"(\d+)\s+créditos de IA", re.I)
 # A tela de termos ou de consentimento: o robô nunca aceita nada pelo Rafael. Também o aviso do
 # teclado (o do Google Tradutor, que abriu em 15/11 com um toque fora do lugar): OK e Cancelar
@@ -392,19 +403,136 @@ def pronto_para_gerar(xml, prompt, modelo, custo):
     return ""
 
 
+def projetos_na_tela(xml):
+    """As descrições dos projetos que a lista do início mostra agora (para saber se ela ainda anda)."""
+    return tuple(el["descricao"] for el in ps.elementos(xml)
+                 if el["pacote"] == PACOTE and (el["descricao"] or "").startswith("O título do projeto"))
+
+
+def achar_o_projeto(d):
+    """
+    O centro do projeto do robô na lista do início, rolando até o fim dela; None quando ele não está
+    em lugar nenhum da lista (a lista parou de andar sem ele).
+    """
+    vistos = None
+    for _ in range(ROLADAS_DA_LISTA + 1):
+        ponto = ponto_parado(d, projeto_na_lista, "projeto do robô", ESPERA_DA_LISTA)
+        if ponto:
+            return ponto
+        na_tela = projetos_na_tela(_tela(d))
+        if na_tela == vistos:
+            return None
+        vistos = na_tela
+        ps.rolar(d)
+        time.sleep(1)
+    return None
+
+
+def botao_do_alto(xml, descricao):
+    """O centro do botão do alto do projeto com essa descrição (o Mais opções do projeto, não o de um vídeo); None sem ele."""
+    for el in ps.elementos(xml):
+        if (el["pacote"] == PACOTE and el["clicavel"] and el["descricao"] == descricao
+                and el["caixa"][3] <= ALTO_DO_PROJETO):
+            x1, y1, x2, y2 = el["caixa"]
+            return (x1 + x2) // 2, (y1 + y2) // 2
+    return None
+
+
+def titulo_do_projeto(xml):
+    """O nome do projeto aberto, no alto da tela; "" fora de um projeto."""
+    for el in ps.elementos(xml):
+        x1, y1, x2, y2 = el["caixa"]
+        if (el["pacote"] == PACOTE and el["classe"] == "View" and not el["clicavel"] and el["descricao"]
+                and y2 <= ALTO_DO_PROJETO and x2 - x1 >= 900):
+            return el["descricao"]
+    return ""
+
+
+def campo_do_nome(xml):
+    """O campo do nome do Renomear, no alto do projeto (o elemento); None sem ele."""
+    return next((el for el in ps.elementos(xml) if el["pacote"] == PACOTE and el["classe"] == "EditText"
+                 and el["caixa"][3] <= ALTO_DO_PROJETO), None)
+
+
+def botoes_do_nome(xml):
+    """
+    Os botões sem nome ao lado do campo do Renomear, da esquerda para a direita: o ✓ e o ✕ (vistos
+    em 15/11/2026). Lista de centros; vazia sem o campo.
+    """
+    campo = campo_do_nome(xml)
+    if not campo:
+        return []
+    _, cima, _, baixo = campo["caixa"]
+    botoes = sorted(el["caixa"] for el in ps.elementos(xml)
+                    if el["pacote"] == PACOTE and el["classe"] == "Button" and el["clicavel"]
+                    and not el["descricao"] and not el["texto"] and cima <= (el["caixa"][1] + el["caixa"][3]) // 2 <= baixo)
+    return [((x1 + x2) // 2, (y1 + y2) // 2) for x1, y1, x2, y2 in botoes]
+
+
+def criar_o_projeto(d):
+    """
+    Cria o projeto do robô quando ele sumiu da lista e o usa de padrão (pedido do Rafael, 15/11/2026).
+    Caminho mapeado em 15/11: o Novo cria um projeto vazio com o nome do dia e já o abre; o Mais
+    opções do alto abre o menu do projeto; o Renomear põe o nome num campo no alto, com o ✓ e o ✕
+    ao lado. O robô escreve PROJETO_DO_ROBO, toca no ✓ e confere o título. No máximo um projeto por
+    dia: o criado que não ficou com o nome não vira outro no mesmo dia. Parada no que falhar.
+    """
+    criado_em = (db.ler_config(CHAVE, {}) or {}).get("projeto_criado_em") or ""
+    if criado_em[:10] == agora()[:10]:
+        raise Parada(f"abrir o Flow: o projeto {PROJETO_DO_ROBO} não está na lista, e o robô já criou um "
+                     "projeto hoje; não cria outro no mesmo dia")
+    tocar(d, "Novo", "criar o projeto")
+    guardar(projeto_criado_em=agora())
+    ponto = ponto_parado(d, lambda x: ps.achar(x, "Criar") and botao_do_alto(x, "Mais opções"), "projeto novo")
+    if not ponto:
+        raise Parada("criar o projeto: o projeto novo não abriu")
+    d.click(*ponto)
+    menu = esperar(d, lambda x: ps.achar(x, "Renomear"))
+    if not menu:
+        raise Parada("criar o projeto: o Renomear não apareceu no menu do projeto")
+    toque_x, toque_y = ps.achar(menu, "Renomear")
+    if any(PROIBIDO_NO_MENU_DO_PROJETO.search(f"{el['texto']} {el['descricao']}")
+           and el["caixa"][0] <= toque_x <= el["caixa"][2] and el["caixa"][1] <= toque_y <= el["caixa"][3]
+           for el in ps.elementos(menu)):
+        raise Parada("criar o projeto: o toque do Renomear cairia no Excluir ou na lixeira; o robô não toca")
+    d.click(toque_x, toque_y)
+    if not esperar(d, lambda x: campo_do_nome(x) is not None):
+        raise Parada("renomear o projeto: o campo do nome não apareceu")
+    ps.escrever(d, PROJETO_DO_ROBO)
+    xml = esperar(d, lambda x: (campo_do_nome(x) or {}).get("texto") == PROJETO_DO_ROBO, 10)
+    if not xml:
+        raise Parada("renomear o projeto: o nome não entrou no campo")
+    botoes = botoes_do_nome(xml)
+    if len(botoes) != 2:
+        raise Parada("renomear o projeto: o ✓ e o ✕ não estão ao lado do campo como no mapeamento")
+    d.click(*botoes[0])
+    # O Criar, que o teclado pode tapar logo depois do ✓, o pedido espera do jeito de sempre.
+    if not esperar(d, lambda x: titulo_do_projeto(x) == PROJETO_DO_ROBO):
+        raise Parada(f"renomear o projeto: o título não ficou {PROJETO_DO_ROBO}")
+
+
 def abrir_o_projeto(d):
-    """Abre o Flow do zero e entra no projeto do robô (PROJETO_DO_ROBO). Parada sem ele: o robô nunca cria outro."""
+    """
+    Abre o Flow do zero e entra no projeto do robô (PROJETO_DO_ROBO), conferindo o título no alto.
+    Sem ele em lugar nenhum da lista, cria um com esse nome (criar_o_projeto). True quando criou.
+    """
     d.app_start(PACOTE, stop=True, wait=True)
     xml = esperar(d, lambda x: ps.achar(x, "Novo") or tem_termos(x), 30)
     if not xml or tem_termos(xml):
         raise Parada("abrir o Flow: o início não apareceu" if not xml else
                      "abrir o Flow: tela de termos; o robô nunca aceita pelo Rafael")
-    ponto = ponto_parado(d, projeto_na_lista, "projeto do robô", 8)
+    ponto = achar_o_projeto(d)
     if not ponto:
-        raise Parada(f"abrir o Flow: o projeto {PROJETO_DO_ROBO} não está na lista; o robô não cria outro")
+        # A lista rolada esconde o Novo, que fica no alto do início: o Flow abre de novo, do alto.
+        d.app_start(PACOTE, stop=True, wait=True)
+        if not esperar(d, lambda x: ps.achar(x, "Novo"), 30):
+            raise Parada("criar o projeto: o início do Flow não voltou")
+        criar_o_projeto(d)
+        return True
     d.click(*ponto)
-    if not esperar(d, lambda x: ps.achar(x, "Criar")):
-        raise Parada("abrir o projeto: o Criar não apareceu")
+    if not esperar(d, lambda x: ps.achar(x, "Criar") and titulo_do_projeto(x) == PROJETO_DO_ROBO):
+        raise Parada(f"abrir o projeto: o Criar ou o título {PROJETO_DO_ROBO} não apareceu")
+    return False
 
 
 def montar_o_pedido(d, prompt, modelo, custo):
@@ -832,8 +960,10 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
             print("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
             return 1
     try:
-        abrir_o_projeto(d)
-        print("Flow: aberto no projeto do robô")
+        if abrir_o_projeto(d):
+            print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
+        else:
+            print("Flow: aberto no projeto do robô")
         if not so_baixar:
             xml = montar_o_pedido(d, teste["prompt"], modelo, custo)
             falta = pronto_para_gerar(xml, teste["prompt"], modelo, custo)
