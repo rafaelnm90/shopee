@@ -1159,6 +1159,20 @@ def test_curtir_acha_o_nome_com_o_selo_antes(monkeypatch):
     assert aparelho.toques == [(525, 1217), (1028, 1233)]
 
 
+def test_abrir_abre_a_shopee_ou_o_flow_e_nada_mais():
+    class Celular:
+        abertos = []
+
+        def app_start(self, pacote, wait=False):
+            self.abertos.append(pacote)
+
+    assert ps.fazer_passo(Celular(), "abrir", "") == (True, "app aberto")
+    assert ps.fazer_passo(Celular(), "abrir", "Flow") == (True, "app aberto")
+    assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk"]
+    assert ps.fazer_passo(Celular(), "abrir", "com.android.settings")[0] is False
+    assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk"]
+
+
 def test_copiado_diz_so_se_e_link_da_shopee_e_o_tamanho():
     class Celular:
         clipboard = "Olha este vídeo: https://sv.shopee.com.br/share-video/abc"
