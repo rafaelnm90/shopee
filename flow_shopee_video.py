@@ -294,12 +294,16 @@ def centro_da_caixa(xml):
 
 
 def projeto_na_lista(xml, nome=PROJETO_DO_ROBO):
-    """O centro do projeto com esse nome na lista do início (o nome inteiro, não um pedaço); None sem ele."""
+    """
+    O centro do projeto com esse nome na lista do início; None sem ele. O Flow descreve cada um como
+    "O título do projeto é Shopee Video, 1 vídeo, 4 imagens" (lido em 15/11/2026): vale o nome
+    inteiro, logo depois do "é" (ou no começo), e não um pedaço dele ("Shopee Video 2" não serve).
+    """
     for el in ps.elementos(xml):
         if el["pacote"] != PACOTE:
             continue
         for valor in (el["descricao"], el["texto"]):
-            if re.match(rf"{re.escape(nome)}\s*(?:$|[,\n])", (valor or "").strip(), re.I):
+            if re.search(rf"(?:^|\bé\s+){re.escape(nome)}\s*(?:$|[,\n])", (valor or "").strip(), re.I):
                 x1, y1, x2, y2 = el["caixa"]
                 return (x1 + x2) // 2, (y1 + y2) // 2
     return None

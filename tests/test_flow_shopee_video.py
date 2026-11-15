@@ -86,9 +86,13 @@ class Flow:
         nos = []
         if self.tela == "inicio":
             nos += [((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "novo"),
-                    ((42, 900, 1038, 1080), _no((42, 900, 1038, 1080), desc="nov. 15, 12:09 PM"), "outro")]
+                    ((42, 900, 1038, 1080), _no((42, 900, 1038, 1080), desc="O título do projeto é nov. 15, 12:09 PM",
+                                                 clicavel=False), "outro")]
             if self.projeto_do_robo:
-                nos.append(((42, 1100, 1038, 1300), _no((42, 1100, 1038, 1300), desc=self.projeto_do_robo), "projeto"))
+                # Como no Flow (15/11): a descrição diz o título e quantos vídeos e imagens o projeto tem.
+                nos.append(((42, 1100, 1038, 1300), _no((42, 1100, 1038, 1300), clicavel=False,
+                                                        desc=f"O título do projeto é {self.projeto_do_robo}, 1 vídeo, 4 imagens"),
+                            "projeto"))
             if self.termos:
                 nos.append(((0, 1400, 1080, 1500), _no((0, 1400, 1080, 1500), texto="Aceitar os Termos de Serviço"), ""))
         elif self.tela == "projeto":
@@ -522,11 +526,14 @@ def test_leitura_das_telas():
              + _no((548, 1200, 867, 1300), "android.widget.Button", "Omni 1.2 Flash\nx1")
              + _no((24, 2110, 1056, 2230), desc="Veo 3.1 - Lite\n10 créditos / video") + '</hierarchy>')
     assert flow.custo_na_tela(folha) == 24 and flow.modelo_no_pedido(folha) == "Omni 1.2 Flash"
-    inicio = ('<hierarchy>' + _no((42, 900, 1038, 1080), desc="nov. 15, 12:09 PM")
-              + _no((42, 1100, 1038, 1300), desc="Shopee Video") + '</hierarchy>')
+    inicio = ('<hierarchy>' + _no((42, 900, 1038, 1080), desc="O título do projeto é nov. 15, 12:09 PM")
+              + _no((42, 1100, 1038, 1300), desc="O título do projeto é Shopee Video, 1 vídeo, 4 imagens")
+              + '</hierarchy>')
     assert flow.projeto_na_lista(inicio) == (540, 1200)
-    assert flow.projeto_na_lista(inicio.replace("Shopee Video", "Shopee Video 2")) is None
-    assert flow.projeto_na_lista(inicio.replace('"Shopee Video"', '"shopee video, 1 vídeo"')) == (540, 1200)
+    assert flow.projeto_na_lista(inicio.replace("Shopee Video,", "Shopee Video 2,")) is None
+    assert flow.projeto_na_lista(inicio.replace("O título do projeto é Shopee Video", "shopee video")) == (540, 1200)
+    assert flow.projeto_na_lista('<hierarchy>' + _no((42, 1100, 1038, 1300), desc="Shopee Video") + '</hierarchy>') \
+        == (540, 1200)
     assert flow.custo_na_tela('<hierarchy></hierarchy>') is None
 
 
