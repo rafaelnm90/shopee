@@ -719,8 +719,21 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   cada um com o custo de um vídeo de 8 s em 720p: Omni 1.2 Flash 24 (o marcado), Omni
   1.1 Flash 12 e Veo 3.1 - Lite 10. O Gerar fica à vista com as opções abertas.
 - O voltar com a lista dos modelos aberta fecha o pedido inteiro, de volta ao projeto.
-- Falta mapear: o que aparece depois do Gerar, o vídeo pronto e como baixá-lo (o teste
-  guarda a tela de minuto em minuto depois do Gerar).
+- Depois do Gerar (mapeado no 1º vídeo do teste, 15/11/2026): o pedido fecha e o vídeo
+  novo aparece no projeto como o 1º quadro da grade, com "1% Gerando…" (e um Reutilizar
+  comando dentro). O do Veo 3.1 - Lite ficou pronto em menos de 1 min: o quadro passa a
+  ter o título que o Flow dá ao vídeo, com ", 1 item" no fim (as fotos que entraram nos
+  pedidos também viram quadros do projeto). Os filtros Tudo, Imagens e Vídeos ficam no alto.
+- O vídeo aberto: Fechar e Mais opções no alto, o título com o nome, o modelo e a
+  resolução ("…\nVeo 3.1 - Lite\n720p"), o player ("Vídeo tocando, 1 de 1" e a duração),
+  Pausar, a barra do tempo, Desativar som (o vídeo vem com som) e, embaixo, Editar e
+  Estender.
+- Mais opções do vídeo aberto: Gostei, Não gostei, Renomear, Reutilizar comando,
+  Favorito, **Baixar**, Enviar, Compartilhar, Compartilhar no YouTube e Enviar feedback.
+  O teste usa só o Baixar; o arquivo vai para uma das pastas de mídia do celular
+  (Download, Movies, DCIM ou Pictures), e o robô procura o .mp4 mais novo que a marca que
+  ele cria antes do toque. Se o Baixar perguntar o tamanho (um maior pode gastar crédito),
+  o robô para sem escolher; falta ver isso no 1º Baixar de verdade.
 
 ## O que não se faz
 
