@@ -569,6 +569,37 @@ def test_busca_com_erro_de_sistema_da_shopee_tenta_mais_uma_vez(monkeypatch):
     assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == [] and len(sessao.postados) == 22
 
 
+def test_erro_de_sistema_que_nao_passa_e_aviso_e_outra_recusa_continua_erro(monkeypatch, caplog):
+    # Checkup de 14/11: o log do bot_mestre tinha 1 erro por dia "a API negou o rastreio" havia 6 dias,
+    # e era sempre o erro de sistema da própria Shopee (10000) que não passou nas tentativas: externo e
+    # já tratado por quem pediu. Ele vira aviso; a recusa com outro código (chave, limite) segue erro.
+    sistema = {"errors": [{"message": "System error", "extensions": {"code": 10000}}]}
+    limite = {"errors": [{"message": "limite", "extensions": {"code": 10030}}]}
+    _api_que_responde(monkeypatch)
+    sessao = api_shopee.aiohttp.ClientSession
+    corpos = []
+
+    def post(url, headers=None, data=None):
+        return _Resposta(200, corpo=corpos.pop(0))
+    sessao.post = post
+    monkeypatch.setattr(api_shopee, "ESPERA_NO_ERRO_DE_SISTEMA", 0)
+
+    def niveis():
+        return [(r.levelname, r.getMessage()) for r in caplog.records if r.levelname in ("WARNING", "ERROR")
+                and ("negou o rastreio" in r.getMessage() or "seguiu com erro de sistema" in r.getMessage())]
+    with caplog.at_level("WARNING", logger="API_Shopee"):
+        corpos[:] = [sistema] * api_shopee.TENTATIVAS_NO_ERRO_DE_SISTEMA
+        assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == []
+        assert [nivel for nivel, _texto in niveis()] == ["WARNING"]
+        caplog.clear()
+        corpos[:] = [limite]
+        assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == []
+        assert [nivel for nivel, _texto in niveis()] == ["ERROR"]
+    # As duas continuam no registro, com o código.
+    assert consultar("SELECT GROUP_CONCAT(resultado, '|') FROM registro_processos WHERE processo = ?",
+                     api_shopee.PROCESSO_DA_BUSCA_NEGADA) == ("código 10.000|código 10.030",)
+
+
 def test_busca_negada_levanta_so_para_quem_pede(monkeypatch):
     # 12/11: o robô da Shopee Vídeo deixou um vídeo de lado de vez porque a busca negada pela API (o erro
     # de sistema da Shopee, que não passou em nenhuma das tentativas) parecia a busca que não achou nada.
