@@ -705,9 +705,17 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
 
 - Abre pelo ícone "Flow" da tela inicial. O início tem os atalhos Editar vídeo, Editar
   foto, Usar avatar e Animar foto (este abre direto o seletor de fotos do Android) e a
-  lista Projetos, com o botão Novo. O projeto novo ganha o nome do dia e da hora
-  ("nov. 15, 08:23 AM"). O do robô o Rafael renomeou para **Shopee Video** (15/11/2026),
-  e é o único que o robô usa; sem ele na lista, o robô para e não cria outro.
+  lista Projetos, com o botão Novo. O Novo cria um projeto vazio com o nome do dia e da
+  hora ("nov. 15, 08:23 AM") e já o abre ("Ainda não há recursos."). A lista põe o projeto
+  mais novo no alto, e cada linha tem o seu Mais opções à direita. O do robô o Rafael
+  renomeou para **Shopee Video** (15/11/2026), e é o único que o robô usa: ele rola a lista
+  até o fim para achá-lo e, sem ele em lugar nenhum, cria um e o renomeia (no máximo um por
+  dia, pedido do Rafael).
+- O alto do projeto aberto: o título (o nome), o Voltar e o Mais opções. O Mais opções abre
+  Renomear, Grade: Grande, Ver lixeira e Excluir projeto (o robô só toca no Renomear). O
+  Renomear troca o título por um campo com o nome, já em foco e com o teclado, e põe dois
+  botões sem nome ao lado: o ✓ (confirma) e, à direita, o ✕ (mapeado em 15/11/2026). O
+  voltar fecha o teclado e, de novo, volta ao início sem mudar o nome.
 - No projeto: Pesquisar, Criar e Enviar embaixo. O Criar abre o pedido com o teclado:
   os modos Imagem, Vídeo e Agente, a caixa "O que você quer fazer?", o + (Adicionar
   mídia), o botão do modelo ("Omni 1.2 Flash", o formato e "x1") e o Gerar (a seta).
