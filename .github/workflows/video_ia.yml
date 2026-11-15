@@ -4,16 +4,20 @@ name: Vídeo de IA (Shopee Vídeo)
 # 25/10, P34): "modelos" mostra os modelos de vídeo (Veo) que a chave do Google enxerga, sem
 # custo; "testar" gera 1 vídeo de uns 8 s do próximo produto da fonte do painel e manda só
 # no privado do Rafael (custa menos de US$ 1; nada é postado). Só roda quando disparado à mão.
+# "flow" é o teste da P229 1 (15/11): o próximo dos 3 vídeos do mesmo produto, um em cada
+# modelo do Google Flow, no celular do robô, com os créditos da conta Pro do Rafael (nada é
+# postado); "flow-sem-gerar" faz tudo até o Gerar, sem tocar nele (sem gastar crédito).
 #
-# O repositório é público, e os logs do Actions também: o video_ia.py imprime só nomes de
-# modelo, estados e números; o nome do produto, a foto e o vídeo vão só no privado.
+# O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
+# imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
+# e no privado.
 on:
   workflow_dispatch:
     inputs:
       acao:
         description: "O que fazer"
         type: choice
-        options: [modelos, testar]
+        options: [modelos, testar, flow, flow-sem-gerar]
         default: modelos
 
 permissions:
@@ -22,7 +26,7 @@ permissions:
 jobs:
   video_ia:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 32
     steps:
       - name: Vídeo de IA no servidor
         uses: appleboy/ssh-action@master
@@ -30,7 +34,12 @@ jobs:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
-          command_timeout: 13m
+          # O flow espera o robô soltar o celular (até 15 min) e olha a tela por 6 min depois do Gerar.
+          command_timeout: 30m
           script: |
             cd ~/shopee
-            venv/bin/python3 video_ia.py ${{ inputs.acao }}
+            case "${{ inputs.acao }}" in
+              flow) venv/bin/python3 flow_shopee_video.py teste ;;
+              flow-sem-gerar) venv/bin/python3 flow_shopee_video.py teste --sem-gerar ;;
+              *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
+            esac
