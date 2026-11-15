@@ -210,6 +210,39 @@ def test_tela_de_bloqueio_nao_toca_em_nada(celular, monkeypatch, capsys):
     assert "tela de bloqueio" in capsys.readouterr().out
 
 
+class Subindo:
+    """O pedido que sobe com o teclado: o Vídeo aparece embaixo e, na leitura seguinte, já no lugar."""
+
+    def __init__(self, dialogo=False):
+        self.leituras, self.toques, self.dialogo = 0, [], dialogo
+
+    def dump_hierarchy(self):
+        self.leituras += 1
+        y = 1900 if self.leituras == 1 else 900
+        nos = _no((419, y, 661, y + 100), "android.widget.Button", "Vídeo")
+        if self.dialogo:
+            nos += _no((154, 1335, 435, 1461), "android.widget.Button", texto="Cancelar", pacote=flow.PACOTE_DO_TECLADO)
+        return f'<hierarchy>{nos}</hierarchy>'
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+
+
+def test_toca_so_quando_o_botao_para_de_subir(monkeypatch):
+    monkeypatch.setattr(flow.time, "sleep", lambda segundos: None)
+    celular = Subindo()
+    flow.tocar(celular, "Vídeo", "modo vídeo")
+    assert celular.toques == [(540, 950)] and celular.leituras >= 3
+
+
+def test_aviso_do_teclado_para_sem_tocar(monkeypatch):
+    monkeypatch.setattr(flow.time, "sleep", lambda segundos: None)
+    celular = Subindo(dialogo=True)
+    with pytest.raises(flow.Parada, match="aviso do teclado"):
+        flow.tocar(celular, "Vídeo", "modo vídeo")
+    assert celular.toques == []
+
+
 def test_ordem_dos_modelos_do_mais_barato_ao_mais_caro():
     assert flow.proximo_modelo({}) == ("Veo 3.1 - Lite", 10)
     assert flow.proximo_modelo({"videos": {"Veo 3.1 - Lite": {}}}) == ("Omni 1.1 Flash", 12)

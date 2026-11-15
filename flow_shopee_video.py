@@ -56,8 +56,11 @@ INTERVALO_DOS_CASOS = 60
 # O nome que o Flow dá ao projeto novo: o mês, o dia e a hora em que ele foi criado.
 NOME_DE_PROJETO = re.compile(r"[a-zç]{3}\. \d{1,2}, \d{1,2}:\d{2} ?(?:AM|PM)", re.I)
 CUSTO_NA_TELA = re.compile(r"(\d+)\s+créditos de IA", re.I)
-# A tela de termos ou de consentimento: o robô nunca aceita nada pelo Rafael.
+# A tela de termos ou de consentimento: o robô nunca aceita nada pelo Rafael. Também o aviso do
+# teclado (o do Google Tradutor, que abriu em 15/11 com um toque fora do lugar): OK e Cancelar
+# num diálogo do teclado.
 PALAVRAS_DE_TERMOS = ("termos de serviço", "aceitar", "concordo", "política de privacidade")
+PACOTE_DO_TECLADO = "com.google.android.inputmethod.latin"
 PEDIDO_DA_IA = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto "
     "oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo de 8 segundos, em pé "
@@ -185,20 +188,50 @@ def esperar(d, condicao, espera=ESPERA_DA_TELA):
 
 
 def tem_termos(xml):
-    """A tela pede para aceitar termos ou dar consentimento? O robô para e chama o Rafael."""
-    return any(palavra in f"{el['texto']} {el['descricao']}".casefold()
-               for el in ps.elementos(xml) for palavra in PALAVRAS_DE_TERMOS)
+    """A tela pede para aceitar termos ou dar consentimento (ou o teclado abriu um aviso)? O robô para."""
+    for el in ps.elementos(xml):
+        if any(palavra in f"{el['texto']} {el['descricao']}".casefold() for palavra in PALAVRAS_DE_TERMOS):
+            return True
+        if el["pacote"] == PACOTE_DO_TECLADO and el["texto"] in ("OK", "Cancelar"):
+            return True
+    return False
+
+
+def ponto_parado(d, achar_ponto, passo, espera=ESPERA_DA_TELA):
+    """
+    O ponto (achar_ponto(xml)) quando ele para de se mexer: duas leituras seguidas no mesmo lugar.
+    O pedido do Flow sobe com o teclado, e o toque no meio da subida cai em outro lugar (em 15/11,
+    no Traduzir do teclado). Parada na tela de termos; None sem o ponto.
+    """
+    fim, anterior = time.monotonic() + espera, None
+    while True:
+        xml = _tela(d)
+        if xml and tem_termos(xml):
+            raise Parada(f"{passo}: tela de termos ou aviso do teclado; o robô nunca aceita pelo Rafael")
+        ponto = achar_ponto(xml) if xml else None
+        if ponto and ponto == anterior:
+            return ponto
+        anterior = ponto
+        if time.monotonic() >= fim:
+            return None
+        time.sleep(PAUSA_DA_LEITURA)
 
 
 def tocar(d, alvo, passo, espera=ESPERA_DA_TELA):
-    """Toca no elemento (texto, descrição ou @id, como no ps.achar) assim que ele aparece; Parada sem ele."""
-    xml = esperar(d, lambda x: ps.achar(x, alvo) or tem_termos(x), espera)
-    if xml and tem_termos(xml):
-        raise Parada(f"{passo}: tela de termos; o robô nunca aceita pelo Rafael")
-    ponto = ps.achar(xml, alvo) if xml else None
+    """Toca no elemento (texto, descrição ou @id, como no ps.achar) quando ele aparece parado; Parada sem ele."""
+    ponto = ponto_parado(d, lambda xml: ps.achar(xml, alvo), passo, espera)
     if not ponto:
         raise Parada(f"{passo}: não achei o botão na tela")
     d.click(*ponto)
+
+
+def centro_da_caixa(xml):
+    """O centro da caixa do pedido; None sem ela."""
+    campo = next((el for el in ps.elementos(xml) if el["pacote"] == PACOTE and el["classe"] == "EditText"), None)
+    if not campo:
+        return None
+    x1, y1, x2, y2 = campo["caixa"]
+    return (x1 + x2) // 2, (y1 + y2) // 2
 
 
 def projeto_na_lista(xml, nome=""):
@@ -284,8 +317,7 @@ def abrir_o_projeto(d, nome):
     if not xml or tem_termos(xml):
         raise Parada("abrir o Flow: o início não apareceu" if not xml else
                      "abrir o Flow: tela de termos; o robô nunca aceita pelo Rafael")
-    xml = esperar(d, lambda x: projeto_na_lista(x, nome), 8) or xml
-    ponto = projeto_na_lista(xml, nome)
+    ponto = ponto_parado(d, lambda x: projeto_na_lista(x, nome), "projeto do robô", 8)
     if ponto:
         d.click(*ponto)
     else:
@@ -315,12 +347,10 @@ def montar_o_pedido(d, prompt, modelo, custo):
     tocar(d, "@button_add", "adicionar a foto")
     if not esperar(d, foto_no_pedido, 30):
         raise Parada("foto no pedido: a miniatura não apareceu")
-    xml = _tela(d)
-    campo = next((el for el in ps.elementos(xml) if el["pacote"] == PACOTE and el["classe"] == "EditText"), None)
-    if not campo:
+    ponto = ponto_parado(d, centro_da_caixa, "texto do pedido")
+    if not ponto:
         raise Parada("texto do pedido: a caixa não apareceu")
-    x1, y1, x2, y2 = campo["caixa"]
-    d.click((x1 + x2) // 2, (y1 + y2) // 2)
+    d.click(*ponto)
     time.sleep(1)
     ps.escrever(d, prompt)
     if not esperar(d, lambda x: " ".join(texto_do_pedido(x).split())[:40] == " ".join(prompt.split())[:40], 10):
