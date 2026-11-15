@@ -507,12 +507,15 @@ def abrir_o_video_novo(d, modelo):
     if not ponto:
         raise Parada("baixar: o vídeo novo não apareceu no projeto")
     d.click(*ponto)
-    xml = esperar(d, lambda x: titulo_do_video(x) is not None)
-    if not xml:
+    if not esperar(d, lambda x: titulo_do_video(x) is not None):
         raise Parada("baixar: o vídeo não abriu")
-    if modelo in titulo_do_video(xml):
+    # O título com o modelo e a coluna das versões aparecem um pouco depois do player (visto em
+    # 15/11: lido cedo demais, o vídeo parecia não ter versões); a versão estendida tem só o nome
+    # no título, sem o modelo.
+    xml = esperar(d, lambda x: modelo in (titulo_do_video(x) or []) or bool(versoes_do_video(x)), ESPERA_DA_VERSAO)
+    if xml and modelo in (titulo_do_video(xml) or []):
         return
-    for versao in versoes_do_video(xml):
+    for versao in versoes_do_video(xml or _tela(d)):
         d.click(*versao)
         if esperar(d, lambda x: modelo in (titulo_do_video(x) or []), ESPERA_DA_VERSAO):
             return

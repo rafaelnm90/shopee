@@ -56,6 +56,8 @@ class Flow:
         self.projeto_do_robo, self.fora_do_projeto = "Shopee Video", []
         # As versões do vídeo aberto (o modelo de cada uma) e a que aparece; vazio = só a do vídeo gerado.
         self.versoes, self.versao = [], 0
+        # Como no app (15/11): a coluna das versões só aparece algumas leituras depois do player.
+        self.atraso_das_versoes, self.leituras_do_video = 2, 0
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
@@ -109,15 +111,16 @@ class Flow:
                 nos.append(((543, 466, 1080, 1004), _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item"), "foto"))
         elif self.tela == "video":
             versoes = self.versoes or [self.modelo_do_video]
-            nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=f"Mulher usando o copo\n{versoes[self.versao]}\n720p",
-                                              clicavel=False), ""),
+            # A versão estendida (a 2ª em diante) tem só o nome no título, sem o modelo.
+            titulo = f"Mulher usando o copo\n{versoes[self.versao]}\n720p" if self.versao == 0 else "Mulher usando o copo"
+            nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=titulo, clicavel=False), ""),
                     ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Fechar"), "projeto"),
                     ((891, 152, 1017, 278), _no((891, 152, 1017, 278), "android.widget.Button", "Mais opções"), "menu_video"),
                     ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184),
                                                 desc=f"Vídeo tocando, {self.versao + 1} de {len(versoes)}\n0:08"), ""),
                     ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), ""),
                     ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"), "")]
-            if len(versoes) > 1:
+            if len(versoes) > 1 and self.leituras_do_video >= self.atraso_das_versoes:
                 nos += [((962, y, 1025, y + 63), _no((962, y, 1025, y + 63), "android.widget.ImageView"), f"versao:{i}")
                         for i, y in enumerate(range(1178, 1178 + 74 * len(versoes), 74))]
         elif self.tela == "menu_video":
@@ -165,6 +168,8 @@ class Flow:
         xml = '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(no for _, no, _ in self.nos()) + "</hierarchy>"
         if self.tela == "projeto" and self.gerando_leituras > 0:
             self.gerando_leituras -= 1
+        if self.tela == "video":
+            self.leituras_do_video += 1
         return xml
 
     def click(self, x, y):
@@ -199,6 +204,8 @@ class Flow:
         elif acao == "filtro":
             self.filtro = True
         elif acao in ("video", "menu_video"):
+            if acao == "video" and self.tela != "menu_video":
+                self.leituras_do_video = 0
             self.tela = acao
         elif acao == "baixar":
             self.tela = "tamanho" if self.pede_tamanho else "video"
@@ -552,9 +559,9 @@ def test_video_com_a_versao_estendida_escolhe_a_do_modelo_do_teste(celular):
     # vídeo abriu na versão estendida (Omni 1.2 Flash). O robô passa para a versão do Veo antes de baixar.
     celular.teste["videos"] = {"Veo 3.1 - Lite": {"custo": 10, "estado": "gerando"}}
     flow.guardar(teste=celular.teste)
-    celular.gerado, celular.versoes = True, ["Omni 1.2 Flash", "Veo 3.1 - Lite"]
+    celular.gerado, celular.versoes, celular.versao = True, ["Veo 3.1 - Lite", "Omni 1.2 Flash"], 1
     assert flow.teste() == 0
-    assert celular.versao == 1 and celular.baixado and len(celular.mandados) == 1
+    assert celular.versao == 0 and celular.baixado and len(celular.mandados) == 1
     assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "enviado"
 
 
