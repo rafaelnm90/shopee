@@ -435,7 +435,14 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
                 await asyncio.sleep(ESPERA_NO_ERRO_DE_SISTEMA * tentativa)
                 continue
             if erros:
-                logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
+                if _codigo_do_erro(erros) == CODIGO_DO_ERRO_DE_SISTEMA:
+                    # O erro de sistema da própria Shopee que não passou em nenhuma tentativa é dela e passa
+                    # sozinho, e quem pediu já trata a busca sem resposta: aviso, não erro (o checkup cobrava
+                    # todo dia um erro que não é nosso). O registro continua contando cada um.
+                    logger.warning(f"⚠️ [API Shopee] A Shopee seguiu com erro de sistema nas "
+                                   f"{TENTATIVAS_NO_ERRO_DE_SISTEMA} tentativas da busca de ofertas.")
+                else:
+                    logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
                 _registrar_busca_negada(erros)
                 return _sem_ofertas(negada_levanta, rotulo_do_codigo(_codigo_do_erro(erros)))
             if tentativa > 1:
