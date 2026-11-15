@@ -51,8 +51,10 @@ class Flow:
         # e o que o Baixar faz.
         self.gerando_leituras, self.modelo_do_video, self.filtro = 0, "", False
         self.falha_ao_gerar = self.baixado = False
-        # A janela "Baixar vídeo" (15/11): o 720p "Tamanho original" vem marcado.
-        self.original_marcado, self.toques_proibidos = True, []
+        # A janela "Baixar vídeo" (15/11): o 720p "Tamanho original" vem marcado e o 1080p fica livre
+        # (sem custo na tela); o 4K pede outro plano. Os toques no plano ficam em toques_proibidos.
+        self.original_marcado, self.maior_marcado, self.toques_proibidos = True, False, []
+        self.sem_1080p = self.custo_no_1080p = self.aviso_de_credito = self.maior_nao_marca = False
         self.geracoes, self.puxados = 0, []
         # O projeto do robô na lista do início (o Rafael o renomeou em 15/11) e os toques fora dele.
         self.projeto_do_robo, self.fora_do_projeto = "Shopee Video", []
@@ -136,10 +138,16 @@ class Flow:
                                                 desc="Escolha uma resolução para fazer o download.\n4K"), ""),
                     ((168, 1136, 912, 1241), _no((168, 1136, 912, 1241), desc="720p\nTamanho original"), "original"),
                     ((168, 1165, 215, 1212), _no((168, 1165, 215, 1212), "android.widget.RadioButton",
-                                                 marcado=self.original_marcado), "original"),
-                    ((168, 1241, 912, 1346), _no((168, 1241, 912, 1346), desc="1080p\nAumentar a resolução"), "maior"),
-                    ((168, 1270, 215, 1317), _no((168, 1270, 215, 1317), "android.widget.RadioButton"), "maior"),
-                    ((302, 1378, 807, 1420), _no((302, 1378, 807, 1420), desc="Assine um plano com IA do Google"), "maior"),
+                                                 marcado=self.original_marcado), "original")]
+            if self.aviso_de_credito:
+                nos.append(((168, 947, 912, 989), _no((168, 947, 912, 989), clicavel=False,
+                                                      desc="Aumentar a resolução usa 10 créditos de IA"), ""))
+            if not self.sem_1080p:
+                maior = "1080p\nAumentar a resolução" + ("\n10 créditos" if self.custo_no_1080p else "")
+                nos += [((168, 1241, 912, 1346), _no((168, 1241, 912, 1346), desc=maior), "maior"),
+                        ((168, 1270, 215, 1317), _no((168, 1270, 215, 1317), "android.widget.RadioButton",
+                                                     marcado=self.maior_marcado), "maior")]
+            nos += [((302, 1378, 807, 1420), _no((302, 1378, 807, 1420), desc="Assine um plano com IA do Google"), "plano"),
                     ((677, 1514, 912, 1640), _no((677, 1514, 912, 1640), "android.widget.Button", "Baixar"), "confirmar")]
         elif self.tela == "seletor":
             nos += [((0, 630, 354, 984), _no((0, 630, 354, 984), "android.widget.FrameLayout",
@@ -221,9 +229,15 @@ class Flow:
         elif acao == "baixar":
             self.tela = "tamanho"
         elif acao == "maior":
+            if not self.maior_nao_marca:
+                self.maior_marcado, self.original_marcado = True, False
+        elif acao == "original":
+            self.maior_marcado, self.original_marcado = False, True
+        elif acao == "plano":
             self.toques_proibidos.append((x, y))
         elif acao == "confirmar":
-            self.tela, self.baixado = "video", self.original_marcado
+            self.tela = "video"
+            self.baixado = "1080p" if self.maior_marcado else "720p" if self.original_marcado else False
 
 
 @pytest.fixture
@@ -291,7 +305,7 @@ def test_gera_com_tudo_conferido_espera_pronto_e_baixa_o_video(celular, capsys):
     assert celular.puxados == [BAIXADO]
     assert ["rm", "-f", BAIXADO, flow.MARCA_DO_BAIXAR] in celular.comandos
     saida = capsys.readouterr().out
-    assert "Gerar tocado (Omni 1.1 Flash, 12 créditos)" in saida and "Flow: vídeo baixado (0.0 MB" in saida
+    assert "Gerar tocado (Omni 1.1 Flash, 12 créditos)" in saida and "Flow: vídeo baixado (1080p, 0.0 MB" in saida
     assert "Mulher" not in saida and ".mp4" not in saida
     assert flow.proximo_modelo(db.ler_config(flow.CHAVE, {})["teste"]) == ("Veo 3.1 - Lite", 10)
 
@@ -335,19 +349,61 @@ def test_video_mais_novo_de_outro_modelo_nao_e_baixado_nem_mandado(celular):
     assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
 
 
-def test_baixar_confirma_o_tamanho_original_marcado(celular):
-    # A janela da resolução (15/11): o 720p "Tamanho original" vem marcado; o robô só toca no Baixar dela.
+def test_baixar_marca_o_1080p_e_confirma(celular):
+    # O Rafael (15/11): "Mas se podemos baixar 1080 pq vou baixar 720?". Na janela da resolução, o robô
+    # marca o 1080p, confere que ficou marcado e só então toca no Baixar dela; nunca no plano do 4K.
     flow.guardar(teste=celular.teste)
     assert flow.teste() == 0
-    assert celular.baixado and celular.toques_proibidos == [] and len(celular.mandados) == 1
+    assert celular.baixado == "1080p" and celular.toques_proibidos == [] and len(celular.mandados) == 1
+    video = db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]
+    assert video["resolucao"] == "1080p" and video["estado"] == "enviado"
+    assert "📐 Resolução: 1080p (aumentada pelo Flow no Baixar)" in celular.mandados[0][1]
 
 
-def test_baixar_sem_o_tamanho_original_marcado_para_sem_escolher(celular):
-    celular.original_marcado = False
+def test_baixar_com_custo_no_1080p_baixa_o_tamanho_original(celular):
+    # Com crédito na linha do 1080p (ou na janela), o robô não o escolhe: o tamanho original vem marcado.
+    celular.custo_no_1080p = True
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 0
+    assert celular.baixado == "720p" and (191, 1293) not in celular.toques and celular.toques_proibidos == []
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["resolucao"] == "720p"
+    assert "📐 Resolução: 720p (o tamanho original)" in celular.mandados[0][1]
+
+
+def test_aviso_de_credito_na_janela_tira_o_1080p():
+    aparelho = Flow()
+    aparelho.tela = "tamanho"
+    assert flow.janela_do_baixar(aparelho.dump_hierarchy())["1080p"] == {
+        "centro": (191, 1293), "marcada": False, "texto": "1080p aumentar a resolução "}
+    aparelho.aviso_de_credito = True
+    janela = flow.janela_do_baixar(aparelho.dump_hierarchy())
+    assert janela["1080p"] is None and janela["original"]["marcada"] and janela["baixar"] == (794, 1577)
+
+
+def test_baixar_sem_o_1080p_baixa_o_tamanho_original(celular):
+    celular.sem_1080p = True
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 0
+    assert celular.baixado == "720p" and celular.toques_proibidos == [] and len(celular.mandados) == 1
+
+
+def test_baixar_com_o_1080p_que_nao_fica_marcado_para(celular, monkeypatch):
+    monkeypatch.setattr(flow, "ESPERA_DA_JANELA_DO_BAIXAR", 0.2)
+    celular.maior_nao_marca = True
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 1
+    assert celular.tela == "tamanho" and not celular.baixado and celular.mandados == []
+    assert ("parou", "baixar: o 1080p não ficou marcado; o robô não baixa sem conferir a resolução") \
+        in celular.guardados
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
+
+
+def test_baixar_sem_nada_marcado_para_sem_escolher(celular):
+    celular.sem_1080p, celular.original_marcado = True, False
     flow.guardar(teste=celular.teste)
     assert flow.teste() == 1
     assert celular.tela == "tamanho" and celular.mandados == [] and celular.toques_proibidos == []
-    assert ("parou", "baixar: o tamanho original não está marcado; o robô não escolhe outra resolução") \
+    assert ("parou", "baixar: nem o 1080p nem o tamanho original estão marcados; o robô não escolhe outra resolução") \
         in celular.guardados
     assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
 
@@ -407,7 +463,7 @@ def test_leitura_das_telas_depois_do_gerar():
     assert flow.titulo_do_video(aberto) == ["Mulher usando o copo", "Veo 3.1 - Lite", "720p"]
     assert flow.titulo_do_video(projeto) is None
     assert not flow.pede_escolha(aberto)
-    assert flow.resolucao_do_baixar(aberto) is None
+    assert flow.janela_do_baixar(aberto) is None
     assert flow.pede_escolha('<hierarchy>' + _no((100, 1000, 980, 1100), "android.widget.Button", "1080p") + '</hierarchy>')
     assert flow.pede_escolha('<hierarchy>' + _no((0, 0, 10, 10), texto="Permitir",
                                                  pacote="com.google.android.permissioncontroller") + '</hierarchy>')
@@ -419,6 +475,7 @@ def test_arquivos_novos_do_baixar():
             assert partes[0] == "find" and flow.MARCA_DO_BAIXAR in partes and "*.mp4" in partes
             return Resposta("find: /sdcard/Movies: No such file or directory\n"
                             "1763216000 100 /sdcard/Download/velho.mp4\n"
+                            "1763216200 512 /sdcard/Download/.pending-1763216200-Vídeo novo.mp4\n"
                             "1763216100 2048 /sdcard/Download/Vídeo com espaço.mp4\n")
 
     assert flow.arquivos_novos(Celular()) == [("/sdcard/Download/Vídeo com espaço.mp4", 2048),
