@@ -35,6 +35,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime
 
 import api_gemini
@@ -126,28 +127,49 @@ CUSTO_NA_TELA = re.compile(r"(\d+)\s+créditos de IA", re.I)
 # num diálogo do teclado.
 PALAVRAS_DE_TERMOS = ("termos de serviço", "aceitar", "concordo", "política de privacidade")
 PACOTE_DO_TECLADO = "com.google.android.inputmethod.latin"
+# O jeito de cada vídeo, que a IA escolhe pelo produto e varia de um vídeo para outro (o nome que o
+# Rafael vê na legenda). Com fala em português do Brasil, viral, inusitado ou de comédia: pedido do
+# Rafael (15/11/2026: "você pode fazer vídeos também com falas (...) Pode ser até vídeos virais também,
+# do tipo uma coisa inusitada (...) Uma coisa mais comédia"), sempre dentro das diretrizes da Shopee
+# Vídeo (sem humilhar ninguém, sem marca, sem preço, sem promessa falsa): DECISOES.md, Shopee Vídeo.
+ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
+           "inusitado": "inusitado (viral)", "comedia": "comédia"}
+ESTILO_PADRAO = "demonstracao"
+# Quantos estilos dos últimos vídeos a IA recebe, para variar (o Rafael pediu vídeos variados, "para não
+# ficar um padrão, para ser mais orgânico", 15/11/2026).
+ESTILOS_LEMBRADOS = 4
 PEDIDO_DA_IA = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto "
     "oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo de 8 segundos, em pé "
-    "(9:16), a partir dessa foto. Responda só com um JSON, sem nada antes ou depois:\n"
-    '{{"serve": true ou false, "motivo": "...", "prompt": "...", "cena": "..."}}\n'
+    "(9:16) e com som, a partir dessa foto. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"serve": true ou false, "motivo": "...", "estilo": "...", "prompt": "...", "cena": "..."}}\n'
     "- serve: false quando a foto não mostra o produto inteiro e com clareza (colagem de várias "
     "fotos, tabela de medidas, mais texto que produto, só a embalagem fechada) ou quando o produto "
     "é proibido nas diretrizes da Shopee Vídeo; motivo: o porquê, em poucas palavras.\n"
-    "- prompt: em inglês, até 90 palavras, o pedido do vídeo: o mesmo produto da foto, idêntico "
-    "(mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
-    "trocado), num lugar real onde ele é usado no dia a dia do Brasil, com luz natural, um só "
-    "movimento suave da câmera (aproximação lenta, giro em volta ou deslize) e, se fizer sentido, "
-    "mãos usando o produto com naturalidade; fotorrealista; sem texto na tela, sem legenda, sem "
-    "logotipo novo, sem outros produtos e sem rosto de pessoa em destaque.\n"
-    "- cena: uma frase em português que descreve a cena, para o Rafael."
+    "- estilo: o jeito do vídeo que mais combina com este produto e prende quem está rolando o feed, um "
+    "destes: \"demonstracao\" (o produto em uso no dia a dia), \"fala\" (uma pessoa comum mostra o "
+    "produto e fala dele, como um cliente contando a experiência), \"inusitado\" (uma situação curiosa "
+    "ou surpreendente com o produto, de vídeo viral) ou \"comedia\" (uma cena engraçada do dia a dia com "
+    "o produto; por exemplo, a bicicleta ergométrica com alguém começando a pedalar com toda a "
+    "determinação e o cachorro assistindo).{evitar}\n"
+    "- prompt: em inglês, até 90 palavras, o pedido do vídeo no estilo escolhido: o mesmo produto da "
+    "foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, "
+    "tirado ou trocado) e bem à vista, numa cena real do Brasil, com luz natural, fotorrealista, com um "
+    "movimento de câmera simples. Com fala, a fala vai em português do Brasil, entre aspas, curta (até "
+    "15 palavras, para caber nos 8 segundos), natural, sem marca, sem preço e sem prometer o que o "
+    "produto não faz. O humor é da situação, nunca de zombar do corpo, da aparência ou de um grupo de "
+    "ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, nojento ou com criança. Sem "
+    "texto na tela, sem legenda, sem logotipo novo e sem outros produtos.\n"
+    "- cena: uma frase em português que descreve a cena (com a fala, se tiver), para o Rafael."
 )
 # A conferência do vídeo pronto, que vai com ele no privado do Rafael: o produto é o da foto?
 PEDIDO_DA_CONFERENCIA = (
     "Este vídeo foi feito por IA a partir da foto do anúncio que vai junto (a imagem). Compare o "
     "produto do vídeo com o da foto: forma, cor, material, detalhes e o que vem junto. Veja também o "
     "que denuncia a IA no vídeo: mãos ou pés estranhos, objetos que se deformam ou mudam de um quadro "
-    "para outro, letras sem sentido. Responda só com um JSON, sem nada antes ou depois:\n"
+    "para outro, letras sem sentido e, se o vídeo tem fala, a fala que não está em português do Brasil, "
+    "que sai cortada ou que não acompanha a boca de quem fala. Responda só com um JSON, sem nada antes "
+    "ou depois:\n"
     '{"mesmo_produto": true ou false, "diferencas": "o que muda no produto, em até 200 letras; vazio '
     'se nada", "defeitos": "o que parece falso ou estranho no vídeo, em até 200 letras; vazio se nada"}'
 )
@@ -162,10 +184,29 @@ def agora():
     return datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def nome_do_estilo(estilo):
+    """A chave do estilo (ESTILOS) pelo que a IA escreveu, com ou sem acento; o ESTILO_PADRAO quando não é nenhum."""
+    sem_acento = unicodedata.normalize("NFKD", str(estilo or "")).encode("ascii", "ignore").decode().lower()
+    return next((chave for chave in ESTILOS if chave in sem_acento), ESTILO_PADRAO)
+
+
+def estilos_recentes():
+    """Os estilos dos últimos vídeos de IA (o mais novo por último), para a IA variar."""
+    return list((db.ler_config(CHAVE, {}) or {}).get("estilos") or [])[-ESTILOS_LEMBRADOS:]
+
+
+def evitar_os_recentes(recentes):
+    """O trecho do pedido à IA que pede outro estilo que não os dos últimos vídeos; "" sem vídeo antes."""
+    if not recentes:
+        return ""
+    return (" Os últimos vídeos foram " + ", ".join(f'"{e}"' for e in recentes) + ": prefira outro estilo, "
+            "se ele também combinar com este produto, para os vídeos não ficarem num padrão só.")
+
+
 def ler_resposta(texto):
     """
-    {"serve", "motivo", "prompt", "cena"} da resposta da IA; None quando ela não veio num JSON
-    ou disse que serve sem escrever o pedido.
+    {"serve", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não veio num
+    JSON ou disse que serve sem escrever o pedido.
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
@@ -181,7 +222,8 @@ def ler_resposta(texto):
     if serve and not prompt:
         return None
     return {"serve": serve, "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
-            "prompt": prompt[:1000], "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
+            "estilo": nome_do_estilo(dados.get("estilo")), "prompt": prompt[:1000],
+            "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
 
 
 def jpeg_sem_metadados(dados):
@@ -203,10 +245,12 @@ def jpeg_sem_metadados(dados):
 def escolher_o_produto():
     """
     O produto do teste: o 1º dos próximos vídeos da fonte do painel com a foto do anúncio que a
-    IA acha boa para o vídeo, com o pedido dela. {"link", "nome", "foto" (bytes), "prompt",
-    "cena", "tentados"}; None sem nenhum.
+    IA acha boa para o vídeo, com o pedido dela, num estilo diferente dos últimos vídeos quando
+    combina (estilos_recentes). {"link", "nome", "foto" (bytes), "estilo", "prompt", "cena",
+    "tentados"}; None sem nenhum.
     """
     fonte = (db.ler_config(ps.CHAVE_PAINEL, {}) or {}).get("fonte", assistente.FONTE_PADRAO)
+    evitar = evitar_os_recentes(estilos_recentes())
     tentados = 0
     for _, _, link, _ in assistente.candidatos_nao_usados(fonte)[:PRODUTOS_TENTADOS]:
         if not link:
@@ -217,10 +261,10 @@ def escolher_o_produto():
         if not foto:
             continue
         resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
-            PEDIDO_DA_IA.format(nome=anuncio["nome"]), imagens=[(foto, "image/jpeg")])))
+            PEDIDO_DA_IA.format(nome=anuncio["nome"], evitar=evitar), imagens=[(foto, "image/jpeg")])))
         if resposta and resposta["serve"]:
-            return {"link": link, "nome": anuncio["nome"], "foto": foto, "prompt": resposta["prompt"],
-                    "cena": resposta["cena"], "tentados": tentados}
+            return {"link": link, "nome": anuncio["nome"], "foto": foto, "estilo": resposta["estilo"],
+                    "prompt": resposta["prompt"], "cena": resposta["cena"], "tentados": tentados}
     return None
 
 
@@ -861,6 +905,7 @@ def legenda_do_video(teste, modelo, custo, conferencia):
               f"🤖 Modelo: {modelo} ({custo} créditos de IA)",
               f"📦 Produto: {teste.get('nome', '')}",
               f"🎥 Cena: {teste.get('cena', '')}",
+              f"🎭 Estilo: {ESTILOS.get(teste.get('estilo'), ESTILOS[ESTILO_PADRAO])}",
               f"🔎 A IA conferiu: {conferido}"]
     video = (teste.get("videos") or {}).get(modelo) or {}
     resolucao = {"1080p": "1080p (aumentada pelo Flow no Baixar)", "720p": "720p (o tamanho original)"}.get(
@@ -1015,11 +1060,12 @@ def teste(sem_gerar=False):
         with open(caminho, "wb") as arquivo:
             arquivo.write(escolhido["foto"])
         teste_de_agora = {"link": escolhido["link"], "nome": escolhido["nome"], "foto": caminho,
-                          "prompt": escolhido["prompt"], "cena": escolhido["cena"], "criado_em": agora(),
-                          "videos": {}}
-        guardar(teste=teste_de_agora)
+                          "estilo": escolhido["estilo"], "prompt": escolhido["prompt"], "cena": escolhido["cena"],
+                          "criado_em": agora(), "videos": {}}
+        # O estilo entra na lista dos últimos, para o próximo vídeo variar (pedido do Rafael, 15/11).
+        guardar(teste=teste_de_agora, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
         print(f"Produto do teste: escolhido (o {escolhido['tentados']}º dos próximos vídeos da fonte); "
-              f"pedido da IA com {len(escolhido['prompt'].split())} palavras")
+              f"estilo {escolhido['estilo']}; pedido da IA com {len(escolhido['prompt'].split())} palavras")
     # O vídeo já gerado vai ao Rafael antes de outro ser gerado: o baixado só falta mandar (sem o
     # celular); o que ficou gerando é baixado agora.
     pendente = None if sem_gerar else video_pendente(teste_de_agora)

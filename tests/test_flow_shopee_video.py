@@ -550,10 +550,14 @@ def test_conferencia_e_legenda():
         {"mesmo": False, "diferencas": "a tampa mudou", "defeitos": ""}
     assert flow.ler_conferencia("sem json") == {"mesmo": None, "diferencas": "", "defeitos": ""}
     assert flow.ler_conferencia('{"mesmo_produto": "sim"}')["mesmo"] is None
-    teste = {"nome": "Copo Térmico Inox", "cena": "O copo na bancada."}
+    teste = {"nome": "Copo Térmico Inox", "cena": "O copo na bancada.", "estilo": "fala"}
     diferente = flow.legenda_do_video(teste, "Omni 1.1 Flash", 12, {"mesmo": False, "diferencas": "a tampa mudou",
                                                                      "defeitos": ""})
     assert "vídeo 2 de 3" in diferente and "o produto muda: a tampa mudou" in diferente
+    assert "🎭 Estilo: pessoa falando do produto" in diferente
+    # O teste de antes, sem o estilo guardado, foi uma demonstração.
+    assert "🎭 Estilo: demonstração" in flow.legenda_do_video({"nome": "Copo"}, "Omni 1.1 Flash", 12,
+                                                              {"mesmo": True, "diferencas": "", "defeitos": ""})
     assert "O que parece IA" not in diferente and "último dos 3" not in diferente
     ultimo = flow.legenda_do_video(dict(teste, nome="X" * 2000), "Omni 1.2 Flash", 24,
                                    {"mesmo": None, "diferencas": "", "defeitos": ""})
@@ -684,8 +688,13 @@ def test_ordem_dos_modelos_do_mais_barato_ao_mais_caro():
 
 def test_resposta_da_ia():
     texto = 'Claro!\n{"serve": true, "motivo": "", "prompt": "Slow orbit  around\\nthe mug", "cena": "A caneca na mesa."}'
-    assert flow.ler_resposta(texto) == {"serve": True, "motivo": "", "prompt": "Slow orbit around the mug",
-                                        "cena": "A caneca na mesa."}
+    assert flow.ler_resposta(texto) == {"serve": True, "motivo": "", "estilo": "demonstracao",
+                                        "prompt": "Slow orbit around the mug", "cena": "A caneca na mesa."}
+    # O estilo como a IA escrever, com ou sem acento; o que não é nenhum vira a demonstração.
+    for escrito, estilo in (("Comédia", "comedia"), ("fala", "fala"), ("inusitado", "inusitado"),
+                            ("demonstração", "demonstracao"), ("dança", "demonstracao")):
+        resposta = flow.ler_resposta(json.dumps({"serve": True, "estilo": escrito, "prompt": "p", "cena": "c"}))
+        assert resposta["estilo"] == estilo, escrito
     assert flow.ler_resposta('{"serve": false, "motivo": "colagem de fotos"}')["serve"] is False
     assert flow.ler_resposta('{"serve": true, "prompt": ""}') is None
     assert flow.ler_resposta("não sei") is None and flow.ler_resposta(None) is None
@@ -699,9 +708,12 @@ def test_escolhe_o_primeiro_produto_com_foto_boa_e_o_log_nao_tem_o_produto(bm, m
     monkeypatch.setattr(flow.ps, "anuncio_do_produto",
                         lambda video: {"foto": _jpeg(), "nome": "Copo Térmico Inox"} if "com-foto" in video["link"] else {})
 
+    pedidos = []
+
     async def ia(prompt, imagens=None):
         assert "Copo Térmico Inox" in prompt and imagens[0][1] == "image/jpeg"
-        return json.dumps({"serve": True, "motivo": "", "prompt": "The exact tumbler, slow push-in.",
+        pedidos.append(prompt)
+        return json.dumps({"serve": True, "motivo": "", "estilo": "comedia", "prompt": "The exact tumbler, slow push-in.",
                            "cena": "O copo na bancada."})
 
     monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", ia)
@@ -714,6 +726,14 @@ def test_escolhe_o_primeiro_produto_com_foto_boa_e_o_log_nao_tem_o_produto(bm, m
     assert teste["nome"] == "Copo Térmico Inox" and teste["link"].endswith("com-foto") and teste["videos"] == {}
     # A foto do teste fica guardada para os 3 vídeos serem do mesmo produto.
     assert flow.teste_guardado()["foto"].endswith("foto_do_teste.jpg")
+    # Pedido do Rafael (15/11): o vídeo pode ter fala em português, ser inusitado ou de comédia, sem zombar de
+    # ninguém; o estilo fica guardado e entra na lista dos últimos, e o próximo pedido pede outro.
+    assert "português do Brasil" in pedidos[0] and "zombar" in pedidos[0] and "comedia" in pedidos[0]
+    assert "prefira outro estilo" not in pedidos[0]
+    assert teste["estilo"] == "comedia" and db.ler_config(flow.CHAVE, {})["estilos"] == ["comedia"]
+    db.atualizar_config(flow.CHAVE, lambda dados: dados.pop("teste"))
+    flow.escolher_o_produto()
+    assert 'Os últimos vídeos foram "comedia": prefira outro estilo' in pedidos[-1]
 
 
 def test_foto_contada_com_as_opcoes_do_modelo_abertas():
