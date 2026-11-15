@@ -93,6 +93,9 @@ ESPERA_DA_VERSAO = 6
 # DECISOES.md, Shopee Vídeo.
 CUSTO_OU_PLANO = re.compile(r"cr[ée]dito|assin|plano|premium|ultra", re.I)
 CREDITO = re.compile(r"cr[ée]dito", re.I)
+# O botão da janela muda com a escolha: "Baixar" no tamanho original e "Aumentar resolução e
+# baixar" no 1080p (visto no 1º Baixar no 1080p, 15/11/2026).
+BOTAO_DO_BAIXAR = re.compile(r"(?:aumentar (?:a )?resolu[çc][ãa]o e )?baixar")
 # Fora dessa janela, outra pergunta de tamanho depois do Baixar (ou uma permissão do Android) para
 # o robô: ele não escolhe nada que não foi mapeado.
 ESCOLHA_NO_BAIXAR = re.compile(r"1080p|\b4k\b|upscal|aumentar|ampliar|melhorad", re.I)
@@ -575,7 +578,8 @@ def janela_do_baixar(xml):
     A janela "Baixar vídeo": {"original", "1080p", "baixar"}; None sem ela. "original" e "1080p" são
     {"centro" (o botão redondo da linha), "marcada"}; o "1080p" é None quando falta, quando a linha
     dele fala em plano ou crédito ou quando a janela fala em crédito. "baixar" é o centro do botão
-    Baixar da janela (None sem ele).
+    que confirma a janela ("Baixar" ou, com o 1080p marcado, "Aumentar resolução e baixar"); None
+    sem ele.
     """
     elementos = [el for el in ps.elementos(xml) if el["pacote"] == PACOTE]
 
@@ -601,7 +605,7 @@ def janela_do_baixar(xml):
     maior = linha(lambda t: t.startswith("1080p"))
     if maior and (CUSTO_OU_PLANO.search(maior["texto"]) or any(CREDITO.search(texto(el)) for el in elementos)):
         maior = None
-    botao = next((el for el in elementos if el["classe"] == "Button" and texto(el) == "baixar"), None)
+    botao = next((el for el in elementos if el["classe"] == "Button" and BOTAO_DO_BAIXAR.fullmatch(texto(el))), None)
     return {"original": original, "1080p": maior, "baixar": _centro(botao) if botao else None}
 
 
