@@ -69,6 +69,10 @@ ESPERA_DA_GERACAO = 10 * 60
 ESPERA_DO_GERANDO = 30
 INTERVALO_DOS_CASOS = 60
 GERANDO = re.compile(r"\bgerando\b", re.I)
+# O "Gerando…" some de uma leitura da tela no meio da geração (15/11/2026, o Omni 1.2 Flash: o
+# robô viu "pronto" aos 6 s e abriu o vídeo de antes). Pronto só depois de PRONTO_SEGUIDAS leituras
+# seguidas do projeto sem ele.
+PRONTO_SEGUIDAS = 3
 ITEM_DO_PROJETO = re.compile(r",\s*\d+\s+(?:item|itens|items)\s*$", re.I)
 # O vídeo aberto: o player ("Vídeo tocando, 1 de 1") e, no alto, o título com o nome, o modelo e a
 # resolução, uma linha cada (mapeado em 15/11/2026).
@@ -464,7 +468,7 @@ def esperar_o_video(d, ja_gerado=False):
     sem ele: o Flow não gerou). ja_gerado=True (gerado num teste anterior): pronto se ele não aparece.
     Os segundos até ficar pronto; None se não ficou em ESPERA_DA_GERACAO.
     """
-    inicio, proximo_caso, visto = time.monotonic(), 0.0, ja_gerado
+    inicio, proximo_caso, visto, seguidas = time.monotonic(), 0.0, ja_gerado, 0
     while True:
         passado = time.monotonic() - inicio
         if passado >= proximo_caso:
@@ -474,11 +478,15 @@ def esperar_o_video(d, ja_gerado=False):
         if xml and tem_termos(xml):
             raise Parada("gerar: tela de termos ou de consentimento; o robô nunca aceita pelo Rafael")
         if xml and gerando(xml):
-            visto = True
-        elif xml and visto:
-            return int(passado)
-        elif not visto and passado >= ESPERA_DO_GERANDO:
-            raise Parada("gerar: o Flow não mostrou o vídeo sendo gerado")
+            visto, seguidas = True, 0
+        elif xml and visto and ps.achar(xml, "Criar"):
+            seguidas += 1
+            if seguidas >= PRONTO_SEGUIDAS:
+                return int(passado)
+        else:
+            seguidas = 0
+            if not visto and passado >= ESPERA_DO_GERANDO:
+                raise Parada("gerar: o Flow não mostrou o vídeo sendo gerado")
         if passado >= ESPERA_DA_GERACAO:
             return None
         time.sleep(PAUSA_DA_LEITURA)
