@@ -38,6 +38,7 @@ import time
 from datetime import datetime
 
 import api_gemini
+import api_shopee
 import assistente_shopee_video as assistente
 import avisar_rafael
 import casos_robo
@@ -738,8 +739,26 @@ def legenda_do_video(teste, modelo, custo, conferencia):
     return "\n".join(linhas)[:1000]
 
 
+def link_do_anuncio(link):
+    """O endereço do anúncio para o Rafael abrir (https://shopee.com.br/product/<loja>/<item>); o link da fonte quando não dá para achar."""
+    try:
+        return api_shopee.produto_do_link(asyncio.run(api_shopee.link_para_converter(link))) or link
+    except Exception:
+        return link
+
+
+def legenda_do_anuncio(teste, modelo):
+    """O texto da foto do anúncio que vai logo depois do vídeo: para comparar, com o link do anúncio."""
+    return (f"🖼️ Foto do anúncio, para comparar com o vídeo {numero_do_modelo(modelo)} de "
+            f"{len(MODELOS_DO_TESTE)} do teste do Flow\n🔗 Anúncio: {link_do_anuncio(teste.get('link', ''))}")[:1000]
+
+
 def mandar_ao_rafael(teste, modelo, custo, local):
-    """Confere o vídeo pela IA e manda no privado do Rafael (sem o celular). 0 mandado, 1 não."""
+    """
+    Confere o vídeo pela IA e manda no privado do Rafael (sem o celular), e logo depois a foto do
+    anúncio com o link dele, para ele comparar (pedido dele, 15/11: DECISOES.md, Shopee Vídeo).
+    0 mandado, 1 não.
+    """
     conferencia = conferir_o_video(local, teste["foto"])
     print(f"Flow: conferência da IA: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}")
     try:
@@ -752,6 +771,11 @@ def mandar_ao_rafael(teste, modelo, custo, local):
         return 1
     marcar_video(modelo, estado="enviado", enviado_em=agora(), mesmo_produto=conferencia["mesmo"])
     print("Flow: vídeo mandado no privado do Rafael")
+    try:
+        foto = avisar_rafael.mandar_foto(teste["foto"], legenda_do_anuncio(teste, modelo))
+    except Exception:
+        foto = False
+    print("Flow: foto e link do anúncio mandados" if foto else "Flow: a foto do anúncio não foi ao privado")
     return 0
 
 
