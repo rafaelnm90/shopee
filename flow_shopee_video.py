@@ -662,17 +662,19 @@ def gerando(xml):
                for el in ps.elementos(xml))
 
 
-def esperar_o_video(d, ja_gerado=False):
+def esperar_o_video(d, ja_gerado=False, guardar_telas=True):
     """
     Espera o vídeo novo ficar pronto no projeto, guardando a tela a cada INTERVALO_DOS_CASOS
-    (casos_robo). Logo depois do Gerar, o "Gerando…" tem de aparecer em ESPERA_DO_GERANDO s (Parada
-    sem ele: o Flow não gerou). ja_gerado=True (gerado num teste anterior): pronto se ele não aparece.
-    Os segundos até ficar pronto; None se não ficou em ESPERA_DA_GERACAO.
+    (casos_robo; guardar_telas=False na produção do dia, para as telas da espera não tirarem do
+    servidor os casos das falhas, que ficam no máximo 30). Logo depois do Gerar, o "Gerando…" tem de
+    aparecer em ESPERA_DO_GERANDO s (Parada sem ele: o Flow não gerou). ja_gerado=True (gerado numa
+    vez anterior): pronto se ele não aparece. Os segundos até ficar pronto; None se não ficou em
+    ESPERA_DA_GERACAO.
     """
     inicio, proximo_caso, visto, seguidas = time.monotonic(), 0.0, ja_gerado, 0
     while True:
         passado = time.monotonic() - inicio
-        if passado >= proximo_caso:
+        if guardar_telas and passado >= proximo_caso:
             casos_robo.guardar(d, "flow", "tela", f"esperando o vídeo, aos {int(passado)} s", passo="flow gerar")
             proximo_caso += INTERVALO_DOS_CASOS
         xml = _tela(d)
@@ -1014,7 +1016,7 @@ def tirar_da_galeria(d, nome):
     d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + caminho])
 
 
-def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=False):
+def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=False, guardar_telas=True):
     """
     O caminho no Flow, com a trava do celular na mão e a tela já conferida: a foto do pedido na
     galeria, o projeto do robô, o pedido (a foto, o texto e o modelo) conferido na tela, o Gerar e,
@@ -1023,6 +1025,7 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
     servidor. so_baixar=True: o vídeo já foi gerado e só falta baixar. Devolve True (o pedido pronto,
     com sem_gerar, ou o vídeo baixado) ou False (o vídeo não ficou pronto a tempo: a próxima vez
     baixa); Parada com o passo que parou. A foto sai da galeria no fim, dê certo ou não.
+    guardar_telas: a tela da espera do vídeo vai aos casos de minuto em minuto (esperar_o_video).
     """
     nome_na_galeria = ""
     if not so_baixar:
@@ -1047,7 +1050,7 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
             tocar(d, "Gerar", "gerar")
             marcar(custo=custo, gerado_em=agora(), estado="gerando")
             print(f"Flow: Gerar tocado ({modelo}, {custo} créditos)")
-        pronto = esperar_o_video(d, ja_gerado=so_baixar)
+        pronto = esperar_o_video(d, ja_gerado=so_baixar, guardar_telas=guardar_telas)
         if pronto is None:
             print(f"Flow: o vídeo não ficou pronto em {ESPERA_DA_GERACAO // 60} min; a próxima vez baixa")
             return False
@@ -1153,8 +1156,9 @@ def producao_no_celular(d, atual):
     """
     local = os.path.join(PASTA, f"producao_{atual['data']}.mp4")
     try:
+        # Sem as telas da espera nos casos: todo dia, elas tirariam do servidor os casos das falhas.
         return no_flow(d, atual, atual["modelo"], atual["custo"], local, guardar_producao,
-                       so_baixar=atual.get("estado") == "gerando")
+                       so_baixar=atual.get("estado") == "gerando", guardar_telas=False)
     except Parada as e:
         casos_robo.guardar(d, "video de IA", "parou", str(e), passo="flow")
         raise

@@ -870,6 +870,8 @@ def test_producao_gera_no_omni_1_2_baixa_e_confere_sem_mandar_ao_privado(celular
     assert flow.video_pronto()["conferencia"]["mesmo"] is True
     # A foto sai da galeria, e nada vai ao privado: o vídeo vira um rascunho do robô.
     assert any(partes[:2] == ["rm", "-f"] for partes in celular.comandos) and celular.mandados == []
+    # A espera do vídeo não guarda a tela de minuto em minuto: os casos ficam para as falhas.
+    assert not any("esperando o vídeo" in motivo for _, motivo in celular.guardados)
     saida = capsys.readouterr().out
     assert "Gerar tocado (Omni 1.2 Flash, 24 créditos)" in saida and "Copo" not in saida and "tumbler" not in saida
 
