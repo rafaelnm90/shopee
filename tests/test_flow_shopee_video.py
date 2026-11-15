@@ -50,6 +50,10 @@ class Flow:
         # Depois do Gerar: quantas leituras o quadrado mostra "Gerando…", de que modelo é o vídeo pronto
         # e o que o Baixar faz.
         self.gerando_leituras, self.modelo_do_video, self.filtro = 0, "", False
+        # Quantas leituras o "Gerando…" dura e em qual delas ele some da tela (como no vídeo 3, 15/11).
+        self.leituras_ao_gerar, self.piscar_na_leitura = 2, None
+        # Um vídeo gerado antes no projeto (o modelo dele), mais abaixo na grade, e se o robô o abriu.
+        self.video_de_antes, self.abriu_o_de_antes = "", False
         self.falha_ao_gerar = self.baixado = False
         # A janela "Baixar vídeo" (15/11): o 720p "Tamanho original" vem marcado e o 1080p fica livre
         # (sem custo na tela); o 4K pede outro plano. Os toques no plano ficam em toques_proibidos.
@@ -108,13 +112,16 @@ class Flow:
                      "filtro"),
                     ((403, 2171, 677, 2339), _no((403, 2171, 677, 2339), "android.widget.Button", "Criar"), "pedido")]
             if self.gerado and self.gerando_leituras > 0:
-                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…"), ""))
+                if self.gerando_leituras != self.piscar_na_leitura:
+                    nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…"), ""))
             elif self.gerado:
                 nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="Mulher usando o copo, 1 item"), "video"))
+            if self.video_de_antes:
+                nos.append(((0, 1427, 537, 1964), _no((0, 1427, 537, 1964), desc="Copo de antes, 1 item"), "antes"))
             if not self.filtro:
                 nos.append(((543, 466, 1080, 1004), _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item"), "foto"))
         elif self.tela == "video":
-            versoes = self.versoes or [self.modelo_do_video]
+            versoes = [self.video_de_antes] if self.abriu_o_de_antes else (self.versoes or [self.modelo_do_video])
             # A versão estendida (a 2ª em diante) tem só o nome no título, sem o modelo.
             titulo = f"Mulher usando o copo\n{versoes[self.versao]}\n720p" if self.versao == 0 else "Mulher usando o copo"
             nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=titulo, clicavel=False), ""),
@@ -222,13 +229,15 @@ class Flow:
             self.geracoes += 1
             self.tela = "projeto"
             if not self.falha_ao_gerar:
-                self.gerado, self.gerando_leituras, self.modelo_do_video = True, 2, self.modelo
+                self.gerado, self.gerando_leituras, self.modelo_do_video = True, self.leituras_ao_gerar, self.modelo
         elif acao.startswith("versao:"):
             self.versao = int(acao.split(":")[1])
         elif acao in ("novo", "outro"):
             self.fora_do_projeto.append(acao)
         elif acao == "filtro":
             self.filtro = True
+        elif acao == "antes":
+            self.tela, self.abriu_o_de_antes, self.leituras_do_video = "video", True, 0
         elif acao in ("video", "menu_video"):
             if acao == "video" and self.tela != "menu_video":
                 self.leituras_do_video = 0
@@ -528,6 +537,16 @@ def test_arquivos_novos_do_baixar():
 
     assert flow.arquivos_novos(Celular()) == [("/sdcard/Download/Vídeo com espaço.mp4", 2048),
                                               ("/sdcard/Download/velho.mp4", 100)]
+
+
+def test_gerando_que_some_numa_leitura_nao_conta_como_pronto(celular):
+    # O vídeo 3 do teste (15/11): o "Gerando…" sumiu de uma leitura no meio da geração e o robô abriu
+    # o vídeo de antes. Agora o pronto pede 3 leituras seguidas do projeto sem ele.
+    celular.leituras_ao_gerar, celular.piscar_na_leitura, celular.video_de_antes = 6, 5, "Omni 1.1 Flash"
+    flow.guardar(teste=celular.teste)
+    assert flow.no_celular(celular.teste, "Omni 1.2 Flash", 24, sem_gerar=False) == 0
+    assert celular.baixado and celular.modelo_do_video == "Omni 1.2 Flash" and not celular.abriu_o_de_antes
+    assert not any(resultado == "parou" for resultado, _ in celular.guardados)
 
 
 def test_flow_aberto_no_veo_lite_troca_o_modelo_antes_das_opcoes(celular):
