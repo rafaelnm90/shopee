@@ -1,4 +1,5 @@
 """flow_shopee_video: o teste da P229 1 monta o pedido no Flow como mapeado, só gera com tudo conferido e o log público não tem o produto."""
+import contextlib
 import io
 import json
 from xml.sax.saxutils import quoteattr
@@ -11,6 +12,11 @@ import flow_shopee_video as flow
 
 CUSTOS = {"Omni 1.2 Flash": 24, "Omni 1.1 Flash": 12, "Veo 3.1 - Lite": 10}
 SELETOR = flow.PACOTE_DO_SELETOR
+# O arquivo que o Baixar do Flow deixa no celular (o nome é o título que o Flow dá ao vídeo).
+BAIXADO = "/sdcard/Download/Mulher usando o copo.mp4"
+MENU_DO_VIDEO = (("Gostei", 278, ""), ("Renomear", 425, ""), ("Reutilizar comando", 530, ""), ("Favorito", 635, ""),
+                 ("Baixar", 740, "baixar"), ("Enviar", 845, ""), ("Compartilhar", 950, ""),
+                 ("Compartilhar no YouTube", 1055, ""), ("Enviar feedback", 1202, ""))
 
 
 def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid=""):
@@ -41,6 +47,11 @@ class Flow:
         self.tela, self.texto, self.modelo, self.foto = "fora", "", "Omni 1.2 Flash", False
         self.folha = self.lista = self.marcada = self.gerado = False
         self.na_galeria, self.comandos, self.toques = "", [], []
+        # Depois do Gerar: quantas leituras o quadrado mostra "Gerando…", de que modelo é o vídeo pronto
+        # e o que o Baixar faz.
+        self.gerando_leituras, self.modelo_do_video, self.filtro = 0, "", False
+        self.falha_ao_gerar = self.pede_tamanho = self.baixado = False
+        self.geracoes, self.puxados = 0, []
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
@@ -57,7 +68,14 @@ class Flow:
 
     def shell(self, partes):
         self.comandos.append(partes)
+        if partes and partes[0] == "find":
+            return Resposta(f"1763216000 2345678 {BAIXADO}\n" if self.baixado else "")
         return Resposta(self.na_galeria if "content" in partes else "")
+
+    def pull(self, origem, destino):
+        self.puxados.append(origem)
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"\0" * 2048)
 
     def nos(self):
         """(caixa, xml do nó, o que o toque faz) da tela de agora."""
@@ -69,7 +87,31 @@ class Flow:
                 nos.append(((0, 1400, 1080, 1500), _no((0, 1400, 1080, 1500), texto="Aceitar os Termos de Serviço"), ""))
         elif self.tela == "projeto":
             nos += [((0, 152, 1080, 278), _no((0, 152, 1080, 278), desc="nov. 15, 08:23 AM", clicavel=False), ""),
+                    ((42, 330, 191, 425), _no((42, 330, 191, 425), "android.widget.Button", "Tudo", clicavel=False), ""),
+                    ((500, 330, 737, 425), _no((500, 330, 737, 425), "android.widget.Button", "Vídeos", clicavel=False),
+                     "filtro"),
                     ((403, 2171, 677, 2339), _no((403, 2171, 677, 2339), "android.widget.Button", "Criar"), "pedido")]
+            if self.gerado and self.gerando_leituras > 0:
+                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…"), ""))
+            elif self.gerado:
+                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="Mulher usando o copo, 1 item"), "video"))
+            if not self.filtro:
+                nos.append(((543, 466, 1080, 1004), _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item"), "foto"))
+        elif self.tela == "video":
+            nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=f"Mulher usando o copo\n{self.modelo_do_video}\n720p",
+                                              clicavel=False), ""),
+                    ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Fechar"), "projeto"),
+                    ((891, 152, 1017, 278), _no((891, 152, 1017, 278), "android.widget.Button", "Mais opções"), "menu_video"),
+                    ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184), desc="Vídeo tocando, 1 de 1\n0:08"), ""),
+                    ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), ""),
+                    ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"), "")]
+        elif self.tela == "menu_video":
+            nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "video"))
+            nos += [((341, y, 954, y + 105), _no((341, y, 954, y + 105), "android.widget.Button", nome), acao)
+                    for nome, y, acao in MENU_DO_VIDEO]
+        elif self.tela == "tamanho":
+            nos += [((100, 900, 980, 1000), _no((100, 900, 980, 1000), "android.widget.Button", "720p"), ""),
+                    ((100, 1000, 980, 1100), _no((100, 1000, 980, 1100), "android.widget.Button", "1080p (melhorado)"), "")]
         elif self.tela == "seletor":
             nos += [((0, 630, 354, 984), _no((0, 630, 354, 984), "android.widget.FrameLayout",
                                               "Item Foto criado em 15 de nov. de 2026 9:48:38 AM", pacote=SELETOR), "marcar"),
@@ -105,7 +147,10 @@ class Flow:
         return nos
 
     def dump_hierarchy(self):
-        return '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(no for _, no, _ in self.nos()) + "</hierarchy>"
+        xml = '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(no for _, no, _ in self.nos()) + "</hierarchy>"
+        if self.tela == "projeto" and self.gerando_leituras > 0:
+            self.gerando_leituras -= 1
+        return xml
 
     def click(self, x, y):
         self.toques.append((x, y))
@@ -128,7 +173,17 @@ class Flow:
         elif acao == "adicionar" and self.marcada:
             self.tela, self.foto = "pedido", True
         elif acao == "gerar":
-            self.gerado = True
+            self.geracoes += 1
+            self.tela = "projeto"
+            if not self.falha_ao_gerar:
+                self.gerado, self.gerando_leituras, self.modelo_do_video = True, 2, self.modelo
+        elif acao == "filtro":
+            self.filtro = True
+        elif acao in ("video", "menu_video"):
+            self.tela = acao
+        elif acao == "baixar":
+            self.tela = "tamanho" if self.pede_tamanho else "video"
+            self.baixado = not self.pede_tamanho
 
 
 @pytest.fixture
@@ -142,7 +197,20 @@ def celular(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(flow.casos_robo, "guardar",
                         lambda d, acao, resultado, motivo, passo="", **extra: guardados.append((resultado, motivo)) or "caso")
     monkeypatch.setattr(flow, "ESPERA_DA_TELA", 0.2)
-    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 0)
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
+    monkeypatch.setattr(flow, "PASTA", str(tmp_path / "flow"))
+    monkeypatch.setattr(flow.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
+    monkeypatch.setattr(flow.celular_robo, "trava", contextlib.contextmanager(lambda: (yield True)))
+    aparelho.mandados, aparelho.conferidos = [], []
+
+    async def conferir(caminho, prompt, imagens=None):
+        aparelho.conferidos.append((caminho, imagens[0][1]))
+        return '{"mesmo_produto": true, "diferencas": "", "defeitos": "a mão muda de forma no fim"}'
+
+    monkeypatch.setattr(flow.api_gemini, "analisar_video_gemini", conferir)
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_video",
+                        lambda caminho, legenda="": aparelho.mandados.append((caminho, legenda)) or True)
     foto = tmp_path / "foto.jpg"
     foto.write_bytes(_jpeg())
     aparelho.guardados = guardados
@@ -170,15 +238,144 @@ def test_sem_gerar_monta_o_pedido_inteiro_e_nao_toca_no_gerar(celular, capsys):
     assert "Veo 3.1 - Lite, 10 créditos" in saida and "Copo" not in saida and "tumbler" not in saida
 
 
-def test_gera_com_tudo_conferido_e_anota_o_modelo_do_teste(celular, capsys):
+def test_gera_com_tudo_conferido_espera_pronto_e_baixa_o_video(celular, capsys):
     flow.guardar(teste=celular.teste)
     assert flow.no_celular(celular.teste, "Omni 1.1 Flash", 12, sem_gerar=False) == 0
-    assert celular.gerado
+    assert celular.gerado and celular.geracoes == 1
     videos = db.ler_config(flow.CHAVE, {})["teste"]["videos"]
-    assert videos["Omni 1.1 Flash"]["estado"] == "gerando" and videos["Omni 1.1 Flash"]["custo"] == 12
-    assert any("depois do Gerar" in motivo for _, motivo in celular.guardados)
-    assert "Gerar tocado (Omni 1.1 Flash, 12 créditos)" in capsys.readouterr().out
+    assert videos["Omni 1.1 Flash"]["estado"] == "baixado" and videos["Omni 1.1 Flash"]["custo"] == 12
+    assert videos["Omni 1.1 Flash"]["arquivo"].endswith("video_2.mp4")
+    assert any("esperando o vídeo" in motivo for _, motivo in celular.guardados)
+    # O arquivo veio do celular, e o celular ficou sem ele e sem a marca do Baixar.
+    assert celular.puxados == [BAIXADO]
+    assert ["rm", "-f", BAIXADO, flow.MARCA_DO_BAIXAR] in celular.comandos
+    saida = capsys.readouterr().out
+    assert "Gerar tocado (Omni 1.1 Flash, 12 créditos)" in saida and "Flow: vídeo baixado (0.0 MB" in saida
+    assert "Mulher" not in saida and ".mp4" not in saida
     assert flow.proximo_modelo(db.ler_config(flow.CHAVE, {})["teste"]) == ("Veo 3.1 - Lite", 10)
+
+
+def test_teste_gera_baixa_confere_e_manda_no_privado(celular, capsys):
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 0
+    assert celular.geracoes == 1 and celular.modelo_do_video == "Veo 3.1 - Lite"
+    assert len(celular.mandados) == 1 and celular.conferidos[0][1] == "image/jpeg"
+    caminho, legenda = celular.mandados[0]
+    assert caminho.endswith("video_1.mp4")
+    for trecho in ("vídeo 1 de 3", "Veo 3.1 - Lite (10 créditos de IA)", "Copo Térmico Inox", "O copo na bancada",
+                   "o produto é o mesmo da foto do anúncio", "a mão muda de forma no fim", "Nada foi postado"):
+        assert trecho in legenda
+    video = db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]
+    assert video["estado"] == "enviado" and video["mesmo_produto"] is True
+    saida = capsys.readouterr().out
+    assert "conferência da IA: mesmo produto" in saida and "vídeo mandado no privado do Rafael" in saida
+    assert "Copo" not in saida and "tumbler" not in saida and "Mulher" not in saida
+
+
+def test_video_ja_gerado_e_baixado_e_mandado_sem_gerar_outro(celular):
+    celular.teste["videos"] = {"Veo 3.1 - Lite": {"custo": 10, "estado": "gerando"}}
+    flow.guardar(teste=celular.teste)
+    celular.gerado, celular.modelo_do_video = True, "Veo 3.1 - Lite"
+    assert flow.teste() == 0
+    assert celular.geracoes == 0 and celular.na_galeria == ""
+    assert len(celular.mandados) == 1
+    teste = db.ler_config(flow.CHAVE, {})["teste"]
+    assert teste["videos"]["Veo 3.1 - Lite"]["estado"] == "enviado"
+    assert flow.proximo_modelo(teste) == ("Omni 1.1 Flash", 12)
+
+
+def test_video_mais_novo_de_outro_modelo_nao_e_baixado_nem_mandado(celular):
+    celular.teste["videos"] = {"Veo 3.1 - Lite": {"custo": 10, "estado": "gerando"}}
+    flow.guardar(teste=celular.teste)
+    celular.gerado, celular.modelo_do_video = True, "Omni 1.1 Flash"
+    assert flow.teste() == 1
+    assert ("parou", "baixar: o vídeo mais novo não é do modelo do teste") in celular.guardados
+    assert not celular.baixado and celular.mandados == []
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
+
+
+def test_baixar_que_pede_o_tamanho_para_sem_escolher(celular):
+    celular.pede_tamanho = True
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 1
+    assert celular.tela == "tamanho" and celular.mandados == []
+    # O último toque foi o Baixar: nenhum nas opções de tamanho (o 1080p pode gastar crédito).
+    assert celular.toques[-1] == (647, 792)
+    assert ("parou", "baixar: o Flow pediu uma escolha (tamanho ou permissão); o robô não escolhe pelo Rafael") \
+        in celular.guardados
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
+
+
+def test_gerar_sem_o_gerando_para_e_guarda_a_tela(celular, monkeypatch):
+    monkeypatch.setattr(flow, "ESPERA_DO_GERANDO", 0.05)
+    celular.falha_ao_gerar = True
+    flow.guardar(teste=celular.teste)
+    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=False) == 1
+    assert ("parou", "gerar: o Flow não mostrou o vídeo sendo gerado") in celular.guardados
+    assert celular.puxados == []
+
+
+def test_baixado_que_nao_chegou_ao_rafael_vai_sem_o_celular(celular, monkeypatch, tmp_path):
+    arquivo = tmp_path / "video_1.mp4"
+    arquivo.write_bytes(b"\0" * 2048)
+    celular.teste["videos"] = {"Veo 3.1 - Lite": {"custo": 10, "estado": "baixado", "arquivo": str(arquivo)}}
+    flow.guardar(teste=celular.teste)
+    monkeypatch.setattr(flow.celular_robo, "conectado", lambda: False)
+    assert flow.teste() == 0
+    assert celular.toques == [] and celular.mandados[0][0] == str(arquivo)
+
+
+def test_envio_recusado_fica_para_o_proximo_teste(celular, monkeypatch, capsys):
+    flow.guardar(teste=celular.teste)
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_video", lambda caminho, legenda="": False)
+    assert flow.teste() == 1
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "baixado"
+    assert "o próximo teste manda de novo" in capsys.readouterr().out
+
+
+def test_conferencia_e_legenda():
+    assert flow.ler_conferencia('ok {"mesmo_produto": false, "diferencas": "a  tampa\\nmudou", "defeitos": ""}') == \
+        {"mesmo": False, "diferencas": "a tampa mudou", "defeitos": ""}
+    assert flow.ler_conferencia("sem json") == {"mesmo": None, "diferencas": "", "defeitos": ""}
+    assert flow.ler_conferencia('{"mesmo_produto": "sim"}')["mesmo"] is None
+    teste = {"nome": "Copo Térmico Inox", "cena": "O copo na bancada."}
+    diferente = flow.legenda_do_video(teste, "Omni 1.1 Flash", 12, {"mesmo": False, "diferencas": "a tampa mudou",
+                                                                     "defeitos": ""})
+    assert "vídeo 2 de 3" in diferente and "o produto muda: a tampa mudou" in diferente
+    assert "O que parece IA" not in diferente and "último dos 3" not in diferente
+    ultimo = flow.legenda_do_video(dict(teste, nome="X" * 2000), "Omni 1.2 Flash", 24,
+                                   {"mesmo": None, "diferencas": "", "defeitos": ""})
+    assert "vídeo 3 de 3" in ultimo and len(ultimo) <= 1000
+    assert "último dos 3" in flow.legenda_do_video(teste, "Omni 1.2 Flash", 24,
+                                                   {"mesmo": True, "diferencas": "", "defeitos": ""})
+
+
+def test_leitura_das_telas_depois_do_gerar():
+    projeto = ('<hierarchy>' + _no((0, 466, 537, 1422), desc="1%\nGerando…")
+               + _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item") + '</hierarchy>')
+    assert flow.gerando(projeto) and flow.quadro_mais_novo(projeto) == (811, 735)
+    pronto = projeto.replace("1%&#10;Gerando…", "Mulher usando o copo, 1 item")
+    assert not flow.gerando(pronto) and flow.quadro_mais_novo(pronto) == (268, 944)
+    aberto = ('<hierarchy>' + _no((0, 131, 1080, 299), desc="Mulher usando o copo\nVeo 3.1 - Lite\n720p", clicavel=False)
+              + _no((0, 309, 1080, 2184), desc="Vídeo tocando, 1 de 1\n0:07") + '</hierarchy>')
+    assert flow.titulo_do_video(aberto) == ["Mulher usando o copo", "Veo 3.1 - Lite", "720p"]
+    assert flow.titulo_do_video(projeto) is None
+    assert not flow.pede_escolha(aberto)
+    assert flow.pede_escolha('<hierarchy>' + _no((100, 1000, 980, 1100), "android.widget.Button", "1080p") + '</hierarchy>')
+    assert flow.pede_escolha('<hierarchy>' + _no((0, 0, 10, 10), texto="Permitir",
+                                                 pacote="com.google.android.permissioncontroller") + '</hierarchy>')
+
+
+def test_arquivos_novos_do_baixar():
+    class Celular:
+        def shell(self, partes):
+            assert partes[0] == "find" and flow.MARCA_DO_BAIXAR in partes and "*.mp4" in partes
+            return Resposta("find: /sdcard/Movies: No such file or directory\n"
+                            "1763216000 100 /sdcard/Download/velho.mp4\n"
+                            "1763216100 2048 /sdcard/Download/Vídeo com espaço.mp4\n")
+
+    assert flow.arquivos_novos(Celular()) == [("/sdcard/Download/Vídeo com espaço.mp4", 2048),
+                                              ("/sdcard/Download/velho.mp4", 100)]
 
 
 def test_custo_diferente_na_tela_nao_gera(celular, capsys):
