@@ -58,7 +58,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
         "Preparar 1 Agora ⚡",
         "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
         "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Fazer Agora ⏩", "Produtos a Mais 🛍️",
-        "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
+        "Testar Caminho 🧭", "Celular do Robô 📱", "Vídeo de IA ✨", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
     for trecho in ("Um cobre o outro", "Depuração por Wi-Fi", "Retomar Postagem ▶️", "Passo a Passo 📖"):
@@ -2179,3 +2179,31 @@ def test_rascunho_sem_o_que_a_edicao_precisa_nao_tem_o_editar(bm, Msg, Est):
     msg = MsgComMidia(Msg, sv.BOTAO_EDITAR)
     rodar(sv.editar_handler(msg, est))
     assert "não dá para editar" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.rascunho
+
+
+def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, monkeypatch, tmp_path):
+    # Escolha do Rafael (15/11, P232 1): 1 vídeo de IA por dia no Google Flow, que vira um dos rascunhos do dia;
+    # ligado até ele desligar no painel.
+    sv, est = _painel(bm), Est()
+    monkeypatch.setattr(sv.robo.flow, "PASTA", str(tmp_path))
+    assert sv.BOTAO_VIDEO_IA in _textos(sv.teclado_robo(sv.ler_config()))
+    assert sv.PROCESSO_DO_VIDEO_DE_IA == sv.robo.PROCESSO_DO_VIDEO_DE_IA
+    assert "Vídeo de IA: ✅ <b>ligado</b> (ainda não fez nenhum)" in sv.texto_robo(sv.ler_config())
+    msg = Msg(sv.BOTAO_VIDEO_IA)
+    rodar(sv.video_ia_handler(msg, est))
+    for trecho in ("Omni 1.2 Flash (24 créditos", "Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz",
+                   "Nunca mais de um vídeo por dia"):
+        assert trecho in msg.saidas[-1]
+    assert _textos(sv.teclado_video_ia(sv.ler_config())) == ["Desligar Vídeo de IA ⏸️", "Voltar ao Robô 🔙"]
+    rodar(sv.ligar_video_ia_handler(Msg("Desligar Vídeo de IA ⏸️"), est))
+    assert sv.robo.ler_config()["robo_video_ia"] is False
+    assert "Vídeo de IA: ⏸️ <b>desligado</b>" in sv.texto_robo(sv.ler_config())
+    rodar(sv.ligar_video_ia_handler(Msg("Ligar Vídeo de IA ✅"), est))
+    assert sv.robo.ler_config()["robo_video_ia"] is True
+    assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ?", sv.PROCESSO_DO_VIDEO_DE_IA) == (2,)
+    # O que aconteceu com o mais recente.
+    hoje = sv.robo.agora_br().strftime("%Y-%m-%d")
+    sv.robo.flow.recomecar_producao(hoje, estado="pronto")
+    assert "hoje: pronto: vira o próximo rascunho" in sv.texto_video_ia(sv.ler_config())
+    sv.robo.flow.recomecar_producao("2026-10-01", estado="descartado")
+    assert "o de 01/10: não virou rascunho" in sv.texto_video_ia(sv.ler_config())

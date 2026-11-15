@@ -696,6 +696,12 @@ BOTAO_PRODUTOS_A_MAIS = "Produtos a Mais 🛍️"
 PROCESSO_DOS_ESPACOS = "espaços livres: o mesmo item de outras lojas"
 BOTAO_LIGAR_A_MAIS = "Ligar Produtos a Mais ✅"
 BOTAO_DESLIGAR_A_MAIS = "Desligar Produtos a Mais ⏸️"
+# O vídeo de IA do dia no Google Flow, que vira um dos rascunhos do dia (P232 1): ligado até o Rafael desligar.
+BOTAO_VIDEO_IA = "Vídeo de IA ✨"
+BOTAO_LIGAR_VIDEO_IA = "Ligar Vídeo de IA ✅"
+BOTAO_DESLIGAR_VIDEO_IA = "Desligar Vídeo de IA ⏸️"
+# O processo do vídeo de IA no registro: o mesmo do robo_shopee_video (o teste confere).
+PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -755,6 +761,7 @@ def teclado_robo(config):
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
         [KeyboardButton(text=BOTAO_FAZER_AGORA), KeyboardButton(text=BOTAO_PRODUTOS_A_MAIS)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
+        [KeyboardButton(text=BOTAO_VIDEO_IA)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
 
@@ -809,6 +816,11 @@ def teclado_capa(config):
 
 def teclado_produtos_a_mais(config):
     liga = BOTAO_DESLIGAR_A_MAIS if config.get("robo_produtos_a_mais", True) else BOTAO_LIGAR_A_MAIS
+    return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+
+
+def teclado_video_ia(config):
+    liga = BOTAO_DESLIGAR_VIDEO_IA if robo.video_de_ia_ligado(config) else BOTAO_LIGAR_VIDEO_IA
     return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
@@ -937,6 +949,8 @@ def texto_robo(config, agora=None, celular=None):
         f"✂️ Edição dos vídeos: {rotulo_edicao(config)}\n"
         f"🏷️ Capa com chamada: {rotulo_capa(config)}\n"
         f"🛍️ Produtos a mais: {rotulo_produtos_a_mais(config)}\n"
+        f"✨ Vídeo de IA: {'✅ <b>ligado</b>' if robo.video_de_ia_ligado(config) else '⏸️ <b>desligado</b>'} "
+        f"({html_escape(linha_do_video_de_ia_de_hoje(agora))})\n"
         f"🧭 Treino: {_linha_treino()}\n\n"
         "<b>O que cada botão faz</b>\n"
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
@@ -962,6 +976,8 @@ def texto_robo(config, agora=None, celular=None):
         "comentando nos que têm algo para dizer).\n"
         f"🛍️ <b>{BOTAO_PRODUTOS_A_MAIS}</b>: nos vídeos de link de produto, o mesmo item de outras lojas nos "
         "espaços livres (até 6 produtos); ligar ou desligar.\n"
+        f"✨ <b>{BOTAO_VIDEO_IA}</b>: 1 vídeo por dia feito por IA no Google Flow, com um produto da fonte; ele vira "
+        "um dos rascunhos do dia, para você aprovar; ligar ou desligar.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
@@ -1546,6 +1562,76 @@ async def exemplo_capa_handler(message: types.Message, state: FSMContext):
                     arquivo.write(exemplo["abertura"])
                 await message.answer_video(FSInputFile(caminho), caption=LEGENDA_DA_ABERTURA, parse_mode="HTML")
     await state.set_state(ShopeeVideoFluxo.menu_robo)
+
+
+# Como está o vídeo de IA do dia, pelo andamento da produção (flow_shopee_video).
+SITUACOES_DO_VIDEO_DE_IA = {
+    "escolhido": "começou e não terminou (a rodada caiu no meio); tenta de novo",
+    "parou": "parou antes do Gerar (nenhum crédito gasto); tenta de novo hoje",
+    "sem produto": "nenhum produto da fonte serviu (os próximos 10 não pagam o mínimo ou a foto não serve)",
+    "gerando": "gerado no Flow; falta baixar, na próxima rodada",
+    "baixado": "baixado; falta a conferência da IA",
+    "pronto": "pronto: vira o próximo rascunho do plano do dia",
+    "descartado": "não virou rascunho (a IA viu outro produto no vídeo, ou o vídeo não chegou do Flow)",
+    "usado": "virou rascunho",
+    "desistiu": "não virou rascunho (o celular ou o app falharam em todas as tentativas)",
+}
+
+
+def linha_do_video_de_ia_de_hoje(agora=None):
+    """O que aconteceu com o vídeo de IA mais recente (P232 1), numa linha."""
+    atual = robo.flow.producao()
+    if not atual.get("estado"):
+        return "ainda não fez nenhum"
+    dia = atual.get("data") or ""
+    hoje = robo.agora_br(agora).strftime("%Y-%m-%d")
+    quando = "hoje" if dia == hoje else f"o de {dia[8:10]}/{dia[5:7]}"
+    return f"{quando}: {SITUACOES_DO_VIDEO_DE_IA.get(atual['estado'], atual['estado'])}"
+
+
+def texto_video_ia(config, agora=None):
+    """A tela do Vídeo de IA ✨. Escolha do Rafael (15/11, P232 1): DECISOES.md, Shopee Vídeo."""
+    modelo, custo = robo.flow.MODELO_DA_PRODUCAO
+    ligado = robo.video_de_ia_ligado(config)
+    return (
+        "✨ <b>Vídeo de IA</b>\n"
+        f"Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo de 8 s feito por IA, no "
+        f"{modelo} ({custo} créditos, dentro dos 50 grátis do dia), com um produto da fonte: o que paga mais por venda "
+        f"entre os próximos {robo.VIDEOS_NA_ESCOLHA}, ainda não postado. A IA escreve o pedido pela foto do anúncio, num "
+        "estilo que varia (demonstração, pessoa falando do produto, inusitado ou comédia), e confere o vídeo pronto com "
+        "a foto. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com a nossa edição, os produtos e o Rótulo "
+        f"de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar. Se a IA vir outro produto no vídeo, ele não "
+        "vira rascunho. Nunca mais de um vídeo por dia.\n\n"
+        f"Agora: {'✅ <b>ligado</b>' if ligado else '⏸️ <b>desligado</b> (o robô não faz nem usa o vídeo de IA)'}\n"
+        f"Último: {html_escape(linha_do_video_de_ia_de_hoje(agora))}\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"✅ <b>{BOTAO_LIGAR_VIDEO_IA}</b> / ⏸️ <b>{BOTAO_DESLIGAR_VIDEO_IA}</b>: liga ou desliga o vídeo de IA dos "
+        "próximos rascunhos (os já salvos ficam como estão).\n"
+        f"🔙 <b>{BOTAO_VOLTAR_ROBO}</b>: volta à tela do Robô Automático."
+    )
+
+
+async def mostrar_video_ia(message, state):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    await message.answer(texto_video_ia(config), parse_mode="HTML", reply_markup=teclado_video_ia(config))
+
+
+@router.message(F.text == BOTAO_VIDEO_IA, StateFilter("*"))
+async def video_ia_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_video_ia(message, state)
+
+
+@router.message(F.text.in_([BOTAO_LIGAR_VIDEO_IA, BOTAO_DESLIGAR_VIDEO_IA]), StateFilter("*"))
+async def ligar_video_ia_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    ligar = message.text == BOTAO_LIGAR_VIDEO_IA
+    alterar_config(robo_video_ia=ligar)
+    registro_processos.registrar("shopee_video", PROCESSO_DO_VIDEO_DE_IA,
+                                 "ligado no painel" if ligar else "desligado no painel", ok=True)
+    logger.info(f"✨ [Shopee Vídeo] Vídeo de IA {'ligado' if ligar else 'desligado'} pelo painel.")
+    await mostrar_video_ia(message, state)
 
 
 async def mostrar_produtos_a_mais(message, state):
@@ -2146,6 +2232,13 @@ def linhas_da_conferencia(conferencia):
     return f"🤖 <b>A IA conferiu o vídeo com o produto ({len(vistos)} vezes):</b>\n{linhas}\n\n"
 
 
+def linha_do_video_de_ia(video_ia):
+    """O vídeo de IA do dia (P232 1): o modelo, o estilo, a cena e a conferência da IA; nada nos vídeos da fonte."""
+    if not video_ia:
+        return ""
+    return f"🎞️ <b>Vídeo de IA do dia</b>\n{html_escape(robo.flow.legenda_da_producao(video_ia))}\n\n"
+
+
 def linha_do_rotulo_de_ia(rotulo_ia):
     """O que a IA decidiu sobre o Rótulo de IA (rascunho de antes dessa conferência: nada)."""
     if rotulo_ia is None:
@@ -2237,7 +2330,7 @@ def texto_rascunho(rascunho, posicao, total):
             f"<code>{html_escape(rascunho['titulo'] or '')}</code>\n\n"
             f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n"
             f"{linhas_dos_produtos(rascunho)}\n"
-            f"{linhas_da_origem(rascunho.get('fonte'))}"
+            f"{linhas_da_origem(rascunho.get('fonte'))}{linha_do_video_de_ia(rascunho.get('video_ia'))}"
             f"{linhas_da_conferencia(rascunho.get('conferencia'))}{linha_do_rotulo_de_ia(rascunho.get('rotulo_ia'))}"
             f"{aviso}" + (
                 f"<b>{BOTAO_POSTAR_AGORA}</b>: o robô posta este vídeo agora, a qualquer hora. Ele sai desta lista "

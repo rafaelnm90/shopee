@@ -617,8 +617,20 @@ def _lista(valor):
     return lido if isinstance(lido, list) else []
 
 
+def _tem_dicionario(valor):
+    """A coluna em JSON do rascunho é um dicionário com alguma coisa dentro?"""
+    try:
+        lido = json.loads(valor) if valor else {}
+    except (TypeError, ValueError):
+        return False
+    return isinstance(lido, dict) and bool(lido)
+
+
+# O vídeo de IA do dia do Google Flow (P232 1) entra na medição, para o Rafael ver se os vídeos de IA levam mais
+# punição que os da fonte.
 CARACTERISTICAS_DO_POST = ("produtos a mais", "troca de loja", "produto achado pela IA", "outra foto de capa",
-                           "outra cor", "chamada na capa", "letras na capa", "rótulo de IA", "Ver Produtos")
+                           "outra cor", "chamada na capa", "letras na capa", "rótulo de IA", "vídeo de IA do Flow",
+                           "Ver Produtos")
 # Desde quando cada característica é anotada: os posts de antes ficam fora da conta dela.
 ANOTADA_DESDE = {"troca de loja": "03/11", "produto achado pela IA": "06/11", "letras na capa": "08/11"}
 
@@ -647,9 +659,11 @@ def _tem(nome, r):
         return {"1": True, "0": False}.get(r["letras"])
     if nome == "rótulo de IA":
         return bool(r["rotulo_ia"])
+    if nome == "vídeo de IA do Flow":
+        return _tem_dicionario(r["video_ia"])
     return bool(_lista(r["links_dos_produtos"]))  # Ver Produtos
 _COLUNAS_DO_POST = ("id", "postado_em", "fonte", "itens", "trocado", "achado", "outras_capas", "outra_cor", "chamada",
-                    "letras", "rotulo_ia", "links_dos_produtos")
+                    "letras", "rotulo_ia", "video_ia", "links_dos_produtos")
 
 
 def punicoes_por_tipo_de_post():

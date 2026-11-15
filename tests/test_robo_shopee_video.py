@@ -51,6 +51,8 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo, "levar_ao_canal", lambda rascunho, link_post: None)
     # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    # O vídeo de IA do dia (P232 1) também tem testes próprios, no fim deste arquivo.
+    monkeypatch.setattr(robo, "video_de_ia_pendente", lambda config, agora=None: False)
     monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
     # No servidor a tabela já existe (o bot_mestre cria).
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
@@ -5218,6 +5220,7 @@ def test_treino_da_segunda_na_suspensao_roda_logo_depois_do_fim(monkeypatch, avi
     monkeypatch.undo()
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "video_de_ia_pendente", lambda config, agora=None: False)
     monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: True)
     assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-29 10:00")) == ("rascunho", None)
 
@@ -9246,3 +9249,231 @@ def test_rascunho_de_ver_produtos_editado_e_refeito_no_app_pela_lista_do_criador
     with pytest.raises(robo.Parada) as parada:
         robo.refazer_no_app(_Tela(), robo.pegar(outro), momento("2026-10-22 15:30"))
     assert "não consegui curtir de novo 1 de 1" in parada.value.motivo
+
+
+# --- Vídeo de IA do dia (P232 1) ---
+# Escolha do Rafael (15/11): depois dos 3 vídeos do teste do Flow, o Omni 1.2 Flash, o mais avançado, para 1 vídeo de
+# IA por dia, que vira um rascunho do robô no lugar de um da fonte.
+VIDEO_DE_IA_PENDENTE = robo.video_de_ia_pendente
+
+
+def _producao_pronta(tmp_path, dia="2026-10-22", **campos):
+    """O vídeo de IA do dia pronto para o rascunho, com o produto do a1 da fonte (o vestido)."""
+    arquivo = tmp_path / f"producao_{dia}.mp4"
+    # O recomeço tira os arquivos da produção de antes: o vídeo vem depois dele.
+    robo.flow.recomecar_producao(dia, **{
+        "estado": "pronto", "id_video": "a1", "link": LINK, "nome": VESTIDO, "item": "2", "valor": 5.99,
+        "arquivo": str(arquivo), "foto": "", "modelo": "Omni 1.2 Flash", "custo": 24, "estilo": "comedia",
+        "cena": "Uma menina gira com o vestido.", "conferencia": {"mesmo": True, "diferencas": "", "defeitos": ""},
+        "gerado_em": f"{dia} 08:00:00", **campos})
+    arquivo.write_bytes(b"video")
+
+
+def test_video_de_ia_uma_vez_por_dia_e_so_com_horario_do_plano_por_vir(monkeypatch, tmp_path):
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    config = robo.ler_config()
+    manha = momento("2026-10-22 08:05")
+    # Nenhum ainda, e o plano de hoje tem 2 horários por vir: a rodada faz o vídeo antes do rascunho.
+    assert robo.o_que_fazer(config, manha) == ("video_ia", None)
+    # Desligado no painel (Vídeo de IA ✨), nada.
+    assert not robo.video_de_ia_pendente({**config, "robo_video_ia": False}, manha)
+    # Gerado e falta baixar: a rodada baixa, sem gerar outro.
+    robo.flow.recomecar_producao("2026-10-22", estado="gerando", gerado_em="2026-10-22 08:10:00")
+    assert robo.video_de_ia_pendente(config, manha)
+    # Pronto, espera o rascunho; usado hoje, só amanhã.
+    robo.flow.guardar_producao(estado="pronto")
+    assert not robo.video_de_ia_pendente(config, manha)
+    robo.flow.guardar_producao(estado="usado")
+    assert not robo.video_de_ia_pendente(config, manha)
+    assert robo.video_de_ia_pendente(config, momento("2026-10-23 08:05"))
+    # Parado antes do Gerar (nenhum crédito gasto): tenta de novo no dia, até 2 vezes.
+    robo.flow.recomecar_producao("2026-10-23", estado="parou", tentativas_de_gerar=1)
+    assert robo.video_de_ia_pendente(config, momento("2026-10-23 08:20"))
+    robo.flow.guardar_producao(tentativas_de_gerar=2)
+    assert not robo.video_de_ia_pendente(config, momento("2026-10-23 08:20"))
+    # Sem horário do plano por vir hoje, o vídeo não teria rascunho: não faz.
+    tarde = momento("2026-10-24 19:59")
+    plano = robo.estado_do_dia(config, tarde)
+    plano["feitos"] = len(plano["horarios"])
+    robo.db.salvar_config(robo.CHAVE_DIA, plano)
+    assert not robo.video_de_ia_pendente(config, tarde)
+
+
+def test_video_de_ia_pega_o_produto_que_paga_mais_com_a_foto_boa(monkeypatch):
+    # Pelas regras do rascunho (P194 1 e P166 1): o que paga mais por venda entre os próximos 10 da fonte, sem o
+    # de menos de R$ 2; a foto que a IA acha ruim passa ao seguinte.
+    _fonte(monkeypatch)
+    _videos_com_valor(monkeypatch, [1.5, 5.0, 9.0, 3.0])
+    ativar(fonte="autorais")
+    pedidos = []
+
+    def pedido(link, evitar=""):
+        pedidos.append(link)
+        if link.endswith("/valor2"):
+            return None
+        return {"link": link, "nome": VESTIDO, "foto": b"jpg", "estilo": "fala", "prompt": "p", "cena": "c"}
+
+    monkeypatch.setattr(robo.flow, "pedido_para_o_produto", pedido)
+    escolhido = robo.escolher_para_o_video_de_ia(robo.ler_config(), momento("2026-10-22 08:05"))
+    assert pedidos == ["https://s.shopee.com.br/valor2", LINK]
+    assert escolhido["id"] == "a1" and escolhido["item"] == "2" and round(escolhido["valor"], 2) == 5.99
+    # O produto já postado (P166 1) nem vai à IA.
+    ident = robo.criar("outro", momento("2026-10-21 10:00"))
+    robo.atualizar(ident, estado="postado", itens_do_video=["2", "92"], postado_em="2026-10-21 11:00:00")
+    pedidos.clear()
+    escolhido = robo.escolher_para_o_video_de_ia(robo.ler_config(), momento("2026-10-22 08:05"))
+    assert pedidos == ["https://s.shopee.com.br/valor1"] and escolhido["id"] == "v1"
+
+
+def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True):
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    escolhido = {"id": "a1", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "comedia",
+                 "prompt": "p", "cena": "Uma menina gira com o vestido.", "item": "2", "valor": 5.99, "posicao": 1}
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda config, agora=None: dict(escolhido))
+    vezes = []
+
+    def no_celular(d, atual):
+        vezes.append(atual["estado"])
+        arquivo = tmp_path / "producao_2026-10-22.mp4"
+        arquivo.write_bytes(b"video")
+        robo.flow.guardar_producao(estado="baixado", arquivo=str(arquivo), gerado_em="2026-10-22 08:06:00",
+                                   resolucao="1080p")
+        return True
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", no_celular)
+    monkeypatch.setattr(robo.flow, "conferir_o_video", lambda caminho, foto: {
+        "mesmo": mesmo, "diferencas": "" if mesmo else "outra estampa", "defeitos": ""})
+    return vezes
+
+
+def test_video_de_ia_reserva_a_fonte_gera_confere_e_avisa(monkeypatch, avisos, tmp_path):
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    vezes = _flow_que_baixa(monkeypatch, tmp_path)
+    resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
+    assert resultado == "vídeo de IA: pronto para o rascunho" and vezes == ["escolhido"]
+    pronto = robo.flow.video_pronto()
+    assert pronto["id_video"] == "a1" and pronto["conferencia"]["mesmo"] is True
+    # O vídeo da fonte de onde veio o produto fica reservado: nem o robô nem o assistente o pegam.
+    assert robo.proximo_video(robo.ler_config()) is None and robo.assistente.proximo_video("autorais") is None
+    aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
+    assert "Rascunhos do Robô 📝" in aviso and "Omni 1.2 Flash (24 créditos de IA)" in aviso and VESTIDO in aviso
+    assert consultar("SELECT acao, resultado FROM shopee_video_tentativas") == ("video_ia", "pronto")
+
+
+def test_video_de_ia_com_outro_produto_nao_vira_rascunho_e_a_fonte_volta(monkeypatch, avisos, tmp_path):
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, mesmo=False)
+    agora = momento("2026-10-22 08:05")
+    assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora) == \
+        "vídeo de IA: a IA viu outro produto no vídeo; não vira rascunho"
+    assert robo.flow.producao()["estado"] == "descartado" and robo.flow.video_pronto() is None
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    assert any("saiu com outro produto" in a for a in avisos if isinstance(a, str))
+    # Nunca outro Gerar no mesmo dia.
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    assert not robo.video_de_ia_pendente(robo.ler_config(), agora)
+
+
+def test_video_de_ia_parado_no_flow_antes_e_depois_do_gerar(monkeypatch, avisos, tmp_path):
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path)
+
+    def falha(d, atual):
+        raise robo.flow.Parada("pedido: a caixa do pedido não apareceu")
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", falha)
+    agora = momento("2026-10-22 08:05")
+    assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora).startswith("vídeo de IA: pedido:")
+    # Antes do Gerar, nada foi gasto: o vídeo da fonte volta à fila, e o passo vai ao histórico.
+    assert robo.flow.producao()["estado"] == "parou" and robo.proximo_video(robo.ler_config())["id"] == "a1"
+    assert consultar("SELECT passo FROM shopee_video_tentativas") == ("vídeo de IA no Flow",)
+    # Depois do Gerar, o vídeo é baixado nas rodadas seguintes, sem outro Gerar, até 3 vezes.
+    robo.flow.guardar_producao(estado="gerando", gerado_em="2026-10-22 08:30:00")
+    for _ in range(robo.TENTATIVAS_DE_BAIXAR - 1):
+        robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora)
+        assert robo.flow.producao()["estado"] == "gerando"
+    robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora)
+    assert robo.flow.producao()["estado"] == "descartado"
+
+
+def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, avisos, tmp_path,
+                                                                     caminho_do_rascunho):
+    # O vídeo de IA pronto vira o rascunho do horário, no lugar de um da fonte, com o Rótulo de IA sempre ligado (P8).
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    _producao_pronta(tmp_path)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    usados = []
+    copiar = robo.copiar_para_o_rascunho
+
+    def copiar_para_o_rascunho(video, *args, **opcoes):
+        usados.append((video["arquivo"], opcoes.get("rotulo_de_ia")))
+        return copiar(video, *args, **opcoes)
+
+    monkeypatch.setattr(robo, "copiar_para_o_rascunho", copiar_para_o_rascunho)
+    app = ComRotuloDeIA()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert usados == [(str(tmp_path / "producao_2026-10-22.mp4"), True)] and app.rotulo
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["id_video"] == "a1" and rascunho["rotulo_ia"] == robo.ROTULO_DO_VIDEO_DE_IA
+    assert rascunho["video_ia"]["modelo"] == "Omni 1.2 Flash" and rascunho["video_ia"]["estilo"] == "comedia"
+    assert robo.flow.producao()["estado"] == "usado" and robo.flow.producao()["rascunho"] == rascunho["id"]
+    # O aviso do começo e o texto do rascunho dizem que é o vídeo de IA do dia.
+    assert any("o vídeo de IA do dia, feito no Google Flow" in a for a in avisos if isinstance(a, str))
+    import painel_shopee_video as sv
+    texto = sv.texto_rascunho(rascunho, 1, 1)
+    assert "Vídeo de IA do dia" in texto and "comédia" in texto and "Uma menina gira com o vestido." in texto
+    # A medição de quais posts levam punição separa o vídeo de IA (P146 2).
+    robo.atualizar(rascunho["id"], estado="postado", postado_em="2026-10-23 10:00:00")
+    medicao = robo.apelacoes.punicoes_por_tipo_de_post()
+    linha = next(c for c in medicao["caracteristicas"] if c[0] == "vídeo de IA do Flow")
+    assert linha[1:] == (1, 0, 0, 0)
+
+
+def test_video_de_ia_que_nao_vira_rascunho_pelo_celular_tenta_de_novo_e_depois_sai(monkeypatch, avisos, tmp_path):
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    _producao_pronta(tmp_path)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    tentados = []
+
+    def falha(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
+        tentados.append(bool(video.get("video_ia")))
+        raise robo.Parada("não achei o botão Rascunhos")
+
+    monkeypatch.setattr(robo, "_preparar", falha)
+    for _ in range(3):
+        robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
+    # As 3 tentativas do horário foram com o vídeo de IA, que continua pronto para o próximo horário.
+    assert tentados == [True, True, True] and robo.flow.producao()["tentativas_do_rascunho"] == 3
+    assert robo.flow.video_pronto() is not None
+    # Acabadas as tentativas do vídeo no horário, o seguinte vai com outro vídeo da fonte.
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "a2", "archive/vestido.mp4", f"Vestido 👗\n{LINK}",
+            "2026-10-22 08:00:00")
+    robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
+    assert tentados == [True, True, True, False]
+    # Com a produção desligada no painel, o vídeo pronto espera.
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, robo_video_ia=False)
+    assert robo.video_de_ia_para_o_rascunho() is not None
+    robo.flow.guardar_producao(tentativas_do_rascunho=robo.flow.TENTATIVAS_DO_RASCUNHO - 1)
+    robo._video_de_ia_nao_saiu({"video_ia": robo.flow.producao()}, False)
+    assert robo.flow.producao()["estado"] == "desistiu"
+
+
+def test_video_de_ia_pronto_sem_o_arquivo_nao_trava_os_dias_seguintes(monkeypatch, tmp_path):
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    _producao_pronta(tmp_path)
+    config = robo.ler_config()
+    assert not robo.video_de_ia_pendente(config, momento("2026-10-23 08:05"))
+    # O arquivo sumiu do servidor: o pronto não espera para sempre, e o do dia seguinte sai.
+    import os
+    os.remove(robo.flow.producao()["arquivo"])
+    assert robo.video_de_ia_para_o_rascunho() is None
+    assert robo.video_de_ia_pendente(config, momento("2026-10-23 08:05"))
