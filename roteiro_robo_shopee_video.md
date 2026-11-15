@@ -718,7 +718,10 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
 - O botão do modelo abre as opções, com o custo em cima ("A geração vai usar N créditos
   de IA"): 16:9 ou 9:16, 360p ou 720p, x1 a x4, a duração (8 s) e a lista dos modelos,
   cada um com o custo de um vídeo de 8 s em 720p: Omni 1.2 Flash 24 (o marcado), Omni
-  1.1 Flash 12 e Veo 3.1 - Lite 10. O Gerar fica à vista com as opções abertas.
+  1.1 Flash 12 e Veo 3.1 - Lite 10. O Gerar fica à vista com as opções abertas. O Flow
+  abre no último modelo usado, e as opções mudam com o modelo: o Veo 3.1 - Lite não tem a
+  escolha da resolução (só 16:9 ou 9:16 e x1 a x4, visto em 15/11). O robô escolhe primeiro
+  o modelo e depois as opções dele.
 - O voltar com a lista dos modelos aberta fecha o pedido inteiro, de volta ao projeto.
 - Depois do Gerar (mapeado no 1º vídeo do teste, 15/11/2026): o pedido fecha e o vídeo
   novo aparece no projeto como o 1º quadro da grade, com "1% Gerando…" (e um Reutilizar
