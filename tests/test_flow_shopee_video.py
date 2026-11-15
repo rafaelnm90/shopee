@@ -264,13 +264,20 @@ def celular(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(flow.celular_robo, "conectado", lambda: True)
     monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
     monkeypatch.setattr(flow.celular_robo, "trava", contextlib.contextmanager(lambda: (yield True)))
-    aparelho.mandados, aparelho.conferidos = [], []
+    aparelho.mandados, aparelho.conferidos, aparelho.fotos = [], [], []
 
     async def conferir(caminho, prompt, imagens=None):
         aparelho.conferidos.append((caminho, imagens[0][1]))
         return '{"mesmo_produto": true, "diferencas": "", "defeitos": "a mão muda de forma no fim"}'
 
     monkeypatch.setattr(flow.api_gemini, "analisar_video_gemini", conferir)
+    # O anúncio que o Rafael abre para comparar (sem rede nos testes): o link curto vira o do produto.
+    async def converter(link):
+        return "https://shopee.com.br/produto-i.123.456?sp_atk=x"
+
+    monkeypatch.setattr(flow.api_shopee, "link_para_converter", converter)
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto",
+                        lambda caminho, legenda="": aparelho.fotos.append((caminho, legenda)) or True)
     monkeypatch.setattr(flow.avisar_rafael, "mandar_video",
                         lambda caminho, legenda="": aparelho.mandados.append((caminho, legenda)) or True)
     foto = tmp_path / "foto.jpg"
@@ -329,9 +336,39 @@ def test_teste_gera_baixa_confere_e_manda_no_privado(celular, capsys):
         assert trecho in legenda
     video = db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]
     assert video["estado"] == "enviado" and video["mesmo_produto"] is True
+    # Pedido do Rafael (15/11): logo depois do vídeo, a foto do anúncio com o link dele, para comparar.
+    assert celular.fotos == [(celular.teste["foto"], "🖼️ Foto do anúncio, para comparar com o vídeo 1 de 3 do teste "
+                                                     "do Flow\n🔗 Anúncio: https://shopee.com.br/product/123/456")]
     saida = capsys.readouterr().out
     assert "conferência da IA: mesmo produto" in saida and "vídeo mandado no privado do Rafael" in saida
+    assert "foto e link do anúncio mandados" in saida and "shopee.com.br" not in saida
     assert "Copo" not in saida and "tumbler" not in saida and "Mulher" not in saida
+
+
+def test_foto_do_anuncio_que_nao_vai_nao_desfaz_o_envio_do_video(celular, monkeypatch, capsys):
+    def falha(caminho, legenda=""):
+        raise OSError("sem rede")
+
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto", falha)
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 0
+    assert len(celular.mandados) == 1
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "enviado"
+    assert "a foto do anúncio não foi ao privado" in capsys.readouterr().out
+
+
+def test_link_do_anuncio_sem_o_produto_fica_o_da_fonte(monkeypatch):
+    async def falha(link):
+        raise OSError("sem rede")
+
+    monkeypatch.setattr(flow.api_shopee, "link_para_converter", falha)
+    assert flow.link_do_anuncio("https://s.shopee.com.br/abc") == "https://s.shopee.com.br/abc"
+
+    async def busca(link):
+        return "https://shopee.com.br/search?keyword=copo"
+
+    monkeypatch.setattr(flow.api_shopee, "link_para_converter", busca)
+    assert flow.link_do_anuncio("https://s.shopee.com.br/abc") == "https://s.shopee.com.br/abc"
 
 
 def test_video_ja_gerado_e_baixado_e_mandado_sem_gerar_outro(celular):
