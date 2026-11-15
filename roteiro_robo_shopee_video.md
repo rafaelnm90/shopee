@@ -706,7 +706,8 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
 - Abre pelo ícone "Flow" da tela inicial. O início tem os atalhos Editar vídeo, Editar
   foto, Usar avatar e Animar foto (este abre direto o seletor de fotos do Android) e a
   lista Projetos, com o botão Novo. O projeto novo ganha o nome do dia e da hora
-  ("nov. 15, 08:23 AM"); o do robô fica na lista.
+  ("nov. 15, 08:23 AM"). O do robô o Rafael renomeou para **Shopee Video** (15/11/2026),
+  e é o único que o robô usa; sem ele na lista, o robô para e não cria outro.
 - No projeto: Pesquisar, Criar e Enviar embaixo. O Criar abre o pedido com o teclado:
   os modos Imagem, Vídeo e Agente, a caixa "O que você quer fazer?", o + (Adicionar
   mídia), o botão do modelo ("Omni 1.2 Flash", o formato e "x1") e o Gerar (a seta).
@@ -734,6 +735,12 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   (Download, Movies, DCIM ou Pictures), e o robô procura o .mp4 mais novo que a marca que
   ele cria antes do toque. Se o Baixar perguntar o tamanho (um maior pode gastar crédito),
   o robô para sem escolher; falta ver isso no 1º Baixar de verdade.
+- O Estender (embaixo do vídeo aberto) abre "Qual é a próxima etapa?" com "Estender 8s" e a
+  duração na barra (6 s 18 créditos, 8 s 24, 10 s 30, no Omni 1.2 Flash, visto no celular do
+  Rafael em 15/11). O vídeo estendido fica junto do original no mesmo quadro do projeto
+  ("…, 2 itens"); aberto, o player diz "1 de 2" e mostra à direita uma miniatura por versão,
+  e o título muda com a versão (o modelo de cada uma). O robô escolhe a versão pela
+  miniatura e confere o título antes de baixar.
 
 ## O que não se faz
 
