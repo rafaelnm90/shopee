@@ -100,10 +100,10 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
 
 
-def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
-    # Escolha do Rafael (02/11, P130): três setinhas para baixo, uma embaixo da outra, com o contorno
-    # branco e a sombra leve (P127), acendendo de cima para baixo, uma volta por segundo, num fundo
-    # transparente; no vermelho do destaque, para chamar mais a atenção (03/11, P140 2).
+def test_maozinha_amarela_desce_toca_e_volta_com_a_onda():
+    # Escolha do Rafael (15/11, P231 1): no lugar das setinhas em cascata, a mãozinha amarela desce, toca logo
+    # acima do cartão do produto, aperta e volta, uma volta por segundo, com uma onda no toque; com o contorno
+    # branco e a sombra leve (P127), num fundo transparente.
     from PIL import Image
     with Image.open(edicao_video.SETA) as arquivo:
         assert arquivo.format == "PNG" and arquivo.mode == "RGBA" and arquivo.size == edicao_video.TAMANHO_DA_SETA
@@ -114,34 +114,27 @@ def test_setinhas_em_cascata_acendem_de_cima_para_baixo():
         for n in range(arquivo.n_frames):
             arquivo.seek(n)
             vistos.append(arquivo.convert("RGBA").copy())
-    cor = edicao_video.VERMELHO_DO_DESTAQUE
     largura, altura = vistos[0].size
 
-    def pontas(quadro):
-        """
-        Na coluna do meio, onde ficam as pontas das três setinhas: a força do vermelho (a soma da
-        opacidade) de cada trecho seguido com vermelho, de cima para baixo.
-        """
-        trechos, soma = [], 0
-        for y in range(altura):
-            r, g, b, a = quadro.getpixel((largura // 2, y))
-            if a > 30 and sum(abs(c - d) for c, d in zip((r, g, b), cor)) < 30:
-                soma += a
-            elif soma:
-                trechos.append(soma)
-                soma = 0
-        return trechos + ([soma] if soma else [])
+    def amarelo(p):
+        return p[3] > 200 and p[0] > 200 and p[1] > 150 and p[2] < 120
 
-    # Três setinhas separadas, em todos os quadros, e sempre uma bem acesa (na passagem de uma para
-    # a de baixo, as duas ficam pela metade do caminho, mais da metade da força).
-    for quadro in vistos:
-        assert len(pontas(quadro)) == 3
-        assert max(quadro.getpixel((x, y))[3] for x in range(largura) for y in range(altura)
-                   if sum(abs(c - d) for c, d in zip(quadro.getpixel((x, y))[:3], cor)) < 30) > 150
-    # Cada uma acende na sua vez: a de cima, depois a do meio, depois a de baixo.
-    for quadro, acesa in ((vistos[3], 0), (vistos[11], 1), (vistos[20], 2)):
-        forcas = pontas(quadro)
-        assert forcas.index(max(forcas)) == acesa
+    def pe_da_mao(quadro):
+        """A linha mais baixa com amarelo (a ponta do dedo)."""
+        return max(y for x in range(largura) for y in range(altura) if amarelo(quadro.getpixel((x, y))))
+
+    # A mão amarela em todos os quadros; ela desce até tocar (no meio da volta) e volta para cima.
+    pes = [pe_da_mao(quadro) for quadro in vistos]
+    assert pes[0] < pes[10] and pes[24] < pes[10] and max(pes) - min(pes) >= 15
+    # A onda (branca, com o anel vermelho) só depois do toque, e só acima da linha do toque.
+    vermelho = edicao_video.VERMELHO_DO_DESTAQUE
+
+    def anel(quadro):
+        return [(x, y) for x in range(largura) for y in range(altura)
+                if quadro.getpixel((x, y))[3] > 60 and sum(abs(c - d) for c, d in zip(quadro.getpixel((x, y))[:3],
+                                                                                      vermelho)) < 60]
+    assert not anel(vistos[5]) and anel(vistos[15])
+    assert max(y for _x, y in anel(vistos[15])) <= max(pes) + 6
     # O contorno branco em volta e o fundo transparente; nada escuro e opaco.
     pixels = [vistos[0].getpixel((x, y)) for x in range(largura) for y in range(altura)]
     assert [p for p in pixels if p[3] == 255 and min(p[:3]) > 240]
@@ -274,10 +267,10 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
         assert tela.size == (720, 1280)
         cx, cy = edicao_video.CENTRO_DA_SETA
         recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
-        cor = edicao_video.VERMELHO_DO_DESTAQUE
-        vermelhos = [p for p in recorte if sum(abs(a - b) for a, b in zip(p, cor)) < 70]
+        # A mãozinha amarela (P231 1).
+        amarelos = [p for p in recorte if p[0] > 200 and p[1] > 150 and p[2] < 120]
         escuros = [p for p in recorte if max(p) < 90]
-        return len(vermelhos) / len(recorte), escuros
+        return len(amarelos) / len(recorte), escuros
 
     # Na foto (os primeiros SEGUNDOS_DA_FOTO), nada de seta; ela começa a se desenhar com o vídeo.
     foto_s = edicao_video.SEGUNDOS_DA_FOTO
@@ -297,11 +290,11 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
     for segundo in (1.0, foto_s + 1.0):
         assert not [p for p in na_moldura(segundo) if sum(abs(a - b) for a, b in zip(p, cor)) < 70], segundo
     assert all(sum(abs(a - b) for a, b in zip(p, cor)) < 70 for p in na_moldura(foto_s + 2.0))
-    vermelho, escuros = onde_fica_a_seta(foto_s + 0.6)
-    assert vermelho > 0 and not escuros
-    # 5,5 s de vídeo: depois do fim do arquivo, já na volta repetida da cascata (uma setinha acesa por inteiro).
-    vermelho, escuros = onde_fica_a_seta(foto_s + 5.5)
-    assert vermelho > 0.02 and not escuros
+    amarelo, escuros = onde_fica_a_seta(foto_s + 0.6)
+    assert amarelo > 0 and not escuros
+    # 5,5 s de vídeo: depois do fim do arquivo, já na volta repetida da mãozinha.
+    amarelo, escuros = onde_fica_a_seta(foto_s + 5.5)
+    assert amarelo > 0.02 and not escuros
 
 
 def test_foto_do_comeco_e_capa_dos_avisos_no_fundo_preto(tmp_path):
@@ -950,7 +943,7 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
                 if lugar in ("esquerda", "direita"):
                     # Nos lados (P47): estreita, longe do meio da tela, acima da seta e dos
                     # botões do app à direita.
-                    topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - 70
+                    topo_da_seta = edicao_video.CAIXA_DAS_SETINHAS[1]
                     assert imagem.width <= 0.34 * 720 and topo + imagem.height < topo_da_seta, (texto, lugar)
 
 
@@ -3809,20 +3802,11 @@ def test_frase_acaba_antes_da_sacolinha_e_dos_icones_do_app():
 # --- Itens do vídeo no painel (P191 1 e P192 1) ---
 
 def _edicao_de_mentira(monkeypatch):
-    """O que a edição pediu ao ffmpeg (videos.com_foto_e_miniatura): a largura, o centro, as setinhas e a moldura."""
+    """O que a edição pediu ao ffmpeg (videos.com_foto_e_miniatura): a largura, o centro, a mãozinha e a moldura."""
     pedidos = []
 
     def com_foto_e_miniatura(video, foto, destino, segundos, largura, centro, seta, centro_seta, *args, **opcoes):
-        cores = None
-        if seta and seta != edicao_video.SETA:
-            # As setinhas noutra cor existem durante a edição; a cor de um ponto do meio da setinha acesa.
-            from PIL import Image
-            with Image.open(seta) as arquivo:
-                quadro = arquivo.convert("RGBA")
-                cores = {quadro.getpixel((x, y))[:3] for x in range(quadro.width) for y in range(quadro.height)
-                         if quadro.getpixel((x, y))[3] == 255}
-        pedidos.append({"largura": largura, "centro": centro, "seta": seta, "cores": cores,
-                        "moldura": opcoes.get("moldura")})
+        pedidos.append({"largura": largura, "centro": centro, "seta": seta, "moldura": opcoes.get("moldura")})
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_foto_e_miniatura", com_foto_e_miniatura)
     return pedidos
@@ -3839,12 +3823,12 @@ def test_itens_do_video_comecam_como_eram(monkeypatch, tmp_path):
     destino = str(tmp_path / "r.mp4")
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino) == ""
     assert pedidos == [{"largura": edicao_video.LARGURA_DA_MINIATURA, "centro": edicao_video.CENTRO_DA_MINIATURA,
-                        "seta": edicao_video.SETA, "cores": None, "moldura": edicao_video.moldura_do_cartao()}]
+                        "seta": edicao_video.SETA, "moldura": edicao_video.moldura_do_cartao()}]
 
 
 def test_itens_do_video_mudam_a_edicao(monkeypatch, tmp_path):
-    # Escolhas do Rafael (10/11, P191 1 e P192 1): a miniatura à esquerda ou sem ela, as setinhas e a
-    # moldura do cartão com ou sem, e uma cor só para as duas.
+    # Escolhas do Rafael (10/11, P191 1 e P192 1): a miniatura à esquerda ou sem ela, a mãozinha (a chave
+    # "setinhas", P231 1) e a moldura do cartão com ou sem, e a cor da moldura.
     pedidos = _edicao_de_mentira(monkeypatch)
     destino = str(tmp_path / "r.mp4")
     largura = edicao_video.LARGURA_DA_MINIATURA
@@ -3859,38 +3843,17 @@ def test_itens_do_video_mudam_a_edicao(monkeypatch, tmp_path):
     assert pedidos[-1]["largura"] == 0
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"setinhas": False, "moldura": False}) == ""
     assert pedidos[-1]["seta"] is None and pedidos[-1]["moldura"] is None
-    # Em azul: as setinhas (num arquivo à parte, que some depois) e a moldura.
+    # Em azul, a moldura; a mãozinha continua a de sempre, amarela (P231 1).
     azul = edicao_video.CORES_DO_DESTAQUE["azul"]
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"cor": "azul"}) == ""
     assert pedidos[-1]["moldura"] == edicao_video.moldura_do_cartao(False, azul)
-    assert azul in pedidos[-1]["cores"] and edicao_video.VERMELHO_DO_DESTAQUE not in pedidos[-1]["cores"]
-    assert not os.path.exists(os.path.dirname(pedidos[-1]["seta"]))
+    assert pedidos[-1]["seta"] == edicao_video.SETA
     # Na cor do produto; sem ela (o produto vermelho), no vermelho de sempre.
     verde = edicao_video.CORES_DO_PRODUTO["verde"]
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, cor=verde, escolhas={"cor": "produto"}) == ""
     assert pedidos[-1]["moldura"] == edicao_video.moldura_do_cartao(False, verde)
     assert edicao_video.editar("v.mp4", _foto_jpg(), destino, escolhas={"cor": "produto"}) == ""
     assert pedidos[-1]["seta"] == edicao_video.SETA and pedidos[-1]["moldura"] == edicao_video.moldura_do_cartao()
-
-
-def test_setinhas_na_cor_trocam_so_o_vermelho(tmp_path):
-    # P192 1: o contorno branco, a sombra e a cascata (a setinha apagada) ficam como são.
-    from PIL import Image, ImageSequence
-    azul = edicao_video.CORES_DO_DESTAQUE["azul"]
-    caminho = edicao_video.seta_na_cor(azul, str(tmp_path / "setas.apng"))
-    assert edicao_video.seta_na_cor(edicao_video.VERMELHO_DO_DESTAQUE, "outro.apng") == edicao_video.SETA
-    with Image.open(edicao_video.SETA) as original, Image.open(caminho) as nova:
-        assert nova.n_frames == original.n_frames and nova.size == original.size
-        for antes, depois in zip(ImageSequence.Iterator(original), ImageSequence.Iterator(nova)):
-            antes, depois = antes.convert("RGBA"), depois.convert("RGBA")
-            assert antes.getchannel("A").tobytes() == depois.getchannel("A").tobytes()
-            for x in range(0, antes.width, 3):
-                for y in range(0, antes.height, 3):
-                    r, g, b, a = antes.getpixel((x, y))
-                    if a == 255 and (r, g, b) == edicao_video.VERMELHO_DO_DESTAQUE:
-                        assert depois.getpixel((x, y))[:3] == azul
-                    elif a == 255 and min(r, g, b) > 240:
-                        assert min(depois.getpixel((x, y))[:3]) > 240
 
 
 def test_miniatura_a_esquerda_leva_os_textos_do_alto_para_a_direita_e_a_ia_olha_o_canto_dela():
@@ -3976,7 +3939,7 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
     assert (registro[-1][2], registro[-1][3]) == ("sem as legendas", edicao_video.LEGENDAS_DESLIGADAS)
     # Sem a miniatura pelo painel, o canto dela não vai ao registro como "de fora".
     assert rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_CANTO, "2000-01-01 00:00:00") == []
-    # À esquerda, com a cor do produto nas setinhas e na moldura.
+    # À esquerda, com a cor do produto na moldura (a mãozinha é sempre amarela, P231 1).
     db.salvar_config("shopee_video", {edicao_video.CHAVE_DAS_ESCOLHAS: {"miniatura": "esquerda", "cor": "produto"}})
     monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome, lado="direita": lados.append(lado) or {
         "nome": "Bolsa", "lugar": "alto", "legendas": fala, "cor": "verde"})
@@ -3984,7 +3947,7 @@ def test_o_que_vai_ao_ar_segue_os_itens_do_painel(monkeypatch, tmp_path):
     assert lados[-1] == "esquerda" and recebidos[-1]["miniatura"] == edicao_video.LARGURA_DA_MINIATURA
     assert recebidos[-1]["legendas"] and edicao_video.COM_A_MINIATURA_A_ESQUERDA in como
     assert como == (edicao_video.COM_LEGENDAS + edicao_video.COM_A_MINIATURA_A_ESQUERDA
-                    + ", setinhas e moldura na cor do produto" + edicao_video.COM_AS_LEGENDAS_DA_FALA)
+                    + ", moldura na cor do produto" + edicao_video.COM_AS_LEGENDAS_DA_FALA)
 
 
 def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(monkeypatch, tmp_path):
@@ -4314,8 +4277,8 @@ def test_setinhas_e_moldura_somem_so_enquanto_o_que_o_criador_pos_passa_por_elas
 
 
 def test_setinhas_somem_de_verdade_so_no_trecho_do_criador(tmp_path):
-    # Com o ffmpeg de verdade (P218 1): as setinhas vermelhas somem enquanto a frase do criador está no lugar delas
-    # e voltam depois; o tempo conta do fim da abertura.
+    # Com o ffmpeg de verdade (P218 1): a mãozinha amarela (P231 1) some enquanto a frase do criador está no lugar
+    # dela e volta depois; o tempo conta do fim da abertura.
     if not shutil.which("ffmpeg"):
         return
     from PIL import Image
@@ -4328,7 +4291,7 @@ def test_setinhas_somem_de_verdade_so_no_trecho_do_criador(tmp_path):
     frase = FRASE_SOBRE_AS_SETINHAS[:4] + (1.0, 2.0)
     assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), por_cima=[frase]) == ""
 
-    def vermelhos(segundo):
+    def amarelos(segundo):
         quadro = tmp_path / "quadro.png"
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(edicao_video.SEGUNDOS_DA_FOTO + segundo), "-i",
                         str(destino), "-frames:v", "1", str(quadro)], check=True)
@@ -4336,8 +4299,8 @@ def test_setinhas_somem_de_verdade_so_no_trecho_do_criador(tmp_path):
             tela = imagem.convert("RGB")
         x1, y1, x2, y2 = edicao_video.CAIXA_DAS_SETINHAS
         return sum(1 for x in range(x1, x2, 3) for y in range(y1, y2, 3)
-                   if (lambda r, g, b: r > 150 and g < 90 and b < 90)(*tela.getpixel((x, y))))
-    assert vermelhos(0.3) > 30 and vermelhos(1.5) == 0 and vermelhos(3.0) > 30
+                   if (lambda r, g, b: r > 200 and g > 150 and b < 120)(*tela.getpixel((x, y))))
+    assert amarelos(0.3) > 30 and amarelos(1.5) == 0 and amarelos(3.0) > 30
 
 
 def test_o_que_vai_ao_ar_tira_as_setinhas_sob_o_criador_e_o_registro_conta(monkeypatch, tmp_path):

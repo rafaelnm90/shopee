@@ -2,8 +2,8 @@
 """
 A edição dos vídeos da Shopee Vídeo como o Rafael faz à mão no LumaFusion: a foto do
 anúncio do produto nos primeiros segundos e, no vídeo inteiro, uma miniatura dela no canto
-de cima à direita e as setinhas vermelhas em cascata embaixo à esquerda (a montagem fica no
-videos.com_foto_e_miniatura, com o resto do tratamento de vídeo).
+de cima à direita e a mãozinha amarela tocando logo acima do cartão do produto, embaixo à
+esquerda (a montagem fica no videos.com_foto_e_miniatura, com o resto do tratamento de vídeo).
 
 Vale para os vídeos de todas as fontes do robô (FONTES_COM_EDICAO): o Rafael confirmou que
 todos os grupos e vídeos dele são autorais. Fica desligada até ele ver um exemplo no
@@ -26,7 +26,6 @@ Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao 
 modo assistente (assistente_shopee_video, no vídeo que vai ao privado do Rafael) e pelo
 painel da Shopee Vídeo (os exemplos).
 """
-import contextlib
 import functools
 import math
 import os
@@ -71,21 +70,23 @@ LARGURA_DA_MINIATURA = 180
 CANTO_DA_MINIATURA = (657, 150)
 CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
                        CANTO_DA_MINIATURA[1] + LARGURA_DA_MINIATURA // 2)
-# As setinhas em cascata (escolha do Rafael, 02/11, P130: no lugar da seta do arquivo dele, a do
-# LumaFusion, que ele pediu em 25/10): três setinhas para baixo, uma embaixo da outra, no vermelho
-# do destaque (VERMELHO_DO_DESTAQUE, P140 2), com um contorno branco e uma sombra leve (P127),
-# acendendo de cima para baixo, uma volta por segundo, perto do canto de baixo à esquerda, logo
-# acima do cartão do produto que o app mostra e apontando para ele (inteiras acima do cartão,
-# P71). Elas começam logo depois da foto e vão até o fim do vídeo: o arquivo guarda uma volta, que
-# se repete (PULSO_DA_SETA). O setas_em_cascata.apng sai do .claude/scripts/gerar_seta.py, com
-# MARGEM_DA_SETA px transparentes de cada lado para o contorno e a sombra. DECISOES.md, Shopee Vídeo.
-SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "setas_em_cascata.apng")
+# O sinal que aponta o cartão do produto: a mãozinha tocando (escolha do Rafael, 15/11, P231 1, no
+# lugar das setinhas em cascata da P130). A mãozinha amarela de emoji, com um contorno branco e uma
+# sombra leve (P127), desce, toca logo acima do cartão do produto que o app mostra (o sinal inteiro
+# acima do cartão, P71), aperta e volta, com uma onda no toque, uma volta por segundo, perto do canto
+# de baixo à esquerda. Ela é sempre amarela: a cor do painel vale só para a moldura do cartão. Começa
+# logo depois da foto e vai até o fim do vídeo: o arquivo guarda uma volta, que se repete
+# (PULSO_DA_SETA). O mao_tocando.apng sai do .claude/scripts/gerar_mao.py, com MARGEM_DA_SETA px
+# transparentes de cada lado para o contorno e a sombra, no tamanho e no lugar das setinhas (a legenda
+# da fala continua ao lado). No código e nas escolhas do painel (a chave "setinhas"), ela ficou com o
+# nome das setinhas que substituiu. DECISOES.md, Shopee Vídeo.
+SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "mao_tocando.apng")
 MARGEM_DA_SETA = 10
 CENTRO_DA_SETA = (142, 796)
-# O que se vê das setinhas no vídeo de 720x1280 (x1, y1, x2, y2: com o contorno e a sombra, em todos os
-# quadros do arquivo, sem a margem transparente; o tests/test_edicao_video.py confere no arquivo), sem a
-# subida do Rótulo de IA: o lugar delas que o que o criador pôs por cima não pode cruzar (P218 1).
-CAIXA_DAS_SETINHAS = (95, 741, 192, 866)
+# O que se vê da mãozinha no vídeo de 720x1280 (x1, y1, x2, y2: com o contorno, a sombra e a onda, em todos
+# os quadros do arquivo, sem a margem transparente; o tests/test_edicao_video.py confere no arquivo), sem a
+# subida do Rótulo de IA: o lugar dela que o que o criador pôs por cima não pode cruzar (P218 1).
+CAIXA_DAS_SETINHAS = (85, 717, 195, 868)
 # O que o app da Shopee mostra do vídeo de 720x1280 num celular de tela 20:9, medido no
 # celular do Rafael (vídeo de 28/10, P71): ele enche a tela e corta uns 47 px de cada lado
 # (fica visível de x 47 a 673), a barra de busca do alto vai até y 140 e o cartão do produto
@@ -104,12 +105,12 @@ CANTO_DA_ESQUERDA = (VISIVEL_NO_APP[0] + VISIVEL_NO_APP[1] - CANTO_DA_MINIATURA[
 # abertura até o fim do vídeo: o cartão do app aparece uns 0,5 s depois da abertura, e a moldura
 # vazia ficava solta antes dele (vídeos do Rafael das 00:32 e 00:36 de 03/11, P140 2). O cartão só
 # aparece uns segundos depois do começo, pode ser fechado no X e muda de tamanho e de lugar com o
-# celular e o nome do produto (02/11, P128): o Rafael liga e desliga a moldura no painel, com as
-# setinhas e a cor das duas (ESCOLHAS_PADRAO, P192 1). DECISOES.md, Shopee Vídeo.
+# celular e o nome do produto (02/11, P128): o Rafael liga e desliga a moldura no painel, com a
+# mãozinha, e escolhe a cor da moldura (ESCOLHAS_PADRAO, P192 1). DECISOES.md, Shopee Vídeo.
 ESPERA_DA_MOLDURA = 1.5                         # depois da abertura, com o cartão do app já na tela
 # Com o Rótulo de IA ligado, o app põe embaixo a linha "Identificado como conteúdo gerado por IA",
 # e o cartão do produto sobe a altura dela (medido no print do Rafael de 03/11, 07:08: o cartão 40
-# px mais alto no vídeo de 720x1280). A moldura, as setinhas e a legenda da fala sobem junto, para
+# px mais alto no vídeo de 720x1280). A moldura, a mãozinha e a legenda da fala sobem junto, para
 # ficarem no mesmo lugar em relação ao cartão. Pedido do Rafael (vídeo das 07:10 de 03/11):
 # DECISOES.md, Shopee Vídeo.
 SUBIDA_COM_O_ROTULO_DE_IA = 40
@@ -117,7 +118,7 @@ CARTAO_DO_PRODUTO = (68, 911, 550, 1096)        # x1, y1, x2, y2 no vídeo de 72
 FOLGA_DO_CARTAO = 8                             # entre o cartão e a moldura
 GROSSURA_DA_MOLDURA_DO_CARTAO = 7               # a da moldura da miniatura
 RAIO_DO_CARTAO = 17                             # o arredondado dos cantos do cartão
-PULSO_DA_SETA = (0, 25)                         # a volta inteira da cascata, em laço
+PULSO_DA_SETA = (0, 25)                         # a volta inteira da mãozinha, em laço
 # As legendas da fala: o que as pessoas falam no vídeo, escrito pela IA vendo o vídeo e posto por
 # nós na edição (não o Captions do app: assim o Rafael vê a legenda no rascunho antes de aprovar).
 # O pé da legenda fica na altura do pé da seta, porque logo abaixo vem o cartão do produto que o app
@@ -316,16 +317,16 @@ SACOLINHA_DA_GRADE = (587, 210, 667, 278)
 FIXADO_DA_GRADE = (36, 200, 252, 305)
 FOTO_DA_CAPA = (0, 280, 720, 1000)              # entre a sacolinha e o número: a foto quadrada, 720x720
 LARANJA_DA_SHOPEE = (238, 77, 45)
-# O vermelho do destaque: a caixa da última mensagem (a chamada para o produto), as setinhas e a
-# moldura do cartão do produto, para chamar mais a atenção que o laranja, que se mistura nos vídeos
+# O vermelho do destaque: a caixa da última mensagem (a chamada para o produto), a moldura do cartão
+# do produto e o anel da onda da mãozinha, para chamar mais a atenção que o laranja, que se mistura nos vídeos
 # de tons quentes. A miniatura e a capa ficam na cor do produto (CORES_DO_PRODUTO), ou no laranja da
 # Shopee. Escolha do Rafael (03/11, P140 2): DECISOES.md, Shopee Vídeo.
 VERMELHO_DO_DESTAQUE = (214, 24, 38)
 # A cor de cada vídeo: a cor principal do produto, que a IA diz junto com os textos da tela, no
 # lugar do laranja do fio e da faixa da capa e da moldura da miniatura, e do preto da caixa do nome
 # e da vantagem, com a letra branca ou preta, a de mais contraste (CONTRASTE_DA_LETRA_BRANCA: com o
-# laranja da Shopee, a branca de sempre). As setinhas, a moldura do cartão e a chamada final
-# continuam no vermelho do destaque. No produto de várias cores, a principal é a que mais aparece
+# laranja da Shopee, a branca de sempre). A moldura do cartão e a chamada final continuam no
+# vermelho do destaque, e a mãozinha, amarela. No produto de várias cores, a principal é a que mais aparece
 # nele (P179 1). O produto vermelho (para a chamada final continuar se destacando) e o vídeo sem a
 # cor da IA ficam com as cores de sempre, como o "colorido", que a IA não deve mais dizer. Cada
 # nome tem um tom fixo, para o vídeo não sair com um tom estranho; o preto é um grafite, para a
@@ -395,9 +396,10 @@ def caixa_dos_textos(cor=None):
 
 # As escolhas do painel para os vídeos que vão ao ar (Edição dos Vídeos ✂️ → Itens do Vídeo 🧩, na chave
 # CHAVE_DAS_ESCOLHAS de shopee_video): a miniatura em cima à direita (a de sempre), em cima à esquerda (os
-# textos do alto passam para a direita, e a IA olha o canto da esquerda) ou sem ela; a legenda da fala, as
-# setinhas e a moldura do cartão, cada uma com ou sem; e uma cor só para as setinhas e a moldura (a caixa
-# da chamada continua no vermelho do destaque; "produto" é a cor do produto, e sem ela, o vermelho). Tudo
+# textos do alto passam para a direita, e a IA olha o canto da esquerda) ou sem ela; a legenda da fala, a
+# mãozinha (a chave "setinhas", P231 1) e a moldura do cartão, cada uma com ou sem; e a cor da moldura (a
+# mãozinha é sempre amarela, e a caixa da chamada continua no vermelho do destaque; "produto" é a cor do
+# produto, e sem ela, o vermelho). Tudo
 # começa como era (ESCOLHAS_PADRAO) e vale para os próximos rascunhos do robô e vídeos do modo assistente,
 # e nos exemplos dos editores. Escolhas do Rafael (10/11, P191 1 e P192 1): DECISOES.md, Shopee Vídeo.
 CHAVE_DAS_ESCOLHAS = "edicao_escolhas"
@@ -433,8 +435,8 @@ def escolhas_do_painel():
 
 def cor_do_destaque(escolhas=None, cor=None):
     """
-    A cor (RGB) das setinhas e da moldura do cartão pelas escolhas: a do painel ou, com "produto", a do
-    produto (cor; sem ela, nas cores de sempre, o vermelho do destaque).
+    A cor (RGB) da moldura do cartão pelas escolhas: a do painel ou, com "produto", a do produto (cor; sem
+    ela, nas cores de sempre, o vermelho do destaque). A mãozinha é sempre amarela (P231 1).
     """
     escolhida = CORES_DO_DESTAQUE.get(escolhas_certas(escolhas)["cor"])
     if escolhida is None:
@@ -443,7 +445,7 @@ def cor_do_destaque(escolhas=None, cor=None):
 
 
 def nome_do_destaque(escolhas=None, cor=None):
-    """A cor das setinhas e da moldura, para o registro: "em azul" (a do painel) ou "na cor do produto"."""
+    """A cor da moldura, para o registro: "em azul" (a do painel) ou "na cor do produto"."""
     escolhida = escolhas_certas(escolhas)["cor"]
     if escolhida == DESTAQUE_NA_COR_DO_PRODUTO:
         return "na cor do produto" if cor else "em vermelho"
@@ -814,36 +816,6 @@ def moldura_do_cartao(rotulo_de_ia=False, cor=None):
     tela = Image.new("RGBA", TELA, (0, 0, 0, 0))
     tela.paste(anel, caixa[:2])
     return _png(tela)
-
-
-def seta_na_cor(cor, destino):
-    """
-    As setinhas (SETA) com o vermelho do destaque trocado pela cor (RGB) escolhida no painel (P192 1), em
-    destino (APNG): o contorno branco e a sombra ficam, e cada ponto vermelho leva a cor na mesma luz, com
-    a transparência da setinha apagada da cascata. Devolve o caminho: SETA mesma na cor de sempre.
-    """
-    if tuple(cor[:3]) == VERMELHO_DO_DESTAQUE:
-        return SETA
-    import numpy
-    from PIL import Image
-    r0, g0, b0 = VERMELHO_DO_DESTAQUE
-    nova = numpy.array(cor[:3], dtype=numpy.float32)
-    quadros, tempos = [], []
-    with Image.open(SETA) as original:
-        for n in range(original.n_frames):
-            original.seek(n)
-            quadro = numpy.asarray(original.convert("RGBA"), dtype=numpy.float32)
-            rgb = quadro[..., :3]
-            # Quanto o ponto é do vermelho (1) ou do contorno, da sombra e da borda entre eles (0).
-            peso = numpy.clip((rgb[..., 0] - numpy.maximum(rgb[..., 1], rgb[..., 2])) / (r0 - max(g0, b0)), 0, 1)
-            luz = numpy.clip(rgb[..., 0] / r0, 0, 1)
-            trocado = rgb * (1 - peso[..., None]) + nova * (luz * peso)[..., None]
-            quadros.append(Image.fromarray(numpy.dstack((trocado, quadro[..., 3])).round().astype(numpy.uint8), "RGBA"))
-            tempos.append(original.info.get("duration", 40))
-    # Cada quadro inteiro, sem somar com o de antes, como o arquivo de sempre (.claude/scripts/gerar_seta.py).
-    quadros[0].save(destino, format="PNG", save_all=True, append_images=quadros[1:], duration=tempos, loop=0,
-                    disposal=1, blend=0)
-    return destino
 
 
 def foto_em_tela_cheia(foto):
@@ -1328,12 +1300,13 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     menor (miniatura_no_video), ela vai desse tamanho, no mesmo canto (P97). Com as outras_fotos
     (bytes de outras fotos do mesmo produto, na ordem, as que cabem: fotos_que_cabem), a
     miniatura troca entre a foto e cada uma delas, uma volta só, o mesmo tempo para cada (P103).
-    Com rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), as setinhas e a moldura do
-    cartão sobem SUBIDA_COM_O_ROTULO_DE_IA, como o cartão do app. Com a cor do produto (RGB, P159
-    2), a moldura da miniatura vai nela. As escolhas do painel (escolhas_certas; None, as de sempre,
-    P192 1): a miniatura à direita, à esquerda ou sem ela, as setinhas e a moldura do cartão com ou
-    sem, e a cor das duas (cor_do_destaque). As setinhas e a moldura somem enquanto uma coisa que o
-    criador pôs por cima (por_cima, P212 1) passa pelo lugar delas (tempos_sob_o_criador, P218 1);
+    Com rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a mãozinha (SETA, P231 1) e a
+    moldura do cartão sobem SUBIDA_COM_O_ROTULO_DE_IA, como o cartão do app. Com a cor do produto (RGB,
+    P159 2), a moldura da miniatura vai nela. As escolhas do painel (escolhas_certas; None, as de sempre,
+    P192 1): a miniatura à direita, à esquerda ou sem ela, a mãozinha (a chave "setinhas") e a moldura do
+    cartão com ou sem, e a cor da moldura (cor_do_destaque; a mãozinha é sempre amarela). A mãozinha e a
+    moldura somem enquanto uma coisa que o criador pôs por cima (por_cima, P212 1) passa pelo lugar delas
+    (tempos_sob_o_criador, P218 1);
     anotar (dict), quando vem, recebe esses trechos em "sob_o_criador". Sem a música, o som do vídeo vai ao
     volume das nossas músicas, sem estourar (ganho_do_som, P222 1), e anotar recebe em "volume" o som
     medido (LUFS) e o ganho (dB). A foto (ou a capa) abre o vídeo por segundos (sem eles, SEGUNDOS_DA_FOTO;
@@ -1370,20 +1343,15 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
         ganho = ganho_do_som(medido)
         if anotar is not None and medido is not None:
             anotar["volume"] = {"medido": round(medido, 1), "ganho": ganho}
-    with contextlib.ExitStack() as pilha:
-        seta = None
-        if escolhas["setinhas"]:
-            # As setinhas noutra cor saem num arquivo ao lado do destino, que some com a edição.
-            pasta = (pilha.enter_context(tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))))
-                     if destaque != VERMELHO_DO_DESTAQUE else "")
-            seta = seta_na_cor(destaque, os.path.join(pasta, "setinhas.apng"))
-        return videos.com_foto_e_miniatura(video, foto, destino, segundos, largura,
-                                           centro_da_miniatura(largura, lado), seta,
-                                           (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
-                                           PULSO_DA_SETA, capa, musica, outras=outras_fotos, moldura=moldura,
-                                           espera_da_moldura=ESPERA_DA_MOLDURA,
-                                           passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0,
-                                           sem_seta=sem_seta, sem_moldura=sem_moldura, ganho=ganho)
+    # A mãozinha é sempre amarela (P231 1): a cor do painel vale só para a moldura do cartão.
+    seta = SETA if escolhas["setinhas"] else None
+    return videos.com_foto_e_miniatura(video, foto, destino, segundos, largura,
+                                       centro_da_miniatura(largura, lado), seta,
+                                       (CENTRO_DA_SETA[0], CENTRO_DA_SETA[1] - subida), ESPERA_MAXIMA,
+                                       PULSO_DA_SETA, capa, musica, outras=outras_fotos, moldura=moldura,
+                                       espera_da_moldura=ESPERA_DA_MOLDURA,
+                                       passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0,
+                                       sem_seta=sem_seta, sem_moldura=sem_moldura, ganho=ganho)
 
 
 def largura_da_miniatura(miniatura):
@@ -3427,7 +3395,7 @@ SEM_A_MINIATURA_PELO_PAINEL = SEM_A_MINIATURA + " (desligada no painel)"
 COM_A_MINIATURA_A_ESQUERDA = ", com a miniatura à esquerda"
 # A miniatura no outro canto de cima, porque o do painel tinha coisa do criador (P213 1).
 COM_A_MINIATURA_NO_OUTRO_CANTO = ", com a miniatura no outro canto"
-SEM_AS_SETINHAS = ", sem as setinhas"
+SEM_AS_SETINHAS = ", sem a mãozinha"
 SEM_A_MOLDURA_DO_CARTAO = ", sem a moldura do cartão"
 LEGENDAS_DESLIGADAS = "a legenda da fala desligada no painel"
 # O porquê, no detalhe do registro, quando o Editor 2 saiu sem algum texto.
@@ -3490,9 +3458,8 @@ def _avisado(avisos, com_capa, musica, miniatura, outras_fotos, escolhas, cor, p
             + (COM_A_MINIATURA_ALTERNADA if outras_fotos and miniatura else "")
             + ("" if escolhas["setinhas"] else SEM_AS_SETINHAS)
             + ("" if escolhas["moldura"] else SEM_A_MOLDURA_DO_CARTAO)
-            + (f", setinhas e moldura {nome_do_destaque(escolhas, cor)}"
-               if (escolhas["setinhas"] or escolhas["moldura"])
-               and cor_do_destaque(escolhas, cor) != VERMELHO_DO_DESTAQUE else ""))
+            + (f", moldura {nome_do_destaque(escolhas, cor)}"
+               if escolhas["moldura"] and cor_do_destaque(escolhas, cor) != VERMELHO_DO_DESTAQUE else ""))
 
 
 def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
@@ -3524,7 +3491,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     tiver (P181 2); com a capa, anotar recebe em "letras" "1" ou "0" (se ela tem letras, pela IA:
     letras_da_foto; "" sem a resposta), para a medição de quais posts levam punição. As escolhas do
     painel (escolhas; None, as que estão lá: escolhas_do_painel, P192 1) dizem o lado da miniatura (ou
-    sem ela), se vão a legenda da fala, as setinhas e a moldura do cartão, e a cor das duas; o jeito
+    sem ela), se vão a legenda da fala, a mãozinha e a moldura do cartão, e a cor da moldura; o jeito
     leva as que mudam o vídeo. Com coisa do criador no canto do painel, a miniatura vai inteira ao outro
     canto de cima, se ele estiver livre (P213 1: canto_da_miniatura; o jeito leva
     COM_A_MINIATURA_NO_OUTRO_CANTO, e o Editar ✏️ guarda o canto em que ela saiu), e os textos da tela ficam

@@ -5778,7 +5778,7 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     chamada ligada, o vídeo abre com a capa com a frase (P125). miniatura (dict) recebe em
     "fotos" as fotos da miniatura que troca no vídeo, a do 1º e as outras, e nada sem a nossa
     miniatura: o de outra cor só vai no post com a foto dele nela (com_a_foto_na_miniatura). Com
-    rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, as setinhas e a
+    rotulo_de_ia=True (o vídeo vai com o Rótulo de IA ligado), a moldura do cartão, a mãozinha e a
     legenda da fala sobem com o cartão do app, que sobe com a linha do rótulo (03/11). link_do_1o:
     no Ver Produtos, o link curto do 1º produto trocado pelo da loja que paga mais (P57): a foto vem
     do anúncio dele, como no link de produto. edicao (dict) recebe em "cor" a cor em que a faixa da

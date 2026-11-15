@@ -675,11 +675,12 @@ LADOS_DOS_BOTOES = {BOTAO_MINIATURA_DIREITA: edicao_video.MINIATURA_A_DIREITA,
                     BOTAO_SEM_MINIATURA: edicao_video.SEM_MINIATURA}
 # (chave das escolhas, nome na tela, botão de ligar, botão de desligar)
 ITENS_DE_LIGAR = (("legenda", "Legenda da fala", "Ligar Legenda da Fala ✅", "Desligar Legenda da Fala ⏸️"),
-                  ("setinhas", "Setinhas", "Ligar Setinhas ✅", "Desligar Setinhas ⏸️"),
+                  ("setinhas", "Mãozinha", "Ligar Mãozinha ✅", "Desligar Mãozinha ⏸️"),
                   ("moldura", "Moldura do cartão", "Ligar Moldura do Cartão ✅", "Desligar Moldura do Cartão ⏸️"))
 BOTOES_DE_LIGAR = {botao: (chave, ligar) for chave, _nome, liga, desliga in ITENS_DE_LIGAR
                    for botao, ligar in ((liga, True), (desliga, False))}
-BOTAO_COR_DO_DESTAQUE = "Cor das Setinhas e da Moldura 🎨"
+# A mãozinha é sempre amarela (P231 1): a cor do painel vale só para a moldura do cartão.
+BOTAO_COR_DO_DESTAQUE = "Cor da Moldura 🎨"
 BOTOES_DAS_CORES = {"Vermelho 🔴": "vermelho", "Laranja da Shopee 🟠": "laranja", "Amarelo 🟡": "amarelo",
                     "Verde 🟢": "verde", "Azul 🔵": "azul", "Branco ⚪": "branco",
                     "Cor do Produto 🎨": edicao_video.DESTAQUE_NA_COR_DO_PRODUTO}
@@ -953,7 +954,7 @@ def texto_robo(config, agora=None, celular=None):
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
-        "canto, as setinhas e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar, e escolher "
+        "canto, a mãozinha e as legendas); ver os exemplos do Editor 1 e do Editor 2, ligar ou desligar, e escolher "
         f"o que vai por cima dos vídeos em {BOTAO_ITENS}.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta, sem hora marcada: "
@@ -1019,12 +1020,12 @@ def texto_edicao(config):
         "✂️ <b>Edição dos Vídeos</b>\n"
         f"<b>Editor 1 sem legendas</b>: o robô edita o vídeo como você faz no LumaFusion: a foto do anúncio do "
         f"produto nos primeiros {_tempo_da_foto()} s e, até o fim do vídeo, uma miniatura dela "
-        "no canto de cima à direita e as setinhas vermelhas em cascata, apontando para o cartão do produto, embaixo à "
-        "esquerda, no lugar em que você põe no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
+        "no canto de cima à direita e a mãozinha amarela tocando logo acima do cartão do produto, embaixo à "
+        "esquerda, no lugar em que você põe a seta no LumaFusion. Se o criador do vídeo já pôs alguma coisa nesse canto "
         "(a foto do produto, um quadro ou um texto), a nossa miniatura vai inteira para o outro canto de cima, se "
         "ele estiver livre; com os dois ocupados, ela fica de fora ou, se a coisa dele fica logo abaixo do canto, "
         "diminui (até 2/3 do tamanho) para ficar acima dela. O lado da miniatura (ou sem ela), "
-        f"a cor das setinhas e o que vai ou não por cima do vídeo você escolhe em {BOTAO_ITENS}.\n\n"
+        f"a cor da moldura do cartão e o que vai ou não por cima do vídeo você escolhe em {BOTAO_ITENS}.\n\n"
         "<b>Editor 2 com legendas</b> (o que vai ao ar): o Editor 1 e os textos na tela, um de cada vez, no "
         "vídeo original, sem cortar nada nem mudar a velocidade: o nome do produto, uma vantagem que o vídeo "
         "mostra e, no fim, uma chamada para o produto anexado embaixo, numa caixa vermelha, em CAIXA ALTA (escritos pela IA, "
@@ -1037,8 +1038,8 @@ def texto_edicao(config):
         "🎨 <b>A cor de cada vídeo</b>: a caixa do nome e da vantagem, a moldura da miniatura e o fio e a faixa "
         "da capa vão na cor principal do produto, que a IA diz vendo o vídeo (no produto de várias cores, a que "
         "mais aparece nele), com a letra branca ou preta, a de mais destaque; no produto vermelho, ficam as de "
-        "sempre (a caixa preta e o laranja). A chamada final continua vermelha, e as setinhas e a moldura do "
-        f"cartão vão na cor que você escolhe em {BOTAO_ITENS} (de começo, vermelhas).\n\n"
+        "sempre (a caixa preta e o laranja). A chamada final continua vermelha, a mãozinha é sempre amarela e a "
+        f"moldura do cartão vai na cor que você escolhe em {BOTAO_ITENS} (de começo, vermelha).\n\n"
         "<b>O que vai ao ar</b>: o vídeo original do Editor 2, nos rascunhos do robô e no modo assistente. Se o "
         "Editor 2 não sair num vídeo, ele vai com o Editor 1, sem legendas (o registro anota). Vale para todos os "
         "vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): todos os seus grupos e vídeos "
@@ -1067,8 +1068,7 @@ def texto_edicao(config):
         f"🏷️ <b>{BOTAO_CAPA}</b>: a vantagem do vídeo escrita em letras grandes na capa que aparece na grade do "
         "seu perfil, sem cobrir os números; ver o exemplo, ligar ou desligar.\n"
         f"🧩 <b>{BOTAO_ITENS}</b>: o que vai por cima dos próximos vídeos: a miniatura (à direita, à esquerda ou "
-        "sem), a legenda da fala, as setinhas e a moldura do cartão (cada uma com ou sem) e a cor das setinhas e da "
-        "moldura."
+        "sem), a legenda da fala, a mãozinha e a moldura do cartão (cada uma com ou sem) e a cor da moldura."
     )
 
 
@@ -1077,7 +1077,7 @@ def linhas_dos_itens(escolhas):
     return "\n".join([f"🖼️ Miniatura: <b>{NOMES_DOS_LADOS[escolhas['miniatura']]}</b>"]
                      + [f"{'✅' if escolhas[chave] else '⏸️'} {nome}: <b>{'com' if escolhas[chave] else 'sem'}</b>"
                         for chave, nome, _liga, _desliga in ITENS_DE_LIGAR]
-                     + [f"🎨 Cor das setinhas e da moldura: <b>{NOMES_DAS_CORES[escolhas['cor']]}</b>"])
+                     + [f"🎨 Cor da moldura: <b>{NOMES_DAS_CORES[escolhas['cor']]}</b>"])
 
 
 def texto_itens(config):
@@ -1097,26 +1097,26 @@ def texto_itens(config):
         "diminui ou fica de fora).\n"
         f"🚫 <b>{BOTAO_SEM_MINIATURA}</b>: os vídeos vão sem a miniatura.\n"
         f"💬 <b>{liga['legenda'][0]}</b> / <b>{liga['legenda'][1]}</b>: as palavras faladas no vídeo, escritas "
-        "embaixo, ao lado das setinhas, em CAIXA ALTA, com o contorno preto e a sombra.\n"
-        f"⬇️ <b>{liga['setinhas'][0]}</b> / <b>{liga['setinhas'][1]}</b>: as setinhas em cascata, apontando para "
-        "o cartão do produto.\n"
+        "embaixo, ao lado da mãozinha, em CAIXA ALTA, com o contorno preto e a sombra.\n"
+        f"👇 <b>{liga['setinhas'][0]}</b> / <b>{liga['setinhas'][1]}</b>: a mãozinha amarela que desce e toca logo "
+        "acima do cartão do produto, com uma onda no toque (sempre amarela).\n"
         f"🔲 <b>{liga['moldura'][0]}</b> / <b>{liga['moldura'][1]}</b>: a moldura em volta do cartão do produto "
         "que o app mostra embaixo.\n"
-        f"🎨 <b>{BOTAO_COR_DO_DESTAQUE}</b>: uma cor só para as setinhas e a moldura do cartão: vermelho (o de "
-        "sempre), laranja da Shopee, amarelo, verde, azul, branco ou a cor do produto. A caixa da chamada do fim "
-        "continua vermelha.\n"
+        f"🎨 <b>{BOTAO_COR_DO_DESTAQUE}</b>: a cor da moldura do cartão: vermelho (o de sempre), laranja da "
+        "Shopee, amarelo, verde, azul, branco ou a cor do produto. A mãozinha é sempre amarela, e a caixa da "
+        "chamada do fim continua vermelha.\n"
         f"🔙 <b>{BOTAO_VOLTAR_EDICAO}</b>: volta à tela da Edição dos Vídeos."
     )
 
 
 def texto_cores(config):
-    """A escolha da cor das setinhas e da moldura do cartão (P192 1)."""
+    """A escolha da cor da moldura do cartão (P192 1; a mãozinha é sempre amarela, P231 1)."""
     escolhida = escolhas_da_edicao(config)["cor"]
-    return ("🎨 <b>Cor das setinhas e da moldura do cartão</b>\n"
+    return ("🎨 <b>Cor da moldura do cartão</b>\n"
             f"Agora: <b>{NOMES_DAS_CORES[escolhida]}</b>.\n\n"
-            "Toque na cor que vale para os próximos vídeos. Com a cor do produto, as duas vão na cor principal dele, "
+            "Toque na cor que vale para os próximos vídeos. Com a cor do produto, ela vai na cor principal dele, "
             "a mesma da faixa da capa e da moldura da miniatura; no produto vermelho e no vídeo sem a cor da IA, "
-            "ficam vermelhas. A caixa da chamada do fim continua vermelha.\n"
+            "fica vermelha. A mãozinha é sempre amarela, e a caixa da chamada do fim continua vermelha.\n"
             f"🔙 <b>{BOTAO_VOLTAR_ITENS}</b>: volta sem mudar.")
 
 
@@ -1458,7 +1458,7 @@ async def salvar_cor_do_destaque(message: types.Message, state: FSMContext):
     cor = BOTOES_DAS_CORES[message.text]
     alterar_itens(cor=cor)
     registro_processos.registrar("shopee_video", PROCESSO_DOS_ITENS, f"cor: {cor}", ok=True)
-    logger.info(f"🎨 [Shopee Vídeo] Cor das setinhas e da moldura: {cor}.")
+    logger.info(f"🎨 [Shopee Vídeo] Cor da moldura: {cor}.")
     await mostrar_itens(message, state)
 
 
@@ -2639,7 +2639,7 @@ def texto_editar(lado, legenda, sem_fala=""):
                            "aparecem.\n")
     else:
         legenda_da_fala = ("<b>Com Legenda 💬</b> / <b>Sem Legenda 🔇</b>: as palavras faladas escritas embaixo, ao "
-                           "lado das setinhas.\n")
+                           "lado da mãozinha.\n")
     return ("✏️ <b>Editar este vídeo</b>\n"
             f"Agora ele está assim: <b>{linha_do_editar(lado, legenda, sem_fala)}</b> (o ✅ nos botões de baixo).\n\n"
             "Toque no que quer mudar: o servidor refaz o vídeo na hora (uns minutos, sem usar o celular), com o "
