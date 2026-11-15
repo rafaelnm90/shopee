@@ -76,6 +76,8 @@ VIDEO_ABERTO = re.compile(r"^v[íi]deo\b.*\b\d+ de \d+", re.I | re.S)
 PASTAS_DO_BAIXAR = ("/sdcard/Download", "/sdcard/Movies", "/sdcard/DCIM", "/sdcard/Pictures")
 MARCA_DO_BAIXAR = "/sdcard/Download/.flow_antes_do_baixar"
 ESPERA_DO_BAIXAR = 90
+# Depois do Baixar do menu, o tempo para a janela da resolução aparecer (sem ela, o download já começou).
+ESPERA_DA_JANELA_DO_BAIXAR = 8
 # Depois do toque na miniatura de uma versão, o tempo para o título do vídeo aberto mudar.
 ESPERA_DA_VERSAO = 6
 # Um tamanho maior no Baixar pode gastar crédito: se o Flow perguntar o tamanho (ou o Android pedir
@@ -548,13 +550,46 @@ def pede_escolha(xml):
     return False
 
 
+def resolucao_do_baixar(xml):
+    """
+    A janela "Baixar vídeo" (mapeada em 15/11/2026): "720p Tamanho original" vem marcado, "1080p
+    Aumentar a resolução" e o 4K ("Assine um plano com IA do Google") ficam desmarcados. O centro do
+    botão Baixar da janela com o tamanho original marcado; "" com a janela aberta sem ele marcado;
+    None sem a janela.
+    """
+    elementos = [el for el in ps.elementos(xml) if el["pacote"] == PACOTE]
+    original = next((el for el in elementos if "tamanho original" in (el["descricao"] or el["texto"]).casefold()), None)
+    if not original:
+        return None
+    _, y1, _, y2 = original["caixa"]
+    marcado = any(el["classe"] == "RadioButton" and el["marcado"] and y1 <= (el["caixa"][1] + el["caixa"][3]) // 2 <= y2
+                  for el in elementos)
+    botao = next((el for el in elementos if el["classe"] == "Button"
+                  and " ".join((el["descricao"] or el["texto"]).split()).casefold() == "baixar"), None)
+    if not marcado or not botao:
+        return ""
+    x1, b1, x2, b2 = botao["caixa"]
+    return (x1 + x2) // 2, (b1 + b2) // 2
+
+
 def baixar(d):
-    """No vídeo aberto: Mais opções → Baixar. O caminho do arquivo no celular, quando ele para de crescer."""
+    """
+    No vídeo aberto: Mais opções → Baixar → (na janela da resolução, o tamanho original, que já vem
+    marcado e é o vídeo como foi gerado, sem custo) Baixar. O caminho do arquivo no celular, quando ele
+    para de crescer. O robô nunca toca no 1080p (aumentar a resolução), no 4K nem no plano: sem o
+    original marcado, ou com outra escolha na tela, para.
+    """
     d.shell(["touch", MARCA_DO_BAIXAR])
     # A hora do arquivo baixado tem de passar a da marca.
     time.sleep(1.1)
     tocar(d, "Mais opções", "mais opções do vídeo")
     tocar(d, "Baixar", "baixar")
+    janela = esperar(d, lambda x: resolucao_do_baixar(x) is not None, ESPERA_DA_JANELA_DO_BAIXAR)
+    if janela:
+        ponto = resolucao_do_baixar(janela)
+        if not ponto:
+            raise Parada("baixar: o tamanho original não está marcado; o robô não escolhe outra resolução")
+        d.click(*ponto)
     fim, anterior = time.monotonic() + ESPERA_DO_BAIXAR, None
     while True:
         xml = _tela(d)
