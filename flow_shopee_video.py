@@ -8,7 +8,8 @@ cena, o movimento da câmera e a luz), sempre com o produto igual ao da foto; o 
 vídeo a partir da foto.
 
 O caminho no app (mapeado no Motorola em 15/11/2026, sem gerar nada; as telas estão no
-roteiro_robo_shopee_video.md): o ícone "Flow" → o projeto do robô na lista (sem ele, Novo) →
+roteiro_robo_shopee_video.md): o ícone "Flow" → o projeto do robô na lista ("Shopee Video";
+sem ele, o teste para, sem criar outro) →
 Criar → Vídeo → + (Adicionar mídia) → Imagens → a foto no seletor do Android ("Item Foto ...")
 → Adicionar → a caixa "O que você quer fazer?" → o modelo (9:16, 720p, x1, 8 s e o modelo, com
 o custo em créditos) → Gerar. Depois do Gerar (mapeado no 1º vídeo, 15/11/2026): o vídeo novo
@@ -75,12 +76,16 @@ VIDEO_ABERTO = re.compile(r"^v[íi]deo\b.*\b\d+ de \d+", re.I | re.S)
 PASTAS_DO_BAIXAR = ("/sdcard/Download", "/sdcard/Movies", "/sdcard/DCIM", "/sdcard/Pictures")
 MARCA_DO_BAIXAR = "/sdcard/Download/.flow_antes_do_baixar"
 ESPERA_DO_BAIXAR = 90
+# Depois do toque na miniatura de uma versão, o tempo para o título do vídeo aberto mudar.
+ESPERA_DA_VERSAO = 6
 # Um tamanho maior no Baixar pode gastar crédito: se o Flow perguntar o tamanho (ou o Android pedir
 # uma permissão), o robô para sem escolher nada.
 ESCOLHA_NO_BAIXAR = re.compile(r"1080p|\b4k\b|upscal|aumentar|ampliar|melhorad", re.I)
 PACOTES_DE_PERMISSAO = ("com.android.permissioncontroller", "com.google.android.permissioncontroller")
-# O nome que o Flow dá ao projeto novo: o mês, o dia e a hora em que ele foi criado.
-NOME_DE_PROJETO = re.compile(r"[a-zç]{3}\. \d{1,2}, \d{1,2}:\d{2} ?(?:AM|PM)", re.I)
+# O projeto do robô no Flow: o Rafael o renomeou para "Shopee Video" (15/11/2026) e pediu que
+# todos os vídeos fiquem só nele, para não bagunçar. O robô nunca cria outro: sem ele na lista,
+# para. Pedido do Rafael (P229): DECISOES.md, Shopee Vídeo.
+PROJETO_DO_ROBO = "Shopee Video"
 CUSTO_NA_TELA = re.compile(r"(\d+)\s+créditos de IA", re.I)
 # A tela de termos ou de consentimento: o robô nunca aceita nada pelo Rafael. Também o aviso do
 # teclado (o do Google Tradutor, que abriu em 15/11 com um toque fora do lugar): OK e Cancelar
@@ -288,26 +293,16 @@ def centro_da_caixa(xml):
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
-def projeto_na_lista(xml, nome=""):
-    """O centro do projeto do robô na lista do início: o de nome guardado ou, sem ele, o 1º com nome de projeto."""
+def projeto_na_lista(xml, nome=PROJETO_DO_ROBO):
+    """O centro do projeto com esse nome na lista do início (o nome inteiro, não um pedaço); None sem ele."""
     for el in ps.elementos(xml):
         if el["pacote"] != PACOTE:
             continue
         for valor in (el["descricao"], el["texto"]):
-            valor = " ".join(valor.split())
-            if valor and (nome in valor if nome else NOME_DE_PROJETO.search(valor)):
+            if re.match(rf"{re.escape(nome)}\s*(?:$|[,\n])", (valor or "").strip(), re.I):
                 x1, y1, x2, y2 = el["caixa"]
                 return (x1 + x2) // 2, (y1 + y2) // 2
     return None
-
-
-def titulo_do_projeto(xml):
-    """O nome do projeto aberto: o texto no alto da tela que tem cara de nome de projeto; "" sem ele."""
-    for el in ps.elementos(xml):
-        achado = NOME_DE_PROJETO.search(" ".join((el["descricao"] or el["texto"]).split()))
-        if el["pacote"] == PACOTE and el["caixa"][1] < 400 and achado:
-            return achado.group(0)
-    return ""
 
 
 def modelo_no_pedido(xml):
@@ -370,22 +365,19 @@ def pronto_para_gerar(xml, prompt, modelo, custo):
     return ""
 
 
-def abrir_o_projeto(d, nome):
-    """Abre o Flow do zero e entra no projeto do robô (sem ele, cria um). Devolve o nome do projeto."""
+def abrir_o_projeto(d):
+    """Abre o Flow do zero e entra no projeto do robô (PROJETO_DO_ROBO). Parada sem ele: o robô nunca cria outro."""
     d.app_start(PACOTE, stop=True, wait=True)
     xml = esperar(d, lambda x: ps.achar(x, "Novo") or tem_termos(x), 30)
     if not xml or tem_termos(xml):
         raise Parada("abrir o Flow: o início não apareceu" if not xml else
                      "abrir o Flow: tela de termos; o robô nunca aceita pelo Rafael")
-    ponto = ponto_parado(d, lambda x: projeto_na_lista(x, nome), "projeto do robô", 8)
-    if ponto:
-        d.click(*ponto)
-    else:
-        tocar(d, "Novo", "projeto novo")
-    xml = esperar(d, lambda x: ps.achar(x, "Criar"))
-    if not xml:
+    ponto = ponto_parado(d, projeto_na_lista, "projeto do robô", 8)
+    if not ponto:
+        raise Parada(f"abrir o Flow: o projeto {PROJETO_DO_ROBO} não está na lista; o robô não cria outro")
+    d.click(*ponto)
+    if not esperar(d, lambda x: ps.achar(x, "Criar")):
         raise Parada("abrir o projeto: o Criar não apareceu")
-    return titulo_do_projeto(xml) or nome
 
 
 def montar_o_pedido(d, prompt, modelo, custo):
@@ -485,10 +477,26 @@ def titulo_do_video(xml):
     return []
 
 
+def versoes_do_video(xml):
+    """
+    Os centros das miniaturas das versões do vídeo aberto: a coluna à direita do player, quando o
+    vídeo tem mais de uma (o Estender guarda a versão nova junto da original, "1 de 2"). [] sem elas.
+    """
+    pontos = []
+    for el in ps.elementos(xml):
+        x1, y1, x2, y2 = el["caixa"]
+        if (el["pacote"] == PACOTE and el["classe"] == "ImageView" and el["clicavel"] and not el["descricao"]
+                and x1 > 800 and 30 <= x2 - x1 <= 120 and 30 <= y2 - y1 <= 120):
+            pontos.append(((x1 + x2) // 2, (y1 + y2) // 2))
+    return pontos
+
+
 def abrir_o_video_novo(d, modelo):
     """
-    No projeto: Vídeos → o mais novo. O título dele tem de ter o modelo do teste: o robô nunca baixa
-    nem manda um vídeo de outro modelo (Parada).
+    No projeto: Vídeos → o mais novo. O título dele tem de ter o modelo do teste: com mais de uma
+    versão (o Estender que o Rafael fez no vídeo do teste em 15/11 ficou junto do original), o robô
+    passa pelas miniaturas das versões até o título dizer o modelo. Nunca baixa nem manda um vídeo
+    de outro modelo (Parada).
     """
     tocar(d, "Vídeos", "filtro dos vídeos")
     ponto = ponto_parado(d, quadro_mais_novo, "vídeo novo")
@@ -498,8 +506,13 @@ def abrir_o_video_novo(d, modelo):
     xml = esperar(d, lambda x: titulo_do_video(x) is not None)
     if not xml:
         raise Parada("baixar: o vídeo não abriu")
-    if modelo not in titulo_do_video(xml):
-        raise Parada("baixar: o vídeo mais novo não é do modelo do teste")
+    if modelo in titulo_do_video(xml):
+        return
+    for versao in versoes_do_video(xml):
+        d.click(*versao)
+        if esperar(d, lambda x: modelo in (titulo_do_video(x) or []), ESPERA_DA_VERSAO):
+            return
+    raise Parada("baixar: o vídeo mais novo não é do modelo do teste")
 
 
 def arquivos_novos(d):
@@ -673,9 +686,7 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
             print("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
             return 1
     try:
-        projeto = abrir_o_projeto(d, (db.ler_config(CHAVE, {}) or {}).get("projeto", ""))
-        if projeto:
-            guardar(projeto=projeto)
+        abrir_o_projeto(d)
         print("Flow: aberto no projeto do robô")
         if not so_baixar:
             xml = montar_o_pedido(d, teste["prompt"], modelo, custo)

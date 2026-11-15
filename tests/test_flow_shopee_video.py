@@ -52,6 +52,10 @@ class Flow:
         self.gerando_leituras, self.modelo_do_video, self.filtro = 0, "", False
         self.falha_ao_gerar = self.pede_tamanho = self.baixado = False
         self.geracoes, self.puxados = 0, []
+        # O projeto do robô na lista do início (o Rafael o renomeou em 15/11) e os toques fora dele.
+        self.projeto_do_robo, self.fora_do_projeto = "Shopee Video", []
+        # As versões do vídeo aberto (o modelo de cada uma) e a que aparece; vazio = só a do vídeo gerado.
+        self.versoes, self.versao = [], 0
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
@@ -81,12 +85,14 @@ class Flow:
         """(caixa, xml do nó, o que o toque faz) da tela de agora."""
         nos = []
         if self.tela == "inicio":
-            nos += [((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "projeto"),
-                    ((42, 1100, 1038, 1300), _no((42, 1100, 1038, 1300), desc="nov. 15, 08:23 AM"), "projeto")]
+            nos += [((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "novo"),
+                    ((42, 900, 1038, 1080), _no((42, 900, 1038, 1080), desc="nov. 15, 12:09 PM"), "outro")]
+            if self.projeto_do_robo:
+                nos.append(((42, 1100, 1038, 1300), _no((42, 1100, 1038, 1300), desc=self.projeto_do_robo), "projeto"))
             if self.termos:
                 nos.append(((0, 1400, 1080, 1500), _no((0, 1400, 1080, 1500), texto="Aceitar os Termos de Serviço"), ""))
         elif self.tela == "projeto":
-            nos += [((0, 152, 1080, 278), _no((0, 152, 1080, 278), desc="nov. 15, 08:23 AM", clicavel=False), ""),
+            nos += [((0, 152, 1080, 278), _no((0, 152, 1080, 278), desc=self.projeto_do_robo, clicavel=False), ""),
                     ((42, 330, 191, 425), _no((42, 330, 191, 425), "android.widget.Button", "Tudo", clicavel=False), ""),
                     ((500, 330, 737, 425), _no((500, 330, 737, 425), "android.widget.Button", "Vídeos", clicavel=False),
                      "filtro"),
@@ -98,13 +104,18 @@ class Flow:
             if not self.filtro:
                 nos.append(((543, 466, 1080, 1004), _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item"), "foto"))
         elif self.tela == "video":
-            nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=f"Mulher usando o copo\n{self.modelo_do_video}\n720p",
+            versoes = self.versoes or [self.modelo_do_video]
+            nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=f"Mulher usando o copo\n{versoes[self.versao]}\n720p",
                                               clicavel=False), ""),
                     ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Fechar"), "projeto"),
                     ((891, 152, 1017, 278), _no((891, 152, 1017, 278), "android.widget.Button", "Mais opções"), "menu_video"),
-                    ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184), desc="Vídeo tocando, 1 de 1\n0:08"), ""),
+                    ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184),
+                                                desc=f"Vídeo tocando, {self.versao + 1} de {len(versoes)}\n0:08"), ""),
                     ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), ""),
                     ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"), "")]
+            if len(versoes) > 1:
+                nos += [((962, y, 1025, y + 63), _no((962, y, 1025, y + 63), "android.widget.ImageView"), f"versao:{i}")
+                        for i, y in enumerate(range(1178, 1178 + 74 * len(versoes), 74))]
         elif self.tela == "menu_video":
             nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "video"))
             nos += [((341, y, 954, y + 105), _no((341, y, 954, y + 105), "android.widget.Button", nome), acao)
@@ -177,6 +188,10 @@ class Flow:
             self.tela = "projeto"
             if not self.falha_ao_gerar:
                 self.gerado, self.gerando_leituras, self.modelo_do_video = True, 2, self.modelo
+        elif acao.startswith("versao:"):
+            self.versao = int(acao.split(":")[1])
+        elif acao in ("novo", "outro"):
+            self.fora_do_projeto.append(acao)
         elif acao == "filtro":
             self.filtro = True
         elif acao in ("video", "menu_video"):
@@ -198,6 +213,7 @@ def celular(bm, monkeypatch, tmp_path):
                         lambda d, acao, resultado, motivo, passo="", **extra: guardados.append((resultado, motivo)) or "caso")
     monkeypatch.setattr(flow, "ESPERA_DA_TELA", 0.2)
     monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
+    monkeypatch.setattr(flow, "ESPERA_DA_VERSAO", 0.2)
     monkeypatch.setattr(flow, "PASTA", str(tmp_path / "flow"))
     monkeypatch.setattr(flow.celular_robo, "conectado", lambda: True)
     monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
@@ -233,7 +249,7 @@ def test_sem_gerar_monta_o_pedido_inteiro_e_nao_toca_no_gerar(celular, capsys):
     assert ("tela", "pedido pronto, sem gerar") in celular.guardados
     # A foto do produto sai da galeria no fim.
     assert any(partes[:2] == ["rm", "-f"] for partes in celular.comandos)
-    assert (db.ler_config(flow.CHAVE, {}) or {}).get("projeto") == "nov. 15, 08:23 AM"
+    assert celular.fora_do_projeto == []
     saida = capsys.readouterr().out
     assert "Veo 3.1 - Lite, 10 créditos" in saida and "Copo" not in saida and "tumbler" not in saida
 
@@ -506,8 +522,39 @@ def test_leitura_das_telas():
              + _no((548, 1200, 867, 1300), "android.widget.Button", "Omni 1.2 Flash\nx1")
              + _no((24, 2110, 1056, 2230), desc="Veo 3.1 - Lite\n10 créditos / video") + '</hierarchy>')
     assert flow.custo_na_tela(folha) == 24 and flow.modelo_no_pedido(folha) == "Omni 1.2 Flash"
-    inicio = '<hierarchy>' + _no((42, 1100, 1038, 1300), desc="nov. 15, 08:23 AM") + '</hierarchy>'
+    inicio = ('<hierarchy>' + _no((42, 900, 1038, 1080), desc="nov. 15, 12:09 PM")
+              + _no((42, 1100, 1038, 1300), desc="Shopee Video") + '</hierarchy>')
     assert flow.projeto_na_lista(inicio) == (540, 1200)
-    assert flow.projeto_na_lista(inicio, "nov. 15, 08:23 AM") == (540, 1200)
-    assert flow.projeto_na_lista(inicio, "nov. 16, 09:00 AM") is None
+    assert flow.projeto_na_lista(inicio.replace("Shopee Video", "Shopee Video 2")) is None
+    assert flow.projeto_na_lista(inicio.replace('"Shopee Video"', '"shopee video, 1 vídeo"')) == (540, 1200)
     assert flow.custo_na_tela('<hierarchy></hierarchy>') is None
+
+
+def test_sem_o_projeto_shopee_video_para_sem_criar_outro(celular):
+    # O Rafael renomeou o projeto do robô para Shopee Video e pediu tudo nele (15/11): sem ele na lista,
+    # o robô não cria um projeto novo nem entra em outro.
+    celular.projeto_do_robo = ""
+    assert flow.no_celular(celular.teste, "Veo 3.1 - Lite", 10, sem_gerar=False) == 1
+    assert celular.fora_do_projeto == [] and not celular.gerado
+    assert ("parou", "abrir o Flow: o projeto Shopee Video não está na lista; o robô não cria outro") \
+        in celular.guardados
+
+
+def test_video_com_a_versao_estendida_escolhe_a_do_modelo_do_teste(celular):
+    # O Estender que o Rafael fez no vídeo do teste (15/11) ficou junto do original: no celular dele, o
+    # vídeo abriu na versão estendida (Omni 1.2 Flash). O robô passa para a versão do Veo antes de baixar.
+    celular.teste["videos"] = {"Veo 3.1 - Lite": {"custo": 10, "estado": "gerando"}}
+    flow.guardar(teste=celular.teste)
+    celular.gerado, celular.versoes = True, ["Omni 1.2 Flash", "Veo 3.1 - Lite"]
+    assert flow.teste() == 0
+    assert celular.versao == 1 and celular.baixado and len(celular.mandados) == 1
+    assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "enviado"
+
+
+def test_versoes_sem_a_do_modelo_do_teste_nao_baixam(celular):
+    celular.teste["videos"] = {"Veo 3.1 - Lite": {"custo": 10, "estado": "gerando"}}
+    flow.guardar(teste=celular.teste)
+    celular.gerado, celular.versoes = True, ["Omni 1.2 Flash", "Omni 1.1 Flash"]
+    assert flow.teste() == 1
+    assert not celular.baixado and celular.mandados == []
+    assert ("parou", "baixar: o vídeo mais novo não é do modelo do teste") in celular.guardados
