@@ -147,8 +147,13 @@ class Flow:
                 nos += [((168, 1241, 912, 1346), _no((168, 1241, 912, 1346), desc=maior), "maior"),
                         ((168, 1270, 215, 1317), _no((168, 1270, 215, 1317), "android.widget.RadioButton",
                                                      marcado=self.maior_marcado), "maior")]
-            nos += [((302, 1378, 807, 1420), _no((302, 1378, 807, 1420), desc="Assine um plano com IA do Google"), "plano"),
-                    ((677, 1514, 912, 1640), _no((677, 1514, 912, 1640), "android.widget.Button", "Baixar"), "confirmar")]
+            nos.append(((302, 1378, 807, 1420), _no((302, 1378, 807, 1420), desc="Assine um plano com IA do Google"), "plano"))
+            # Como no app (15/11): com o 1080p marcado, o botão vira "Aumentar resolução e baixar", mais largo.
+            if self.maior_marcado:
+                nos.append(((290, 1514, 912, 1640), _no((290, 1514, 912, 1640), "android.widget.Button",
+                                                        "Aumentar resolução e baixar"), "confirmar"))
+            else:
+                nos.append(((677, 1514, 912, 1640), _no((677, 1514, 912, 1640), "android.widget.Button", "Baixar"), "confirmar"))
         elif self.tela == "seletor":
             nos += [((0, 630, 354, 984), _no((0, 630, 354, 984), "android.widget.FrameLayout",
                                               "Item Foto criado em 15 de nov. de 2026 9:48:38 AM", pacote=SELETOR), "marcar"),
@@ -375,6 +380,10 @@ def test_aviso_de_credito_na_janela_tira_o_1080p():
     aparelho.tela = "tamanho"
     assert flow.janela_do_baixar(aparelho.dump_hierarchy())["1080p"] == {
         "centro": (191, 1293), "marcada": False, "texto": "1080p aumentar a resolução "}
+    aparelho.maior_marcado, aparelho.original_marcado = True, False
+    janela = flow.janela_do_baixar(aparelho.dump_hierarchy())
+    assert janela["1080p"]["marcada"] and not janela["original"]["marcada"] and janela["baixar"] == (601, 1577)
+    aparelho.maior_marcado, aparelho.original_marcado = False, True
     aparelho.aviso_de_credito = True
     janela = flow.janela_do_baixar(aparelho.dump_hierarchy())
     assert janela["1080p"] is None and janela["original"]["marcada"] and janela["baixar"] == (794, 1577)
