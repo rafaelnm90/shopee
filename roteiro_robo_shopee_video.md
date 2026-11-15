@@ -733,8 +733,10 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   Favorito, **Baixar**, Enviar, Compartilhar, Compartilhar no YouTube e Enviar feedback.
   O teste usa só o Baixar; o arquivo vai para uma das pastas de mídia do celular
   (Download, Movies, DCIM ou Pictures), e o robô procura o .mp4 mais novo que a marca que
-  ele cria antes do toque. Se o Baixar perguntar o tamanho (um maior pode gastar crédito),
-  o robô para sem escolher; falta ver isso no 1º Baixar de verdade.
+  ele cria antes do toque. O Baixar abre a janela "Baixar vídeo" (vista no 1º Baixar de
+  verdade, 15/11/2026): "720p Tamanho original" já marcado, "1080p Aumentar a resolução" e
+  o 4K apagado, com "Assine um plano com IA do Google"; o robô só toca no Baixar da janela
+  com o tamanho original marcado (o vídeo como foi gerado, sem custo) e nunca nas outras.
 - O Estender (embaixo do vídeo aberto) abre "Qual é a próxima etapa?" com "Estender 8s" e a
   duração na barra (6 s 18 créditos, 8 s 24, 10 s 30, no Omni 1.2 Flash, visto no celular do
   Rafael em 15/11). O vídeo estendido fica junto do original no mesmo quadro do projeto

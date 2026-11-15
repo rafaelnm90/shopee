@@ -19,11 +19,11 @@ MENU_DO_VIDEO = (("Gostei", 278, ""), ("Renomear", 425, ""), ("Reutilizar comand
                  ("Compartilhar no YouTube", 1055, ""), ("Enviar feedback", 1202, ""))
 
 
-def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid=""):
+def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid="", marcado=False):
     x1, y1, x2, y2 = caixa
     return (f'<node index="0" text={quoteattr(texto)} resource-id={quoteattr(rid)} class="{classe}" '
             f'package="{pacote}" content-desc={quoteattr(desc)} clickable="{str(clicavel).lower()}" '
-            f'visible-to-user="true" bounds="[{x1},{y1}][{x2},{y2}]" />')
+            f'checked="{str(marcado).lower()}" visible-to-user="true" bounds="[{x1},{y1}][{x2},{y2}]" />')
 
 
 class Campo:
@@ -50,7 +50,9 @@ class Flow:
         # Depois do Gerar: quantas leituras o quadrado mostra "Gerando…", de que modelo é o vídeo pronto
         # e o que o Baixar faz.
         self.gerando_leituras, self.modelo_do_video, self.filtro = 0, "", False
-        self.falha_ao_gerar = self.pede_tamanho = self.baixado = False
+        self.falha_ao_gerar = self.baixado = False
+        # A janela "Baixar vídeo" (15/11): o 720p "Tamanho original" vem marcado.
+        self.original_marcado, self.toques_proibidos = True, []
         self.geracoes, self.puxados = 0, []
         # O projeto do robô na lista do início (o Rafael o renomeou em 15/11) e os toques fora dele.
         self.projeto_do_robo, self.fora_do_projeto = "Shopee Video", []
@@ -128,8 +130,17 @@ class Flow:
             nos += [((341, y, 954, y + 105), _no((341, y, 954, y + 105), "android.widget.Button", nome), acao)
                     for nome, y, acao in MENU_DO_VIDEO]
         elif self.tela == "tamanho":
-            nos += [((100, 900, 980, 1000), _no((100, 900, 980, 1000), "android.widget.Button", "720p"), ""),
-                    ((100, 1000, 980, 1100), _no((100, 1000, 980, 1100), "android.widget.Button", "1080p (melhorado)"), "")]
+            nos += [((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar"), "video"),
+                    ((168, 874, 912, 947), _no((168, 874, 912, 947), desc="Baixar vídeo", clicavel=False), ""),
+                    ((168, 989, 912, 1451), _no((168, 989, 912, 1451), "android.widget.RadioGroup", clicavel=False,
+                                                desc="Escolha uma resolução para fazer o download.\n4K"), ""),
+                    ((168, 1136, 912, 1241), _no((168, 1136, 912, 1241), desc="720p\nTamanho original"), "original"),
+                    ((168, 1165, 215, 1212), _no((168, 1165, 215, 1212), "android.widget.RadioButton",
+                                                 marcado=self.original_marcado), "original"),
+                    ((168, 1241, 912, 1346), _no((168, 1241, 912, 1346), desc="1080p\nAumentar a resolução"), "maior"),
+                    ((168, 1270, 215, 1317), _no((168, 1270, 215, 1317), "android.widget.RadioButton"), "maior"),
+                    ((302, 1378, 807, 1420), _no((302, 1378, 807, 1420), desc="Assine um plano com IA do Google"), "maior"),
+                    ((677, 1514, 912, 1640), _no((677, 1514, 912, 1640), "android.widget.Button", "Baixar"), "confirmar")]
         elif self.tela == "seletor":
             nos += [((0, 630, 354, 984), _no((0, 630, 354, 984), "android.widget.FrameLayout",
                                               "Item Foto criado em 15 de nov. de 2026 9:48:38 AM", pacote=SELETOR), "marcar"),
@@ -208,8 +219,11 @@ class Flow:
                 self.leituras_do_video = 0
             self.tela = acao
         elif acao == "baixar":
-            self.tela = "tamanho" if self.pede_tamanho else "video"
-            self.baixado = not self.pede_tamanho
+            self.tela = "tamanho"
+        elif acao == "maior":
+            self.toques_proibidos.append((x, y))
+        elif acao == "confirmar":
+            self.tela, self.baixado = "video", self.original_marcado
 
 
 @pytest.fixture
@@ -321,14 +335,19 @@ def test_video_mais_novo_de_outro_modelo_nao_e_baixado_nem_mandado(celular):
     assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
 
 
-def test_baixar_que_pede_o_tamanho_para_sem_escolher(celular):
-    celular.pede_tamanho = True
+def test_baixar_confirma_o_tamanho_original_marcado(celular):
+    # A janela da resolução (15/11): o 720p "Tamanho original" vem marcado; o robô só toca no Baixar dela.
+    flow.guardar(teste=celular.teste)
+    assert flow.teste() == 0
+    assert celular.baixado and celular.toques_proibidos == [] and len(celular.mandados) == 1
+
+
+def test_baixar_sem_o_tamanho_original_marcado_para_sem_escolher(celular):
+    celular.original_marcado = False
     flow.guardar(teste=celular.teste)
     assert flow.teste() == 1
-    assert celular.tela == "tamanho" and celular.mandados == []
-    # O último toque foi o Baixar: nenhum nas opções de tamanho (o 1080p pode gastar crédito).
-    assert celular.toques[-1] == (647, 792)
-    assert ("parou", "baixar: o Flow pediu uma escolha (tamanho ou permissão); o robô não escolhe pelo Rafael") \
+    assert celular.tela == "tamanho" and celular.mandados == [] and celular.toques_proibidos == []
+    assert ("parou", "baixar: o tamanho original não está marcado; o robô não escolhe outra resolução") \
         in celular.guardados
     assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "gerando"
 
@@ -388,6 +407,7 @@ def test_leitura_das_telas_depois_do_gerar():
     assert flow.titulo_do_video(aberto) == ["Mulher usando o copo", "Veo 3.1 - Lite", "720p"]
     assert flow.titulo_do_video(projeto) is None
     assert not flow.pede_escolha(aberto)
+    assert flow.resolucao_do_baixar(aberto) is None
     assert flow.pede_escolha('<hierarchy>' + _no((100, 1000, 980, 1100), "android.widget.Button", "1080p") + '</hierarchy>')
     assert flow.pede_escolha('<hierarchy>' + _no((0, 0, 10, 10), texto="Permitir",
                                                  pacote="com.google.android.permissioncontroller") + '</hierarchy>')
