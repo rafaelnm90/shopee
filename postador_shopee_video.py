@@ -17,7 +17,7 @@ bot; sem ele, no Android virtual. No celular, só dentro do Horário do Robô �
 para resolver. Com o robô automático (robo_shopee_video.py) tocando no celular, nem começa.
 
 Passos, separados por ponto e vírgula:
-    abrir            abre o app da Shopee (fechar: fecha)
+    abrir            abre o app da Shopee (fechar: fecha); abrir:flow abre o Google Flow
     tocar:TEXTO      toca no botão com esse texto ou descrição (tocar:@id pelo id)
     xy:X,Y           toca nesse ponto da tela
     voltar, inicio   as teclas do Android
@@ -112,6 +112,9 @@ from api_shopee import eh_video, link_para_converter, tipo_de_link
 from fuso import fuso_horario
 
 PACOTE = av.PACOTE_SHOPEE
+# Os apps que o passo abrir do explorar abre: a Shopee (abrir) e o Google Flow do teste da P229
+# (abrir:flow), do jeito que ele está, para mapear as telas sem depender da tela inicial do celular.
+APPS_DO_EXPLORAR = {"": PACOTE, "flow": "com.google.android.apps.labs.whisk"}
 PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
 CHAVE_PAINEL = "shopee_video"  # a mesma chave do painel_shopee_video
@@ -2593,7 +2596,10 @@ def separar_passos(texto):
 def fazer_passo(d, nome, argumento):
     """Faz um passo. Devolve (deu certo, o que dizer no log)."""
     if nome == "abrir":
-        d.app_start(PACOTE, wait=True)
+        pacote = APPS_DO_EXPLORAR.get(argumento.lower())
+        if not pacote:
+            return False, "abrir abre a Shopee (abrir) ou o Google Flow (abrir:flow)"
+        d.app_start(pacote, wait=True)
         return True, "app aberto"
     if nome == "fechar":
         d.app_stop(PACOTE)
