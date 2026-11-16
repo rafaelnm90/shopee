@@ -7,6 +7,9 @@ name: Vídeo de IA (Shopee Vídeo)
 # "flow" é o teste da P229 1 (15/11): o próximo dos 3 vídeos do mesmo produto, um em cada
 # modelo do Google Flow, no celular do robô, com os créditos da conta Pro do Rafael (nada é
 # postado); "flow-sem-gerar" faz tudo até o Gerar, sem tocar nele (sem gastar crédito).
+# "produtos" é a sonda da P234 1 (15/11): o que a API de afiliado devolve com a chave do Rafael em
+# cada jeito de pedir a lista de produtos (os em alta, os mais vendidos, os nichos dos Achadinhos), só em
+# contagens, para a escolha do produto do vídeo de IA do dia; só lê, não gasta nada.
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
@@ -17,7 +20,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [modelos, testar, flow, flow-sem-gerar]
+        options: [modelos, testar, flow, flow-sem-gerar, produtos]
         default: modelos
 
 permissions:
