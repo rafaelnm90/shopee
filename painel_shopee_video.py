@@ -1537,6 +1537,7 @@ async def exemplo_capa_handler(message: types.Message, state: FSMContext):
     if _exemplo_da_edicao.locked():
         await message.answer("⏳ Um exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
         return
+    antes = await state.get_state()
     async with _exemplo_da_edicao:
         await message.answer("⏳ Montando o exemplo da capa com chamada com o próximo vídeo que o robô pegaria (a IA "
                              "vê o vídeo para escrever a vantagem). Leva até uns 2 minutos.")
@@ -1569,7 +1570,18 @@ async def exemplo_capa_handler(message: types.Message, state: FSMContext):
                 with open(caminho, "wb") as arquivo:
                     arquivo.write(exemplo["abertura"])
                 await message.answer_video(FSInputFile(caminho), caption=LEGENDA_DA_ABERTURA, parse_mode="HTML")
-    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    await _de_volta_ao_menu_do_robo(state, antes)
+
+
+async def _de_volta_ao_menu_do_robo(state, antes):
+    """
+    Depois de um exemplo da edição, a conversa volta ao menu do robô, mas só se o Rafael continua no passo em que
+    pediu o exemplo: ele leva minutos, e os outros botões funcionam enquanto ele é montado (pergunta do Rafael,
+    16/11). O passo em que ele entrou nesse meio tempo (o código do pareamento, a recusa de um rascunho) continua
+    esperando a resposta dele.
+    """
+    if await state.get_state() == antes:
+        await state.set_state(ShopeeVideoFluxo.menu_robo)
 
 
 # Como está o vídeo de IA do dia, pelo andamento da produção (flow_shopee_video).
@@ -1823,6 +1835,7 @@ async def _mandar_exemplo(message, state, editor):
     if _exemplo_da_edicao.locked():
         await message.answer("⏳ Um exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
         return
+    antes = await state.get_state()
     async with _exemplo_da_edicao:
         await message.answer(f"⏳ Montando o exemplo do {NOME_DO_EDITOR[editor]} com o próximo vídeo que o robô "
                              f"pegaria: o vídeo completo e as versões. Leva até uns {MINUTOS_DO_EXEMPLO[editor]} "
@@ -1834,7 +1847,7 @@ async def _mandar_exemplo(message, state, editor):
             db.salvar_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {})
     # O texto da Edição dos Vídeos não volta depois do exemplo: ele empurrava os vídeos para
     # cima, e o teclado do painel continua embaixo (pedido do Rafael, vídeo de 28/10, 00:30).
-    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    await _de_volta_ao_menu_do_robo(state, antes)
 
 
 async def _montar_e_mandar_exemplo(message, editor):
