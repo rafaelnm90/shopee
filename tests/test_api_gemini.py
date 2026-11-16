@@ -183,6 +183,15 @@ def test_descontinuado_nao_fica_na_cascata():
     assert "gemini-2.5-flash-lite" in ia.MODELOS_CASCATA_GEMINI
 
 
+def test_gemini_4_hydrogen_na_cascata_e_o_carbon_fora():
+    # Páginas de modelos e de preços do Google, 16/11/2026: o Gemini 4 Hydrogen (a geração nova do
+    # 3.8 Flash) tem cota grátis e responde na chave; o 4 Carbon não tem cota grátis (a chave só
+    # devolve "cota do dia") e fica de fora, como modelo pago, até o Rafael pedir.
+    assert "gemini-4-hydrogen" in ia.MODELOS_CASCATA_GEMINI
+    assert ia.MODELOS_CASCATA_GEMINI.index("gemini-4-hydrogen") < ia.MODELOS_CASCATA_GEMINI.index("gemini-3.8-flash")
+    assert "gemini-4-carbon" not in ia.MODELOS_CASCATA_GEMINI
+
+
 BLOQUEADO = "block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>"
 
 

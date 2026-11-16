@@ -35,6 +35,7 @@ client_genai = genai.Client(api_key=GEMINI_API_KEY)
 # enxerga e respondem. Escolha do Rafael (P36): DECISOES.md, Código e manutenção.
 MODELOS_CASCATA_GEMINI = [
     "gemini-4-argon",
+    "gemini-4-hydrogen",
     "gemini-3.1-pro-preview",
     "gemini-pro-latest",
     "gemini-3.8-flash",
