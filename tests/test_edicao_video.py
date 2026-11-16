@@ -818,13 +818,14 @@ def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_a_chamada_da_ia(monkey
         "versoes": versoes, "falas": [], "lugar": "meio"})
     pedidos = []
 
-    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True, escolhas=None):
+    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True, escolhas=None,
+                           musica_da_ia=""):
         pedidos.append((1, video, list(versoes_da_ia), falas, miniatura))
         return "", {"versoes": []}
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                            lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None,
-                           por_cima=(), nos_momentos=None):
+                           por_cima=(), nos_momentos=None, musica_da_ia=""):
         pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), chamada, lugar, miniatura))
         return "", {"versoes": []}
 
@@ -1624,6 +1625,80 @@ def test_o_que_vai_ao_ar_sem_som_leva_a_musica_e_o_registro_diz(monkeypatch, tmp
     assert musicas[-1] is None
 
 
+def test_a_ia_escolhe_a_musica_e_o_rodizio_fica_para_quando_ela_nao_diz(monkeypatch):
+    # Escolha do Rafael (16/11, P241 1): a música do vídeo sem som é a que a IA diz que combina com ele; sem a
+    # resposta dela, a da vez no rodízio, que só anda quando é usado.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("mudo.mp4", anotar=anotado, escolhida="calma")[0][0] == "calma"
+    assert anotado["musica"] == {"nome": "calma", "pela_ia": True}
+    # As versões do exemplo levam as outras, na ordem depois da escolhida.
+    assert [m[0] for m in edicao_video.musicas_de_fundo("mudo.mp4", 3, escolhida="divertida")] == [
+        "divertida", "animada", "calma"]
+    # Sem a resposta da IA (ou com uma que não é das nossas), a da vez: o rodízio não andou com as da IA.
+    assert edicao_video.musicas_de_fundo("mudo.mp4", anotar=anotado, escolhida="")[0][0] == "animada"
+    assert anotado["musica"] == {"nome": "animada", "pela_ia": False}
+    assert edicao_video.musicas_de_fundo("mudo.mp4", escolhida="rock")[0][0] == "calma"
+    # Com som, nada muda, e nada é anotado.
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
+    monkeypatch.setattr(edicao_video.videos, "volume_do_som", lambda video: -16.0)
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("com_som.mp4", escolhida="calma", anotar=anotado) == [None]
+    assert anotado == {}
+
+
+def test_a_ia_diz_a_musica_pelo_clima_de_cada_uma():
+    # P241 1: os dois pedidos que veem o vídeo (o do que vai ao ar e o do exemplo) trazem as nossas músicas com o
+    # clima de cada uma, e a resposta vale só com um nome delas, mesmo com maiúscula ou o clima depois.
+    nomes = [nome for nome, _ in edicao_video.MUSICAS]
+    assert list(edicao_video.CLIMA_DAS_MUSICAS) == nomes
+    for prompt in (edicao_video.prompt_dos_textos("Copo"), edicao_video.prompt_das_versoes("Copo")):
+        assert '"musica": "..."' in prompt
+        for nome, clima in edicao_video.CLIMA_DAS_MUSICAS.items():
+            assert f"{nome} ({clima})" in prompt
+    musica = edicao_video.musica_da_ia
+    assert (musica("calma"), musica("Calma (lo-fi tranquilo)"), musica("DIVERTIDA."), musica("rock"), musica(None),
+            musica(3), musica("a calma")) == ("calma", "calma", "divertida", "", "", "", "")
+    assert edicao_video._nome_lugar_e_falas({"musica": "Animada"})["musica"] == "animada"
+    assert "musica" not in edicao_video._nome_lugar_e_falas({"musica": "sertanejo"})
+
+
+def test_o_que_vai_ao_ar_leva_a_musica_da_ia_e_o_registro_diz_de_onde_veio(monkeypatch, tmp_path):
+    # P241 1: no rascunho do robô e no modo assistente, o vídeo sem som leva a música que a IA escolheu; sem ela, a
+    # da vez. O registro conta cada uma, com o nome da música.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    musicas = []
+    _versoes_de_mentira(monkeypatch, musicas)
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
+    destino = str(tmp_path / "rascunho.mp4")
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "alto",
+                                  "musica": "divertida"})
+    anotado = {}
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa", anotar=anotado)[0] == ""
+    assert musicas == ["musica_divertida.m4a"] and anotado["refazer"]["musica"] == "divertida"
+    _textos_da_tela(monkeypatch, {"nome": "Bolsa de Palha", "vantagem": "Leve", "falas": [], "lugar": "alto"})
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Bolsa")[0] == ""
+    assert musicas[-1] == "musica_animada.m4a"
+    linhas = edicao_video.registro_processos.sequencia("shopee_video", edicao_video.PROCESSO_DA_MUSICA,
+                                                       "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in linhas] == [(edicao_video.ESCOLHIDA_PELA_IA, "divertida"),
+                                              (edicao_video.DA_VEZ_NO_RODIZIO, "animada")]
+
+
+def test_exemplo_leva_a_musica_que_a_ia_escolheu(monkeypatch, tmp_path):
+    # P241 1: no exemplo do painel, o vídeo completo sem som leva a música da IA, como o que vai ao ar.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    _versoes_de_mentira(monkeypatch, [])
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
+    destino = str(tmp_path / "exemplo.mp4")
+    _motivo, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", destino, "Bolsa de Palha", "Leve", [],
+                                                      "Garanta a sua", [], lugar="alto", musica_da_ia="calma")
+    assert resumo["versoes"][0]["musica"] == "calma"
+    _motivo, resumo = edicao_video.editar_1_e_versoes("v.mp4", b"foto", destino, [], [], musica_da_ia="divertida")
+    assert resumo["versoes"][0]["musica"] == "divertida"
+
+
 def test_som_baixo_demais_mesmo_com_a_subida_maxima():
     # Escolha do Rafael (16/11, P237 1): o som que, mesmo subindo os 10 dB, fica mais de 6 dB abaixo das nossas
     # músicas (-16 LUFS), ou seja, abaixo de -32 LUFS. O vídeo de IA da geladeira veio em -37,5.
@@ -1642,7 +1717,8 @@ def test_video_baixinho_sem_fala_ganha_a_musica_e_o_com_fala_fica_com_o_som(monk
     monkeypatch.setattr(edicao_video.videos, "palavras_faladas", lambda video: ouvidos.append(video) or palavras[0])
     anotado = {}
     assert edicao_video.musicas_de_fundo("ia.mp4", anotar=anotado)[0][0] == "animada"
-    assert anotado == {"baixinho": {"fala": edicao_video.SEM_FALA_NO_SOM, "medido": -37.5}}
+    assert anotado == {"baixinho": {"fala": edicao_video.SEM_FALA_NO_SOM, "medido": -37.5},
+                       "musica": {"nome": "animada", "pela_ia": False}}
     # Cada versão do exemplo leva a sua, como no mudo.
     assert [m[0] for m in edicao_video.musicas_de_fundo("ia.mp4", 2)] == ["calma", "divertida"]
     # A fala que a IA ouviu basta: o reconhecimento de voz nem é chamado.
@@ -3527,7 +3603,7 @@ def test_o_exemplo_do_editor_2_mostra_as_legendas_da_fala_como_vai_ao_ar(monkeyp
 
     def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                            lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None,
-                           por_cima=(), nos_momentos=None):
+                           por_cima=(), nos_momentos=None, musica_da_ia=""):
         recebidas.append(list(legendas))
         return "", {"versoes": []}
 
