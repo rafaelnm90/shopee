@@ -1,4 +1,6 @@
 """video_ia: o teste do vídeo feito por IA (P34) escolhe o modelo mais barato e só mostra números no log público."""
+from conftest import inserir
+
 import video_ia
 
 
@@ -60,3 +62,61 @@ def test_sem_modelo_de_video_ou_sem_foto_o_teste_nao_roda(monkeypatch, capsys):
     monkeypatch.setattr(video_ia, "produto_para_teste", lambda: None)
     assert video_ia.main(["testar"]) == 1
     assert video_ia.main(["outra"]) == 2
+
+
+def _produto(item, preco, comissao, nota, vendas=100, nome="Garrafa Térmica Azul"):
+    return {"itemId": item, "productName": nome, "priceMin": str(preco), "commissionRate": str(comissao),
+            "ratingStar": str(nota), "sales": vendas, "imageUrl": "https://img.exemplo/garrafa.jpg",
+            "productLink": f"https://shopee.com.br/product/11/{item}"}
+
+
+def test_o_erro_da_api_vai_ao_log_sem_numeros():
+    erros = [{"message": "Invalid   argument listType for app 123456 0123456789abcdef0123", "extensions": {"code": 10020}}]
+    texto = video_ia.erro_da_api(erros)
+    assert texto == "código 10.020: Invalid argument listType for app # #"
+    assert video_ia.erro_da_api([{}]) == "sem código: sem mensagem"
+
+
+def test_as_contagens_da_lista_da_sonda():
+    # 1: nota e mínimo (R$ 3 por venda); 2: nota sem o mínimo (R$ 1); 3: mínimo sem a nota; 4: as duas, já postado.
+    produtos = [_produto(1, 30, 0.10, 4.8), _produto(2, 10, 0.10, 4.9), _produto(3, 100, 0.10, 4.2),
+                _produto(4, 300, 0.10, 4.5, vendas=900)]
+    linhas = video_ia.contagens_da_lista(produtos, {"4"}, lambda preco, comissao: preco * comissao / 100, 2.0)
+    assert linhas[0] == ("   nota 4,5 ou mais: 3 | pagam o mínimo por venda: 3 | as duas coisas: 2 "
+                         "(ainda não postados: 1)")
+    assert "com a foto: 4 | com o link do produto: 4 | vendas (mediana): 100 | nota (mediana): 4,7" in linhas[1]
+    assert linhas[2] == "   preço: até R$ 50: 2 | de R$ 50 a R$ 200: 1 | acima de R$ 200: 1"
+    assert linhas[3] == ("   por venda, entre os das duas coisas: de R$ 2 a R$ 5: 1 | de R$ 5 a R$ 15: 0 | "
+                         "acima de R$ 15: 1")
+    assert video_ia.contagens_da_lista([], set(), lambda p, c: 0, 2.0)[1].endswith("vendas (mediana): - | nota (mediana): -")
+
+
+def test_a_sonda_dos_produtos_so_mostra_contagens_no_log(monkeypatch, capsys):
+    pedidos = []
+
+    async def pedir_lista(argumentos, extra=""):
+        pedidos.append((argumentos, extra))
+        if "listType: 1" in argumentos:
+            return [], "código 10.020: Invalid argument", None
+        if "keyword" in argumentos:
+            return [_produto(9, 80, 0.10, 4.9)], "", None
+        return [_produto(1, 30, 0.10, 4.8), _produto(2, 10, 0.10, 4.9)], "", (True if extra else None)
+
+    monkeypatch.setattr(video_ia, "pedir_lista", pedir_lista)
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    video_ia.db.salvar_config("achadinhos_config", {"nichos": [{"nome": "Casa", "keywords": ["organizador secreto", "x"]},
+                                                              {"nome": "Vazio", "keywords": []},
+                                                              {"nome": "Pet", "keywords": ["coleira rara"]}]})
+    assert video_ia.main(["produtos"]) == 0
+    saida = capsys.readouterr().out
+    assert "== em alta (listType 2): 2 produto(s), 2 diferente(s)" in saida
+    assert "== maior comissão (listType 1): a API recusou (código 10.020: Invalid argument)" in saida
+    assert "== em alta, com a página informada: 2 produto(s), 2 diferente(s) | tem próxima página: sim" in saida
+    assert "em comum com a 1ª lista: 2" in saida
+    assert "== Nichos dos Achadinhos: 3 nicho(s), 3 palavra(s)-chave" in saida
+    assert "== nicho nº 1, 1ª palavra, por mais vendidos: 1 produto(s)" in saida
+    assert "== nicho nº 2, 1ª palavra, por mais vendidos: 1 produto(s)" in saida
+    # A palavra de busca vai à API, nunca ao log; nem o nome, o link ou a foto do produto.
+    assert any('keyword: "organizador secreto", sortType: 2, limit: 50' == argumentos for argumentos, _ in pedidos)
+    for privado in ("organizador", "coleira", "Garrafa", "shopee.com.br", "img.exemplo", "Casa", "Pet"):
+        assert privado not in saida

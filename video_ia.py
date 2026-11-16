@@ -11,16 +11,22 @@ modelo, estados e números; o nome do produto, a foto e o vídeo vão só no pri
 
     python3 video_ia.py modelos   # os modelos de vídeo que a chave do Google enxerga
     python3 video_ia.py testar    # 1 vídeo de teste do próximo produto da fonte, no privado
+    python3 video_ia.py produtos  # o que a API de afiliado devolve para o produto do vídeo de IA (P234 1)
 """
 import asyncio
+import json
 import logging
 import os
+import re
+import statistics
 import sys
 import time
 
+import aiohttp
 from google.genai import types
 
 import api_gemini
+import api_shopee
 import assistente_shopee_video as assistente
 import avisar_rafael
 import db
@@ -146,6 +152,147 @@ def testar():
     return 0 if enviado else 1
 
 
+# --- A sonda da API de afiliado: de onde tirar o produto do vídeo de IA (P234 1) ---
+# O Rafael escolheu (15/11, P234 1) que o produto do vídeo de IA do dia venha da API de afiliado (os produtos em
+# alta, de nota alta, que pagam o mínimo por venda), sem depender do Viral. A sonda mostra o que a API devolve
+# com a chave dele em cada jeito de pedir a lista: sem palavra de busca (os em alta, os de maior comissão, os mais
+# vendidos, a 2ª página, 100 por página) e com a 1ª palavra-chave dos primeiros nichos dos Achadinhos. Só
+# contagens e rótulos fixos: nenhum nome, link, palavra de busca ou preço de produto vai ao log, que é público.
+CAMPOS_DA_SONDA = "itemId productName priceMin commissionRate ratingStar sales imageUrl productLink"
+PAGINA_DA_SONDA = " pageInfo { page limit hasNextPage }"
+# (o rótulo fixo da lista, os argumentos do productOfferV2, o que pedir além dos produtos)
+LISTAS_DA_SONDA = (
+    ("em alta (listType 2)", "listType: 2, limit: 50", ""),
+    ("em alta, 2ª página", "listType: 2, limit: 50, page: 2", ""),
+    ("em alta, por mais vendidos", "listType: 2, sortType: 2, limit: 50", ""),
+    ("maior comissão (listType 1)", "listType: 1, limit: 50", ""),
+    ("todos, por mais vendidos", "sortType: 2, limit: 50", ""),
+    ("todos, por maior comissão", "sortType: 5, limit: 50", ""),
+    ("em alta, 100 por página", "listType: 2, limit: 100", ""),
+    ("em alta, com a página informada", "listType: 2, limit: 50", PAGINA_DA_SONDA),
+)
+NICHOS_NA_SONDA = 3
+NOTA_DA_SONDA = 4.5
+TENTATIVAS_DA_SONDA = 4
+PRODUTO_NO_LINK = re.compile(r"/product/\d+/\d+")
+FAIXAS_DE_PRECO = ((50, "até R$ 50"), (200, "de R$ 50 a R$ 200"), (float("inf"), "acima de R$ 200"))
+FAIXAS_POR_VENDA = ((5, "de R$ 2 a R$ 5"), (15, "de R$ 5 a R$ 15"), (float("inf"), "acima de R$ 15"))
+
+
+def erro_da_api(erros):
+    """O erro que a API devolveu, para o log público: o código e a mensagem dela sem números nem sequências longas."""
+    primeiro = erros[0] if isinstance(erros, list) and erros and isinstance(erros[0], dict) else {}
+    mensagem = re.sub(r"[0-9A-Fa-f]{16,}|\d+", "#", " ".join(str(primeiro.get("message") or "").split()))[:120]
+    return f"{api_shopee.rotulo_do_codigo(api_shopee._codigo_do_erro(erros))}: {mensagem or 'sem mensagem'}"
+
+
+async def pedir_lista(argumentos, extra=""):
+    """
+    (produtos, erro, tem próxima página) do productOfferV2 com esses argumentos; erro é "" quando a API
+    respondeu. O erro de sistema da Shopee tenta de novo, como na busca de ofertas.
+    """
+    consulta = f"query {{ productOfferV2({argumentos}) {{ nodes {{ {CAMPOS_DA_SONDA} }}{extra} }} }}"
+    for tentativa in range(1, TENTATIVAS_DA_SONDA + 1):
+        # A assinatura leva a hora: cada tentativa assina de novo.
+        headers, corpo = api_shopee.gerar_headers_e_payload({"query": consulta})
+        try:
+            async with aiohttp.ClientSession() as sessao:
+                async with sessao.post(assistente.URL_API, headers=headers, data=corpo) as resposta:
+                    estado = resposta.status
+                    dados = await resposta.json(content_type=None)
+        except Exception as e:
+            return [], f"sem resposta ({type(e).__name__})", None
+        erros = (dados or {}).get("errors")
+        if (erros and api_shopee._codigo_do_erro(erros) == api_shopee.CODIGO_DO_ERRO_DE_SISTEMA
+                and tentativa < TENTATIVAS_DA_SONDA):
+            await asyncio.sleep(api_shopee.ESPERA_NO_ERRO_DE_SISTEMA * tentativa)
+            continue
+        if erros:
+            return [], erro_da_api(erros), None
+        if estado != 200:
+            return [], f"status {estado}", None
+        lista = ((dados or {}).get("data") or {}).get("productOfferV2") or {}
+        return lista.get("nodes") or [], "", (lista.get("pageInfo") or {}).get("hasNextPage")
+    return [], "sem resposta", None
+
+
+def contagens_da_lista(produtos, ja_postados, valor_por_venda, minimo):
+    """
+    As linhas de uma lista da sonda, só com números e rótulos fixos: quantos têm a nota, quantos pagam o
+    mínimo por venda, quantos passam nas duas coisas (e, desses, quantos ainda não foram postados), a foto, o
+    link de produto, as medianas das vendas e da nota e as faixas do preço e do que pagam por venda.
+    """
+    precos = {rotulo: 0 for _, rotulo in FAIXAS_DE_PRECO}
+    por_venda = {rotulo: 0 for _, rotulo in FAIXAS_POR_VENDA}
+    notas, vendas = [], []
+    com_nota = pagam = as_duas = novos = com_foto = com_link = 0
+    for produto in produtos:
+        preco = assistente._numero(produto.get("priceMin"))
+        valor = valor_por_venda(preco, assistente._numero(produto.get("commissionRate")) * 100)
+        nota = assistente._numero(produto.get("ratingStar"))
+        notas.append(nota)
+        vendas.append(int(assistente._numero(produto.get("sales"))))
+        com_nota += nota >= NOTA_DA_SONDA
+        pagam += valor >= minimo
+        com_foto += bool(produto.get("imageUrl"))
+        com_link += bool(PRODUTO_NO_LINK.search(produto.get("productLink") or ""))
+        precos[next(rotulo for teto, rotulo in FAIXAS_DE_PRECO if preco <= teto)] += 1
+        if nota >= NOTA_DA_SONDA and valor >= minimo:
+            as_duas += 1
+            novos += str(produto.get("itemId") or "") not in ja_postados
+            por_venda[next(rotulo for teto, rotulo in FAIXAS_POR_VENDA if valor <= teto)] += 1
+    nota_do_meio = f"{statistics.median(notas):.1f}".replace(".", ",") if notas else "-"
+    return [
+        f"   nota {str(NOTA_DA_SONDA).replace('.', ',')} ou mais: {com_nota} | pagam o mínimo por venda: {pagam} | "
+        f"as duas coisas: {as_duas} (ainda não postados: {novos})",
+        f"   com a foto: {com_foto} | com o link do produto: {com_link} | vendas (mediana): "
+        f"{int(statistics.median(vendas)) if vendas else '-'} | nota (mediana): {nota_do_meio}",
+        "   preço: " + " | ".join(f"{rotulo}: {n}" for rotulo, n in precos.items()),
+        "   por venda, entre os das duas coisas: " + " | ".join(f"{rotulo}: {n}" for rotulo, n in por_venda.items()),
+    ]
+
+
+def palavras_dos_nichos():
+    """(quantos nichos, quantas palavras-chave, a 1ª palavra dos primeiros NICHOS_NA_SONDA nichos) dos Achadinhos."""
+    nichos = (db.ler_config("achadinhos_config", {}) or {}).get("nichos") or []
+    palavras = [[str(p).strip() for p in (nicho.get("keywords") or []) if str(p).strip()] for nicho in nichos]
+    return len(nichos), sum(len(p) for p in palavras), [p[0] for p in palavras if p][:NICHOS_NA_SONDA]
+
+
+def sondar_produtos():
+    """A sonda inteira: cada lista sem palavra de busca e a busca de uma palavra de cada nicho, em contagens."""
+    # Só aqui: as outras ações não precisam do robô.
+    import robo_shopee_video as robo
+    ja_postados = robo.produtos_ja_postados()
+    primeira = None
+    for rotulo, argumentos, extra in LISTAS_DA_SONDA:
+        produtos, erro, proxima = asyncio.run(pedir_lista(argumentos, extra))
+        if erro:
+            print(f"== {rotulo}: a API recusou ({erro})")
+            continue
+        itens = {str(p.get("itemId") or "") for p in produtos}
+        pagina = "" if proxima is None else f" | tem próxima página: {'sim' if proxima else 'não'}"
+        print(f"== {rotulo}: {len(produtos)} produto(s), {len(itens)} diferente(s){pagina}")
+        for linha in contagens_da_lista(produtos, ja_postados, robo.valor_por_venda, robo.MINIMO_POR_VENDA):
+            print(linha)
+        if primeira is None:
+            primeira = itens
+        else:
+            print(f"   em comum com a 1ª lista: {len(itens & primeira)}")
+    nichos, palavras, primeiras = palavras_dos_nichos()
+    print(f"== Nichos dos Achadinhos: {nichos} nicho(s), {palavras} palavra(s)-chave")
+    for posicao, palavra in enumerate(primeiras, 1):
+        argumentos = f"keyword: {json.dumps(palavra, ensure_ascii=False)}, sortType: 2, limit: 50"
+        produtos, erro, _ = asyncio.run(pedir_lista(argumentos))
+        if erro:
+            print(f"== nicho nº {posicao}, 1ª palavra, por mais vendidos: a API recusou ({erro})")
+            continue
+        print(f"== nicho nº {posicao}, 1ª palavra, por mais vendidos: {len(produtos)} produto(s)")
+        for linha in contagens_da_lista(produtos, ja_postados, robo.valor_por_venda, robo.MINIMO_POR_VENDA):
+            print(linha)
+    return 0
+
+
 def main(argumentos):
     if argumentos == ["modelos"]:
         nomes = modelos_de_video()
@@ -161,6 +308,12 @@ def main(argumentos):
         logging.disable(logging.CRITICAL)
         try:
             return testar()
+        finally:
+            logging.disable(logging.NOTSET)
+    if argumentos == ["produtos"]:
+        logging.disable(logging.CRITICAL)
+        try:
+            return sondar_produtos()
         finally:
             logging.disable(logging.NOTSET)
     print(__doc__)
