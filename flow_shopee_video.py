@@ -24,11 +24,17 @@ produto do vídeo com a foto do anúncio, e o vídeo vai ao privado do Rafael co
 custo, o produto, a cena e a conferência. O vídeo que não fica pronto ou não sai num teste é
 baixado e mandado no próximo, sem gerar outro.
 
-Usado pelo workflow video_ia.yml (acao flow ou flow-sem-gerar). O log do Actions é público:
-saem só estados, modelos e números; o produto e o pedido ficam no banco, e o vídeo, no privado.
+As amostras (P236 1, 16/11/2026): vídeos de teste como os da produção (o produto pela lista da
+API de afiliado e o Omni 1.2 Flash), um por vez, só no privado do Rafael, para ele ver como os
+vídeos de IA estão ficando; não viram rascunho nem post.
+
+Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar ou amostra). O log do Actions é
+público: saem só estados, modelos e números; o produto e o pedido ficam no banco, e o vídeo, no
+privado.
 
     python3 flow_shopee_video.py teste              # o próximo passo do teste (um modelo por vez)
     python3 flow_shopee_video.py teste --sem-gerar  # tudo até o Gerar, sem tocar nele
+    python3 flow_shopee_video.py amostra            # a próxima amostra do vídeo de IA (P236 1)
 """
 import asyncio
 import io
@@ -1260,6 +1266,173 @@ def legenda_da_producao(atual):
     return "\n".join(linhas)
 
 
+# --- As amostras: vídeos de teste da produção, só no privado do Rafael (P236 1) ---
+# Pedido do Rafael (16/11, P236 1): ver como os vídeos de IA estão ficando sem esperar o do dia. Cada amostra é um
+# vídeo como o da produção (o produto pela lista da API de afiliado, P234 1, o pedido da IA num estilo que varia e o
+# MODELO_DA_PRODUCAO), que vai só ao privado dele, com a foto e o link do anúncio e a conferência da IA, como o teste
+# da P229 1. Não vira rascunho nem post e não muda o vídeo de IA do dia: o produto da amostra fica fora só das
+# amostras seguintes (amostras_feitas) e continua podendo ser o do vídeo do dia. Roda a qualquer hora, porque ele
+# pediu (como o Preparar 1 Agora ⚡). Uma amostra por vez (cada video_ia.yml amostra faz a próxima); a que ficou
+# gerando ou baixada vai ao privado antes de outra ser gerada. Escolha do Rafael (16/11/2026, P236 1): DECISOES.md.
+
+
+def amostra_guardada():
+    """A amostra de agora (o produto, o pedido e o vídeo), do banco; {} sem nenhuma."""
+    atual = (db.ler_config(CHAVE, {}) or {}).get("amostra") or {}
+    return atual if atual.get("foto") and os.path.exists(atual["foto"]) else {}
+
+
+def marcar_amostra(**campos):
+    """Grava os campos na amostra de agora (o estado: gerando, baixado ou enviado; o custo; o arquivo)."""
+    db.atualizar_config(CHAVE, lambda dados: dados.setdefault("amostra", {}).update(campos))
+
+
+def amostras_feitas():
+    """Os produtos que já tiveram uma amostra mandada ao Rafael (os números deles): ficam fora das próximas."""
+    return [str(item) for item in (db.ler_config(CHAVE, {}) or {}).get("amostras_feitas") or []]
+
+
+def legenda_da_amostra(atual, conferencia):
+    """O texto que vai com a amostra no privado do Rafael (até 1000 letras)."""
+    if conferencia["mesmo"] is True:
+        conferido = "o produto é o mesmo da foto do anúncio"
+    elif conferencia["mesmo"] is False:
+        conferido = f"o produto muda: {conferencia['diferencas'] or 'sem detalhes'}"
+    else:
+        conferido = "não deu para conferir"
+    linhas = [f"🎬 Amostra do vídeo de IA nº {atual.get('numero', 1)} (teste da P236 1)",
+              f"🤖 Modelo: {atual.get('modelo', '')} ({atual.get('custo', 0)} créditos de IA)",
+              f"📦 Produto: {atual.get('nome', '')}",
+              f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
+              f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)",
+              f"🎥 Cena: {atual.get('cena', '')}",
+              f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}",
+              f"🔎 A IA conferiu: {conferido}"]
+    resolucao = {"1080p": "1080p (aumentada pelo Flow no Baixar)", "720p": "720p (o tamanho original)"}.get(
+        atual.get("resolucao"))
+    if resolucao:
+        linhas.append(f"📐 Resolução: {resolucao}" + (f", {atual['tamanho']}" if atual.get("tamanho") else ""))
+    if conferencia["defeitos"]:
+        linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
+    linhas.append("Nada foi postado: é só para você ver como os vídeos de IA estão ficando. O vídeo de IA do dia sai "
+                  "normalmente e vira rascunho.")
+    return "\n".join(linhas)[:1000]
+
+
+def mandar_a_amostra():
+    """
+    Confere a amostra baixada pela IA e manda no privado do Rafael (sem o celular), e logo depois a foto do anúncio
+    com o link dele. O produto entra nas amostras feitas. 0 mandada, 1 não.
+    """
+    atual = amostra_guardada()
+    if atual.get("estado") != "baixado" or not os.path.exists(atual.get("arquivo") or ""):
+        print("Amostra: o vídeo baixado não está no servidor")
+        return 1
+    conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
+    print(f"Amostra: conferência da IA: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}")
+    try:
+        ok = avisar_rafael.mandar_video(atual["arquivo"], legenda_da_amostra(atual, conferencia))
+    except Exception as e:
+        print(f"Amostra: o envio ao privado falhou ({type(e).__name__}); a próxima amostra manda de novo")
+        return 1
+    if not ok:
+        print("Amostra: o Telegram não aceitou o vídeo; a próxima amostra manda de novo")
+        return 1
+    marcar_amostra(estado="enviado", enviado_em=agora(), mesmo_produto=conferencia["mesmo"])
+
+    def anotar(dados):
+        dados["amostras_feitas"] = ([i for i in dados.get("amostras_feitas") or [] if str(i) != str(atual["item"])]
+                                    + [str(atual["item"])])[-ITENS_LEMBRADOS:]
+    db.atualizar_config(CHAVE, anotar)
+    print(f"Amostra nº {atual.get('numero', 1)}: vídeo mandado no privado do Rafael")
+    try:
+        foto = avisar_rafael.mandar_foto(atual["foto"], (
+            f"🖼️ Foto do anúncio, para comparar com a amostra nº {atual.get('numero', 1)}\n"
+            f"🔗 Anúncio: {link_do_anuncio(atual.get('link', ''))}")[:1000])
+    except Exception:
+        foto = False
+    print("Amostra: foto e link do anúncio mandados" if foto else "Amostra: a foto do anúncio não foi ao privado")
+    return 0
+
+
+def amostra(sem_gerar=False):
+    """
+    A próxima amostra do vídeo de IA (P236 1): escolhe o produto como a produção, gera no MODELO_DA_PRODUCAO, baixa
+    e manda no privado do Rafael. A que já foi gerada só é baixada e mandada (nunca dois Gerar para a mesma amostra).
+    sem_gerar: tudo até o Gerar, sem tocar nele. 0 deu certo, 1 parou. Só rótulos fixos e números no log.
+    """
+    atual = amostra_guardada()
+    if atual.get("estado") == "baixado" and os.path.exists(atual.get("arquivo") or ""):
+        print(f"Amostra nº {atual.get('numero', 1)}: já baixada; falta mandar")
+        return mandar_a_amostra()
+    so_baixar = atual.get("estado") == "gerando"
+    if so_baixar:
+        print(f"Amostra nº {atual.get('numero', 1)}: já gerada; falta baixar e mandar")
+    else:
+        # Só aqui: o robô importa este módulo, e a escolha é a dele (P234 1).
+        import robo_shopee_video as robo
+        try:
+            escolhido, origem, _restam = robo.escolher_para_o_video_de_ia(fora=amostras_feitas(), amostra=True)
+        except api_shopee.BuscaNegada as e:
+            print(f"Amostra: a API da Shopee negou a lista de produtos ({e}); nada foi tocado")
+            return 1
+        if not escolhido:
+            print("Amostra: nenhum produto da lista serviu agora (a foto ou o link curto); nada foi tocado")
+            return 1
+        os.makedirs(PASTA, exist_ok=True)
+        foto = os.path.join(PASTA, "amostra.jpg")
+        with open(foto, "wb") as arquivo:
+            arquivo.write(escolhido["foto"])
+        modelo, custo = MODELO_DA_PRODUCAO
+        atual = {chave: escolhido.get(chave) for chave in ("link", "nome", "item", "valor", "origem", "estilo",
+                                                            "prompt", "cena")}
+        atual.update(foto=foto, modelo=modelo, custo=custo, estado="escolhido", criado_em=agora(),
+                     numero=len(amostras_feitas()) + 1)
+        guardar(amostra=atual, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
+        print(f"Amostra nº {atual['numero']}: produto escolhido (o {escolhido.get('posicao')}º de {origem}); "
+              f"estilo {escolhido['estilo']}; pedido da IA com {len(escolhido['prompt'].split())} palavras")
+    if not celular_robo.conectado():
+        print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
+        return 1
+    tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
+    for tentativa in range(tentativas):
+        with celular_robo.trava() as livre:
+            if livre:
+                codigo = _amostra_no_celular(atual, sem_gerar, so_baixar)
+                break
+        if tentativa == 0:
+            print(f"celular: o robô automático está tocando no celular; esperando ele soltar "
+                  f"(até {ps.ESPERA_DO_CELULAR // 60} min)")
+        if tentativa < tentativas - 1:
+            time.sleep(ps.PAUSA_DA_ESPERA)
+    else:
+        print("celular: o robô automático continua tocando no celular; nada foi tocado")
+        return 1
+    # A conferência da IA e o envio ao privado vêm com o celular já solto para o robô automático.
+    if codigo == 0 and not sem_gerar:
+        return mandar_a_amostra()
+    return codigo
+
+
+def _amostra_no_celular(atual, sem_gerar, so_baixar):
+    """A amostra no celular, com a trava na mão: a tela, a foto, o Flow, o Gerar e o Baixar. 0 deu certo, 1 parou."""
+    if celular_robo.tela_acesa() is False:
+        ps.conectar(celular=True).screen_on()
+        time.sleep(2)
+    if celular_robo.tela_acesa() is False or celular_robo.tela_de_bloqueio():
+        print("celular: a tela está apagada ou na tela de bloqueio; nada foi tocado")
+        return 1
+    d = ps.conectar(celular=True)
+    try:
+        feito = no_flow(d, atual, atual["modelo"], atual["custo"], os.path.join(PASTA, "amostra.mp4"),
+                        marcar_amostra, sem_gerar=sem_gerar, so_baixar=so_baixar, guardar_telas=False)
+    except Parada as e:
+        casos_robo.guardar(d, "flow", "parou", str(e), passo="flow")
+        print(f"Amostra: parou: {e}")
+        return 1
+    return 0 if feito else 1
+
+
 def teste(sem_gerar=False):
     """O próximo vídeo do teste (um modelo por vez); com sem_gerar, tudo até o Gerar, sem tocar nele."""
     teste_de_agora = teste_guardado()
@@ -1325,11 +1498,11 @@ def teste(sem_gerar=False):
 
 
 def main(argumentos):
-    if argumentos and argumentos[0] == "teste" and set(argumentos[1:]) <= {"--sem-gerar"}:
+    if argumentos and argumentos[0] in ("teste", "amostra") and set(argumentos[1:]) <= {"--sem-gerar"}:
         # Os módulos logam nomes e links; aqui o log é público, e o resultado sai pelos prints.
         logging.disable(logging.CRITICAL)
         try:
-            return teste(sem_gerar="--sem-gerar" in argumentos)
+            return (teste if argumentos[0] == "teste" else amostra)(sem_gerar="--sem-gerar" in argumentos)
         except Exception as e:
             # Só o tipo: a mensagem de um erro inesperado pode trazer o nome do arquivo do vídeo.
             print(f"Flow: erro inesperado ({type(e).__name__})")

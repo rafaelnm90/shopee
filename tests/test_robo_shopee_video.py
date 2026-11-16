@@ -9394,6 +9394,19 @@ def test_video_de_ia_pega_da_lista_da_api_o_que_paga_mais_com_a_foto_boa(monkeyp
     assert not any("Produto" in detalhe or "shopee.com" in detalhe for _, detalhe in linhas)
 
 
+def test_escolha_da_amostra_deixa_de_fora_as_feitas_e_fica_no_registro_dela(monkeypatch):
+    # As amostras do vídeo de IA (P236 1) escolhem como a produção, sem repetir o produto de uma amostra anterior,
+    # e o registro delas fica à parte: o checkup conta o vídeo do dia sem elas.
+    ofertas = [_oferta_da_lista("13", comissao=0.08), _oferta_da_lista("14", comissao=0.06)]
+    foram = _lista_da_api(monkeypatch, ofertas)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 00:30"), fora=["13"],
+                                                                    amostra=True)
+    assert escolhido["item"] == "14" and foram == ["14"]
+    assert _registro_do_video_de_ia() == []
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_AMOSTRA) == \
+        ("produto escolhido",)
+
+
 def test_candidatos_do_video_de_ia_pela_peneira(monkeypatch):
     # O preço é o "a partir de" (ou o preço, sem ele), e a comissão vem em fração: 0,05 são 5%.
     ofertas = [_oferta_da_lista("1", preco=40.0, comissao=0.05),                      # R$ 2,00: exatamente o mínimo

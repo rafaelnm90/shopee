@@ -3204,6 +3204,9 @@ ORIGEM_DOS_NICHOS = "os mais vendidos dos nichos dos Achadinhos"
 PALAVRAS_DOS_NICHOS_POR_VEZ = 6
 OFERTAS_POR_PALAVRA = 40
 MOTIVO_DA_LISTA_NEGADA = "a API da Shopee negou a lista de produtos"
+# As amostras do vídeo de IA (P236 1, flow_shopee_video.amostra) escolhem o produto como a produção, com o registro
+# à parte: o checkup conta o vídeo do dia sem elas.
+PROCESSO_DA_AMOSTRA = "amostra do vídeo de IA"
 # Tantos produtos seguidos sem o link curto (a API de afiliado fora do ar) encerram a tentativa: os outros só
 # gastariam o tempo da rodada, e a próxima tentativa do dia olha os mesmos.
 SEM_LINK_CURTO_SEGUIDOS = 3
@@ -3327,18 +3330,19 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
     return sorted(bons, key=lambda bom: (-bom["valor"], -bom["vendas"])), contagem
 
 
-def escolher_para_o_video_de_ia(agora=None):
+def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
     lista da API de afiliado (candidatos_do_video_de_ia), do que paga mais por venda para o que paga menos, o 1º, até
     FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio,
     num estilo diferente dos últimos vídeos), o link curto que o celular abre, "id" (o nome do vídeo de IA entre os
     vídeos do robô), "item", "valor", "posicao" e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica
-    lembrada, e o produto não volta. api_shopee.BuscaNegada quando a API não deu a lista.
+    lembrada, e o produto não volta. api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que
+    ficam de fora (os das amostras já feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
-                                               flow.itens_gerados() + flow.fotos_recusadas())
+                                               flow.itens_gerados() + flow.fotos_recusadas() + list(fora))
     peneira = (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
                f"mínimo; {contagem['novos']} novos")
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
@@ -3357,18 +3361,26 @@ def escolher_para_o_video_de_ia(agora=None):
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar)
         if pedido:
-            registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "produto escolhido",
-                                         f"{peneira}; o {posicao}º; estilo {pedido['estilo']}", ok=None, agora=agora)
+            _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; estilo {pedido['estilo']}",
+                              agora)
             return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
                          valor=bom["valor"], posicao=posicao, origem=origem), origem, True)
         if serve is False:
             recusadas += 1
             flow.lembrar_foto_recusada(bom["item"])
     restam = len(bons) > recusadas
-    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem foto" if restam else "sem produto",
-                                 f"{peneira}; {olhadas} foto(s) olhada(s), {recusadas} recusada(s)"
-                                 + (f", {sem_link} sem o link curto" if sem_link else ""), ok=None, agora=agora)
+    _anotar_a_escolha(amostra, "sem foto" if restam else "sem produto",
+                      f"{peneira}; {olhadas} foto(s) olhada(s), {recusadas} recusada(s)"
+                      + (f", {sem_link} sem o link curto" if sem_link else ""), agora)
     return None, origem, restam
+
+
+def _anotar_a_escolha(amostra, resultado, detalhe, agora=None):
+    """A escolha do produto no registro: a do vídeo do dia ou a de uma amostra (P236 1), cada uma no seu."""
+    if amostra:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_AMOSTRA, resultado, detalhe, ok=None, agora=agora)
+    else:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, resultado, detalhe, ok=None, agora=agora)
 
 
 def _soltar_a_fonte_do_video_de_ia(atual):

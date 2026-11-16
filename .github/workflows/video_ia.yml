@@ -10,6 +10,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # "produtos" é a sonda da P234 1 (15/11): o que a API de afiliado devolve com a chave do Rafael em
 # cada jeito de pedir a lista de produtos (os em alta, os mais vendidos, os nichos dos Achadinhos), só em
 # contagens, para a escolha do produto do vídeo de IA do dia; só lê, não gasta nada.
+# "amostra" é o teste da P236 1 (16/11): a próxima amostra do vídeo de IA, como o da produção (o produto
+# pela lista da Shopee e o Omni 1.2 Flash, 24 créditos), só no privado do Rafael (nada é postado).
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
@@ -20,7 +22,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [modelos, testar, flow, flow-sem-gerar, produtos]
+        options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra]
         default: modelos
 
 permissions:
@@ -45,5 +47,6 @@ jobs:
             case "${{ inputs.acao }}" in
               flow) venv/bin/python3 flow_shopee_video.py teste ;;
               flow-sem-gerar) venv/bin/python3 flow_shopee_video.py teste --sem-gerar ;;
+              amostra) venv/bin/python3 flow_shopee_video.py amostra ;;
               *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
             esac
