@@ -372,6 +372,11 @@ def _sem_ofertas(negada_levanta, motivo):
     return []
 
 
+# O que a busca de ofertas e a lista dos produtos em alta pedem de cada produto.
+CAMPOS_DA_OFERTA = ("itemId productName price priceMin priceMax priceDiscountRate ratingStar sales shopName "
+                    "imageUrl productLink commissionRate")
+
+
 async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None, sort_type=2,
                                 negada_levanta=False):
     """
@@ -385,40 +390,71 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
     porque ordenar por preço num conjunto pouco relevante traz acessório
     barato em vez do produto (sort_type=4 traz capinha de fone, não fone).
     """
-    cred_id = app_id or SHOPEE_APP_ID
-    cred_secret = app_secret or SHOPEE_APP_SECRET
-
-    if not cred_id or not cred_secret:
-        logger.warning("⏳ [API Shopee] Chaves financeiras ausentes.")
-        return _sem_ofertas(negada_levanta, "sem as chaves")
-
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     payload = {
-        "query": """query getProductOffer($keyword: String!, $limit: Int!, $sortType: Int) {
-            productOfferV2(keyword: $keyword, limit: $limit, sortType: $sortType) {
-                nodes {
-                    itemId
-                    productName
-                    price
-                    priceMin
-                    priceMax
-                    priceDiscountRate
-                    ratingStar
-                    sales
-                    shopName
-                    imageUrl
-                    productLink
-                    commissionRate
-                }
-            }
-        }""",
+        "query": "query getProductOffer($keyword: String!, $limit: Int!, $sortType: Int) { "
+                 "productOfferV2(keyword: $keyword, limit: $limit, sortType: $sortType) { "
+                 f"nodes {{ {CAMPOS_DA_OFERTA} }} }} }}",
         "variables": {
             "keyword": keyword,
             "limit": limite,
             "sortType": sort_type
         }
     }
+    return await _pedir_ofertas(payload, app_id, app_secret, negada_levanta)
 
+
+# A lista dos produtos em alta da Shopee (os de melhor desempenho entre os afiliados), sem palavra de busca: o
+# listType 2 do productOfferV2, OFERTAS_POR_PAGINA por página (o máximo que a API aceita: com 100, ela recusa),
+# página por página, sem repetir produto entre elas. Conferido com a chave do Rafael em 16/11/2026, pela sonda
+# do video_ia.yml (produtos): a lista dos de maior comissão (listType 1) vem vazia, e a ordem (sortType) não
+# muda a lista sem palavra de busca. O robô da Shopee Vídeo tira dela o produto do vídeo de IA do dia (P234 1).
+LISTA_EM_ALTA = 2
+OFERTAS_POR_PAGINA = 50
+PAGINAS_EM_ALTA = 2
+
+
+async def ofertas_em_alta_shopee(paginas=PAGINAS_EM_ALTA, app_id=None, app_secret=None, negada_levanta=False):
+    """
+    Os produtos em alta da Shopee pela API de afiliado, as primeiras `paginas` páginas (OFERTAS_POR_PAGINA em cada
+    uma): a lista de produtos (nodes da API, como na busca de ofertas), ou lista vazia em qualquer erro. Com
+    negada_levanta=True, a 1ª página que fica sem a resposta da API levanta BuscaNegada; das seguintes, a que
+    falha só encerra a lista (as páginas de antes valem).
+    """
+    ofertas = []
+    for pagina in range(1, paginas + 1):
+        # Os números vão direto na consulta, como a API os aceitou na sonda.
+        payload = {"query": f"query {{ productOfferV2(listType: {LISTA_EM_ALTA}, limit: {OFERTAS_POR_PAGINA}, "
+                            f"page: {pagina}) {{ nodes {{ {CAMPOS_DA_OFERTA} }} pageInfo {{ hasNextPage }} }} }}"}
+        try:
+            nodes, continua = await _pedir_ofertas(payload, app_id, app_secret, negada_levanta or pagina > 1,
+                                                   com_a_proxima=True)
+        except BuscaNegada:
+            if pagina == 1 and negada_levanta:
+                raise
+            break
+        ofertas += nodes or []
+        if not nodes or not continua:
+            break
+    return ofertas
+
+
+async def _pedir_ofertas(payload, app_id, app_secret, negada_levanta, com_a_proxima=False):
+    """
+    O pedido de produtos (productOfferV2) à API de afiliado, com as novas tentativas no erro de sistema da
+    Shopee: a lista de produtos (nodes), ou lista vazia em qualquer erro (BuscaNegada com negada_levanta).
+    Com com_a_proxima, (a lista, se a API diz que há outra página).
+    """
+    cred_id = app_id or SHOPEE_APP_ID
+    cred_secret = app_secret or SHOPEE_APP_SECRET
+
+    def devolver(nodes, continua=False):
+        return (nodes, continua) if com_a_proxima else nodes
+
+    if not cred_id or not cred_secret:
+        logger.warning("⏳ [API Shopee] Chaves financeiras ausentes.")
+        return devolver(_sem_ofertas(negada_levanta, "sem as chaves"))
+
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     for tentativa in range(1, TENTATIVAS_NO_ERRO_DE_SISTEMA + 1):
         # A assinatura leva a hora: cada tentativa assina de novo.
         headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
@@ -426,7 +462,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
             async with aiohttp.ClientSession() as session:
                 async with session.post(endpoint, headers=headers, data=payload_json) as response:
                     if response.status != 200:
-                        return _sem_ofertas(negada_levanta, f"status {response.status}")
+                        return devolver(_sem_ofertas(negada_levanta, f"status {response.status}"))
                     dados = await response.json()
             erros = dados.get("errors")
             if (erros and _codigo_do_erro(erros) == CODIGO_DO_ERRO_DE_SISTEMA
@@ -444,16 +480,17 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
                 else:
                     logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
                 _registrar_busca_negada(erros)
-                return _sem_ofertas(negada_levanta, rotulo_do_codigo(_codigo_do_erro(erros)))
+                return devolver(_sem_ofertas(negada_levanta, rotulo_do_codigo(_codigo_do_erro(erros))))
             if tentativa > 1:
                 _registrar_nova_tentativa(tentativa)
-            return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
+            lista = dados.get("data", {}).get("productOfferV2", {})
+            return devolver(lista.get("nodes", []), bool((lista.get("pageInfo") or {}).get("hasNextPage")))
         except BuscaNegada:
             raise
         except Exception as e:
             logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
-            return _sem_ofertas(negada_levanta, type(e).__name__)
-    return _sem_ofertas(negada_levanta, "sem resposta")
+            return devolver(_sem_ofertas(negada_levanta, type(e).__name__))
+    return devolver(_sem_ofertas(negada_levanta, "sem resposta"))
 
 
 def _registrar_nova_tentativa(tentativa):

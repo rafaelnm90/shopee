@@ -633,6 +633,55 @@ def test_busca_negada_levanta_so_para_quem_pede(monkeypatch):
     assert rodar(api_shopee.buscar_ofertas_shopee("garrafa")) == []
 
 
+def test_produtos_em_alta_pagina_por_pagina_sem_palavra_de_busca(monkeypatch):
+    # Escolha do Rafael (15/11, P234 1): o produto do vídeo de IA sai da lista dos produtos em alta da API de
+    # afiliado. A sonda de 16/11 mostrou o jeito que a chave aceita: listType 2, 50 por página, sem palavra.
+    _api_que_responde(monkeypatch)
+    sessao = api_shopee.aiohttp.ClientSession
+    respostas = []
+
+    def post(url, headers=None, data=None):
+        sessao.postados.append(json.loads(data))
+        status, corpo = respostas.pop(0)
+        return _Resposta(status, corpo=corpo)
+    sessao.post = post
+
+    def pagina(itens, continua):
+        return 200, {"data": {"productOfferV2": {"nodes": [{"itemId": i} for i in itens],
+                                                 "pageInfo": {"hasNextPage": continua}}}}
+    respostas[:] = [pagina([1, 2], True), pagina([3], True)]
+    assert rodar(api_shopee.ofertas_em_alta_shopee()) == [{"itemId": 1}, {"itemId": 2}, {"itemId": 3}]
+    consultas = [postado["query"] for postado in sessao.postados]
+    assert len(consultas) == api_shopee.PAGINAS_EM_ALTA == 2
+    assert "productOfferV2(listType: 2, limit: 50, page: 1)" in consultas[0] and "page: 2)" in consultas[1]
+    assert all("keyword" not in consulta and "imageUrl productLink commissionRate" in consulta
+               for consulta in consultas)
+    # A API diz que não há outra página, ou a página vem vazia: a lista acaba ali.
+    respostas[:] = [pagina([1], False)]
+    assert rodar(api_shopee.ofertas_em_alta_shopee()) == [{"itemId": 1}] and respostas == []
+    respostas[:] = [pagina([], True)]
+    assert rodar(api_shopee.ofertas_em_alta_shopee()) == [] and respostas == []
+    # A 2ª página que falha só encerra a lista: a 1ª vale, mesmo para quem pede a BuscaNegada.
+    limite = {"errors": [{"message": "limite", "extensions": {"code": 10030}}]}
+    respostas[:] = [pagina([1], True), (200, limite)]
+    assert rodar(api_shopee.ofertas_em_alta_shopee(negada_levanta=True)) == [{"itemId": 1}]
+    # A 1ª página negada: lista vazia, ou BuscaNegada com o código para quem pede (o robô da Shopee Vídeo).
+    respostas[:] = [(200, limite)]
+    assert rodar(api_shopee.ofertas_em_alta_shopee()) == []
+    respostas[:] = [(200, limite)]
+    with pytest.raises(api_shopee.BuscaNegada, match="código 10.030"):
+        rodar(api_shopee.ofertas_em_alta_shopee(negada_levanta=True))
+    # O erro de sistema da Shopee tenta de novo, como na busca de ofertas.
+    monkeypatch.setattr(api_shopee, "ESPERA_NO_ERRO_DE_SISTEMA", 0)
+    sistema = {"errors": [{"message": "System error", "extensions": {"code": 10000}}]}
+    respostas[:] = [(200, sistema), pagina([7], False)]
+    assert rodar(api_shopee.ofertas_em_alta_shopee(negada_levanta=True)) == [{"itemId": 7}]
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_ID", None)
+    with pytest.raises(api_shopee.BuscaNegada, match="sem as chaves"):
+        rodar(api_shopee.ofertas_em_alta_shopee(negada_levanta=True))
+    assert rodar(api_shopee.ofertas_em_alta_shopee()) == []
+
+
 def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):
     _api_que_responde(monkeypatch, erro=OSError("caiu"))
     assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == PRODUTO
