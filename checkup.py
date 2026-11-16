@@ -435,6 +435,7 @@ SEM_META = {
     ("shopee_video", "horário sem rascunho"), ("shopee_video", "plano de hoje refeito"),
     ("shopee_video", "tela do celular"), ("shopee_video", "alerta do celular"),
     ("shopee_video", "vídeo de IA do dia"), ("shopee_video", "amostra do vídeo de IA"),
+    ("shopee_video", "rascunho recusado"),
     ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
 }
 
@@ -1031,6 +1032,8 @@ def robo_da_shopee_video(agora=None):
     # mandou sem o celular e o Rafael marcou com Postei ✅ (cobertos, P156 1). O checkup não os cobra.
     sem_tentar = int(plano.get("sem_tentar") or 0) if plano.get("data") == hoje else 0
     cobertos = len(plano.get("cobertos") or []) if plano.get("data") == hoje else 0
+    # Os horários a mais no lugar dos rascunhos recusados de hoje (P235 1).
+    no_lugar = len(plano.get("no_lugar_de_recusados") or []) if plano.get("data") == hoje else 0
     # Pela tabela dos rascunhos, que guarda todos; o histórico das tentativas pode ter
     # começado depois.
     salvos = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? "
@@ -1048,7 +1051,8 @@ def robo_da_shopee_video(agora=None):
     fila_viral = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
     do_canal = sum(1 for item in fila_viral if str(item.get("chat_origem")) == pedidos_do_canal.CANAL)
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
-            "sem_tentar": sem_tentar, "cobertos": cobertos, "salvos": salvos or 0, "pulados": pulados or 0,
+            "sem_tentar": sem_tentar, "cobertos": cobertos, "no_lugar": no_lugar, "salvos": salvos or 0,
+            "pulados": pulados or 0,
             "ruins": ruins, "linhas": linhas,
             "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
             "pontos": pontos, "faixa": faixa, "faixa_do_assistente": faixa_do_assistente,
@@ -2180,7 +2184,8 @@ def main():
         situacao += f" | punições esperando recurso: {robo_sv['punicoes']}"
     if robo_sv.get("pontos"):
         situacao += f" | pontos de penalidade {robo_sv['pontos']}"
-    print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
+    print(f"{situacao} | horários hoje {robo_sv['horarios']}"
+          + (f" ({robo_sv['no_lugar']} no lugar de recusado(s))" if robo_sv.get("no_lugar") else "") + " | "
           f"vencidos {robo_sv['vencidos']} (sem tentativa: {robo_sv['sem_tentar']}"
           + (f", fechados pelo assistente: {robo_sv['cobertos']}" if robo_sv.get("cobertos") else "") + ") | "
           f"rascunhos salvos hoje {robo_sv['salvos']} | "
