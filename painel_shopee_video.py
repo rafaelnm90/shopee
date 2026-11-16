@@ -425,6 +425,7 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_confirmacao_janela_robo = State()
     aguardando_confirmacao_pausa_robo = State()
     fazer_agora = State()
+    preparar_de_onde = State()
     rascunho = State()
     aguardando_confirmacao_recusa = State()
     aguardando_produtos_a_tirar = State()
@@ -645,6 +646,15 @@ BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
 BOTAO_ANTIGO_INTERACOES = "Horário das Interações 💬"
 BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
+# Depois do Preparar 1 Agora ⚡, de onde vem o vídeo, nesta ordem (pedido do Rafael, 16/11; P243): o sorteio meio a
+# meio, o próximo vídeo da Fonte dos Vídeos (o "grupo", como sempre foi) e o vídeo de IA no Google Flow.
+BOTAO_PREPARAR_ALEATORIO = "Aleatório 🎲"
+BOTAO_PREPARAR_DO_GRUPO = "Do Grupo 📥"
+BOTAO_PREPARAR_DE_IA = "De IA ✨"
+ORIGEM_DO_BOTAO = {BOTAO_PREPARAR_ALEATORIO: "aleatorio", BOTAO_PREPARAR_DO_GRUPO: "fonte", BOTAO_PREPARAR_DE_IA: "ia"}
+# O vídeo de IA que não acaba numa rodada (gerado e por baixar, ou pronto sem tempo para o rascunho) segue em
+# tantas rodadas seguidas, chamadas na hora.
+RODADAS_SEGUIDAS_DO_DE_IA = 3
 BOTAO_FAZER_AGORA = "Fazer Agora ⏩"
 BOTAO_HISTORICO = "Histórico do Robô 📋"
 BOTAO_FILA = "Fila de Rascunhos 🗂️"
@@ -823,6 +833,11 @@ def teclado_produtos_a_mais(config):
     return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
+def teclado_preparar():
+    return montar_teclado([[KeyboardButton(text=botao) for botao in ORIGEM_DO_BOTAO],
+                           [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+
+
 def teclado_video_ia(config):
     liga = BOTAO_DESLIGAR_VIDEO_IA if robo.video_de_ia_ligado(config) else BOTAO_LIGAR_VIDEO_IA
     return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
@@ -967,8 +982,9 @@ def texto_robo(config, agora=None, celular=None):
         "posta na hora.\n"
         f"🗂️ <b>{BOTAO_FILA}</b>: a lista dos rascunhos esperando a sua aprovação e dos aprovados, com a hora "
         "prevista de cada post e, se algum passou da hora, por que ainda não saiu.\n"
-        f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado); se o vídeo "
-        "tiver um problema próprio, ele passa sozinho ao próximo, até 3.\n"
+        f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado), com o vídeo "
+        f"de onde você escolher: {BOTAO_PREPARAR_ALEATORIO}, {BOTAO_PREPARAR_DO_GRUPO} ou {BOTAO_PREPARAR_DE_IA}; se o "
+        "vídeo do grupo tiver um problema próprio, ele passa sozinho ao próximo, até 3.\n"
         f"⏩ <b>{BOTAO_FAZER_AGORA}</b>: manda o robô fazer na próxima folga do celular a limpeza, a Saúde do Vídeo, as "
         "respostas, o post antigo ou o feed, sem esperar a vez deles; o que já saiu hoje até o limite do dia ele não "
         "repete.\n"
@@ -1305,7 +1321,7 @@ async def mostrar_assistente(message: types.Message, state: FSMContext):
 # Depois de um Cancelar ❌ (bot_mestre), volta à tela de onde o ajuste saiu.
 ESTADOS_DO_ROBO = ("aguardando_tipo_faixa_robo", "aguardando_faixa_robo", "aguardando_confirmacao_faixa_robo", "aguardando_janela_robo",
                    "aguardando_confirmacao_janela_robo", "aguardando_confirmacao_pausa_robo", "menu_robo",
-                   "rascunho", "aguardando_confirmacao_recusa", "fazer_agora")
+                   "rascunho", "aguardando_confirmacao_recusa", "fazer_agora", "preparar_de_onde")
 # Do Tirar Produto ➖ e do Editar ✏️, o Cancelar ❌ volta ao rascunho, sem mudar nada.
 ESTADOS_DO_RASCUNHO = ("aguardando_produtos_a_tirar", "editando_rascunho")
 ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
@@ -1612,6 +1628,18 @@ def linha_do_video_de_ia_de_hoje(agora=None):
     return f"{quando}: {SITUACOES_DO_VIDEO_DE_IA.get(atual['estado'], atual['estado'])}"
 
 
+def limite_dos_videos_de_ia():
+    """A regra dos vídeos de IA por dia, na tela do Vídeo de IA ✨ (VIDEOS_DE_IA_POR_DIA; P232 1 e P243)."""
+    limite, custo = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.MODELO_DA_PRODUCAO[1]
+    pedido = f"{BOTAO_PREPARAR} → {BOTAO_PREPARAR_DE_IA}"
+    if limite is None:
+        return (f"Além do vídeo do robô, cada {pedido} faz mais um ({custo} créditos cada; passando dos 50 grátis do "
+                "dia, saem do plano)")
+    if limite == 1:
+        return f"Nunca mais de um vídeo por dia (o {pedido} só adianta o de hoje)"
+    return f"No máximo {limite} vídeos de IA por dia, contando o do robô e os que você pede em {pedido}"
+
+
 def texto_video_ia(config, agora=None):
     """A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1): DECISOES.md, Shopee Vídeo."""
     modelo, custo = robo.flow.MODELO_DA_PRODUCAO
@@ -1628,7 +1656,7 @@ def texto_video_ia(config, agora=None):
         "o próximo), escreve o pedido num estilo que varia (demonstração, pessoa falando do produto, inusitado ou "
         "comédia) e confere o vídeo pronto com a foto. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
         f"a nossa edição, os produtos e o Rótulo de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar. Se a IA "
-        "vir outro produto no vídeo, ele não vira rascunho. Nunca mais de um vídeo por dia, e o produto que já ganhou "
+        f"vir outro produto no vídeo, ele não vira rascunho. {limite_dos_videos_de_ia()}, e o produto que já ganhou "
         "um vídeo de IA não ganha outro.\n\n"
         f"Agora: {'✅ <b>ligado</b>' if ligado else '⏸️ <b>desligado</b> (o robô não faz nem usa o vídeo de IA)'}\n"
         f"Último: {html_escape(linha_do_video_de_ia_de_hoje(agora))}\n\n"
@@ -2057,25 +2085,48 @@ async def botao_antigo_das_interacoes(message: types.Message, state: FSMContext)
         "qualquer hora do Horário do Robô.", reply_markup=teclado_robo(ler_config()))
 
 
+def texto_preparar(agora=None):
+    """A tela do Preparar 1 Agora ⚡: de onde vem o vídeo do rascunho (pedido do Rafael, 16/11; P243)."""
+    hoje = robo.agora_br(agora).strftime("%Y-%m-%d")
+    feitos, limite = robo.flow.gerados_no_dia(hoje), robo.VIDEOS_DE_IA_POR_DIA
+    pode, motivo = robo.o_de_ia_pode(agora)
+    fonte = assistente.FONTES.get(ler_config()["fonte"], ler_config()["fonte"])
+    return (
+        "⚡ <b>Preparar 1 Agora</b>\n"
+        "Um rascunho a mais, agora (mesmo pausado ou fora do Horário do Robô). De onde vem o vídeo?\n\n"
+        f"🎲 <b>{BOTAO_PREPARAR_ALEATORIO}</b>: sorteia meio a meio entre o Do Grupo e o De IA; quando o De IA não "
+        "pode sair (o limite do dia), vai o Do Grupo.\n"
+        f"📥 <b>{BOTAO_PREPARAR_DO_GRUPO}</b>: o próximo vídeo da Fonte dos Vídeos (hoje: {html_escape(fonte)}), como "
+        "sempre foi; se ele tiver um problema próprio, o robô passa sozinho ao próximo, até 3. Uns 5 a 10 min.\n"
+        f"✨ <b>{BOTAO_PREPARAR_DE_IA}</b>: o vídeo de IA pronto que espera vira o rascunho; sem ele, o robô faz um "
+        "novo no Google Flow, com o produto escolhido como o do dia, e ele vira o rascunho. Uns 20 a 40 min.\n\n"
+        f"Vídeos de IA hoje: <b>{feitos}</b>" + (f" de {limite}" if limite is not None else "")
+        + ("" if pode else f" ({html_escape(motivo)})"))
+
+
 @router.message(F.text == BOTAO_PREPARAR, StateFilter("*"))
 async def preparar_handler(message: types.Message, state: FSMContext):
     """
-    Um rascunho na hora, a mais do plano do dia, mesmo pausado ou fora do Horário do
-    Robô: para testar ou ter mais um. Ele entra em Rascunhos do Robô 📝 como os outros.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    O Preparar 1 Agora ⚡ pergunta de onde vem o vídeo: Aleatório 🎲, Do Grupo 📥 ou De IA ✨ (pedido do Rafael,
+    16/11; P243). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not _admin(message): return
-    if robo_ocupado():
-        await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
-        return
-    logger.info("⚡ Shopee Vídeo: Preparar 1 Agora.")
-    # Acima do teto pelos pontos de penalidade, o botão continua valendo, com o aviso (P145).
-    aviso = apelacoes.aviso_acima_do_teto(robo.rascunhos_de_hoje(), rascunhos_hoje(ler_config()),
-                                          apelacoes.pontos_de_agora(robo.ler_estado()))
-    await message.answer("⚡ Preparando 1 rascunho agora no Motorola. Em uns 5 a 10 min ele chega em "
-                         f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se o vídeo tiver um problema próprio, ele passa "
-                         "sozinho ao próximo (até 3), e se algo impedir, ele diz o quê." + aviso, parse_mode="HTML")
-    asyncio.create_task(rodar_robo("--preparar"))
+    await state.set_state(ShopeeVideoFluxo.preparar_de_onde)
+    await message.answer(texto_preparar(), parse_mode="HTML", reply_markup=teclado_preparar())
+
+
+async def preparar_agora(de):
+    """
+    A rodada do Preparar 1 Agora ⚡ com a origem escolhida (P243). O vídeo de IA que não acabou nela (gerado e por
+    baixar, ou pronto sem tempo para o rascunho: rascunho_de_ia_pedido) segue em rodadas chamadas na hora, até
+    RODADAS_SEGUIDAS_DO_DE_IA.
+    """
+    robo.gravar_estado(rascunho_de_ia_pedido=False)
+    await rodar_robo("--preparar", "--de", de)
+    for _ in range(RODADAS_SEGUIDAS_DO_DE_IA):
+        if not robo.ler_estado().get("rascunho_de_ia_pedido"):
+            return
+        await rodar_robo("--preparar", "--de", "ia")
 
 
 def rotulo_da_atividade(atividade, agora=None):
@@ -3301,6 +3352,47 @@ async def confirmar_janela_robo(message: types.Message, state: FSMContext):
     await message.answer(f"Robô trabalhando <b>{rotulo_janela(inicio, fim)}</b>?", parse_mode="HTML",
                          reply_markup=teclado_aprovar_cancelar)
     await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_janela_robo)
+
+
+@router.message(ShopeeVideoFluxo.preparar_de_onde, F.text.in_(list(ORIGEM_DO_BOTAO)))
+async def preparar_de_onde_handler(message: types.Message, state: FSMContext):
+    """
+    Um rascunho na hora, a mais do plano do dia, mesmo pausado ou fora do Horário do Robô, com o vídeo da origem
+    tocada (P243): para testar ou ter mais um. Ele entra em Rascunhos do Robô 📝 como os outros.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    if robo_ocupado():
+        await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
+        return
+    de = ORIGEM_DO_BOTAO[message.text]
+    pode, motivo = robo.o_de_ia_pode()
+    if de == "ia" and not pode:
+        await message.answer(f"✨ {motivo[:1].upper()}{motivo[1:]}. Toque em {BOTAO_PREPARAR_DO_GRUPO} para um vídeo "
+                             "do grupo.", reply_markup=teclado_preparar())
+        return
+    logger.info(f"⚡ Shopee Vídeo: Preparar 1 Agora ({de}).")
+    # Acima do teto pelos pontos de penalidade, o botão continua valendo, com o aviso (P145).
+    aviso = apelacoes.aviso_acima_do_teto(robo.rascunhos_de_hoje(), rascunhos_hoje(ler_config()),
+                                          apelacoes.pontos_de_agora(robo.ler_estado()))
+    chega = (f"Em uns 5 a 10 min ele chega em {BOTAO_RASCUNHOS}, e o robô avisa aqui; se o vídeo tiver um problema "
+             "próprio, ele passa sozinho ao próximo (até 3), e se algo impedir, ele diz o quê.")
+    if de == "fonte":
+        texto = f"⚡ Preparando 1 rascunho agora no Motorola, com o próximo vídeo do grupo. {chega}"
+    elif de == "ia" and robo.flow.video_pronto():
+        texto = ("✨ Preparando 1 rascunho agora no Motorola, com o vídeo de IA pronto que esperava. Em uns 5 a 10 min "
+                 f"ele chega em {BOTAO_RASCUNHOS}, e o robô avisa aqui.")
+    elif de == "ia":
+        texto = ("✨ Preparando 1 rascunho agora com um vídeo de IA: o robô escolhe o produto, faz o vídeo no Google "
+                 "Flow do Motorola e confere; depois ele vira o rascunho. Leva uns 20 a 40 min, e o robô avisa aqui "
+                 "cada passo.")
+    else:
+        texto = ("🎲 Preparando 1 rascunho agora no Motorola: o robô sorteia entre um vídeo do grupo e um de IA e "
+                 "avisa aqui o que saiu."
+                 + ("" if pode else " Hoje o De IA já chegou ao limite: vai um vídeo do grupo."))
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    await message.answer(texto + aviso, parse_mode="HTML", reply_markup=teclado_robo(ler_config()))
+    asyncio.create_task(preparar_agora(de))
 
 
 @router.message(ShopeeVideoFluxo.fazer_agora)

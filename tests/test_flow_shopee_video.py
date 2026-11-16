@@ -1102,3 +1102,30 @@ def test_amostra_sem_produto_ou_com_a_lista_negada_nao_toca_no_celular(celular, 
     saida = capsys.readouterr().out
     assert "negou a lista de produtos (código 10.000)" in saida and "nenhum produto da lista serviu" in saida
     assert celular.toques == [] and celular.geracoes == 0 and celular.mandados == []
+
+
+def test_os_gerar_do_dia_passam_de_um_andamento_ao_outro(monkeypatch, tmp_path):
+    # O limite de vídeos de IA do dia (P243) conta o do robô e os do Preparar 1 Agora ⚡: cada Gerar soma uma vez, e a
+    # conta passa ao andamento seguinte do mesmo dia; o do botão guarda se o do robô já tinha saído.
+    monkeypatch.setattr(flow, "PASTA", str(tmp_path))
+    # No servidor a tabela já existe (o bot_mestre cria).
+    with db.conexao() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    flow.recomecar_producao("2026-10-22", estado="escolhido", item="1")
+    assert flow.gerados_no_dia("2026-10-22") == 0
+    flow._marcar_a_producao(estado="gerando", gerado_em="2026-10-22 08:00:00")
+    assert flow.gerados_no_dia("2026-10-22") == 1
+    # O mesmo Gerar anotado de novo não conta duas vezes.
+    flow._marcar_a_producao(gerado_em="2026-10-22 08:00:05")
+    assert flow.gerados_no_dia("2026-10-22") == 1
+    flow.guardar_producao(estado="usado")
+    flow.recomecar_producao("2026-10-22", estado="escolhido", item="2", do_botao=True)
+    atual = flow.producao()
+    assert atual["do_botao"] is True and atual["do_robo_fechado"] is True
+    assert flow.gerados_no_dia("2026-10-22") == 1 and flow.o_do_robo_saiu("2026-10-22")
+    flow._marcar_a_producao(estado="gerando", gerado_em="2026-10-22 15:00:00")
+    assert flow.gerados_no_dia("2026-10-22") == 2
+    # Outro dia, outra conta, e o do robô ainda não saiu nele.
+    assert flow.gerados_no_dia("2026-10-23") == 0 and not flow.o_do_robo_saiu("2026-10-23")
+    flow.recomecar_producao("2026-10-23", estado="escolhido", item="3")
+    assert flow.gerados_no_dia("2026-10-23") == 0 and flow.producao().get("do_botao") is None

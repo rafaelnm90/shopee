@@ -15,6 +15,7 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --rodada
     python3 robo_shopee_video.py --treino      # o treino na hora (botão Testar Caminho 🧭)
     python3 robo_shopee_video.py --preparar    # um rascunho na hora (botão Preparar 1 Agora ⚡)
+    python3 robo_shopee_video.py --preparar --de aleatorio|fonte|ia   # com a origem escolhida (P243)
     python3 robo_shopee_video.py --saude       # a Saúde do Vídeo na hora (botão Gerar Apelação ⚖️)
     python3 robo_shopee_video.py --postar ID   # o aprovado na hora (botão Postar Agora 🚀, P138)
     python3 robo_shopee_video.py --fazer       # o pedido do Fazer Agora ⏩ que espera (P162 1)
@@ -3200,7 +3201,7 @@ def minutos_de_um_rascunho():
     return MINUTOS_DE_UM_RASCUNHO_SEM_OS_A_MAIS if sem_os_a_mais() else MINUTOS_DE_UM_RASCUNHO
 
 
-def preparar_o_pedido(d, config, agora=None, comeco=None):
+def preparar_o_pedido(d, config, agora=None, comeco=None, de=None):
     """
     O rascunho do Preparar 1 Agora: preparar_rascunho com o próximo vídeo a cada Parada do
     próprio vídeo, até VIDEOS_DO_PEDIDO vídeos, enquanto cabe outro rascunho na rodada e a fonte
@@ -3209,11 +3210,32 @@ def preparar_o_pedido(d, config, agora=None, comeco=None):
     por que não houve outro, para a resposta no privado. comeco: o time.monotonic() do começo
     da rodada, de onde o painel conta MAXIMO_DA_RODADA (sem ele, agora). O registro diz em que
     minuto da rodada cada próximo vídeo começou ou ficou sem tempo (só números).
+    de: de onde vem o vídeo (P243): "fonte" (Do Grupo 📥), "ia" (De IA ✨, preparar_o_de_ia) ou "aleatorio"
+    (Aleatório 🎲: sortear_a_origem; o de IA que não gera nada dá lugar ao da fonte); None, como antes dela.
     """
     comeco = time.monotonic() if comeco is None else comeco
+    sorteado = de == "aleatorio"
+    if sorteado:
+        de = sortear_a_origem(agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "sorteio", "de IA" if de == "ia" else "do grupo",
+                                     ok=None, agora=agora)
+        avisar(f"🎲 Robô da Shopee Vídeo: no sorteio do Aleatório saiu {'De IA ✨' if de == 'ia' else 'Do Grupo 📥'}.")
+    if de == "ia":
+        try:
+            return preparar_o_de_ia(d, config, agora, comeco)
+        except SemOVideoDeIa as e:
+            if not sorteado:
+                return f"sem o vídeo de IA: {e}"
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "sorteio", "do grupo no lugar do de IA",
+                                         ok=None, agora=agora)
+            avisar(f"🎲 Robô da Shopee Vídeo: o vídeo de IA do sorteio não saiu ({e}). Vou com um vídeo do grupo.")
+            de = "fonte"
+            passados = time.monotonic() - comeco
+            if passados > MAXIMO_DA_RODADA - minutos_de_um_rascunho() * 60:
+                return "não há tempo para um vídeo do grupo nesta rodada; toque de novo em Preparar 1 Agora ⚡"
     for vez in range(1, VIDEOS_DO_PEDIDO + 1):
         try:
-            return preparar_rascunho(d, config, agora)
+            return preparar_rascunho(d, config, agora, de=de)
         except Parada as e:
             if not e.do_video:
                 raise
@@ -3236,6 +3258,55 @@ def preparar_o_pedido(d, config, agora=None, comeco=None):
                                          f"o {vez + 1}º, aos {_minutos(passados)} min da rodada", ok=None, agora=agora)
             avisar(f"⚠️ Robô da Shopee Vídeo: o vídeo {vez} de {VIDEOS_DO_PEDIDO} do rascunho que você pediu ficou "
                    f"de lado ({e.motivo}). Vou para o próximo vídeo.")
+
+
+def preparar_o_de_ia(d, config, agora=None, comeco=None):
+    """
+    O rascunho do De IA ✨ do Preparar 1 Agora ⚡ (P243). O vídeo de IA pronto que espera vira o rascunho; sem ele, o
+    gerado que falta baixar segue, ou o robô faz um novo no Flow (fazer_o_video_de_ia, com o produto escolhido como
+    o do dia), se o dia ainda cabe outro Gerar (o_de_ia_pode). O rascunho sai na mesma rodada quando o tempo dá;
+    senão, fica pedido (rascunho_de_ia_pedido) e o painel chama a rodada seguinte na hora. SemOVideoDeIa quando nada
+    foi gerado nem havia vídeo pronto (o limite do dia, nenhum produto serviu): o Aleatório vai então à fonte.
+    """
+    comeco = time.monotonic() if comeco is None else comeco
+    # A rodada que continua a de antes (o painel a chama pelo rascunho_de_ia_pedido) só acaba o vídeo dela: se outra
+    # rodada já o levou a um rascunho, não gera outro.
+    continuacao = bool(ler_estado().get("rascunho_de_ia_pedido"))
+    gravar_estado(rascunho_de_ia_pedido=False)
+    if not video_de_ia_para_o_rascunho(evitar_hoje(config, agora)):
+        pendente = flow.producao().get("estado") in flow.ESTADOS_PENDENTES
+        if not pendente and continuacao:
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "vídeo de IA",
+                                         "já usado por outra rodada", ok=None, agora=agora)
+            return JaAvisado("o vídeo de IA pedido já foi usado por outra rodada")
+        if not pendente:
+            pode, motivo = o_de_ia_pode(agora)
+            if not pode:
+                raise SemOVideoDeIa(motivo)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "vídeo de IA",
+                                     "baixar o gerado" if pendente else "gerar um novo", ok=None, agora=agora)
+        resultado = fazer_o_video_de_ia(d, config, agora, do_botao=True)
+        atual = flow.producao()
+        if atual.get("estado") in flow.ESTADOS_PENDENTES:
+            gravar_estado(rascunho_de_ia_pedido=True)
+            avisar("🎞️ Robô da Shopee Vídeo: gerei no Google Flow o vídeo de IA que você pediu, mas ele ainda não "
+                   "ficou pronto. Baixo e faço o rascunho em seguida, numa rodada logo depois desta.")
+            return JaAvisado(resultado)
+        if not video_de_ia_para_o_rascunho(evitar_hoje(config, agora)):
+            if not atual.get("gerado_em"):
+                raise SemOVideoDeIa(resultado.removeprefix("vídeo de IA: "))
+            # Gerado e conferido com outro produto: o aviso do fazer_o_video_de_ia já disse.
+            return JaAvisado(resultado)
+    passados, minutos = time.monotonic() - comeco, minutos_de_um_rascunho()
+    if passados > MAXIMO_DA_RODADA - minutos * 60:
+        gravar_estado(rascunho_de_ia_pedido=True)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "rascunho do vídeo de IA na rodada seguinte",
+                                     f"aos {_minutos(passados)} min da rodada; um rascunho leva até {minutos} min",
+                                     ok=None, agora=agora)
+        avisar("🎞️ Robô da Shopee Vídeo: o vídeo de IA que você pediu está pronto. O rascunho sai em seguida, numa "
+               "rodada logo depois desta (nesta não cabe mais um rascunho).")
+        return JaAvisado(DE_IA_NA_RODADA_SEGUINTE)
+    return preparar_rascunho(d, config, agora, de="ia")
 
 
 # --- Vídeo de IA do dia (P232 1 e P234 1) ---
@@ -3273,11 +3344,55 @@ PROCESSO_DA_AMOSTRA = "amostra do vídeo de IA"
 # Tantos produtos seguidos sem o link curto (a API de afiliado fora do ar) encerram a tentativa: os outros só
 # gastariam o tempo da rodada, e a próxima tentativa do dia olha os mesmos.
 SEM_LINK_CURTO_SEGUIDOS = 3
+# O Preparar 1 Agora ⚡ pergunta de onde vem o vídeo (pedido do Rafael, 16/11), nesta ordem: Aleatório 🎲 (meio a
+# meio entre os outros dois), Do Grupo 📥 (o próximo da Fonte dos Vídeos, como sempre foi) e De IA ✨ (o vídeo de IA
+# pronto que espera ou o gerado que falta baixar; sem eles, um novo no Flow, com o produto escolhido como o do dia).
+# O do botão é o rascunho a mais, na hora, mesmo com o Vídeo de IA ✨ desligado (ele liga o do robô), e conta no
+# limite de vídeos de IA do dia junto com o do robô: VIDEOS_DE_IA_POR_DIA Gerar (None: sem limite).
+# Escolha do Rafael (P243): DECISOES.md, Shopee Vídeo.
+ORIGENS_DO_PEDIDO = ("aleatorio", "fonte", "ia")
+VIDEOS_DE_IA_POR_DIA = 2
+# O rascunho do vídeo de IA do botão que não cabe na mesma rodada (o vídeo gerado e por baixar, ou pronto sem tempo
+# para o rascunho) fica pedido no estado do robô (rascunho_de_ia_pedido), e o painel chama a rodada seguinte na hora.
+DE_IA_NA_RODADA_SEGUINTE = "vídeo de IA pronto; o rascunho sai na rodada seguinte"
+
+
+class SemOVideoDeIa(Exception):
+    """O De IA ✨ do Preparar 1 Agora ⚡ não gerou nem achou vídeo pronto (o limite do dia, nenhum produto serviu)."""
+
+
+class JaAvisado(str):
+    """O resultado do Preparar 1 Agora ⚡ que já foi dito ao Rafael no privado: o _agir não repete o aviso."""
 
 
 def video_de_ia_ligado(config):
     """O vídeo de IA do dia está ligado no painel (Vídeo de IA ✨)? Ligado até o Rafael desligar (P232 1)."""
     return bool(config.get("robo_video_ia", True))
+
+
+def cabe_outro_video_de_ia(dia, atual=None):
+    """O dia ainda cabe outro Gerar no Flow, contando o do robô e os do Preparar 1 Agora ⚡ (VIDEOS_DE_IA_POR_DIA)?"""
+    return VIDEOS_DE_IA_POR_DIA is None or flow.gerados_no_dia(dia, atual) < VIDEOS_DE_IA_POR_DIA
+
+
+def o_de_ia_pode(agora=None):
+    """
+    (o De IA ✨ do Preparar 1 Agora ⚡ pode sair agora, por que não) (P243). Com o vídeo de IA pronto que espera ou o
+    gerado que falta baixar, sempre: nada novo é gerado. Sem eles, enquanto o dia cabe outro Gerar.
+    """
+    atual = flow.producao()
+    if flow.video_pronto() or atual.get("estado") in flow.ESTADOS_PENDENTES:
+        return True, ""
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    if cabe_outro_video_de_ia(hoje, atual):
+        return True, ""
+    feitos = flow.gerados_no_dia(hoje, atual)
+    return False, f"hoje já {'saiu 1 vídeo' if feitos == 1 else f'saíram {feitos} vídeos'} de IA, o limite do dia"
+
+
+def sortear_a_origem(agora=None, sorteio=None):
+    """O Aleatório 🎲 do Preparar 1 Agora ⚡ (P243): "ia" ou "fonte", meio a meio; sem o De IA (o limite), "fonte"."""
+    return "ia" if o_de_ia_pode(agora)[0] and (sorteio or random.random)() < 0.5 else "fonte"
 
 
 def _sem_produto_pela_fonte(atual):
@@ -3293,6 +3408,7 @@ def video_de_ia_pendente(config, agora=None):
     A rodada faz o vídeo de IA do dia agora (o_que_fazer)? O vídeo já gerado que falta baixar ou conferir, sim; o
     pronto espera o rascunho. Sem vídeo hoje: só com o plano do dia tendo um horário por vir (o vídeo vira o rascunho
     dele), uma vez por dia, e a produção que parou antes do Gerar tenta de novo até flow.TENTATIVAS_ANTES_DO_GERAR.
+    Os vídeos do Preparar 1 Agora ⚡ contam no limite do dia (VIDEOS_DE_IA_POR_DIA, P243).
     """
     if not video_de_ia_ligado(config):
         return False
@@ -3303,9 +3419,8 @@ def video_de_ia_pendente(config, agora=None):
     # O pronto espera o rascunho; o que perdeu o arquivo conta como o vídeo do dia dele, e o do dia seguinte sai.
     if estado == "pronto" and os.path.exists(atual.get("arquivo") or ""):
         return False
-    if atual.get("data") == agora_br(agora).strftime("%Y-%m-%d") and not _sem_produto_pela_fonte(atual) and (
-            estado in flow.ESTADOS_DO_DIA_ACABADO or atual.get("gerado_em")
-            or atual.get("tentativas_de_gerar", 0) >= flow.TENTATIVAS_ANTES_DO_GERAR):
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    if flow.o_do_robo_saiu(hoje, atual) or not cabe_outro_video_de_ia(hoje, atual):
         return False
     plano = estado_do_dia(config, agora)
     return plano.get("feitos", 0) < len(plano.get("horarios") or [])
@@ -3458,26 +3573,29 @@ def _soltar_a_fonte_do_video_de_ia(atual):
         con.execute("DELETE FROM shopee_video_enviados WHERE id_unico = ? AND status = 'robo'", (atual["id_video"],))
 
 
-def fazer_o_video_de_ia(d, config, agora=None):
+def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
     """
     O vídeo de IA do dia na rodada (P232 1): escolhe o produto pela API de afiliado (P234 1), gera no Flow, baixa e
-    a IA confere com a foto do anúncio; o que já foi gerado só é baixado (nunca outro Gerar no dia). Devolve o que
-    aconteceu numa frase.
+    a IA confere com a foto do anúncio; o que já foi gerado só é baixado (nunca outro Gerar por cima dele).
+    do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243), com as tentativas dele à parte das do robô.
+    Devolve o que aconteceu numa frase.
     """
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     atual = flow.producao()
+    botao = {"do_botao": True} if do_botao else {}
     if atual.get("estado") not in flow.ESTADOS_PENDENTES:
         if atual.get("estado") == "escolhido":
             # A rodada de antes caiu no meio, antes do Gerar: a reserva dela sai.
             _soltar_a_fonte_do_video_de_ia(atual)
-        de_hoje = atual.get("data") == hoje and not _sem_produto_pela_fonte(atual)
+        de_hoje = (atual.get("data") == hoje and not _sem_produto_pela_fonte(atual)
+                   and bool(atual.get("do_botao")) == do_botao)
         tentativas = (atual.get("tentativas_de_gerar", 0) if de_hoje else 0) + 1
         try:
             escolhido, origem, restam = escolher_para_o_video_de_ia(agora)
         except api_shopee.BuscaNegada as e:
             # A API sem resposta não é falta de produto: tenta de novo no dia, como a que para antes do Gerar.
             motivo = f"vídeo de IA: {MOTIVO_DA_LISTA_NEGADA} ({e})"
-            flow.recomecar_producao(hoje, estado="parou", tentativas_de_gerar=tentativas, motivo=motivo)
+            flow.recomecar_producao(hoje, estado="parou", tentativas_de_gerar=tentativas, motivo=motivo, **botao)
             registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "parou", "a API negou a lista de produtos",
                                          ok=False, agora=agora)
             registrar_tentativa("video_ia", "parou", motivo, agora=agora)
@@ -3485,11 +3603,11 @@ def fazer_o_video_de_ia(d, config, agora=None):
         if not escolhido:
             # Com produto ainda por olhar (a IA não achou boa a foto dos que viu), tenta de novo no dia.
             flow.recomecar_producao(hoje, estado="sem foto" if restam else "sem produto",
-                                    tentativas_de_gerar=tentativas, origem=origem)
+                                    tentativas_de_gerar=tentativas, origem=origem, **botao)
             registrar_tentativa("video_ia", "sem vídeo",
                                 "vídeo de IA: nenhum produto da lista da Shopee serviu para o vídeo", agora=agora)
             return "vídeo de IA: nenhum produto da lista da Shopee serviu desta vez"
-        atual = flow.comecar_producao(hoje, escolhido, tentativas)
+        atual = flow.comecar_producao(hoje, escolhido, tentativas, do_botao=do_botao)
     if atual["estado"] != "baixado":
         try:
             baixado = flow.producao_no_celular(d, atual)
@@ -3507,16 +3625,23 @@ def fazer_o_video_de_ia(d, config, agora=None):
                                      ok=False, agora=agora)
         registrar_tentativa("video_ia", "descartado", "vídeo de IA: a IA viu outro produto no vídeo",
                             produto=atual.get("nome", ""), agora=agora, video=atual.get("id_video", ""))
-        avisar("⚠️ Robô da Shopee Vídeo: o vídeo de IA de hoje saiu com outro produto, pela conferência da IA com a "
-               "foto do anúncio. Ele não vira rascunho, e o de amanhã sai normalmente.\n\n"
+        if atual.get("do_botao"):
+            qual, depois = "que você pediu", (". Toque de novo em Preparar 1 Agora ⚡ → De IA ✨ para tentar outro, se o "
+                                               "dia ainda tiver espaço para vídeo de IA.")
+        else:
+            qual, depois = "de hoje", ", e o de amanhã sai normalmente."
+        avisar(f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} saiu com outro produto, pela conferência da IA com a "
+               f"foto do anúncio. Ele não vira rascunho{depois}\n\n"
                f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}")
         return "vídeo de IA: a IA viu outro produto no vídeo; não vira rascunho"
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "pronto",
                                  atual.get("resolucao") or "sem a janela da resolução", ok=True, agora=agora)
     registrar_tentativa("video_ia", "pronto", produto=atual.get("nome", ""), agora=agora,
                         video=atual.get("id_video", ""))
-    avisar("🎞️ Robô da Shopee Vídeo: fiz o vídeo de IA do dia no Google Flow. Ele vira o próximo rascunho, com a nossa "
-           "edição e o Rótulo de IA ligado, e chega em Rascunhos do Robô 📝 para você aprovar.\n\n"
+    vira = ("que você pediu no Google Flow. Agora ele vira o rascunho" if atual.get("do_botao")
+            else "do dia no Google Flow. Ele vira o próximo rascunho")
+    avisar(f"🎞️ Robô da Shopee Vídeo: fiz o vídeo de IA {vira}, com a nossa edição e o Rótulo de IA ligado, e chega "
+           "em Rascunhos do Robô 📝 para você aprovar.\n\n"
            f"Produto: {atual.get('nome', '')}\n{de_onde_veio_o_produto_do_video_de_ia(atual)}"
            f"{flow.legenda_da_producao(atual)}")
     return "vídeo de IA: pronto para o rascunho"
@@ -3600,7 +3725,7 @@ def _video_de_ia_nao_saiu(video, do_video, agora=None):
                                  ok=False, agora=agora)
 
 
-def preparar_rascunho(d, config, agora=None):
+def preparar_rascunho(d, config, agora=None, de=None):
     """
     Um rascunho novo, do vídeo da fonte até Rascunhos, com todas as conferências. O vídeo
     fica reservado (o assistente não o pega) enquanto o robô trabalha nele.
@@ -3609,11 +3734,17 @@ def preparar_rascunho(d, config, agora=None):
     diz o produto: não paga comissão) fica de lado, e o robô passa ao próximo na mesma
     rodada, sem gastar a tentativa do horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     O vídeo de IA do dia pronto vira o rascunho do horário, no lugar de um vídeo da fonte (P232 1).
+    de (o Preparar 1 Agora ⚡, P243): "fonte" fica só com os vídeos da fonte; "ia", só com o vídeo de IA pronto.
     """
     evitar = evitar_hoje(config, agora)
     ja_postados = produtos_ja_postados()
-    # Desligado no painel, o vídeo de IA pronto espera o Rafael ligar de novo.
-    do_flow = video_de_ia_para_o_rascunho(evitar, ja_postados) if video_de_ia_ligado(config) else None
+    # Desligado no painel, o vídeo de IA pronto espera o Rafael ligar de novo; o De IA ✨ do botão o usa mesmo assim.
+    usa_o_de_ia = de == "ia" or (de is None and video_de_ia_ligado(config))
+    do_flow = video_de_ia_para_o_rascunho(evitar, ja_postados) if usa_o_de_ia else None
+    if de == "ia" and not do_flow:
+        resultado = "o vídeo de IA não está pronto para o rascunho"
+        registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
+        return resultado
     video = do_flow
     for _ in range(0 if do_flow else VIDEOS_SEM_OFERTA_POR_RODADA):
         # O de produto que paga mais por venda entre os próximos da fonte (P194 1).
@@ -8894,7 +9025,7 @@ def lembrar_celular_desconectado(agora=None):
     return "alertado de novo"
 
 
-def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar=None, fazer=False):
+def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar=None, fazer=False, de=None):
     """
     Uma rodada. treino=True é o botão Testar Caminho 🧭, preparar=True o Preparar 1
     Agora ⚡, saude=True o Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee
@@ -8902,7 +9033,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
     Agora ⏩ que espera (P162 1; fazer=True: só ele): rodam na hora, mesmo pausado ou fora do
     horário (o Rafael pediu agora), e o rascunho do Preparar 1 Agora é a mais do plano do dia. Com a conta suspensa, a única coisa que o robô faz no
     celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo botão). Devolve o que
-    aconteceu, numa frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    aconteceu, numa frase. de: de onde vem o vídeo do Preparar 1 Agora ⚡ (P243, preparar_o_pedido).
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     # O painel interrompe a rodada em MAXIMO_DA_RODADA contados daqui (o Preparar 1 Agora mede o
     # tempo que sobra para outro vídeo a partir deste começo).
@@ -9024,7 +9156,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
         d = casos_robo.com_historico(d or ps.conectar(celular=True))
         try:
             resultado = _agir(d, acao, ident, preparar, config, agora,
-                              pedido=(saude or pedido_de_post or pedida == "saude") and na_hora, comeco=comeco)
+                              pedido=(saude or pedido_de_post or pedida == "saude") and na_hora, comeco=comeco, de=de)
             if pedida and pedida != "saude":
                 # A Saúde pedida já manda o resumo dela; as outras dizem aqui como foi.
                 avisar(f"⏩ Robô da Shopee Vídeo: {ATIVIDADES_DO_FAZER_AGORA[pedida][0]}, do Fazer Agora: "
@@ -9067,11 +9199,11 @@ def deixar_sem_video(d, agora=None):
                                      ok=False, agora=agora)
 
 
-def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
+def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None, de=None):
     """
     A ação da rodada no celular, já dentro da trava, com o que fazer quando ela para.
     pedido=True: o Rafael pediu a Saúde do Vídeo pelo botão Gerar Apelação ⚖️ e espera a resposta.
-    comeco: o time.monotonic() do começo da rodada (preparar_o_pedido).
+    comeco: o time.monotonic() do começo da rodada (preparar_o_pedido). de: a origem do Preparar 1 Agora ⚡ (P243).
     """
     # O rascunho entra no histórico pelo preparar_rascunho, que sabe qual vídeo tentou.
     produto = ", ".join((pegar(ident) or {}).get("produtos") or []) if ident else ""
@@ -9136,12 +9268,12 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None):
         if not preparar:
             _em_preparo(config, agora, True)
         try:
-            resultado = (preparar_o_pedido(d, config, agora, comeco) if preparar
+            resultado = (preparar_o_pedido(d, config, agora, comeco, de=de) if preparar
                          else preparar_rascunho(d, config, agora))
         finally:
             if not preparar:
                 _em_preparo(config, agora, False)
-        if resultado == "rascunho salvo":
+        if resultado == "rascunho salvo" or isinstance(resultado, JaAvisado):
             return resultado
         _repetir_depois(acao, preparar, config, agora)
         _avisar_que_nao_saiu(acao, preparar, config, agora)
@@ -9402,6 +9534,14 @@ def main(argumentos):
         return 0
     treino, preparar, saude = "--treino" in argumentos, "--preparar" in argumentos, "--saude" in argumentos
     fazer = "--fazer" in argumentos
+    # De onde vem o vídeo do Preparar 1 Agora ⚡ (P243): --de aleatorio, fonte ou ia.
+    de = None
+    if "--de" in argumentos:
+        resto = argumentos[argumentos.index("--de") + 1:]
+        if not preparar or not resto or resto[0] not in ORIGENS_DO_PEDIDO:
+            print(__doc__)
+            return 2
+        de = resto[0]
     postar = None
     if "--postar" in argumentos:
         resto = argumentos[argumentos.index("--postar") + 1:]
@@ -9412,7 +9552,7 @@ def main(argumentos):
     if not treino and not preparar and not saude and not fazer and postar is None and "--rodada" not in argumentos:
         print(__doc__)
         return 2
-    resultado = rodada(treino=treino, preparar=preparar, saude=saude, postar=postar, fazer=fazer)
+    resultado = rodada(treino=treino, preparar=preparar, saude=saude, postar=postar, fazer=fazer, de=de)
     logger.info(f"🤖 [Robô Shopee Vídeo] {resultado}.")
     # O resultado fica no banco com o texto mascarado (sem nome de produto), para o
     # diagnóstico do servidor, que é público, mostrar como foi a última rodada.

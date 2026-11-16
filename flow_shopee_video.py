@@ -1162,15 +1162,60 @@ def guardar_producao(**campos):
     db.atualizar_config(CHAVE, lambda dados: dados.setdefault("producao", {}).update(campos))
 
 
+def _o_do_robo_acabou(atual):
+    """
+    O andamento do vídeo do dia do robô fechou o dia dele? Gerado, num estado que acaba o dia ou sem mais tentativas
+    antes do Gerar. O "sem produto" sem a lista de onde veio é o da escolha antiga, pelos vídeos da fonte, que a
+    P234 1 trocou pela lista da API de afiliado: não fecha o dia.
+    """
+    estado = atual.get("estado")
+    if estado == "sem produto" and not atual.get("origem"):
+        return False
+    return bool(estado in ESTADOS_DO_DIA_ACABADO or atual.get("gerado_em")
+                or atual.get("tentativas_de_gerar", 0) >= TENTATIVAS_ANTES_DO_GERAR)
+
+
+def o_do_robo_saiu(dia, atual=None):
+    """
+    O vídeo de IA do dia do robô (P232 1) já saiu no dia (ou desistiu)? O andamento do Preparar 1 Agora ⚡ (do_botao,
+    P243) guarda a resposta do andamento que veio antes dele (do_robo_fechado).
+    """
+    atual = producao() if atual is None else atual
+    if atual.get("data") != dia:
+        return False
+    if atual.get("do_botao"):
+        return bool(atual.get("do_robo_fechado"))
+    return _o_do_robo_acabou(atual)
+
+
+def gerados_no_dia(dia, atual=None):
+    """
+    Quantos Gerar o Flow teve no dia, o do robô e os do Preparar 1 Agora ⚡ (P243): o número passa de um andamento ao
+    seguinte do mesmo dia. O andamento gerado conta pelo menos 1 (o de antes desta conta não a tem).
+    """
+    atual = producao() if atual is None else atual
+    if atual.get("data") != dia:
+        return 0
+    return max(int(atual.get("gerados_no_dia") or 0), 1 if atual.get("gerado_em") else 0)
+
+
 def recomecar_producao(dia, **campos):
-    """Um andamento novo para o vídeo do dia, no lugar do de antes (os arquivos de antes saem do servidor)."""
+    """
+    Um andamento novo para o vídeo do dia, no lugar do de antes (os arquivos de antes saem do servidor). Do de antes,
+    no mesmo dia, ficam quantos Gerar o dia já teve e, no do Preparar 1 Agora ⚡ (do_botao), se o vídeo do dia do
+    robô já tinha saído.
+    """
+    anterior = producao()
     for nome in os.listdir(PASTA) if os.path.isdir(PASTA) else []:
         if nome.startswith("producao_"):
             try:
                 os.remove(os.path.join(PASTA, nome))
             except OSError:
                 pass
-    db.atualizar_config(CHAVE, lambda dados: dados.update(producao=dict(campos, data=dia)))
+    novo = dict(campos, data=dia, gerados_no_dia=gerados_no_dia(dia, anterior))
+    if novo.get("do_botao"):
+        novo["do_robo_fechado"] = o_do_robo_saiu(dia, anterior)
+    db.atualizar_config(CHAVE, lambda dados: dados.update(producao=novo))
 
 
 def itens_gerados():
@@ -1203,14 +1248,15 @@ def lembrar_foto_recusada(item):
     _lembrar("fotos_recusadas", item)
 
 
-def comecar_producao(dia, escolhido, tentativas_de_gerar):
+def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     """
     Guarda o pedido do vídeo do dia (escolhido: o pedido_para_o_anuncio com o nome do vídeo de IA entre os
     vídeos do robô, "id", o produto, "item" e "valor", e de onde ele veio, "origem"), no estado "escolhido", e o
     estilo na lista dos últimos (estilos_recentes). A foto vai a um arquivo ao lado dos vídeos; o banco fica com o
-    caminho. Devolve o andamento novo.
+    caminho. do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
     """
-    recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar)
+    recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar,
+                       **({"do_botao": True} if do_botao else {}))
     os.makedirs(PASTA, exist_ok=True)
     foto = os.path.join(PASTA, f"producao_{dia}.jpg")
     with open(foto, "wb") as arquivo:
@@ -1245,7 +1291,11 @@ def _marcar_a_producao(**campos):
     """
     Guarda o andamento do vídeo do dia; no toque do Gerar ("gerado_em"), o produto entra nos que já tiveram um
     vídeo gerado (itens_gerados), na mesma hora: a rodada que cai logo depois não deixa o produto voltar à escolha.
+    O Gerar conta também entre os do dia (gerados_no_dia, P243).
     """
+    if campos.get("gerado_em"):
+        atual = producao()
+        campos["gerados_no_dia"] = gerados_no_dia(atual.get("data"), atual) + (0 if atual.get("gerado_em") else 1)
     guardar_producao(**campos)
     if campos.get("gerado_em"):
         lembrar_item_gerado(producao().get("item"))

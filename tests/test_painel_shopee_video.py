@@ -1182,7 +1182,8 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
               "botao_antigo_das_interacoes", "treino_handler", "preparar_handler", "fazer_agora_handler",
               "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
-                 "confirmar_faixa_robo", "confirmar_janela_robo", "pedir_atividade_agora", "salvar_recusa")
+                 "confirmar_faixa_robo", "confirmar_janela_robo", "pedir_atividade_agora", "salvar_recusa",
+                 "preparar_de_onde_handler")
     assert max(ordem.index(b) for b in botoes) < min(ordem.index(r) for r in respostas)
 
 
@@ -1323,7 +1324,18 @@ def test_rascunho_de_ver_produtos_mostra_o_link_de_cada_produto(bm):
     assert "• Cortina A\n• Cortina B\n🔗 https://s.shopee.com.br/video" in antigo and "🎬" not in antigo
 
 
-def test_preparar_1_agora_roda_o_robo_na_hora(bm, Msg, Est, monkeypatch):
+def _tocar_a_origem(sv, msg, est):
+    async def tocar():
+        await sv.preparar_de_onde_handler(msg, est)
+        for _ in range(10):
+            await sv.asyncio.sleep(0)
+
+    rodar(tocar())
+
+
+def test_preparar_1_agora_pergunta_de_onde_vem_o_video_e_roda_o_robo_com_ela(bm, Msg, Est, monkeypatch):
+    # Pedido do Rafael (16/11; P243): o Preparar 1 Agora ⚡ pergunta de onde vem o vídeo, nesta ordem: o sorteio, o
+    # próximo vídeo do grupo (como sempre foi) e o vídeo de IA.
     sv = _painel(bm)
     chamadas = []
 
@@ -1331,14 +1343,65 @@ def test_preparar_1_agora_roda_o_robo_na_hora(bm, Msg, Est, monkeypatch):
         chamadas.append(argumentos)
 
     monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
-    msg = Msg("Preparar 1 Agora ⚡")
+    monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
+    msg, est = Msg("Preparar 1 Agora ⚡"), Est()
+    rodar(sv.preparar_handler(msg, est))
+    assert chamadas == [] and est.estado == sv.ShopeeVideoFluxo.preparar_de_onde
+    assert _textos(sv.teclado_preparar()) == ["Aleatório 🎲", "Do Grupo 📥", "De IA ✨", "Voltar ao Robô 🔙"]
+    tela = msg.saidas[0]
+    assert tela.index("Aleatório 🎲") < tela.index("Do Grupo 📥") < tela.index("De IA ✨")
+    assert "Vídeos de IA hoje: <b>0</b> de 2" in tela
+    for botao, de, texto in (("Aleatório 🎲", "aleatorio", "o robô sorteia entre um vídeo do grupo e um de IA"),
+                             ("Do Grupo 📥", "fonte", "Preparando 1 rascunho agora no Motorola, com o próximo vídeo "
+                                                     "do grupo"),
+                             ("De IA ✨", "ia", "faz o vídeo no Google Flow")):
+        chamadas.clear()
+        msg, est = Msg(botao), Est(estado=sv.ShopeeVideoFluxo.preparar_de_onde)
+        _tocar_a_origem(sv, msg, est)
+        assert chamadas == [("--preparar", "--de", de)] and texto in msg.saidas[0], botao
+        assert est.estado == sv.ShopeeVideoFluxo.menu_robo
 
-    async def tocar():
-        await sv.preparar_handler(msg, Est())
-        await sv.asyncio.sleep(0)
 
-    rodar(tocar())
-    assert chamadas == [("--preparar",)] and "Preparando 1 rascunho" in msg.saidas[0]
+def test_de_ia_no_limite_do_dia_nao_roda_o_robo_e_o_aleatorio_avisa(bm, Msg, Est, monkeypatch):
+    # O limite de vídeos de IA do dia (P243): o De IA só explica; o Aleatório roda e vai com um vídeo do grupo.
+    sv = _painel(bm)
+    chamadas = []
+
+    async def rodar_robo(*argumentos):
+        chamadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
+    monkeypatch.setattr(sv.robo, "o_de_ia_pode",
+                        lambda agora=None: (False, "hoje já saíram 2 vídeos de IA, o limite do dia"))
+    msg, est = Msg("De IA ✨"), Est(estado=sv.ShopeeVideoFluxo.preparar_de_onde)
+    _tocar_a_origem(sv, msg, est)
+    assert chamadas == [] and est.estado == sv.ShopeeVideoFluxo.preparar_de_onde
+    assert msg.saidas == ["✨ Hoje já saíram 2 vídeos de IA, o limite do dia. Toque em Do Grupo 📥 para um vídeo do "
+                          "grupo."]
+    msg = Msg("Aleatório 🎲")
+    _tocar_a_origem(sv, msg, Est(estado=sv.ShopeeVideoFluxo.preparar_de_onde))
+    assert chamadas == [("--preparar", "--de", "aleatorio")]
+    assert "Hoje o De IA já chegou ao limite: vai um vídeo do grupo." in msg.saidas[0]
+
+
+def test_video_de_ia_que_nao_acaba_numa_rodada_segue_na_seguinte(bm, Msg, Est, monkeypatch):
+    # O vídeo de IA gerado e por baixar, ou pronto sem tempo para o rascunho, segue em rodadas chamadas na hora
+    # (rascunho_de_ia_pedido), até RODADAS_SEGUIDAS_DO_DE_IA; o pedido de um toque antigo não vale para o novo.
+    sv = _painel(bm)
+    chamadas, pedidos = [], [True, False]
+
+    async def rodar_robo(*argumentos):
+        chamadas.append(argumentos)
+        sv.robo.gravar_estado(rascunho_de_ia_pedido=pedidos.pop(0) if pedidos else True)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    sv.robo.gravar_estado(rascunho_de_ia_pedido=True)
+    rodar(sv.preparar_agora("fonte"))
+    assert chamadas == [("--preparar", "--de", "fonte"), ("--preparar", "--de", "ia")]
+    chamadas.clear()
+    rodar(sv.preparar_agora("ia"))
+    assert chamadas == [("--preparar", "--de", "ia")] * (1 + sv.RODADAS_SEGUIDAS_DO_DE_IA)
 
 
 def test_treino_sem_resultado_depois_de_meia_hora_diz_que_nao_terminou(bm):
@@ -1616,7 +1679,7 @@ def test_rodada_de_antes_do_reinicio_no_celular_segura_os_botoes_e_o_agendador(b
     monkeypatch.setattr(sv.celular_robo, "ocupado", lambda: True)
     sv.alterar_config(robo_pausado=False, robo_inicio=0, robo_fim=24)
     rodar(sv.verificar_robo())
-    for botao, handler in (("Preparar 1 Agora ⚡", sv.preparar_handler), ("Testar Caminho 🧭", sv.treino_handler)):
+    for botao, handler in (("Do Grupo 📥", sv.preparar_de_onde_handler), ("Testar Caminho 🧭", sv.treino_handler)):
         msg = Msg(botao)
         rodar(handler(msg, Est()))
         assert "no meio de uma rodada" in msg.saidas[0]
@@ -1865,15 +1928,15 @@ def test_painel_mostra_o_teto_pelos_pontos_e_o_preparar_avisa_acima_dele(bm, Msg
 
     monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
     monkeypatch.setattr(sv, "robo_ocupado", lambda: False)
-    msg = MsgComMidia(Msg, sv.BOTAO_PREPARAR)
-    rodar(sv.preparar_handler(msg, Est()))
+    msg = MsgComMidia(Msg, sv.BOTAO_PREPARAR_DO_GRUPO)
+    rodar(sv.preparar_de_onde_handler(msg, Est()))
     assert "passa do teto" not in msg.saidas[-1]
     for n in range(sv.rascunhos_hoje(sv.ler_config())):
         _rascunho(sv, f"Hoje #{n}", agora)
-    msg = MsgComMidia(Msg, sv.BOTAO_PREPARAR)
-    rodar(sv.preparar_handler(msg, Est()))
+    msg = MsgComMidia(Msg, sv.BOTAO_PREPARAR_DO_GRUPO)
+    rodar(sv.preparar_de_onde_handler(msg, Est()))
     rodar(asyncio.sleep(0))
-    assert rodadas == [("--preparar",), ("--preparar",)] and "este passa do teto" in msg.saidas[-1]
+    assert rodadas == [("--preparar", "--de", "fonte")] * 2 and "este passa do teto" in msg.saidas[-1]
 
 
 def test_painel_mostra_o_numero_do_plano_de_hoje_e_que_a_mudanca_vale_amanha(bm):
@@ -2246,8 +2309,11 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     msg = Msg(sv.BOTAO_VIDEO_IA)
     rodar(sv.video_ia_handler(msg, est))
     for trecho in ("Omni 1.2 Flash (24 créditos", "Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz",
-                   "Nunca mais de um vídeo por dia"):
+                   sv.limite_dos_videos_de_ia()):
         assert trecho in msg.saidas[-1]
+    # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243).
+    assert sv.limite_dos_videos_de_ia() == (
+        "No máximo 2 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨")
     # Escolha do Rafael (15/11, P234 1): o produto vem da API de afiliado da Shopee, sem depender da fonte.
     for trecho in ("sem depender dos vídeos da fonte", "entre os produtos em alta, os de nota 4,5 ou mais, que pagam "
                    "pelo menos R$ 2,00 por venda e que você ainda não postou", "o que paga mais por venda",
