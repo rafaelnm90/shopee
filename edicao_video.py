@@ -183,13 +183,23 @@ SEM_FOTO_LEMBRADOS = 300
 
 # A música de fundo do vídeo sem som: 3 músicas instrumentais feitas pelo Claude do zero, por
 # síntese (.claude/scripts/gerar_musicas.py), sem pedaço de música de ninguém, porque a regra 7
-# da Shopee pune música de terceiros sem licença. Cada vídeo mudo leva a próxima, em rodízio
-# (a vez fica em MUSICA_DA_VEZ, na chave shopee_video), e no exemplo cada versão modificada
-# leva outra. Escolha do Rafael (28/10, P55): DECISOES.md, Shopee Vídeo.
+# da Shopee pune música de terceiros sem licença. Cada vídeo mudo leva a que a IA escolhe para ele (P241 1,
+# CLIMA_DAS_MUSICAS) ou, sem ela, a próxima, em rodízio (a vez fica em MUSICA_DA_VEZ, na chave shopee_video), e no
+# exemplo cada versão modificada leva outra. Escolha do Rafael (28/10, P55): DECISOES.md, Shopee Vídeo.
 MUSICAS = (("animada", "musica_animada.m4a"), ("calma", "musica_calma.m4a"),
            ("divertida", "musica_divertida.m4a"))
 PASTA_DA_MIDIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia")
 MUSICA_DA_VEZ = "musica_de_fundo_da_vez"
+# A música do vídeo que vai sem o som dele: a IA, que já vê o vídeo para escrever os textos, diz qual das nossas
+# combina com ele, pelo clima de cada uma; sem a resposta dela, vai a da vez no rodízio, e o registro conta de onde
+# veio cada uma (PROCESSO_DA_MUSICA). Escolha do Rafael (16/11, P241 1): DECISOES.md, Shopee Vídeo.
+CLIMA_DAS_MUSICAS = {
+    "animada": "pop dançante, para vídeo agitado e de produto que anima: brinquedo, fone, moda jovem, festa",
+    "calma": "lo-fi tranquilo, para vídeo calmo: casa, cozinha, organização, beleza, cuidados pessoais",
+    "divertida": "ukulele e assobio, para vídeo engraçado ou leve: comédia, bichinho, criança, coisa curiosa",
+}
+PROCESSO_DA_MUSICA = "edição do vídeo: música de fundo"
+ESCOLHIDA_PELA_IA, DA_VEZ_NO_RODIZIO = "escolhida pela IA", "a da vez no rodízio"
 # O som de cada vídeo editado vai ao volume das nossas músicas de fundo (-16 LUFS, o das redes, P55),
 # sem estourar: o que veio baixinho sobe no máximo SUBIDA_MAXIMA_DO_SOM (para não aumentar o chiado), e a
 # diferença menor que DIFERENCA_QUE_NAO_SE_OUVE fica como veio. O registro anota quanto cada um subiu ou
@@ -213,13 +223,14 @@ def ligada():
     return bool((db.ler_config("shopee_video", {}) or {}).get("edicao_ligada"))
 
 
-def musicas_de_fundo(video, quantas=1, ouviu_fala=False, anotar=None):
+def musicas_de_fundo(video, quantas=1, ouviu_fala=False, anotar=None, escolhida=None):
     """
     A música (nome, caminho) de cada um dos `quantas` vídeos que saem deste (o original e as
-    versões), a partir da da vez, que anda uma casa; [None] * quantas quando o vídeo tem som. O de som
-    baixo demais em que ninguém fala também ganha a música (fala_no_som_baixinho, P237 1; ouviu_fala: a IA
+    versões): a 1ª é a que a IA escolheu para o vídeo (escolhida, um nome de MUSICAS, P241 1) ou, sem ela, a da
+    vez, que anda uma casa, e as das versões vêm na ordem depois dela; [None] * quantas quando o vídeo tem som. O
+    de som baixo demais em que ninguém fala também ganha a música (fala_no_som_baixinho, P237 1; ouviu_fala: a IA
     ouviu alguém falar nele). anotar (dict), quando vem, recebe em "baixinho" o porquê e o som medido do
-    som baixo demais, com ou sem a música.
+    som baixo demais, com ou sem a música, e em "musica" a do vídeo e se foi a IA que a escolheu.
     """
     if not videos.mudo(video):
         fala, medido = fala_no_som_baixinho(video, ouviu_fala)
@@ -233,8 +244,12 @@ def musicas_de_fundo(video, quantas=1, ouviu_fala=False, anotar=None):
         dados[MUSICA_DA_VEZ] = (vez + 1) % len(MUSICAS)
         return vez
 
-    vez = db.atualizar_config("shopee_video", andar) or 0
+    nomes = [nome for nome, _ in MUSICAS]
+    pela_ia = escolhida in nomes
+    vez = nomes.index(escolhida) if pela_ia else (db.atualizar_config("shopee_video", andar) or 0)
     escolhidas = [MUSICAS[(vez + n) % len(MUSICAS)] for n in range(quantas)]
+    if anotar is not None:
+        anotar["musica"] = {"nome": escolhidas[0][0], "pela_ia": pela_ia}
     return [(nome, os.path.join(PASTA_DA_MIDIA, arquivo)) for nome, arquivo in escolhidas]
 
 
@@ -288,6 +303,14 @@ def _registrar_o_baixinho(baixinho):
     registro_processos.registrar("shopee_video", PROCESSO_DO_BAIXINHO, TROCADO_PELA_MUSICA if trocado else FICOU_O_SOM,
                                  f"{baixinho.get('fala')}; o som estava em {baixinho.get('medido', 0.0):.1f} LUFS",
                                  ok=None)
+
+
+def _registrar_a_musica(musica):
+    """O registro da música do vídeo que vai ao ar sem o som dele (musica: o que musicas_de_fundo anota, P241 1)."""
+    if musica:
+        registro_processos.registrar("shopee_video", PROCESSO_DA_MUSICA,
+                                     ESCOLHIDA_PELA_IA if musica.get("pela_ia") else DA_VEZ_NO_RODIZIO,
+                                     musica.get("nome", ""), ok=None)
 
 
 def _registrar_o_volume(volume):
@@ -1591,6 +1614,10 @@ _COR_NO_PROMPT = ("Diga também \"cor\", a cor que mais aparece no produto que o
                   + "; mesmo quando ele tem várias cores, diga a que mais aparece nele. E \"cor_2\", a "
                   "segunda cor que mais se destaca no produto, da mesma lista e diferente da \"cor\" (vazio "
                   "quando ele é de uma cor só).\n")
+# A música de fundo que combina com o vídeo, se ele for ao ar sem o som dele (P241 1): uma das nossas, pelo clima.
+_MUSICA_NO_PROMPT = ("Diga também \"musica\", a música de fundo que combina com o vídeo se ele for ao ar sem o som "
+                     "dele, uma destas: " + "; ".join(f"{nome} ({clima})" for nome, clima in CLIMA_DAS_MUSICAS.items())
+                     + ".\n")
 _REGRAS_NO_PROMPT = ("Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; "
                      "sem preço, desconto, promoção, emoji ou hashtag. Escreva com a ortografia e a acentuação "
                      "certas do português do Brasil e confira cada palavra antes de responder.\n")
@@ -1711,10 +1738,12 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
-    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT + "{lugares_nos_momentos}"
-    + _TEXTO_NO_VIDEO_NO_PROMPT + _POR_CIMA_NO_PROMPT + _CANTO_NO_PROMPT + _LEGENDAS_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _MUSICA_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT
+    + "{lugares_nos_momentos}" + _TEXTO_NO_VIDEO_NO_PROMPT + _POR_CIMA_NO_PROMPT + _CANTO_NO_PROMPT
+    + _LEGENDAS_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"capa\": \"...\", \"chamada\": \"...\", "
-    "\"cor\": \"...\", \"cor_2\": \"...\", \"lugares\": [\"alto_esquerda\", \"meio\"], {chave_dos_momentos}"
+    "\"cor\": \"...\", \"cor_2\": \"...\", \"musica\": \"...\", \"lugares\": [\"alto_esquerda\", \"meio\"], "
+    "{chave_dos_momentos}"
     "\"textos_do_video\": [], "
     "\"por_cima_do_video\": [], \"canto_ocupado\": false, \"outro_canto_ocupado\": false, \"legendas\": [], "
     "\"legenda_no_video\": false}}"
@@ -2073,6 +2102,9 @@ def _nome_lugar_e_falas(dados, duracao=0.0, momentos=()):
     segunda = " ".join(str(dados.get("cor_2") or "").lower().split())
     if segunda != textos.get("cor") and (segunda in CORES_DO_PRODUTO or segunda == CORES_DE_SEMPRE[0]):
         textos["cor_2"] = segunda
+    musica = musica_da_ia(dados.get("musica"))
+    if musica:
+        textos["musica"] = musica
     for chave in ("canto_ocupado", "outro_canto_ocupado"):
         if isinstance(dados.get(chave), bool):
             textos[chave] = dados[chave]
@@ -2095,6 +2127,18 @@ def _nome_lugar_e_falas(dados, duracao=0.0, momentos=()):
     if isinstance(dados.get("legenda_no_video"), bool):
         textos["legenda_no_video"] = dados["legenda_no_video"]
     return textos
+
+
+def musica_da_ia(bruta):
+    """
+    A música de fundo que a IA escolheu para o vídeo (P241 1): o nome de uma das MUSICAS, pela 1ª palavra da
+    resposta, sem acento nem maiúscula (ela pode repetir o clima depois); "" quando não é nenhuma delas.
+    """
+    palavras = _sem_acento(str(bruta or ""))
+    for nome, _arquivo in MUSICAS:
+        if palavras and palavras[0] == _sem_acento(nome)[0]:
+            return nome
+    return ""
 
 
 def _lugares_da_ia(bruto):
@@ -3648,7 +3692,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     # ouviu evita perguntar ao reconhecimento de voz.
     som = {}
     musica_da_vez = musicas_de_fundo(video, ouviu_fala=bool(textos.get("legendas") or textos.get("falas")),
-                                     anotar=som)[0]
+                                     anotar=som, escolhida=textos.get("musica"))[0]
     musica = _caminho(musica_da_vez)
     # A cor do produto no lugar do laranja e do preto (P159 2); o registro conta cada uma.
     cor = cor_do_produto(textos.get("cor"))
@@ -3780,6 +3824,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         _registrar_o_que_sumiu(resumo.get("sob_o_criador"), resumo.get("original") or 0.0)
         _registrar_o_volume(resumo.get("volume"))
         _registrar_o_baixinho(som.get("baixinho"))
+        _registrar_a_musica(som.get("musica"))
         fora = resumo.get("nao_entraram") or {}
         if fora:
             # Os textos da tela que não entraram por cobrir, na hora deles, o que o criador pôs por cima, o
@@ -3805,6 +3850,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         _registrar_o_que_sumiu(sob.get("sob_o_criador"))
         _registrar_o_volume(sob.get("volume"))
         _registrar_o_baixinho(som.get("baixinho"))
+        _registrar_a_musica(som.get("musica"))
     return motivo_1, SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}"
 
 
@@ -4010,9 +4056,9 @@ PROMPT_DAS_VERSOES = (
     f"vídeo, chamando para o produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, diferente em cada "
     "versão, sem mandar para fora da Shopee). Só ponha uma versão com um momento e uma vantagem que as outras "
     "não têm: se o vídeo mostra uma coisa só, uma versão só.\n"
-    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
+    + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _MUSICA_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
     + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"chamada\": \"...\", \"cor\": \"...\", "
-    "\"cor_2\": \"...\", "
+    "\"cor_2\": \"...\", \"musica\": \"...\", "
     "\"versoes\": [{{\"vantagem\": \"...\", "
     "\"inicio\": 0.0, \"fim\": 0.0, \"chamada\": \"...\"}}], \"falas\": [[0.0, 0.0]], "
     "\"lugares\": [\"alto_esquerda\", \"meio\"], {chave_dos_momentos}\"textos_do_video\": [], "
@@ -4170,12 +4216,14 @@ def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, te
     return "", resumo
 
 
-def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True, escolhas=None):
+def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, miniatura=True, escolhas=None,
+                       musica_da_ia=""):
     """
     O Editor 1 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 1; os seguintes são as versões modificadas, remontadas como as do
     Editor 2 (sem as partes paradas, com o ritmo), mas sem textos (pedido do Rafael, 28/10:
-    DECISOES.md, Shopee Vídeo). versoes_da_ia = [{"vantagem", "inicio", "fim", ...}].
+    DECISOES.md, Shopee Vídeo). versoes_da_ia = [{"vantagem", "inicio", "fim", ...}]. No vídeo sem som, o
+    completo leva a música que a IA escolheu (musica_da_ia, P241 1), como o que vai ao ar.
     Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas
     versões fica em resumo["remontagem"].
     """
@@ -4184,7 +4232,7 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
         return "o vídeo não abre", {}
     com_fala, trechos = _remontagem(video, original, falas)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
-    musicas = musicas_de_fundo(video, 1 + len(planos), ouviu_fala=bool(falas))
+    musicas = musicas_de_fundo(video, 1 + len(planos), ouviu_fala=bool(falas), escolhida=musica_da_ia)
     completo = arquivo_da_versao(destino, 1)
     resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala), "miniatura": miniatura,
@@ -4198,7 +4246,7 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
 
 def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), chamada="", falas=None,
                        lugar=None, miniatura=True, legendas=(), cor=None, escolhas=None, lugares=None, por_cima=(),
-                       nos_momentos=None):
+                       nos_momentos=None, musica_da_ia=""):
     """
     O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo original, sem
     cortes, com o Editor 2 (o nome, a vantagem e a chamada), como vai ao ar; os seguintes são as
@@ -4209,7 +4257,8 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     no vídeo que vai ao ar. Os textos ficam sempre no mesmo lugar (P220 1): no completo, o que, na hora dele,
     cobriria o que o criador pôs por cima (por_cima), o produto ou um rosto (nos_momentos; sem eles, lugares)
     não aparece, como no que vai ao ar; nas versões remontadas, o tempo muda, e só conta a lista do vídeo todo
-    (lugares). Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas versões fica
+    (lugares). No vídeo sem som, o completo leva a música que a IA escolheu (musica_da_ia, P241 1), como o que vai
+    ao ar. Devolve (motivo, resumo): motivo "" quando todos saíram; o que a remontagem muda nas versões fica
     em resumo["remontagem"].
     """
     original = videos.duracao(video)
@@ -4219,7 +4268,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     lugar = _lugar(lugar)
     caixa = caixa_dos_textos(cor)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
-    musicas = musicas_de_fundo(video, 1 + len(planos), ouviu_fala=bool(falas or legendas))
+    musicas = musicas_de_fundo(video, 1 + len(planos), ouviu_fala=bool(falas or legendas), escolhida=musica_da_ia)
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
                                                 musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas,
@@ -4275,7 +4324,7 @@ def exemplo_editor_1(destino):
     """
     return _exemplo_das_versoes(destino, "ids", lambda arquivo, foto, textos, produto, escolhas: editar_1_e_versoes(
         arquivo, foto, destino, textos.get("versoes", []), textos.get("falas"),
-        miniatura_no_video(textos, escolhas["miniatura"]), escolhas), escolhas_do_painel())
+        miniatura_no_video(textos, escolhas["miniatura"]), escolhas, textos.get("musica", "")), escolhas_do_painel())
 
 
 def exemplo_editor_2(destino):
@@ -4290,7 +4339,8 @@ def exemplo_editor_2(destino):
         legendas_no_tempo(arquivo, legendas_da_fala(textos)[0])[0] if escolhas["legenda"] else [],
         cor=cor_do_produto(textos.get("cor")), escolhas=escolhas,
         lugares=lugares_dos_textos(textos, escolhas["miniatura"]), por_cima=textos.get("por_cima", ()),
-        nos_momentos=_momentos_conferidos(arquivo, textos, escolhas["miniatura"], produto)),
+        nos_momentos=_momentos_conferidos(arquivo, textos, escolhas["miniatura"], produto),
+        musica_da_ia=textos.get("musica", "")),
         escolhas_do_painel())
 
 
