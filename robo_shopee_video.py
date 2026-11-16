@@ -424,8 +424,12 @@ def _criados_hoje(estados, agora=None):
 
 
 def rascunhos_de_hoje(agora=None):
-    """Os rascunhos salvos hoje (o do Preparar 1 Agora também), para o aviso do teto pelos pontos."""
-    return len(_criados_hoje(ESTADOS_SALVOS, agora))
+    """
+    Os rascunhos salvos hoje (o do Preparar 1 Agora também), para o aviso do teto pelos pontos; o recusado que
+    ganhou outro no lugar (P235 1) não conta, porque o outro conta por ele.
+    """
+    repostos = set(_plano_guardado_de_hoje(agora).get("recusados_repostos") or [])
+    return sum(1 for r in _criados_hoje(ESTADOS_SALVOS, agora) if r["id"] not in repostos)
 
 
 def postados_de_hoje(agora=None):
@@ -546,7 +550,9 @@ def recuperar_horarios(config, estado, perdidos, agora=None):
 # refeito na hora com o que vale agora (P157 1), e é o do dia inteiro: o que já saiu hoje entra na
 # conta, e só o que falta sai, espalhado no resto do dia como os perdidos. Já saíram: os rascunhos de
 # hoje (os do Preparar 1 Agora, os recusados e o que está no preparo também) e os vídeos do
-# assistente que cobriram o robô (P156 1). Pedido do Rafael (06/11): DECISOES.md, Shopee Vídeo.
+# assistente que cobriram o robô (P156 1). Pedido do Rafael (06/11): DECISOES.md, Shopee Vídeo. O
+# recusado que ganhou outro no lugar não conta (o outro conta por ele), e os horários a mais dele
+# entram no plano refeito (P235 1, 16/11).
 PROCESSO_DO_PLANO_REFEITO = "plano de hoje refeito"
 ESTADOS_QUE_SAIRAM = ("preparando",) + ESTADOS_SALVOS
 
@@ -565,7 +571,9 @@ def replanejar_hoje(config, agora=None):
     momento = agora_br(agora)
     hora, dia = momento.strftime("%H:%M"), estado["data"]
     no_dia = quantos_hoje(config, dia)
-    rascunhos = sorted(r["criado_em"][11:16] for r in _criados_hoje(ESTADOS_QUE_SAIRAM, agora))
+    repostos = set(estado.get("recusados_repostos") or [])
+    rascunhos = sorted(r["criado_em"][11:16] for r in _criados_hoje(ESTADOS_QUE_SAIRAM, agora)
+                       if r["id"] not in repostos)
     cobertos = assistente.postados_cobrindo_o_robo(dia)
     saidos = len(rascunhos) + len(cobertos)
     esperando = int(bool(estado.get("repetir")) and estado.get("tentativas", 0) > 0 and not estado.get("em_preparo"))
@@ -585,7 +593,7 @@ def replanejar_hoje(config, agora=None):
     passados += [hora] * (esperando + de_fora)
     estado.update(horarios=sorted(passados) + futuros, feitos=len(passados), cobertos=cobertos,
                   sem_tentar=min(len(cobertos), no_dia) + de_fora, repostos=[], volta_do_horario="",
-                  feito_com=feito_com(config, dia),
+                  no_lugar_de_recusados=[], feito_com=feito_com(config, dia),
                   refeito={"no_dia": no_dia, "saidos": saidos, "faltam": esperando + novos, "de_fora": de_fora,
                            "proximo": futuros[0] if futuros and not esperando else ""})
     db.salvar_config(CHAVE_DIA, estado)
@@ -657,6 +665,56 @@ def repor_o_horario(config, estado, agora=None):
     registro_processos.registrar(REGISTRO, PROCESSO_DO_HORARIO_SEM_RASCUNHO, "volta mais tarde", f"às {novo}",
                                  ok=None, agora=agora)
     return novo
+
+
+# O rascunho feito hoje que o Rafael recusa hoje abre mais um horário hoje, no vão livre do resto do
+# dia, como a volta da P132 (vao_para_o_horario: a pelo menos ESPACO_MINIMO de agora e de cada
+# horário que falta), e o robô faz outro rascunho, com outro vídeo; sem um vão assim, fica sem. O de
+# outro dia não é reposto. O vídeo de IA recusado é reposto por um vídeo da fonte: o do dia já foi
+# usado, e nunca sai um 2º no dia. O plano guarda os recusados repostos ("recusados_repostos": o
+# plano refeito e o aviso do teto não os contam, porque o outro conta por eles) e os horários a mais
+# ("no_lugar_de_recusados", que o painel e o checkup mostram à parte do número do dia). Escolha do
+# Rafael (16/11, P235 1): DECISOES.md, Shopee Vídeo.
+PROCESSO_DA_RECUSA = "rascunho recusado"
+RECUSADO_DE_OUTRO_DIA = "feito em outro dia"
+RECUSADO_SEM_ESPACO = "sem espaço no dia"
+
+
+def _plano_guardado_de_hoje(agora=None):
+    """O plano de hoje como está guardado, sem criar o do dia ({} sem ele)."""
+    plano = db.ler_config(CHAVE_DIA, {}) or {}
+    return plano if plano.get("data") == agora_br(agora).strftime("%Y-%m-%d") else {}
+
+
+def no_lugar_de_recusados(agora=None):
+    """Os horários que o plano de hoje ganhou no lugar de rascunhos recusados (P235 1)."""
+    return list(_plano_guardado_de_hoje(agora).get("no_lugar_de_recusados") or [])
+
+
+def repor_o_recusado(rascunho, agora=None):
+    """
+    O rascunho que o Rafael acabou de recusar (P235 1): o de hoje abre mais um horário hoje, no vão livre
+    do resto do dia. Devolve (o "HH:MM" do horário novo, "") ou ("", o porquê de não repor:
+    RECUSADO_DE_OUTRO_DIA ou RECUSADO_SEM_ESPACO); o registro diz qual.
+    """
+    if not (rascunho.get("criado_em") or "").startswith(agora_br(agora).strftime("%Y-%m-%d")):
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_RECUSA, "não reposto", RECUSADO_DE_OUTRO_DIA,
+                                     ok=None, agora=agora)
+        return "", RECUSADO_DE_OUTRO_DIA
+    config = ler_config()
+    estado = estado_do_dia(config, agora)
+    novo = vao_para_o_horario(config, estado, agora)
+    if not novo:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_RECUSA, "não reposto", RECUSADO_SEM_ESPACO,
+                                     ok=None, agora=agora)
+        return "", RECUSADO_SEM_ESPACO
+    estado.update(horarios=sorted(estado["horarios"] + [novo]),
+                  recusados_repostos=estado.get("recusados_repostos", []) + [rascunho["id"]],
+                  no_lugar_de_recusados=estado.get("no_lugar_de_recusados", []) + [novo])
+    db.salvar_config(CHAVE_DIA, estado)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_RECUSA, "reposto", f"outro rascunho às {novo}",
+                                 ok=None, agora=agora)
+    return novo, ""
 
 
 def consumir_horarios(config, agora=None, pular=False):
@@ -1533,8 +1591,13 @@ def aprovar(ident, agora=None):
 
 
 def recusar(ident, agora=None):
-    """O Rafael recusou: o robô apaga o rascunho do app numa próxima rodada, e o vídeo não volta."""
+    """
+    O Rafael recusou: o robô apaga o rascunho do app numa próxima rodada, e o vídeo não volta. O de hoje
+    abre mais um horário hoje, para outro rascunho (P235 1). Devolve o que repor_o_recusado devolve.
+    """
+    rascunho = pegar(ident)
     atualizar(ident, estado="recusado", aprovado_em=_momento(agora))
+    return repor_o_recusado(rascunho, agora) if rascunho else ("", RECUSADO_DE_OUTRO_DIA)
 
 
 def o_que_fazer(config, agora=None):

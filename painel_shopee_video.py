@@ -614,11 +614,15 @@ def linha_dos_pontos(piso, topo, agora=None):
 
 
 def rascunhos_hoje(config, agora=None):
-    """Quantos rascunhos o robô faz hoje: os do plano de hoje; sem o plano ainda, o sorteio de hoje."""
+    """
+    Quantos rascunhos o robô faz hoje: os do plano de hoje, sem os horários a mais no lugar dos recusados
+    (P235 1: o recusado não vai ao ar, e o número do dia continua o do plano); sem o plano ainda, o sorteio
+    de hoje.
+    """
     horarios = plano_de_hoje(robo.CHAVE_DIA, agora)
     if horarios is None:
         return robo.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d"))
-    return len(horarios)
+    return len(horarios) - len(robo.no_lugar_de_recusados(agora))
 
 
 # --- Painel ---
@@ -920,7 +924,10 @@ def texto_robo(config, agora=None, celular=None):
     piso, topo = config["robo_limite_min"], config["robo_limite_max"]
     pontos = linha_dos_pontos(piso, topo, agora)
     no_plano = rascunhos_hoje(config, agora)
-    hoje = f" (hoje: <b>{no_plano}</b>)" if topo > piso or pontos else ""
+    # Os horários a mais no lugar dos recusados de hoje (P235 1) aparecem à parte do número do dia.
+    a_mais = len(robo.no_lugar_de_recusados(agora))
+    no_lugar = f" + <b>{a_mais}</b> no lugar de recusado(s)" if a_mais else ""
+    hoje = f" (hoje: <b>{no_plano}</b>{no_lugar})" if topo > piso or pontos or a_mais else ""
     plano = linha_do_plano(no_plano, robo.quantos_hoje(config, (agora or datetime.now(fuso_horario)).strftime(
         "%Y-%m-%d")), "rascunho(s)")
     linha_celular = ""
@@ -1254,7 +1261,8 @@ COMO_FUNCIONA = (
     "2️⃣ <b>Um cobre o outro.</b> Com o robô ligado, o assistente fica em espera. Pausou o robô (ou o "
     "Motorola desconectou), o assistente volta a mandar. Nunca os dois juntos.\n\n"
     "3️⃣ <b>No dia a dia.</b> O robô avisa quando deixa um rascunho pronto. Toque em Rascunhos do Robô 📝 "
-    "e aprove ✅ ou recuse ❌. Os aprovados ficam em Aprovados para Postar ⏳ (lá, o Postar Agora 🚀 posta na "
+    "e aprove ✅ ou recuse ❌. O recusado que foi feito hoje ganha outro no lugar ainda hoje, com outro vídeo, "
+    "quando cabe no horário do robô. Os aprovados ficam em Aprovados para Postar ⏳ (lá, o Postar Agora 🚀 posta na "
     "hora) e saem espalhados no horário do robô, e você recebe o link do post. Depois de postar, o robô curte "
     "o vídeo, comenta nele (um texto curto chamando para comprar) e "
     "curte o comentário; 1 vez por dia, faz o mesmo num post dos últimos 30 dias.\n\n"
@@ -2553,7 +2561,9 @@ async def pedir_recusa(message: types.Message, state: FSMContext):
     if not _admin(message): return
     if not await _rascunho_da_vez(message, state):
         return
-    await message.answer("❌ <b>Recusar</b> este rascunho? O robô apaga do celular, e o vídeo não volta.",
+    await message.answer("❌ <b>Recusar</b> este rascunho? O robô apaga do celular, e o vídeo não volta. Se ele "
+                         "foi feito hoje, o robô faz outro no lugar ainda hoje, com outro vídeo, quando cabe no "
+                         f"Horário do Robô (pelo menos {robo.ESPACO_MINIMO} min depois).",
                          parse_mode="HTML", reply_markup=teclado_com_cancelar("Confirmar Recusa ✅"))
     await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_recusa)
 
@@ -3400,14 +3410,27 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     await mostrar_robo(message, state)
 
 
+def texto_da_reposicao(novo, sem_repor):
+    """O que acontece no lugar do rascunho recusado (P235 1): a hora do outro, ou por que não há outro."""
+    if novo:
+        return (f"\n\n🔁 No lugar dele, o robô faz outro rascunho hoje, com outro vídeo, a partir das <b>{novo}</b>. "
+                f"Ele chega em {BOTAO_RASCUNHOS} como os outros.")
+    if sem_repor == robo.RECUSADO_SEM_ESPACO:
+        return (f"\n\n🔁 Hoje não cabe outro rascunho no lugar dele: o Horário do Robô não tem mais um espaço de "
+                f"pelo menos {robo.ESPACO_MINIMO} min depois de agora e dos outros horários. Se quiser outro, toque em "
+                f"{BOTAO_PREPARAR}.")
+    return "\n\n🔁 Ele foi feito em outro dia: só o rascunho feito hoje ganha outro no lugar."
+
+
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_recusa, F.text == "Confirmar Recusa ✅")
 async def salvar_recusa(message: types.Message, state: FSMContext):
     ident = (await state.get_data()).get("rascunho_id")
     rascunho = robo.pegar(ident) if ident else None
     if rascunho and rascunho["estado"] == "rascunho":
-        robo.recusar(ident)
+        novo, sem_repor = robo.recusar(ident)
         logger.info("❌ Shopee Vídeo: rascunho recusado.")
-        await message.answer("❌ Recusado. O robô apaga o rascunho do celular na próxima rodada.")
+        await message.answer("❌ Recusado. O robô apaga o rascunho do celular na próxima rodada."
+                             + texto_da_reposicao(novo, sem_repor), parse_mode="HTML")
     await mostrar_rascunho(message, state, depois_de=ident, depois_de_resolver=True, lista=LISTA_DOS_RASCUNHOS)
 
 

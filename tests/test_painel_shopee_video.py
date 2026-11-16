@@ -790,10 +790,38 @@ def test_rascunhos_um_por_um_com_video_print_titulo_e_link(bm, Msg, Est):
     msg = MsgComMidia(Msg, "Confirmar Recusa ✅")
     rodar(sv.salvar_recusa(msg, est))
     assert sv.robo.pegar(segundo)["estado"] == "recusado"
-    # Pedido do Rafael (24/10): no fim, só a frase, sem o texto do painel inteiro.
-    assert msg.saidas[-2:] == ["❌ Recusado. O robô apaga o rascunho do celular na próxima rodada.",
+    # Pedido do Rafael (24/10): no fim, só a frase, sem o texto do painel inteiro. O rascunho é de outro dia: não
+    # ganha outro no lugar (P235 1).
+    assert msg.saidas[-2:] == ["❌ Recusado. O robô apaga o rascunho do celular na próxima rodada.\n\n🔁 Ele foi "
+                               "feito em outro dia: só o rascunho feito hoje ganha outro no lugar.",
                                "📝 Nenhum rascunho esperando a sua aprovação."]
     assert not any("Quem posta agora" in s for s in msg.saidas)
+
+
+def test_recusar_o_rascunho_de_hoje_diz_quando_vem_o_outro_no_lugar(bm, Msg, Est, relogio):
+    # Escolha do Rafael (16/11, P235 1): o rascunho de hoje recusado ganha outro no lugar ainda hoje, no maior
+    # vão livre do Horário do Robô; o número do dia continua o do plano, com o horário a mais à parte.
+    relogio("15:00")
+    sv, est = _painel(bm), Est()
+    robo = sv.robo
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_inicio": 8, "robo_fim": 22,
+                                              "robo_limite_min": 2, "robo_limite_max": 2})
+    hoje = robo.agora_br().strftime("%Y-%m-%d")
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": hoje, "horarios": ["09:00", "14:30"], "feitos": 2})
+    ident = _rascunho(sv, criado=f"{hoje} 14:40:00")
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    rodar(sv.pedir_recusa(MsgComMidia(Msg, "Recusar Rascunho ❌"), est))
+    msg = MsgComMidia(Msg, "Confirmar Recusa ✅")
+    rodar(sv.salvar_recusa(msg, est))
+    assert robo.pegar(ident)["estado"] == "recusado"
+    # Das 15:30 (meia hora depois de agora) às 22:00, o maior vão: no meio dele.
+    assert ("🔁 No lugar dele, o robô faz outro rascunho hoje, com outro vídeo, a partir das <b>18:44</b>."
+            in msg.saidas[-2])
+    config = sv.ler_config()
+    assert sv.rascunhos_hoje(config) == 2
+    assert ("Rascunhos por dia: <b>2 (fixo)</b> (hoje: <b>2</b> + <b>1</b> no lugar de recusado(s))"
+            in sv.texto_robo(config))
+    assert "O recusado que foi feito hoje ganha outro no lugar ainda hoje" in sv.COMO_FUNCIONA
 
 
 def test_aprovar_o_ultimo_mostra_so_as_duas_frases(bm, Msg, Est):

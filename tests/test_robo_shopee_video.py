@@ -2505,6 +2505,79 @@ def test_horario_sem_rascunho_sem_vao_no_dia_fica_de_fora(monkeypatch, avisos):
     assert robo.vao_para_o_horario({**config, "robo_fim": 12}, estado, momento("2026-10-22 11:40")) is None
 
 
+def test_rascunho_de_hoje_recusado_abre_mais_um_horario_hoje():
+    # Escolha do Rafael (16/11, P235 1): o rascunho feito hoje que ele recusa abre mais um horário hoje, no
+    # maior vão livre do Horário do Robô, a pelo menos 30 min de agora e dos outros horários, e o robô faz
+    # outro rascunho, com outro vídeo. O de ontem não é reposto, e tarde da noite, sem um vão, fica sem.
+    import registro_processos as rp
+    ativar(robo_limite_min=3, robo_limite_max=3, robo_inicio=8, robo_fim=20)
+    config = robo.ler_config()
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-22", "horarios": ["10:00", "14:00", "18:00"],
+                                            "feitos": 1})
+    de_hoje = _rascunho(criado="2026-10-22 10:20:00")
+    de_ontem = _rascunho(criado="2026-10-21 18:20:00")
+    # Às 11:00, os vãos livres: das 11:30 às 13:30, das 14:30 às 17:30 e das 18:30 às 20:00; o maior é o da
+    # tarde, e o horário novo fica no meio dele.
+    assert robo.recusar(de_hoje, momento("2026-10-22 11:00")) == ("16:00", "")
+    estado = robo.estado_do_dia(config, momento("2026-10-22 11:00"))
+    assert estado["horarios"] == ["10:00", "14:00", "16:00", "18:00"] and estado["feitos"] == 1
+    assert estado["recusados_repostos"] == [de_hoje]
+    assert robo.no_lugar_de_recusados(momento("2026-10-22 11:00")) == ["16:00"]
+    assert robo.pegar(de_hoje)["estado"] == "recusado"
+    assert robo.recusar(de_ontem, momento("2026-10-22 11:05")) == ("", robo.RECUSADO_DE_OUTRO_DIA)
+    assert robo.pegar(de_ontem)["estado"] == "recusado"
+    assert len(robo.estado_do_dia(config, momento("2026-10-22 11:05"))["horarios"]) == 4
+    # O dia segue: às 14:00 o de sempre, às 16:00 o do recusado e às 18:00 o último.
+    assert not robo.consumir_horarios(config, momento("2026-10-22 13:59"))
+    for hora in ("14:00", "16:00", "18:00"):
+        assert robo.consumir_horarios(config, momento(f"2026-10-22 {hora}"))
+    # Às 19:50, até o fim do Horário do Robô (20h) não cabem 30 min de agora: fica sem.
+    tarde = _rascunho(criado="2026-10-22 18:10:00")
+    assert robo.recusar(tarde, momento("2026-10-22 19:50")) == ("", robo.RECUSADO_SEM_ESPACO)
+    assert robo.no_lugar_de_recusados(momento("2026-10-22 19:50")) == ["16:00"]
+    registro = [(r, d) for _m, _p, r, d, _o in rp.sequencia("shopee_video", robo.PROCESSO_DA_RECUSA,
+                                                            "2000-01-01 00:00:00")]
+    assert registro == [("reposto", "outro rascunho às 16:00"), ("não reposto", "feito em outro dia"),
+                        ("não reposto", "sem espaço no dia")]
+
+
+def test_plano_refeito_e_teto_nao_contam_o_recusado_que_ganhou_outro_no_lugar():
+    # P235 1 com o plano refeito (P157 1): o recusado que ganhou outro no lugar não conta como saído, e o
+    # aviso do teto pelos pontos também não o conta (o outro conta por ele).
+    ativar(robo_limite_min=4, robo_limite_max=4, robo_inicio=8, robo_fim=22)
+    config = robo.ler_config()
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-11-10", "horarios": ["09:00", "11:00", "13:00", "19:00"],
+                                            "feitos": 3})
+    _rascunho("postado", criado="2026-11-10 09:10:00")
+    _rascunho("aprovado", criado="2026-11-10 11:10:00")
+    recusado = _rascunho(criado="2026-11-10 13:10:00")
+    assert robo.rascunhos_de_hoje(momento("2026-11-10 14:00")) == 3
+    novo, _ = robo.recusar(recusado, momento("2026-11-10 14:00"))
+    assert novo and robo.rascunhos_de_hoje(momento("2026-11-10 14:00")) == 2
+    plano = robo.replanejar_hoje(config, momento("2026-11-10 15:00"))
+    assert plano["refeito"]["saidos"] == 2 and plano["refeito"]["faltam"] == 2
+    assert len(plano["horarios"]) == 4 and plano["no_lugar_de_recusados"] == []
+    # O 2º plano refeito do dia continua sem contar o recusado.
+    assert robo.replanejar_hoje(config, momento("2026-11-10 15:10"))["refeito"]["saidos"] == 2
+
+
+def test_video_de_ia_recusado_e_reposto_por_um_video_da_fonte(monkeypatch, tmp_path):
+    # P235 1: o vídeo de IA do dia recusado ganha outro rascunho no lugar, de um vídeo da fonte; nunca sai um
+    # 2º vídeo de IA no dia (P232 1).
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    config = robo.ler_config()
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-22", "horarios": ["09:00", "15:00"], "feitos": 1})
+    _producao_pronta(tmp_path)
+    robo.flow.guardar_producao(estado="usado")
+    do_flow = _rascunho(criado="2026-10-22 09:10:00", video_ia={"modelo": "Omni 1.2 Flash"})
+    novo, _ = robo.recusar(do_flow, momento("2026-10-22 10:00"))
+    assert novo and len(robo.estado_do_dia(config, momento("2026-10-22 10:00"))["horarios"]) == 3
+    assert not robo.video_de_ia_pendente(config, momento("2026-10-22 10:00"))
+    assert robo.video_de_ia_para_o_rascunho() is None
+
+
 def test_rascunho_do_plano_que_nao_saiu_avisa_onde_parou_e_quando_tenta_de_novo(monkeypatch, avisos):
     # Escolha do Rafael (23/10): o "começando um rascunho" sempre tem um fim no privado.
     _fonte(monkeypatch, confere=False)
