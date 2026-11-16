@@ -102,7 +102,12 @@ def test_a_sonda_dos_produtos_so_mostra_contagens_no_log(monkeypatch, capsys):
             return [_produto(9, 80, 0.10, 4.9)], "", None
         return [_produto(1, 30, 0.10, 4.8), _produto(2, 10, 0.10, 4.9)], "", (True if extra else None)
 
+    async def em_alta(negada_levanta=False):
+        # A lista que o robô usa na escolha: 3 produtos, 2 com a nota, 1 deles pagando o mínimo.
+        return [_produto(1, 30, 0.10, 4.8), _produto(2, 10, 0.10, 4.9), _produto(3, 90, 0.10, 4.0)]
+
     monkeypatch.setattr(video_ia, "pedir_lista", pedir_lista)
+    monkeypatch.setattr(video_ia.api_shopee, "ofertas_em_alta_shopee", em_alta)
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     video_ia.db.salvar_config("achadinhos_config", {"nichos": [{"nome": "Casa", "keywords": ["organizador secreto", "x"]},
                                                               {"nome": "Vazio", "keywords": []},
@@ -116,6 +121,9 @@ def test_a_sonda_dos_produtos_so_mostra_contagens_no_log(monkeypatch, capsys):
     assert "== Nichos dos Achadinhos: 3 nicho(s), 3 palavra(s)-chave" in saida
     assert "== nicho nº 1, 1ª palavra, por mais vendidos: 1 produto(s)" in saida
     assert "== nicho nº 2, 1ª palavra, por mais vendidos: 1 produto(s)" in saida
+    # O que a escolha do robô acharia agora (P234 1), sem a IA: a lista e as contagens da peneira dele.
+    assert ("== A escolha do robô agora: os produtos em alta da Shopee: 3 da lista; 2 com a nota; 1 pagam o mínimo; "
+            "1 novos") in saida
     # A palavra de busca vai à API, nunca ao log; nem o nome, o link ou a foto do produto.
     assert any('keyword: "organizador secreto", sortType: 2, limit: 50' == argumentos for argumentos, _ in pedidos)
     for privado in ("organizador", "coleira", "Garrafa", "shopee.com.br", "img.exemplo", "Casa", "Pet"):
