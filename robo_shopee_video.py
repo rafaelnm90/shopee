@@ -3518,8 +3518,9 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
     FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio,
     num estilo diferente dos últimos vídeos), o link curto que o celular abre, "id" (o nome do vídeo de IA entre os
     vídeos do robô), "item", "valor", "posicao" e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica
-    lembrada, e o produto não volta. api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que
-    ficam de fora (os das amostras já feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela.
+    lembrada, e o produto não volta, como o que a IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à
+    parte no registro. api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que ficam de fora (os
+    das amostras já feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3527,7 +3528,7 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
     peneira = (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
                f"mínimo; {contagem['novos']} novos")
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
-    olhadas = recusadas = sem_link = seguidos = 0
+    olhadas = recusadas = mudam = sem_link = seguidos = 0
     for posicao, bom in enumerate(bons, 1):
         if olhadas >= FOTOS_PARA_A_IA or seguidos >= SEM_LINK_CURTO_SEGUIDOS:
             break
@@ -3542,16 +3543,21 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar)
         if pedido:
-            _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; estilo {pedido['estilo']}",
-                              agora)
+            _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; estilo {pedido['estilo']}"
+                              + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)
             return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
                          valor=bom["valor"], posicao=posicao, origem=origem), origem, True)
         if serve is False:
             recusadas += 1
             flow.lembrar_foto_recusada(bom["item"])
-    restam = len(bons) > recusadas
+        elif serve == flow.MUDA_NA_IA:
+            # Lembrado como a foto recusada (o produto não volta), e contado à parte no registro (P245 1).
+            mudam += 1
+            flow.lembrar_foto_recusada(bom["item"])
+    restam = len(bons) > recusadas + mudam
     _anotar_a_escolha(amostra, "sem foto" if restam else "sem produto",
                       f"{peneira}; {olhadas} foto(s) olhada(s), {recusadas} recusada(s)"
+                      + (f", {mudam} com o que a IA de vídeo muda" if mudam else "")
                       + (f", {sem_link} sem o link curto" if sem_link else ""), agora)
     return None, origem, restam
 
@@ -3633,9 +3639,10 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
                                                "dia ainda tiver espaço para vídeo de IA.")
         else:
             qual, depois = "de hoje", ", e o de amanhã sai normalmente."
-        avisar(f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} saiu com outro produto, pela conferência da IA com a "
-               f"foto do anúncio. Ele não vira rascunho{depois}\n\n"
-               f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}")
+        mandar_o_video_de_ia_descartado(atual, (
+            f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} saiu com outro produto, pela conferência da IA com a "
+            f"foto do anúncio. Ele não vira rascunho{depois}\n\n"
+            f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}"), agora)
         return "vídeo de IA: a IA viu outro produto no vídeo; não vira rascunho"
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "pronto",
                                  atual.get("resolucao") or "sem a janela da resolução", ok=True, agora=agora)
@@ -3712,10 +3719,11 @@ def resumo_do_video_de_ia(atual):
                                                   "resolucao")}
 
 
-def _video_de_ia_nao_saiu(video, do_video, agora=None):
+def _video_de_ia_nao_saiu(video, do_video, agora=None, motivo="", visto=""):
     """
-    O rascunho do vídeo de IA não saiu: com o problema no próprio vídeo, ele sai ("descartado"); sem ele (o celular, o
-    app), fica para o próximo horário, até flow.TENTATIVAS_DO_RASCUNHO, e depois sai ("desistiu").
+    O rascunho do vídeo de IA não saiu: com o problema no próprio vídeo, ele sai ("descartado") e vai ao privado do
+    Rafael com o motivo da Parada e o que a IA viu (visto), só para ele ver (P245 1); sem ele (o celular, o app), fica
+    para o próximo horário, até flow.TENTATIVAS_DO_RASCUNHO, e depois sai ("desistiu").
     """
     if not video or not video.get("video_ia"):
         return
@@ -3726,6 +3734,48 @@ def _video_de_ia_nao_saiu(video, do_video, agora=None):
                                  {"descartado": "problema no próprio vídeo", "desistiu": "tentativas acabaram"}.get(
                                      estado, f"tentativa {vezes} de {flow.TENTATIVAS_DO_RASCUNHO}"),
                                  ok=False, agora=agora)
+    if estado == "descartado":
+        atual = flow.producao()
+        do_botao = atual.get("do_botao")
+        depois = (" Toque de novo em Preparar 1 Agora ⚡ → De IA ✨ para tentar outro, se o dia ainda tiver espaço "
+                  "para vídeo de IA." if do_botao else " O de amanhã sai normalmente.")
+        # A conferência do Flow, que deixou o vídeo passar, fica de fora: o porquê é o do rascunho.
+        mandar_o_video_de_ia_descartado(atual, (
+            f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {'que você pediu' if do_botao else 'de hoje'} não virou "
+            f"rascunho: {motivo or 'um problema no próprio vídeo'}.{depois}"
+            + (f"\n\nO que a IA viu: {visto}" if visto else "")
+            + f"\n\nProduto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual, com_a_conferencia=False)}"),
+            agora)
+
+
+# O vídeo de IA descartado (pela conferência do Flow ou por um problema do próprio vídeo no rascunho, como a
+# conferência do produto) vai ao privado do Rafael logo depois do aviso, só para ele ver: não vira rascunho e não é
+# postado. Escolha do Rafael (16/11/2026, P245 1): DECISOES.md, Shopee Vídeo.
+LEGENDA_DO_DESCARTADO = ("🗑️ O vídeo de IA descartado, o do aviso acima, só para você ver: não vira rascunho e não é "
+                         "postado.")
+
+
+def mandar_o_video_de_ia_descartado(atual, aviso, agora=None):
+    """
+    O aviso do vídeo de IA descartado e, logo depois, o próprio vídeo, com a LEGENDA_DO_DESCARTADO (P245 1). Sem o
+    arquivo no servidor, ou sem o Telegram aceitar o vídeo (o Bot API não manda mais de 50 MB), vai só o aviso. O
+    registro diz se o vídeo foi. True quando o vídeo chegou.
+    """
+    avisar(aviso)
+    arquivo = atual.get("arquivo") or ""
+    foi = bool(arquivo) and os.path.exists(arquivo) and avisar_video(arquivo, LEGENDA_DO_DESCARTADO)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "descartado no privado",
+                                 "com o vídeo" if foi else "só o aviso, sem o vídeo", ok=None, agora=agora)
+    return bool(foi)
+
+
+def _o_que_a_ia_viu(ident):
+    """O que a IA disse na última conferência do rascunho (a coluna conferencia); "" sem ela."""
+    try:
+        vistos = json.loads((pegar(ident) or {}).get("conferencia") or "[]")
+    except ValueError:
+        return ""
+    return str(vistos[-1]).strip() if isinstance(vistos, list) and vistos else ""
 
 
 def preparar_rascunho(d, config, agora=None, de=None):
@@ -3810,6 +3860,9 @@ def preparar_rascunho(d, config, agora=None, de=None):
         # O de lado no dia pelo que paga (P200 1) não é falha: sem caso, e o vídeo volta amanhã.
         de_lado = isinstance(e, DeLadoNoDia)
         resultado = "de lado" if de_lado else "pulado" if e.do_video else "parou"
+        # O que a IA viu no vídeo de IA que ela recusou, lido antes de o rascunho sair, vai com ele ao privado (P245 1).
+        visto = (_o_que_a_ia_viu(ident) if video.get("video_ia") and e.motivo.startswith(ps.MOTIVO_OUTRO_PRODUTO)
+                 else "")
         if de_lado:
             _deixar_de_lado_no_dia([video["id"]], config, agora)
         else:
@@ -3817,7 +3870,7 @@ def preparar_rascunho(d, config, agora=None, de=None):
         # O vídeo de IA que não sai não fica entre os pulados da fonte: o andamento dele diz o que houve
         # (_video_de_ia_nao_saiu).
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video and not de_lado and not video.get("video_ia"))
-        _video_de_ia_nao_saiu(video, e.do_video, agora)
+        _video_de_ia_nao_saiu(video, e.do_video, agora, e.motivo, visto)
         registrar_tentativa("rascunho", resultado, e.motivo, _produto_do_video(video), agora, video["id"])
         e.id_video = video["id"]
         if celular:
