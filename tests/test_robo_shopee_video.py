@@ -9397,11 +9397,11 @@ def _oferta_da_lista(item, preco=100.0, comissao=0.05, nota="4.8", vendas=10, **
             "productLink": f"https://shopee.com.br/product/1/{item}", **campos}
 
 
-def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=()):
+def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=(), mudam=()):
     """
     A lista dos produtos em alta da API de afiliado e o que a escolha usa dela: o link curto de cada produto, a foto
-    do anúncio e a IA, que recusa a foto dos itens de recusadas e não responde nos de sem_resposta. Devolve os itens
-    que foram à IA, na ordem.
+    do anúncio e a IA, que recusa a foto dos itens de recusadas, não responde nos de sem_resposta e diz que a IA de
+    vídeo muda os de mudam (P245 1). Devolve os itens que foram à IA, na ordem.
     """
     foram = []
 
@@ -9420,6 +9420,8 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
             return None, None
         if item in recusadas:
             return None, False
+        if item in mudam:
+            return None, robo.flow.MUDA_NA_IA
         return {"link": link, "nome": nome, "foto": foto, "estilo": "fala", "prompt": "p", "cena": "c"}, True
 
     monkeypatch.setattr(robo.api_shopee, "ofertas_em_alta_shopee", em_alta)
@@ -9465,6 +9467,29 @@ def test_video_de_ia_pega_da_lista_da_api_o_que_paga_mais_com_a_foto_boa(monkeyp
     assert linhas[0] == ("produto escolhido",
                          f"{EM_ALTA}: 7 da lista; 5 com a nota; 4 pagam o mínimo; 3 novos; o 2º; estilo fala")
     assert not any("Produto" in detalhe or "shopee.com" in detalhe for _, detalhe in linhas)
+
+
+def test_video_de_ia_pula_o_produto_que_a_ia_de_video_muda(monkeypatch):
+    # Escolha do Rafael (16/11, P245 1): em 16/11, os 2 vídeos de IA pedidos no De IA ✨ foram gerados e descartados
+    # pelas conferências (a TV não saiu igual à da foto). O produto que a IA de vídeo costuma mudar sai da escolha
+    # como a foto recusada (não volta), e o registro conta à parte quantos foram pulados por isso.
+    ofertas = [_oferta_da_lista("13", comissao=0.09), _oferta_da_lista("14", comissao=0.08),
+               _oferta_da_lista("15", comissao=0.07)]
+    foram = _lista_da_api(monkeypatch, ofertas, recusadas={"14"}, mudam={"13"})
+    escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert escolhido["item"] == "15" and foram == ["13", "14", "15"] and restam
+    assert robo.flow.fotos_recusadas() == ["13", "14"]
+    assert _registro_do_video_de_ia()[-1] == (
+        "produto escolhido", f"{EM_ALTA}: 3 da lista; 3 com a nota; 3 pagam o mínimo; 3 novos; o 3º; estilo fala; "
+        "1 pulado(s) pelo que a IA de vídeo muda")
+    # Sem nenhum que sirva, o registro separa os recusados pela foto dos pulados pelo que a IA de vídeo muda.
+    foram = _lista_da_api(monkeypatch, [_oferta_da_lista("20", comissao=0.09), _oferta_da_lista("21", comissao=0.08)],
+                          recusadas={"21"}, mudam={"20"})
+    escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"))
+    assert escolhido is None and not restam and foram == ["20", "21"]
+    assert _registro_do_video_de_ia()[-1] == (
+        "sem produto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 2 foto(s) olhada(s), "
+        "1 recusada(s), 1 com o que a IA de vídeo muda")
 
 
 def test_escolha_da_amostra_deixa_de_fora_as_feitas_e_fica_no_registro_dela(monkeypatch):
@@ -9720,7 +9745,10 @@ def test_video_de_ia_com_outro_produto_nao_vira_rascunho(monkeypatch, avisos, tm
     assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora) == \
         "vídeo de IA: a IA viu outro produto no vídeo; não vira rascunho"
     assert robo.flow.producao()["estado"] == "descartado" and robo.flow.video_pronto() is None
-    assert any("saiu com outro produto" in a for a in avisos if isinstance(a, str))
+    # O aviso e, logo depois, o vídeo descartado, só para o Rafael ver (P245 1).
+    i = next(i for i, a in enumerate(avisos) if isinstance(a, str) and "saiu com outro produto" in a)
+    assert avisos[i + 1] == ("video", robo.LEGENDA_DO_DESCARTADO)
+    assert ("descartado no privado", "com o vídeo") in _registro_do_video_de_ia()
     # Nunca outro Gerar no mesmo dia.
     monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
     assert not robo.video_de_ia_pendente(robo.ler_config(), agora)
@@ -9814,6 +9842,37 @@ def test_video_de_ia_que_nao_vira_rascunho_pelo_celular_tenta_de_novo_e_depois_s
     robo.flow.guardar_producao(tentativas_do_rascunho=robo.flow.TENTATIVAS_DO_RASCUNHO - 1)
     robo._video_de_ia_nao_saiu({"video_ia": robo.flow.producao()}, False)
     assert robo.flow.producao()["estado"] == "desistiu"
+
+
+def test_video_de_ia_que_o_rascunho_descarta_vai_ao_privado_com_o_que_a_ia_viu(monkeypatch, avisos, tmp_path):
+    # Escolha do Rafael (16/11, P245 1): o vídeo de IA que a conferência do rascunho recusa (P244 3) vai ao privado,
+    # só para ele ver, com o que a IA viu e sem a conferência do Flow, que o tinha deixado passar.
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    _producao_pronta(tmp_path, do_botao=True)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+
+    def recusa(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
+        robo.atualizar(ident, conferencia=json.dumps(["a TV do vídeo é de outro modelo"]))
+        raise robo.Parada(f"{robo.ps.MOTIVO_OUTRO_PRODUTO} (1ª vez)", do_video=True)
+
+    monkeypatch.setattr(robo, "_preparar", recusa)
+    robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
+    assert robo.flow.producao()["estado"] == "descartado"
+    i = next(i for i, a in enumerate(avisos) if isinstance(a, str) and "não virou rascunho" in a)
+    aviso = avisos[i]
+    assert "o vídeo de IA que você pediu não virou rascunho: a IA viu outro produto no vídeo (1ª vez)." in aviso
+    assert "O que a IA viu: a TV do vídeo é de outro modelo" in aviso and "Preparar 1 Agora ⚡ → De IA ✨" in aviso
+    assert VESTIDO in aviso and "Omni 1.2 Flash" in aviso and "🔎" not in aviso
+    assert avisos[i + 1] == ("video", robo.LEGENDA_DO_DESCARTADO)
+    assert ("descartado no privado", "com o vídeo") in _registro_do_video_de_ia()
+
+
+def test_video_de_ia_descartado_sem_o_arquivo_vai_so_com_o_aviso(monkeypatch, avisos, tmp_path):
+    # Sem o arquivo no servidor (ou com o Telegram recusando o vídeo), o aviso vai sozinho, e o registro diz.
+    assert robo.mandar_o_video_de_ia_descartado({"arquivo": str(tmp_path / "sumiu.mp4")}, "aviso") is False
+    assert avisos == ["aviso"]
+    assert _registro_do_video_de_ia() == [("descartado no privado", "só o aviso, sem o vídeo")]
 
 
 def test_video_de_ia_pronto_sem_o_arquivo_nao_trava_os_dias_seguintes(monkeypatch, tmp_path):

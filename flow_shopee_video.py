@@ -170,10 +170,14 @@ PEDIDO_DA_IA = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto "
     "oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo de 8 segundos, em pé "
     "(9:16) e com som, a partir dessa foto. Responda só com um JSON, sem nada antes ou depois:\n"
-    '{{"serve": true ou false, "motivo": "...", "estilo": "...", "prompt": "...", "cena": "..."}}\n'
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "estilo": "...", "prompt": "...", '
+    '"cena": "..."}}\n'
     "- serve: false quando a foto não mostra o produto inteiro e com clareza (colagem de várias "
     "fotos, tabela de medidas, mais texto que produto, só a embalagem fechada) ou quando o produto "
     "é proibido nas diretrizes da Shopee Vídeo{bebida}; motivo: o porquê, em poucas palavras.\n"
+    "- muda_na_ia: true quando o produto tem o que a IA de vídeo costuma mudar ao recriá-lo pela foto, e o "
+    "vídeo sairia com outro produto: tela (TV, celular, tablet, monitor, relógio ou outro aparelho com visor), "
+    "marca, logotipo ou letras no corpo do produto, ou muitos botões e peças pequenas.\n"
     "- estilo: o jeito do vídeo que mais combina com este produto e prende quem está rolando o feed, um "
     "destes: \"demonstracao\" (o produto em uso no dia a dia), \"fala\" (uma pessoa comum mostra o "
     "produto e fala dele, como um cliente contando a experiência), \"inusitado\" (uma situação curiosa "
@@ -193,6 +197,10 @@ PEDIDO_DA_IA = (
 # Bebida alcoólica fica de lado enquanto as diretrizes a deixam em espera (P111): o vídeo nem é gerado, para não
 # gastar o crédito de um vídeo que o rascunho deixaria de lado.
 TRECHO_DA_BEBIDA = ", ou é bebida alcoólica (em espera nas diretrizes)"
+# O produto que a IA de vídeo costuma mudar ao recriá-lo pela foto (tela, marca ou letras no corpo, muitos botões)
+# sai da escolha, mesmo com a foto boa: o vídeo dele quase sempre sai com outro produto, e as conferências o
+# descartam depois de gasto o crédito. Escolha do Rafael (16/11/2026, P245 1): DECISOES.md, Shopee Vídeo.
+MUDA_NA_IA = "muda na IA de vídeo"
 # A conferência do vídeo pronto, que vai com ele no privado do Rafael: o produto é o da foto?
 PEDIDO_DA_CONFERENCIA = (
     "Este vídeo foi feito por IA a partir da foto do anúncio que vai junto (a imagem). Compare o "
@@ -236,8 +244,8 @@ def evitar_os_recentes(recentes):
 
 def ler_resposta(texto):
     """
-    {"serve", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não veio num
-    JSON ou disse que serve sem escrever o pedido.
+    {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
+    veio num JSON ou disse que serve sem escrever o pedido.
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
@@ -252,7 +260,8 @@ def ler_resposta(texto):
     prompt = " ".join(str(dados.get("prompt") or "").split())
     if serve and not prompt:
         return None
-    return {"serve": serve, "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
+    return {"serve": serve, "muda_na_ia": dados.get("muda_na_ia") is True,
+            "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
             "estilo": nome_do_estilo(dados.get("estilo")), "prompt": prompt[:1000],
             "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
 
@@ -279,7 +288,8 @@ def pedido_para_o_anuncio(link, nome, foto, evitar=""):
     dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
     trecho de evitar_os_recentes). (o pedido, serve): o pedido é {"link", "nome", "foto" (bytes), "estilo",
     "prompt", "cena"} quando a IA acha a foto boa para o vídeo; serve é False quando ela disse que a foto não
-    serve e None quando não deu para saber (a foto não é uma imagem, ou a IA não respondeu).
+    serve, MUDA_NA_IA quando o produto tem o que a IA de vídeo costuma mudar (P245 1) e None quando não deu
+    para saber (a foto não é uma imagem, ou a IA não respondeu).
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
@@ -291,6 +301,8 @@ def pedido_para_o_anuncio(link, nome, foto, evitar=""):
         return None, None
     if not resposta["serve"]:
         return None, False
+    if resposta["muda_na_ia"]:
+        return None, MUDA_NA_IA
     return {"link": link, "nome": nome, "foto": foto, "estilo": resposta["estilo"], "prompt": resposta["prompt"],
             "cena": resposta["cena"]}, True
 
@@ -1323,8 +1335,11 @@ def video_pronto():
     return None
 
 
-def legenda_da_producao(atual):
-    """As linhas do vídeo de IA no aviso e no texto do rascunho: o modelo, o custo, o estilo, a cena e a conferência."""
+def legenda_da_producao(atual, com_a_conferencia=True):
+    """
+    As linhas do vídeo de IA no aviso e no texto do rascunho: o modelo, o custo, o estilo, a cena e a conferência do
+    Flow (com_a_conferencia=False: sem ela, no aviso do vídeo que outra conferência descartou, P245 1).
+    """
     conferencia = atual.get("conferencia") or {}
     if conferencia.get("mesmo") is True:
         conferido = "o produto é o mesmo da foto do anúncio"
@@ -1334,8 +1349,9 @@ def legenda_da_producao(atual):
         conferido = "não deu para conferir"
     linhas = [f"🤖 Feito por IA no Google Flow: {atual.get('modelo', '')} ({atual.get('custo', 0)} créditos de IA)",
               f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}",
-              f"🎥 Cena: {atual.get('cena', '')}",
-              f"🔎 A IA conferiu: {conferido}"]
+              f"🎥 Cena: {atual.get('cena', '')}"]
+    if com_a_conferencia:
+        linhas.append(f"🔎 A IA conferiu: {conferido}")
     if conferencia.get("defeitos"):
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     return "\n".join(linhas)

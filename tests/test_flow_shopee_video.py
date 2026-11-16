@@ -696,8 +696,11 @@ def test_ordem_dos_modelos_do_mais_barato_ao_mais_caro():
 
 def test_resposta_da_ia():
     texto = 'Claro!\n{"serve": true, "motivo": "", "prompt": "Slow orbit  around\\nthe mug", "cena": "A caneca na mesa."}'
-    assert flow.ler_resposta(texto) == {"serve": True, "motivo": "", "estilo": "demonstracao",
+    # Sem o muda_na_ia na resposta, o produto não sai pela IA de vídeo (P245 1): só o true conta.
+    assert flow.ler_resposta(texto) == {"serve": True, "muda_na_ia": False, "motivo": "", "estilo": "demonstracao",
                                         "prompt": "Slow orbit around the mug", "cena": "A caneca na mesa."}
+    assert flow.ler_resposta('{"serve": true, "muda_na_ia": "talvez", "prompt": "p"}')["muda_na_ia"] is False
+    assert flow.ler_resposta('{"serve": true, "muda_na_ia": true, "prompt": "p"}')["muda_na_ia"] is True
     # O estilo como a IA escrever, com ou sem acento; o que não é nenhum vira a demonstração.
     for escrito, estilo in (("Comédia", "comedia"), ("fala", "fala"), ("inusitado", "inusitado"),
                             ("demonstração", "demonstracao"), ("dança", "demonstracao")):
@@ -998,6 +1001,38 @@ def test_pedido_pelo_anuncio_diz_se_a_foto_serve(monkeypatch):
     assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg()) == (None, None)
     assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", None) == (None, None)
     assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", b"nao e imagem") == (None, None)
+
+
+def test_produto_que_a_ia_de_video_muda_sai_da_escolha_mesmo_com_a_foto_boa(monkeypatch):
+    # Escolha do Rafael (16/11, P245 1): em 16/11, os 2 vídeos de IA pedidos no De IA ✨ foram gerados e descartados
+    # pelas conferências (a TV não saiu igual à da foto). A IA que olha a foto diz também se o produto tem o que a IA
+    # de vídeo costuma mudar (tela, marca ou letras no corpo, muitos botões), e ele sai antes de gastar o crédito.
+    respostas, pedidos = [], []
+
+    async def ia(prompt, imagens=None):
+        pedidos.append(prompt)
+        return respostas.pop(0)
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", ia)
+    link = "https://s.shopee.com.br/tv"
+    respostas.append(json.dumps({"serve": True, "muda_na_ia": True, "motivo": "tela e marca", "estilo": "fala",
+                                 "prompt": "The exact TV.", "cena": "Uma família vê a TV."}))
+    assert flow.pedido_para_o_anuncio(link, "Smart TV 50", _jpeg()) == (None, flow.MUDA_NA_IA)
+    assert '"muda_na_ia"' in pedidos[0] and "tela (TV, celular" in pedidos[0] and "letras no corpo" in pedidos[0]
+    # Com a marca falsa (ou sem ela, como antes), vale a foto boa.
+    respostas.append(json.dumps({"serve": True, "muda_na_ia": False, "motivo": "", "estilo": "fala",
+                                 "prompt": "The exact tumbler.", "cena": "Uma moça mostra o copo."}))
+    pedido, serve = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg())
+    assert serve is True and pedido["prompt"] == "The exact tumbler."
+    # A foto que não serve continua recusada pela foto, mesmo com a marca.
+    respostas.append(json.dumps({"serve": False, "muda_na_ia": True, "motivo": "colagem de fotos"}))
+    assert flow.pedido_para_o_anuncio(link, "Smart TV 50", _jpeg()) == (None, False)
+    # O aviso do vídeo que outra conferência descartou vai sem a do Flow, que o deixou passar.
+    atual = {"modelo": "Omni 1.2 Flash", "custo": 24, "estilo": "fala", "cena": "Uma família vê a TV.",
+             "conferencia": {"mesmo": True, "diferencas": "", "defeitos": ""}}
+    assert "🔎" in flow.legenda_da_producao(atual)
+    assert "🔎" not in flow.legenda_da_producao(atual, com_a_conferencia=False)
+    assert "Omni 1.2 Flash (24 créditos de IA)" in flow.legenda_da_producao(atual, com_a_conferencia=False)
     assert flow.pedido_para_o_anuncio(link, "", _jpeg()) == (None, None) and respostas == []
 
 
