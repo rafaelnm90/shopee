@@ -1736,6 +1736,10 @@ def test_a_ia_confere_so_pelo_que_o_video_e_o_anuncio_mostram_sem_o_que_sabe_de_
     assert all(regra in pedido for pedido in pedidos)
     assert "lançamentos" in regra and "pode estar desatualizado" in regra
     assert "nunca é motivo para dizer que não confere" in regra
+    # Em 15/11 a IA deixou de lado outro celular porque o desenho era "um conceito diferente dos modelos
+    # tradicionais" da marca, e era o modelo novo do anúncio: o desenho que ela conhece da marca também não conta.
+    assert "como é o desenho dos produtos de uma marca" in regra
+    assert "um desenho diferente do que você conhece da marca (que pareça um conceito" in regra
 
 
 # A linha das ordens de Minhas Curtidas, como no Motorola (07/11/2026).

@@ -154,13 +154,16 @@ AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo: na tela final, o produto anexa
                     "(ou há produto a mais ou a menos). Não salvei nem postei; confira o celular.")
 # O conhecimento da IA para numa data, e o modelo lançado depois dela parece "não existir": num
 # vídeo de 13/11, a IA deixou de lado o celular de uma marca conhecida porque o modelo "ainda não
-# foi lançado", e o vídeo mostrava o mesmo modelo do anúncio, com o nome escrito na tela. Vai em
-# todos os pedidos que conferem o produto: a IA compara só o que o vídeo e o anúncio mostram, e a
-# réplica fica com o Rafael na aprovação. Escolha dele (13/11, P217 1): DECISOES.md, Shopee Vídeo.
-SO_O_QUE_SE_VE = ("Não use o que você sabe sobre lançamentos, datas ou quais modelos existem: o seu conhecimento "
-                  "para numa data e pode estar desatualizado, e um modelo que você não conhece pode ter sido lançado "
-                  "depois dela. Isso nunca é motivo para dizer que não confere: compare só o que o vídeo e o "
-                  "anúncio mostram.")
+# foi lançado", e o vídeo mostrava o mesmo modelo do anúncio, com o nome escrito na tela; num de
+# 15/11, porque o desenho do aparelho era "um conceito diferente dos modelos tradicionais" da
+# marca, e era o modelo novo do anúncio. Vai em todos os pedidos que conferem o produto: a IA
+# compara só o que o vídeo e o anúncio mostram, e a réplica fica com o Rafael na aprovação. Escolha
+# dele (13/11, P217 1): DECISOES.md, Shopee Vídeo.
+SO_O_QUE_SE_VE = ("Não use o que você sabe sobre lançamentos, datas, quais modelos existem ou como é o desenho dos "
+                  "produtos de uma marca: o seu conhecimento para numa data e pode estar desatualizado, e um modelo "
+                  "que você não conhece, ou com um desenho diferente do que você conhece da marca (que pareça um "
+                  "conceito ou uma versão que não existe), pode ter sido lançado depois dela. Isso nunca é motivo "
+                  "para dizer que não confere: compare só o que o vídeo e o anúncio mostram.")
 PROMPT_PRODUTO_DO_VIDEO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 O link que vai junto com o vídeo leva a este produto: "{nome}".
 Assista ao vídeo inteiro e diga se o produto mostrado no vídeo é esse produto (o mesmo produto, \
