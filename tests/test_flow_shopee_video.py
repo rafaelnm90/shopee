@@ -988,3 +988,87 @@ def test_memoria_dos_produtos_que_nao_voltam_a_escolha(bm, monkeypatch):
     monkeypatch.setattr(flow, "ITENS_LEMBRADOS", 2)
     flow.lembrar_foto_recusada("55")
     assert flow.fotos_recusadas() == ["44", "55"]
+
+
+# --- As amostras: vídeos de teste da produção, só no privado do Rafael (P236 1) ---
+
+def _escolha_da_amostra(monkeypatch):
+    """A escolha do robô (P234 1) de mentira: cada pedido dá o próximo produto; guarda o que foi deixado de fora."""
+    import robo_shopee_video as robo
+    pedidos = []
+
+    def escolher(agora=None, fora=(), amostra=False):
+        pedidos.append((list(fora), amostra))
+        item = str(455 + len(pedidos))
+        return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
+                 "foto": _jpeg(), "estilo": "fala", "prompt": "The exact tumbler from the photo, a woman talks.",
+                 "cena": "Uma moça mostra o copo.", "item": item, "valor": 6.5, "posicao": 1,
+                 "origem": "os produtos em alta da Shopee"}, "os produtos em alta da Shopee", True)
+
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", escolher)
+    return pedidos
+
+
+def test_amostra_gera_no_modelo_da_producao_e_vai_so_ao_privado(celular, monkeypatch, capsys):
+    # Pedido do Rafael (16/11, P236 1): ver como os vídeos de IA estão ficando sem esperar o do dia. A amostra é um
+    # vídeo como o da produção, que vai só ao privado dele; roda fora do Horário do Robô, porque ele pediu.
+    pedidos = _escolha_da_amostra(monkeypatch)
+    monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: False)
+    assert flow.main(["amostra"]) == 0
+    assert pedidos == [([], True)] and celular.geracoes == 1 and celular.modelo == "Omni 1.2 Flash"
+    (caminho, legenda), = celular.mandados
+    assert caminho.endswith("amostra.mp4")
+    for trecho in ("Amostra do vídeo de IA nº 1", "Omni 1.2 Flash (24 créditos de IA)", "Copo Térmico Inox",
+                   "Paga R$ 6,50 por venda", "os produtos em alta da Shopee", "Uma moça mostra o copo.",
+                   "pessoa falando do produto", "o produto é o mesmo da foto do anúncio", "Nada foi postado"):
+        assert trecho in legenda, trecho
+    assert len(celular.fotos) == 1 and "amostra nº 1" in celular.fotos[0][1]
+    assert "Anúncio: https://shopee.com.br/product/123/456" in celular.fotos[0][1]
+    # Não vira rascunho nem muda o vídeo do dia: a produção fica como estava, e o produto pode ser o do dia.
+    assert flow.producao() == {} and flow.itens_gerados() == [] and flow.amostras_feitas() == ["456"]
+    assert flow.estilos_recentes()[-1] == "fala"
+    # A próxima amostra deixa de fora o produto da anterior.
+    monkeypatch.setattr(flow.ps, "conectar", lambda celular=False, novo=Flow(): novo)
+    assert flow.main(["amostra"]) == 0
+    assert pedidos[-1] == (["456"], True) and flow.amostras_feitas() == ["456", "457"]
+    assert len(celular.mandados) == 2 and "Amostra do vídeo de IA nº 2" in celular.mandados[-1][1]
+    # O log público não tem o produto, o pedido nem o link.
+    saida = capsys.readouterr().out
+    assert "Gerar tocado (Omni 1.2 Flash, 24 créditos)" in saida and "Amostra nº 2: vídeo mandado" in saida
+    for privado in ("Copo", "tumbler", "shopee.com.br", "6,50"):
+        assert privado not in saida, privado
+
+
+def test_amostra_ja_gerada_so_baixa_e_a_que_nao_foi_ao_privado_vai_sem_gerar(celular, monkeypatch, capsys):
+    pedidos = _escolha_da_amostra(monkeypatch)
+    # A rodada de antes tocou no Gerar e o vídeo não ficou pronto a tempo: esta só baixa e manda, sem outro Gerar.
+    no_celular = flow._amostra_no_celular
+    monkeypatch.setattr(flow, "_amostra_no_celular", lambda atual, sem_gerar, so_baixar: 1)
+    assert flow.main(["amostra"]) == 1 and len(pedidos) == 1
+    flow.marcar_amostra(estado="gerando", gerado_em="2026-11-16 00:30:00")
+    monkeypatch.setattr(flow, "_amostra_no_celular", no_celular)
+    celular.gerado, celular.modelo_do_video = True, "Omni 1.2 Flash"
+    assert flow.amostra() == 0
+    assert len(pedidos) == 1 and celular.geracoes == 0 and len(celular.mandados) == 1
+    assert "já gerada; falta baixar e mandar" in capsys.readouterr().out
+    # O vídeo baixado que o Telegram recusou vai na próxima vez, sem o celular.
+    flow.marcar_amostra(estado="baixado")
+    monkeypatch.setattr(flow.celular_robo, "conectado", lambda: pytest.fail("não precisa do celular"))
+    assert flow.amostra() == 0 and len(pedidos) == 1 and len(celular.mandados) == 2
+    assert flow.amostra_guardada()["estado"] == "enviado" and flow.amostras_feitas() == ["456"]
+
+
+def test_amostra_sem_produto_ou_com_a_lista_negada_nao_toca_no_celular(celular, monkeypatch, capsys):
+    import robo_shopee_video as robo
+
+    def negada(agora=None, fora=(), amostra=False):
+        raise robo.api_shopee.BuscaNegada("código 10.000")
+
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", negada)
+    assert flow.amostra() == 1
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia",
+                        lambda agora=None, fora=(), amostra=False: (None, "os produtos em alta da Shopee", False))
+    assert flow.amostra() == 1
+    saida = capsys.readouterr().out
+    assert "negou a lista de produtos (código 10.000)" in saida and "nenhum produto da lista serviu" in saida
+    assert celular.toques == [] and celular.geracoes == 0 and celular.mandados == []

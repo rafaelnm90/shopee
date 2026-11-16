@@ -434,7 +434,7 @@ SEM_META = {
     ("shopee_video", "editar o rascunho"), ("shopee_video", "refazer o rascunho editado"),
     ("shopee_video", "horário sem rascunho"), ("shopee_video", "plano de hoje refeito"),
     ("shopee_video", "tela do celular"), ("shopee_video", "alerta do celular"),
-    ("shopee_video", "vídeo de IA do dia"),
+    ("shopee_video", "vídeo de IA do dia"), ("shopee_video", "amostra do vídeo de IA"),
     ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
 }
 
