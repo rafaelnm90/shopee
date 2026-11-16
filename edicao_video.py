@@ -73,8 +73,9 @@ CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
 # O sinal que aponta o cartão do produto: a mãozinha tocando (escolha do Rafael, 15/11, P231 1, no
 # lugar das setinhas em cascata da P130). A mãozinha amarela de emoji, com um contorno branco e uma
 # sombra leve (P127), desce, toca logo acima do cartão do produto que o app mostra (o sinal inteiro
-# acima do cartão, P71), aperta e volta, com uma onda no toque, uma volta por segundo, perto do canto
-# de baixo à esquerda. Ela é sempre amarela: a cor do painel vale só para a moldura do cartão. Começa
+# acima do cartão, P71), aperta e volta, com uma onda no toque (o anel inteiro, deitado em volta da
+# ponta do dedo, P238 1), uma volta por segundo, perto do canto de baixo à esquerda. Ela é sempre
+# amarela: a cor do painel vale só para a moldura do cartão. Começa
 # logo depois da foto e vai até o fim do vídeo: o arquivo guarda uma volta, que se repete
 # (PULSO_DA_SETA). O mao_tocando.apng sai do .claude/scripts/gerar_mao.py, com MARGEM_DA_SETA px
 # transparentes de cada lado para o contorno e a sombra, no tamanho e no lugar das setinhas (a legenda
