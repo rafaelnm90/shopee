@@ -186,19 +186,35 @@ VOLUME_DAS_MUSICAS = -16.0
 SUBIDA_MAXIMA_DO_SOM = 10.0
 DIFERENCA_QUE_NAO_SE_OUVE = 1.0
 PROCESSO_DO_VOLUME = "edição do vídeo: volume do som"
+# O vídeo em que ninguém fala e cujo som, mesmo com a subida máxima, fica mais de FICA_BAIXO_DEMAIS dB abaixo das
+# nossas músicas também ganha a música de fundo da vez no lugar do som, como o mudo (P55): o vídeo de IA que vem só
+# com o barulho da cena, em -37,5 LUFS, passava quase mudo no feed. O vídeo com fala nunca perde o som, nem o que
+# não dá para ouvir. O registro conta cada um (PROCESSO_DO_BAIXINHO). Escolha do Rafael (16/11, P237 1):
+# DECISOES.md, Shopee Vídeo.
+FICA_BAIXO_DEMAIS = 6.0
+PROCESSO_DO_BAIXINHO = "edição do vídeo: som baixo demais"
+TROCADO_PELA_MUSICA, FICOU_O_SOM = "trocado pela música de fundo", "ficou o som"
+SEM_FALA_NO_SOM, COM_FALA_NO_SOM, SEM_OUVIR_A_FALA = "sem fala", "com fala", "sem o reconhecimento de voz"
 
 
 def ligada():
     return bool((db.ler_config("shopee_video", {}) or {}).get("edicao_ligada"))
 
 
-def musicas_de_fundo(video, quantas=1):
+def musicas_de_fundo(video, quantas=1, ouviu_fala=False, anotar=None):
     """
     A música (nome, caminho) de cada um dos `quantas` vídeos que saem deste (o original e as
-    versões), a partir da da vez, que anda uma casa; [None] * quantas quando o vídeo tem som.
+    versões), a partir da da vez, que anda uma casa; [None] * quantas quando o vídeo tem som. O de som
+    baixo demais em que ninguém fala também ganha a música (fala_no_som_baixinho, P237 1; ouviu_fala: a IA
+    ouviu alguém falar nele). anotar (dict), quando vem, recebe em "baixinho" o porquê e o som medido do
+    som baixo demais, com ou sem a música.
     """
     if not videos.mudo(video):
-        return [None] * quantas
+        fala, medido = fala_no_som_baixinho(video, ouviu_fala)
+        if fala and anotar is not None:
+            anotar["baixinho"] = {"fala": fala, "medido": round(medido, 1)}
+        if fala != SEM_FALA_NO_SOM:
+            return [None] * quantas
 
     def andar(dados):
         vez = int(dados.get(MUSICA_DA_VEZ) or 0) % len(MUSICAS)
@@ -226,6 +242,40 @@ def ganho_do_som(medido):
     if abs(ganho) < DIFERENCA_QUE_NAO_SE_OUVE:
         return 0.0
     return round(min(ganho, SUBIDA_MAXIMA_DO_SOM), 1)
+
+
+def baixinho_demais(medido):
+    """O som (LUFS) que, mesmo com a subida máxima, fica mais de FICA_BAIXO_DEMAIS dB abaixo das músicas (P237 1)."""
+    return medido is not None and medido + SUBIDA_MAXIMA_DO_SOM < VOLUME_DAS_MUSICAS - FICA_BAIXO_DEMAIS
+
+
+def fala_no_som_baixinho(video, ouviu_fala=False):
+    """
+    (porquê, medido): o som do vídeo em LUFS (videos.volume_do_som) e, quando ele é baixo demais
+    (baixinho_demais), se alguém fala no vídeo: SEM_FALA_NO_SOM (a IA não ouviu fala, ouviu_fala, e o
+    reconhecimento de voz não achou nenhuma palavra: o vídeo ganha a música, P237 1), COM_FALA_NO_SOM ou
+    SEM_OUVIR_A_FALA (o reconhecimento de voz não ouviu o vídeo); nesses dois, fica o som. "" no som que não
+    é baixo demais, sem perguntar ao reconhecimento de voz.
+    """
+    medido = videos.volume_do_som(video)
+    if not baixinho_demais(medido):
+        return "", medido
+    if ouviu_fala:
+        return COM_FALA_NO_SOM, medido
+    palavras = videos.palavras_faladas(video)
+    if palavras is None:
+        return SEM_OUVIR_A_FALA, medido
+    return (COM_FALA_NO_SOM if palavras else SEM_FALA_NO_SOM), medido
+
+
+def _registrar_o_baixinho(baixinho):
+    """O registro do som baixo demais do vídeo que vai ao ar (baixinho: o que musicas_de_fundo anota, P237 1)."""
+    if not baixinho:
+        return
+    trocado = baixinho.get("fala") == SEM_FALA_NO_SOM
+    registro_processos.registrar("shopee_video", PROCESSO_DO_BAIXINHO, TROCADO_PELA_MUSICA if trocado else FICOU_O_SOM,
+                                 f"{baixinho.get('fala')}; o som estava em {baixinho.get('medido', 0.0):.1f} LUFS",
+                                 ok=None)
 
 
 def _registrar_o_volume(volume):
@@ -3475,7 +3525,8 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     Devolve (motivo, como, detalhe): motivo "" quando o vídeo saiu editado; como, o jeito
     (COM_LEGENDAS, SEM_LEGENDAS_NA_TELA ou SO_COM_O_EDITOR_1, mais COM_OS_AVISOS); detalhe,
     o porquê fixo de faltar algum texto ou o Editor 2 ("" quando não falta nada). O vídeo sem
-    som ganha a música de fundo da vez (P55), e o jeito termina com COM_MUSICA. Com a capa com
+    som ganha a música de fundo da vez (P55), e o de som baixo demais em que ninguém fala também (P237 1:
+    fala_no_som_baixinho, com o registro PROCESSO_DO_BAIXINHO), e o jeito leva COM_MUSICA. Com a capa com
     chamada ligada (P76), a frase curta da IA para a capa (P106; sem ela, a vantagem) vai na capa
     de todos os vídeos (P100), e o jeito leva COM_A_CHAMADA. Com as outras_fotos (bytes das
     outras fotos diferentes dos produtos do post, as que cabem: fotos_que_cabem), a miniatura
@@ -3505,9 +3556,13 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
         return (editar(video, foto, destino, avisos, escolhas=escolhas),
                 SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), "")
-    musica_da_vez = musicas_de_fundo(video)[0]
-    musica = _caminho(musica_da_vez)
     textos = textos_da_tela(video, produto, lado) if produto else {}
+    # A música de fundo no vídeo sem som (P55) e no de som baixo demais em que ninguém fala (P237 1): a fala que a IA
+    # ouviu evita perguntar ao reconhecimento de voz.
+    som = {}
+    musica_da_vez = musicas_de_fundo(video, ouviu_fala=bool(textos.get("legendas") or textos.get("falas")),
+                                     anotar=som)[0]
+    musica = _caminho(musica_da_vez)
     # A cor do produto no lugar do laranja e do preto (P159 2); o registro conta cada uma.
     cor = cor_do_produto(textos.get("cor"))
     # A 2ª cor do produto, para o fio e a faixa da capa quando a principal some no fundo da foto (P173).
@@ -3637,6 +3692,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         avisado += COM_AS_LEGENDAS_DA_FALA if postas else ""
         _registrar_o_que_sumiu(resumo.get("sob_o_criador"), resumo.get("original") or 0.0)
         _registrar_o_volume(resumo.get("volume"))
+        _registrar_o_baixinho(som.get("baixinho"))
         fora = resumo.get("nao_entraram") or {}
         if fora:
             # Os textos da tela que não entraram por cobrir, na hora deles, o que o criador pôs por cima, o
@@ -3661,6 +3717,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     if not motivo_1:
         _registrar_o_que_sumiu(sob.get("sob_o_criador"))
         _registrar_o_volume(sob.get("volume"))
+        _registrar_o_baixinho(som.get("baixinho"))
     return motivo_1, SO_COM_O_EDITOR_1 + avisado, f"o Editor 2 não saiu: {motivo_2}"
 
 
@@ -4039,7 +4096,7 @@ def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None, minia
         return "o vídeo não abre", {}
     com_fala, trechos = _remontagem(video, original, falas)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
-    musicas = musicas_de_fundo(video, 1 + len(planos))
+    musicas = musicas_de_fundo(video, 1 + len(planos), ouviu_fala=bool(falas))
     completo = arquivo_da_versao(destino, 1)
     resumo = {"original": original, "inteiro": original, "com_fala": _segundos_com_fala(com_fala, original),
               "remontagem": _resumo_da_remontagem(trechos, original, com_fala), "miniatura": miniatura,
@@ -4074,7 +4131,7 @@ def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia
     lugar = _lugar(lugar)
     caixa = caixa_dos_textos(cor)
     planos = planejar_versoes(trechos, [(v["inicio"], v["fim"]) for v in versoes_da_ia], com_fala, original)
-    musicas = musicas_de_fundo(video, 1 + len(planos))
+    musicas = musicas_de_fundo(video, 1 + len(planos), ouviu_fala=bool(falas or legendas))
     completo = arquivo_da_versao(destino, 1)
     motivo, do_completo = _editor_2_no_original(video, foto, completo, original, nome, vantagem, chamada, lugar,
                                                 musica=_caminho(musicas[0]), miniatura=miniatura, legendas=legendas,

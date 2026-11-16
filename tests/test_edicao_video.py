@@ -1508,6 +1508,76 @@ def test_o_que_vai_ao_ar_sem_som_leva_a_musica_e_o_registro_diz(monkeypatch, tmp
     assert musicas[-1] is None
 
 
+def test_som_baixo_demais_mesmo_com_a_subida_maxima():
+    # Escolha do Rafael (16/11, P237 1): o som que, mesmo subindo os 10 dB, fica mais de 6 dB abaixo das nossas
+    # músicas (-16 LUFS), ou seja, abaixo de -32 LUFS. O vídeo de IA da geladeira veio em -37,5.
+    baixinho = edicao_video.baixinho_demais
+    assert (baixinho(-37.5), baixinho(-32.1), baixinho(-32.0), baixinho(-26.0), baixinho(-9.0), baixinho(None)) == (
+        True, True, False, False, False, False)
+
+
+def test_video_baixinho_sem_fala_ganha_a_musica_e_o_com_fala_fica_com_o_som(monkeypatch):
+    # P237 1: o vídeo em que ninguém fala e cujo som fica baixo demais ganha a música de fundo da vez, como o mudo; o
+    # que tem fala (a IA ouviu, ou o reconhecimento de voz achou palavras) e o que não dá para ouvir ficam com o som.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    volume, palavras, ouvidos = [-37.5], [[]], []
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
+    monkeypatch.setattr(edicao_video.videos, "volume_do_som", lambda video, *a, **k: volume[0])
+    monkeypatch.setattr(edicao_video.videos, "palavras_faladas", lambda video: ouvidos.append(video) or palavras[0])
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("ia.mp4", anotar=anotado)[0][0] == "animada"
+    assert anotado == {"baixinho": {"fala": edicao_video.SEM_FALA_NO_SOM, "medido": -37.5}}
+    # Cada versão do exemplo leva a sua, como no mudo.
+    assert [m[0] for m in edicao_video.musicas_de_fundo("ia.mp4", 2)] == ["calma", "divertida"]
+    # A fala que a IA ouviu basta: o reconhecimento de voz nem é chamado.
+    ouvidos.clear()
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("fala.mp4", ouviu_fala=True, anotar=anotado) == [None]
+    assert anotado["baixinho"]["fala"] == edicao_video.COM_FALA_NO_SOM and ouvidos == []
+    # O reconhecimento de voz achou palavras: fica o som.
+    palavras[0] = [(0.4, 0.8, "olha")]
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("fala.mp4", anotar=anotado) == [None]
+    assert anotado["baixinho"]["fala"] == edicao_video.COM_FALA_NO_SOM
+    # Sem conseguir ouvir o vídeo, fica o som.
+    palavras[0] = None
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("v.mp4", anotar=anotado) == [None]
+    assert anotado["baixinho"]["fala"] == edicao_video.SEM_OUVIR_A_FALA
+    # O som que a subida máxima leva perto das músicas fica como estava, sem perguntar ao reconhecimento de voz.
+    volume[0], palavras[0] = -30.0, []
+    ouvidos.clear()
+    anotado = {}
+    assert edicao_video.musicas_de_fundo("v.mp4", anotar=anotado) == [None] and anotado == {} and ouvidos == []
+
+
+def test_o_que_vai_ao_ar_baixinho_sem_fala_leva_a_musica_e_o_registro_diz(monkeypatch, tmp_path):
+    # P237 1: no que vai ao ar (rascunho do robô e modo assistente), o vídeo baixinho sem fala sai com a música de
+    # fundo, que o Editar ✏️ guarda; o registro diz se o som foi trocado pela música ou ficou, e por quê.
+    import registro_processos as rp
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    musicas = []
+    _versoes_de_mentira(monkeypatch, musicas)
+    textos = {"nome": "Geladeira", "vantagem": "Espaçosa", "falas": [], "lugar": "alto"}
+    _textos_da_tela(monkeypatch, textos)
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
+    monkeypatch.setattr(edicao_video.videos, "volume_do_som", lambda video, *a, **k: -37.5)
+    monkeypatch.setattr(edicao_video.videos, "palavras_faladas", lambda video: [])
+    destino, anotado = str(tmp_path / "rascunho.mp4"), {}
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Geladeira", anotar=anotado) == (
+        "", edicao_video.COM_LEGENDAS + edicao_video.COM_MUSICA, "")
+    assert musicas == ["musica_animada.m4a"] and anotado["refazer"]["musica"] == "animada"
+    # Com alguém falando, o vídeo fica com o som dele (subindo o máximo, P222 1).
+    _textos_da_tela(monkeypatch, dict(textos, falas=[(0.5, 2.0)], legendas=[(0.5, 2.0, "Olha essa geladeira")]))
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Geladeira")[1].startswith(
+        edicao_video.COM_LEGENDAS)
+    assert musicas[-1] is None
+    registro = rp.sequencia("shopee_video", edicao_video.PROCESSO_DO_BAIXINHO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [
+        (edicao_video.TROCADO_PELA_MUSICA, "sem fala; o som estava em -37.5 LUFS"),
+        (edicao_video.FICOU_O_SOM, "com fala; o som estava em -37.5 LUFS")]
+
+
 def test_exemplo_sem_som_tem_uma_musica_em_cada_video(monkeypatch, tmp_path):
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     musicas = []
@@ -3966,7 +4036,8 @@ def test_o_editar_refaz_a_edicao_sem_a_ia_mudando_so_a_miniatura_e_a_legenda(mon
                           "rotulo": rotulo_de_ia, "cor": cor, "escolhas": escolhas})
         return "", {"textos": [nome], "legendas": len(legendas)}
     monkeypatch.setattr(edicao_video, "editar_2", editar_2)
-    monkeypatch.setattr(edicao_video, "musicas_de_fundo", lambda video, quantas=1: [("calma", "/m/musica_calma.m4a")])
+    monkeypatch.setattr(edicao_video, "musicas_de_fundo",
+                        lambda video, quantas=1, **_: [("calma", "/m/musica_calma.m4a")])
     monkeypatch.setattr(edicao_video, "_capa_da_vez", lambda foto, frase, no_video=False, cor=None, segunda=None:
                         f"{frase}|{no_video}".encode())
     monkeypatch.setattr(edicao_video, "capa_ligada", lambda: True)
