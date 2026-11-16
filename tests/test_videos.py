@@ -265,6 +265,17 @@ def test_cada_imagem_entra_na_tabela_do_hd_e_o_video_do_criador_fica_como_veio()
     assert remontado[-len(videos.ETIQUETA_DAS_CORES) - 3:-3] == videos.ETIQUETA_DAS_CORES
 
 
+def test_letreiro_animado_comeca_a_animacao_na_hora_em_que_entra():
+    # P240 1: a caixa do alto com o pulinho (APNG) começa a animação no início dela; a parada (a legenda da fala)
+    # vale o vídeo todo, sem atraso.
+    remontado = videos.comando_cortes_e_ritmo("v.mp4", [(0, 9, 1.0)], "d.mp4", False,
+                                              [("nome.apng", 4.3, 7.3, 10, 10), ("fala.png", 1.0, 3.0, 10, 900)])
+    assert "setpts=PTS+4.300/TB" in _cadeias(remontado)["[1:v]"]
+    assert "setpts" not in _cadeias(remontado)["[2:v]"]
+    assert videos.animada(b"\x89PNG\r\n\x1a\n....IHDR....acTL....IDAT") is True
+    assert videos.animada(b"\x89PNG\r\n\x1a\n....IHDR....IDAT....tEXtacTL") is False
+
+
 def test_cores_das_imagens_no_video_como_o_celular_le(tmp_path):
     # P204 1, com o ffmpeg de verdade: lido na tabela do HD, como o celular lê, o rosa da capa e da
     # miniatura e o vermelho da moldura saem com a cor escolhida (antes, o rosa saía mais claro), o

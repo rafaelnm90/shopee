@@ -1515,6 +1515,18 @@ TOPO_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][1]
 LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
 LETRA_DOS_TEXTOS = (36, 28)         # a maior e a menor
 SEGUNDOS_DE_CADA_TEXTO = 3.0
+# As caixas do alto (o nome, a vantagem e a chamada) entram com um pulinho: nascem transparentes, com
+# TAMANHO_AO_NASCER do tamanho, crescem até PASSA_DO_TAMANHO e assentam no tamanho delas, em ENTRADA_DAS_CAIXAS;
+# e saem sumindo em SAIDA_DAS_CAIXAS, encolhendo até TAMANHO_AO_SAIR. O movimento puxa o olho para o texto, como
+# nos vídeos editados no CapCut. A legenda da fala, embaixo, fica sem ele: ela troca a cada frase, e um pulinho
+# em cada troca cansaria. Escolha do Rafael (16/11, P240 1): DECISOES.md, Shopee Vídeo.
+ENTRADA_DAS_CAIXAS = 0.25
+SAIDA_DAS_CAIXAS = 0.2
+TAMANHO_AO_NASCER = 0.6
+PASSA_DO_TAMANHO = 1.08
+TAMANHO_AO_SAIR = 0.92
+CRESCE_ATE = 0.6                    # a parte da entrada em que ela cresce; no resto, assenta
+APARECE_ATE = 0.45                  # a parte da entrada em que ela vai do transparente ao inteiro
 FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
 BORDA_DOS_TEXTOS = (28, 18)         # da caixa até as letras, dos lados e em cima e embaixo
 FUNDO_DA_CHAMADA = VERMELHO_DO_DESTAQUE + (230,)
@@ -3338,6 +3350,64 @@ def _livre_na_hora(lugar, inicio, fim, nos_momentos=None, lugares=None):
     return livres is None or lugar in livres
 
 
+def _quadro_do_pulinho(caixa, tela, escala, alfa):
+    """Um quadro do pulinho: a caixa (RGBA) nessa escala e transparência, no meio da tela (o tamanho do quadro)."""
+    from PIL import Image
+    quadro = Image.new("RGBA", tela, (0, 0, 0, 0))
+    largura, altura = round(caixa.width * escala), round(caixa.height * escala)
+    if alfa <= 0 or largura < 2 or altura < 2:
+        return quadro
+    menor = caixa if (largura, altura) == caixa.size else caixa.resize((largura, altura), Image.LANCZOS)
+    if alfa < 1:
+        menor = menor.copy()
+        menor.putalpha(menor.getchannel("A").point(lambda v: round(v * alfa)))
+    quadro.alpha_composite(menor, ((tela[0] - largura) // 2, (tela[1] - altura) // 2))
+    return quadro
+
+
+def com_pulinho(letreiro):
+    """
+    O letreiro (imagem PNG, início, fim, x, y) de uma caixa do alto com o pulinho (P240 1), como (APNG, início,
+    fim, x, y): os quadros da entrada (ENTRADA_DAS_CAIXAS), a caixa parada e os quadros da saída
+    (SAIDA_DAS_CAIXAS), no ritmo de quadros do vídeo, numa tela com folga para a caixa que passa do tamanho dela.
+    x e y andam a folga, e a caixa parada fica no mesmo lugar, igual à de antes. Na janela curta, a entrada e a
+    saída encolhem juntas, e a caixa fica parada um pouco no meio.
+    """
+    import io
+
+    from PIL import Image
+    imagem, inicio, fim, x, y = letreiro
+    caixa = Image.open(io.BytesIO(imagem)).convert("RGBA")
+    folga = (math.ceil(caixa.width * (PASSA_DO_TAMANHO - 1) / 2) + 1,
+             math.ceil(caixa.height * (PASSA_DO_TAMANHO - 1) / 2) + 1)
+    tela = (caixa.width + 2 * folga[0], caixa.height + 2 * folga[1])
+    passo = 1 / videos.QUADROS_POR_SEGUNDO
+    janela = max(0.0, fim - inicio)
+    encolhe = min(1.0, janela * 0.8 / (ENTRADA_DAS_CAIXAS + SAIDA_DAS_CAIXAS))
+    entrada = max(1, round(ENTRADA_DAS_CAIXAS * encolhe / passo))
+    saida = max(1, round(SAIDA_DAS_CAIXAS * encolhe / passo))
+    quadros = []
+    for n in range(entrada):
+        k = n / entrada
+        escala = (TAMANHO_AO_NASCER + (PASSA_DO_TAMANHO - TAMANHO_AO_NASCER) * k / CRESCE_ATE if k < CRESCE_ATE
+                  else PASSA_DO_TAMANHO - (PASSA_DO_TAMANHO - 1) * (k - CRESCE_ATE) / (1 - CRESCE_ATE))
+        quadros.append(_quadro_do_pulinho(caixa, tela, escala, min(1.0, k / APARECE_ATE)))
+    quadros.append(_quadro_do_pulinho(caixa, tela, 1.0, 1.0))
+    for n in range(saida):
+        k = 1 - n / saida
+        quadros.append(_quadro_do_pulinho(caixa, tela, TAMANHO_AO_SAIR + (1 - TAMANHO_AO_SAIR) * k, k))
+    # O começo de cada quadro, desde a entrada, e o fim do último: a caixa parada fica até a saída, que acaba no
+    # fim da janela (dali em diante, o overlay já não mostra o letreiro).
+    sai = max(entrada * passo, janela - saida * passo)
+    comecos = [n * passo for n in range(entrada + 1)] + [sai + n * passo for n in range(saida + 1)]
+    ms = [round(1000 * t) for t in comecos]
+    duracoes = [max(1, b - a) for a, b in zip(ms, ms[1:])]
+    saida_png = io.BytesIO()
+    quadros[0].save(saida_png, format="PNG", save_all=True, append_images=quadros[1:], duration=duracoes, loop=1,
+                    disposal=1, blend=0)
+    return saida_png.getvalue(), inicio, fim, x - folga[0], y - folga[1]
+
+
 def _letreiros(textos, lugar, duracao, lado=MINIATURA_A_DIREITA, lugares=None, por_cima=(), anotar=None,
                nos_momentos=None):
     """
@@ -3419,6 +3489,8 @@ def _editor_2_no_original(video, foto, destino, original, nome, vantagem, chamad
     fora = {}
     letreiros, textos = _letreiros([(nome, caixa), (vantagem, caixa), (chamada, FUNDO_DA_CHAMADA)], lugar, original,
                                    escolhas["miniatura"], lugares, por_cima, fora, nos_momentos)
+    # As caixas do alto entram com o pulinho e saem sumindo (P240 1); a legenda da fala fica parada.
+    letreiros = [com_pulinho(letreiro) for letreiro in letreiros]
     subida = SUBIDA_COM_O_ROTULO_DE_IA if rotulo_de_ia else 0
     da_fala = letreiros_da_fala(legendas, original, subida) if legendas else []
     # A legenda da fala some enquanto o que o criador pôs por cima passa pelo lugar dela (P224 1).
@@ -4085,6 +4157,7 @@ def _versoes_modificadas(video, foto, destino, planos, versoes_da_ia, resumo, te
         for numero, (plano, musica) in enumerate(zip(planos, musicas), 2):
             da_ia = versoes_da_ia[plano["gancho"]]
             letreiros, textos = textos_da_versao(plano, da_ia)
+            letreiros = [com_pulinho(letreiro) for letreiro in letreiros]
             arquivo = arquivo_da_versao(destino, numero)
             resumo["versoes"].append(_resumo_da_versao(arquivo, plano, da_ia, textos, musica))
             corpo = os.path.join(pasta, f"remontado_{numero}.mp4")

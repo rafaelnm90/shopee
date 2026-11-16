@@ -593,8 +593,8 @@ def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
     O ffmpeg do vídeo remontado: trechos = [(início, fim, velocidade)], cada pedaço do vídeo
     original na ordem da lista (que pode trocar a ordem do original), na velocidade dele (o som acompanha, sem mudar o tom; o que não está
     em nenhum trecho sai). Sai em 720x1280. letreiros = [(imagem, início, fim, x, y)]: cada
-    imagem (PNG com fundo transparente) por cima, com o canto de cima à esquerda em (x, y),
-    nesses segundos do vídeo já remontado.
+    imagem (PNG com fundo transparente; a terminada em .apng, animada desde o início) por cima, com o canto de
+    cima à esquerda em (x, y), nesses segundos do vídeo já remontado.
     """
     quantos = len(trechos)
     filtro = f"[0:v]split={quantos}" + "".join(f"[v{i}]" for i in range(quantos)) + ";"
@@ -616,9 +616,12 @@ def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
     entradas = ["-i", video]
     for i, (imagem, inicio, fim, x, y) in enumerate(letreiros):
         entradas += ["-i", imagem]
+        # O letreiro animado (APNG: as caixas do alto, com o pulinho da P240 1) começa a animação na hora em que
+        # entra; o parado vale o vídeo todo.
+        atraso = f",setpts=PTS+{inicio:.3f}/TB" if imagem.endswith(".apng") else ""
         # Do início até antes do fim: o letreiro que acaba quando o seguinte começa (as legendas da
         # fala) não fica junto com ele no quadro da troca, um por cima do outro.
-        filtro += (f";[{i + 1}:v]{POR_CIMA}[letreiro{i}];"
+        filtro += (f";[{i + 1}:v]{POR_CIMA}{atraso}[letreiro{i}];"
                    f"[t{i}][letreiro{i}]overlay=x={x}:y={y}:enable='gte(t,{inicio:.2f})*lt(t,{fim:.2f})',"
                    f"format=yuv420p[t{i + 1}]")
     saida = ["-map", f"[t{len(letreiros)}]"]
@@ -630,10 +633,16 @@ def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
                destino])
 
 
+def animada(imagem):
+    """Se a imagem PNG (bytes) é animada (APNG: o pedaço acTL vem antes do primeiro IDAT)."""
+    dados = imagem.find(b"IDAT")
+    return b"acTL" in imagem[:dados if dados > 0 else len(imagem)]
+
+
 def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
     """
     Grava em destino o vídeo remontado pelos trechos (início, fim, velocidade), com os
-    letreiros (imagem PNG em bytes, início, fim, x, y) por cima. Devolve "" quando deu
+    letreiros (imagem PNG em bytes, parada ou animada, início, fim, x, y) por cima. Devolve "" quando deu
     certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not trechos:
@@ -641,7 +650,7 @@ def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         imagens = []
         for i, (imagem, inicio, fim, x, y) in enumerate(letreiros):
-            caminho = os.path.join(pasta, f"letreiro_{i}.png")
+            caminho = os.path.join(pasta, f"letreiro_{i}.{'apng' if animada(imagem) else 'png'}")
             with open(caminho, "wb") as arquivo:
                 arquivo.write(imagem)
             imagens.append((caminho, inicio, fim, x, y))
