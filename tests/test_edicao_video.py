@@ -1585,10 +1585,14 @@ def test_caixa_com_pulinho_no_video_de_verdade(tmp_path):
     assert vermelho(77) is None                                   # 2,57 s
 
 
-def test_as_tres_musicas_de_fundo_estao_na_midia():
-    # Escolha do Rafael (28/10, P55): 3 músicas feitas pelo Claude do zero (animada, calma e
-    # divertida), sem música de ninguém, para os vídeos sem som.
-    assert [nome for nome, _ in edicao_video.MUSICAS] == ["animada", "calma", "divertida"]
+def test_as_musicas_de_fundo_estao_na_midia():
+    # Escolhas do Rafael: as 3 músicas feitas pelo Claude do zero (28/10, P55: animada, calma e divertida), sem
+    # música de ninguém, para os vídeos sem som, e mais 8, cada uma com o clima de outros tipos de vídeo (16/11,
+    # P242 1).
+    assert [nome for nome, _ in edicao_video.MUSICAS] == [
+        "animada", "calma", "divertida", "romântica", "elegante", "energia", "tecnologia", "fofa", "aconchegante",
+        "tropical", "mistério"]
+    assert len({arquivo for _, arquivo in edicao_video.MUSICAS}) == len(edicao_video.MUSICAS)
     for _, arquivo in edicao_video.MUSICAS:
         caminho = os.path.join(edicao_video.PASTA_DA_MIDIA, arquivo)
         assert os.path.getsize(caminho) > 100_000
@@ -1600,10 +1604,11 @@ def test_video_sem_som_ganha_a_musica_da_vez_e_o_rodizio_anda(monkeypatch):
     monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
     assert edicao_video.musicas_de_fundo("com_som.mp4", 3) == [None, None, None]
     monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: True)
-    nomes = [edicao_video.musicas_de_fundo("mudo.mp4")[0][0] for _ in range(4)]
-    assert nomes == ["animada", "calma", "divertida", "animada"]
+    nomes = [edicao_video.musicas_de_fundo("mudo.mp4")[0][0] for _ in range(len(edicao_video.MUSICAS) + 1)]
+    # O rodízio passa por todas, na ordem, e volta à 1ª.
+    assert nomes == [nome for nome, _ in edicao_video.MUSICAS] + ["animada"]
     # Cada versão do exemplo leva outra música, a partir da da vez.
-    assert [m[0] for m in edicao_video.musicas_de_fundo("mudo.mp4", 3)] == ["calma", "divertida", "animada"]
+    assert [m[0] for m in edicao_video.musicas_de_fundo("mudo.mp4", 3)] == ["calma", "divertida", "romântica"]
     assert edicao_video.musicas_de_fundo("mudo.mp4")[0][1].endswith(os.path.join("midia", "musica_divertida.m4a"))
     # A vez fica junto da configuração, sem apagar o resto.
     assert db.ler_config("shopee_video", {})["edicao_ligada"]
@@ -1635,7 +1640,7 @@ def test_a_ia_escolhe_a_musica_e_o_rodizio_fica_para_quando_ela_nao_diz(monkeypa
     assert anotado["musica"] == {"nome": "calma", "pela_ia": True}
     # As versões do exemplo levam as outras, na ordem depois da escolhida.
     assert [m[0] for m in edicao_video.musicas_de_fundo("mudo.mp4", 3, escolhida="divertida")] == [
-        "divertida", "animada", "calma"]
+        "divertida", "romântica", "elegante"]
     # Sem a resposta da IA (ou com uma que não é das nossas), a da vez: o rodízio não andou com as da IA.
     assert edicao_video.musicas_de_fundo("mudo.mp4", anotar=anotado, escolhida="")[0][0] == "animada"
     assert anotado["musica"] == {"nome": "animada", "pela_ia": False}
@@ -1661,6 +1666,9 @@ def test_a_ia_diz_a_musica_pelo_clima_de_cada_uma():
     assert (musica("calma"), musica("Calma (lo-fi tranquilo)"), musica("DIVERTIDA."), musica("rock"), musica(None),
             musica(3), musica("a calma")) == ("calma", "calma", "divertida", "", "", "", "")
     assert edicao_video._nome_lugar_e_falas({"musica": "Animada"})["musica"] == "animada"
+    # As novas, com acento no nome (P242 1), valem com ou sem ele na resposta.
+    assert (musica("Romantica"), musica("romântica"), musica("misterio (pizzicato)"), musica("Aconchegante")) == (
+        "romântica", "romântica", "mistério", "aconchegante")
     assert "musica" not in edicao_video._nome_lugar_e_falas({"musica": "sertanejo"})
 
 
@@ -1782,8 +1790,8 @@ def test_exemplo_sem_som_tem_uma_musica_em_cada_video(monkeypatch, tmp_path):
     musicas.clear()
     _, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
                                                 VERSOES_DA_IA, "Garanta a sua aqui embaixo", falas=[], lugar="alto")
-    assert musicas == ["musica_calma.m4a", "musica_divertida.m4a", "musica_animada.m4a"]
-    assert [v["musica"] for v in resumo["versoes"]] == ["calma", "divertida", "animada"]
+    assert musicas == ["musica_calma.m4a", "musica_divertida.m4a", "musica_romantica.m4a"]
+    assert [v["musica"] for v in resumo["versoes"]] == ["calma", "divertida", "romântica"]
 
 
 def test_comando_com_musica_poe_ela_no_video_inteiro_em_laco(monkeypatch, tmp_path):
