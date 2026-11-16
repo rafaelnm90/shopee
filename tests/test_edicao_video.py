@@ -126,7 +126,9 @@ def test_maozinha_amarela_desce_toca_e_volta_com_a_onda():
     # A mão amarela em todos os quadros; ela desce até tocar (no meio da volta) e volta para cima.
     pes = [pe_da_mao(quadro) for quadro in vistos]
     assert pes[0] < pes[10] and pes[24] < pes[10] and max(pes) - min(pes) >= 15
-    # A onda (branca, com o anel vermelho) só depois do toque, e só acima da linha do toque.
+    # A onda (branca, com o anel vermelho) só depois do toque: o anel inteiro, deitado em volta da ponta do dedo, com a
+    # frente dele abaixo da ponta (P238 1, 16/11: só a metade de cima, com a mão tampando o meio, parecia um círculo
+    # quebrado), cabendo inteiro no quadro, acima do cartão do produto (P71).
     vermelho = edicao_video.VERMELHO_DO_DESTAQUE
 
     def anel(quadro):
@@ -134,7 +136,8 @@ def test_maozinha_amarela_desce_toca_e_volta_com_a_onda():
                 if quadro.getpixel((x, y))[3] > 60 and sum(abs(c - d) for c, d in zip(quadro.getpixel((x, y))[:3],
                                                                                       vermelho)) < 60]
     assert not anel(vistos[5]) and anel(vistos[15])
-    assert max(y for _x, y in anel(vistos[15])) <= max(pes) + 6
+    assert max(y for _x, y in anel(vistos[19])) > max(pes) + 2
+    assert all(quadro.getpixel((x, altura - 1))[3] == 0 for quadro in vistos for x in range(largura))
     # O contorno branco em volta e o fundo transparente; nada escuro e opaco.
     pixels = [vistos[0].getpixel((x, y)) for x in range(largura) for y in range(altura)]
     assert [p for p in pixels if p[3] == 255 and min(p[:3]) > 240]

@@ -3,7 +3,8 @@ A mãozinha tocando dos vídeos da Shopee Vídeo (midia/mao_tocando.apng), no lu
 cascata (escolha do Rafael, 15/11, P231 1: DECISOES.md, Shopee Vídeo): a mãozinha amarela de
 emoji, com o contorno branco e a sombra leve, desce, toca logo acima do cartão do produto que o
 app mostra, aperta e volta, uma volta por segundo, e do toque sai uma onda (branca, com um anel
-no vermelho do destaque). Ela é sempre amarela: a cor do painel não vale para ela. O quadro tem o
+no vermelho do destaque), inteira, deitada em volta da ponta do dedo (P238 1). Ela é sempre
+amarela: a cor do painel não vale para ela. O quadro tem o
 tamanho do TAMANHO_DA_SETA do edicao_video.py, com a margem transparente onde cabem o contorno e a
 sombra, e a ponta do dedo onde terminava a setinha de baixo, logo acima do cartão. O desenho da
 mão é o do emoji da fonte Noto Color Emoji (licença livre), o mesmo do exemplo que o Rafael
@@ -33,8 +34,8 @@ VERMELHO = (214, 24, 38)         # o VERMELHO_DO_DESTAQUE do edicao_video.py, no
 QUADROS_POR_SEGUNDO = 25
 QUADROS_POR_VOLTA = 25           # uma volta por segundo
 TOQUE = (0.4, 0.5)               # da volta: desce até 0,4, fica apertando até 0,5 e volta até o fim
-ONDA = (9.5, 42.0)               # o raio da onda no toque e quanto ela cresce até o fim da volta
-ACHATAMENTO = 0.55               # a onda é uma elipse deitada (o toque visto de lado)
+ONDA = (8.0, 31.0)               # o raio da onda no toque e quanto ela cresce até o fim da volta
+ACHATAMENTO = 0.30               # a onda é uma elipse deitada (o toque visto de lado), achatada para caber inteira
 VEZES = 4                        # a onda é desenhada maior e reduzida, para a borda sair lisa
 
 
@@ -76,14 +77,15 @@ def mao():
 
 def onda(k):
     """
-    A onda do toque na fração k (0 a 1) do caminho dela, no quadro todo (RGBA): só a metade de cima,
-    acima da linha do toque. A de baixo ficaria embaixo do cartão do produto, que o app desenha por
-    cima do vídeo, e o sinal inteiro fica acima do cartão (P71).
+    A onda do toque na fração k (0 a 1) do caminho dela, no quadro todo (RGBA): o anel inteiro, deitado em volta
+    da ponta do dedo, atrás da mão (P238 1: a metade de cima só, com a mão tampando o meio, parecia um círculo
+    quebrado). Ele é achatado e cresce só até caber inteiro no quadro, acima do cartão do produto que o app
+    desenha por cima do vídeo (o sinal inteiro acima do cartão, P71).
     """
     grande = Image.new("RGBA", (QUADRO[0] * VEZES, QUADRO[1] * VEZES), (0, 0, 0, 0))
     desenho = ImageDraw.Draw(grande)
     raio = (ONDA[0] + ONDA[1] * k) * VEZES
-    x, y = PONTA[0] * VEZES, (PONTA[1] + 3) * VEZES
+    x, y = PONTA[0] * VEZES, PONTA[1] * VEZES
     forca = int(230 * (1 - k))
     branca, vermelha = 5 * VEZES, 3 * VEZES
     desenho.ellipse((x - raio, y - raio * ACHATAMENTO, x + raio, y + raio * ACHATAMENTO),
@@ -92,7 +94,6 @@ def onda(k):
     if dentro > vermelha:
         desenho.ellipse((x - dentro, y - dentro * ACHATAMENTO, x + dentro, y + dentro * ACHATAMENTO),
                         outline=VERMELHO + (int(forca * 0.8),), width=vermelha)
-    desenho.rectangle((0, y, grande.width, grande.height), fill=(0, 0, 0, 0))
     return grande.resize(QUADRO, Image.LANCZOS)
 
 
