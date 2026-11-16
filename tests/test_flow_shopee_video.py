@@ -849,19 +849,25 @@ def test_versoes_sem_a_do_modelo_do_teste_nao_baixam(celular):
 # --- A produção: 1 vídeo de IA por dia, que vira rascunho do robô (P232 1) ---
 
 def _escolhido():
-    return {"id": "v1", "link": "https://s.shopee.com.br/abc", "nome": "Copo Térmico Inox", "foto": _jpeg(),
+    return {"id": "ia:2026-11-16", "link": "https://s.shopee.com.br/abc", "nome": "Copo Térmico Inox", "foto": _jpeg(),
             "estilo": "comedia", "prompt": "The exact stainless steel tumbler from the photo, a funny kitchen scene.",
-            "cena": "O copo na bancada da cozinha.", "item": "456", "valor": 3.5}
+            "cena": "O copo na bancada da cozinha.", "item": "456", "valor": 3.5,
+            "origem": "os produtos em alta da Shopee"}
 
 
 def test_producao_gera_no_omni_1_2_baixa_e_confere_sem_mandar_ao_privado(celular, capsys):
     # Escolha do Rafael (15/11, P232 1): 1 vídeo por dia no Omni 1.2 Flash, que vira rascunho do robô.
     atual = flow.comecar_producao("2026-11-16", _escolhido(), 1)
     assert atual["estado"] == "escolhido" and (atual["modelo"], atual["custo"]) == ("Omni 1.2 Flash", 24)
-    assert atual["foto"].endswith("producao_2026-11-16.jpg") and atual["id_video"] == "v1"
+    assert atual["foto"].endswith("producao_2026-11-16.jpg") and atual["id_video"] == "ia:2026-11-16"
+    # De que lista da API de afiliado o produto veio (P234 1) fica no andamento, para o aviso do rascunho.
+    assert atual["origem"] == "os produtos em alta da Shopee"
     assert flow.estilos_recentes()[-1] == "comedia"
+    # Até o Gerar, o produto ainda pode voltar à escolha; tocado o Gerar, ele não ganha outro vídeo (P234 1).
+    assert flow.itens_gerados() == []
     assert flow.producao_no_celular(celular, atual) is True
     assert celular.geracoes == 1 and celular.modelo == "Omni 1.2 Flash"
+    assert flow.itens_gerados() == ["456"]
     atual = flow.producao()
     assert atual["estado"] == "baixado" and atual["arquivo"].endswith("producao_2026-11-16.mp4")
     assert atual["gerado_em"] and atual["custo"] == 24
@@ -903,6 +909,8 @@ def test_producao_parada_no_flow_guarda_o_caso(celular, monkeypatch):
         flow.producao_no_celular(celular, atual)
     assert ("parou", "gerar: o Flow não mostrou o vídeo sendo gerado") in celular.guardados
     assert flow.producao()["estado"] == "gerando"
+    # O Gerar foi tocado (o crédito pode ter sido gasto): o produto já fica de fora das próximas escolhas.
+    assert flow.itens_gerados() == ["456"]
 
 
 def test_producao_nova_tira_os_arquivos_da_de_antes(celular):
@@ -935,3 +943,48 @@ def test_legenda_da_producao_e_bebida_em_espera_no_pedido(monkeypatch):
     monkeypatch.setattr(flow.assistente, "BEBIDA_EM_ESPERA", False)
     flow.pedido_para_o_produto("https://s.shopee.com.br/vinho")
     assert flow.TRECHO_DA_BEBIDA not in pedidos[1]
+
+
+def test_pedido_pelo_anuncio_diz_se_a_foto_serve(monkeypatch):
+    # A escolha pela lista da API de afiliado (P234 1) já tem o nome e a foto do anúncio, e precisa saber se a IA
+    # recusou a foto (o produto não volta à escolha) ou se não deu para saber (ele volta).
+    respostas = []
+
+    async def ia(prompt, imagens=None):
+        assert "Copo Térmico Inox" in prompt and imagens[0][1] == "image/jpeg"
+        return respostas.pop(0)
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", ia)
+    link = "https://s.shopee.com.br/copo"
+    respostas.append(json.dumps({"serve": True, "motivo": "", "estilo": "fala", "prompt": "The exact tumbler.",
+                                 "cena": "Uma moça mostra o copo."}))
+    pedido, serve = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg())
+    assert serve is True and pedido["link"] == link and pedido["nome"] == "Copo Térmico Inox"
+    assert pedido["estilo"] == "fala" and pedido["prompt"] == "The exact tumbler." and pedido["foto"]
+    respostas.append(json.dumps({"serve": False, "motivo": "colagem de fotos"}))
+    assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg()) == (None, False)
+    # Sem a resposta da IA, sem a foto ou sem o nome, não dá para saber: None, e a IA nem é chamada sem a foto.
+    respostas.append("não sei")
+    assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg()) == (None, None)
+    assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", None) == (None, None)
+    assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", b"nao e imagem") == (None, None)
+    assert flow.pedido_para_o_anuncio(link, "", _jpeg()) == (None, None) and respostas == []
+
+
+def test_memoria_dos_produtos_que_nao_voltam_a_escolha(bm, monkeypatch):
+    # P234 1: a lista da API muda pouco de um dia para o outro. O produto que já teve um vídeo gerado e o de foto
+    # que a IA recusou ficam lembrados (só os números), sem repetir, os mais novos por último.
+    assert flow.itens_gerados() == [] and flow.fotos_recusadas() == []
+    flow.lembrar_item_gerado("11")
+    flow.lembrar_item_gerado(22)
+    flow.lembrar_item_gerado("11")
+    flow.lembrar_item_gerado("")
+    flow.lembrar_foto_recusada("33")
+    assert flow.itens_gerados() == ["22", "11"] and flow.fotos_recusadas() == ["33"]
+    # O resto da chave do Flow (o andamento do dia, os estilos) fica como estava.
+    flow.guardar_producao(estado="pronto")
+    flow.lembrar_foto_recusada("44")
+    assert flow.producao()["estado"] == "pronto" and flow.fotos_recusadas() == ["33", "44"]
+    monkeypatch.setattr(flow, "ITENS_LEMBRADOS", 2)
+    flow.lembrar_foto_recusada("55")
+    assert flow.fotos_recusadas() == ["44", "55"]

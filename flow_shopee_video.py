@@ -4,11 +4,11 @@ Vídeos feitos por IA no Google Flow, no celular do robô da Shopee Vídeo, com 
 Rafael. Primeiro o teste que ele escolheu (P229 1, 15/11/2026): 3 vídeos do mesmo produto, um em
 cada modelo do Flow, só no privado dele, para ele escolher o modelo. Depois dele, a produção (P232
 1, 15/11/2026): 1 vídeo por dia no Omni 1.2 Flash, o mais avançado, que vira um rascunho do robô
-(robo_shopee_video escolhe o produto pelas regras dele e chama producao_no_celular na rodada dele;
-o rascunho leva a nossa edição, os produtos e o Rótulo de IA ligado, e o Rafael aprova em Rascunhos
-do Robô 📝). A IA vê a foto do anúncio e o nome do produto e escreve o pedido do vídeo (a cena, o
-movimento da câmera e a luz), sempre com o produto igual ao da foto; o Flow gera o vídeo a partir
-da foto.
+(robo_shopee_video escolhe o produto entre os produtos em alta da API de afiliado, P234 1, e chama
+producao_no_celular na rodada dele; o rascunho leva a nossa edição, os produtos e o Rótulo de IA
+ligado, e o Rafael aprova em Rascunhos do Robô 📝). A IA vê a foto do anúncio e o nome do produto e
+escreve o pedido do vídeo (a cena, o movimento da câmera e a luz), sempre com o produto igual ao da
+foto; o Flow gera o vídeo a partir da foto.
 
 O caminho no app (mapeado no Motorola em 15/11/2026, sem gerar nada; as telas estão no
 roteiro_robo_shopee_video.md): o ícone "Flow" → o projeto do robô na lista ("Shopee Video";
@@ -257,25 +257,35 @@ def jpeg_sem_metadados(dados):
         return None
 
 
+def pedido_para_o_anuncio(link, nome, foto, evitar=""):
+    """
+    O pedido do vídeo para o anúncio já em mãos (o link, o nome e os bytes da foto do anúncio): a foto sem os
+    dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
+    trecho de evitar_os_recentes). (o pedido, serve): o pedido é {"link", "nome", "foto" (bytes), "estilo",
+    "prompt", "cena"} quando a IA acha a foto boa para o vídeo; serve é False quando ela disse que a foto não
+    serve e None quando não deu para saber (a foto não é uma imagem, ou a IA não respondeu).
+    """
+    foto = jpeg_sem_metadados(foto) if foto and nome else None
+    if not foto:
+        return None, None
+    resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
+        PEDIDO_DA_IA.format(nome=nome, evitar=evitar, bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
+        imagens=[(foto, "image/jpeg")])))
+    if not resposta:
+        return None, None
+    if not resposta["serve"]:
+        return None, False
+    return {"link": link, "nome": nome, "foto": foto, "estilo": resposta["estilo"], "prompt": resposta["prompt"],
+            "cena": resposta["cena"]}, True
+
+
 def pedido_para_o_produto(link, evitar=""):
     """
-    O pedido do vídeo para o produto do link: a foto do anúncio (sem os dados de câmera), o nome e o
-    que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o trecho de
-    evitar_os_recentes). {"link", "nome", "foto" (bytes), "estilo", "prompt", "cena"}; None quando o
-    anúncio não traz a foto e o nome ou a IA não acha a foto boa para o vídeo.
+    O pedido do vídeo para o produto do link (pedido_para_o_anuncio, com a foto e o nome que a API de afiliado
+    dá para o link); None quando o anúncio não traz a foto e o nome ou a IA não acha a foto boa para o vídeo.
     """
     anuncio = ps.anuncio_do_produto({"link": link})
-    foto = jpeg_sem_metadados(anuncio["foto"]) if anuncio.get("foto") and anuncio.get("nome") else None
-    if not foto:
-        return None
-    resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
-        PEDIDO_DA_IA.format(nome=anuncio["nome"], evitar=evitar,
-                            bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
-        imagens=[(foto, "image/jpeg")])))
-    if not resposta or not resposta["serve"]:
-        return None
-    return {"link": link, "nome": anuncio["nome"], "foto": foto, "estilo": resposta["estilo"],
-            "prompt": resposta["prompt"], "cena": resposta["cena"]}
+    return pedido_para_o_anuncio(link, anuncio.get("nome"), anuncio.get("foto"), evitar)[0]
 
 
 def escolher_o_produto():
@@ -1094,16 +1104,23 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
 
 
 # --- A produção: 1 vídeo de IA por dia, que vira rascunho do robô (P232 1) ---
-# O andamento do vídeo do dia fica na chave do Flow, em "producao": a data, o estado, o vídeo da fonte de onde veio
-# o produto ("id_video"), o produto ("link", "nome", "item", "valor"), o pedido da IA ("estilo", "prompt", "cena"),
-# a foto e o vídeo no servidor e a conferência da IA. Os estados: "parou" (antes do Gerar, sem gastar crédito: tenta
-# de novo no dia, até TENTATIVAS_ANTES_DO_GERAR), "sem produto" (nenhum vídeo da fonte serviu hoje), "gerando" (o
-# Gerar foi tocado e falta o vídeo chegar ao servidor), "baixado" (falta a conferência), "pronto" (espera o
-# rascunho), "descartado" (a IA viu outro produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho) e
-# "desistiu" (não virou rascunho em TENTATIVAS_DO_RASCUNHO). O robô escolhe o produto pelas regras dele e chama a
-# produção na rodada dele, com a trava do celular na mão. Escolha do Rafael (15/11/2026, P232 1): DECISOES.md.
+# O andamento do vídeo do dia fica na chave do Flow, em "producao": a data, o estado, o nome que o vídeo de IA tem
+# entre os vídeos do robô ("id_video"), o produto ("link", "nome", "item", "valor") e de onde ele veio ("origem": a
+# lista da API de afiliado, P234 1), o pedido da IA ("estilo", "prompt", "cena"), a foto e o vídeo no servidor e a
+# conferência da IA. Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou boa
+# nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
+# TENTATIVAS_ANTES_DO_GERAR; "sem produto" (nenhum produto da lista serve hoje), "gerando" (o Gerar foi tocado e
+# falta o vídeo chegar ao servidor), "baixado" (falta a conferência), "pronto" (espera o rascunho), "descartado" (a
+# IA viu outro produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho) e "desistiu" (não virou
+# rascunho em TENTATIVAS_DO_RASCUNHO). O robô escolhe o produto pelas regras dele e chama a produção na rodada
+# dele, com a trava do celular na mão. Escolhas do Rafael (15/11/2026, P232 1 e P234 1): DECISOES.md.
 ESTADOS_PENDENTES = ("gerando", "baixado")
 ESTADOS_DO_DIA_ACABADO = ("sem produto", "pronto", "descartado", "usado", "desistiu")
+# A escolha do produto pela lista da API de afiliado (P234 1) vai sempre do que paga mais para o que paga menos:
+# sem uma memória, o produto que não deu certo num dia seria o 1º de novo no dia seguinte. Ficam de fora o produto
+# que já teve um vídeo gerado (itens_gerados: virou rascunho, foi recusado ou descartado) e o de foto que a IA não
+# achou boa para o vídeo (fotos_recusadas). Só os números dos produtos, os ITENS_LEMBRADOS mais novos de cada lista.
+ITENS_LEMBRADOS = 600
 
 
 def producao():
@@ -1127,11 +1144,42 @@ def recomecar_producao(dia, **campos):
     db.atualizar_config(CHAVE, lambda dados: dados.update(producao=dict(campos, data=dia)))
 
 
+def itens_gerados():
+    """Os produtos que já tiveram um vídeo de IA gerado (os números deles): não ganham outro."""
+    return [str(item) for item in (db.ler_config(CHAVE, {}) or {}).get("itens_gerados") or []]
+
+
+def fotos_recusadas():
+    """Os produtos cuja foto do anúncio a IA não achou boa para o vídeo (os números deles): não voltam à IA."""
+    return [str(item) for item in (db.ler_config(CHAVE, {}) or {}).get("fotos_recusadas") or []]
+
+
+def _lembrar(lista, item):
+    """Põe o produto no fim da lista da chave do Flow (itens_gerados ou fotos_recusadas), sem repetir."""
+    if not item:
+        return
+
+    def alterar(dados):
+        dados[lista] = ([i for i in dados.get(lista) or [] if str(i) != str(item)] + [str(item)])[-ITENS_LEMBRADOS:]
+    db.atualizar_config(CHAVE, alterar)
+
+
+def lembrar_item_gerado(item):
+    """O produto teve um vídeo gerado no Flow (o crédito foi gasto): fica de fora das próximas escolhas."""
+    _lembrar("itens_gerados", item)
+
+
+def lembrar_foto_recusada(item):
+    """A IA disse que a foto do anúncio do produto não serve para o vídeo: ele fica fora das próximas escolhas."""
+    _lembrar("fotos_recusadas", item)
+
+
 def comecar_producao(dia, escolhido, tentativas_de_gerar):
     """
-    Guarda o pedido do vídeo do dia (escolhido: o pedido_para_o_produto com o vídeo da fonte, "id", e o
-    produto, "item" e "valor"), no estado "escolhido", e o estilo na lista dos últimos (estilos_recentes).
-    A foto vai a um arquivo ao lado dos vídeos; o banco fica com o caminho. Devolve o andamento novo.
+    Guarda o pedido do vídeo do dia (escolhido: o pedido_para_o_anuncio com o nome do vídeo de IA entre os
+    vídeos do robô, "id", o produto, "item" e "valor", e de onde ele veio, "origem"), no estado "escolhido", e o
+    estilo na lista dos últimos (estilos_recentes). A foto vai a um arquivo ao lado dos vídeos; o banco fica com o
+    caminho. Devolve o andamento novo.
     """
     recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar)
     os.makedirs(PASTA, exist_ok=True)
@@ -1140,8 +1188,8 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar):
         arquivo.write(escolhido["foto"])
     modelo, custo = MODELO_DA_PRODUCAO
     guardar_producao(id_video=escolhido["id"], link=escolhido["link"], nome=escolhido["nome"],
-                     item=escolhido.get("item", ""), valor=escolhido.get("valor"), foto=foto,
-                     estilo=escolhido["estilo"], prompt=escolhido["prompt"], cena=escolhido["cena"],
+                     item=escolhido.get("item", ""), valor=escolhido.get("valor"), origem=escolhido.get("origem", ""),
+                     foto=foto, estilo=escolhido["estilo"], prompt=escolhido["prompt"], cena=escolhido["cena"],
                      modelo=modelo, custo=custo, escolhido_em=agora())
     guardar(estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
     return producao()
@@ -1157,11 +1205,21 @@ def producao_no_celular(d, atual):
     local = os.path.join(PASTA, f"producao_{atual['data']}.mp4")
     try:
         # Sem as telas da espera nos casos: todo dia, elas tirariam do servidor os casos das falhas.
-        return no_flow(d, atual, atual["modelo"], atual["custo"], local, guardar_producao,
+        return no_flow(d, atual, atual["modelo"], atual["custo"], local, _marcar_a_producao,
                        so_baixar=atual.get("estado") == "gerando", guardar_telas=False)
     except Parada as e:
         casos_robo.guardar(d, "video de IA", "parou", str(e), passo="flow")
         raise
+
+
+def _marcar_a_producao(**campos):
+    """
+    Guarda o andamento do vídeo do dia; no toque do Gerar ("gerado_em"), o produto entra nos que já tiveram um
+    vídeo gerado (itens_gerados), na mesma hora: a rodada que cai logo depois não deixa o produto voltar à escolha.
+    """
+    guardar_producao(**campos)
+    if campos.get("gerado_em"):
+        lembrar_item_gerado(producao().get("item"))
 
 
 def conferir_a_producao():

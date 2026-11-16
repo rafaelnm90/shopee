@@ -1568,7 +1568,10 @@ async def exemplo_capa_handler(message: types.Message, state: FSMContext):
 SITUACOES_DO_VIDEO_DE_IA = {
     "escolhido": "começou e não terminou (a rodada caiu no meio); tenta de novo",
     "parou": "parou antes do Gerar (nenhum crédito gasto); tenta de novo hoje",
-    "sem produto": "nenhum produto da fonte serviu (os próximos 10 não pagam o mínimo ou a foto não serve)",
+    "sem foto": "a IA não achou boa a foto dos produtos que olhou (nenhum crédito gasto); tenta de novo hoje com os "
+                "próximos da lista",
+    "sem produto": "nenhum produto da lista da Shopee serviu (nota 4,5 ou mais, pagando o mínimo, ainda não postado "
+                   "e com a foto boa para o vídeo)",
     "gerando": "gerado no Flow; falta baixar, na próxima rodada",
     "baixado": "baixado; falta a conferência da IA",
     "pronto": "pronto: vira o próximo rascunho do plano do dia",
@@ -1590,18 +1593,23 @@ def linha_do_video_de_ia_de_hoje(agora=None):
 
 
 def texto_video_ia(config, agora=None):
-    """A tela do Vídeo de IA ✨. Escolha do Rafael (15/11, P232 1): DECISOES.md, Shopee Vídeo."""
+    """A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1): DECISOES.md, Shopee Vídeo."""
     modelo, custo = robo.flow.MODELO_DA_PRODUCAO
     ligado = robo.video_de_ia_ligado(config)
+    minimo = robo.assistente._reais(robo.MINIMO_POR_VENDA)
+    nota = f"{robo.NOTA_MINIMA_DO_VIDEO_DE_IA:.1f}".replace(".", ",")
     return (
         "✨ <b>Vídeo de IA</b>\n"
         f"Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo de 8 s feito por IA, no "
-        f"{modelo} ({custo} créditos, dentro dos 50 grátis do dia), com um produto da fonte: o que paga mais por venda "
-        f"entre os próximos {robo.VIDEOS_NA_ESCOLHA}, ainda não postado. A IA escreve o pedido pela foto do anúncio, num "
-        "estilo que varia (demonstração, pessoa falando do produto, inusitado ou comédia), e confere o vídeo pronto com "
-        "a foto. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com a nossa edição, os produtos e o Rótulo "
-        f"de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar. Se a IA vir outro produto no vídeo, ele não "
-        "vira rascunho. Nunca mais de um vídeo por dia.\n\n"
+        f"{modelo} ({custo} créditos, dentro dos 50 grátis do dia). O produto vem da própria Shopee, sem depender dos "
+        f"vídeos da fonte: entre os produtos em alta, os de nota {nota} ou mais, que pagam pelo menos {minimo} por "
+        "venda e que você ainda não postou, o robô pega o que paga mais por venda (sem a lista dos produtos em alta, "
+        "os mais vendidos dos nichos dos seus Achadinhos). A IA olha a foto do anúncio antes (se não servir, vai para "
+        "o próximo), escreve o pedido num estilo que varia (demonstração, pessoa falando do produto, inusitado ou "
+        "comédia) e confere o vídeo pronto com a foto. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
+        f"a nossa edição, os produtos e o Rótulo de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar. Se a IA "
+        "vir outro produto no vídeo, ele não vira rascunho. Nunca mais de um vídeo por dia, e o produto que já ganhou "
+        "um vídeo de IA não ganha outro.\n\n"
         f"Agora: {'✅ <b>ligado</b>' if ligado else '⏸️ <b>desligado</b> (o robô não faz nem usa o vídeo de IA)'}\n"
         f"Último: {html_escape(linha_do_video_de_ia_de_hoje(agora))}\n\n"
         "<b>O que cada botão faz</b>\n"

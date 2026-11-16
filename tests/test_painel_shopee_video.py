@@ -2194,6 +2194,12 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     for trecho in ("Omni 1.2 Flash (24 créditos", "Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz",
                    "Nunca mais de um vídeo por dia"):
         assert trecho in msg.saidas[-1]
+    # Escolha do Rafael (15/11, P234 1): o produto vem da API de afiliado da Shopee, sem depender da fonte.
+    for trecho in ("sem depender dos vídeos da fonte", "entre os produtos em alta, os de nota 4,5 ou mais, que pagam "
+                   "pelo menos R$ 2,00 por venda e que você ainda não postou", "o que paga mais por venda",
+                   "os mais vendidos dos nichos dos seus Achadinhos", "não ganha outro"):
+        assert trecho in msg.saidas[-1]
+    assert "próximos 10" not in msg.saidas[-1]
     assert _textos(sv.teclado_video_ia(sv.ler_config())) == ["Desligar Vídeo de IA ⏸️", "Voltar ao Robô 🔙"]
     rodar(sv.ligar_video_ia_handler(Msg("Desligar Vídeo de IA ⏸️"), est))
     assert sv.robo.ler_config()["robo_video_ia"] is False
@@ -2207,3 +2213,9 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     assert "hoje: pronto: vira o próximo rascunho" in sv.texto_video_ia(sv.ler_config())
     sv.robo.flow.recomecar_producao("2026-10-01", estado="descartado")
     assert "o de 01/10: não virou rascunho" in sv.texto_video_ia(sv.ler_config())
+    # A foto que a IA não achou boa não gasta crédito, e o dia ainda tem outra tentativa; sem produto, não.
+    sv.robo.flow.recomecar_producao(hoje, estado="sem foto")
+    assert "hoje: a IA não achou boa a foto dos produtos que olhou (nenhum crédito gasto); tenta de novo hoje" in \
+        sv.texto_video_ia(sv.ler_config())
+    sv.robo.flow.recomecar_producao(hoje, estado="sem produto", origem=sv.robo.ORIGEM_EM_ALTA)
+    assert "hoje: nenhum produto da lista da Shopee serviu" in sv.texto_video_ia(sv.ler_config())
