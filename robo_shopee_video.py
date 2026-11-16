@@ -33,7 +33,8 @@ que pode (P161 1):
    intervalo sorteado entre eles, sempre dentro do Horário do Robô;
 4. faz no Google Flow o vídeo de IA do dia (P232 1: 1 por dia, no Omni 1.2 Flash, com o produto que
    paga mais por venda entre os produtos em alta da API de afiliado, P234 1), quando o plano do dia
-   ainda tem um horário por vir: ele vira o rascunho desse horário;
+   ainda tem um horário por vir: ele vira o rascunho desse horário; os do Preparar 1 Agora ⚡ → De IA ✨
+   contam junto, até VIDEOS_DE_IA_POR_DIA no dia (P243);
 5. prepara um rascunho novo quando um horário do plano do dia passou: cada dia sorteia
    quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô;
 6. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia, das 8h às 22h, com pelo
@@ -3316,8 +3317,9 @@ def preparar_o_de_ia(d, config, agora=None, comeco=None):
 # escreve o pedido pela foto do anúncio (flow.pedido_para_o_anuncio), o Flow gera e o robô baixa; a IA confere o
 # vídeo com a foto. Pronto, ele vira o rascunho do próximo horário (preparar_rascunho), com a nossa edição, a troca
 # de loja, os produtos a mais, as conferências de sempre e o Rótulo de IA ligado; o Rafael aprova em Rascunhos do
-# Robô 📝. Nunca mais de um Gerar por dia (24 créditos, dentro dos 50 grátis do dia). No registro, só rótulos fixos
-# e números. Escolhas do Rafael (15/11/2026, P232 1 e P234 1): DECISOES.md, Shopee Vídeo.
+# Robô 📝. O do robô é 1 por dia (24 créditos, dentro dos 50 grátis do dia); os do Preparar 1 Agora ⚡ → De IA ✨
+# contam junto no limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos e números.
+# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 # Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
@@ -3351,7 +3353,8 @@ SEM_LINK_CURTO_SEGUIDOS = 3
 # limite de vídeos de IA do dia junto com o do robô: VIDEOS_DE_IA_POR_DIA Gerar (None: sem limite).
 # Escolha do Rafael (P243): DECISOES.md, Shopee Vídeo.
 ORIGENS_DO_PEDIDO = ("aleatorio", "fonte", "ia")
-VIDEOS_DE_IA_POR_DIA = 2
+# "P243 até 5 por dia" (16/11): 5 contando o do robô; do 3º em diante, cada um passa dos 50 créditos grátis.
+VIDEOS_DE_IA_POR_DIA = 5
 # O rascunho do vídeo de IA do botão que não cabe na mesma rodada (o vídeo gerado e por baixar, ou pronto sem tempo
 # para o rascunho) fica pedido no estado do robô (rascunho_de_ia_pedido), e o painel chama a rodada seguinte na hora.
 DE_IA_NA_RODADA_SEGUINTE = "vídeo de IA pronto; o rascunho sai na rodada seguinte"

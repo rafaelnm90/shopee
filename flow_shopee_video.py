@@ -67,9 +67,11 @@ PASTA = os.path.join(os.path.expanduser("~"), "shopee_video", "flow")
 # dos 50 grátis do dia): o 1º vídeo é o que mostra as telas depois do Gerar.
 MODELOS_DO_TESTE = (("Veo 3.1 - Lite", 10), ("Omni 1.1 Flash", 12), ("Omni 1.2 Flash", 24))
 # A produção: depois dos 3 vídeos do teste, o Rafael escolheu o mais avançado para 1 vídeo de IA por dia, que vira
-# um rascunho do robô, no lugar de um da fonte (P232 1). 24 créditos por vídeo, dentro dos 50 grátis do dia: nunca
-# mais de um Gerar por dia. Escolha do Rafael (15/11/2026): DECISOES.md, Shopee Vídeo.
+# um rascunho do robô, no lugar de um da fonte (P232 1). 24 créditos por vídeo; o dia tem CREDITOS_GRATIS_DO_DIA.
+# O do robô é 1 por dia; o Preparar 1 Agora ⚡ → De IA ✨ faz outros, até 5 no dia contando o do robô (P243), e o
+# que passa dos grátis sai do plano. Escolhas do Rafael (15/11 e 16/11/2026): DECISOES.md, Shopee Vídeo.
 MODELO_DA_PRODUCAO = ("Omni 1.2 Flash", 24)
+CREDITOS_GRATIS_DO_DIA = 50
 # A produção que para antes do Gerar (sem gastar crédito) tenta de novo no mesmo dia, até estas vezes.
 TENTATIVAS_ANTES_DO_GERAR = 2
 # O vídeo pronto que não vira rascunho nestas tentativas (o celular, o app, nada do vídeo) sai, e o robô segue com os

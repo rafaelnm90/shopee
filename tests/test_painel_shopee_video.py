@@ -1350,7 +1350,9 @@ def test_preparar_1_agora_pergunta_de_onde_vem_o_video_e_roda_o_robo_com_ela(bm,
     assert _textos(sv.teclado_preparar()) == ["Aleatório 🎲", "Do Grupo 📥", "De IA ✨", "Voltar ao Robô 🔙"]
     tela = msg.saidas[0]
     assert tela.index("Aleatório 🎲") < tela.index("Do Grupo 📥") < tela.index("De IA ✨")
-    assert "Vídeos de IA hoje: <b>0</b> de 2" in tela
+    # Escolha do Rafael (P243, "até 5 por dia"): 5 contando o do robô; do 3º em diante, créditos do plano.
+    assert "Vídeos de IA hoje: <b>0</b> de 5" in tela
+    assert "Os 2 primeiros do dia cabem nos 50 créditos grátis; os outros gastam 24 créditos do plano cada." in tela
     for botao, de, texto in (("Aleatório 🎲", "aleatorio", "o robô sorteia entre um vídeo do grupo e um de IA"),
                              ("Do Grupo 📥", "fonte", "Preparando 1 rascunho agora no Motorola, com o próximo vídeo "
                                                      "do grupo"),
@@ -2313,7 +2315,8 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
         assert trecho in msg.saidas[-1]
     # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243).
     assert sv.limite_dos_videos_de_ia() == (
-        "No máximo 2 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨")
+        "No máximo 5 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨ "
+        "(24 créditos cada; passando dos 50 grátis do dia, os outros saem do plano)")
     # Escolha do Rafael (15/11, P234 1): o produto vem da API de afiliado da Shopee, sem depender da fonte.
     for trecho in ("sem depender dos vídeos da fonte", "entre os produtos em alta, os de nota 4,5 ou mais, que pagam "
                    "pelo menos R$ 2,00 por venda e que você ainda não postou", "o que paga mais por venda",
