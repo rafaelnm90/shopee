@@ -30,8 +30,9 @@ que pode (P161 1):
 2. apaga no app um rascunho que o Rafael recusou;
 3. posta um rascunho aprovado cuja hora chegou: os aprovados saem um de cada vez, com um
    intervalo sorteado entre eles, sempre dentro do Horário do Robô;
-4. faz no Google Flow o vídeo de IA do dia (P232 1: 1 por dia, no Omni 1.2 Flash, com um produto da
-   fonte), quando o plano do dia ainda tem um horário por vir: ele vira o rascunho desse horário;
+4. faz no Google Flow o vídeo de IA do dia (P232 1: 1 por dia, no Omni 1.2 Flash, com o produto que
+   paga mais por venda entre os produtos em alta da API de afiliado, P234 1), quando o plano do dia
+   ainda tem um horário por vir: ele vira o rascunho desse horário;
 5. prepara um rascunho novo quando um horário do plano do dia passou: cada dia sorteia
    quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô;
 6. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia, das 8h às 22h, com pelo
@@ -1150,6 +1151,7 @@ LINHAS_DO_HISTORICO = 12
 # O passo em que parou, achado no motivo (as frases fixas do robô e do postador). A
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
+    ("a API da Shopee negou a lista de produtos", "busca negada pela Shopee"),
     ("vídeo de IA:", "vídeo de IA no Flow"),
     ("a tela do celular está apagada", "tela do celular apagada"),
     ("a tela do celular não acendeu", "tela do celular apagada"),
@@ -3041,9 +3043,11 @@ def de_onde_veio_o_video(video, fonte):
     """A linha do aviso do começo do rascunho que diz qual vídeo da fonte o robô pegou (P194 1)."""
     nome_da_fonte = assistente.FONTES.get(fonte, fonte)
     if video.get("video_ia"):
+        # A lista de onde o produto veio (P234 1), quando o andamento do vídeo a diz.
+        origem = video["video_ia"].get("origem")
         return (f"Vídeo: o vídeo de IA do dia, feito no Google Flow com o produto que paga mais por venda "
-                f"({assistente._reais(video.get('valor') or 0)}) entre os próximos {VIDEOS_NA_ESCOLHA} de "
-                f"{nome_da_fonte} ainda não usados (P232 1).\n{flow.legenda_da_producao(video['video_ia'])}")
+                f"({assistente._reais(video.get('valor') or 0)}){f' entre {origem}' if origem else ''}, ainda não "
+                f"postado (P232 1 e P234 1).\n{flow.legenda_da_producao(video['video_ia'])}")
     if video.get("valor") is not None:
         return (f"Vídeo: o que paga mais por venda ({assistente._reais(video['valor'])}) entre os próximos "
                 f"{VIDEOS_NA_ESCOLHA} de {nome_da_fonte} ainda não usados.")
@@ -3171,26 +3175,51 @@ def preparar_o_pedido(d, config, agora=None, comeco=None):
                    f"de lado ({e.motivo}). Vou para o próximo vídeo.")
 
 
-# --- Vídeo de IA do dia (P232 1) ---
+# --- Vídeo de IA do dia (P232 1 e P234 1) ---
 # Depois dos 3 vídeos do teste do Google Flow (P229 1), o Rafael escolheu o Omni 1.2 Flash, o mais avançado, para 1
-# vídeo de IA por dia, que vira um rascunho do robô no lugar de um da fonte. Numa rodada própria, quando o plano do dia
-# ainda tem um horário por vir, o robô escolhe o produto pelas regras do rascunho (entre os próximos VIDEOS_NA_ESCOLHA
-# vídeos da fonte, só os de link de produto, com oferta, ainda não postados e pagando o mínimo, do que paga mais por
-# venda para o que paga menos, P194 1 e P166 1), a IA escreve o pedido pela foto do anúncio (flow.pedido_para_o_produto),
-# o Flow gera e o robô baixa; a IA confere o vídeo com a foto. Pronto, ele vira o rascunho do próximo horário
-# (preparar_rascunho), com a nossa edição, a troca de loja, os produtos a mais, as conferências de sempre e o Rótulo de
-# IA ligado; o Rafael aprova em Rascunhos do Robô 📝. Nunca mais de um Gerar por dia (24 créditos, dentro dos 50 grátis
-# do dia). O vídeo da fonte de onde veio o produto fica reservado (nem o robô nem o assistente o pegam). No registro,
-# só rótulos fixos e números. Escolha do Rafael (15/11/2026, P232 1): DECISOES.md, Shopee Vídeo.
+# vídeo de IA por dia, que vira um rascunho do robô no lugar de um da fonte. Numa rodada própria, quando o plano do
+# dia ainda tem um horário por vir, o robô escolhe o produto pela API de afiliado da Shopee (P234 1, abaixo), a IA
+# escreve o pedido pela foto do anúncio (flow.pedido_para_o_anuncio), o Flow gera e o robô baixa; a IA confere o
+# vídeo com a foto. Pronto, ele vira o rascunho do próximo horário (preparar_rascunho), com a nossa edição, a troca
+# de loja, os produtos a mais, as conferências de sempre e o Rótulo de IA ligado; o Rafael aprova em Rascunhos do
+# Robô 📝. Nunca mais de um Gerar por dia (24 créditos, dentro dos 50 grátis do dia). No registro, só rótulos fixos
+# e números. Escolhas do Rafael (15/11/2026, P232 1 e P234 1): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
-# Quantos dos produtos que pagam mais vão à IA, um por um, até ela achar a foto boa para o vídeo.
+# Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
 ROTULO_DO_VIDEO_DE_IA = "o vídeo foi feito por IA no Google Flow (o vídeo de IA do dia, P232 1)"
+# O produto do vídeo de IA não depende dos vídeos da fonte (em 15/11, 9 dos próximos 10 do Viral eram de link de
+# vídeo, sem produto para escolher, e o dia ficou sem vídeo de IA). O robô pede à API de afiliado os produtos em
+# alta (ofertas_para_o_video_de_ia: os 100 primeiros); fica com os de nota NOTA_MINIMA_DO_VIDEO_DE_IA ou mais, que
+# pagam pelo menos MINIMO_POR_VENDA por venda e nunca postados (P166 1), e vai do que paga mais por venda para o que
+# paga menos, até a IA achar a foto do anúncio boa para o vídeo. Sem a lista dos produtos em alta (a API nega, ou
+# ela vem vazia), os mais vendidos das palavras-chave dos nichos dos Achadinhos. O produto que já teve um vídeo
+# gerado e o de foto que a IA recusou não voltam à escolha (flow.itens_gerados e flow.fotos_recusadas): a lista
+# muda pouco de um dia para o outro, e sem isso o mesmo produto seria o 1º todo dia.
+# Escolha do Rafael (15/11/2026, P234 1): DECISOES.md, Shopee Vídeo.
+NOTA_MINIMA_DO_VIDEO_DE_IA = 4.5
+ORIGEM_EM_ALTA = "os produtos em alta da Shopee"
+ORIGEM_DOS_NICHOS = "os mais vendidos dos nichos dos Achadinhos"
+# Na busca pelos nichos: quantas palavras-chave por vez e quantos produtos de cada uma (os 40 do garimpo deles).
+PALAVRAS_DOS_NICHOS_POR_VEZ = 6
+OFERTAS_POR_PALAVRA = 40
+MOTIVO_DA_LISTA_NEGADA = "a API da Shopee negou a lista de produtos"
+# Tantos produtos seguidos sem o link curto (a API de afiliado fora do ar) encerram a tentativa: os outros só
+# gastariam o tempo da rodada, e a próxima tentativa do dia olha os mesmos.
+SEM_LINK_CURTO_SEGUIDOS = 3
 
 
 def video_de_ia_ligado(config):
     """O vídeo de IA do dia está ligado no painel (Vídeo de IA ✨)? Ligado até o Rafael desligar (P232 1)."""
     return bool(config.get("robo_video_ia", True))
+
+
+def _sem_produto_pela_fonte(atual):
+    """
+    O "sem produto" que não diz de que lista veio é o da escolha pelos vídeos da fonte, que a P234 1 trocou pela
+    lista da API de afiliado: não fecha o dia, e a escolha pela API ainda tem as tentativas dela.
+    """
+    return atual.get("estado") == "sem produto" and not atual.get("origem")
 
 
 def video_de_ia_pendente(config, agora=None):
@@ -3208,7 +3237,7 @@ def video_de_ia_pendente(config, agora=None):
     # O pronto espera o rascunho; o que perdeu o arquivo conta como o vídeo do dia dele, e o do dia seguinte sai.
     if estado == "pronto" and os.path.exists(atual.get("arquivo") or ""):
         return False
-    if atual.get("data") == agora_br(agora).strftime("%Y-%m-%d") and (
+    if atual.get("data") == agora_br(agora).strftime("%Y-%m-%d") and not _sem_produto_pela_fonte(atual) and (
             estado in flow.ESTADOS_DO_DIA_ACABADO or atual.get("gerado_em")
             or atual.get("tentativas_de_gerar", 0) >= flow.TENTATIVAS_ANTES_DO_GERAR):
         return False
@@ -3216,43 +3245,137 @@ def video_de_ia_pendente(config, agora=None):
     return plano.get("feitos", 0) < len(plano.get("horarios") or [])
 
 
-def escolher_para_o_video_de_ia(config, agora=None):
+def palavras_dos_nichos(agora=None):
     """
-    O produto do vídeo de IA do dia, pelas regras do rascunho: entre os próximos VIDEOS_NA_ESCOLHA vídeos da fonte,
-    os de link de produto com oferta de afiliado, ainda não postados (P166 1) e pagando pelo menos MINIMO_POR_VENDA
-    por venda (P194 1), do que paga mais para o que paga menos; o 1º, até FOTOS_PARA_A_IA, cuja foto do anúncio a IA
-    acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_produto, num estilo diferente dos últimos vídeos).
-    O pedido com "id" (o vídeo da fonte), "item", "valor" e "posicao"; None sem nenhum.
+    As palavras-chave dos nichos dos Achadinhos para a busca de hoje: uma de cada nicho por vez (a 1ª de cada um,
+    depois a 2ª...), PALAVRAS_DOS_NICHOS_POR_VEZ por dia, começando onde o dia anterior parou (pela data, sem
+    sorteio), para todas terem a vez delas.
     """
-    candidatos = list(itertools.islice(_videos_da_fonte(config, evitar_hoje(config, agora), agora), VIDEOS_NA_ESCOLHA))
-    ja_postados = produtos_ja_postados()
-    bons = []
-    for posicao, video in enumerate(candidatos, 1):
-        if video["de_video"]:
+    nichos = (db.ler_config("achadinhos_config", {}) or {}).get("nichos") or []
+    listas = [[str(palavra).strip() for palavra in nicho.get("keywords") or [] if str(palavra).strip()]
+              for nicho in nichos]
+    palavras = list(dict.fromkeys(palavra for grupo in itertools.zip_longest(*listas) for palavra in grupo if palavra))
+    if not palavras:
+        return []
+    comeco = agora_br(agora).toordinal() * PALAVRAS_DOS_NICHOS_POR_VEZ % len(palavras)
+    return (palavras[comeco:] + palavras[:comeco])[:PALAVRAS_DOS_NICHOS_POR_VEZ]
+
+
+def ofertas_para_o_video_de_ia(agora=None):
+    """
+    (as ofertas da API de afiliado de onde sai o produto do vídeo de IA, de onde elas vieram) (P234 1): os produtos em
+    alta da Shopee e, quando a API não dá essa lista (nega, ou vem vazia), os mais vendidos das palavras-chave de hoje
+    dos nichos dos Achadinhos (palavras_dos_nichos). api_shopee.BuscaNegada quando a API não responde a nenhum pedido.
+    """
+    negada = None
+    try:
+        ofertas = asyncio.run(api_shopee.ofertas_em_alta_shopee(negada_levanta=True))
+        if ofertas:
+            return ofertas, ORIGEM_EM_ALTA
+    except api_shopee.BuscaNegada as e:
+        negada = e
+    ofertas, respondidas = [], 0
+    for palavra in palavras_dos_nichos(agora):
+        try:
+            ofertas += asyncio.run(api_shopee.buscar_ofertas_shopee(palavra, limite=OFERTAS_POR_PALAVRA, sort_type=2,
+                                                                    negada_levanta=True))
+            respondidas += 1
+        except api_shopee.BuscaNegada as e:
+            negada = e
+            if not respondidas:
+                # A 1ª palavra também sem resposta: a API está fora, e as outras só gastariam o tempo da rodada.
+                break
+    if negada and not respondidas:
+        raise negada
+    return ofertas, ORIGEM_DOS_NICHOS
+
+
+def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
+    """
+    (os produtos das ofertas que servem para o vídeo de IA, as contagens da peneira) (P234 1). Servem os de nota
+    NOTA_MINIMA_DO_VIDEO_DE_IA ou mais, que pagam pelo menos MINIMO_POR_VENDA por venda (o preço "a partir de" vezes a
+    comissão), nunca postados (ja_postados, P166 1) e fora dos que já tiveram um vídeo gerado ou a foto recusada
+    (fora): [{item, link, nome, imagem, valor, vendas}], do que paga mais por venda para o que paga menos (no empate,
+    o que vende mais). As contagens ({"lista", "nota", "minimo", "novos"}, cada uma dentro da anterior) vão ao
+    registro.
+    """
+    fora = set(ja_postados) | set(fora)
+    vistos, bons = set(), []
+    contagem = {"lista": 0, "nota": 0, "minimo": 0, "novos": 0}
+    for oferta in ofertas:
+        item = str(oferta.get("itemId") or "")
+        link = oferta.get("productLink") or ""
+        nome = (oferta.get("productName") or "").strip()
+        imagem = oferta.get("imageUrl") or ""
+        if not item or not link or not nome or not imagem or item in vistos:
             continue
-        produto = _produto_do_link_do_video(video)
-        item = str((produto or {}).get("item") or "")
-        if not item or item in ja_postados:
+        vistos.add(item)
+        contagem["lista"] += 1
+        if assistente._numero(oferta.get("ratingStar")) < NOTA_MINIMA_DO_VIDEO_DE_IA:
             continue
-        valor = valor_por_venda(assistente._numero(produto.get("preco")), assistente._numero(produto.get("comissao")))
-        if valor >= MINIMO_POR_VENDA:
-            bons.append((valor, -posicao, posicao, video, item))
+        contagem["nota"] += 1
+        preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
+        valor = valor_por_venda(preco, assistente._numero(oferta.get("commissionRate")) * 100)
+        if valor < MINIMO_POR_VENDA:
+            continue
+        contagem["minimo"] += 1
+        if item in fora:
+            continue
+        contagem["novos"] += 1
+        bons.append({"item": item, "link": link, "nome": nome, "imagem": imagem, "valor": valor,
+                     "vendas": int(assistente._numero(oferta.get("sales")))})
+    return sorted(bons, key=lambda bom: (-bom["valor"], -bom["vendas"])), contagem
+
+
+def escolher_para_o_video_de_ia(agora=None):
+    """
+    (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
+    lista da API de afiliado (candidatos_do_video_de_ia), do que paga mais por venda para o que paga menos, o 1º, até
+    FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio,
+    num estilo diferente dos últimos vídeos), o link curto que o celular abre, "id" (o nome do vídeo de IA entre os
+    vídeos do robô), "item", "valor", "posicao" e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica
+    lembrada, e o produto não volta. api_shopee.BuscaNegada quando a API não deu a lista.
+    """
+    ofertas, origem = ofertas_para_o_video_de_ia(agora)
+    bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
+                                               flow.itens_gerados() + flow.fotos_recusadas())
+    peneira = (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
+               f"mínimo; {contagem['novos']} novos")
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
-    for valor, _, posicao, video, item in sorted(bons, key=lambda bom: bom[:2], reverse=True)[:FOTOS_PARA_A_IA]:
-        pedido = flow.pedido_para_o_produto(video["link"], evitar)
+    olhadas = recusadas = sem_link = seguidos = 0
+    for posicao, bom in enumerate(bons, 1):
+        if olhadas >= FOTOS_PARA_A_IA or seguidos >= SEM_LINK_CURTO_SEGUIDOS:
+            break
+        link = asyncio.run(api_shopee.converter_link_shopee(bom["link"], api_shopee.ETIQUETA_SHOPEE_VIDEO,
+                                                            avisar_falha=False))
+        if not link or link == bom["link"]:
+            # Sem o link curto, o celular não abre o produto (fica no esqueleto da página).
+            sem_link += 1
+            seguidos += 1
+            continue
+        seguidos = 0
+        olhadas += 1
+        pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar)
         if pedido:
             registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "produto escolhido",
-                                         f"o {posicao}º de {len(candidatos)}; estilo {pedido['estilo']}", ok=None,
-                                         agora=agora)
-            return dict(pedido, id=video["id"], item=item, valor=valor, posicao=posicao)
-    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem produto",
-                                 f"{len(bons)} de {len(candidatos)} pagam o mínimo; nenhuma foto boa para o vídeo",
-                                 ok=None, agora=agora)
-    return None
+                                         f"{peneira}; o {posicao}º; estilo {pedido['estilo']}", ok=None, agora=agora)
+            return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
+                         valor=bom["valor"], posicao=posicao, origem=origem), origem, True)
+        if serve is False:
+            recusadas += 1
+            flow.lembrar_foto_recusada(bom["item"])
+    restam = len(bons) > recusadas
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem foto" if restam else "sem produto",
+                                 f"{peneira}; {olhadas} foto(s) olhada(s), {recusadas} recusada(s)"
+                                 + (f", {sem_link} sem o link curto" if sem_link else ""), ok=None, agora=agora)
+    return None, origem, restam
 
 
 def _soltar_a_fonte_do_video_de_ia(atual):
-    """O vídeo da fonte reservado para o vídeo de IA volta à fila (o de IA não saiu)."""
+    """
+    A reserva do vídeo de IA entre os vídeos usados sai (o de IA não saiu). No andamento em que o produto veio de
+    um vídeo da fonte, é esse vídeo que volta à fila.
+    """
     if not atual.get("id_video"):
         return
     with db.conexao() as con:
@@ -3262,25 +3385,36 @@ def _soltar_a_fonte_do_video_de_ia(atual):
 
 def fazer_o_video_de_ia(d, config, agora=None):
     """
-    O vídeo de IA do dia na rodada (P232 1): escolhe o produto, gera no Flow, baixa e a IA confere com a foto do
-    anúncio; o que já foi gerado só é baixado (nunca outro Gerar no dia). Devolve o que aconteceu numa frase.
+    O vídeo de IA do dia na rodada (P232 1): escolhe o produto pela API de afiliado (P234 1), gera no Flow, baixa e
+    a IA confere com a foto do anúncio; o que já foi gerado só é baixado (nunca outro Gerar no dia). Devolve o que
+    aconteceu numa frase.
     """
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     atual = flow.producao()
     if atual.get("estado") not in flow.ESTADOS_PENDENTES:
         if atual.get("estado") == "escolhido":
-            # A rodada de antes caiu no meio, antes do Gerar: o vídeo da fonte reservado volta à fila.
+            # A rodada de antes caiu no meio, antes do Gerar: a reserva dela sai.
             _soltar_a_fonte_do_video_de_ia(atual)
-        tentativas = (atual.get("tentativas_de_gerar", 0) if atual.get("data") == hoje else 0) + 1
-        escolhido = escolher_para_o_video_de_ia(config, agora)
+        de_hoje = atual.get("data") == hoje and not _sem_produto_pela_fonte(atual)
+        tentativas = (atual.get("tentativas_de_gerar", 0) if de_hoje else 0) + 1
+        try:
+            escolhido, origem, restam = escolher_para_o_video_de_ia(agora)
+        except api_shopee.BuscaNegada as e:
+            # A API sem resposta não é falta de produto: tenta de novo no dia, como a que para antes do Gerar.
+            motivo = f"vídeo de IA: {MOTIVO_DA_LISTA_NEGADA} ({e})"
+            flow.recomecar_producao(hoje, estado="parou", tentativas_de_gerar=tentativas, motivo=motivo)
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "parou", "a API negou a lista de produtos",
+                                         ok=False, agora=agora)
+            registrar_tentativa("video_ia", "parou", motivo, agora=agora)
+            return f"{motivo}; parado"
         if not escolhido:
-            flow.recomecar_producao(hoje, estado="sem produto", tentativas_de_gerar=tentativas)
-            registrar_tentativa("video_ia", "sem vídeo", "vídeo de IA: nenhum produto da fonte serviu para o vídeo",
-                                agora=agora)
-            return "vídeo de IA: nenhum produto da fonte serviu hoje"
+            # Com produto ainda por olhar (a IA não achou boa a foto dos que viu), tenta de novo no dia.
+            flow.recomecar_producao(hoje, estado="sem foto" if restam else "sem produto",
+                                    tentativas_de_gerar=tentativas, origem=origem)
+            registrar_tentativa("video_ia", "sem vídeo",
+                                "vídeo de IA: nenhum produto da lista da Shopee serviu para o vídeo", agora=agora)
+            return "vídeo de IA: nenhum produto da lista da Shopee serviu desta vez"
         atual = flow.comecar_producao(hoje, escolhido, tentativas)
-        # O vídeo da fonte de onde veio o produto fica reservado: nem o robô nem o assistente o pegam.
-        assistente.registrar(escolhido["id"], "robo", "vídeo de IA do dia", agora)
     if atual["estado"] != "baixado":
         try:
             baixado = flow.producao_no_celular(d, atual)
@@ -3308,8 +3442,17 @@ def fazer_o_video_de_ia(d, config, agora=None):
                         video=atual.get("id_video", ""))
     avisar("🎞️ Robô da Shopee Vídeo: fiz o vídeo de IA do dia no Google Flow. Ele vira o próximo rascunho, com a nossa "
            "edição e o Rótulo de IA ligado, e chega em Rascunhos do Robô 📝 para você aprovar.\n\n"
-           f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}")
+           f"Produto: {atual.get('nome', '')}\n{de_onde_veio_o_produto_do_video_de_ia(atual)}"
+           f"{flow.legenda_da_producao(atual)}")
     return "vídeo de IA: pronto para o rascunho"
+
+
+def de_onde_veio_o_produto_do_video_de_ia(atual):
+    """A linha do aviso do vídeo de IA pronto que diz a escolha do produto (P234 1); "" sem a lista de onde veio."""
+    if not atual.get("origem"):
+        return ""
+    return (f"Escolha: o que paga mais por venda ({assistente._reais(atual.get('valor') or 0)}) entre "
+            f"{atual['origem']}, ainda não postado.\n")
 
 
 # O vídeo gerado que não chega ao servidor em tantas rodadas é dado por perdido (o crédito já foi).
@@ -3318,9 +3461,9 @@ TENTATIVAS_DE_BAIXAR = 3
 
 def _video_de_ia_parou(motivo, agora=None):
     """
-    A produção parou no Flow (o caso já foi guardado). Antes do Gerar, nada foi gasto: o vídeo da fonte volta à fila,
-    e a produção tenta de novo no dia (video_de_ia_pendente). Depois do Gerar, o vídeo é baixado na próxima rodada,
-    sem gerar outro, até TENTATIVAS_DE_BAIXAR vezes. Devolve o resultado da rodada.
+    A produção parou no Flow (o caso já foi guardado). Antes do Gerar, nada foi gasto, e a produção tenta de novo
+    no dia (video_de_ia_pendente). Depois do Gerar, o vídeo é baixado na próxima rodada, sem gerar outro, até
+    TENTATIVAS_DE_BAIXAR vezes. Devolve o resultado da rodada.
     """
     atual = flow.producao()
     motivo = f"vídeo de IA: {motivo}"
@@ -3344,8 +3487,8 @@ def _video_de_ia_parou(motivo, agora=None):
 def video_de_ia_para_o_rascunho(evitar=(), ja_postados=None):
     """
     O vídeo de IA do dia pronto (P232 1) no jeito de um vídeo da fonte, para o preparar_rascunho: o arquivo é o do
-    Flow, e o link, o do produto escolhido; "video_ia" leva o andamento. None sem ele, com o vídeo da fonte dele de
-    lado hoje (evitar: as tentativas do horário acabaram) ou com o produto já postado (P166 1: ele sai).
+    Flow, e o link, o do produto escolhido; "video_ia" leva o andamento. None sem ele, com ele de lado hoje (evitar:
+    as tentativas do horário acabaram) ou com o produto já postado (P166 1: ele sai).
     """
     atual = flow.video_pronto()
     if not atual or atual.get("id_video") in set(evitar):
@@ -3462,7 +3605,8 @@ def preparar_rascunho(d, config, agora=None):
             _deixar_de_lado_no_dia([video["id"]], config, agora)
         else:
             _guardar_caso(d if celular else None, "rascunho", resultado, e.motivo, video, ident, agora)
-        # O vídeo da fonte de onde veio o produto do vídeo de IA não tem culpa do problema dele: volta à fila.
+        # O vídeo de IA que não sai não fica entre os pulados da fonte: o andamento dele diz o que houve
+        # (_video_de_ia_nao_saiu).
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video and not de_lado and not video.get("video_ia"))
         _video_de_ia_nao_saiu(video, e.do_video, agora)
         registrar_tentativa("rascunho", resultado, e.motivo, _produto_do_video(video), agora, video["id"])

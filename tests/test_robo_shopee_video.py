@@ -9251,18 +9251,21 @@ def test_rascunho_de_ver_produtos_editado_e_refeito_no_app_pela_lista_do_criador
     assert "não consegui curtir de novo 1 de 1" in parada.value.motivo
 
 
-# --- Vídeo de IA do dia (P232 1) ---
-# Escolha do Rafael (15/11): depois dos 3 vídeos do teste do Flow, o Omni 1.2 Flash, o mais avançado, para 1 vídeo de
-# IA por dia, que vira um rascunho do robô no lugar de um da fonte.
+# --- Vídeo de IA do dia (P232 1 e P234 1) ---
+# Escolhas do Rafael (15/11): depois dos 3 vídeos do teste do Flow, o Omni 1.2 Flash, o mais avançado, para 1 vídeo
+# de IA por dia, que vira um rascunho do robô no lugar de um da fonte (P232 1), com o produto escolhido pela API de
+# afiliado da Shopee, sem depender dos vídeos da fonte (P234 1).
 VIDEO_DE_IA_PENDENTE = robo.video_de_ia_pendente
+EM_ALTA = "os produtos em alta da Shopee"
 
 
 def _producao_pronta(tmp_path, dia="2026-10-22", **campos):
-    """O vídeo de IA do dia pronto para o rascunho, com o produto do a1 da fonte (o vestido)."""
+    """O vídeo de IA do dia pronto para o rascunho, com o vestido, escolhido pela lista da API de afiliado."""
     arquivo = tmp_path / f"producao_{dia}.mp4"
     # O recomeço tira os arquivos da produção de antes: o vídeo vem depois dele.
     robo.flow.recomecar_producao(dia, **{
-        "estado": "pronto", "id_video": "a1", "link": LINK, "nome": VESTIDO, "item": "2", "valor": 5.99,
+        "estado": "pronto", "id_video": f"ia:{dia}", "link": LINK, "nome": VESTIDO, "item": "2", "valor": 5.99,
+        "origem": EM_ALTA,
         "arquivo": str(arquivo), "foto": "", "modelo": "Omni 1.2 Flash", "custo": 24, "estilo": "comedia",
         "cena": "Uma menina gira com o vestido.", "conferencia": {"mesmo": True, "diferencas": "", "defeitos": ""},
         "gerado_em": f"{dia} 08:00:00", **campos})
@@ -9301,37 +9304,294 @@ def test_video_de_ia_uma_vez_por_dia_e_so_com_horario_do_plano_por_vir(monkeypat
     assert not robo.video_de_ia_pendente(config, tarde)
 
 
-def test_video_de_ia_pega_o_produto_que_paga_mais_com_a_foto_boa(monkeypatch):
-    # Pelas regras do rascunho (P194 1 e P166 1): o que paga mais por venda entre os próximos 10 da fonte, sem o
-    # de menos de R$ 2; a foto que a IA acha ruim passa ao seguinte.
-    _fonte(monkeypatch)
-    _videos_com_valor(monkeypatch, [1.5, 5.0, 9.0, 3.0])
-    ativar(fonte="autorais")
-    pedidos = []
+def _registro_do_video_de_ia():
+    with robo.db.conexao() as con:
+        return [tuple(linha) for linha in con.execute(
+            "SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY id",
+            (robo.PROCESSO_DO_VIDEO_DE_IA,))]
 
-    def pedido(link, evitar=""):
-        pedidos.append(link)
-        if link.endswith("/valor2"):
-            return None
-        return {"link": link, "nome": VESTIDO, "foto": b"jpg", "estilo": "fala", "prompt": "p", "cena": "c"}
 
-    monkeypatch.setattr(robo.flow, "pedido_para_o_produto", pedido)
-    escolhido = robo.escolher_para_o_video_de_ia(robo.ler_config(), momento("2026-10-22 08:05"))
-    assert pedidos == ["https://s.shopee.com.br/valor2", LINK]
-    assert escolhido["id"] == "a1" and escolhido["item"] == "2" and round(escolhido["valor"], 2) == 5.99
-    # O produto já postado (P166 1) nem vai à IA.
+def _tentativas_do_video_de_ia():
+    with robo.db.conexao() as con:
+        return [tuple(linha) for linha in con.execute(
+            "SELECT acao, resultado, passo FROM shopee_video_tentativas ORDER BY id")]
+
+
+def _oferta_da_lista(item, preco=100.0, comissao=0.05, nota="4.8", vendas=10, **campos):
+    """Um produto da lista da API de afiliado: paga preco x comissao por venda (R$ 5,00 no padrão)."""
+    return {"itemId": item, "productName": f"Produto {item}", "priceMin": str(preco), "commissionRate": str(comissao),
+            "ratingStar": nota, "sales": vendas, "imageUrl": f"https://cf.shopee.com.br/file/{item}",
+            "productLink": f"https://shopee.com.br/product/1/{item}", **campos}
+
+
+def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=()):
+    """
+    A lista dos produtos em alta da API de afiliado e o que a escolha usa dela: o link curto de cada produto, a foto
+    do anúncio e a IA, que recusa a foto dos itens de recusadas e não responde nos de sem_resposta. Devolve os itens
+    que foram à IA, na ordem.
+    """
+    foram = []
+
+    async def em_alta(negada_levanta=False):
+        return list(ofertas)
+
+    async def converter(link, etiqueta, avisar_falha=True):
+        item = link.rsplit("/", 1)[-1]
+        return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
+
+    def pedido(link, nome, foto, evitar=""):
+        item = link.split("curto")[-1]
+        foram.append(item)
+        assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
+        if item in sem_resposta:
+            return None, None
+        if item in recusadas:
+            return None, False
+        return {"link": link, "nome": nome, "foto": foto, "estilo": "fala", "prompt": "p", "cena": "c"}, True
+
+    monkeypatch.setattr(robo.api_shopee, "ofertas_em_alta_shopee", em_alta)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    monkeypatch.setattr(robo, "foto_do_anuncio", lambda endereco: f"foto {endereco.rsplit('/', 1)[-1]}".encode())
+    monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", pedido)
+    return foram
+
+
+def test_video_de_ia_pega_da_lista_da_api_o_que_paga_mais_com_a_foto_boa(monkeypatch):
+    # Escolha do Rafael (15/11, P234 1): em 15/11, 9 dos próximos 10 vídeos do Viral eram de link de vídeo, e o dia
+    # ficou sem vídeo de IA. O produto vem da lista dos produtos em alta da API de afiliado: nota 4,5 ou mais, pelo
+    # menos R$ 2 por venda, nunca postado, do que paga mais por venda para o que paga menos; a foto que a IA acha
+    # ruim passa ao seguinte.
+    ofertas = [_oferta_da_lista("10", comissao=0.01),                 # R$ 1,00 por venda: abaixo do mínimo
+               _oferta_da_lista("11", comissao=0.09, nota="4.4"),     # paga bem, mas a nota é baixa
+               _oferta_da_lista("12", comissao=0.09, nota=""),        # sem nota nenhuma
+               _oferta_da_lista("13", comissao=0.08),                 # R$ 8,00: o que paga mais, com a foto ruim
+               _oferta_da_lista("14", comissao=0.06),                 # R$ 6,00
+               _oferta_da_lista("15", comissao=0.07),                 # R$ 7,00: já postado
+               _oferta_da_lista("16", comissao=0.06, vendas=90),      # R$ 6,00, vende mais que o 14
+               _oferta_da_lista("16", comissao=0.06, vendas=90),      # repetido na lista
+               _oferta_da_lista("17", comissao=0.09, imageUrl="")]    # sem a foto do anúncio
+    foram = _lista_da_api(monkeypatch, ofertas, recusadas={"13"})
     ident = robo.criar("outro", momento("2026-10-21 10:00"))
-    robo.atualizar(ident, estado="postado", itens_do_video=["2", "92"], postado_em="2026-10-21 11:00:00")
-    pedidos.clear()
-    escolhido = robo.escolher_para_o_video_de_ia(robo.ler_config(), momento("2026-10-22 08:05"))
-    assert pedidos == ["https://s.shopee.com.br/valor1"] and escolhido["id"] == "v1"
+    robo.atualizar(ident, estado="postado", itens_do_video=["15"], postado_em="2026-10-21 11:00:00")
+    escolhido, origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert foram == ["13", "16"] and origem == EM_ALTA and restam
+    assert escolhido["id"] == "ia:2026-10-22" and escolhido["item"] == "16" and round(escolhido["valor"], 2) == 6.0
+    # O link é o curto, que o celular abre; o produto não é de nenhum vídeo da fonte.
+    assert escolhido["link"] == "https://s.shopee.com.br/curto16" and escolhido["origem"] == EM_ALTA
+    assert escolhido["nome"] == "Produto 16" and escolhido["estilo"] == "fala" and escolhido["posicao"] == 2
+    # A foto que a IA recusou fica lembrada: o produto não volta à IA nas próximas escolhas.
+    assert robo.flow.fotos_recusadas() == ["13"]
+    foram.clear()
+    assert robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"))[0]["item"] == "16" and foram == ["16"]
+    # O produto que já teve um vídeo gerado também não volta: o seguinte da lista é o que paga mais.
+    robo.flow.lembrar_item_gerado("16")
+    foram.clear()
+    assert robo.escolher_para_o_video_de_ia(momento("2026-10-23 08:05"))[0]["item"] == "14" and foram == ["14"]
+    # O registro (o checkup é público) tem só a lista, as contagens da peneira e a posição: nenhum nome ou link.
+    linhas = _registro_do_video_de_ia()
+    assert linhas[0] == ("produto escolhido",
+                         f"{EM_ALTA}: 7 da lista; 5 com a nota; 4 pagam o mínimo; 3 novos; o 2º; estilo fala")
+    assert not any("Produto" in detalhe or "shopee.com" in detalhe for _, detalhe in linhas)
+
+
+def test_candidatos_do_video_de_ia_pela_peneira(monkeypatch):
+    # O preço é o "a partir de" (ou o preço, sem ele), e a comissão vem em fração: 0,05 são 5%.
+    ofertas = [_oferta_da_lista("1", preco=40.0, comissao=0.05),                      # R$ 2,00: exatamente o mínimo
+               _oferta_da_lista("2", preco=39.0, comissao=0.05),                      # R$ 1,95
+               _oferta_da_lista("3", nota="4.5", priceMin="", price="200", comissao=0.02),   # nota no limite; R$ 4,00
+               _oferta_da_lista("4", productLink=""), _oferta_da_lista("", comissao=0.5),
+               _oferta_da_lista("5", productName="  ")]
+    bons, contagem = robo.candidatos_do_video_de_ia(ofertas, {"9"}, ["8"])
+    assert [(bom["item"], round(bom["valor"], 2)) for bom in bons] == [("3", 4.0), ("1", 2.0)]
+    assert contagem == {"lista": 3, "nota": 3, "minimo": 2, "novos": 2}
+    assert bons[0] == {"item": "3", "link": "https://shopee.com.br/product/1/3", "nome": "Produto 3",
+                       "imagem": "https://cf.shopee.com.br/file/3", "valor": 4.0, "vendas": 10}
+    # Os já postados e os que já tiveram vídeo ou a foto recusada saem por último, depois da nota e do mínimo.
+    bons, contagem = robo.candidatos_do_video_de_ia(ofertas, {"3"}, ["1"])
+    assert bons == [] and contagem == {"lista": 3, "nota": 3, "minimo": 2, "novos": 0}
+
+
+def test_video_de_ia_sem_foto_boa_tenta_de_novo_e_sem_produto_fecha_o_dia(monkeypatch, tmp_path):
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    config = robo.ler_config()
+    agora = momento("2026-10-22 08:05")
+    # 7 produtos servem, e a IA recusa a foto dos 5 que olha (FOTOS_PARA_A_IA): ainda há 2 por olhar.
+    ofertas = [_oferta_da_lista(str(n), comissao=n / 100) for n in range(3, 10)]
+    foram = _lista_da_api(monkeypatch, ofertas, recusadas={str(n) for n in range(3, 10)})
+    assert robo.fazer_o_video_de_ia(Intocavel(), config, agora) == \
+        "vídeo de IA: nenhum produto da lista da Shopee serviu desta vez"
+    assert foram == ["9", "8", "7", "6", "5"] and robo.flow.fotos_recusadas() == ["9", "8", "7", "6", "5"]
+    atual = robo.flow.producao()
+    assert (atual["estado"], atual["origem"], atual["tentativas_de_gerar"]) == ("sem foto", EM_ALTA, 1)
+    # Nenhum crédito gasto: a rodada seguinte olha os que faltam, sem repetir os recusados.
+    assert robo.video_de_ia_pendente(config, agora)
+    foram.clear()
+    robo.fazer_o_video_de_ia(Intocavel(), config, agora)
+    assert foram == ["4", "3"]
+    # Todos recusados: nenhum produto da lista serve hoje, e o dia fecha.
+    atual = robo.flow.producao()
+    assert (atual["estado"], atual["tentativas_de_gerar"]) == ("sem produto", 2)
+    assert not robo.video_de_ia_pendente(config, agora)
+    assert robo.video_de_ia_pendente(config, momento("2026-10-23 08:05"))
+    assert _registro_do_video_de_ia() == [
+        ("sem foto", f"{EM_ALTA}: 7 da lista; 7 com a nota; 7 pagam o mínimo; 7 novos; 5 foto(s) olhada(s), "
+         "5 recusada(s)"),
+        ("sem produto", f"{EM_ALTA}: 7 da lista; 7 com a nota; 7 pagam o mínimo; 2 novos; 2 foto(s) olhada(s), "
+         "2 recusada(s)")]
+    assert _tentativas_do_video_de_ia() == [("video_ia", "sem vídeo", "vídeo de IA no Flow")] * 2
+
+
+def test_video_de_ia_sem_resposta_da_ia_ou_sem_link_curto_nao_recusa_o_produto(monkeypatch, tmp_path):
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    # Sem o link curto, o celular não abre o produto: ele nem vai à IA. Sem a resposta da IA, não dá para saber
+    # se a foto serve: nenhum dos dois fica lembrado como recusado, e os dois voltam na próxima tentativa.
+    ofertas = [_oferta_da_lista("7", comissao=0.07), _oferta_da_lista("6", comissao=0.06)]
+    foram = _lista_da_api(monkeypatch, ofertas, sem_resposta={"6"}, sem_link={"7"})
+    escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert escolhido is None and restam and foram == ["6"] and robo.flow.fotos_recusadas() == []
+    assert _registro_do_video_de_ia() == [
+        ("sem foto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 1 foto(s) olhada(s), "
+         "0 recusada(s), 1 sem o link curto")]
+    assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05")) == \
+        "vídeo de IA: nenhum produto da lista da Shopee serviu desta vez"
+    assert robo.flow.producao()["estado"] == "sem foto"
+    # A API de afiliado fora do ar (3 produtos seguidos sem o link curto): a tentativa acaba ali, sem passar por
+    # todos os outros da lista.
+    muitos = [_oferta_da_lista(str(n), comissao=n / 100) for n in range(10, 30)]
+    convertidos = []
+
+    async def sem_converter(link, etiqueta, avisar_falha=True):
+        convertidos.append(link)
+        return link
+
+    _lista_da_api(monkeypatch, muitos)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", sem_converter)
+    escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"))
+    assert escolhido is None and restam and len(convertidos) == robo.SEM_LINK_CURTO_SEGUIDOS == 3
+
+
+def test_video_de_ia_com_a_lista_negada_pela_api_tenta_de_novo_no_dia(monkeypatch, tmp_path):
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    config = robo.ler_config()
+    agora = momento("2026-10-22 08:05")
+
+    def negada(agora=None):
+        raise robo.api_shopee.BuscaNegada("erro 10000")
+
+    monkeypatch.setattr(robo, "ofertas_para_o_video_de_ia", negada)
+    resultado = robo.fazer_o_video_de_ia(Intocavel(), config, agora)
+    assert resultado == "vídeo de IA: a API da Shopee negou a lista de produtos (erro 10000); parado"
+    # A API sem resposta não é falta de produto: o dia não fecha, e a próxima rodada tenta de novo (até 2 vezes).
+    atual = robo.flow.producao()
+    assert (atual["estado"], atual["tentativas_de_gerar"]) == ("parou", 1)
+    assert robo.video_de_ia_pendente(config, agora)
+    assert consultar("SELECT acao, resultado, passo FROM shopee_video_tentativas") == \
+        ("video_ia", "parou", "busca negada pela Shopee")
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_VIDEO_DE_IA) == ("parou", "a API negou a lista de produtos", 0)
+    robo.fazer_o_video_de_ia(Intocavel(), config, agora)
+    assert robo.flow.producao()["tentativas_de_gerar"] == 2 and not robo.video_de_ia_pendente(config, agora)
+
+
+def test_sem_produto_de_antes_da_api_nao_fecha_o_dia(monkeypatch, tmp_path):
+    # O "sem produto" de quando o produto vinha dos vídeos da fonte (sem a lista de onde veio) não fecha o dia
+    # nem gasta as tentativas da escolha pela API (P234 1).
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    ativar(robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    config = robo.ler_config()
+    agora = momento("2026-10-22 08:05")
+    robo.flow.recomecar_producao("2026-10-22", estado="sem produto", tentativas_de_gerar=2)
+    assert robo.video_de_ia_pendente(config, agora)
+    _lista_da_api(monkeypatch, [])
+    monkeypatch.setattr(robo, "palavras_dos_nichos", lambda agora=None: [])
+    robo.fazer_o_video_de_ia(Intocavel(), config, agora)
+    atual = robo.flow.producao()
+    assert (atual["estado"], atual["tentativas_de_gerar"], atual["origem"]) == \
+        ("sem produto", 1, "os mais vendidos dos nichos dos Achadinhos")
+    # O "sem produto" da escolha pela API, esse sim, fecha o dia.
+    assert not robo.video_de_ia_pendente(config, agora)
+
+
+def _nichos(*listas):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    robo.db.salvar_config("achadinhos_config", {"nichos": [{"nome": f"n{i}", "keywords": list(palavras)}
+                                                           for i, palavras in enumerate(listas)]})
+
+
+def test_palavras_dos_nichos_uma_de_cada_nicho_e_andando_com_o_dia(monkeypatch):
+    assert robo.palavras_dos_nichos(momento("2026-10-22 08:05")) == []
+    _nichos(["a1", "a2", " a3 "], ["b1"], [], ["c1", "c2", "a1", ""])
+    monkeypatch.setattr(robo, "PALAVRAS_DOS_NICHOS_POR_VEZ", 2)
+    # Uma de cada nicho por vez (a1, b1, c1, a2, c2, a3), sem repetir, 2 por dia, sem sorteio: o mesmo dia dá
+    # sempre as mesmas, e os dias seguintes continuam de onde o anterior parou, até dar a volta.
+    todas = ["a1", "b1", "c1", "a2", "c2", "a3"]
+    dias = [robo.palavras_dos_nichos(momento(f"2026-10-{dia} 08:05")) for dia in (22, 23, 24, 25)]
+    assert dias[0] == robo.palavras_dos_nichos(momento("2026-10-22 19:00"))
+    comeco = todas.index(dias[0][0])
+    assert [palavra for dia in dias[:3] for palavra in dia] == todas[comeco:] + todas[:comeco]
+    assert dias[3] == dias[0]
+
+
+def test_ofertas_do_video_de_ia_em_alta_e_pelos_nichos_quando_a_api_nao_da(monkeypatch):
+    _nichos(["tenis", "meia"], ["panela"])
+    buscas = []
+    lista = {"em_alta": [_oferta_da_lista("1")], "negadas": set()}
+
+    async def em_alta(negada_levanta=False):
+        assert negada_levanta
+        if lista["em_alta"] is None:
+            raise robo.api_shopee.BuscaNegada("erro 10020")
+        return lista["em_alta"]
+
+    async def buscar(palavra, limite=10, sort_type=2, negada_levanta=False):
+        buscas.append((palavra, limite, sort_type, negada_levanta))
+        if palavra in lista["negadas"]:
+            raise robo.api_shopee.BuscaNegada("erro 10000")
+        return [_oferta_da_lista(f"da {palavra}")]
+
+    monkeypatch.setattr(robo.api_shopee, "ofertas_em_alta_shopee", em_alta)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    agora = momento("2026-10-22 08:05")
+    # Com a lista dos produtos em alta, os nichos nem são consultados.
+    assert robo.ofertas_para_o_video_de_ia(agora) == ([_oferta_da_lista("1")], EM_ALTA) and buscas == []
+    # A chave não dá a lista (a API nega) ou ela vem vazia: os mais vendidos das palavras-chave dos nichos.
+    for sem_a_lista in (None, []):
+        lista["em_alta"] = sem_a_lista
+        buscas.clear()
+        ofertas, origem = robo.ofertas_para_o_video_de_ia(agora)
+        assert origem == "os mais vendidos dos nichos dos Achadinhos"
+        assert sorted(oferta["itemId"] for oferta in ofertas) == ["da meia", "da panela", "da tenis"]
+        assert sorted(buscas) == [("meia", 40, 2, True), ("panela", 40, 2, True), ("tenis", 40, 2, True)]
+    # Uma palavra negada depois de outra responder não derruba a lista.
+    primeira = buscas[0][0]
+    lista["negadas"] = {palavra for palavra in ("tenis", "meia", "panela") if palavra != primeira}
+    assert [oferta["itemId"] for oferta in robo.ofertas_para_o_video_de_ia(agora)[0]] == [f"da {primeira}"]
+    # A 1ª palavra também negada: a API está fora, e o robô nem tenta as outras.
+    lista["negadas"] = {primeira}
+    buscas.clear()
+    with pytest.raises(robo.api_shopee.BuscaNegada):
+        robo.ofertas_para_o_video_de_ia(agora)
+    assert len(buscas) == 1
+    # Sem nicho nenhum, vale o que a lista dos produtos em alta disse: negada, ou vazia.
+    _nichos()
+    lista["em_alta"] = None
+    with pytest.raises(robo.api_shopee.BuscaNegada):
+        robo.ofertas_para_o_video_de_ia(agora)
+    lista["em_alta"] = []
+    assert robo.ofertas_para_o_video_de_ia(agora) == ([], "os mais vendidos dos nichos dos Achadinhos")
 
 
 def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True):
     monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
-    escolhido = {"id": "a1", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "comedia",
-                 "prompt": "p", "cena": "Uma menina gira com o vestido.", "item": "2", "valor": 5.99, "posicao": 1}
-    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda config, agora=None: dict(escolhido))
+    escolhido = {"id": "ia:2026-10-22", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "comedia",
+                 "prompt": "p", "cena": "Uma menina gira com o vestido.", "item": "2", "valor": 5.99, "posicao": 1,
+                 "origem": EM_ALTA}
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda agora=None: (dict(escolhido), EM_ALTA, True))
     vezes = []
 
     def no_celular(d, atual):
@@ -9348,22 +9608,25 @@ def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True):
     return vezes
 
 
-def test_video_de_ia_reserva_a_fonte_gera_confere_e_avisa(monkeypatch, avisos, tmp_path):
+def test_video_de_ia_gera_confere_e_avisa_sem_gastar_video_da_fonte(monkeypatch, avisos, tmp_path):
     _fonte(monkeypatch)
     ativar(fonte="autorais")
     vezes = _flow_que_baixa(monkeypatch, tmp_path)
     resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
     assert resultado == "vídeo de IA: pronto para o rascunho" and vezes == ["escolhido"]
     pronto = robo.flow.video_pronto()
-    assert pronto["id_video"] == "a1" and pronto["conferencia"]["mesmo"] is True
-    # O vídeo da fonte de onde veio o produto fica reservado: nem o robô nem o assistente o pegam.
-    assert robo.proximo_video(robo.ler_config()) is None and robo.assistente.proximo_video("autorais") is None
+    assert pronto["id_video"] == "ia:2026-10-22" and pronto["conferencia"]["mesmo"] is True
+    assert pronto["origem"] == EM_ALTA
+    # O produto vem da API de afiliado (P234 1): nenhum vídeo da fonte sai da fila do robô nem da do assistente.
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    assert robo.assistente.proximo_video("autorais")["id"] == "a1"
     aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
+    assert "Escolha: o que paga mais por venda (R$ 5,99) entre os produtos em alta da Shopee, ainda não postado." in aviso
     assert "Rascunhos do Robô 📝" in aviso and "Omni 1.2 Flash (24 créditos de IA)" in aviso and VESTIDO in aviso
     assert consultar("SELECT acao, resultado FROM shopee_video_tentativas") == ("video_ia", "pronto")
 
 
-def test_video_de_ia_com_outro_produto_nao_vira_rascunho_e_a_fonte_volta(monkeypatch, avisos, tmp_path):
+def test_video_de_ia_com_outro_produto_nao_vira_rascunho(monkeypatch, avisos, tmp_path):
     _fonte(monkeypatch)
     ativar(fonte="autorais")
     _flow_que_baixa(monkeypatch, tmp_path, mesmo=False)
@@ -9371,7 +9634,6 @@ def test_video_de_ia_com_outro_produto_nao_vira_rascunho_e_a_fonte_volta(monkeyp
     assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora) == \
         "vídeo de IA: a IA viu outro produto no vídeo; não vira rascunho"
     assert robo.flow.producao()["estado"] == "descartado" and robo.flow.video_pronto() is None
-    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
     assert any("saiu com outro produto" in a for a in avisos if isinstance(a, str))
     # Nunca outro Gerar no mesmo dia.
     monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
@@ -9389,8 +9651,8 @@ def test_video_de_ia_parado_no_flow_antes_e_depois_do_gerar(monkeypatch, avisos,
     monkeypatch.setattr(robo.flow, "producao_no_celular", falha)
     agora = momento("2026-10-22 08:05")
     assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora).startswith("vídeo de IA: pedido:")
-    # Antes do Gerar, nada foi gasto: o vídeo da fonte volta à fila, e o passo vai ao histórico.
-    assert robo.flow.producao()["estado"] == "parou" and robo.proximo_video(robo.ler_config())["id"] == "a1"
+    # Antes do Gerar, nada foi gasto: a produção tenta de novo no dia, e o passo vai ao histórico.
+    assert robo.flow.producao()["estado"] == "parou" and robo.flow.producao()["tentativas_de_gerar"] == 1
     assert consultar("SELECT passo FROM shopee_video_tentativas") == ("vídeo de IA no Flow",)
     # Depois do Gerar, o vídeo é baixado nas rodadas seguintes, sem outro Gerar, até 3 vezes.
     robo.flow.guardar_producao(estado="gerando", gerado_em="2026-10-22 08:30:00")
@@ -9420,11 +9682,14 @@ def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, 
     assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     assert usados == [(str(tmp_path / "producao_2026-10-22.mp4"), True)] and app.rotulo
     rascunho = robo.esperando_aprovacao()[0]
-    assert rascunho["id_video"] == "a1" and rascunho["rotulo_ia"] == robo.ROTULO_DO_VIDEO_DE_IA
+    assert rascunho["id_video"] == "ia:2026-10-22" and rascunho["rotulo_ia"] == robo.ROTULO_DO_VIDEO_DE_IA
     assert rascunho["video_ia"]["modelo"] == "Omni 1.2 Flash" and rascunho["video_ia"]["estilo"] == "comedia"
     assert robo.flow.producao()["estado"] == "usado" and robo.flow.producao()["rascunho"] == rascunho["id"]
-    # O aviso do começo e o texto do rascunho dizem que é o vídeo de IA do dia.
-    assert any("o vídeo de IA do dia, feito no Google Flow" in a for a in avisos if isinstance(a, str))
+    # O vídeo de IA não gasta o vídeo da fonte: o a1 continua na fila para o próximo rascunho.
+    assert robo.proximo_video(robo.ler_config())["id"] == "a1"
+    # O aviso do começo e o texto do rascunho dizem que é o vídeo de IA do dia, e de que lista veio o produto.
+    assert any("o vídeo de IA do dia, feito no Google Flow com o produto que paga mais por venda (R$ 5,99) entre os "
+               "produtos em alta da Shopee, ainda não postado" in a for a in avisos if isinstance(a, str))
     import painel_shopee_video as sv
     texto = sv.texto_rascunho(rascunho, 1, 1)
     assert "Vídeo de IA do dia" in texto and "comédia" in texto and "Uma menina gira com o vestido." in texto
