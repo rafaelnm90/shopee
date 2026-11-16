@@ -228,16 +228,18 @@ def _fora_dos_trechos(trechos):
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
                              centro_seta=None, pulso_da_seta=(0, 1), capa=None, musica=None, total=0.0,
                              outras=(), troca=0.0, capa_do_resto=None, moldura=None, espera_da_moldura=0.0,
-                             passagem=0.0, sem_seta=(), sem_moldura=(), ganho=0.0):
+                             passagem=0.0, sem_seta=(), sem_moldura=(), ganho=0.0, espera_da_seta=0.0,
+                             surgir_da_seta=0.0):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo preto) por `segundos`, ou a `capa` no
     lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
     avisos), depois o vídeo em 720x1280 com a foto em miniatura (`miniatura` px de largura)
     com o centro em `centro` (x, y) até o fim; com `miniatura` 0, sem ela (o canto tem coisa
     do criador do vídeo, P81). Com `seta` (uma animação APNG com fundo transparente), a seta
-    com o centro em `centro_seta`, do começo do vídeo, logo depois da foto, até o fim;
-    `pulso_da_seta` = (primeiro quadro, quantos quadros) é o trecho do fim da animação que
-    se repete até o fim do vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
+    com o centro em `centro_seta`, `espera_da_seta` segundos depois da foto (a animação começa
+    ali), aparecendo aos poucos em `surgir_da_seta` segundos, até o fim; `pulso_da_seta` =
+    (primeiro quadro, quantos quadros) é o trecho do fim da animação que se repete até o fim do
+    vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
     vídeo sem som sai sem som. Com a `musica` (caminho de um arquivo de áudio), ela é o som do
     vídeo inteiro, foto incluída (`total` segundos), em laço se o vídeo for mais longo,
     entrando e saindo devagar; o som do vídeo não entra. Com as `outras` (caminhos de outras
@@ -289,7 +291,11 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     if seta:
         inicio, quadros = pulso_da_seta
         entradas += ["-i", seta]
-        filtro += (f"[3:v]loop=loop=-1:size={quadros}:start={inicio},{POR_CIMA}[seta];"
+        # A seta que espera (P239 1) começa a animação na hora em que entra, e o overlay deixa o vídeo como
+        # está até o primeiro quadro dela.
+        atraso = f",setpts=PTS+{espera_da_seta:.3f}/TB" if espera_da_seta > 0 else ""
+        surgir = f",fade=t=in:st={espera_da_seta:.3f}:d={surgir_da_seta:.3f}:alpha=1" if surgir_da_seta > 0 else ""
+        filtro += (f"[3:v]loop=loop=-1:size={quadros}:start={inicio},{POR_CIMA}{atraso}{surgir}[seta];"
                    f"[comfoto][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1"
                    + (f":enable='{_fora_dos_trechos(sem_seta)}'" if sem_seta else "") + ","
                    "format=yuv420p[editado];"
@@ -334,7 +340,7 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
                          centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None, musica=None, outras=(),
                          moldura=None, espera_da_moldura=0.0, passagem=0.0, sem_seta=(),
-                         sem_moldura=(), ganho=0.0):
+                         sem_moldura=(), ganho=0.0, espera_da_seta=0.0, surgir_da_seta=0.0):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
     (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
@@ -345,7 +351,8 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
     ordem), a miniatura troca entre a foto e cada uma delas, uma volta só, com o vídeo dividido
     igual entre elas; a outra que não abre fica de fora, sem derrubar a edição. Com a `moldura`
     (bytes de uma imagem do tamanho da tela, transparente fora dela), ela vai por cima do vídeo
-    `espera_da_moldura` segundos depois da abertura; a que não abre fica de fora. A seta e a moldura
+    `espera_da_moldura` segundos depois da abertura; a que não abre fica de fora. A seta entra
+    `espera_da_seta` segundos depois da abertura, aparecendo em `surgir_da_seta` (P239 1). A seta e a moldura
     somem nos trechos de `sem_seta` e de `sem_moldura` (P218 1). Com o `ganho` (dB), o som do vídeo
     sobe ou desce esse tanto, sem estourar (P222 1). Devolve "" quando
     deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
@@ -398,7 +405,7 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
                                            musica if total > segundos else None, total,
                                            caminhos_das_outras if troca else (), troca, caminho_do_resto,
                                            caminho_da_moldura, espera_da_moldura, passagem, sem_seta,
-                                           sem_moldura, ganho)
+                                           sem_moldura, ganho, espera_da_seta, surgir_da_seta)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

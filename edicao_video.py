@@ -2,7 +2,7 @@
 """
 A edição dos vídeos da Shopee Vídeo como o Rafael faz à mão no LumaFusion: a foto do
 anúncio do produto nos primeiros segundos e, no vídeo inteiro, uma miniatura dela no canto
-de cima à direita e a mãozinha amarela tocando logo acima do cartão do produto, embaixo à
+de cima à direita e a mãozinha amarela tocando a borda de cima do cartão do produto, embaixo à
 esquerda (a montagem fica no videos.com_foto_e_miniatura, com o resto do tratamento de vídeo).
 
 Vale para os vídeos de todas as fontes do robô (FONTES_COM_EDICAO): o Rafael confirmou que
@@ -72,27 +72,37 @@ CENTRO_DA_MINIATURA = (CANTO_DA_MINIATURA[0] - LARGURA_DA_MINIATURA // 2,
                        CANTO_DA_MINIATURA[1] + LARGURA_DA_MINIATURA // 2)
 # O sinal que aponta o cartão do produto: a mãozinha tocando (escolha do Rafael, 15/11, P231 1, no
 # lugar das setinhas em cascata da P130). A mãozinha amarela de emoji, com um contorno branco e uma
-# sombra leve (P127), desce, toca logo acima do cartão do produto que o app mostra (o sinal inteiro
-# acima do cartão, P71), aperta e volta, com uma onda no toque (o anel inteiro, deitado em volta da
-# ponta do dedo, P238 1), uma volta por segundo, perto do canto de baixo à esquerda. Ela é sempre
-# amarela: a cor do painel vale só para a moldura do cartão. Começa
-# logo depois da foto e vai até o fim do vídeo: o arquivo guarda uma volta, que se repete
-# (PULSO_DA_SETA). O mao_tocando.apng sai do .claude/scripts/gerar_mao.py, com MARGEM_DA_SETA px
-# transparentes de cada lado para o contorno e a sombra, no tamanho e no lugar das setinhas (a legenda
-# da fala continua ao lado). No código e nas escolhas do painel (a chave "setinhas"), ela ficou com o
-# nome das setinhas que substituiu. DECISOES.md, Shopee Vídeo.
+# sombra leve (P127), desce, toca a borda de cima do cartão do produto que o app mostra, aperta e
+# volta, com uma onda no toque (o anel inteiro, deitado em volta da ponta do dedo, P238 1), uma volta
+# por segundo, perto do canto de baixo à esquerda. Ela é sempre amarela: a cor do painel vale só para
+# a moldura do cartão. Entra junto com o cartão (ENTRADA_DA_MAOZINHA) e vai até o fim do vídeo: o
+# arquivo guarda uma volta, que se repete (PULSO_DA_SETA). O mao_tocando.apng sai do
+# .claude/scripts/gerar_mao.py, com MARGEM_DA_SETA px transparentes de cada lado para o contorno e a
+# sombra, no tamanho das setinhas (a legenda da fala continua ao lado). No código e nas escolhas do
+# painel (a chave "setinhas"), ela ficou com o nome das setinhas que substituiu.
+# DECISOES.md, Shopee Vídeo.
 SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "mao_tocando.apng")
 MARGEM_DA_SETA = 10
-CENTRO_DA_SETA = (142, 796)
+# A ponta do dedo, no toque, encosta na borda de cima do cartão do produto (CARTAO_DO_PRODUTO, medido no
+# celular do Rafael): a mão imita um dedo tocando no anúncio, e tocando no ar, acima dele, ela não parece
+# tocar nada. A frente da onda fica embaixo do cartão, que o app desenha por cima do vídeo.
+# Escolha do Rafael (16/11, P239 1): DECISOES.md, Shopee Vídeo.
+CENTRO_DA_SETA = (142, 856)
+# A mãozinha entra junto com o cartão do produto, que o app mostra de 2,3 a 2,6 s depois que o vídeo abre
+# (medido nas gravações do Rafael de 16/11): entrando antes, ela apontaria para o nada. Ela aparece aos
+# poucos, de transparente a inteira, em SURGIR_DA_MAOZINHA, e a volta dela começa ali, de cima. Escolha do
+# Rafael (16/11, P239 1): DECISOES.md, Shopee Vídeo.
+ENTRADA_DA_MAOZINHA = 2.5           # segundos desde o começo do vídeo (com a foto da abertura)
+SURGIR_DA_MAOZINHA = 0.15
 # O que se vê da mãozinha no vídeo de 720x1280 (x1, y1, x2, y2: com o contorno, a sombra e a onda, em todos
 # os quadros do arquivo, sem a margem transparente; o tests/test_edicao_video.py confere no arquivo), sem a
 # subida do Rótulo de IA: o lugar dela que o que o criador pôs por cima não pode cruzar (P218 1).
-CAIXA_DAS_SETINHAS = (85, 717, 195, 868)
+CAIXA_DAS_SETINHAS = (85, 777, 195, 928)
 # O que o app da Shopee mostra do vídeo de 720x1280 num celular de tela 20:9, medido no
 # celular do Rafael (vídeo de 28/10, P71): ele enche a tela e corta uns 47 px de cada lado
 # (fica visível de x 47 a 673), a barra de busca do alto vai até y 140 e o cartão do produto
-# embaixo começa em y 870. A seta e os textos ficam dentro disso (o tests/test_edicao_video.py
-# confere).
+# embaixo começa em y 870. Os textos e a legenda da fala ficam dentro disso (o tests/test_edicao_video.py
+# confere); a mãozinha encosta no cartão (P239 1).
 VISIVEL_NO_APP = (47, 673)
 FIM_DA_BARRA_DE_BUSCA = 140
 COMECO_DO_CARTAO_DO_PRODUTO = 870
@@ -122,8 +132,9 @@ RAIO_DO_CARTAO = 17                             # o arredondado dos cantos do ca
 PULSO_DA_SETA = (0, 25)                         # a volta inteira da mãozinha, em laço
 # As legendas da fala: o que as pessoas falam no vídeo, escrito pela IA vendo o vídeo e posto por
 # nós na edição (não o Captions do app: assim o Rafael vê a legenda no rascunho antes de aprovar).
-# O pé da legenda fica na altura do pé da seta, porque logo abaixo vem o cartão do produto que o app
-# mostra; ela vai à direita da seta, sem cobri-la, até antes da coluna dos ícones do app à direita
+# O pé da legenda fica logo acima do cartão do produto que o app mostra (PE_DA_LEGENDA: ela fica nessa
+# altura com a mãozinha encostando no cartão, P239 1); ela vai à direita da seta, sem cobri-la, até
+# antes da coluna dos ícones do app à direita
 # (o perfil, o coração e os comentários, que começam em COLUNA_DOS_ICONES, medido no celular do
 # Rafael no vídeo de 02/11, 12:36: pedido dele, a legenda passava por cima dos ícones), sempre na
 # mesma altura. O vídeo sem fala (só música ou canto) e o que já tem a fala escrita na tela vão sem
@@ -132,8 +143,8 @@ PULSO_DA_SETA = (0, 25)                         # a volta inteira da mãozinha, 
 # vídeo, na maior de LETRA_DA_LEGENDA em que o trecho cabe em LINHAS_DA_LEGENDA linhas. Escolha do
 # Rafael (12/11, P214 1): DECISOES.md, Shopee Vídeo.
 TAMANHO_DA_SETA = (202, 160)        # o arquivo da seta, com a margem (o tests/test_edicao_video.py confere)
-# O pé e o lado da seta são os do pedaço com ela, sem a margem do contorno e da sombra.
-PE_DA_LEGENDA = CENTRO_DA_SETA[1] + TAMANHO_DA_SETA[1] // 2 - MARGEM_DA_SETA
+# O lado da seta é o do pedaço com ela, sem a margem do contorno e da sombra.
+PE_DA_LEGENDA = 866
 ESQUERDA_DA_LEGENDA = CENTRO_DA_SETA[0] + TAMANHO_DA_SETA[0] // 2 - MARGEM_DA_SETA + 12
 COLUNA_DOS_ICONES = 586
 DIREITA_DA_LEGENDA = COLUNA_DOS_ICONES - 12
@@ -1361,7 +1372,8 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
     anotar (dict), quando vem, recebe esses trechos em "sob_o_criador". Sem a música, o som do vídeo vai ao
     volume das nossas músicas, sem estourar (ganho_do_som, P222 1), e anotar recebe em "volume" o som
     medido (LUFS) e o ganho (dB). A foto (ou a capa) abre o vídeo por segundos (sem eles, SEGUNDOS_DA_FOTO;
-    o Editar ✏️ de um rascunho usa o tempo com que ele foi feito, P221 1).
+    o Editar ✏️ de um rascunho usa o tempo com que ele foi feito, P221 1). A mãozinha entra aos
+    ENTRADA_DA_MAOZINHA s do vídeo, com o cartão do app, aparecendo em SURGIR_DA_MAOZINHA (P239 1).
     """
     escolhas = escolhas_certas(escolhas)
     lado = escolhas["miniatura"]
@@ -1402,7 +1414,9 @@ def editar(video, foto, destino, avisos=False, musica=None, capa=None, miniatura
                                        PULSO_DA_SETA, capa, musica, outras=outras_fotos, moldura=moldura,
                                        espera_da_moldura=ESPERA_DA_MOLDURA,
                                        passagem=PASSAGEM_DA_CAPA if PASSAGEM_NOS_VIDEOS else 0.0,
-                                       sem_seta=sem_seta, sem_moldura=sem_moldura, ganho=ganho)
+                                       sem_seta=sem_seta, sem_moldura=sem_moldura, ganho=ganho,
+                                       espera_da_seta=max(0.0, ENTRADA_DA_MAOZINHA - segundos),
+                                       surgir_da_seta=SURGIR_DA_MAOZINHA)
 
 
 def largura_da_miniatura(miniatura):

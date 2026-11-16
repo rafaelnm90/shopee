@@ -1,12 +1,13 @@
 """
 A mãozinha tocando dos vídeos da Shopee Vídeo (midia/mao_tocando.apng), no lugar das setinhas em
 cascata (escolha do Rafael, 15/11, P231 1: DECISOES.md, Shopee Vídeo): a mãozinha amarela de
-emoji, com o contorno branco e a sombra leve, desce, toca logo acima do cartão do produto que o
-app mostra, aperta e volta, uma volta por segundo, e do toque sai uma onda (branca, com um anel
+emoji, com o contorno branco e a sombra leve, desce, toca a borda de cima do cartão do produto
+que o app mostra (P239 1), aperta e volta, uma volta por segundo, e do toque sai uma onda (branca, com um anel
 no vermelho do destaque), inteira, deitada em volta da ponta do dedo (P238 1). Ela é sempre
 amarela: a cor do painel não vale para ela. O quadro tem o
 tamanho do TAMANHO_DA_SETA do edicao_video.py, com a margem transparente onde cabem o contorno e a
-sombra, e a ponta do dedo onde terminava a setinha de baixo, logo acima do cartão. O desenho da
+sombra, e a ponta do dedo, no toque, em PONTA (no vídeo, na borda de cima do cartão, pelo
+CENTRO_DA_SETA do edicao_video.py). O desenho da
 mão é o do emoji da fonte Noto Color Emoji (licença livre), o mesmo do exemplo que o Rafael
 escolheu. Ferramenta do Claude, fora dos robôs: roda só para refazer ou mudar a mãozinha.
 
@@ -22,7 +23,7 @@ FONTE = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
 MAO = "\U0001F447"               # a mão apontando para baixo
 QUADRO = (202, 160)              # o TAMANHO_DA_SETA do edicao_video.py
 MARGEM = 10                      # o MARGEM_DA_SETA do edicao_video.py
-PONTA = (105, 141)               # onde o dedo toca no quadro (no vídeo, x 146 e y 857: logo acima do cartão)
+PONTA = (105, 141)               # onde o dedo toca no quadro (no vídeo, x 146 e y 917: na borda do cartão)
 ALTURA_DA_MAO = 113              # px do vídeo de 720x1280
 DESCIDA = 21                     # quanto a mão desce até tocar
 APERTO = 0.94                    # o tamanho da mão apertando
@@ -79,8 +80,8 @@ def onda(k):
     """
     A onda do toque na fração k (0 a 1) do caminho dela, no quadro todo (RGBA): o anel inteiro, deitado em volta
     da ponta do dedo, atrás da mão (P238 1: a metade de cima só, com a mão tampando o meio, parecia um círculo
-    quebrado). Ele é achatado e cresce só até caber inteiro no quadro, acima do cartão do produto que o app
-    desenha por cima do vídeo (o sinal inteiro acima do cartão, P71).
+    quebrado). Ele é achatado e cresce só até caber inteiro no quadro; no vídeo, a frente dele passa por baixo
+    do cartão do produto, que o app desenha por cima (P239 1).
     """
     grande = Image.new("RGBA", (QUADRO[0] * VEZES, QUADRO[1] * VEZES), (0, 0, 0, 0))
     desenho = ImageDraw.Draw(grande)

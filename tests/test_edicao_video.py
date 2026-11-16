@@ -70,9 +70,9 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     largura, (mx, my) = edicao_video.LARGURA_DA_MINIATURA, edicao_video.CENTRO_DA_MINIATURA
     assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and f"scale={largura}:-2" in filtro
     assert f"overlay=x={mx}-w/2:y={my}-h/2:shortest=1" in filtro
-    # As setinhas entram só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e a volta da
-    # cascata (os 25 quadros do arquivo, P130) se repete até o fim.
-    assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro
+    # A mãozinha entra só no vídeo, aos 2,5 s, junto com o cartão do app, aparecendo aos poucos e com a volta dela
+    # começando ali (P239 1), e a volta (os 25 quadros do arquivo) se repete até o fim.
+    assert _mao_no_filtro() in filtro
     cx, cy = edicao_video.CENTRO_DA_SETA
     assert f"[comfoto][seta]overlay=x={cx}-w/2:y={cy}-h/2:shortest=1,format=yuv420p[editado]" in filtro
     assert "[foto][editado]concat=n=2:v=1:a=0[v]" in filtro
@@ -97,12 +97,19 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert (f"[5:v]{videos.POR_CIMA}[moldura];[semmoldura][moldura]overlay=0:0:shortest=1"
             f":enable='gte(t,{espera:.3f})'[comfoto]") in filtro
     assert [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"][3] == edicao_video.SETA
-    assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    assert _mao_no_filtro() in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+
+
+def _mao_no_filtro():
+    """A entrada da mãozinha no ffmpeg (P239 1): aos ENTRADA_DA_MAOZINHA s do vídeo, depois da foto da abertura."""
+    espera = edicao_video.ENTRADA_DA_MAOZINHA - edicao_video.SEGUNDOS_DA_FOTO
+    return (f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA},setpts=PTS+{espera:.3f}/TB,"
+            f"fade=t=in:st={espera:.3f}:d={edicao_video.SURGIR_DA_MAOZINHA:.3f}:alpha=1[seta]")
 
 
 def test_maozinha_amarela_desce_toca_e_volta_com_a_onda():
-    # Escolha do Rafael (15/11, P231 1): no lugar das setinhas em cascata, a mãozinha amarela desce, toca logo
-    # acima do cartão do produto, aperta e volta, uma volta por segundo, com uma onda no toque; com o contorno
+    # Escolha do Rafael (15/11, P231 1): no lugar das setinhas em cascata, a mãozinha amarela desce, toca o
+    # cartão do produto (P239 1), aperta e volta, uma volta por segundo, com uma onda no toque; com o contorno
     # branco e a sombra leve (P127), num fundo transparente.
     from PIL import Image
     with Image.open(edicao_video.SETA) as arquivo:
@@ -128,7 +135,7 @@ def test_maozinha_amarela_desce_toca_e_volta_com_a_onda():
     assert pes[0] < pes[10] and pes[24] < pes[10] and max(pes) - min(pes) >= 15
     # A onda (branca, com o anel vermelho) só depois do toque: o anel inteiro, deitado em volta da ponta do dedo, com a
     # frente dele abaixo da ponta (P238 1, 16/11: só a metade de cima, com a mão tampando o meio, parecia um círculo
-    # quebrado), cabendo inteiro no quadro, acima do cartão do produto (P71).
+    # quebrado), cabendo inteiro no quadro.
     vermelho = edicao_video.VERMELHO_DO_DESTAQUE
 
     def anel(quadro):
@@ -155,7 +162,7 @@ def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
     # do destaque (03/11, P140 2).
     import io
 
-    from PIL import Image, ImageSequence
+    from PIL import Image
     imagem = Image.open(io.BytesIO(edicao_video.moldura_do_cartao()))
     assert imagem.mode == "RGBA" and imagem.size == edicao_video.TELA
     x1, y1, x2, y2 = edicao_video.CARTAO_DO_PRODUTO
@@ -172,12 +179,8 @@ def test_moldura_do_cartao_fica_em_volta_do_cartao_do_produto(monkeypatch):
     caixa = imagem.getchannel("A").getbbox()
     esquerda, direita = edicao_video.VISIVEL_NO_APP
     assert esquerda <= caixa[0] and caixa[2] <= direita
-    # Abaixo da seta (no maior pulso) e da legenda da fala; acima da linha do Ver Produtos (y 1122).
-    with Image.open(edicao_video.SETA) as seta:
-        pe_da_seta = max(q.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()[3]
-                         for q in ImageSequence.Iterator(seta) if q.convert("RGBA").getchannel("A").getbbox())
-        topo_da_seta = edicao_video.CENTRO_DA_SETA[1] - seta.size[1] // 2
-    assert topo_da_seta + pe_da_seta < caixa[1] and edicao_video.PE_DA_LEGENDA < caixa[1] and caixa[3] <= 1115
+    # Abaixo da legenda da fala (a mãozinha encosta no cartão, P239 1) e acima da linha do Ver Produtos (y 1122).
+    assert edicao_video.PE_DA_LEGENDA < caixa[1] and caixa[3] <= 1115
     # Na cor escolhida no painel (P192 1), no mesmo lugar.
     azul = edicao_video.CORES_DO_DESTAQUE["azul"]
     na_cor = Image.open(io.BytesIO(edicao_video.moldura_do_cartao(cor=azul)))
@@ -293,7 +296,10 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
     for segundo in (1.0, foto_s + 1.0):
         assert not [p for p in na_moldura(segundo) if sum(abs(a - b) for a, b in zip(p, cor)) < 70], segundo
     assert all(sum(abs(a - b) for a, b in zip(p, cor)) < 70 for p in na_moldura(foto_s + 2.0))
-    amarelo, escuros = onde_fica_a_seta(foto_s + 0.6)
+    # A mãozinha entra aos 2,5 s do vídeo, junto com o cartão do app (P239 1): antes, nada dela; logo depois, ela.
+    entrada = edicao_video.ENTRADA_DA_MAOZINHA
+    assert onde_fica_a_seta(entrada - 0.15) == (0, [])
+    amarelo, escuros = onde_fica_a_seta(entrada + 0.3)
     assert amarelo > 0 and not escuros
     # 5,5 s de vídeo: depois do fim do arquivo, já na volta repetida da mãozinha.
     amarelo, escuros = onde_fica_a_seta(foto_s + 5.5)
@@ -952,9 +958,10 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
 
 def test_seta_e_textos_dentro_do_que_o_app_mostra():
     # Escolha do Rafael (P71, vídeo de 28/10 às 23:20): no celular dele o app corta as bordas do
-    # vídeo, a barra de busca cobria o alto da caixa do texto e o cartão do produto tampava a
-    # ponta da seta. A seta fica inteira acima do cartão, mesmo no maior pulso, e os textos dentro
-    # do que o app mostra, abaixo da busca.
+    # vídeo e a barra de busca cobria o alto da caixa do texto: os textos ficam dentro do que o app
+    # mostra, abaixo da busca. A ponta do dedo da mãozinha, no toque, encosta na borda de cima do
+    # cartão do produto, logo atrás dela (P239 1, 16/11: tocando no ar, uns 60 px acima, a mão não
+    # parecia tocar nada).
     import io
 
     from PIL import Image, ImageSequence
@@ -963,8 +970,14 @@ def test_seta_e_textos_dentro_do_que_o_app_mostra():
         caixas = [q.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()
                   for q in ImageSequence.Iterator(seta)]
         largura, altura = seta.size
+        quadros = [q.convert("RGBA").tobytes() for q in ImageSequence.Iterator(seta)]
+    # A ponta do dedo é o pé do amarelo da mão (o contorno branco fica em volta).
+    amarelos = [max((n // 4 // largura for n in range(0, len(q), 4)
+                     if q[n + 3] > 200 and q[n] > 200 and q[n + 1] > 150 and q[n + 2] < 120), default=0)
+                for q in quadros]
     cx, cy = edicao_video.CENTRO_DA_SETA
-    assert cy - altura // 2 + max(c[3] for c in caixas if c) < edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
+    ponta_do_dedo = cy - altura // 2 + max(amarelos)
+    assert 0 <= ponta_do_dedo - edicao_video.CARTAO_DO_PRODUTO[1] <= 10
     assert cx - largura // 2 + min(c[0] for c in caixas if c) >= esquerda
     for texto in ("Óculos de Sol Hexagonal", "Mantém a bebida gelada por 24 horas", "Design elegante e moderno",
                   "Toque no produto aqui embaixo"):
@@ -2725,7 +2738,7 @@ def test_a_miniatura_troca_entre_todas_as_fotos_uma_volta_so(monkeypatch, tmp_pa
     assert f"[corpo][mini0]{lugar}:enable='lt(t,3.000)'[mini0_no_corpo]" in filtro
     assert f"[mini0_no_corpo][mini1]{lugar}:enable='gte(t,3.000)*lt(t,6.000)'[mini1_no_corpo]" in filtro
     assert f"[mini1_no_corpo][mini2]{lugar}:enable='gte(t,6.000)'[semmoldura]" in filtro
-    assert f"[3:v]loop=loop=-1:size=25:start=0,{videos.POR_CIMA}[seta]" in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
+    assert _mao_no_filtro() in filtro and "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro
     # A foto que não abre fica de fora, e as que sobram dividem o vídeo igual.
     monkeypatch.setattr(edicao_video.videos, "imagem_abre", lambda caminho: not caminho.endswith("outra_0.jpg"))
     assert edicao_video.editar("video.mp4", b"foto", destino, outras_fotos=[b"nao abre", b"triangulo"]) == ""
@@ -3120,18 +3133,17 @@ def test_a_seta_tem_o_tamanho_que_a_legenda_usa():
         assert seta.size == edicao_video.TAMANHO_DA_SETA
 
 
-def test_legenda_da_fala_fica_com_o_pe_na_altura_do_pe_da_seta_a_direita_dela():
-    # O pé da legenda na altura do pé da seta (logo abaixo vem o cartão do produto), sem cobrir a seta e
-    # dentro do que o app mostra.
+def test_legenda_da_fala_fica_logo_acima_do_cartao_a_direita_da_mao():
+    # O pé da legenda logo acima do cartão do produto, também com a mãozinha encostando no cartão (P239 1: a
+    # legenda fica onde está), à direita da mão, sem cobri-la, e dentro do que o app mostra.
     letreiros = edicao_video.letreiros_da_fala([(1.0, 3.0, "Olha que lindo esse vestido")], 10.0)
     assert len(letreiros) == 1
     imagem, inicio, fim, x, y = letreiros[0]
     largura, altura = _medidas(imagem)
     # O pé e o lado da seta sem a margem transparente do arquivo (onde ficam o contorno e a sombra).
     margem = edicao_video.MARGEM_DA_SETA
-    pe_da_seta = edicao_video.CENTRO_DA_SETA[1] + edicao_video.TAMANHO_DA_SETA[1] // 2 - margem
     direita_da_seta = edicao_video.CENTRO_DA_SETA[0] + edicao_video.TAMANHO_DA_SETA[0] // 2 - margem
-    assert (inicio, fim) == (1.0, 3.0) and y + altura == edicao_video.PE_DA_LEGENDA == pe_da_seta
+    assert (inicio, fim) == (1.0, 3.0) and y + altura == edicao_video.PE_DA_LEGENDA == 866
     assert edicao_video.PE_DA_LEGENDA <= edicao_video.COMECO_DO_CARTAO_DO_PRODUTO
     assert x > direita_da_seta and x + largura <= edicao_video.VISIVEL_NO_APP[1]
     # Pedido do Rafael (02/11): a legenda para antes da coluna dos ícones do app à direita (o perfil,
@@ -4352,17 +4364,17 @@ def test_setinhas_e_moldura_somem_so_enquanto_o_que_o_criador_pos_passa_por_elas
 
 def test_setinhas_somem_de_verdade_so_no_trecho_do_criador(tmp_path):
     # Com o ffmpeg de verdade (P218 1): a mãozinha amarela (P231 1) some enquanto a frase do criador está no lugar
-    # dela e volta depois; o tempo conta do fim da abertura.
+    # dela e volta depois; o tempo conta do fim da abertura, e a mão só entra com o cartão do app (P239 1).
     if not shutil.which("ffmpeg"):
         return
     from PIL import Image
     video, foto = tmp_path / "v.mp4", tmp_path / "foto.jpg"
-    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=4",
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=6",
                     str(video)], check=True)
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
                     "-frames:v", "1", str(foto)], check=True)
     destino = tmp_path / "editado.mp4"
-    frase = FRASE_SOBRE_AS_SETINHAS[:4] + (1.0, 2.0)
+    frase = FRASE_SOBRE_AS_SETINHAS[:4] + (2.0, 3.0)
     assert edicao_video.editar(str(video), foto.read_bytes(), str(destino), por_cima=[frase]) == ""
 
     def amarelos(segundo):
@@ -4374,7 +4386,7 @@ def test_setinhas_somem_de_verdade_so_no_trecho_do_criador(tmp_path):
         x1, y1, x2, y2 = edicao_video.CAIXA_DAS_SETINHAS
         return sum(1 for x in range(x1, x2, 3) for y in range(y1, y2, 3)
                    if (lambda r, g, b: r > 200 and g > 150 and b < 120)(*tela.getpixel((x, y))))
-    assert amarelos(0.3) > 30 and amarelos(1.5) == 0 and amarelos(3.0) > 30
+    assert amarelos(0.5) == 0 and amarelos(1.5) > 30 and amarelos(2.5) == 0 and amarelos(4.5) > 30
 
 
 def test_o_que_vai_ao_ar_tira_as_setinhas_sob_o_criador_e_o_registro_conta(monkeypatch, tmp_path):
