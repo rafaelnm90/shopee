@@ -1630,14 +1630,17 @@ def linha_do_video_de_ia_de_hoje(agora=None):
 
 def limite_dos_videos_de_ia():
     """A regra dos vídeos de IA por dia, na tela do Vídeo de IA ✨ (VIDEOS_DE_IA_POR_DIA; P232 1 e P243)."""
-    limite, custo = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.MODELO_DA_PRODUCAO[1]
+    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.MODELO_DA_PRODUCAO[1], robo.flow.CREDITOS_GRATIS_DO_DIA
     pedido = f"{BOTAO_PREPARAR} → {BOTAO_PREPARAR_DE_IA}"
     if limite is None:
-        return (f"Além do vídeo do robô, cada {pedido} faz mais um ({custo} créditos cada; passando dos 50 grátis do "
-                "dia, saem do plano)")
+        return (f"Além do vídeo do robô, cada {pedido} faz mais um ({custo} créditos cada; passando dos {gratis} "
+                "grátis do dia, saem do plano)")
     if limite == 1:
         return f"Nunca mais de um vídeo por dia (o {pedido} só adianta o de hoje)"
-    return f"No máximo {limite} vídeos de IA por dia, contando o do robô e os que você pede em {pedido}"
+    texto = f"No máximo {limite} vídeos de IA por dia, contando o do robô e os que você pede em {pedido}"
+    if limite * custo > gratis:
+        texto += f" ({custo} créditos cada; passando dos {gratis} grátis do dia, os outros saem do plano)"
+    return texto
 
 
 def texto_video_ia(config, agora=None):
@@ -2101,7 +2104,16 @@ def texto_preparar(agora=None):
         f"✨ <b>{BOTAO_PREPARAR_DE_IA}</b>: o vídeo de IA pronto que espera vira o rascunho; sem ele, o robô faz um "
         "novo no Google Flow, com o produto escolhido como o do dia, e ele vira o rascunho. Uns 20 a 40 min.\n\n"
         f"Vídeos de IA hoje: <b>{feitos}</b>" + (f" de {limite}" if limite is not None else "")
-        + ("" if pode else f" ({html_escape(motivo)})"))
+        + ("" if pode else f" ({html_escape(motivo)})") + creditos_do_de_ia())
+
+
+def creditos_do_de_ia():
+    """Na tela do Preparar 1 Agora ⚡, quantos vídeos de IA do dia cabem nos créditos grátis, quando o limite passa."""
+    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.MODELO_DA_PRODUCAO[1], robo.flow.CREDITOS_GRATIS_DO_DIA
+    if limite is not None and limite * custo <= gratis:
+        return ""
+    return f"\n<i>Os {gratis // custo} primeiros do dia cabem nos {gratis} créditos grátis; os outros gastam {custo} " \
+           "créditos do plano cada.</i>"
 
 
 @router.message(F.text == BOTAO_PREPARAR, StateFilter("*"))
