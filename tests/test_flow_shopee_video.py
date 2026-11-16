@@ -77,6 +77,9 @@ class Flow:
         self.versoes, self.versao = [], 0
         # Como no app (15/11): a coluna das versões só aparece algumas leituras depois do player.
         self.atraso_das_versoes, self.leituras_do_video = 2, 0
+        # Quantas vezes o vídeo aberto mostra "Falha ao carregar o vídeo" no player (visto em 16/11) e se
+        # a abertura de agora é uma delas.
+        self.falhas_ao_carregar, self.falha_no_player = 0, False
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
@@ -163,8 +166,9 @@ class Flow:
             nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=titulo, clicavel=False), ""),
                     ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Fechar"), "projeto"),
                     ((891, 152, 1017, 278), _no((891, 152, 1017, 278), "android.widget.Button", "Mais opções"), "menu_video"),
-                    ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184),
-                                                desc=f"Vídeo tocando, {self.versao + 1} de {len(versoes)}\n0:08"), ""),
+                    ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184), desc=(
+                        f"{self.versao + 1} de {len(versoes)}\nFalha ao carregar o vídeo" if self.falha_no_player
+                        else f"Vídeo tocando, {self.versao + 1} de {len(versoes)}\n0:08")), ""),
                     ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), ""),
                     ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"), "")]
             if len(versoes) > 1 and self.leituras_do_video >= self.atraso_das_versoes:
@@ -293,6 +297,9 @@ class Flow:
         elif acao in ("video", "menu_video"):
             if acao == "video" and self.tela != "menu_video":
                 self.leituras_do_video = 0
+            if acao == "video" and self.tela == "projeto":
+                self.falha_no_player = self.falhas_ao_carregar > 0
+                self.falhas_ao_carregar -= int(self.falha_no_player)
             self.tela = acao
         elif acao == "baixar":
             self.tela = "tamanho"
@@ -322,6 +329,7 @@ def celular(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(flow, "ESPERA_DA_LISTA", 0.2)
     monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
     monkeypatch.setattr(flow, "ESPERA_DA_VERSAO", 0.2)
+    monkeypatch.setattr(flow, "ESPERA_DO_PLAYER", 0.2)
     monkeypatch.setattr(flow, "PASTA", str(tmp_path / "flow"))
     monkeypatch.setattr(flow.celular_robo, "conectado", lambda: True)
     monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
@@ -835,6 +843,28 @@ def test_video_com_a_versao_estendida_escolhe_a_do_modelo_do_teste(celular):
     assert flow.teste() == 0
     assert celular.versao == 0 and celular.baixado and len(celular.mandados) == 1
     assert db.ler_config(flow.CHAVE, {})["teste"]["videos"]["Veo 3.1 - Lite"]["estado"] == "enviado"
+
+
+def test_video_que_nao_carrega_no_player_e_fechado_e_aberto_de_novo(celular, capsys):
+    # Amostra nº 2 (16/11): o vídeo ficou pronto, mas abriu com "Falha ao carregar o vídeo" no player, e
+    # o robô parou sem baixar. Agora ele fecha e abre de novo, como uma pessoa faria, e baixa.
+    flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    flow.guardar_producao(estado="gerando", gerado_em="2026-11-16 08:00:00")
+    celular.gerado, celular.modelo_do_video, celular.falhas_ao_carregar = True, "Omni 1.2 Flash", 2
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    assert celular.falhas_ao_carregar == 0 and celular.baixado and celular.geracoes == 0
+    assert capsys.readouterr().out.count("o vídeo não carregou no player; fechado para abrir de novo") == 2
+
+
+def test_video_que_nunca_carrega_no_player_para_sem_baixar(celular):
+    flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    flow.guardar_producao(estado="gerando", gerado_em="2026-11-16 08:00:00")
+    celular.gerado, celular.modelo_do_video, celular.falhas_ao_carregar = True, "Omni 1.2 Flash", 99
+    with pytest.raises(flow.Parada, match="o Flow não carregou o vídeo"):
+        flow.producao_no_celular(celular, flow.producao())
+    # Três aberturas, nenhum Baixar; o vídeo continua "gerando" para a próxima rodada baixar.
+    assert celular.falhas_ao_carregar == 99 - flow.ABERTURAS_DO_VIDEO
+    assert not celular.baixado and flow.producao()["estado"] == "gerando"
 
 
 def test_versoes_sem_a_do_modelo_do_teste_nao_baixam(celular):

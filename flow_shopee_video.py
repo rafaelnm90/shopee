@@ -110,6 +110,14 @@ ESPERA_DA_JANELA_DO_BAIXAR = 8
 ESPERA_PARA_A_JANELA_FECHAR = 30
 # Depois do toque na miniatura de uma versão, o tempo para o título do vídeo aberto mudar.
 ESPERA_DA_VERSAO = 6
+# O vídeo aberto com o player em "Falha ao carregar o vídeo" (visto em 16/11/2026, logo depois de o
+# vídeo ficar pronto): o título com o modelo aparece, mas o vídeo não toca. O robô espera o player
+# até ESPERA_DO_PLAYER e, sem ele, fecha o vídeo e o abre de novo depois de PAUSA_ANTES_DE_REABRIR,
+# até ABERTURAS_DO_VIDEO vezes; sem carregar, Parada (o vídeo continua gerado: a próxima vez baixa).
+FALHA_NO_PLAYER = re.compile(r"falha ao carregar", re.I)
+ESPERA_DO_PLAYER = 10
+PAUSA_ANTES_DE_REABRIR = 20
+ABERTURAS_DO_VIDEO = 3
 # A janela "Baixar vídeo" (mapeada em 15/11/2026) vem com o "720p Tamanho original" marcado; o
 # "1080p Aumentar a resolução" fica livre no plano Pro e o 4K pede outro plano. O robô baixa no
 # 1080p e só quando a linha dele não fala em plano nem em crédito, e a janela não fala em crédito;
@@ -747,20 +755,35 @@ def versoes_do_video(xml):
     return pontos
 
 
+def video_sem_carregar(xml):
+    """O vídeo aberto com o player em "Falha ao carregar o vídeo"?"""
+    return any(el["pacote"] == PACOTE and FALHA_NO_PLAYER.search(f"{el['texto']} {el['descricao']}")
+               for el in ps.elementos(xml))
+
+
 def abrir_o_video_novo(d, modelo):
     """
     No projeto: Vídeos → o mais novo. O título dele tem de ter o modelo do teste: com mais de uma
     versão (o Estender que o Rafael fez no vídeo do teste em 15/11 ficou junto do original), o robô
     passa pelas miniaturas das versões até o título dizer o modelo. Nunca baixa nem manda um vídeo
-    de outro modelo (Parada).
+    de outro modelo (Parada). O player que não carrega é fechado e aberto de novo (ABERTURAS_DO_VIDEO).
     """
     tocar(d, "Vídeos", "filtro dos vídeos")
-    ponto = ponto_parado(d, quadro_mais_novo, "vídeo novo")
-    if not ponto:
-        raise Parada("baixar: o vídeo novo não apareceu no projeto")
-    d.click(*ponto)
-    if not esperar(d, lambda x: titulo_do_video(x) is not None):
-        raise Parada("baixar: o vídeo não abriu")
+    for abertura in range(1, ABERTURAS_DO_VIDEO + 1):
+        ponto = ponto_parado(d, quadro_mais_novo, "vídeo novo")
+        if not ponto:
+            raise Parada("baixar: o vídeo novo não apareceu no projeto")
+        d.click(*ponto)
+        xml = esperar(d, lambda x: titulo_do_video(x) is not None or video_sem_carregar(x))
+        if not xml:
+            raise Parada("baixar: o vídeo não abriu")
+        if titulo_do_video(xml) is not None or esperar(d, lambda x: titulo_do_video(x) is not None, ESPERA_DO_PLAYER):
+            break
+        if abertura == ABERTURAS_DO_VIDEO:
+            raise Parada(f"baixar: o Flow não carregou o vídeo ({ABERTURAS_DO_VIDEO} vezes)")
+        print("Flow: o vídeo não carregou no player; fechado para abrir de novo")
+        tocar(d, "Fechar", "fechar o vídeo que não carregou")
+        time.sleep(PAUSA_ANTES_DE_REABRIR)
     # O título com o modelo e a coluna das versões aparecem um pouco depois do player (visto em
     # 15/11: lido cedo demais, o vídeo parecia não ter versões); a versão estendida tem só o nome
     # no título, sem o modelo.
