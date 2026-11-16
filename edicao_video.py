@@ -181,22 +181,35 @@ EXEMPLOS_LEMBRADOS = 100
 SEM_FOTO_LEMBRADOS = 300
 
 
-# A música de fundo do vídeo sem som: 3 músicas instrumentais feitas pelo Claude do zero, por
-# síntese (.claude/scripts/gerar_musicas.py), sem pedaço de música de ninguém, porque a regra 7
-# da Shopee pune música de terceiros sem licença. Cada vídeo mudo leva a que a IA escolhe para ele (P241 1,
-# CLIMA_DAS_MUSICAS) ou, sem ela, a próxima, em rodízio (a vez fica em MUSICA_DA_VEZ, na chave shopee_video), e no
-# exemplo cada versão modificada leva outra. Escolha do Rafael (28/10, P55): DECISOES.md, Shopee Vídeo.
+# A música de fundo do vídeo sem som: músicas instrumentais feitas pelo Claude do zero, por síntese
+# (.claude/scripts/gerar_musicas.py), sem pedaço de música de ninguém, porque a regra 7 da Shopee pune música de
+# terceiros sem licença: as 3 primeiras da P55 (28/10) e as 8 seguintes, cada uma com o clima de outros tipos de
+# vídeo, da P242 1 (16/11). Cada vídeo mudo leva a que a IA escolhe para ele (P241 1, CLIMA_DAS_MUSICAS) ou, sem ela,
+# a próxima, em rodízio (a vez fica em MUSICA_DA_VEZ, na chave shopee_video), e no exemplo cada versão modificada
+# leva outra. Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
 MUSICAS = (("animada", "musica_animada.m4a"), ("calma", "musica_calma.m4a"),
-           ("divertida", "musica_divertida.m4a"))
+           ("divertida", "musica_divertida.m4a"), ("romântica", "musica_romantica.m4a"),
+           ("elegante", "musica_elegante.m4a"), ("energia", "musica_energia.m4a"),
+           ("tecnologia", "musica_tecnologia.m4a"), ("fofa", "musica_fofa.m4a"),
+           ("aconchegante", "musica_aconchegante.m4a"), ("tropical", "musica_tropical.m4a"),
+           ("mistério", "musica_misterio.m4a"))
 PASTA_DA_MIDIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia")
 MUSICA_DA_VEZ = "musica_de_fundo_da_vez"
 # A música do vídeo que vai sem o som dele: a IA, que já vê o vídeo para escrever os textos, diz qual das nossas
 # combina com ele, pelo clima de cada uma; sem a resposta dela, vai a da vez no rodízio, e o registro conta de onde
 # veio cada uma (PROCESSO_DA_MUSICA). Escolha do Rafael (16/11, P241 1): DECISOES.md, Shopee Vídeo.
 CLIMA_DAS_MUSICAS = {
-    "animada": "pop dançante, para vídeo agitado e de produto que anima: brinquedo, fone, moda jovem, festa",
-    "calma": "lo-fi tranquilo, para vídeo calmo: casa, cozinha, organização, beleza, cuidados pessoais",
-    "divertida": "ukulele e assobio, para vídeo engraçado ou leve: comédia, bichinho, criança, coisa curiosa",
+    "animada": "pop dançante, para vídeo agitado e alegre: moda jovem, festa, dança, achadinho que anima",
+    "calma": "lo-fi tranquilo, para vídeo calmo do dia a dia: organização, rotina, decoração simples, autocuidado",
+    "divertida": "ukulele e assobio, para vídeo engraçado ou leve: comédia, bichinho fazendo graça, criança",
+    "romântica": "piano e cordas suaves, para vídeo delicado: beleza, maquiagem, skincare, joia, perfume, presente",
+    "elegante": "jazz suave com piano elétrico, para vídeo sofisticado: moda, bolsa, relógio, decoração fina",
+    "energia": "eletrônica forte, para vídeo de força e movimento: academia, esporte, ferramenta, carro, moto",
+    "tecnologia": "sintetizadores modernos, para vídeo de tecnologia: celular, fone, eletrônico, luz de LED, gadget",
+    "fofa": "caixinha de música e pizzicato, para vídeo fofo: bebê, criança pequena, brinquedo, filhote, papelaria",
+    "aconchegante": "violão dedilhado e piano, para vídeo de casa e cuidado: cozinha, receita, café, cama e banho",
+    "tropical": "batida de verão, tambor de aço e marimba, para vídeo de verão: praia, piscina, viagem, moda praia",
+    "mistério": "pizzicato e tique-taque, para vídeo de curiosidade: coisa inusitada, antes e depois, truque",
 }
 PROCESSO_DA_MUSICA = "edição do vídeo: música de fundo"
 ESCOLHIDA_PELA_IA, DA_VEZ_NO_RODIZIO = "escolhida pela IA", "a da vez no rodízio"
