@@ -740,6 +740,10 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   resolução ("…\nVeo 3.1 - Lite\n720p"), o player ("Vídeo tocando, 1 de 1" e a duração),
   Pausar, a barra do tempo, Desativar som (o vídeo vem com som) e, embaixo, Editar e
   Estender.
+- O player que não carrega (visto em 16/11/2026, aberto logo depois de o vídeo ficar
+  pronto): o título com o modelo aparece, mas o player diz "1 de 1" e "Falha ao carregar o
+  vídeo", sem o Pausar nem a barra do tempo. O robô espera um pouco, fecha e abre de novo
+  (até 3 vezes, `abrir_o_video_novo`).
 - Mais opções do vídeo aberto: Gostei, Não gostei, Renomear, Reutilizar comando,
   Favorito, **Baixar**, Enviar, Compartilhar, Compartilhar no YouTube e Enviar feedback.
   O teste usa só o Baixar; o arquivo vai para uma das pastas de mídia do celular
