@@ -1011,6 +1011,8 @@ def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
     # Sem texto, o vídeo vai direto ao Editor 1, sem passar pelo ffmpeg dos textos.
     assert motivo == "" and montados == [] and resumo["textos"] == [] and resumo["lugar"] == "nenhum"
 
+    # O lugar das caixas, sem o pulinho da entrada e da saída (P240 1), que tem os testes dele.
+    monkeypatch.setattr(edicao_video, "com_pulinho", lambda letreiro: letreiro)
     edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", "Confira no produto abaixo",
                           lugar="esquerda")
     margem = edicao_video.LUGARES_DOS_TEXTOS["esquerda"][0]
@@ -1483,6 +1485,104 @@ def test_legendas_seguidas_nao_ficam_juntas_no_quadro_da_troca(tmp_path):
     antes, troca = quadro(29), quadro(30)                 # 30 quadros por segundo: o 30 é o de 1,0 s
     assert antes.getpixel((130, 130))[0] > 180 and antes.getpixel((330, 130))[2] < 180
     assert troca.getpixel((130, 130))[0] < 180 and troca.getpixel((330, 130))[2] > 180
+
+def _caixa_vermelha(largura=300, altura=100):
+    from PIL import Image
+    saida = io.BytesIO()
+    Image.new("RGBA", (largura, altura), (230, 20, 20, 255)).save(saida, "PNG")
+    return saida.getvalue()
+
+
+def _quadros_do_pulinho(apng):
+    """[(duração em ms, caixa visível no quadro, transparência no meio)] de cada quadro do APNG."""
+    from PIL import Image
+    quadros = []
+    with Image.open(io.BytesIO(apng)) as imagem:
+        for numero in range(imagem.n_frames):
+            imagem.seek(numero)
+            rgba = imagem.convert("RGBA")
+            quadros.append((imagem.info["duration"], rgba.getchannel("A").getbbox(),
+                            rgba.getpixel((rgba.width // 2, rgba.height // 2))[3]))
+    return quadros
+
+
+def test_caixa_do_alto_entra_com_o_pulinho_e_sai_sumindo():
+    # Escolha do Rafael (16/11, P240 1): a caixa nasce menor e transparente, passa um pouco do tamanho dela e
+    # assenta em 0,25 s, fica parada no lugar de antes e sai sumindo e encolhendo em 0,2 s.
+    caixa = _caixa_vermelha()
+    assert not videos.animada(caixa)
+    apng, inicio, fim, x, y = edicao_video.com_pulinho((caixa, 4.3, 7.3, 200, 300))
+    assert videos.animada(apng) and (inicio, fim) == (4.3, 7.3)
+    quadros = _quadros_do_pulinho(apng)
+    assert sum(duracao for duracao, _, _ in quadros) == 3000
+    duracoes = [duracao for duracao, _, _ in quadros]
+    parada = duracoes.index(max(duracoes))
+    # A caixa parada fica no mesmo lugar e do mesmo tamanho de antes.
+    esquerda, topo, direita, baixo = quadros[parada][1]
+    assert (x + esquerda, y + topo, direita - esquerda, baixo - topo) == (200, 300, 300, 100)
+    assert quadros[parada][2] == 255
+    entrada, saida = quadros[:parada], quadros[parada + 1:]
+    larguras = [caixa[2] - caixa[0] if caixa else 0 for _, caixa, _ in entrada]
+    assert entrada[0][1] is None and entrada[1][2] < 255
+    assert max(larguras) > 300 * 1.05 and larguras[1] < 300 * 0.75
+    assert sum(duracao for duracao, _, _ in entrada) == pytest.approx(edicao_video.ENTRADA_DAS_CAIXAS * 1000, abs=20)
+    # A saída: cada quadro mais transparente e menor, até o fim da janela.
+    assert sum(duracao for duracao, _, _ in saida) == pytest.approx(edicao_video.SAIDA_DAS_CAIXAS * 1000, abs=40)
+    transparencias = [meio for _, _, meio in saida]
+    assert transparencias == sorted(transparencias, reverse=True) and transparencias[-1] < 80
+    assert saida[-1][1][2] - saida[-1][1][0] < 300
+
+
+def test_pulinho_na_janela_curta_cabe_nela():
+    # A janela curta (o vídeo curto divide o tempo entre os textos) leva a entrada e a saída mais curtas.
+    for janela in (0.5, 0.2):
+        quadros = _quadros_do_pulinho(edicao_video.com_pulinho((_caixa_vermelha(), 1.0, 1.0 + janela, 0, 0))[0])
+        assert sum(duracao for duracao, _, _ in quadros) == round(janela * 1000)
+
+
+def test_editor_2_poe_o_pulinho_so_nas_caixas_do_alto(monkeypatch, tmp_path):
+    # P240 1: o nome, a vantagem e a chamada entram com o pulinho; a legenda da fala, embaixo, fica parada.
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
+    monkeypatch.setattr(edicao_video, "editar", lambda *a, **k: "")
+    montados = []
+
+    def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+        montados.extend(letreiros)
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
+    motivo, resumo = edicao_video.editar_2("v.mp4", b"foto", str(tmp_path / "r.mp4"), "Copo Térmico",
+                                           "Mantém gelado o dia todo", "Garanta o seu aqui embaixo", lugar="alto",
+                                           legendas=[(1.0, 3.0, "Olha que lindo esse copo")])
+    assert motivo == "" and len(resumo["textos"]) == 3 and resumo["legendas"] == 1
+    animados = [videos.animada(imagem) for imagem, *_ in montados]
+    assert animados == [True, True, True, False]
+
+
+def test_caixa_com_pulinho_no_video_de_verdade(tmp_path):
+    # O ffmpeg lê o APNG com o tempo de cada quadro: antes do início, nada; logo depois, a caixa menor; no meio,
+    # a caixa inteira no lugar dela; depois do fim, nada.
+    if not shutil.which("ffmpeg"):
+        return
+    from PIL import Image
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:size=720x1280:rate=30:duration=3",
+                    "-pix_fmt", "yuv420p", str(video)], check=True)
+    destino = tmp_path / "r.mp4"
+    letreiro = edicao_video.com_pulinho((_caixa_vermelha(), 1.0, 2.5, 200, 300))
+    assert edicao_video.videos.com_cortes_e_ritmo(str(video), [(0.0, 3.0, 1.0)], str(destino), [letreiro]) == ""
+
+    def vermelho(numero):
+        saida = tmp_path / f"q{numero}.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(destino), "-vf", f"select=eq(n\\,{numero})",
+                        "-frames:v", "1", str(saida)], check=True)
+        with Image.open(saida) as imagem:
+            return imagem.convert("RGB").getchannel("R").point(lambda v: 255 if v > 60 else 0).getbbox()
+    assert vermelho(28) is None                                   # 0,93 s
+    esquerda, topo, direita, baixo = vermelho(32)                 # 1,07 s: nascendo, menor
+    assert direita - esquerda < 290 and 200 < esquerda
+    assert vermelho(48) == (200, 300, 500, 400)                   # 1,6 s: parada, no lugar dela
+    assert vermelho(77) is None                                   # 2,57 s
+
 
 def test_as_tres_musicas_de_fundo_estao_na_midia():
     # Escolha do Rafael (28/10, P55): 3 músicas feitas pelo Claude do zero (animada, calma e
