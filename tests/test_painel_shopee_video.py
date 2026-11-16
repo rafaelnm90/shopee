@@ -626,6 +626,32 @@ def test_exemplo_da_capa_manda_a_capa_e_o_pedaco_da_grade(bm, Msg, Est, monkeypa
     assert "não saiu: a IA não escreveu a vantagem do produto deste vídeo" in msg.saidas[-1] and not msg.midias
 
 
+
+def test_exemplo_da_edicao_nao_tira_o_rafael_do_passo_em_que_ele_entrou(bm, Msg, Est, monkeypatch):
+    # Pergunta do Rafael (16/11): pedir um exemplo e tocar em outro botão no meio não suspende nada, e o exemplo
+    # chega quando fica pronto. Ao terminar, a conversa só volta ao menu do robô se ele continua no mesmo passo:
+    # o passo em que ele entrou enquanto o exemplo era montado (aqui, a porta do pareamento) continua esperando.
+    sv = _painel(bm)
+    outro_passo = sv.ShopeeVideoFluxo.aguardando_porta
+    capa = ("Copo Térmico", "", {"capa": b"capa", "grade": b"grade", "chamada": "Gelado por 12 horas"})
+    sem_exemplo = (None, "a IA não escreveu a vantagem do produto deste vídeo", None)
+    for nome, handler, botao, resultado in (
+            ("exemplo_capa", sv.exemplo_capa_handler, sv.BOTAO_EXEMPLO_DA_CAPA, capa),
+            ("exemplo_editor_2", sv.exemplo_editor_2_handler, "Editor 2 com Legendas ✨", sem_exemplo)):
+        for foi_a_outro_passo in (True, False):
+            est = Est(estado=sv.ShopeeVideoFluxo.menu_robo)
+
+            def montar(*_args, est=est, foi=foi_a_outro_passo, resultado=resultado):
+                if foi:
+                    est.estado = outro_passo
+                return resultado
+            monkeypatch.setattr(sv.edicao_video, nome, montar)
+            msg = MsgComMidia(Msg, botao)
+            rodar(handler(msg, est))
+            assert msg.midias if resultado[0] else "não saiu" in msg.saidas[-1]
+            esperado = outro_passo if foi_a_outro_passo else sv.ShopeeVideoFluxo.menu_robo
+            assert rodar(est.get_state()) == esperado.state, (nome, foi_a_outro_passo)
+
 def test_produtos_a_mais_ligam_e_desligam_pelo_painel(bm, Msg, Est):
     # Escolha do Rafael (29/10, P73): os produtos a mais ficam ligados para a medição de 7 dias;
     # a punição de produto os para sozinha, e eles voltam pelo painel.
