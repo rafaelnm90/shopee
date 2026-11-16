@@ -290,7 +290,23 @@ def sondar_produtos():
         print(f"== nicho nº {posicao}, 1ª palavra, por mais vendidos: {len(produtos)} produto(s)")
         for linha in contagens_da_lista(produtos, ja_postados, robo.valor_por_venda, robo.MINIMO_POR_VENDA):
             print(linha)
+    print(f"== A escolha do robô agora: {escolha_do_robo(robo, ja_postados)}")
     return 0
+
+
+def escolha_do_robo(robo, ja_postados):
+    """
+    O que a escolha do produto do vídeo de IA acharia agora (P234 1), sem a IA e sem mudar nada: de que lista viriam
+    os produtos e as contagens da peneira do robô (com os que já tiveram vídeo ou a foto recusada de fora).
+    """
+    try:
+        ofertas, origem = robo.ofertas_para_o_video_de_ia()
+    except api_shopee.BuscaNegada as e:
+        return f"a API negou a lista ({e})"
+    _bons, contagem = robo.candidatos_do_video_de_ia(
+        ofertas, ja_postados, robo.flow.itens_gerados() + robo.flow.fotos_recusadas())
+    return (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
+            f"mínimo; {contagem['novos']} novos")
 
 
 def main(argumentos):
