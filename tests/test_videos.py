@@ -394,3 +394,32 @@ def test_o_ganho_entra_no_som_do_video_e_nao_na_musica():
     assert "volume=-4.00dB[som]" in filtro(videos.comando_foto_e_miniatura(**base, ganho=-4.0))
     assert "volume=" not in filtro(videos.comando_foto_e_miniatura(**base))
     assert "volume=" not in filtro(videos.comando_foto_e_miniatura(**base, musica="m.m4a", total=10.0, ganho=6.0))
+
+
+def test_juntar_as_partes_do_video_de_ia_de_16_s(tmp_path):
+    # P246 1: quando o Flow baixa só a continuação do Estender, a original e a continuação viram um vídeo só, a
+    # original primeiro, no tamanho dela e com o som das duas.
+    import shutil
+    import subprocess
+    destino = str(tmp_path / "juntos.mp4")
+    assert videos.juntar([str(tmp_path / "nao_existe.mp4")], destino) == "a 1ª parte não é um vídeo que abre"
+    if not shutil.which("ffmpeg"):
+        return
+
+    def gravar(nome, tamanho, som=True):
+        caminho = str(tmp_path / nome)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        f"color=c=red:size={tamanho}:rate=24:duration=2",
+                        *(["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-map", "0:v", "-map", "1:a"]
+                          if som else []), "-shortest", caminho], check=True)
+        return caminho
+    original, continuacao = gravar("original.mp4", "360x640"), gravar("continuacao.mp4", "720x1280")
+    pastas = {p.name for p in tmp_path.iterdir() if p.is_dir()}
+    assert videos.juntar([original, continuacao], destino) == ""
+    assert abs(videos.duracao(destino) - 4.0) < 0.3
+    assert asyncio.run(videos.dimensoes(destino)) == (360, 640) and videos.tem_audio(destino)
+    # Uma parte sem som: o vídeo sai inteiro, sem som.
+    assert videos.juntar([original, gravar("muda.mp4", "360x640", som=False)], destino) == ""
+    assert abs(videos.duracao(destino) - 4.0) < 0.3 and not videos.tem_audio(destino)
+    # A pasta de trabalho do ffmpeg não fica para trás.
+    assert {p.name for p in tmp_path.iterdir() if p.is_dir()} == pastas

@@ -20,12 +20,12 @@ MENU_DO_VIDEO = (("Gostei", 278, ""), ("Renomear", 425, ""), ("Reutilizar comand
 
 
 def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid="", marcado=False,
-        foco=False):
+        foco=False, ligado=True):
     x1, y1, x2, y2 = caixa
     return (f'<node index="0" text={quoteattr(texto)} resource-id={quoteattr(rid)} class="{classe}" '
             f'package="{pacote}" content-desc={quoteattr(desc)} clickable="{str(clicavel).lower()}" '
-            f'checked="{str(marcado).lower()}" focused="{str(foco).lower()}" visible-to-user="true" '
-            f'bounds="[{x1},{y1}][{x2},{y2}]" />')
+            f'checked="{str(marcado).lower()}" focused="{str(foco).lower()}" enabled="{str(ligado).lower()}" '
+            f'visible-to-user="true" bounds="[{x1},{y1}][{x2},{y2}]" />')
 
 
 class Campo:
@@ -37,6 +37,8 @@ class Campo:
         if self.celular.tela == "renomear":
             if not self.celular.nome_nao_entra:
                 self.celular.nome_no_campo = texto
+        elif self.celular.tela == "estender":
+            self.celular.texto_do_estender = texto
         else:
             self.celular.texto = texto
 
@@ -80,6 +82,17 @@ class Flow:
         # Quantas vezes o vídeo aberto mostra "Falha ao carregar o vídeo" no player (visto em 16/11) e se
         # a abertura de agora é uma delas.
         self.falhas_ao_carregar, self.falha_no_player = 0, False
+        # O Estender (P246 1, mapeado em 16/11): o texto na caixa do painel, o rótulo da duração, quantas vezes o
+        # Gerar do painel foi tocado (com o texto que levou), quantas leituras do projeto a versão estendida leva
+        # para ficar pronta e as versões que cada Baixar baixou.
+        self.texto_do_estender, self.rotulo_da_duracao, self.extensoes, self.texto_estendido = "", "Estender 8s", 0, ""
+        self.leituras_ao_estender, self.estendendo_leituras, self.baixadas = 2, 0, []
+
+    def extensao_pronta(self):
+        return self.extensoes > 0 and self.estendendo_leituras <= 0
+
+    def versoes_do_gerado(self):
+        return self.versoes or ([self.modelo_do_video, ""] if self.extensao_pronta() else [self.modelo_do_video])
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
@@ -110,8 +123,9 @@ class Flow:
 
     def pull(self, origem, destino):
         self.puxados.append(origem)
+        # Cada Baixar traz o arquivo da versão que estava à vista.
         with open(destino, "wb") as arquivo:
-            arquivo.write(b"\0" * 2048)
+            arquivo.write(b"\0" * 2048 + str(self.baixadas[-1] if self.baixadas else 0).encode())
 
     def nos(self):
         """(caixa, xml do nó, o que o toque faz) da tela de agora."""
@@ -154,13 +168,18 @@ class Flow:
                 if self.gerando_leituras != self.piscar_na_leitura:
                     nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…"), ""))
             elif self.gerado:
-                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="Mulher usando o copo, 1 item"), "video"))
+                if self.extensoes and self.estendendo_leituras > 0:
+                    nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False), ""))
+                quantas = len(self.versoes_do_gerado())
+                itens = f"{quantas} itens" if quantas > 1 else "1 item"
+                quadro = _no((0, 466, 537, 1422), desc=f"Mulher usando o copo, {itens}")
+                nos.append(((0, 466, 537, 1422), quadro, "video"))
             if self.video_de_antes:
                 nos.append(((0, 1427, 537, 1964), _no((0, 1427, 537, 1964), desc="Copo de antes, 1 item"), "antes"))
             if not self.filtro:
                 nos.append(((543, 466, 1080, 1004), _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item"), "foto"))
         elif self.tela == "video":
-            versoes = [self.video_de_antes] if self.abriu_o_de_antes else (self.versoes or [self.modelo_do_video])
+            versoes = [self.video_de_antes] if self.abriu_o_de_antes else self.versoes_do_gerado()
             # A versão estendida (a 2ª em diante) tem só o nome no título, sem o modelo.
             titulo = f"Mulher usando o copo\n{versoes[self.versao]}\n720p" if self.versao == 0 else "Mulher usando o copo"
             nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), desc=titulo, clicavel=False), ""),
@@ -170,10 +189,24 @@ class Flow:
                         f"{self.versao + 1} de {len(versoes)}\nFalha ao carregar o vídeo" if self.falha_no_player
                         else f"Vídeo tocando, {self.versao + 1} de {len(versoes)}\n0:08")), ""),
                     ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), ""),
-                    ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"), "")]
+                    ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"),
+                     "estender")]
             if len(versoes) > 1 and self.leituras_do_video >= self.atraso_das_versoes:
                 nos += [((962, y, 1025, y + 63), _no((962, y, 1025, y + 63), "android.widget.ImageView"), f"versao:{i}")
                         for i, y in enumerate(range(1178, 1178 + 74 * len(versoes), 74))]
+        elif self.tela == "estender":
+            # O painel do Estender como no Motorola (16/11): o Gerar fica desligado com a caixa vazia.
+            nos += [((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Voltar"), "video"),
+                    ((0, 152, 1080, 1096), _no((0, 152, 1080, 1096), desc=f"1 de {len(self.versoes_do_gerado())}"), ""),
+                    ((45, 1319, 1035, 1445), _no((45, 1319, 1035, 1445), "android.widget.EditText",
+                                                 texto=self.texto_do_estender, foco=True), ""),
+                    ((45, 1445, 171, 1571), _no((45, 1445, 171, 1571), "android.widget.Button", "Adicionar mídia"), ""),
+                    ((620, 1445, 867, 1571), _no((620, 1445, 867, 1571), "android.widget.Button",
+                                                 self.rotulo_da_duracao), "proibido"),
+                    ((888, 1445, 1014, 1571), _no((888, 1445, 1014, 1571)), "gerar_estender"),
+                    ((888, 1445, 1014, 1571), _no((888, 1445, 1014, 1571), "android.widget.Button", "Gerar",
+                                                  clicavel=False, ligado=bool(self.texto_do_estender)),
+                     "gerar_estender")]
         elif self.tela == "menu_video":
             nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "video"))
             nos += [((341, y, 954, y + 105), _no((341, y, 954, y + 105), "android.widget.Button", nome), acao)
@@ -241,6 +274,8 @@ class Flow:
         xml = '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(no for _, no, _ in self.nos()) + "</hierarchy>"
         if self.tela == "projeto" and self.gerando_leituras > 0:
             self.gerando_leituras -= 1
+        if self.tela == "projeto" and self.estendendo_leituras > 0:
+            self.estendendo_leituras -= 1
         if self.tela == "video":
             self.leituras_do_video += 1
         return xml
@@ -270,6 +305,16 @@ class Flow:
             self.tela = "projeto"
             if not self.falha_ao_gerar:
                 self.gerado, self.gerando_leituras, self.modelo_do_video = True, self.leituras_ao_gerar, self.modelo
+        elif acao == "estender":
+            self.tela = "estender"
+        elif acao == "gerar_estender":
+            # Desligado com a caixa vazia: o toque não faz nada.
+            if self.texto_do_estender:
+                self.extensoes += 1
+                self.texto_estendido, self.texto_do_estender = self.texto_do_estender, ""
+                self.estendendo_leituras, self.tela = self.leituras_ao_estender, "video"
+        elif acao == "proibido":
+            self.toques_proibidos.append((x, y))
         elif acao.startswith("versao:"):
             self.versao = int(acao.split(":")[1])
         elif acao.startswith("abrir:"):
@@ -313,6 +358,7 @@ class Flow:
         elif acao == "confirmar":
             self.tela = "video"
             self.baixado = "1080p" if self.maior_marcado else "720p" if self.original_marcado else False
+            self.baixadas.append(self.versao)
 
 
 @pytest.fixture
@@ -1062,7 +1108,7 @@ def _escolha_da_amostra(monkeypatch):
     import robo_shopee_video as robo
     pedidos = []
 
-    def escolher(agora=None, fora=(), amostra=False):
+    def escolher(agora=None, fora=(), amostra=False, longo=False):
         pedidos.append((list(fora), amostra))
         item = str(455 + len(pedidos))
         return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
@@ -1126,13 +1172,14 @@ def test_amostra_ja_gerada_so_baixa_e_a_que_nao_foi_ao_privado_vai_sem_gerar(cel
 def test_amostra_sem_produto_ou_com_a_lista_negada_nao_toca_no_celular(celular, monkeypatch, capsys):
     import robo_shopee_video as robo
 
-    def negada(agora=None, fora=(), amostra=False):
+    def negada(agora=None, fora=(), amostra=False, longo=False):
         raise robo.api_shopee.BuscaNegada("código 10.000")
 
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", negada)
     assert flow.amostra() == 1
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia",
-                        lambda agora=None, fora=(), amostra=False: (None, "os produtos em alta da Shopee", False))
+                        lambda agora=None, fora=(), amostra=False, longo=False: (None, "os produtos em alta da Shopee",
+                                                                               False))
     assert flow.amostra() == 1
     saida = capsys.readouterr().out
     assert "negou a lista de produtos (código 10.000)" in saida and "nenhum produto da lista serviu" in saida
@@ -1164,3 +1211,178 @@ def test_os_gerar_do_dia_passam_de_um_andamento_ao_outro(monkeypatch, tmp_path):
     assert flow.gerados_no_dia("2026-10-23") == 0 and not flow.o_do_robo_saiu("2026-10-23")
     flow.recomecar_producao("2026-10-23", estado="escolhido", item="3")
     assert flow.gerados_no_dia("2026-10-23") == 0 and flow.producao().get("do_botao") is None
+
+
+# --- O vídeo de IA de 16 s com uma pessoa vendendo o produto (P246 1) ---
+
+CONTINUACAO = "She keeps talking while using the exact tumbler, shows it keeps ice and ends with a call to buy."
+
+
+def _escolha_longa(monkeypatch):
+    """A escolha do robô de mentira para a amostra de 16 s: o pedido com a continuação do Estender e a fala."""
+    import robo_shopee_video as robo
+    pedidos = []
+
+    def escolher(agora=None, fora=(), amostra=False, longo=False):
+        pedidos.append((list(fora), amostra, longo))
+        item = str(455 + len(pedidos))
+        return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
+                 "foto": _jpeg(), "estilo": flow.ESTILO_DO_VENDEDOR,
+                 "prompt": "A woman holds the exact tumbler and says the hook.", "continuacao": CONTINUACAO,
+                 "fala": "Gelo que dura o dia todo? Olha esse copo! Garanta já o seu!",
+                 "cena": "Uma moça vende o copo na cozinha.", "item": item, "valor": 6.5, "posicao": 1,
+                 "origem": "os produtos em alta da Shopee"}, "os produtos em alta da Shopee", True)
+
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", escolher)
+    return pedidos
+
+
+def _duracoes(monkeypatch, celular, estendida):
+    """A duração de cada vídeo baixado (a versão estendida com `estendida` s, a original com 8) e o juntar falso."""
+    juntados = []
+
+    def duracao(caminho, timeout=30):
+        if juntados and caminho == juntados[-1][1]:
+            return 16.0
+        return float(estendida) if celular.baixadas and celular.baixadas[-1] == 1 else 8.0
+
+    def juntar(partes, destino, espera=300):
+        juntados.append(([p.rsplit(".", 2)[-2] for p in partes], destino))
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"\0" * 4096)
+        return ""
+
+    monkeypatch.setattr(flow.videos, "duracao", duracao)
+    monkeypatch.setattr(flow.videos, "juntar", juntar)
+    return juntados
+
+
+def test_amostra_de_16_s_gera_estende_baixa_a_versao_estendida_e_vai_so_ao_privado(celular, monkeypatch, capsys):
+    # Escolha do Rafael (16/11, P246 1): os vídeos de IA estavam "fracos e sem graça, além de curtos"; a amostra do
+    # formato novo tem 16 s, os 8 s gerados pela foto e mais 8 s do Estender, com uma pessoa vendendo o produto.
+    pedidos = _escolha_longa(monkeypatch)
+    juntados = _duracoes(monkeypatch, celular, estendida=16)
+    estilos = flow.estilos_recentes()
+    assert flow.main(["amostra", "--longa"]) == 0
+    assert pedidos == [([], True, True)]
+    # Um Gerar para os 8 s e um para o Estender, com a continuação escrita no painel; o botão da duração nunca é tocado.
+    assert celular.geracoes == 1 and celular.extensoes == 1 and celular.texto_estendido == CONTINUACAO
+    assert celular.toques_proibidos == [] and celular.baixadas == [1] and juntados == []
+    (caminho, legenda), = celular.mandados
+    assert caminho.endswith("amostra.mp4")
+    for trecho in ("Amostra nº 1 do vídeo de IA de 16 s", "48 créditos de IA: 24 dos 8 s gerados e 24 do Estender",
+                   "Gelo que dura o dia todo? Olha esse copo! Garanta já o seu!", "Copo Térmico Inox",
+                   "o produto é o mesmo da foto do anúncio", "16 s", "Gostando, diga ao Claude"):
+        assert trecho in legenda, trecho
+    atual = flow.amostra_guardada()
+    assert atual["estado"] == "enviado" and atual["custo"] == 48 and atual["duracao"] == 16 and atual["longa"]
+    # O jeito do vídeo de 16 s fica fora da variação dos estilos dos vídeos de 8 s.
+    assert flow.estilos_recentes() == estilos
+    saida = capsys.readouterr().out
+    for trecho in ("Gerar dos 8 s tocado (Omni 1.2 Flash, 24 créditos)", "Gerar do Estender tocado (8 s, 24 créditos)",
+                   "versão estendida pronta", "vídeo de 16 s baixado"):
+        assert trecho in saida, trecho
+    for privado in ("Copo", "tumbler", "Gelo", "shopee.com.br", "6,50"):
+        assert privado not in saida, privado
+
+
+def test_amostra_de_16_s_com_so_a_continuacao_baixa_a_original_e_junta_as_duas(celular, monkeypatch, capsys):
+    # A versão estendida que o Flow baixa com menos de 12 s é só a continuação: a original vem também, e as duas são
+    # juntadas no servidor, a original primeiro.
+    _escolha_longa(monkeypatch)
+    juntados = _duracoes(monkeypatch, celular, estendida=8)
+    assert flow.main(["amostra", "--longa"]) == 0
+    assert celular.baixadas == [1, 0]
+    (partes, destino), = juntados
+    assert partes == ["original", "continuacao"] and destino.endswith("amostra.mp4")
+    assert flow.amostra_guardada()["duracao"] == 16
+    assert "a original e a continuação foram juntadas" in capsys.readouterr().out
+    assert [n for n in __import__("os").listdir(flow.PASTA) if "continuacao" in n or "original" in n] == []
+
+
+def test_baixar_que_traz_a_mesma_versao_duas_vezes_nao_junta(celular, monkeypatch):
+    # Se o Baixar do menu trouxesse sempre a mesma versão, a "continuação" curta seria a própria original: o robô
+    # para em vez de mandar um vídeo com a original repetida.
+    _escolha_longa(monkeypatch)
+    juntados = _duracoes(monkeypatch, celular, estendida=8)
+    monkeypatch.setattr(flow.videos, "calcular_hash_video", lambda caminho: "mesmo")
+    assert flow.main(["amostra", "--longa"]) == 1
+    assert juntados == [] and celular.mandados == [] and flow.amostra_guardada()["estado"] == "estendendo"
+    assert celular.guardados[-1] == ("parou", "juntar as duas partes: o Baixar trouxe a mesma versão duas vezes")
+
+
+def test_estender_so_gera_com_tudo_conferido_e_continua_de_onde_parou(celular, monkeypatch, capsys):
+    _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    # O painel com outra duração: o robô não toca no Gerar do Estender, e os 8 s já gerados ficam esperando.
+    celular.rotulo_da_duracao = "Estender 10s"
+    assert flow.main(["amostra", "--longa"]) == 1
+    assert celular.geracoes == 1 and celular.extensoes == 0
+    assert flow.amostra_guardada()["estado"] == "gerando" and celular.mandados == []
+    assert "antes do Gerar do Estender: a duração não é a de 8 s" in capsys.readouterr().out
+    # A próxima vez não gera os 8 s de novo: só estende. A versão estendida que não fica pronta a tempo é baixada na
+    # vez seguinte, sem outro Gerar nem outro Estender.
+    celular.rotulo_da_duracao, celular.texto_do_estender = "Estender 8s", ""
+    celular.leituras_ao_estender = 10 ** 6
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 0.3)
+    assert flow.main(["amostra", "--longa"]) == 1
+    assert celular.geracoes == 1 and celular.extensoes == 1 and flow.amostra_guardada()["estado"] == "estendendo"
+    assert "já gerada; falta estender, baixar e mandar" in capsys.readouterr().out
+    celular.estendendo_leituras = 0
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
+    assert flow.main(["amostra", "--longa"]) == 0
+    assert celular.geracoes == 1 and celular.extensoes == 1 and len(celular.mandados) == 1
+    assert "já estendida; falta baixar e mandar" in capsys.readouterr().out
+
+
+def test_video_que_ja_tem_a_versao_estendida_nao_e_estendido_de_novo(celular, monkeypatch):
+    # A vez que caiu logo depois do Gerar do Estender, antes de anotar: o vídeo já tem a 2ª versão, e o robô segue
+    # para baixar sem tocar no Estender outra vez.
+    _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    celular.versoes = ["Omni 1.2 Flash", ""]
+    assert flow.main(["amostra", "--longa"]) == 0
+    assert celular.geracoes == 1 and celular.extensoes == 0 and len(celular.mandados) == 1
+
+
+def test_leitura_do_painel_do_estender():
+    painel = ('<hierarchy>' + _no((0, 152, 1080, 1096), desc="1 de 1")
+              + _no((45, 1319, 1035, 1445), "android.widget.EditText", texto=CONTINUACAO)
+              + _no((620, 1445, 867, 1571), "android.widget.Button", "Estender 8s")
+              + _no((888, 1445, 1014, 1571), "android.widget.Button", "Gerar", clicavel=False) + '</hierarchy>')
+    lido = flow.painel_do_estender(painel)
+    assert lido["caixa"] == (540, 1382) and lido["duracao"] == "Estender 8s" and lido["versoes"] == (1, 1)
+    assert lido["gerar"] == (951, 1508) and lido["gerar_ligado"] is True
+    assert flow.pronto_para_estender(painel, CONTINUACAO) == ""
+    assert flow.pronto_para_estender(painel, "Other text") == "o texto da continuação não entrou"
+    assert flow.pronto_para_estender(painel.replace("1 de 1", "1 de 2"), CONTINUACAO) == \
+        "o vídeo de cima não é o de uma versão só"
+    assert flow.pronto_para_estender(painel.replace('enabled="true" visible-to-user="true" bounds="[888',
+                                                    'enabled="false" visible-to-user="true" bounds="[888'),
+                                     CONTINUACAO) == "o Gerar está desligado"
+    # O pedido do Criar (sem o botão da duração) e o vídeo aberto não são o painel do Estender.
+    assert flow.painel_do_estender(painel.replace("Estender 8s", "Omni 1.2 Flash\nx1")) is None
+
+
+def test_resposta_e_pedido_do_video_de_16_s(monkeypatch):
+    resposta = ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "Part one.", "continuacao": "Part two.", '
+                '"fala": "Gancho! Vantagens. Garanta já o seu!", "cena": "Uma moça vende o copo."}')
+    lida = flow.ler_resposta(resposta, longo=True)
+    assert lida["estilo"] == flow.ESTILO_DO_VENDEDOR and lida["continuacao"] == "Part two."
+    assert lida["fala"] == "Gancho! Vantagens. Garanta já o seu!"
+    # Sem a continuação, o pedido de 16 s não serve; o de 8 s nem olha para ela.
+    assert flow.ler_resposta(resposta.replace('"Part two."', '""'), longo=True) is None
+    assert "continuacao" not in flow.ler_resposta(resposta)
+    pedidos = []
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return resposta
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    pedido, serve = flow.pedido_para_o_anuncio("https://s.shopee.com.br/abc", "Copo Térmico Inox", _jpeg(), longo=True)
+    assert serve is True and pedido["continuacao"] == "Part two." and pedido["fala"].startswith("Gancho")
+    for trecho in ("16 segundos", "continuacao", "gancho", "Garanta já o seu!", "muda_na_ia", "Copo Térmico Inox"):
+        assert trecho in pedidos[-1], trecho
+    flow.pedido_para_o_anuncio("https://s.shopee.com.br/abc", "Copo Térmico Inox", _jpeg())
+    assert "8 segundos" in pedidos[-1] and "continuacao" not in pedidos[-1]

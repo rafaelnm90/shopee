@@ -10,6 +10,8 @@ miniatura e a seta por cima (com_foto_e_miniatura), é a edição dos vídeos do
 câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela; o volume
 do som (volume_do_som) leva o som de cada vídeo ao das músicas de fundo. O vídeo
 sem som nenhum (mudo) ganha uma música da Shopee na hora de postar (assistente_shopee_video).
+As partes de um vídeo, uma depois da outra (juntar), são o vídeo de IA de 16 s
+(flow_shopee_video, P246 1).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
@@ -439,6 +441,45 @@ def abertura_com_passagem(capa, resto, destino, segundos=2, passagem=0.3, espera
                     "-loop", "1", "-t", str(segundos), "-i", caminhos[1], "-filter_complex", filtro,
                     "-map", "[foto]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
                     "-pix_fmt", "yuv420p", *ETIQUETA_DAS_CORES, "-movflags", "+faststart", temporario])
+        try:
+            feito = subprocess.run(comando, capture_output=True, timeout=espera)
+        except subprocess.TimeoutExpired:
+            return f"o ffmpeg passou de {espera // 60} min"
+        except OSError:
+            return "o ffmpeg não abriu"
+        if feito.returncode != 0 or not os.path.exists(temporario) or not os.path.getsize(temporario):
+            return f"o ffmpeg falhou (código {feito.returncode})"
+        os.replace(temporario, destino)
+    return ""
+
+
+def juntar(partes, destino, espera=300):
+    """
+    Grava em destino os vídeos das partes, um depois do outro, no tamanho da 1ª e com o som (sem som quando uma das
+    partes não tem). O vídeo de IA de 16 s (P246 1): a original do Flow e a continuação do Estender, quando o Flow
+    baixa só a continuação. Devolve "" quando deu certo, ou o motivo fixo de não ter dado (o destino não fica pela
+    metade).
+    """
+    largura, altura = asyncio.run(dimensoes(partes[0], timeout=30)) if partes else (None, None)
+    if not largura or not altura:
+        return "a 1ª parte não é um vídeo que abre"
+    com_audio = all(tem_audio(parte) for parte in partes)
+    entradas, filtro = [], ""
+    for indice, parte in enumerate(partes):
+        entradas += ["-i", parte]
+        filtro += (f"[{indice}:v]scale={largura}:{altura}:force_original_aspect_ratio=decrease,"
+                   f"pad={largura}:{altura}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={QUADROS_POR_SEGUNDO},"
+                   f"format=yuv420p[v{indice}];")
+        if com_audio:
+            filtro += f"[{indice}:a]aresample=48000[a{indice}];"
+    filtro += ("".join(f"[v{indice}]" + (f"[a{indice}]" if com_audio else "") for indice in range(len(partes)))
+               + f"concat=n={len(partes)}:v=1:a={1 if com_audio else 0}[v]" + ("[a]" if com_audio else ""))
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
+        temporario = os.path.join(pasta, "juntos.mp4")
+        comando = (["ffmpeg", "-v", "error", "-y", *entradas, "-filter_complex", filtro, "-map", "[v]",
+                    *(["-map", "[a]", "-c:a", "aac", "-b:a", "192k"] if com_audio else ["-an"]),
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart", temporario])
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

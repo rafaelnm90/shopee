@@ -12,6 +12,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # contagens, para a escolha do produto do vídeo de IA do dia; só lê, não gasta nada.
 # "amostra" é o teste da P236 1 (16/11): a próxima amostra do vídeo de IA, como o da produção (o produto
 # pela lista da Shopee e o Omni 1.2 Flash, 24 créditos), só no privado do Rafael (nada é postado).
+# "amostra-16s" é a amostra da P246 1 (16/11): o vídeo de 16 s com uma pessoa vendendo o produto do começo
+# ao fim, nos 8 s gerados e em mais 8 s do Estender do Flow (48 créditos), só no privado do Rafael.
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
@@ -22,7 +24,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra]
+        options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s]
         default: modelos
 
 permissions:
@@ -40,7 +42,8 @@ jobs:
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           # O flow espera o robô soltar o celular (até 15 min), olha a tela por até 10 min depois do
-          # Gerar e espera o Baixar no 1080p por até 5 min.
+          # Gerar e espera o Baixar no 1080p por até 5 min. A amostra de 16 s espera também o Estender;
+          # a que não acaba no tempo continua na próxima vez, de onde parou.
           command_timeout: 45m
           script: |
             cd ~/shopee
@@ -48,5 +51,6 @@ jobs:
               flow) venv/bin/python3 flow_shopee_video.py teste ;;
               flow-sem-gerar) venv/bin/python3 flow_shopee_video.py teste --sem-gerar ;;
               amostra) venv/bin/python3 flow_shopee_video.py amostra ;;
+              amostra-16s) venv/bin/python3 flow_shopee_video.py amostra --longa ;;
               *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
             esac
