@@ -151,6 +151,19 @@ ESPERA_DO_PAINEL = 20
 DURACAO_ESTENDIDA = 12
 CASOS_DO_ESTENDER = 3
 VERSOES_NO_QUADRO = re.compile(r",\s*(\d+)\s+(?:item|itens|items)\s*$", re.I)
+# Logo depois do Gerar do Estender, o vídeo aberto mostra a continuação sendo gerada: "2 de 2", a porcentagem e
+# "Gerando…" no lugar do player, com o Estender apagado (visto na amostra nº 5, 17/11/2026). Fechado antes disso, o
+# Flow pode perder a continuação: o vídeo fica com uma versão só e nada é gerado (visto no 1º vídeo de IA de 16 s da
+# produção, 17/11/2026). O robô só sai do vídeo (o Flow é aberto de novo, do zero, para a espera no projeto) com a
+# continuação à vista, esperando até ESPERA_DA_CONTINUACAO s.
+ESPERA_DA_CONTINUACAO = 30
+# Na espera do Estender no projeto, o quadro mais novo com uma versão só e nada sendo gerado por ESPERA_SEM_CONTINUACAO
+# s seguidos: a continuação não está vindo, e a vez acaba sem esperar a ESPERA_DA_GERACAO inteira.
+ESPERA_SEM_CONTINUACAO = 60
+# O porquê da vez que acaba sem o vídeo de 16 s (no andamento, "espera"; o robô anota no registro).
+ESPERA_DOS_8_S = "os 8 s sem ficar prontos"
+ESPERA_DA_EXTENSAO = "a continuação sem ficar pronta"
+SEM_CONTINUACAO = "a continuação não veio"
 # A janela "Baixar vídeo" (mapeada em 15/11/2026) vem com o "720p Tamanho original" marcado; o
 # "1080p Aumentar a resolução" fica livre no plano Pro e o 4K pede outro plano. O robô baixa no
 # 1080p e só quando a linha dele não fala em plano nem em crédito, e a janela não fala em crédito;
@@ -1024,14 +1037,20 @@ def estender(d, continuacao):
         raise Parada("estender: o painel não fechou depois do Gerar")
 
 
+def continuacao_na_tela(xml):
+    """O vídeo aberto mostra a continuação do Estender: sendo gerada ("Gerando…") ou na coluna das versões."""
+    return gerando(xml) or len(versoes_do_video(xml)) >= 2
+
+
 def esperar_a_extensao(d, guardar_telas=True):
     """
     No projeto (aberto de novo depois do Gerar do Estender): espera a versão estendida ficar pronta, o quadro mais novo
     com 2 versões ou mais e nada "Gerando…" na tela, em PRONTO_SEGUIDAS leituras seguidas. A tela vai aos casos nos
-    primeiros CASOS_DO_ESTENDER minutos (guardar_telas=False na produção do dia, como na espera dos 8 s). Os segundos
-    até ficar pronta; None se não ficou em ESPERA_DA_GERACAO.
+    primeiros CASOS_DO_ESTENDER minutos (guardar_telas=False na produção do dia, como na espera dos 8 s). (os segundos
+    até ficar pronta, "") ou, sem ela, (None, o porquê): ESPERA_DA_EXTENSAO, se não ficou em ESPERA_DA_GERACAO, ou
+    SEM_CONTINUACAO, com o quadro mais novo de uma versão só e nada sendo gerado por ESPERA_SEM_CONTINUACAO s seguidos.
     """
-    inicio, proximo_caso, seguidas = time.monotonic(), 0.0, 0
+    inicio, proximo_caso, seguidas, sem_continuacao = time.monotonic(), 0.0, 0, None
     while True:
         passado = time.monotonic() - inicio
         if guardar_telas and passado >= proximo_caso and proximo_caso < CASOS_DO_ESTENDER * INTERVALO_DOS_CASOS:
@@ -1040,14 +1059,21 @@ def esperar_a_extensao(d, guardar_telas=True):
         xml = _tela(d)
         if xml and tem_termos(xml):
             raise Parada("estender: tela de termos ou de consentimento; o robô nunca aceita pelo Rafael")
-        if xml and not gerando(xml) and versoes_do_mais_novo(xml) >= 2:
+        versoes = versoes_do_mais_novo(xml) if xml else 0
+        if xml and not gerando(xml) and versoes >= 2:
             seguidas += 1
             if seguidas >= PRONTO_SEGUIDAS:
-                return int(passado)
+                return int(passado), ""
         else:
             seguidas = 0
+        if xml and not gerando(xml) and versoes == 1:
+            sem_continuacao = passado if sem_continuacao is None else sem_continuacao
+            if passado - sem_continuacao >= ESPERA_SEM_CONTINUACAO:
+                return None, SEM_CONTINUACAO
+        else:
+            sem_continuacao = None
         if passado >= ESPERA_DA_GERACAO:
-            return None
+            return None, ESPERA_DA_EXTENSAO
         time.sleep(PAUSA_DA_LEITURA)
 
 
@@ -1450,6 +1476,7 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
         pronto = esperar_o_video(d, ja_gerado=so_baixar, guardar_telas=guardar_telas)
         if pronto is None:
             print(f"Flow: o vídeo não ficou pronto em {ESPERA_DA_GERACAO // 60} min; a próxima vez baixa")
+            marcar(espera=ESPERA_DOS_8_S)
             return False
         print(f"Flow: vídeo pronto ({pronto} s esperando)")
         abrir_o_video_novo(d, modelo)
@@ -1472,10 +1499,11 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False, guar
     seguinte retoma pelo estado do pedido: o pedido e o Gerar dos 8 s ("gerando"), o Estender com a continuação
     ("estendendo", com o custo das duas partes) e o Baixar da versão estendida ("baixado"), juntando a original e a
     continuação quando o Flow baixa só a continuação. Nunca dois Gerar para a mesma parte: o vídeo que já tem a
-    versão estendida não é estendido de novo. True com o vídeo no servidor (ou o pedido pronto, com sem_gerar);
-    False quando uma parte não ficou pronta a tempo (a próxima vez continua); Parada com o passo que parou. A foto
-    sai da galeria no fim, dê certo ou não. guardar_telas: as telas do Estender vão aos casos (False na produção do
-    dia, P247 1: todo dia, elas tirariam do servidor os casos das falhas, que ficam no máximo 30).
+    versão estendida não é estendido de novo. Depois do Gerar do Estender, o robô só sai do vídeo com a continuação à
+    vista (ESPERA_DA_CONTINUACAO). True com o vídeo no servidor (ou o pedido pronto, com sem_gerar); False quando uma
+    parte não ficou pronta a tempo (a próxima vez continua; o porquê vai em "espera"); Parada com o passo que parou.
+    A foto sai da galeria no fim, dê certo ou não. guardar_telas: as telas do Estender vão aos casos (False na
+    produção do dia, P247 1: todo dia, elas tirariam do servidor os casos das falhas, que ficam no máximo 30).
     """
     estado = pedido.get("estado")
     nome_na_galeria = ""
@@ -1505,22 +1533,31 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False, guar
             pronto = esperar_o_video(d, ja_gerado=estado == "gerando", guardar_telas=False)
             if pronto is None:
                 print(f"Flow: os 8 s não ficaram prontos em {ESPERA_DA_GERACAO // 60} min; a próxima vez estende")
+                marcar(espera=ESPERA_DOS_8_S)
                 return False
             print(f"Flow: os 8 s prontos ({pronto} s esperando)")
             abrir_o_video_novo(d, modelo)
-            if esperar(d, lambda x: len(versoes_do_video(x)) >= 2, ESPERA_DA_VERSAO):
+            ja_estendido = bool(esperar(d, lambda x: len(versoes_do_video(x)) >= 2, ESPERA_DA_VERSAO))
+            if ja_estendido:
                 print("Flow: o vídeo já tinha a versão estendida; o robô não estende de novo")
             else:
                 estender(d, pedido["continuacao"])
                 print(f"Flow: Gerar do Estender tocado (8 s, {CUSTO_DO_ESTENDER} créditos)")
+            # Anotado logo depois do toque (o crédito pode ter ido): o vídeo nunca é estendido de novo.
             marcar(estado="estendendo", estendido_em=agora(), custo=custo + CUSTO_DO_ESTENDER)
+            if not ja_estendido:
+                # O Flow fechado antes de mostrar a continuação pode perdê-la (ESPERA_DA_CONTINUACAO).
+                if not esperar(d, continuacao_na_tela, ESPERA_DA_CONTINUACAO):
+                    raise Parada("estender: a continuação não apareceu sendo gerada no vídeo")
+                print("Flow: a continuação está sendo gerada")
             if guardar_telas:
                 casos_robo.guardar(d, "flow", "tela", "depois do Gerar do Estender", passo="flow estender")
             # De volta ao projeto, do alto, onde o quadro do vídeo mostra as versões.
             abrir_o_projeto(d)
-        pronto = esperar_a_extensao(d, guardar_telas=guardar_telas)
+        pronto, porque = esperar_a_extensao(d, guardar_telas=guardar_telas)
         if pronto is None:
-            print(f"Flow: a versão estendida não ficou pronta em {ESPERA_DA_GERACAO // 60} min; a próxima vez baixa")
+            print(f"Flow: a versão estendida não ficou pronta ({porque}); a próxima vez baixa")
+            marcar(espera=porque)
             return False
         print(f"Flow: versão estendida pronta ({pronto} s esperando)")
         _abrir_o_mais_novo(d)

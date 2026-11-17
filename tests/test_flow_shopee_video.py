@@ -87,15 +87,27 @@ class Flow:
         # para ficar pronta e as versões que cada Baixar baixou.
         self.texto_do_estender, self.rotulo_da_duracao, self.extensoes, self.texto_estendido = "", "Estender 8s", 0, ""
         self.leituras_ao_estender, self.estendendo_leituras, self.baixadas = 2, 0, []
+        # Depois do Gerar do Estender, quantas leituras do vídeo aberto o Flow leva para mostrar a continuação sendo
+        # gerada ("2 de 2", "Gerando…"); fechado à força antes disso, ele a perde, e o vídeo fica com uma versão só
+        # (visto no 1º vídeo de IA de 16 s da produção, 17/11).
+        self.atraso_da_continuacao, self.continuacao_pendente, self.continuacao_perdida = 0, 0, False
+
+    def continuacao_registrada(self):
+        return self.extensoes > 0 and not self.continuacao_perdida and self.continuacao_pendente <= 0
+
+    def estendendo(self):
+        return self.continuacao_registrada() and self.estendendo_leituras > 0
 
     def extensao_pronta(self):
-        return self.extensoes > 0 and self.estendendo_leituras <= 0
+        return self.continuacao_registrada() and self.estendendo_leituras <= 0
 
     def versoes_do_gerado(self):
         return self.versoes or ([self.modelo_do_video, ""] if self.extensao_pronta() else [self.modelo_do_video])
 
     # --- o que o uiautomator2 faz
     def app_start(self, pacote, stop=False, wait=False):
+        if stop and self.continuacao_pendente > 0:
+            self.continuacao_pendente, self.continuacao_perdida = 0, True
         self.tela, self.rolagem = "inicio", 0
 
     def screen_on(self):
@@ -168,7 +180,7 @@ class Flow:
                 if self.gerando_leituras != self.piscar_na_leitura:
                     nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…"), ""))
             elif self.gerado:
-                if self.extensoes and self.estendendo_leituras > 0:
+                if self.estendendo():
                     nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False), ""))
                 quantas = len(self.versoes_do_gerado())
                 itens = f"{quantas} itens" if quantas > 1 else "1 item"
@@ -186,7 +198,9 @@ class Flow:
                     ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Fechar"), "projeto"),
                     ((891, 152, 1017, 278), _no((891, 152, 1017, 278), "android.widget.Button", "Mais opções"), "menu_video"),
                     ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184), desc=(
-                        f"{self.versao + 1} de {len(versoes)}\nFalha ao carregar o vídeo" if self.falha_no_player
+                        # Como no app (17/11): a continuação sendo gerada no lugar do player, logo depois do Gerar.
+                        "2 de 2\n2%\nGerando…" if self.estendendo() and not self.abriu_o_de_antes
+                        else f"{self.versao + 1} de {len(versoes)}\nFalha ao carregar o vídeo" if self.falha_no_player
                         else f"Vídeo tocando, {self.versao + 1} de {len(versoes)}\n0:08")), ""),
                     ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), ""),
                     ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Estender"),
@@ -274,10 +288,12 @@ class Flow:
         xml = '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(no for _, no, _ in self.nos()) + "</hierarchy>"
         if self.tela == "projeto" and self.gerando_leituras > 0:
             self.gerando_leituras -= 1
-        if self.tela == "projeto" and self.estendendo_leituras > 0:
+        if self.tela == "projeto" and self.estendendo():
             self.estendendo_leituras -= 1
         if self.tela == "video":
             self.leituras_do_video += 1
+            if self.continuacao_pendente > 0:
+                self.continuacao_pendente -= 1
         return xml
 
     def click(self, x, y):
@@ -313,6 +329,7 @@ class Flow:
                 self.extensoes += 1
                 self.texto_estendido, self.texto_do_estender = self.texto_do_estender, ""
                 self.estendendo_leituras, self.tela = self.leituras_ao_estender, "video"
+                self.continuacao_pendente = self.atraso_da_continuacao
         elif acao == "proibido":
             self.toques_proibidos.append((x, y))
         elif acao.startswith("versao:"):
@@ -376,6 +393,8 @@ def celular(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
     monkeypatch.setattr(flow, "ESPERA_DA_VERSAO", 0.2)
     monkeypatch.setattr(flow, "ESPERA_DO_PLAYER", 0.2)
+    monkeypatch.setattr(flow, "ESPERA_DA_CONTINUACAO", 0.3)
+    monkeypatch.setattr(flow, "ESPERA_SEM_CONTINUACAO", 0.2)
     monkeypatch.setattr(flow, "PASTA", str(tmp_path / "flow"))
     monkeypatch.setattr(flow.celular_robo, "conectado", lambda: True)
     monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
@@ -1344,6 +1363,66 @@ def test_video_que_ja_tem_a_versao_estendida_nao_e_estendido_de_novo(celular, mo
     celular.versoes = ["Omni 1.2 Flash", ""]
     assert flow.main(["amostra", "--longa"]) == 0
     assert celular.geracoes == 1 and celular.extensoes == 0 and len(celular.mandados) == 1
+
+
+def test_estender_so_sai_do_video_com_a_continuacao_a_vista(celular, monkeypatch, capsys):
+    # Visto no 1º vídeo de IA de 16 s da produção (17/11): o Flow fechado logo depois do Gerar do Estender, antes de
+    # mostrar a continuação sendo gerada, a perdeu, e o vídeo ficou com uma versão só. O robô só sai do vídeo (o Flow
+    # é aberto de novo, do zero) com a continuação à vista, e o vídeo de 16 s sai na mesma vez.
+    _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    celular.atraso_da_continuacao = 3
+    assert flow.main(["amostra", "--longa"]) == 0
+    assert not celular.continuacao_perdida and celular.extensoes == 1 and len(celular.mandados) == 1
+    assert flow.amostra_guardada()["duracao"] == 16
+    assert "Flow: a continuação está sendo gerada" in capsys.readouterr().out
+
+
+def test_continuacao_que_nao_aparece_para_e_a_vez_seguinte_nao_estende_de_novo(celular, monkeypatch, capsys):
+    # Sem a continuação à vista depois do Gerar do Estender, a vez para ali, já anotada como "estendendo" (o crédito
+    # pode ter ido): a seguinte nunca toca no Estender de novo. Com o vídeo de uma versão só e nada sendo gerado no
+    # projeto, ela acaba em ESPERA_SEM_CONTINUACAO, sem esperar a ESPERA_DA_GERACAO inteira, e anota o porquê.
+    _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    celular.atraso_da_continuacao = 10 ** 6
+    assert flow.main(["amostra", "--longa"]) == 1
+    assert flow.amostra_guardada()["estado"] == "estendendo" and celular.extensoes == 1
+    assert celular.guardados[-1] == ("parou", "estender: a continuação não apareceu sendo gerada no vídeo")
+    capsys.readouterr()
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 600)
+    inicio = flow.time.monotonic()
+    assert flow.main(["amostra", "--longa"]) == 1
+    assert flow.time.monotonic() - inicio < 60
+    assert celular.continuacao_perdida and celular.extensoes == 1 and celular.mandados == []
+    atual = flow.amostra_guardada()
+    assert atual["estado"] == "estendendo" and atual["espera"] == flow.SEM_CONTINUACAO
+    assert "a versão estendida não ficou pronta (a continuação não veio)" in capsys.readouterr().out
+
+
+class _Tela:
+    """Um celular de mentira que mostra sempre a mesma tela."""
+
+    def __init__(self, *nos):
+        self.xml = "<hierarchy>" + "".join(nos) + "</hierarchy>"
+
+    def dump_hierarchy(self):
+        return self.xml
+
+
+def test_espera_da_extensao_diz_por_que_acabou(monkeypatch):
+    # O quadro mais novo de uma versão só e nada sendo gerado (a tela do projeto em 17/11, com a foto do anúncio no
+    # quadro ao lado): a continuação não vem. Com o "Gerando…" na tela, a espera vai até a ESPERA_DA_GERACAO.
+    monkeypatch.setattr(flow.time, "sleep", lambda segundos: None)
+    monkeypatch.setattr(flow, "ESPERA_SEM_CONTINUACAO", 0.05)
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 0.3)
+    uma = _no((0, 466, 537, 1422), desc="Mulher usando o copo, 1 item")
+    duas = _no((0, 466, 537, 1422), desc="Mulher usando o copo, 2 itens")
+    gerando = _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False)
+    foto = _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item")
+    assert flow.esperar_a_extensao(_Tela(uma, foto), guardar_telas=False) == (None, flow.SEM_CONTINUACAO)
+    assert flow.esperar_a_extensao(_Tela(gerando, uma, foto), guardar_telas=False) == (None, flow.ESPERA_DA_EXTENSAO)
+    segundos, porque = flow.esperar_a_extensao(_Tela(duas, foto), guardar_telas=False)
+    assert segundos is not None and porque == ""
 
 
 def test_leitura_do_painel_do_estender():
