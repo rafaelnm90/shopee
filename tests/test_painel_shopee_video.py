@@ -1350,9 +1350,10 @@ def test_preparar_1_agora_pergunta_de_onde_vem_o_video_e_roda_o_robo_com_ela(bm,
     assert _textos(sv.teclado_preparar()) == ["Aleatório 🎲", "Do Grupo 📥", "De IA ✨", "Voltar ao Robô 🔙"]
     tela = msg.saidas[0]
     assert tela.index("Aleatório 🎲") < tela.index("Do Grupo 📥") < tela.index("De IA ✨")
-    # Escolha do Rafael (P243, "até 5 por dia"): 5 contando o do robô; do 3º em diante, créditos do plano.
+    # Escolha do Rafael (P243, "até 5 por dia"): 5 contando o do robô. Com os 48 créditos do vídeo de 16 s (P247 1),
+    # só o 1º do dia cabe nos grátis.
     assert "Vídeos de IA hoje: <b>0</b> de 5" in tela
-    assert "Os 2 primeiros do dia cabem nos 50 créditos grátis; os outros gastam 24 créditos do plano cada." in tela
+    assert "O 1º do dia cabe nos 50 créditos grátis; cada um dos outros gasta até 48 créditos do plano." in tela
     for botao, de, texto in (("Aleatório 🎲", "aleatorio", "o robô sorteia entre um vídeo do grupo e um de IA"),
                              ("Do Grupo 📥", "fonte", "Preparando 1 rascunho agora no Motorola, com o próximo vídeo "
                                                      "do grupo"),
@@ -2300,6 +2301,27 @@ def test_rascunho_sem_o_que_a_edicao_precisa_nao_tem_o_editar(bm, Msg, Est):
     assert "não dá para editar" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.rascunho
 
 
+def test_rascunho_do_video_de_ia_de_16_s_mostra_a_fala_ouvida(bm, monkeypatch, tmp_path):
+    # P247 1 com a P248 1 (D): em Rascunhos do Robô 📝, o rascunho do vídeo de IA de 16 s mostra a fala pedida e o que
+    # o servidor ouviu, para o Rafael decidir na aprovação; o andamento "estendendo" tem a sua frase na tela.
+    sv = _painel(bm)
+    monkeypatch.setattr(sv.robo.flow, "PASTA", str(tmp_path))
+    video_ia = {"modelo": "Omni 1.2 Flash", "custo": 48, "estilo": "vendedor", "cena": "Uma moça vende o copo.",
+                "conferencia": {"mesmo": True, "diferencas": "", "defeitos": ""}, "longa": True, "duracao": 16,
+                "fala": "Gelo o dia todo? Garanta o seu!",
+                "fala_conferida": {"situacao": "cortada", "estranhas": [], "aos": None, "faltou": ["o", "seu"],
+                                   "ouvidas": 6}}
+    linha = sv.linha_do_video_de_ia(video_ia)
+    for trecho in ("Omni 1.2 Flash, 16 s (48 créditos de IA: 24 dos 8 s gerados e 24 do Estender)",
+                   "🗣️ Fala: Gelo o dia todo? Garanta o seu!",
+                   "⚠️ Fala no vídeo: cortada no fim (faltou &quot;o seu&quot;)"):
+        assert trecho in linha, trecho
+    hoje = sv.robo.agora_br().strftime("%Y-%m-%d")
+    sv.robo.flow.recomecar_producao(hoje, estado="estendendo")
+    tela = sv.texto_video_ia(sv.ler_config())
+    assert "hoje: os 8 s gerados e o Estender tocado no Flow; falta baixar os 16 s" in tela
+
+
 def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, monkeypatch, tmp_path):
     # Escolha do Rafael (15/11, P232 1): 1 vídeo de IA por dia no Google Flow, que vira um dos rascunhos do dia;
     # ligado até ele desligar no painel.
@@ -2310,13 +2332,19 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     assert "Vídeo de IA: ✅ <b>ligado</b> (ainda não fez nenhum)" in sv.texto_robo(sv.ler_config())
     msg = Msg(sv.BOTAO_VIDEO_IA)
     rodar(sv.video_ia_handler(msg, est))
-    for trecho in ("Omni 1.2 Flash (24 créditos", "Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz",
+    for trecho in ("Omni 1.2 Flash (48 créditos", "Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz",
                    sv.limite_dos_videos_de_ia()):
         assert trecho in msg.saidas[-1]
+    # Escolha do Rafael (17/11, P247 1): o vídeo de IA tem 16 s, com uma pessoa vendendo o produto, e o rascunho
+    # avisa a fala embolada ou cortada (P248 1).
+    for trecho in ("um vídeo de 16 s feito por IA", "uma pessoa vendendo o produto do começo ao fim",
+                   "mais 8 s do Estender", "o rascunho avisa se ela saiu embolada ou cortada"):
+        assert trecho in msg.saidas[-1], trecho
+    assert "vídeo de 8 s" not in msg.saidas[-1] and "estilo que varia" not in msg.saidas[-1]
     # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243).
     assert sv.limite_dos_videos_de_ia() == (
         "No máximo 5 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨ "
-        "(24 créditos cada; passando dos 50 grátis do dia, os outros saem do plano)")
+        "(48 créditos cada; passando dos 50 grátis do dia, os outros saem do plano)")
     # Escolha do Rafael (15/11, P234 1): o produto vem da API de afiliado da Shopee, sem depender da fonte.
     for trecho in ("sem depender dos vídeos da fonte", "entre os produtos em alta, os de nota 4,5 ou mais, que pagam "
                    "pelo menos R$ 2,00 por venda e que você ainda não postou", "o que paga mais por venda",

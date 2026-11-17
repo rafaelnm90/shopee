@@ -9494,7 +9494,8 @@ def test_video_de_ia_pula_o_produto_que_a_ia_de_video_muda(monkeypatch):
 
 def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     # P246 1: a amostra do vídeo de 16 s escolhe o produto como a do vídeo do dia, e a IA escreve o pedido de 16 s
-    # (com a continuação do Estender); a escolha do vídeo do dia continua pedindo o de 8 s.
+    # (com a continuação do Estender). Desde a P247 1 (17/11), a escolha do vídeo do dia também pede o de 16 s; o de
+    # 8 s fica só para as amostras de 8 s.
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, longos = robo.flow.pedido_para_o_anuncio, []
 
@@ -9507,7 +9508,8 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
                                                                     longo=True)
     assert escolhido["item"] == "13" and longos == [True]
     robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
-    assert longos == [True, False]
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:10"), amostra=True, longo=False)
+    assert longos == [True, True, False]
 
 
 def test_escolha_da_amostra_deixa_de_fora_as_feitas_e_fica_no_registro_dela(monkeypatch):
@@ -9715,11 +9717,17 @@ def test_ofertas_do_video_de_ia_em_alta_e_pelos_nichos_quando_a_api_nao_da(monke
     assert robo.ofertas_para_o_video_de_ia(agora) == ([], "os mais vendidos dos nichos dos Achadinhos")
 
 
-def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True):
+FALA_DO_VESTIDO = "Vestido que gira? Olha só! Garanta o seu!"
+
+
+def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False):
     monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
     escolhido = {"id": "ia:2026-10-22", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "comedia",
                  "prompt": "p", "cena": "Uma menina gira com o vestido.", "item": "2", "valor": 5.99, "posicao": 1,
                  "origem": EM_ALTA}
+    if longo:
+        # O pedido de 16 s, o padrão desde a P247 1: com a continuação do Estender e a fala.
+        escolhido.update(estilo=robo.flow.ESTILO_DO_VENDEDOR, continuacao="c", fala=FALA_DO_VESTIDO)
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda agora=None: (dict(escolhido), EM_ALTA, True))
     vezes = []
 
@@ -9728,7 +9736,8 @@ def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True):
         arquivo = tmp_path / "producao_2026-10-22.mp4"
         arquivo.write_bytes(b"video")
         robo.flow.guardar_producao(estado="baixado", arquivo=str(arquivo), gerado_em="2026-10-22 08:06:00",
-                                   resolucao="1080p")
+                                   resolucao="720p" if longo else "1080p",
+                                   **({"custo": robo.flow.CUSTO_DA_PRODUCAO, "duracao": 16} if longo else {}))
         return True
 
     monkeypatch.setattr(robo.flow, "producao_no_celular", no_celular)
@@ -9793,6 +9802,61 @@ def test_video_de_ia_parado_no_flow_antes_e_depois_do_gerar(monkeypatch, avisos,
         assert robo.flow.producao()["estado"] == "gerando"
     robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora)
     assert robo.flow.producao()["estado"] == "descartado"
+
+
+def test_video_de_ia_de_16_s_ouve_a_fala_e_o_rascunho_leva_o_aviso(monkeypatch, avisos, tmp_path):
+    # Escolha do Rafael (17/11, P247 1): o vídeo de IA do dia é o de 16 s, com uma pessoa vendendo o produto. A fala
+    # embolada ou cortada não o descarta: o aviso vai no rascunho, e o Rafael decide na aprovação (P248 1).
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True)
+    embolada = {"situacao": "embolada", "estranhas": ["vou", "feitecer"], "aos": 6, "faltou": [], "ouvidas": 9}
+    ouvidas = []
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala: ouvidas.append(fala) or dict(embolada))
+    resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
+    assert resultado == "vídeo de IA: pronto para o rascunho" and ouvidas == [FALA_DO_VESTIDO]
+    pronto = robo.flow.video_pronto()
+    assert pronto["longa"] is True and pronto["fala_conferida"]["situacao"] == "embolada"
+    # No registro, só o rótulo fixo da fala ouvida.
+    assert ("fala conferida", "embolada") in _registro_do_video_de_ia()
+    aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
+    for trecho in ("Omni 1.2 Flash, 16 s (48 créditos de IA: 24 dos 8 s gerados e 24 do Estender)",
+                   f"🗣️ Fala: {FALA_DO_VESTIDO}", '⚠️ Fala no vídeo: embolada aos 6 s (ouvi "vou", "feitecer"'):
+        assert trecho in aviso, trecho
+    # O rascunho guarda a fala pedida e a ouvida, que o Rafael vê em Rascunhos do Robô 📝 antes de aprovar.
+    resumo = robo.resumo_do_video_de_ia(pronto)
+    assert resumo["longa"] is True and resumo["duracao"] == 16 and resumo["fala"] == FALA_DO_VESTIDO
+    assert resumo["fala_conferida"] == pronto["fala_conferida"]
+    assert "⚠️ Fala no vídeo: embolada aos 6 s" in robo.flow.legenda_da_producao(resumo)
+
+
+def test_video_de_ia_parado_depois_do_estender_segue_sem_recomecar(monkeypatch, avisos, tmp_path):
+    # No vídeo de 16 s (P247 1), o que para depois do Gerar do Estender (o crédito das duas partes já foi) segue de
+    # onde parou nas rodadas seguintes, sem escolher outro produto nem gerar de novo, até TENTATIVAS_DE_BAIXAR vezes,
+    # como o que para depois do Gerar dos 8 s.
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True)
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda agora=None: pytest.fail("escolheu outro produto"))
+    estados = []
+
+    def falha(d, atual):
+        estados.append(atual["estado"])
+        raise robo.flow.Parada("baixar: o vídeo não abriu")
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", falha)
+    robo.flow.recomecar_producao("2026-10-22", estado="estendendo", longa=True, gerado_em="2026-10-22 08:00:00",
+                                 item="2", id_video="ia:2026-10-22", custo=48)
+    agora = momento("2026-10-22 08:30")
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    assert robo.video_de_ia_pendente(robo.ler_config(), agora)
+    for vez in range(1, robo.TENTATIVAS_DE_BAIXAR):
+        robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora)
+        atual = robo.flow.producao()
+        assert atual["estado"] == "estendendo" and atual["tentativas_de_baixar"] == vez
+    robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora)
+    assert robo.flow.producao()["estado"] == "descartado" and estados == ["estendendo"] * robo.TENTATIVAS_DE_BAIXAR
+    assert _registro_do_video_de_ia().count(("parou", "depois do Gerar")) == robo.TENTATIVAS_DE_BAIXAR
 
 
 def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, avisos, tmp_path,
