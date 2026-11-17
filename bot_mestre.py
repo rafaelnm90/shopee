@@ -18153,6 +18153,19 @@ async def comando_status(message: types.Message, state: FSMContext):
 
 
 # --- main(): agenda os jobs e sobe o bot (fica no fim do arquivo) ---
+def sair_sem_esperar_as_threads():
+    """
+    O fim do bot depois que o systemd o para (deploy ou reinício): sai na hora, sem esperar as threads que ainda
+    trabalham. A IA responde numa thread (api_gemini, até LIMITE_DA_RESPOSTA_S), e o asyncio e o Python esperam cada
+    thread acabar antes de sair: com uma resposta da IA a caminho, o bot passava do tempo que o systemd espera (90 s)
+    e era morto à força (checkup: "não parou no tempo e foi morto"). O que a thread fazia se perde como na parada à
+    força, mas sem os 90 s com o bot fora do ar; o que foi gravado no banco já está lá.
+    """
+    import logging
+    logging.shutdown()
+    os._exit(0)
+
+
 async def main():
     """Agenda os jobs, monta a grade de hoje, limpa painéis órfãos e começa o polling."""
     # Grade do dia, todo dia às 00:01
@@ -18289,6 +18302,8 @@ async def main():
     await reenviar_botao_ofertas()
 
     await dp.start_polling(bot)
+    # O polling só acaba quando o systemd para o bot: sai sem esperar as threads (sair_sem_esperar_as_threads).
+    sair_sem_esperar_as_threads()
 
 if __name__ == '__main__':
     asyncio.run(main())
