@@ -3629,9 +3629,7 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
         except flow.Parada as e:
             return _video_de_ia_parou(str(e), agora)
         if not baixado:
-            registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "gerado", "baixa na próxima rodada",
-                                         ok=None, agora=agora)
-            return "vídeo de IA: gerado, mas não ficou pronto a tempo; a próxima rodada baixa"
+            return _video_de_ia_sem_ficar_pronto(d, agora)
     estado = flow.conferir_a_producao()
     atual = flow.producao()
     if atual.get("fala_conferida"):
@@ -3689,9 +3687,11 @@ def _video_de_ia_parou(motivo, agora=None):
     atual = flow.producao()
     motivo = f"vídeo de IA: {motivo}"
     depois_do_gerar = atual.get("estado") in ("gerando", "estendendo")
+    perdido = False
     if depois_do_gerar:
         vezes = atual.get("tentativas_de_baixar", 0) + 1
-        if vezes >= TENTATIVAS_DE_BAIXAR:
+        perdido = vezes >= TENTATIVAS_DE_BAIXAR
+        if perdido:
             flow.guardar_producao(estado="descartado", tentativas_de_baixar=vezes, motivo=motivo)
             _soltar_a_fonte_do_video_de_ia(atual)
         else:
@@ -3702,7 +3702,51 @@ def _video_de_ia_parou(motivo, agora=None):
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "parou",
                                  "depois do Gerar" if depois_do_gerar else "antes do Gerar", ok=False, agora=agora)
     registrar_tentativa("video_ia", "parou", motivo, agora=agora, video=atual.get("id_video", ""))
+    if perdido:
+        _avisar_o_video_de_ia_perdido(atual, f"parou no Google Flow em {TENTATIVAS_DE_BAIXAR} rodadas depois do Gerar")
     return f"{motivo}; parado"
+
+
+def _video_de_ia_sem_ficar_pronto(d, agora=None):
+    """
+    O vídeo gerado não ficou pronto a tempo nesta rodada (o porquê no andamento, "espera"). Conta entre as
+    TENTATIVAS_DE_BAIXAR rodadas depois do Gerar, como a parada (P232 1 e P247 1: até 3 rodadas): o vídeo de IA vem
+    antes do rascunho, das respostas e do feed (o_que_fazer), e um vídeo que nunca fica pronto (a continuação que o
+    Flow perdeu) prenderia o robô numa espera atrás da outra. Na última, ele sai ("descartado"), com a tela do Flow
+    guardada para o Claude ver o porquê. Devolve o resultado da rodada.
+    """
+    atual = flow.producao()
+    vezes = atual.get("tentativas_de_baixar", 0) + 1
+    espera = atual.get("espera") or flow.ESPERA_DOS_8_S
+    if vezes < TENTATIVAS_DE_BAIXAR:
+        flow.guardar_producao(tentativas_de_baixar=vezes)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "gerado",
+                                     f"baixa na próxima rodada ({espera}; rodada {vezes} de {TENTATIVAS_DE_BAIXAR})",
+                                     ok=None, agora=agora)
+        return "vídeo de IA: gerado, mas não ficou pronto a tempo; a próxima rodada baixa"
+    motivo = f"vídeo de IA: não ficou pronto no Flow em {vezes} rodadas ({espera})"
+    casos_robo.guardar(d, "video de IA", "parou", motivo, passo="flow")
+    flow.guardar_producao(estado="descartado", tentativas_de_baixar=vezes, motivo=motivo)
+    _soltar_a_fonte_do_video_de_ia(atual)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "parou", f"não ficou pronto ({espera})",
+                                 ok=False, agora=agora)
+    registrar_tentativa("video_ia", "parou", motivo, agora=agora, video=atual.get("id_video", ""))
+    _avisar_o_video_de_ia_perdido(atual, f"não ficou pronto no Google Flow em {vezes} rodadas ({espera})")
+    return f"{motivo}; parado"
+
+
+def _avisar_o_video_de_ia_perdido(atual, porque):
+    """
+    O aviso do vídeo de IA gerado que saiu sem chegar ao servidor (as rodadas depois do Gerar acabaram), como o dos
+    outros descartados (P245 1): o do De IA ✨ diz como pedir outro (o Preparar 1 Agora ⚡ conta com este aviso).
+    """
+    if atual.get("do_botao"):
+        qual, depois = "que você pediu", (" Toque de novo em Preparar 1 Agora ⚡ → De IA ✨ para tentar outro, se o dia "
+                                          "ainda tiver espaço para vídeo de IA.")
+    else:
+        qual, depois = "de hoje", " O de amanhã sai normalmente."
+    avisar(f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} {porque} e saiu: ele não vira rascunho.{depois}\n\n"
+           f"Produto: {atual.get('nome', '')}")
 
 
 def video_de_ia_para_o_rascunho(evitar=(), ja_postados=None):

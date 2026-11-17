@@ -9857,6 +9857,52 @@ def test_video_de_ia_parado_depois_do_estender_segue_sem_recomecar(monkeypatch, 
     robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora)
     assert robo.flow.producao()["estado"] == "descartado" and estados == ["estendendo"] * robo.TENTATIVAS_DE_BAIXAR
     assert _registro_do_video_de_ia().count(("parou", "depois do Gerar")) == robo.TENTATIVAS_DE_BAIXAR
+    # O Rafael sabe que o vídeo saiu, como nos outros descartados do vídeo de IA.
+    aviso = next(a for a in avisos if isinstance(a, str) and "não vira rascunho" in a)
+    assert "o vídeo de IA de hoje parou no Google Flow em 3 rodadas depois do Gerar" in aviso
+
+
+def test_video_de_ia_que_nao_fica_pronto_sai_depois_de_3_rodadas(monkeypatch, avisos, tmp_path):
+    # P232 1 e P247 1: depois de um Gerar, até 3 rodadas. A rodada em que o vídeo não fica pronto a tempo também conta:
+    # o vídeo de IA vem antes do rascunho, das respostas e do feed, e o de 17/11, cuja continuação o Flow perdeu,
+    # esperou rodada após rodada pela versão estendida, sem deixar o robô fazer o resto.
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True)
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda agora=None: pytest.fail("escolheu outro produto"))
+    casos = []
+    monkeypatch.setattr(robo.casos_robo, "guardar",
+                        lambda d, acao, resultado, motivo, passo="", **extra: casos.append((motivo, passo)))
+
+    def nao_fica_pronto(d, atual):
+        robo.flow.guardar_producao(espera=robo.flow.SEM_CONTINUACAO)
+        return False
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", nao_fica_pronto)
+    robo.flow.recomecar_producao("2026-10-22", estado="estendendo", longa=True, gerado_em="2026-10-22 08:00:00",
+                                 item="2", id_video="ia:2026-10-22", custo=48, nome=VESTIDO, do_botao=True)
+    agora = momento("2026-10-22 08:30")
+    for vez in range(1, robo.TENTATIVAS_DE_BAIXAR):
+        assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora) == \
+            "vídeo de IA: gerado, mas não ficou pronto a tempo; a próxima rodada baixa"
+        atual = robo.flow.producao()
+        assert atual["estado"] == "estendendo" and atual["tentativas_de_baixar"] == vez
+    assert casos == [] and not any(isinstance(a, str) and "não vira rascunho" in a for a in avisos)
+    motivo = "vídeo de IA: não ficou pronto no Flow em 3 rodadas (a continuação não veio)"
+    assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora) == f"{motivo}; parado"
+    # O robô fica livre: o vídeo sai dos pendentes, e a tela do Flow fica guardada para o Claude ver o porquê.
+    assert robo.flow.producao()["estado"] == "descartado"
+    assert robo.flow.producao()["estado"] not in robo.flow.ESTADOS_PENDENTES
+    assert casos == [(motivo, "flow")]
+    assert consultar("SELECT resultado, passo FROM shopee_video_tentativas") == ("parou", "vídeo de IA no Flow")
+    registro = _registro_do_video_de_ia()
+    assert ("gerado", "baixa na próxima rodada (a continuação não veio; rodada 1 de 3)") in registro
+    assert ("parou", "não ficou pronto (a continuação não veio)") in registro
+    # O pedido do De IA ✨: o Rafael sabe que ele saiu e como pedir outro.
+    aviso = next(a for a in avisos if isinstance(a, str) and "não vira rascunho" in a)
+    for trecho in ("o vídeo de IA que você pediu não ficou pronto no Google Flow em 3 rodadas",
+                   "Preparar 1 Agora ⚡ → De IA ✨", VESTIDO):
+        assert trecho in aviso, trecho
 
 
 def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, avisos, tmp_path,
