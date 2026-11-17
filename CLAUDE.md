@@ -119,6 +119,7 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
 - aiogram: ganha o primeiro handler registrado que casar. Num fluxo FSM, o handler de "Cancelar ❌" tem de vir antes do handler que lê texto livre.
 - `validar_deploy.py` exige que o 1º parâmetro de um handler se chame `message`, `callback`, `event`, `query`, `msg` ou `callback_query`.
 - Uma sessão Telethon não pode ser usada por dois processos ao mesmo tempo.
+- Parado pelo systemd (deploy), o bot_mestre sai na hora, sem esperar as threads (`sair_sem_esperar_as_threads`): a resposta da IA numa thread prendia a saída além dos 90 s, e o systemd o matava.
 - `ADMIN_ID` e os IDs dos canais estão fixos no código.
 - Log: `logger.info/warning/error` direto, sem chave na frente (o `tests/test_logs.py` barra `EXIBIR_LOGS`). O nível de cada robô vem do `NIVEL_LOG` no `.env` (`DEBUG`, `INFO`, `WARNING`, `ERROR`; padrão `INFO`).
 
