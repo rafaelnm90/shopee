@@ -762,6 +762,15 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   ("…, 2 itens"); aberto, o player diz "1 de 2" e mostra à direita uma miniatura por versão,
   e o título muda com a versão (o modelo de cada uma). O robô escolhe a versão pela
   miniatura e confere o título antes de baixar.
+- O painel do Estender (mapeado pelo explorar em 16/11/2026, sem gerar): o Voltar no alto, o
+  vídeo em cima ("1 de 1"), a fita dos quadros com uma alça em cada ponta (o trecho que
+  continua; o robô não mexe), a caixa "Qual é a próxima etapa?" já em foco, com o teclado, o +
+  (Adicionar mídia), o botão "Estender 8s" e o Gerar (a seta), desligado com a caixa vazia. O
+  voltar fecha o teclado e, de novo, o painel, sem gerar. A amostra de 16 s (P246 1) escreve a
+  continuação, confere a caixa, o "Estender 8s" e o "1 de 1" e só então toca no Gerar; não
+  toca no "Estender 8s". Falta ver o que o app mostra enquanto estende (a amostra guarda a
+  tela nos primeiros minutos) e se o Baixar da versão estendida traz os 16 s ou só a
+  continuação (o robô confere a duração do arquivo e, curto, junta a original).
 
 ## O que não se faz
 

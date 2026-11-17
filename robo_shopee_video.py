@@ -3511,7 +3511,7 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
     return sorted(bons, key=lambda bom: (-bom["valor"], -bom["vendas"])), contagem
 
 
-def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
+def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=False):
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
     lista da API de afiliado (candidatos_do_video_de_ia), do que paga mais por venda para o que paga menos, o 1º, até
@@ -3520,7 +3520,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
     vídeos do robô), "item", "valor", "posicao" e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica
     lembrada, e o produto não volta, como o que a IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à
     parte no registro. api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que ficam de fora (os
-    das amostras já feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela.
+    das amostras já feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela; longo=True: o pedido
+    do vídeo de 16 s com uma pessoa vendendo o produto (P246 1).
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3541,7 +3542,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False):
             continue
         seguidos = 0
         olhadas += 1
-        pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar)
+        pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
+                                                   longo=longo)
         if pedido:
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; estilo {pedido['estilo']}"
                               + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)

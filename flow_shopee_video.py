@@ -26,15 +26,19 @@ baixado e mandado no próximo, sem gerar outro.
 
 As amostras (P236 1, 16/11/2026): vídeos de teste como os da produção (o produto pela lista da
 API de afiliado e o Omni 1.2 Flash), um por vez, só no privado do Rafael, para ele ver como os
-vídeos de IA estão ficando; não viram rascunho nem post.
+vídeos de IA estão ficando; não viram rascunho nem post. A amostra de 16 s (P246 1, 16/11/2026):
+uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens em uso e a chamada), nos 8 s
+gerados pela foto e em mais 8 s do Estender do Flow, que continua a mesma cena (no_flow_longo);
+gostando, ela vira o padrão do vídeo de IA.
 
-Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar ou amostra). O log do Actions é
+Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra ou amostra-16s). O log do Actions é
 público: saem só estados, modelos e números; o produto e o pedido ficam no banco, e o vídeo, no
 privado.
 
     python3 flow_shopee_video.py teste              # o próximo passo do teste (um modelo por vez)
     python3 flow_shopee_video.py teste --sem-gerar  # tudo até o Gerar, sem tocar nele
     python3 flow_shopee_video.py amostra            # a próxima amostra do vídeo de IA (P236 1)
+    python3 flow_shopee_video.py amostra --longa    # a amostra do vídeo de 16 s, com o Estender (P246 1)
 """
 import asyncio
 import io
@@ -45,6 +49,7 @@ import re
 import sys
 import time
 import unicodedata
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import api_gemini
@@ -120,6 +125,22 @@ FALHA_NO_PLAYER = re.compile(r"falha ao carregar", re.I)
 ESPERA_DO_PLAYER = 10
 PAUSA_ANTES_DE_REABRIR = 20
 ABERTURAS_DO_VIDEO = 3
+# O Estender (P246 1, mapeado no Motorola em 16/11/2026, sem gerar): embaixo do vídeo aberto, abre o painel "Qual é a
+# próxima etapa?", com o vídeo em cima ("1 de 1"), a fita dos quadros com as alças (o trecho que continua; o robô não
+# mexe nelas), a caixa do pedido, o + (Adicionar mídia), o botão da duração ("Estender 8s") e o Gerar, desligado com a
+# caixa vazia. O robô escreve a continuação e só toca no Gerar com a caixa, os 8 s e o vídeo de uma versão só
+# conferidos na tela. Os 8 s custam 24 créditos no Omni 1.2 Flash (6 s 18 e 10 s 30, vistos no celular do Rafael em
+# 15/11). Depois do Gerar, o painel fecha em até ESPERA_DO_PAINEL s.
+DURACAO_DO_ESTENDER = "Estender 8s"
+CUSTO_DO_ESTENDER = 24
+ESPERA_DO_PAINEL = 20
+# O Flow guarda a versão estendida no mesmo quadro do vídeo ("…, 2 itens"; aberto, "2 de 2", visto no celular do
+# Rafael em 15/11). A versão baixada com DURACAO_ESTENDIDA s ou mais já tem os 16 s; a mais curta é só a continuação,
+# e o robô baixa também a original e junta as duas no servidor (videos.juntar). Na espera do Estender, que o robô
+# ainda não viu, a tela vai aos casos só nos primeiros CASOS_DO_ESTENDER minutos (para o Claude ver).
+DURACAO_ESTENDIDA = 12
+CASOS_DO_ESTENDER = 3
+VERSOES_NO_QUADRO = re.compile(r",\s*(\d+)\s+(?:item|itens|items)\s*$", re.I)
 # A janela "Baixar vídeo" (mapeada em 15/11/2026) vem com o "720p Tamanho original" marcado; o
 # "1080p Aumentar a resolução" fica livre no plano Pro e o 4K pede outro plano. O robô baixa no
 # 1080p e só quando a linha dele não fala em plano nem em crédito, e a janela não fala em crédito;
@@ -160,24 +181,32 @@ PACOTE_DO_TECLADO = "com.google.android.inputmethod.latin"
 # Rafael (15/11/2026: "você pode fazer vídeos também com falas (...) Pode ser até vídeos virais também,
 # do tipo uma coisa inusitada (...) Uma coisa mais comédia"), sempre dentro das diretrizes da Shopee
 # Vídeo (sem humilhar ninguém, sem marca, sem preço, sem promessa falsa): DECISOES.md, Shopee Vídeo.
+# O vídeo de 16 s (P246 1) tem um jeito só, fora dos que a IA escolhe: uma pessoa vendendo o produto do começo ao
+# fim.
+ESTILO_DO_VENDEDOR = "vendedor"
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
-           "inusitado": "inusitado (viral)", "comedia": "comédia"}
+           "inusitado": "inusitado (viral)", "comedia": "comédia",
+           ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada (16 s)"}
 ESTILO_PADRAO = "demonstracao"
 # Quantos estilos dos últimos vídeos a IA recebe, para variar (o Rafael pediu vídeos variados, "para não
 # ficar um padrão, para ser mais orgânico", 15/11/2026).
 ESTILOS_LEMBRADOS = 4
-PEDIDO_DA_IA = (
-    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto "
-    "oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo de 8 segundos, em pé "
-    "(9:16) e com som, a partir dessa foto. Responda só com um JSON, sem nada antes ou depois:\n"
-    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "estilo": "...", "prompt": "...", '
-    '"cena": "..."}}\n'
+# O que a IA diz da foto do anúncio (serve e muda_na_ia), igual no pedido do vídeo de 8 s e no de 16 s (P246 1).
+REGRAS_DA_FOTO = (
     "- serve: false quando a foto não mostra o produto inteiro e com clareza (colagem de várias "
     "fotos, tabela de medidas, mais texto que produto, só a embalagem fechada) ou quando o produto "
     "é proibido nas diretrizes da Shopee Vídeo{bebida}; motivo: o porquê, em poucas palavras.\n"
     "- muda_na_ia: true quando o produto tem o que a IA de vídeo costuma mudar ao recriá-lo pela foto, e o "
     "vídeo sairia com outro produto: tela (TV, celular, tablet, monitor, relógio ou outro aparelho com visor), "
     "marca, logotipo ou letras no corpo do produto, ou muitos botões e peças pequenas.\n"
+)
+PEDIDO_DA_IA = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto "
+    "oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo de 8 segundos, em pé "
+    "(9:16) e com som, a partir dessa foto. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "estilo": "...", "prompt": "...", '
+    '"cena": "..."}}\n'
+    + REGRAS_DA_FOTO +
     "- estilo: o jeito do vídeo que mais combina com este produto e prende quem está rolando o feed, um "
     "destes: \"demonstracao\" (o produto em uso no dia a dia), \"fala\" (uma pessoa comum mostra o "
     "produto e fala dele, como um cliente contando a experiência), \"inusitado\" (uma situação curiosa "
@@ -193,6 +222,36 @@ PEDIDO_DA_IA = (
     "ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, nojento ou com criança. Sem "
     "texto na tela, sem legenda, sem logotipo novo e sem outros produtos.\n"
     "- cena: uma frase em português que descreve a cena (com a fala, se tiver), para o Rafael."
+)
+# O pedido do vídeo de 16 s (P246 1): uma pessoa vendendo o produto do começo ao fim, como nos vídeos de IA do feed
+# que o Rafael mostrou (16/11/2026): o gancho logo no começo, as vantagens mostradas de perto e em uso e a chamada no
+# fim. Em duas partes de 8 s: a 1ª gerada pela foto (prompt) e a 2ª pelo Estender do Flow (continuacao), que continua
+# a mesma cena.
+PEDIDO_DO_VENDEDOR = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A imagem é a foto oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo "
+    "de 16 segundos, em pé (9:16) e com som, em duas partes de 8 segundos: a 1ª a partir dessa foto e a 2ª "
+    "continuando a 1ª, na mesma cena, com a mesma pessoa e a mesma voz. Uma pessoa comum, brasileira, vende o "
+    "produto falando com quem assiste do começo ao fim: um gancho logo no 1º segundo, as vantagens mostradas de "
+    "perto e em uso e uma chamada para comprar no fim. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "continuacao": '
+    '"...", "fala": "...", "cena": "..."}}\n'
+    + REGRAS_DA_FOTO +
+    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos: a pessoa olha para a câmera, segura o produto "
+    "da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
+    "trocado) e bem à vista, e diz o gancho, entre aspas, em português do Brasil, até 12 palavras: uma dor que o "
+    "produto resolve, uma pergunta ou uma surpresa (por exemplo: \"Orelha rasgada? Nunca mais!\"); depois mostra "
+    "o produto de perto. Numa cena real do Brasil, com luz natural, fotorrealista, como filmado com o celular na "
+    "mão.\n"
+    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando a mesma cena sem corte, com a "
+    "mesma pessoa, a mesma roupa e o mesmo produto, idêntico: ela usa o produto e mostra de perto, em uso, duas "
+    "vantagens que se veem na tela, falando entre aspas, em português do Brasil, até 16 palavras, e termina com uma "
+    "chamada curta para comprar (por exemplo: \"Garanta já o seu!\").\n"
+    "- fala: tudo o que a pessoa fala, em português, as duas partes juntas, como vai sair no vídeo.\n"
+    "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
+    "A fala é natural, sem marca, sem preço e sem prometer o que o produto não faz. Nada de zombar do corpo, da "
+    "aparência ou de um grupo de ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, nojento ou com "
+    "criança. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos."
 )
 # Bebida alcoólica fica de lado enquanto as diretrizes a deixam em espera (P111): o vídeo nem é gerado, para não
 # gastar o crédito de um vídeo que o rascunho deixaria de lado.
@@ -242,10 +301,11 @@ def evitar_os_recentes(recentes):
             "se ele também combinar com este produto, para os vídeos não ficarem num padrão só.")
 
 
-def ler_resposta(texto):
+def ler_resposta(texto, longo=False):
     """
     {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
-    veio num JSON ou disse que serve sem escrever o pedido.
+    veio num JSON ou disse que serve sem escrever o pedido. longo: a resposta do pedido de 16 s (P246 1), com a
+    "continuacao" (o pedido do Estender, sem ela também None) e a "fala", no estilo do vendedor.
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
@@ -258,12 +318,16 @@ def ler_resposta(texto):
         return None
     serve = dados.get("serve") is True
     prompt = " ".join(str(dados.get("prompt") or "").split())
-    if serve and not prompt:
+    continuacao = " ".join(str(dados.get("continuacao") or "").split())
+    if serve and (not prompt or (longo and not continuacao)):
         return None
-    return {"serve": serve, "muda_na_ia": dados.get("muda_na_ia") is True,
-            "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
-            "estilo": nome_do_estilo(dados.get("estilo")), "prompt": prompt[:1000],
-            "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
+    resposta = {"serve": serve, "muda_na_ia": dados.get("muda_na_ia") is True,
+                "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
+                "estilo": ESTILO_DO_VENDEDOR if longo else nome_do_estilo(dados.get("estilo")),
+                "prompt": prompt[:1000], "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
+    if longo:
+        resposta.update(continuacao=continuacao[:1000], fala=" ".join(str(dados.get("fala") or "").split())[:400])
+    return resposta
 
 
 def jpeg_sem_metadados(dados):
@@ -282,29 +346,34 @@ def jpeg_sem_metadados(dados):
         return None
 
 
-def pedido_para_o_anuncio(link, nome, foto, evitar=""):
+def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False):
     """
     O pedido do vídeo para o anúncio já em mãos (o link, o nome e os bytes da foto do anúncio): a foto sem os
     dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
     trecho de evitar_os_recentes). (o pedido, serve): o pedido é {"link", "nome", "foto" (bytes), "estilo",
     "prompt", "cena"} quando a IA acha a foto boa para o vídeo; serve é False quando ela disse que a foto não
     serve, MUDA_NA_IA quando o produto tem o que a IA de vídeo costuma mudar (P245 1) e None quando não deu
-    para saber (a foto não é uma imagem, ou a IA não respondeu).
+    para saber (a foto não é uma imagem, ou a IA não respondeu). longo: o pedido do vídeo de 16 s com uma pessoa
+    vendendo o produto (P246 1), com a "continuacao" do Estender e a "fala".
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
         return None, None
+    pedido = PEDIDO_DO_VENDEDOR if longo else PEDIDO_DA_IA
     resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
-        PEDIDO_DA_IA.format(nome=nome, evitar=evitar, bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
-        imagens=[(foto, "image/jpeg")])))
+        pedido.format(nome=nome, evitar=evitar, bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
+        imagens=[(foto, "image/jpeg")])), longo=longo)
     if not resposta:
         return None, None
     if not resposta["serve"]:
         return None, False
     if resposta["muda_na_ia"]:
         return None, MUDA_NA_IA
-    return {"link": link, "nome": nome, "foto": foto, "estilo": resposta["estilo"], "prompt": resposta["prompt"],
-            "cena": resposta["cena"]}, True
+    escolhido = {"link": link, "nome": nome, "foto": foto, "estilo": resposta["estilo"], "prompt": resposta["prompt"],
+                 "cena": resposta["cena"]}
+    if longo:
+        escolhido.update(continuacao=resposta["continuacao"], fala=resposta["fala"])
+    return escolhido, True
 
 
 def pedido_para_o_produto(link, evitar=""):
@@ -775,13 +844,8 @@ def video_sem_carregar(xml):
                for el in ps.elementos(xml))
 
 
-def abrir_o_video_novo(d, modelo):
-    """
-    No projeto: Vídeos → o mais novo. O título dele tem de ter o modelo do teste: com mais de uma
-    versão (o Estender que o Rafael fez no vídeo do teste em 15/11 ficou junto do original), o robô
-    passa pelas miniaturas das versões até o título dizer o modelo. Nunca baixa nem manda um vídeo
-    de outro modelo (Parada). O player que não carrega é fechado e aberto de novo (ABERTURAS_DO_VIDEO).
-    """
+def _abrir_o_mais_novo(d):
+    """No projeto: Vídeos → o mais novo; o player que não carrega é fechado e aberto de novo (ABERTURAS_DO_VIDEO)."""
     tocar(d, "Vídeos", "filtro dos vídeos")
     for abertura in range(1, ABERTURAS_DO_VIDEO + 1):
         ponto = ponto_parado(d, quadro_mais_novo, "vídeo novo")
@@ -798,6 +862,16 @@ def abrir_o_video_novo(d, modelo):
         print("Flow: o vídeo não carregou no player; fechado para abrir de novo")
         tocar(d, "Fechar", "fechar o vídeo que não carregou")
         time.sleep(PAUSA_ANTES_DE_REABRIR)
+
+
+def abrir_o_video_novo(d, modelo):
+    """
+    No projeto: Vídeos → o mais novo. O título dele tem de ter o modelo do teste: com mais de uma
+    versão (o Estender que o Rafael fez no vídeo do teste em 15/11 ficou junto do original), o robô
+    passa pelas miniaturas das versões até o título dizer o modelo. Nunca baixa nem manda um vídeo
+    de outro modelo (Parada). O player que não carrega é fechado e aberto de novo (ABERTURAS_DO_VIDEO).
+    """
+    _abrir_o_mais_novo(d)
     # O título com o modelo e a coluna das versões aparecem um pouco depois do player (visto em
     # 15/11: lido cedo demais, o vídeo parecia não ter versões); a versão estendida tem só o nome
     # no título, sem o modelo.
@@ -809,6 +883,162 @@ def abrir_o_video_novo(d, modelo):
         if esperar(d, lambda x: modelo in (titulo_do_video(x) or []), ESPERA_DA_VERSAO):
             return
     raise Parada("baixar: o vídeo mais novo não é do modelo do teste")
+
+
+# --- O Estender: a continuação do vídeo de 16 s (P246 1) ---
+
+def posicao_no_player(xml):
+    """(N, M) do "N de M" do player do vídeo aberto: a versão à vista e quantas há; None fora do vídeo aberto."""
+    for el in ps.elementos(xml):
+        valor = el["descricao"] or ""
+        if el["pacote"] == PACOTE and (VIDEO_ABERTO.search(valor) or FALHA_NO_PLAYER.search(valor)):
+            achado = re.search(r"\b(\d+) de (\d+)\b", valor)
+            if achado:
+                return int(achado.group(1)), int(achado.group(2))
+    return None
+
+
+def versoes_do_mais_novo(xml):
+    """Quantas versões tem o quadro mais novo do projeto (o "…, 2 itens" depois do Estender); 0 sem quadro."""
+    quadros = [el for el in ps.elementos(xml)
+               if el["pacote"] == PACOTE and el["clicavel"] and VERSOES_NO_QUADRO.search(el["descricao"] or "")]
+    if not quadros:
+        return 0
+    mais_novo = min(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0]))
+    return int(VERSOES_NO_QUADRO.search(mais_novo["descricao"]).group(1))
+
+
+def _gerar_ligado(xml):
+    """O Gerar do app está ligado? (O do Estender fica desligado com a caixa vazia, visto em 16/11/2026.)"""
+    try:
+        raiz = ET.fromstring(xml)
+    except ET.ParseError:
+        return False
+    return any(no.get("package") == PACOTE and no.get("content-desc") == "Gerar" and no.get("enabled") == "true"
+               for no in raiz.iter("node"))
+
+
+def painel_do_estender(xml):
+    """
+    O painel do Estender aberto: {"caixa" (o centro da caixa do pedido), "texto" (o que está nela), "duracao" (o
+    botão "Estender 8s"), "gerar" (o centro do Gerar), "gerar_ligado", "versoes" (o "N de M" do vídeo de cima, ou
+    None)}; None sem ele.
+    """
+    elementos = [el for el in ps.elementos(xml) if el["pacote"] == PACOTE]
+    caixa = next((el for el in elementos if el["classe"] == "EditText"), None)
+    duracao = next((el for el in elementos
+                    if re.fullmatch(r"estender\s+\d+\s*s", " ".join((el["descricao"] or "").split()), re.I)), None)
+    gerar = next((el for el in elementos if el["descricao"] == "Gerar"), None)
+    if not (caixa and duracao and gerar):
+        return None
+    de_cima = next((re.fullmatch(r"(\d+) de (\d+)", (el["descricao"] or "").strip()) for el in elementos
+                    if re.fullmatch(r"\d+ de \d+", (el["descricao"] or "").strip())), None)
+    return {"caixa": _centro(caixa), "texto": caixa["texto"], "duracao": " ".join(duracao["descricao"].split()),
+            "gerar": _centro(gerar), "gerar_ligado": _gerar_ligado(xml),
+            "versoes": (int(de_cima.group(1)), int(de_cima.group(2))) if de_cima else None}
+
+
+def _comeco(texto):
+    return " ".join((texto or "").split())[:40]
+
+
+def pronto_para_estender(xml, continuacao):
+    """"" quando o painel do Estender está como o robô quer (a continuação, os 8 s, uma versão só e o Gerar ligado);
+    senão, o que falta (texto fixo)."""
+    painel = painel_do_estender(xml)
+    if not painel:
+        return "o painel do Estender sumiu"
+    if painel["versoes"] != (1, 1):
+        return "o vídeo de cima não é o de uma versão só"
+    if _comeco(painel["texto"]) != _comeco(continuacao):
+        return "o texto da continuação não entrou"
+    if painel["duracao"] != DURACAO_DO_ESTENDER:
+        return "a duração não é a de 8 s"
+    if not painel["gerar_ligado"]:
+        return "o Gerar está desligado"
+    return ""
+
+
+def estender(d, continuacao):
+    """
+    No vídeo aberto (o original, com o modelo no título): Estender → a caixa → a continuação → confere o painel
+    (pronto_para_estender) → Gerar, e espera o painel fechar. Parada no que falhar; antes do Gerar, sem gastar crédito.
+    A caixa com outro texto de antes para (o robô não apaga às cegas); com a mesma continuação, segue.
+    """
+    tocar(d, "Estender", "estender")
+    xml = esperar(d, lambda x: painel_do_estender(x) is not None)
+    if not xml:
+        raise Parada("estender: o painel do Estender não abriu")
+    texto = painel_do_estender(xml)["texto"]
+    if texto.strip() and _comeco(texto) != _comeco(continuacao):
+        raise Parada("estender: a caixa já tinha outro texto de antes")
+    if not texto.strip():
+        ponto = ponto_parado(d, lambda x: (painel_do_estender(x) or {}).get("caixa"), "texto do Estender")
+        if not ponto:
+            raise Parada("estender: a caixa do pedido não apareceu")
+        d.click(*ponto)
+        time.sleep(1)
+        ps.escrever(d, continuacao)
+        xml = esperar(d, lambda x: _comeco((painel_do_estender(x) or {}).get("texto")) == _comeco(continuacao), 10)
+        if not xml:
+            raise Parada("estender: o texto não entrou na caixa")
+    falta = pronto_para_estender(xml, continuacao)
+    if falta:
+        raise Parada(f"antes do Gerar do Estender: {falta}")
+    d.click(*painel_do_estender(xml)["gerar"])
+    if not esperar(d, lambda x: painel_do_estender(x) is None, ESPERA_DO_PAINEL):
+        raise Parada("estender: o painel não fechou depois do Gerar")
+
+
+def esperar_a_extensao(d):
+    """
+    No projeto (aberto de novo depois do Gerar do Estender): espera a versão estendida ficar pronta, o quadro mais novo
+    com 2 versões ou mais e nada "Gerando…" na tela, em PRONTO_SEGUIDAS leituras seguidas. A tela vai aos casos nos
+    primeiros CASOS_DO_ESTENDER minutos. Os segundos até ficar pronta; None se não ficou em ESPERA_DA_GERACAO.
+    """
+    inicio, proximo_caso, seguidas = time.monotonic(), 0.0, 0
+    while True:
+        passado = time.monotonic() - inicio
+        if passado >= proximo_caso and proximo_caso < CASOS_DO_ESTENDER * INTERVALO_DOS_CASOS:
+            casos_robo.guardar(d, "flow", "tela", f"esperando o Estender, aos {int(passado)} s", passo="flow estender")
+            proximo_caso += INTERVALO_DOS_CASOS
+        xml = _tela(d)
+        if xml and tem_termos(xml):
+            raise Parada("estender: tela de termos ou de consentimento; o robô nunca aceita pelo Rafael")
+        if xml and not gerando(xml) and versoes_do_mais_novo(xml) >= 2:
+            seguidas += 1
+            if seguidas >= PRONTO_SEGUIDAS:
+                return int(passado)
+        else:
+            seguidas = 0
+        if passado >= ESPERA_DA_GERACAO:
+            return None
+        time.sleep(PAUSA_DA_LEITURA)
+
+
+def escolher_a_versao(d, estendida, modelo):
+    """
+    No vídeo aberto com mais de uma versão: a estendida (a última, "M de M" no player) ou a original (a 1ª, com o
+    modelo no título). Passa pelas miniaturas das versões até ela ficar à vista; Parada sem ela.
+    """
+    def certa(xml):
+        posicao = posicao_no_player(xml)
+        if not posicao or posicao[1] < 2:
+            return False
+        if estendida:
+            return posicao[0] == posicao[1]
+        return posicao[0] == 1 and modelo in (titulo_do_video(xml) or [])
+
+    xml = esperar(d, lambda x: len(versoes_do_video(x)) >= 2, ESPERA_DA_VERSAO)
+    if not xml:
+        raise Parada("estender: o vídeo não tem a versão estendida")
+    if certa(xml):
+        return
+    for versao in versoes_do_video(xml):
+        d.click(*versao)
+        if esperar(d, certa, ESPERA_DA_VERSAO):
+            return
+    raise Parada(f"estender: a versão {'estendida' if estendida else 'original'} não ficou à vista")
 
 
 def arquivos_novos(d):
@@ -1122,6 +1352,96 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
         tirar_da_galeria(d, nome_na_galeria)
 
 
+def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False):
+    """
+    O vídeo de 16 s (P246 1) no Flow, com a trava do celular na mão e a tela já conferida, em etapas que a vez
+    seguinte retoma pelo estado do pedido: o pedido e o Gerar dos 8 s ("gerando"), o Estender com a continuação
+    ("estendendo", com o custo das duas partes) e o Baixar da versão estendida ("baixado"), juntando a original e a
+    continuação quando o Flow baixa só a continuação. Nunca dois Gerar para a mesma parte: o vídeo que já tem a
+    versão estendida não é estendido de novo. True com o vídeo no servidor (ou o pedido pronto, com sem_gerar);
+    False quando uma parte não ficou pronta a tempo (a próxima vez continua); Parada com o passo que parou. A foto
+    sai da galeria no fim, dê certo ou não.
+    """
+    estado = pedido.get("estado")
+    nome_na_galeria = ""
+    if estado not in ("gerando", "estendendo"):
+        nome_na_galeria = foto_na_galeria(d, pedido["foto"])
+        if not nome_na_galeria:
+            raise Parada("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
+    try:
+        if abrir_o_projeto(d):
+            print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
+        else:
+            print("Flow: aberto no projeto do robô")
+        if estado not in ("gerando", "estendendo"):
+            xml = montar_o_pedido(d, pedido["prompt"], modelo, custo)
+            falta = pronto_para_gerar(xml, pedido["prompt"], modelo, custo)
+            if falta:
+                raise Parada(f"antes do Gerar: {falta}")
+            print(f"Flow: pedido dos 8 s pronto (foto, texto, {modelo}, {custo} créditos)")
+            if sem_gerar:
+                casos_robo.guardar(d, "flow", "tela", "pedido pronto, sem gerar", passo="flow sem gerar")
+                print("Flow: sem gerar; a tela do pedido pronto foi guardada")
+                return True
+            tocar(d, "Gerar", "gerar")
+            marcar(custo=custo, gerado_em=agora(), estado="gerando")
+            print(f"Flow: Gerar dos 8 s tocado ({modelo}, {custo} créditos)")
+        if estado != "estendendo":
+            pronto = esperar_o_video(d, ja_gerado=estado == "gerando", guardar_telas=False)
+            if pronto is None:
+                print(f"Flow: os 8 s não ficaram prontos em {ESPERA_DA_GERACAO // 60} min; a próxima vez estende")
+                return False
+            print(f"Flow: os 8 s prontos ({pronto} s esperando)")
+            abrir_o_video_novo(d, modelo)
+            if esperar(d, lambda x: len(versoes_do_video(x)) >= 2, ESPERA_DA_VERSAO):
+                print("Flow: o vídeo já tinha a versão estendida; o robô não estende de novo")
+            else:
+                estender(d, pedido["continuacao"])
+                print(f"Flow: Gerar do Estender tocado (8 s, {CUSTO_DO_ESTENDER} créditos)")
+            marcar(estado="estendendo", estendido_em=agora(), custo=custo + CUSTO_DO_ESTENDER)
+            casos_robo.guardar(d, "flow", "tela", "depois do Gerar do Estender", passo="flow estender")
+            # De volta ao projeto, do alto, onde o quadro do vídeo mostra as versões.
+            abrir_o_projeto(d)
+        pronto = esperar_a_extensao(d)
+        if pronto is None:
+            print(f"Flow: a versão estendida não ficou pronta em {ESPERA_DA_GERACAO // 60} min; a próxima vez baixa")
+            return False
+        print(f"Flow: versão estendida pronta ({pronto} s esperando)")
+        _abrir_o_mais_novo(d)
+        escolher_a_versao(d, True, modelo)
+        remoto, resolucao = baixar(d)
+        puxar(d, remoto, local)
+        segundos = videos.duracao(local)
+        if segundos < DURACAO_ESTENDIDA:
+            # O Flow baixou só a continuação: a original vem também, e as duas são juntadas no servidor.
+            continuacao, original = f"{local}.continuacao.mp4", f"{local}.original.mp4"
+            os.replace(local, continuacao)
+            try:
+                escolher_a_versao(d, False, modelo)
+                remoto, _ = baixar(d)
+                puxar(d, remoto, original)
+                # O Baixar que trouxe a mesma versão duas vezes não vira um vídeo com a original repetida.
+                if videos.calcular_hash_video(original) == videos.calcular_hash_video(continuacao):
+                    raise Parada("juntar as duas partes: o Baixar trouxe a mesma versão duas vezes")
+                falha = videos.juntar([original, continuacao], local)
+            finally:
+                for parte in (continuacao, original):
+                    if os.path.exists(parte):
+                        os.remove(parte)
+            if falha:
+                raise Parada(f"juntar as duas partes: {falha}")
+            print("Flow: o Flow baixou só a continuação; a original e a continuação foram juntadas")
+            segundos = videos.duracao(local)
+        largura, altura = asyncio.run(videos.dimensoes(local, timeout=30))
+        marcar(estado="baixado", arquivo=local, resolucao=resolucao, duracao=round(segundos),
+               tamanho=f"{largura}x{altura}" if largura and altura else "")
+        print(f"Flow: vídeo de {segundos:.0f} s baixado ({resolucao or 'sem a janela da resolução'}, "
+              f"{os.path.getsize(local) / 1e6:.1f} MB)")
+        return True
+    finally:
+        tirar_da_galeria(d, nome_na_galeria)
+
+
 def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
     """
     O teste no celular, com a trava na mão: a tela, a foto, o Flow, o Gerar e, com o vídeo pronto,
@@ -1384,29 +1704,45 @@ def amostras_feitas():
 
 
 def legenda_da_amostra(atual, conferencia):
-    """O texto que vai com a amostra no privado do Rafael (até 1000 letras)."""
+    """O texto que vai com a amostra no privado do Rafael (até 1000 letras); a de 16 s (P246 1) com a fala."""
     if conferencia["mesmo"] is True:
         conferido = "o produto é o mesmo da foto do anúncio"
     elif conferencia["mesmo"] is False:
         conferido = f"o produto muda: {conferencia['diferencas'] or 'sem detalhes'}"
     else:
         conferido = "não deu para conferir"
-    linhas = [f"🎬 Amostra do vídeo de IA nº {atual.get('numero', 1)} (teste da P236 1)",
-              f"🤖 Modelo: {atual.get('modelo', '')} ({atual.get('custo', 0)} créditos de IA)",
-              f"📦 Produto: {atual.get('nome', '')}",
-              f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
-              f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)",
-              f"🎥 Cena: {atual.get('cena', '')}",
-              f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}",
-              f"🔎 A IA conferiu: {conferido}"]
+    custo = atual.get("custo", 0)
+    paga = (f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
+            f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
+    if atual.get("longa"):
+        linhas = [f"🎬 Amostra nº {atual.get('numero', 1)} do vídeo de IA de 16 s (P246 1: uma pessoa vendendo o "
+                  "produto do começo ao fim)",
+                  f"🤖 Modelo: {atual.get('modelo', '')} ({custo} créditos de IA: {custo - CUSTO_DO_ESTENDER} dos "
+                  f"8 s gerados e {CUSTO_DO_ESTENDER} do Estender)",
+                  f"📦 Produto: {atual.get('nome', '')}", paga,
+                  f"🗣️ Fala: {atual.get('fala', '')}",
+                  f"🔎 A IA conferiu: {conferido}"]
+    else:
+        linhas = [f"🎬 Amostra do vídeo de IA nº {atual.get('numero', 1)} (teste da P236 1)",
+                  f"🤖 Modelo: {atual.get('modelo', '')} ({custo} créditos de IA)",
+                  f"📦 Produto: {atual.get('nome', '')}", paga,
+                  f"🎥 Cena: {atual.get('cena', '')}",
+                  f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}",
+                  f"🔎 A IA conferiu: {conferido}"]
     resolucao = {"1080p": "1080p (aumentada pelo Flow no Baixar)", "720p": "720p (o tamanho original)"}.get(
         atual.get("resolucao"))
     if resolucao:
-        linhas.append(f"📐 Resolução: {resolucao}" + (f", {atual['tamanho']}" if atual.get("tamanho") else ""))
+        linhas.append(f"📐 Resolução: {resolucao}" + (f", {atual['tamanho']}" if atual.get("tamanho") else "")
+                      + (f", {atual['duracao']} s" if atual.get("duracao") else ""))
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
-    linhas.append("Nada foi postado: é só para você ver como os vídeos de IA estão ficando. O vídeo de IA do dia sai "
-                  "normalmente e vira rascunho.")
+    if atual.get("longa"):
+        linhas.append("Nada foi postado: é a amostra do formato novo. Gostando, diga ao Claude, e ele vira o padrão "
+                      "do vídeo de IA.")
+        linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
+    else:
+        linhas.append("Nada foi postado: é só para você ver como os vídeos de IA estão ficando. O vídeo de IA do dia "
+                      "sai normalmente e vira rascunho.")
     return "\n".join(linhas)[:1000]
 
 
@@ -1446,24 +1782,30 @@ def mandar_a_amostra():
     return 0
 
 
-def amostra(sem_gerar=False):
+def amostra(sem_gerar=False, longa=False):
     """
     A próxima amostra do vídeo de IA (P236 1): escolhe o produto como a produção, gera no MODELO_DA_PRODUCAO, baixa
     e manda no privado do Rafael. A que já foi gerada só é baixada e mandada (nunca dois Gerar para a mesma amostra).
-    sem_gerar: tudo até o Gerar, sem tocar nele. 0 deu certo, 1 parou. Só rótulos fixos e números no log.
+    sem_gerar: tudo até o Gerar, sem tocar nele. longa: a amostra do vídeo de 16 s com uma pessoa vendendo o produto
+    (P246 1), com o Estender; a que ficou pela metade continua do jeito dela. 0 deu certo, 1 parou. Só rótulos fixos
+    e números no log.
     """
     atual = amostra_guardada()
     if atual.get("estado") == "baixado" and os.path.exists(atual.get("arquivo") or ""):
         print(f"Amostra nº {atual.get('numero', 1)}: já baixada; falta mandar")
         return mandar_a_amostra()
     so_baixar = atual.get("estado") == "gerando"
-    if so_baixar:
-        print(f"Amostra nº {atual.get('numero', 1)}: já gerada; falta baixar e mandar")
+    if atual.get("estado") == "estendendo":
+        print(f"Amostra nº {atual.get('numero', 1)}: já estendida; falta baixar e mandar")
+    elif so_baixar:
+        print(f"Amostra nº {atual.get('numero', 1)}: já gerada; falta "
+              + ("estender, baixar e mandar" if atual.get("longa") else "baixar e mandar"))
     else:
         # Só aqui: o robô importa este módulo, e a escolha é a dele (P234 1).
         import robo_shopee_video as robo
         try:
-            escolhido, origem, _restam = robo.escolher_para_o_video_de_ia(fora=amostras_feitas(), amostra=True)
+            escolhido, origem, _restam = robo.escolher_para_o_video_de_ia(fora=amostras_feitas(), amostra=True,
+                                                                          longo=longa)
         except api_shopee.BuscaNegada as e:
             print(f"Amostra: a API da Shopee negou a lista de produtos ({e}); nada foi tocado")
             return 1
@@ -1479,9 +1821,15 @@ def amostra(sem_gerar=False):
                                                             "prompt", "cena")}
         atual.update(foto=foto, modelo=modelo, custo=custo, estado="escolhido", criado_em=agora(),
                      numero=len(amostras_feitas()) + 1)
-        guardar(amostra=atual, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
+        if longa:
+            # O vídeo de 16 s tem um jeito só e fica fora da variação dos estilos dos vídeos de 8 s.
+            atual.update(longa=True, continuacao=escolhido.get("continuacao", ""), fala=escolhido.get("fala", ""))
+            guardar(amostra=atual)
+        else:
+            guardar(amostra=atual, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
         print(f"Amostra nº {atual['numero']}: produto escolhido (o {escolhido.get('posicao')}º de {origem}); "
-              f"estilo {escolhido['estilo']}; pedido da IA com {len(escolhido['prompt'].split())} palavras")
+              f"estilo {escolhido['estilo']}; pedido da IA com {len(escolhido['prompt'].split())} palavras"
+              + (f" e a continuação com {len(atual['continuacao'].split())}" if longa else ""))
     if not celular_robo.conectado():
         print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
         return 1
@@ -1515,8 +1863,12 @@ def _amostra_no_celular(atual, sem_gerar, so_baixar):
         return 1
     d = ps.conectar(celular=True)
     try:
-        feito = no_flow(d, atual, atual["modelo"], atual["custo"], os.path.join(PASTA, "amostra.mp4"),
-                        marcar_amostra, sem_gerar=sem_gerar, so_baixar=so_baixar, guardar_telas=False)
+        if atual.get("longa"):
+            feito = no_flow_longo(d, atual, atual["modelo"], atual["custo"], os.path.join(PASTA, "amostra.mp4"),
+                                  marcar_amostra, sem_gerar=sem_gerar)
+        else:
+            feito = no_flow(d, atual, atual["modelo"], atual["custo"], os.path.join(PASTA, "amostra.mp4"),
+                            marcar_amostra, sem_gerar=sem_gerar, so_baixar=so_baixar, guardar_telas=False)
     except Parada as e:
         casos_robo.guardar(d, "flow", "parou", str(e), passo="flow")
         print(f"Amostra: parou: {e}")
@@ -1589,11 +1941,15 @@ def teste(sem_gerar=False):
 
 
 def main(argumentos):
-    if argumentos and argumentos[0] in ("teste", "amostra") and set(argumentos[1:]) <= {"--sem-gerar"}:
+    opcoes = set(argumentos[1:])
+    if argumentos and ((argumentos[0] == "teste" and opcoes <= {"--sem-gerar"})
+                       or (argumentos[0] == "amostra" and opcoes <= {"--sem-gerar", "--longa"})):
         # Os módulos logam nomes e links; aqui o log é público, e o resultado sai pelos prints.
         logging.disable(logging.CRITICAL)
         try:
-            return (teste if argumentos[0] == "teste" else amostra)(sem_gerar="--sem-gerar" in argumentos)
+            if argumentos[0] == "teste":
+                return teste(sem_gerar="--sem-gerar" in opcoes)
+            return amostra(sem_gerar="--sem-gerar" in opcoes, longa="--longa" in opcoes)
         except Exception as e:
             # Só o tipo: a mensagem de um erro inesperado pode trazer o nome do arquivo do vídeo.
             print(f"Flow: erro inesperado ({type(e).__name__})")

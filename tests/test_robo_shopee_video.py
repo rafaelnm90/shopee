@@ -9412,7 +9412,7 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
         item = link.rsplit("/", 1)[-1]
         return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
 
-    def pedido(link, nome, foto, evitar=""):
+    def pedido(link, nome, foto, evitar="", longo=False):
         item = link.split("curto")[-1]
         foram.append(item)
         assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
@@ -9490,6 +9490,24 @@ def test_video_de_ia_pula_o_produto_que_a_ia_de_video_muda(monkeypatch):
     assert _registro_do_video_de_ia()[-1] == (
         "sem produto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 2 foto(s) olhada(s), "
         "1 recusada(s), 1 com o que a IA de vídeo muda")
+
+
+def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
+    # P246 1: a amostra do vídeo de 16 s escolhe o produto como a do vídeo do dia, e a IA escreve o pedido de 16 s
+    # (com a continuação do Estender); a escolha do vídeo do dia continua pedindo o de 8 s.
+    _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
+    pedido, longos = robo.flow.pedido_para_o_anuncio, []
+
+    def anotar(*argumentos, longo=False):
+        longos.append(longo)
+        return pedido(*argumentos, longo=longo)
+
+    monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", anotar)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 00:30"), amostra=True,
+                                                                    longo=True)
+    assert escolhido["item"] == "13" and longos == [True]
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert longos == [True, False]
 
 
 def test_escolha_da_amostra_deixa_de_fora_as_feitas_e_fica_no_registro_dela(monkeypatch):
