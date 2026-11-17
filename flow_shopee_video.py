@@ -27,20 +27,25 @@ baixado e mandado no próximo, sem gerar outro.
 As amostras (P236 1, 16/11/2026): vídeos de teste como os da produção (o produto pela lista da
 API de afiliado e o Omni 1.2 Flash), um por vez, só no privado do Rafael, para ele ver como os
 vídeos de IA estão ficando; não viram rascunho nem post. A amostra de 16 s (P246 1, 16/11/2026):
-uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens em uso e a chamada), nos 8 s
+uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada), nos 8 s
 gerados pela foto e em mais 8 s do Estender do Flow, que continua a mesma cena (no_flow_longo);
-gostando, ela vira o padrão do vídeo de IA.
+gostando, ela vira o padrão do vídeo de IA. Contra as alucinações da 1ª (P248 1, 17/11/2026), a
+pessoa só segura, vira e aponta o produto, os 16 s ficam no mesmo lugar e enquadramento, a fala é
+curta (PEDIDO_DO_VENDEDOR), e o servidor ouve o vídeo pronto e compara com a fala pedida: a embolada
+ou cortada vai na legenda (conferir_a_fala). A amostra pode repetir o produto da anterior (--mesmo).
 
-Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra ou amostra-16s). O log do Actions é
-público: saem só estados, modelos e números; o produto e o pedido ficam no banco, e o vídeo, no
-privado.
+Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s ou amostra-16s-mesmo). O
+log do Actions é público: saem só estados, modelos e números; o produto e o pedido ficam no banco, e o
+vídeo, no privado.
 
     python3 flow_shopee_video.py teste              # o próximo passo do teste (um modelo por vez)
     python3 flow_shopee_video.py teste --sem-gerar  # tudo até o Gerar, sem tocar nele
     python3 flow_shopee_video.py amostra            # a próxima amostra do vídeo de IA (P236 1)
     python3 flow_shopee_video.py amostra --longa    # a amostra do vídeo de 16 s, com o Estender (P246 1)
+    python3 flow_shopee_video.py amostra --longa --mesmo  # a de 16 s com o produto da anterior (P248 1)
 """
 import asyncio
+import difflib
 import io
 import json
 import logging
@@ -223,35 +228,48 @@ PEDIDO_DA_IA = (
     "texto na tela, sem legenda, sem logotipo novo e sem outros produtos.\n"
     "- cena: uma frase em português que descreve a cena (com a fala, se tiver), para o Rafael."
 )
+# A fala de cada parte de 8 s do vídeo de 16 s: a mais longa embolava ("palavras que não existem") e a chamada do fim
+# saía cortada na 1ª amostra.
+PALAVRAS_POR_PARTE = 10
 # O pedido do vídeo de 16 s (P246 1): uma pessoa vendendo o produto do começo ao fim, como nos vídeos de IA do feed
-# que o Rafael mostrou (16/11/2026): o gancho logo no começo, as vantagens mostradas de perto e em uso e a chamada no
-# fim. Em duas partes de 8 s: a 1ª gerada pela foto (prompt) e a 2ª pelo Estender do Flow (continuacao), que continua
-# a mesma cena.
+# que o Rafael mostrou (16/11/2026): o gancho logo no começo, as vantagens mostradas de perto e a chamada no fim. Em
+# duas partes de 8 s: a 1ª gerada pela foto (prompt) e a 2ª pelo Estender do Flow (continuacao), que continua a mesma
+# cena. Contra as alucinações da 1ª amostra (a tampa grudada na alça, a ida a outro fogão com comida do nada, o rosto
+# trocado, a fala embolada e cortada), a pessoa só segura, vira e aponta o produto, os 16 s ficam no mesmo lugar e
+# enquadramento, e a fala é curta e simples. Escolha do Rafael (P248 1): DECISOES.md, Shopee Vídeo.
 PEDIDO_DO_VENDEDOR = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
     "vendem no feed. A imagem é a foto oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo "
     "de 16 segundos, em pé (9:16) e com som, em duas partes de 8 segundos: a 1ª a partir dessa foto e a 2ª "
     "continuando a 1ª, na mesma cena, com a mesma pessoa e a mesma voz. Uma pessoa comum, brasileira, vende o "
     "produto falando com quem assiste do começo ao fim: um gancho logo no 1º segundo, as vantagens mostradas de "
-    "perto e em uso e uma chamada para comprar no fim. Responda só com um JSON, sem nada antes ou depois:\n"
+    "perto e uma chamada para comprar no fim. A IA de vídeo inventa coisas quando a cena pede demais; por isso, nas "
+    "duas partes: a pessoa só segura o produto, vira devagar e aponta para ele, sem abrir, fechar, desmontar, "
+    "encaixar, despejar, cozinhar, vestir ou trocar o produto de mão, e ele aparece desde o 1º quadro do jeito que "
+    "é usado (vestido, montado, no lugar), sem nada mudar de estado; os 16 segundos ficam no mesmo lugar, com o "
+    "mesmo fundo e o mesmo enquadramento e a câmera parada, sem corte, sem ir a outro lugar e sem aparecer comida, "
+    "objeto ou pessoa nova (se o produto pede um lugar para ser mostrado, como o fogão, a pia ou a cama, o vídeo "
+    "já começa lá). Responda só com um JSON, sem nada antes ou depois:\n"
     '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "continuacao": '
     '"...", "fala": "...", "cena": "..."}}\n'
     + REGRAS_DA_FOTO +
     "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos: a pessoa olha para a câmera, segura o produto "
     "da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
-    "trocado) e bem à vista, e diz o gancho, entre aspas, em português do Brasil, até 12 palavras: uma dor que o "
-    "produto resolve, uma pergunta ou uma surpresa (por exemplo: \"Orelha rasgada? Nunca mais!\"); depois mostra "
-    "o produto de perto. Numa cena real do Brasil, com luz natural, fotorrealista, como filmado com o celular na "
-    "mão.\n"
-    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando a mesma cena sem corte, com a "
-    "mesma pessoa, a mesma roupa e o mesmo produto, idêntico: ela usa o produto e mostra de perto, em uso, duas "
-    "vantagens que se veem na tela, falando entre aspas, em português do Brasil, até 16 palavras, e termina com uma "
-    "chamada curta para comprar (por exemplo: \"Garanta já o seu!\").\n"
+    "trocado) e bem à vista, e diz logo no começo o gancho, entre aspas, em português do Brasil, até "
+    f"{PALAVRAS_POR_PARTE} palavras: uma dor que o produto resolve, uma pergunta ou uma surpresa (por exemplo: "
+    "\"Orelha rasgada? Nunca mais!\"), terminando antes dos 6 segundos; depois, calada, vira o produto devagar para "
+    "a câmera. Numa cena real do Brasil, com luz natural, fotorrealista, a câmera parada na altura do peito.\n"
+    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
+    "mesmo lugar e enquadramento, com a mesma pessoa, a mesma roupa e o mesmo produto, idêntico: ela aponta e "
+    "mostra de perto uma vantagem que se vê no produto, só virando-o ou aproximando-o da câmera, e fala logo no "
+    f"começo, entre aspas, em português do Brasil, até {PALAVRAS_POR_PARTE} palavras, a vantagem e uma chamada curta "
+    "para comprar (por exemplo: \"Nada gruda e limpa fácil. Garanta a sua!\"), terminando antes dos 6 segundos.\n"
     "- fala: tudo o que a pessoa fala, em português, as duas partes juntas, como vai sair no vídeo.\n"
     "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
-    "A fala é natural, sem marca, sem preço e sem prometer o que o produto não faz. Nada de zombar do corpo, da "
-    "aparência ou de um grupo de ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, nojento ou com "
-    "criança. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos."
+    "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
+    "que a IA de vídeo embola), sem marca, sem preço e sem prometer o que o produto não faz. Nada de zombar do "
+    "corpo, da aparência ou de um grupo de ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, "
+    "nojento ou com criança. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos."
 )
 # Bebida alcoólica fica de lado enquanto as diretrizes a deixam em espera (P111): o vídeo nem é gerado, para não
 # gastar o crédito de um vídeo que o rascunho deixaria de lado.
@@ -272,6 +290,17 @@ PEDIDO_DA_CONFERENCIA = (
     'se nada", "defeitos": "o que parece falso ou estranho no vídeo, em até 200 letras; vazio se nada"}'
 )
 ROTULOS_DA_CONFERENCIA = {True: "mesmo produto", False: "produto diferente", None: "sem resposta"}
+# A conferência da fala do vídeo de 16 s pelo servidor (P248 1, conferir_a_fala): a palavra ouvida quase igual a uma
+# da fala pedida conta como ela (FALA_PARECIDA das letras); 2 palavras ouvidas fora da fala pedida, com 3 letras ou
+# mais, são a fala embolada; o fim da fala pedida que não se ouve, com a fala indo até FOLGA_DO_FIM_DA_FALA do fim do
+# vídeo, é a chamada cortada.
+FALA_PARECIDA = 0.8
+LETRAS_DA_ESTRANHA = 3
+ESTRANHAS_DA_FALA_EMBOLADA = 2
+FOLGA_DO_FIM_DA_FALA = 0.5
+ROTULOS_DA_FALA = {"igual": "igual à pedida", "embolada": "embolada", "cortada": "cortada no fim",
+                   "embolada e cortada": "embolada e cortada no fim", "sem fala": "sem fala",
+                   None: "não deu para ouvir"}
 
 
 class Parada(Exception):
@@ -1206,6 +1235,85 @@ def conferir_o_video(caminho, foto):
     return ler_conferencia(texto)
 
 
+def _palavras_da_fala(texto):
+    """[(a palavra sem acento e em minúsculas, como foi escrita)] do texto, na ordem, sem a pontuação."""
+    palavras = []
+    for original in re.findall(r"\w+", str(texto or "")):
+        normal = unicodedata.normalize("NFKD", original).encode("ascii", "ignore").decode().lower()
+        if normal:
+            palavras.append((normal, original.lower()))
+    return palavras
+
+
+def _a_pedida(palavra, pedidas):
+    """
+    A palavra da fala pedida que a ouvida é, igual ou quase ("pra" e "para": o reconhecimento de voz erra uma letra
+    à toa); None quando ela não parece nenhuma.
+    """
+    if palavra in pedidas:
+        return palavra
+    parecidas = [(difflib.SequenceMatcher(None, palavra, pedida).ratio(), pedida) for pedida in pedidas]
+    nota, pedida = max(parecidas, default=(0, None))
+    return pedida if nota >= FALA_PARECIDA else None
+
+
+def conferir_a_fala(arquivo, fala):
+    """
+    A fala ouvida no vídeo pronto comparada com a pedida (P248 1), pelo reconhecimento de voz das legendas:
+    {"situacao": "igual", "embolada", "cortada", "embolada e cortada", "sem fala" ou None (não deu para ouvir),
+    "estranhas": as palavras ouvidas que não estão na fala pedida, "aos": o segundo da 1ª delas, "faltou": as últimas
+    palavras da fala pedida que não se ouvem, "ouvidas": quantas palavras se ouvem}. Embolada: palavras fora da
+    fala pedida (a 1ª amostra disse "Vou feitecer já essa sela"); cortada: o fim da fala pedida não se ouve, e a
+    fala vai até o fim do vídeo.
+    """
+    pedidas = _palavras_da_fala(fala)
+    normais = [normal for normal, _original in pedidas]
+    resultado = {"situacao": None, "estranhas": [], "aos": None, "faltou": [], "ouvidas": 0}
+    ouvidas = videos.palavras_faladas(arquivo) if pedidas else None
+    if ouvidas is None:
+        return resultado
+    ditas = [(inicio, fim, normal, original) for inicio, fim, texto in ouvidas
+             for normal, original in _palavras_da_fala(texto)]
+    resultado["ouvidas"] = len(ditas)
+    if not ditas:
+        return dict(resultado, situacao="sem fala")
+    lidas = [_a_pedida(normal, normais) for _inicio, _fim, normal, _original in ditas]
+    # As palavras curtas ("e", "o", "a") ficam de fora: o reconhecimento de voz as troca à toa.
+    estranhas = [(inicio, original) for (inicio, _fim, normal, original), lida in zip(ditas, lidas)
+                 if lida is None and len(normal) >= LETRAS_DA_ESTRANHA]
+    # O que faltou no fim: as palavras pedidas depois da última que se ouve na ordem da fala.
+    alinhadas = [lida or normal for lida, (_inicio, _fim, normal, _original) in zip(lidas, ditas)]
+    blocos = difflib.SequenceMatcher(None, normais, alinhadas, autojunk=False).get_matching_blocks()
+    ultima = max((bloco.a + bloco.size for bloco in blocos if bloco.size), default=0)
+    faltou = [original for _normal, original in pedidas[ultima:]]
+    duracao = videos.duracao(arquivo)
+    embolada = len(estranhas) >= ESTRANHAS_DA_FALA_EMBOLADA
+    cortada = bool(faltou) and bool(duracao) and ditas[-1][1] >= duracao - FOLGA_DO_FIM_DA_FALA
+    situacao = ("embolada e cortada" if embolada and cortada else "embolada" if embolada
+                else "cortada" if cortada else "igual")
+    return dict(resultado, situacao=situacao, estranhas=[original for _, original in estranhas][:8],
+                aos=round(estranhas[0][0]) if estranhas else None, faltou=faltou[:8])
+
+
+def texto_da_fala(conferida):
+    """A linha da conferência da fala na legenda da amostra (P248 1)."""
+    situacao = conferida.get("situacao")
+    if situacao is None:
+        return "👂 Fala no vídeo: não deu para ouvir"
+    if situacao == "sem fala":
+        return "⚠️ Fala no vídeo: nenhuma palavra ouvida"
+    estranhas = ", ".join(f'"{palavra}"' for palavra in conferida.get("estranhas") or [])
+    partes = []
+    if "embolada" in situacao:
+        partes.append(f"embolada aos {conferida.get('aos')} s (ouvi {estranhas}, que não estão na fala pedida)")
+    if "cortada" in situacao:
+        partes.append(f"cortada no fim (faltou \"{' '.join(conferida.get('faltou') or [])}\")")
+    if partes:
+        return "⚠️ Fala no vídeo: " + "; ".join(partes)
+    return (f"👂 Fala no vídeo: igual à pedida ({conferida.get('ouvidas', 0)} palavras ouvidas"
+            + (f"; fora dela só {estranhas}" if estranhas else "") + ")")
+
+
 def legenda_do_video(teste, modelo, custo, conferencia):
     """O texto que vai com o vídeo no privado do Rafael (até 1000 letras): o modelo, o custo, o produto, a cena e a conferência."""
     numero = numero_do_modelo(modelo)
@@ -1703,8 +1811,11 @@ def amostras_feitas():
     return [str(item) for item in (db.ler_config(CHAVE, {}) or {}).get("amostras_feitas") or []]
 
 
-def legenda_da_amostra(atual, conferencia):
-    """O texto que vai com a amostra no privado do Rafael (até 1000 letras); a de 16 s (P246 1) com a fala."""
+def legenda_da_amostra(atual, conferencia, fala_ouvida=None):
+    """
+    O texto que vai com a amostra no privado do Rafael (até 1000 letras); a de 16 s (P246 1) com a fala pedida e o
+    que o servidor ouviu no vídeo (fala_ouvida, de conferir_a_fala; P248 1).
+    """
     if conferencia["mesmo"] is True:
         conferido = "o produto é o mesmo da foto do anúncio"
     elif conferencia["mesmo"] is False:
@@ -1715,13 +1826,17 @@ def legenda_da_amostra(atual, conferencia):
     paga = (f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
             f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
     if atual.get("longa"):
+        de_novo = (f", com o mesmo produto da nº {atual['mesmo_de']} e as mudanças contra as alucinações (P248 1)"
+                   if atual.get("mesmo_de") else "")
         linhas = [f"🎬 Amostra nº {atual.get('numero', 1)} do vídeo de IA de 16 s (P246 1: uma pessoa vendendo o "
-                  "produto do começo ao fim)",
+                  f"produto do começo ao fim){de_novo}",
                   f"🤖 Modelo: {atual.get('modelo', '')} ({custo} créditos de IA: {custo - CUSTO_DO_ESTENDER} dos "
                   f"8 s gerados e {CUSTO_DO_ESTENDER} do Estender)",
                   f"📦 Produto: {atual.get('nome', '')}", paga,
                   f"🗣️ Fala: {atual.get('fala', '')}",
                   f"🔎 A IA conferiu: {conferido}"]
+        if fala_ouvida:
+            linhas.append(texto_da_fala(fala_ouvida))
     else:
         linhas = [f"🎬 Amostra do vídeo de IA nº {atual.get('numero', 1)} (teste da P236 1)",
                   f"🤖 Modelo: {atual.get('modelo', '')} ({custo} créditos de IA)",
@@ -1757,8 +1872,13 @@ def mandar_a_amostra():
         return 1
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
     print(f"Amostra: conferência da IA: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}")
+    # A fala do vídeo de 16 s conferida pelo servidor (P248 1): a embolada ou cortada vai na legenda.
+    fala_ouvida = conferir_a_fala(atual["arquivo"], atual["fala"]) if atual.get("longa") and atual.get("fala") else None
+    if fala_ouvida:
+        print(f"Amostra: fala conferida: {ROTULOS_DA_FALA[fala_ouvida['situacao']]}")
+        marcar_amostra(fala_conferida=fala_ouvida["situacao"])
     try:
-        ok = avisar_rafael.mandar_video(atual["arquivo"], legenda_da_amostra(atual, conferencia))
+        ok = avisar_rafael.mandar_video(atual["arquivo"], legenda_da_amostra(atual, conferencia, fala_ouvida))
     except Exception as e:
         print(f"Amostra: o envio ao privado falhou ({type(e).__name__}); a próxima amostra manda de novo")
         return 1
@@ -1782,13 +1902,32 @@ def mandar_a_amostra():
     return 0
 
 
-def amostra(sem_gerar=False, longa=False):
+def _pedido_do_mesmo_produto(anterior, longa):
+    """
+    O pedido novo da IA para o produto da amostra anterior (o link, o nome e a foto dela), com as regras de agora: a
+    amostra de 16 s de novo com o mesmo produto, para o Rafael comparar (P248 1). None sem a amostra anterior ou sem
+    o pedido da IA.
+    """
+    if not (anterior.get("link") and anterior.get("nome") and anterior.get("item")):
+        return None
+    try:
+        with open(anterior["foto"], "rb") as arquivo:
+            foto = arquivo.read()
+    except (KeyError, OSError):
+        return None
+    escolhido, _serve = pedido_para_o_anuncio(anterior["link"], anterior["nome"], foto, longo=longa)
+    if not escolhido:
+        return None
+    return dict(escolhido, item=anterior["item"], valor=anterior.get("valor"), origem=anterior.get("origem"))
+
+
+def amostra(sem_gerar=False, longa=False, mesmo=False):
     """
     A próxima amostra do vídeo de IA (P236 1): escolhe o produto como a produção, gera no MODELO_DA_PRODUCAO, baixa
     e manda no privado do Rafael. A que já foi gerada só é baixada e mandada (nunca dois Gerar para a mesma amostra).
     sem_gerar: tudo até o Gerar, sem tocar nele. longa: a amostra do vídeo de 16 s com uma pessoa vendendo o produto
-    (P246 1), com o Estender; a que ficou pela metade continua do jeito dela. 0 deu certo, 1 parou. Só rótulos fixos
-    e números no log.
+    (P246 1), com o Estender; a que ficou pela metade continua do jeito dela. mesmo: com o produto da amostra
+    anterior e um pedido novo da IA (P248 1). 0 deu certo, 1 parou. Só rótulos fixos e números no log.
     """
     atual = amostra_guardada()
     if atual.get("estado") == "baixado" and os.path.exists(atual.get("arquivo") or ""):
@@ -1801,17 +1940,25 @@ def amostra(sem_gerar=False, longa=False):
         print(f"Amostra nº {atual.get('numero', 1)}: já gerada; falta "
               + ("estender, baixar e mandar" if atual.get("longa") else "baixar e mandar"))
     else:
-        # Só aqui: o robô importa este módulo, e a escolha é a dele (P234 1).
-        import robo_shopee_video as robo
-        try:
-            escolhido, origem, _restam = robo.escolher_para_o_video_de_ia(fora=amostras_feitas(), amostra=True,
-                                                                          longo=longa)
-        except api_shopee.BuscaNegada as e:
-            print(f"Amostra: a API da Shopee negou a lista de produtos ({e}); nada foi tocado")
-            return 1
-        if not escolhido:
-            print("Amostra: nenhum produto da lista serviu agora (a foto ou o link curto); nada foi tocado")
-            return 1
+        numero_anterior = int(atual.get("numero") or 0)
+        if mesmo:
+            escolhido, origem = _pedido_do_mesmo_produto(atual, longa), ""
+            if not escolhido:
+                print("Amostra: sem a amostra anterior ou sem o pedido novo da IA para o mesmo produto; "
+                      "nada foi tocado")
+                return 1
+        else:
+            # Só aqui: o robô importa este módulo, e a escolha é a dele (P234 1).
+            import robo_shopee_video as robo
+            try:
+                escolhido, origem, _restam = robo.escolher_para_o_video_de_ia(fora=amostras_feitas(), amostra=True,
+                                                                              longo=longa)
+            except api_shopee.BuscaNegada as e:
+                print(f"Amostra: a API da Shopee negou a lista de produtos ({e}); nada foi tocado")
+                return 1
+            if not escolhido:
+                print("Amostra: nenhum produto da lista serviu agora (a foto ou o link curto); nada foi tocado")
+                return 1
         os.makedirs(PASTA, exist_ok=True)
         foto = os.path.join(PASTA, "amostra.jpg")
         with open(foto, "wb") as arquivo:
@@ -1819,15 +1966,20 @@ def amostra(sem_gerar=False, longa=False):
         modelo, custo = MODELO_DA_PRODUCAO
         atual = {chave: escolhido.get(chave) for chave in ("link", "nome", "item", "valor", "origem", "estilo",
                                                             "prompt", "cena")}
+        # A amostra com o mesmo produto não entra de novo nas feitas: o número segue a conta da anterior.
         atual.update(foto=foto, modelo=modelo, custo=custo, estado="escolhido", criado_em=agora(),
-                     numero=len(amostras_feitas()) + 1)
+                     numero=max(len(amostras_feitas()), numero_anterior) + 1)
+        if mesmo:
+            atual.update(mesmo_de=numero_anterior)
         if longa:
             # O vídeo de 16 s tem um jeito só e fica fora da variação dos estilos dos vídeos de 8 s.
             atual.update(longa=True, continuacao=escolhido.get("continuacao", ""), fala=escolhido.get("fala", ""))
             guardar(amostra=atual)
         else:
             guardar(amostra=atual, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
-        print(f"Amostra nº {atual['numero']}: produto escolhido (o {escolhido.get('posicao')}º de {origem}); "
+        escolha = (f"o mesmo produto da amostra nº {numero_anterior}" if mesmo
+                   else f"produto escolhido (o {escolhido.get('posicao')}º de {origem})")
+        print(f"Amostra nº {atual['numero']}: {escolha}; "
               f"estilo {escolhido['estilo']}; pedido da IA com {len(escolhido['prompt'].split())} palavras"
               + (f" e a continuação com {len(atual['continuacao'].split())}" if longa else ""))
     if not celular_robo.conectado():
@@ -1943,13 +2095,13 @@ def teste(sem_gerar=False):
 def main(argumentos):
     opcoes = set(argumentos[1:])
     if argumentos and ((argumentos[0] == "teste" and opcoes <= {"--sem-gerar"})
-                       or (argumentos[0] == "amostra" and opcoes <= {"--sem-gerar", "--longa"})):
+                       or (argumentos[0] == "amostra" and opcoes <= {"--sem-gerar", "--longa", "--mesmo"})):
         # Os módulos logam nomes e links; aqui o log é público, e o resultado sai pelos prints.
         logging.disable(logging.CRITICAL)
         try:
             if argumentos[0] == "teste":
                 return teste(sem_gerar="--sem-gerar" in opcoes)
-            return amostra(sem_gerar="--sem-gerar" in opcoes, longa="--longa" in opcoes)
+            return amostra(sem_gerar="--sem-gerar" in opcoes, longa="--longa" in opcoes, mesmo="--mesmo" in opcoes)
         except Exception as e:
             # Só o tipo: a mensagem de um erro inesperado pode trazer o nome do arquivo do vídeo.
             print(f"Flow: erro inesperado ({type(e).__name__})")

@@ -1382,7 +1382,124 @@ def test_resposta_e_pedido_do_video_de_16_s(monkeypatch):
     monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
     pedido, serve = flow.pedido_para_o_anuncio("https://s.shopee.com.br/abc", "Copo Térmico Inox", _jpeg(), longo=True)
     assert serve is True and pedido["continuacao"] == "Part two." and pedido["fala"].startswith("Gancho")
-    for trecho in ("16 segundos", "continuacao", "gancho", "Garanta já o seu!", "muda_na_ia", "Copo Térmico Inox"):
+    for trecho in ("16 segundos", "continuacao", "gancho", "Garanta a sua!", "muda_na_ia", "Copo Térmico Inox"):
         assert trecho in pedidos[-1], trecho
     flow.pedido_para_o_anuncio("https://s.shopee.com.br/abc", "Copo Térmico Inox", _jpeg())
     assert "8 segundos" in pedidos[-1] and "continuacao" not in pedidos[-1]
+
+
+# --- Contra as alucinações do vídeo de 16 s (P248 1) ---
+
+FALA_DA_1A_AMOSTRA = [(1.8, 2.4, "Cansado"), (2.5, 2.6, "de"), (2.7, 2.9, "comida"), (2.9, 3.5, "grudando"),
+                      (3.6, 3.7, "na"), (3.7, 4.2, "panela?"), (6.3, 6.5, "Vou"), (6.5, 7.0, "feitecer"),
+                      (7.0, 7.2, "já"), (7.2, 7.4, "essa"), (7.4, 7.9, "sela?"), (11.7, 12.2, "Limpeza"),
+                      (12.3, 12.7, "super"), (12.8, 13.0, "fácil"), (13.1, 13.2, "e"), (13.5, 13.7, "nada"),
+                      (13.8, 14.3, "gruda!"), (14.8, 15.1, "Aproveite"), (15.2, 15.3, "e"), (15.4, 15.6, "garanta"),
+                      (15.6, 15.7, "o"), (15.8, 16.0, "seu...")]
+
+
+def test_pedido_de_16_s_pede_acoes_simples_no_mesmo_lugar_e_fala_curta():
+    # Escolha do Rafael (17/11, P248 1): na 1ª amostra, a tampa ficou grudada na alça, a pessoa foi a outro fogão com
+    # uma panqueca do nada e voltou, o rosto mudou, e a fala saiu embolada e cortada. O pedido à IA não manda mais
+    # abrir, cozinhar ou mostrar "em uso", deixa os 16 s no mesmo lugar e encurta a fala.
+    pedido = flow.PEDIDO_DO_VENDEDOR.format(nome="Jogo de Panelas", evitar="", bebida="")
+    for trecho in ("só segura o produto, vira devagar e aponta", "sem abrir, fechar, desmontar", "cozinhar",
+                   "no mesmo lugar, com o mesmo fundo e o mesmo enquadramento", "câmera parada", "sem corte",
+                   "sem aparecer comida, objeto ou pessoa nova", "o vídeo já começa lá",
+                   f"até {flow.PALAVRAS_POR_PARTE} palavras", "terminando antes dos 6 segundos",
+                   "palavras simples", "Jogo de Panelas"):
+        assert trecho in pedido, trecho
+    assert flow.PALAVRAS_POR_PARTE == 10
+    assert "em uso" not in pedido and "16 palavras" not in pedido and "celular na mão" not in pedido
+
+
+def test_conferir_a_fala_acha_a_embolada_e_a_cortada_da_1a_amostra(monkeypatch):
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DA_1A_AMOSTRA)
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 16.04)
+    pedida = ("Cansado de comida grudando na panela? Olha só essa panela! Limpeza super fácil e nada gruda. "
+              "Aproveite e garanta o seu na Shopee!")
+    conferida = flow.conferir_a_fala("amostra.mp4", pedida)
+    assert conferida["situacao"] == "embolada e cortada" and conferida["ouvidas"] == 22
+    # "já" e "e" são curtas demais para contar como estranhas; "essa" está na fala pedida.
+    assert conferida["estranhas"] == ["vou", "feitecer", "sela"] and conferida["aos"] == 6
+    assert conferida["faltou"] == ["na", "shopee"]
+    linha = flow.texto_da_fala(conferida)
+    assert linha.startswith("⚠️ Fala no vídeo: embolada aos 6 s")
+    assert '"feitecer", "sela"' in linha and 'cortada no fim (faltou "na shopee")' in linha
+    # A fala que termina antes do fim do vídeo, sem o fim da pedida, não é cortada: ela só não disse.
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 18.0)
+    assert flow.conferir_a_fala("amostra.mp4", pedida)["situacao"] == "embolada"
+
+
+def test_conferir_a_fala_igual_quase_igual_e_sem_ouvir(monkeypatch):
+    pedida = "Comida grudando na panela? Acabou! Nada gruda e limpa fácil. Garanta a sua pra hoje!"
+    ouvidas = [(0.5 * i, 0.5 * i + 0.4, palavra) for i, palavra in enumerate(
+        "Gente, comida grudando na panela? Acabou! Nada gruda e limpa fácil. Garanta a sua para hoje!".split())]
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: ouvidas)
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 16.0)
+    conferida = flow.conferir_a_fala("amostra.mp4", pedida)
+    # "para" no lugar de "pra" conta como a mesma; uma palavra a mais ("gente") não faz a fala embolada.
+    assert conferida["situacao"] == "igual" and conferida["estranhas"] == ["gente"] and conferida["faltou"] == []
+    assert flow.texto_da_fala(conferida) == ('👂 Fala no vídeo: igual à pedida (16 palavras ouvidas; '
+                                             'fora dela só "gente")')
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: [])
+    assert flow.texto_da_fala(flow.conferir_a_fala("amostra.mp4", pedida)) == "⚠️ Fala no vídeo: nenhuma palavra ouvida"
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: None)
+    assert flow.conferir_a_fala("amostra.mp4", pedida)["situacao"] is None
+    assert flow.texto_da_fala({"situacao": None}) == "👂 Fala no vídeo: não deu para ouvir"
+    # Sem a fala pedida, nada é ouvido.
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: pytest.fail("sem fala pedida"))
+    assert flow.conferir_a_fala("amostra.mp4", "")["situacao"] is None
+
+
+def test_amostra_de_16_s_de_novo_com_o_mesmo_produto_e_a_fala_conferida(celular, monkeypatch, capsys):
+    # Escolha do Rafael (17/11, P248 1): outra amostra de 16 s com o mesmo produto da anterior, para comparar as duas,
+    # com o pedido novo da IA; o servidor confere a fala do vídeo pronto e põe o resultado na legenda.
+    pedidos = _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    assert flow.main(["amostra", "--longa"]) == 0
+    assert "Fala no vídeo: não deu para ouvir" in celular.mandados[-1][1]
+    anterior = flow.amostra_guardada()
+    pedidos_da_ia = []
+    resposta = ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "She holds the same tumbler, still.", '
+                '"continuacao": "Same shot, she points at the lid.", "fala": "Gelo o dia todo? Olha! Tampa firme. '
+                'Garanta o seu!", "cena": "A moça no mesmo balcão."}')
+
+    async def gerar(texto, imagens=None):
+        pedidos_da_ia.append((texto, imagens))
+        return resposta
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    ouvidas = [(0.6 * i, 0.6 * i + 0.5, palavra) for i, palavra in enumerate(
+        "Gelo o dia todo? Olha! Tampa firme. Garanta o seu!".split())]
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: ouvidas)
+    # O celular de mentira da vez anterior ficou com o pedido na tela: esta vez começa num limpo.
+    novo = Flow()
+    monkeypatch.setattr(flow.ps, "conectar", lambda celular=False: novo)
+    assert flow.main(["amostra", "--longa", "--mesmo"]) == 0
+    # A escolha da lista não roda de novo: a IA escreve o pedido novo para o mesmo anúncio, com as regras de agora.
+    assert len(pedidos) == 1 and len(pedidos_da_ia) == 1
+    assert "Copo Térmico Inox" in pedidos_da_ia[0][0] and "câmera parada" in pedidos_da_ia[0][0]
+    atual = flow.amostra_guardada()
+    assert atual["item"] == anterior["item"] and atual["link"] == anterior["link"] and atual["numero"] == 2
+    assert atual["mesmo_de"] == 1 and atual["continuacao"] == "Same shot, she points at the lid."
+    assert atual["estado"] == "enviado" and atual["fala_conferida"] == "igual"
+    assert novo.texto_estendido == "Same shot, she points at the lid." and novo.geracoes == novo.extensoes == 1
+    legenda = celular.mandados[-1][1]
+    for trecho in ("Amostra nº 2 do vídeo de IA de 16 s", "com o mesmo produto da nº 1 e as mudanças contra as "
+                   "alucinações (P248 1)", "Gelo o dia todo? Olha! Tampa firme. Garanta o seu!",
+                   "👂 Fala no vídeo: igual à pedida (10 palavras ouvidas)"):
+        assert trecho in legenda, trecho
+    # O produto não entra duas vezes nas amostras feitas, e a próxima amostra comum continua a conta.
+    assert flow.amostras_feitas() == [anterior["item"]]
+    saida = capsys.readouterr().out
+    assert "Amostra nº 2: o mesmo produto da amostra nº 1" in saida and "fala conferida: igual à pedida" in saida
+    for privado in ("Copo", "tumbler", "Gelo", "shopee.com.br", "6,50"):
+        assert privado not in saida, privado
+
+
+def test_amostra_com_o_mesmo_produto_sem_a_anterior_nao_toca_no_celular(celular, monkeypatch, capsys):
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", lambda *a, **k: pytest.fail("sem a anterior"))
+    assert flow.main(["amostra", "--longa", "--mesmo"]) == 1
+    assert "sem a amostra anterior ou sem o pedido novo da IA" in capsys.readouterr().out
+    assert celular.toques == [] and celular.geracoes == 0 and celular.mandados == []
