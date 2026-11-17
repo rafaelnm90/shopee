@@ -3317,9 +3317,11 @@ def preparar_o_de_ia(d, config, agora=None, comeco=None):
 # escreve o pedido pela foto do anúncio (flow.pedido_para_o_anuncio), o Flow gera e o robô baixa; a IA confere o
 # vídeo com a foto. Pronto, ele vira o rascunho do próximo horário (preparar_rascunho), com a nossa edição, a troca
 # de loja, os produtos a mais, as conferências de sempre e o Rótulo de IA ligado; o Rafael aprova em Rascunhos do
-# Robô 📝. O do robô é 1 por dia (24 créditos, dentro dos 50 grátis do dia); os do Preparar 1 Agora ⚡ → De IA ✨
-# contam junto no limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos e números.
-# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243): DECISOES.md, Shopee Vídeo.
+# Robô 📝. Desde a P247 1, o vídeo é o de 16 s com uma pessoa vendendo o produto (os 8 s gerados e mais 8 s do
+# Estender), e a fala que o servidor ouve vai no rascunho (P248 1). O do robô é 1 por dia (48 créditos, dentro dos 50
+# grátis do dia); os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No
+# registro, só rótulos fixos e números.
+# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 # Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
@@ -3353,7 +3355,8 @@ SEM_LINK_CURTO_SEGUIDOS = 3
 # limite de vídeos de IA do dia junto com o do robô: VIDEOS_DE_IA_POR_DIA Gerar (None: sem limite).
 # Escolha do Rafael (P243): DECISOES.md, Shopee Vídeo.
 ORIGENS_DO_PEDIDO = ("aleatorio", "fonte", "ia")
-# "P243 até 5 por dia" (16/11): 5 contando o do robô; do 3º em diante, cada um passa dos 50 créditos grátis.
+# "P243 até 5 por dia" (16/11): 5 contando o do robô; com os 48 créditos do vídeo de 16 s (P247 1), do 2º em diante,
+# cada um passa dos 50 créditos grátis.
 VIDEOS_DE_IA_POR_DIA = 5
 # O rascunho do vídeo de IA do botão que não cabe na mesma rodada (o vídeo gerado e por baixar, ou pronto sem tempo
 # para o rascunho) fica pedido no estado do robô (rascunho_de_ia_pedido), e o painel chama a rodada seguinte na hora.
@@ -3511,17 +3514,18 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
     return sorted(bons, key=lambda bom: (-bom["valor"], -bom["vendas"])), contagem
 
 
-def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=False):
+def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True):
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
     lista da API de afiliado (candidatos_do_video_de_ia), do que paga mais por venda para o que paga menos, o 1º, até
-    FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio,
-    num estilo diferente dos últimos vídeos), o link curto que o celular abre, "id" (o nome do vídeo de IA entre os
-    vídeos do robô), "item", "valor", "posicao" e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica
-    lembrada, e o produto não volta, como o que a IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à
-    parte no registro. api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que ficam de fora (os
-    das amostras já feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela; longo=True: o pedido
-    do vídeo de 16 s com uma pessoa vendendo o produto (P246 1).
+    FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio),
+    o link curto que o celular abre, "id" (o nome do vídeo de IA entre os vídeos do robô), "item", "valor", "posicao"
+    e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica lembrada, e o produto não volta, como o que a
+    IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à parte no registro. api_shopee.BuscaNegada quando a
+    API não deu a lista. fora: mais produtos que ficam de fora (os das amostras já feitas); amostra=True: a escolha de
+    uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com uma pessoa vendendo o produto (P246
+    1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo diferente dos últimos vídeos (as
+    amostras de 8 s).
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3586,10 +3590,10 @@ def _soltar_a_fonte_do_video_de_ia(atual):
 
 def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
     """
-    O vídeo de IA do dia na rodada (P232 1): escolhe o produto pela API de afiliado (P234 1), gera no Flow, baixa e
-    a IA confere com a foto do anúncio; o que já foi gerado só é baixado (nunca outro Gerar por cima dele).
-    do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243), com as tentativas dele à parte das do robô.
-    Devolve o que aconteceu numa frase.
+    O vídeo de IA do dia na rodada (P232 1): escolhe o produto pela API de afiliado (P234 1), gera no Flow o vídeo de
+    16 s, com o Estender (P247 1), baixa e a IA confere com a foto do anúncio, e o servidor ouve a fala; o que já foi
+    gerado só segue de onde parou (nunca outro Gerar por cima dele). do_botao: o vídeo pedido no De IA ✨ do Preparar
+    1 Agora ⚡ (P243), com as tentativas dele à parte das do robô. Devolve o que aconteceu numa frase.
     """
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     atual = flow.producao()
@@ -3630,6 +3634,11 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
             return "vídeo de IA: gerado, mas não ficou pronto a tempo; a próxima rodada baixa"
     estado = flow.conferir_a_producao()
     atual = flow.producao()
+    if atual.get("fala_conferida"):
+        # A fala que o servidor ouviu (P248 1), só o rótulo fixo: a embolada ou cortada vai no rascunho.
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "fala conferida",
+                                     flow.ROTULOS_DA_FALA.get(atual["fala_conferida"].get("situacao"), "?"),
+                                     ok=None, agora=agora)
     if estado == "descartado":
         _soltar_a_fonte_do_video_de_ia(atual)
         registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "descartado", "a IA viu outro produto",
@@ -3674,12 +3683,13 @@ TENTATIVAS_DE_BAIXAR = 3
 def _video_de_ia_parou(motivo, agora=None):
     """
     A produção parou no Flow (o caso já foi guardado). Antes do Gerar, nada foi gasto, e a produção tenta de novo
-    no dia (video_de_ia_pendente). Depois do Gerar, o vídeo é baixado na próxima rodada, sem gerar outro, até
-    TENTATIVAS_DE_BAIXAR vezes. Devolve o resultado da rodada.
+    no dia (video_de_ia_pendente). Depois do Gerar (o dos 8 s ou o do Estender, no vídeo de 16 s), o vídeo segue de
+    onde parou na próxima rodada, sem gerar outro, até TENTATIVAS_DE_BAIXAR vezes. Devolve o resultado da rodada.
     """
     atual = flow.producao()
     motivo = f"vídeo de IA: {motivo}"
-    if atual.get("estado") == "gerando":
+    depois_do_gerar = atual.get("estado") in ("gerando", "estendendo")
+    if depois_do_gerar:
         vezes = atual.get("tentativas_de_baixar", 0) + 1
         if vezes >= TENTATIVAS_DE_BAIXAR:
             flow.guardar_producao(estado="descartado", tentativas_de_baixar=vezes, motivo=motivo)
@@ -3690,8 +3700,7 @@ def _video_de_ia_parou(motivo, agora=None):
         flow.guardar_producao(estado="parou", motivo=motivo)
         _soltar_a_fonte_do_video_de_ia(atual)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "parou",
-                                 "depois do Gerar" if atual.get("estado") == "gerando" else "antes do Gerar",
-                                 ok=False, agora=agora)
+                                 "depois do Gerar" if depois_do_gerar else "antes do Gerar", ok=False, agora=agora)
     registrar_tentativa("video_ia", "parou", motivo, agora=agora, video=atual.get("id_video", ""))
     return f"{motivo}; parado"
 
@@ -3716,9 +3725,14 @@ def video_de_ia_para_o_rascunho(evitar=(), ja_postados=None):
 
 
 def resumo_do_video_de_ia(atual):
-    """O que fica no rascunho (coluna video_ia) do vídeo que o Flow fez."""
-    return {chave: atual.get(chave) for chave in ("modelo", "custo", "estilo", "cena", "conferencia", "gerado_em",
-                                                  "resolucao")}
+    """
+    O que fica no rascunho (coluna video_ia) do vídeo que o Flow fez; no de 16 s (P247 1), também a duração, a fala
+    pedida e a que o servidor ouviu, que o Rafael vê em Rascunhos do Robô 📝 antes de aprovar (P248 1).
+    """
+    resumo = {chave: atual.get(chave) for chave in ("modelo", "custo", "estilo", "cena", "conferencia", "gerado_em",
+                                                    "resolucao")}
+    resumo.update({chave: atual[chave] for chave in ("longa", "duracao", "fala", "fala_conferida") if atual.get(chave)})
+    return resumo
 
 
 def _video_de_ia_nao_saiu(video, do_video, agora=None, motivo="", visto=""):

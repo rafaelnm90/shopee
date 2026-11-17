@@ -8,7 +8,9 @@ cada modelo do Flow, só no privado dele, para ele escolher o modelo. Depois del
 producao_no_celular na rodada dele; o rascunho leva a nossa edição, os produtos e o Rótulo de IA
 ligado, e o Rafael aprova em Rascunhos do Robô 📝). A IA vê a foto do anúncio e o nome do produto e
 escreve o pedido do vídeo (a cena, o movimento da câmera e a luz), sempre com o produto igual ao da
-foto; o Flow gera o vídeo a partir da foto.
+foto; o Flow gera o vídeo a partir da foto. Desde a P247 1 (17/11/2026), o vídeo da produção (o do dia e
+o do Preparar 1 Agora ⚡ → De IA ✨) é o de 16 s com uma pessoa vendendo o produto, como a amostra de 16 s
+(abaixo), e a fala que o servidor ouve vai no rascunho.
 
 O caminho no app (mapeado no Motorola em 15/11/2026, sem gerar nada; as telas estão no
 roteiro_robo_shopee_video.md): o ícone "Flow" → o projeto do robô na lista ("Shopee Video";
@@ -28,8 +30,8 @@ As amostras (P236 1, 16/11/2026): vídeos de teste como os da produção (o prod
 API de afiliado e o Omni 1.2 Flash), um por vez, só no privado do Rafael, para ele ver como os
 vídeos de IA estão ficando; não viram rascunho nem post. A amostra de 16 s (P246 1, 16/11/2026):
 uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada), nos 8 s
-gerados pela foto e em mais 8 s do Estender do Flow, que continua a mesma cena (no_flow_longo);
-gostando, ela vira o padrão do vídeo de IA. Contra as alucinações da 1ª (P248 1, 17/11/2026), a
+gerados pela foto e em mais 8 s do Estender do Flow, que continua a mesma cena (no_flow_longo); o
+Rafael gostou, e ela virou o padrão do vídeo de IA (P247 1). Contra as alucinações da 1ª (P248 1, 17/11/2026), a
 pessoa só segura, vira e aponta o produto, os 16 s ficam no mesmo lugar e enquadramento, a fala é
 curta (PEDIDO_DO_VENDEDOR), e o servidor ouve o vídeo pronto e compara com a fala pedida: a embolada
 ou cortada vai na legenda (conferir_a_fala). A amostra pode repetir o produto da anterior (--mesmo).
@@ -77,9 +79,10 @@ PASTA = os.path.join(os.path.expanduser("~"), "shopee_video", "flow")
 # dos 50 grátis do dia): o 1º vídeo é o que mostra as telas depois do Gerar.
 MODELOS_DO_TESTE = (("Veo 3.1 - Lite", 10), ("Omni 1.1 Flash", 12), ("Omni 1.2 Flash", 24))
 # A produção: depois dos 3 vídeos do teste, o Rafael escolheu o mais avançado para 1 vídeo de IA por dia, que vira
-# um rascunho do robô, no lugar de um da fonte (P232 1). 24 créditos por vídeo; o dia tem CREDITOS_GRATIS_DO_DIA.
+# um rascunho do robô, no lugar de um da fonte (P232 1), de 16 s com uma pessoa vendendo o produto (P247 1): 24
+# créditos dos 8 s gerados e mais CUSTO_DO_ESTENDER do Estender (CUSTO_DA_PRODUCAO); o dia tem CREDITOS_GRATIS_DO_DIA.
 # O do robô é 1 por dia; o Preparar 1 Agora ⚡ → De IA ✨ faz outros, até 5 no dia contando o do robô (P243), e o
-# que passa dos grátis sai do plano. Escolhas do Rafael (15/11 e 16/11/2026): DECISOES.md, Shopee Vídeo.
+# que passa dos grátis sai do plano. Escolhas do Rafael (15/11, 16/11 e 17/11/2026): DECISOES.md, Shopee Vídeo.
 MODELO_DA_PRODUCAO = ("Omni 1.2 Flash", 24)
 CREDITOS_GRATIS_DO_DIA = 50
 # A produção que para antes do Gerar (sem gastar crédito) tenta de novo no mesmo dia, até estas vezes.
@@ -138,6 +141,8 @@ ABERTURAS_DO_VIDEO = 3
 # 15/11). Depois do Gerar, o painel fecha em até ESPERA_DO_PAINEL s.
 DURACAO_DO_ESTENDER = "Estender 8s"
 CUSTO_DO_ESTENDER = 24
+# O vídeo de IA da produção inteiro, os 8 s gerados e o Estender (P247 1).
+CUSTO_DA_PRODUCAO = MODELO_DA_PRODUCAO[1] + CUSTO_DO_ESTENDER
 ESPERA_DO_PAINEL = 20
 # O Flow guarda a versão estendida no mesmo quadro do vídeo ("…, 2 itens"; aberto, "2 de 2", visto no celular do
 # Rafael em 15/11). A versão baixada com DURACAO_ESTENDIDA s ou mais já tem os 16 s; a mais curta é só a continuação,
@@ -1019,16 +1024,17 @@ def estender(d, continuacao):
         raise Parada("estender: o painel não fechou depois do Gerar")
 
 
-def esperar_a_extensao(d):
+def esperar_a_extensao(d, guardar_telas=True):
     """
     No projeto (aberto de novo depois do Gerar do Estender): espera a versão estendida ficar pronta, o quadro mais novo
     com 2 versões ou mais e nada "Gerando…" na tela, em PRONTO_SEGUIDAS leituras seguidas. A tela vai aos casos nos
-    primeiros CASOS_DO_ESTENDER minutos. Os segundos até ficar pronta; None se não ficou em ESPERA_DA_GERACAO.
+    primeiros CASOS_DO_ESTENDER minutos (guardar_telas=False na produção do dia, como na espera dos 8 s). Os segundos
+    até ficar pronta; None se não ficou em ESPERA_DA_GERACAO.
     """
     inicio, proximo_caso, seguidas = time.monotonic(), 0.0, 0
     while True:
         passado = time.monotonic() - inicio
-        if passado >= proximo_caso and proximo_caso < CASOS_DO_ESTENDER * INTERVALO_DOS_CASOS:
+        if guardar_telas and passado >= proximo_caso and proximo_caso < CASOS_DO_ESTENDER * INTERVALO_DOS_CASOS:
             casos_robo.guardar(d, "flow", "tela", f"esperando o Estender, aos {int(passado)} s", passo="flow estender")
             proximo_caso += INTERVALO_DOS_CASOS
         xml = _tela(d)
@@ -1460,7 +1466,7 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
         tirar_da_galeria(d, nome_na_galeria)
 
 
-def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False):
+def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False, guardar_telas=True):
     """
     O vídeo de 16 s (P246 1) no Flow, com a trava do celular na mão e a tela já conferida, em etapas que a vez
     seguinte retoma pelo estado do pedido: o pedido e o Gerar dos 8 s ("gerando"), o Estender com a continuação
@@ -1468,7 +1474,8 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False):
     continuação quando o Flow baixa só a continuação. Nunca dois Gerar para a mesma parte: o vídeo que já tem a
     versão estendida não é estendido de novo. True com o vídeo no servidor (ou o pedido pronto, com sem_gerar);
     False quando uma parte não ficou pronta a tempo (a próxima vez continua); Parada com o passo que parou. A foto
-    sai da galeria no fim, dê certo ou não.
+    sai da galeria no fim, dê certo ou não. guardar_telas: as telas do Estender vão aos casos (False na produção do
+    dia, P247 1: todo dia, elas tirariam do servidor os casos das falhas, que ficam no máximo 30).
     """
     estado = pedido.get("estado")
     nome_na_galeria = ""
@@ -1507,10 +1514,11 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False):
                 estender(d, pedido["continuacao"])
                 print(f"Flow: Gerar do Estender tocado (8 s, {CUSTO_DO_ESTENDER} créditos)")
             marcar(estado="estendendo", estendido_em=agora(), custo=custo + CUSTO_DO_ESTENDER)
-            casos_robo.guardar(d, "flow", "tela", "depois do Gerar do Estender", passo="flow estender")
+            if guardar_telas:
+                casos_robo.guardar(d, "flow", "tela", "depois do Gerar do Estender", passo="flow estender")
             # De volta ao projeto, do alto, onde o quadro do vídeo mostra as versões.
             abrir_o_projeto(d)
-        pronto = esperar_a_extensao(d)
+        pronto = esperar_a_extensao(d, guardar_telas=guardar_telas)
         if pronto is None:
             print(f"Flow: a versão estendida não ficou pronta em {ESPERA_DA_GERACAO // 60} min; a próxima vez baixa")
             return False
@@ -1577,15 +1585,18 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
 # --- A produção: 1 vídeo de IA por dia, que vira rascunho do robô (P232 1) ---
 # O andamento do vídeo do dia fica na chave do Flow, em "producao": a data, o estado, o nome que o vídeo de IA tem
 # entre os vídeos do robô ("id_video"), o produto ("link", "nome", "item", "valor") e de onde ele veio ("origem": a
-# lista da API de afiliado, P234 1), o pedido da IA ("estilo", "prompt", "cena"), a foto e o vídeo no servidor e a
-# conferência da IA. Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou boa
-# nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
+# lista da API de afiliado, P234 1), o pedido da IA ("estilo", "prompt", "cena"; no vídeo de 16 s, P247 1, "longa",
+# a "continuacao" do Estender e a "fala"), a foto e o vídeo no servidor e as conferências (a da IA e, no de 16 s, a
+# da fala, "fala_conferida"). Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou
+# boa nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
 # TENTATIVAS_ANTES_DO_GERAR; "sem produto" (nenhum produto da lista serve hoje), "gerando" (o Gerar foi tocado e
-# falta o vídeo chegar ao servidor), "baixado" (falta a conferência), "pronto" (espera o rascunho), "descartado" (a
-# IA viu outro produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho) e "desistiu" (não virou
+# falta o vídeo chegar ao servidor; no de 16 s, falta também o Estender), "estendendo" (no de 16 s, o Gerar do
+# Estender foi tocado e falta baixar), "baixado" (falta a conferência), "pronto" (espera o rascunho), "descartado"
+# (a IA viu outro produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho) e "desistiu" (não virou
 # rascunho em TENTATIVAS_DO_RASCUNHO). O robô escolhe o produto pelas regras dele e chama a produção na rodada
-# dele, com a trava do celular na mão. Escolhas do Rafael (15/11/2026, P232 1 e P234 1): DECISOES.md.
-ESTADOS_PENDENTES = ("gerando", "baixado")
+# dele, com a trava do celular na mão. Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 17/11/2026, P247 1):
+# DECISOES.md.
+ESTADOS_PENDENTES = ("gerando", "estendendo", "baixado")
 ESTADOS_DO_DIA_ACABADO = ("sem produto", "pronto", "descartado", "usado", "desistiu")
 # A escolha do produto pela lista da API de afiliado (P234 1) vai sempre do que paga mais para o que paga menos:
 # sem uma memória, o produto que não deu certo num dia seria o 1º de novo no dia seguinte. Ficam de fora o produto
@@ -1693,9 +1704,11 @@ def lembrar_foto_recusada(item):
 def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     """
     Guarda o pedido do vídeo do dia (escolhido: o pedido_para_o_anuncio com o nome do vídeo de IA entre os
-    vídeos do robô, "id", o produto, "item" e "valor", e de onde ele veio, "origem"), no estado "escolhido", e o
-    estilo na lista dos últimos (estilos_recentes). A foto vai a um arquivo ao lado dos vídeos; o banco fica com o
-    caminho. do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
+    vídeos do robô, "id", o produto, "item" e "valor", e de onde ele veio, "origem"), no estado "escolhido". A foto
+    vai a um arquivo ao lado dos vídeos; o banco fica com o caminho. O pedido de 16 s (P247 1), com a "continuacao"
+    do Estender, fica "longa", com a fala, e tem um jeito só, fora da lista dos estilos dos últimos vídeos, a das
+    amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. do_botao: o vídeo pedido no De IA ✨ do
+    Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
     """
     recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar,
                        **({"do_botao": True} if do_botao else {}))
@@ -1704,24 +1717,32 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     with open(foto, "wb") as arquivo:
         arquivo.write(escolhido["foto"])
     modelo, custo = MODELO_DA_PRODUCAO
+    longa = bool(escolhido.get("continuacao"))
     guardar_producao(id_video=escolhido["id"], link=escolhido["link"], nome=escolhido["nome"],
                      item=escolhido.get("item", ""), valor=escolhido.get("valor"), origem=escolhido.get("origem", ""),
                      foto=foto, estilo=escolhido["estilo"], prompt=escolhido["prompt"], cena=escolhido["cena"],
-                     modelo=modelo, custo=custo, escolhido_em=agora())
-    guardar(estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
+                     modelo=modelo, custo=custo, escolhido_em=agora(),
+                     **({"longa": True, "continuacao": escolhido["continuacao"], "fala": escolhido.get("fala", "")}
+                        if longa else {}))
+    if not longa:
+        guardar(estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
     return producao()
 
 
 def producao_no_celular(d, atual):
     """
-    O vídeo do dia no Flow, na rodada do robô (a trava e a tela já conferidas por ele): o Gerar no
-    MODELO_DA_PRODUCAO e o Baixar, ou só o Baixar do que já foi gerado ("gerando"). True com o vídeo
-    no servidor ("baixado"), False quando ele não ficou pronto a tempo (a próxima rodada baixa);
-    Parada com o passo que parou, com o caso guardado.
+    O vídeo do dia no Flow, na rodada do robô (a trava e a tela já conferidas por ele). O de 16 s ("longa", P247
+    1): o Gerar dos 8 s no MODELO_DA_PRODUCAO, o Estender e o Baixar, em etapas que a rodada seguinte retoma pelo
+    estado (no_flow_longo). O de 8 s (o andamento de antes da P247 1): o Gerar e o Baixar, ou só o Baixar do que já foi
+    gerado ("gerando"). True com o vídeo no servidor ("baixado"), False quando ele não ficou pronto a tempo (a
+    próxima rodada continua); Parada com o passo que parou, com o caso guardado.
     """
     local = os.path.join(PASTA, f"producao_{atual['data']}.mp4")
     try:
         # Sem as telas da espera nos casos: todo dia, elas tirariam do servidor os casos das falhas.
+        if atual.get("longa"):
+            return no_flow_longo(d, atual, atual["modelo"], atual["custo"], local, _marcar_a_producao,
+                                 guardar_telas=False)
         return no_flow(d, atual, atual["modelo"], atual["custo"], local, _marcar_a_producao,
                        so_baixar=atual.get("estado") == "gerando", guardar_telas=False)
     except Parada as e:
@@ -1746,12 +1767,17 @@ def _marcar_a_producao(**campos):
 def conferir_a_producao():
     """
     A conferência da IA do vídeo do dia com a foto do anúncio (conferir_o_video): "pronto" ou, com outro
-    produto no vídeo, "descartado" (nunca vira rascunho). Devolve o estado novo.
+    produto no vídeo, "descartado" (nunca vira rascunho). No pronto de 16 s, o servidor ouve também a fala e a compara
+    com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o vídeo; o aviso vai no
+    rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Devolve o estado novo.
     """
     atual = producao()
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
     estado = "descartado" if conferencia["mesmo"] is False else "pronto"
-    guardar_producao(estado=estado, conferencia=conferencia, conferido_em=agora())
+    fala = {}
+    if estado == "pronto" and atual.get("longa") and atual.get("fala"):
+        fala = {"fala_conferida": conferir_a_fala(atual["arquivo"], atual["fala"])}
+    guardar_producao(estado=estado, conferencia=conferencia, conferido_em=agora(), **fala)
     return estado
 
 
@@ -1766,7 +1792,8 @@ def video_pronto():
 def legenda_da_producao(atual, com_a_conferencia=True):
     """
     As linhas do vídeo de IA no aviso e no texto do rascunho: o modelo, o custo, o estilo, a cena e a conferência do
-    Flow (com_a_conferencia=False: sem ela, no aviso do vídeo que outra conferência descartou, P245 1).
+    Flow (com_a_conferencia=False: sem ela, no aviso do vídeo que outra conferência descartou, P245 1). No de 16 s
+    (P247 1), a duração, o custo das duas partes, a fala pedida e a fala que o servidor ouviu (P248 1).
     """
     conferencia = atual.get("conferencia") or {}
     if conferencia.get("mesmo") is True:
@@ -1775,11 +1802,20 @@ def legenda_da_producao(atual, com_a_conferencia=True):
         conferido = f"o produto muda: {conferencia.get('diferencas') or 'sem detalhes'}"
     else:
         conferido = "não deu para conferir"
-    linhas = [f"🤖 Feito por IA no Google Flow: {atual.get('modelo', '')} ({atual.get('custo', 0)} créditos de IA)",
-              f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}",
-              f"🎥 Cena: {atual.get('cena', '')}"]
+    custo = atual.get("custo", 0)
+    duracao = f", {atual['duracao']} s" if atual.get("duracao") else ""
+    partes = (f": {custo - CUSTO_DO_ESTENDER} dos 8 s gerados e {CUSTO_DO_ESTENDER} do Estender"
+              if atual.get("longa") and custo > CUSTO_DO_ESTENDER else "")
+    linhas = [f"🤖 Feito por IA no Google Flow: {atual.get('modelo', '')}{duracao} ({custo} créditos de IA{partes})",
+              f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}"]
+    if atual.get("fala"):
+        linhas.append(f"🗣️ Fala: {atual['fala']}")
+    linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     if com_a_conferencia:
         linhas.append(f"🔎 A IA conferiu: {conferido}")
+    if atual.get("fala_conferida"):
+        # A fala embolada ou cortada não descarta o vídeo: o Rafael decide na aprovação (P248 1).
+        linhas.append(texto_da_fala(atual["fala_conferida"]))
     if conferencia.get("defeitos"):
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     return "\n".join(linhas)
@@ -1852,8 +1888,9 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None):
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     if atual.get("longa"):
-        linhas.append("Nada foi postado: é a amostra do formato novo. Gostando, diga ao Claude, e ele vira o padrão "
-                      "do vídeo de IA.")
+        # Desde a P247 1, o formato de 16 s é o do vídeo de IA do dia: a amostra é só para ver.
+        linhas.append("Nada foi postado: é só para você ver como os vídeos de IA de 16 s estão ficando. O vídeo de IA "
+                      "do dia sai normalmente e vira rascunho.")
         linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     else:
         linhas.append("Nada foi postado: é só para você ver como os vídeos de IA estão ficando. O vídeo de IA do dia "

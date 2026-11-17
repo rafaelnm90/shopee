@@ -1608,7 +1608,8 @@ SITUACOES_DO_VIDEO_DE_IA = {
                 "próximos da lista",
     "sem produto": "nenhum produto da lista da Shopee serviu (nota 4,5 ou mais, pagando o mínimo, ainda não postado "
                    "e com a foto boa para o vídeo)",
-    "gerando": "gerado no Flow; falta baixar, na próxima rodada",
+    "gerando": "gerado no Flow; falta terminar e baixar, na próxima rodada",
+    "estendendo": "os 8 s gerados e o Estender tocado no Flow; falta baixar os 16 s, na próxima rodada",
     "baixado": "baixado; falta a conferência da IA",
     "pronto": "pronto: vira o próximo rascunho do plano do dia",
     "descartado": "não virou rascunho (a IA viu outro produto no vídeo, ou o vídeo não chegou do Flow)",
@@ -1629,8 +1630,8 @@ def linha_do_video_de_ia_de_hoje(agora=None):
 
 
 def limite_dos_videos_de_ia():
-    """A regra dos vídeos de IA por dia, na tela do Vídeo de IA ✨ (VIDEOS_DE_IA_POR_DIA; P232 1 e P243)."""
-    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.MODELO_DA_PRODUCAO[1], robo.flow.CREDITOS_GRATIS_DO_DIA
+    """A regra dos vídeos de IA por dia, na tela do Vídeo de IA ✨ (VIDEOS_DE_IA_POR_DIA; P232 1, P243 e P247 1)."""
+    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.CUSTO_DA_PRODUCAO, robo.flow.CREDITOS_GRATIS_DO_DIA
     pedido = f"{BOTAO_PREPARAR} → {BOTAO_PREPARAR_DE_IA}"
     if limite is None:
         return (f"Além do vídeo do robô, cada {pedido} faz mais um ({custo} créditos cada; passando dos {gratis} "
@@ -1644,20 +1645,25 @@ def limite_dos_videos_de_ia():
 
 
 def texto_video_ia(config, agora=None):
-    """A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1): DECISOES.md, Shopee Vídeo."""
-    modelo, custo = robo.flow.MODELO_DA_PRODUCAO
+    """
+    A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1): DECISOES.md, Shopee Vídeo.
+    """
+    modelo, custo = robo.flow.MODELO_DA_PRODUCAO[0], robo.flow.CUSTO_DA_PRODUCAO
     ligado = robo.video_de_ia_ligado(config)
     minimo = robo.assistente._reais(robo.MINIMO_POR_VENDA)
     nota = f"{robo.NOTA_MINIMA_DO_VIDEO_DE_IA:.1f}".replace(".", ",")
     return (
         "✨ <b>Vídeo de IA</b>\n"
-        f"Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo de 8 s feito por IA, no "
-        f"{modelo} ({custo} créditos, dentro dos 50 grátis do dia). O produto vem da própria Shopee, sem depender dos "
+        "Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo de 16 s feito por IA, "
+        "com uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada): os 8 s "
+        f"gerados pela foto do anúncio e mais 8 s do Estender, no {modelo} ({custo} créditos, dentro dos "
+        f"{robo.flow.CREDITOS_GRATIS_DO_DIA} grátis do dia). O produto vem da própria Shopee, sem depender dos "
         f"vídeos da fonte: entre os produtos em alta, os de nota {nota} ou mais, que pagam pelo menos {minimo} por "
         "venda e que você ainda não postou, o robô pega o que paga mais por venda (sem a lista dos produtos em alta, "
         "os mais vendidos dos nichos dos seus Achadinhos). A IA olha a foto do anúncio antes (se não servir, vai para "
-        "o próximo), escreve o pedido num estilo que varia (demonstração, pessoa falando do produto, inusitado ou "
-        "comédia) e confere o vídeo pronto com a foto. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
+        "o próximo), escreve as duas partes e a fala (a pessoa só segura, vira e aponta o produto, no mesmo lugar, "
+        "com fala curta) e confere o vídeo pronto com a foto; o servidor ouve a fala, e o rascunho avisa se ela saiu "
+        "embolada ou cortada. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
         f"a nossa edição, os produtos e o Rótulo de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar. Se a IA "
         f"vir outro produto no vídeo, ele não vira rascunho. {limite_dos_videos_de_ia()}, e o produto que já ganhou "
         "um vídeo de IA não ganha outro.\n\n"
@@ -2109,10 +2115,15 @@ def texto_preparar(agora=None):
 
 def creditos_do_de_ia():
     """Na tela do Preparar 1 Agora ⚡, quantos vídeos de IA do dia cabem nos créditos grátis, quando o limite passa."""
-    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.MODELO_DA_PRODUCAO[1], robo.flow.CREDITOS_GRATIS_DO_DIA
+    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.CUSTO_DA_PRODUCAO, robo.flow.CREDITOS_GRATIS_DO_DIA
     if limite is not None and limite * custo <= gratis:
         return ""
-    return f"\n<i>Os {gratis // custo} primeiros do dia cabem nos {gratis} créditos grátis; os outros gastam {custo} " \
+    cabem = gratis // custo
+    if cabem == 1:
+        # O vídeo de 16 s (P247 1): 48 créditos, e só o 1º do dia cabe nos grátis; o 2º usa a sobra e o plano.
+        return f"\n<i>O 1º do dia cabe nos {gratis} créditos grátis; cada um dos outros gasta até {custo} créditos " \
+               "do plano.</i>"
+    return f"\n<i>Os {cabem} primeiros do dia cabem nos {gratis} créditos grátis; os outros gastam {custo} " \
            "créditos do plano cada.</i>"
 
 

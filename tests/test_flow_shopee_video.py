@@ -1272,7 +1272,8 @@ def test_amostra_de_16_s_gera_estende_baixa_a_versao_estendida_e_vai_so_ao_priva
     assert caminho.endswith("amostra.mp4")
     for trecho in ("Amostra nº 1 do vídeo de IA de 16 s", "48 créditos de IA: 24 dos 8 s gerados e 24 do Estender",
                    "Gelo que dura o dia todo? Olha esse copo! Garanta já o seu!", "Copo Térmico Inox",
-                   "o produto é o mesmo da foto do anúncio", "16 s", "Gostando, diga ao Claude"):
+                   "o produto é o mesmo da foto do anúncio", "16 s",
+                   "como os vídeos de IA de 16 s estão ficando. O vídeo de IA do dia sai normalmente"):
         assert trecho in legenda, trecho
     atual = flow.amostra_guardada()
     assert atual["estado"] == "enviado" and atual["custo"] == 48 and atual["duracao"] == 16 and atual["longa"]
@@ -1503,3 +1504,107 @@ def test_amostra_com_o_mesmo_produto_sem_a_anterior_nao_toca_no_celular(celular,
     assert flow.main(["amostra", "--longa", "--mesmo"]) == 1
     assert "sem a amostra anterior ou sem o pedido novo da IA" in capsys.readouterr().out
     assert celular.toques == [] and celular.geracoes == 0 and celular.mandados == []
+
+
+# --- O vídeo de IA de 16 s vira o padrão da produção (P247 1) ---
+
+FALA_PEDIDA = "Gelo que dura o dia todo? Olha esse copo! Garanta a sua!"
+
+
+def _escolhido_longo():
+    """O pedido de 16 s que a escolha do robô dá desde a P247 1: com a continuação do Estender e a fala."""
+    return dict(_escolhido(), estilo=flow.ESTILO_DO_VENDEDOR,
+                prompt="A woman holds the exact tumbler and says the hook.", continuacao=CONTINUACAO,
+                fala=FALA_PEDIDA, cena="Uma moça vende o copo na cozinha.")
+
+
+def _ouvir(monkeypatch, texto):
+    """O reconhecimento de voz de mentira: as palavras do texto, uma a cada 0,6 s."""
+    ouvidas = [(0.6 * i, 0.6 * i + 0.5, palavra) for i, palavra in enumerate(texto.split())]
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: ouvidas)
+    return ouvidas
+
+
+def test_producao_de_16_s_gera_estende_baixa_e_ouve_a_fala(celular, monkeypatch, capsys):
+    # Escolha do Rafael (17/11, P247 1): o formato da amostra de 16 s, uma pessoa vendendo o produto do começo ao
+    # fim, vira o do vídeo de IA do dia e do De IA ✨: os 8 s gerados pela foto e mais 8 s do Estender (24 + 24).
+    _duracoes(monkeypatch, celular, estendida=16)
+    estilos = flow.estilos_recentes()
+    atual = flow.comecar_producao("2026-11-17", _escolhido_longo(), 1)
+    assert atual["longa"] is True and atual["continuacao"] == CONTINUACAO and atual["fala"] == FALA_PEDIDA
+    assert atual["custo"] == 24 and atual["estilo"] == flow.ESTILO_DO_VENDEDOR
+    # O jeito do vídeo de 16 s fica fora da variação dos estilos das amostras de 8 s.
+    assert flow.estilos_recentes() == estilos
+    assert flow.producao_no_celular(celular, atual) is True
+    # Um Gerar para os 8 s e um para o Estender, com a continuação escrita no painel.
+    assert celular.geracoes == 1 and celular.extensoes == 1 and celular.texto_estendido == CONTINUACAO
+    assert celular.toques_proibidos == [] and celular.baixadas == [1]
+    atual = flow.producao()
+    assert atual["estado"] == "baixado" and atual["arquivo"].endswith("producao_2026-11-17.mp4")
+    assert atual["custo"] == flow.CUSTO_DA_PRODUCAO == 48 and atual["duracao"] == 16
+    assert flow.itens_gerados() == ["456"] and flow.gerados_no_dia("2026-11-17") == 1
+    # Nenhuma tela do Estender nos casos: todo dia, elas tirariam do servidor os casos das falhas.
+    assert not any("Estender" in motivo or "esperando" in motivo for _, motivo in celular.guardados)
+    ouvidas = _ouvir(monkeypatch, FALA_PEDIDA)
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert pronto["fala_conferida"]["situacao"] == "igual"
+    legenda = flow.legenda_da_producao(pronto)
+    for trecho in ("Omni 1.2 Flash, 16 s (48 créditos de IA: 24 dos 8 s gerados e 24 do Estender)",
+                   "pessoa vendendo o produto", f"🗣️ Fala: {FALA_PEDIDA}", "o produto é o mesmo da foto do anúncio",
+                   f"👂 Fala no vídeo: igual à pedida ({len(ouvidas)} palavras ouvidas)"):
+        assert trecho in legenda, trecho
+    # O vídeo vira rascunho do robô: nada vai ao privado.
+    assert celular.mandados == []
+    saida = capsys.readouterr().out
+    assert "Gerar do Estender tocado (8 s, 24 créditos)" in saida and "vídeo de 16 s baixado" in saida
+    for privado in ("Copo", "tumbler", "Gelo"):
+        assert privado not in saida, privado
+
+
+def test_producao_de_16_s_continua_de_onde_parou_sem_outro_gerar(celular, monkeypatch):
+    # A rodada que acabou depois do Gerar dos 8 s: a seguinte só estende; a versão estendida que não ficou pronta a
+    # tempo é baixada na outra, sem outro Gerar nem outro Estender.
+    _duracoes(monkeypatch, celular, estendida=16)
+    flow.comecar_producao("2026-11-17", _escolhido_longo(), 1)
+    flow._marcar_a_producao(estado="gerando", gerado_em="2026-11-17 08:00:00", custo=24)
+    celular.gerado, celular.modelo_do_video = True, "Omni 1.2 Flash"
+    celular.leituras_ao_estender = 10 ** 6
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 0.3)
+    assert flow.producao_no_celular(celular, flow.producao()) is False
+    atual = flow.producao()
+    assert celular.geracoes == 0 and celular.extensoes == 1
+    assert atual["estado"] == "estendendo" and atual["custo"] == 48 and atual["estendido_em"]
+    assert "estendendo" in flow.ESTADOS_PENDENTES
+    celular.estendendo_leituras = 0
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    assert celular.geracoes == 0 and celular.extensoes == 1 and flow.producao()["estado"] == "baixado"
+    # O Estender não é um Gerar a mais no dia (o limite do P243 conta os vídeos).
+    assert flow.gerados_no_dia("2026-11-17") == 1
+
+
+def test_producao_com_a_fala_embolada_vira_rascunho_com_o_aviso(celular, monkeypatch):
+    # P248 1 (D): a fala embolada ou cortada não descarta o vídeo; o aviso vai no rascunho, e o Rafael decide na
+    # aprovação.
+    _duracoes(monkeypatch, celular, estendida=16)
+    flow.comecar_producao("2026-11-17", _escolhido_longo(), 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    _ouvir(monkeypatch, "Gelo que dura o dia todo? Vou feitecer esse sela! Garanta a sua!")
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert pronto["fala_conferida"]["situacao"] == "embolada"
+    assert '⚠️ Fala no vídeo: embolada aos 4 s (ouvi "vou", "feitecer", "sela"' in flow.legenda_da_producao(pronto)
+
+
+def test_producao_de_8_s_de_antes_da_p247_continua_pelo_caminho_de_8_s(celular):
+    # O andamento de 8 s que estava gerando na hora do deploy é baixado como era, sem Estender.
+    flow.comecar_producao("2026-11-16", _escolhido(), 1)
+    flow.guardar_producao(estado="gerando", gerado_em="2026-11-16 08:00:00")
+    assert "longa" not in flow.producao()
+    celular.gerado, celular.modelo_do_video = True, "Omni 1.2 Flash"
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    assert celular.geracoes == 0 and celular.extensoes == 0 and flow.producao()["estado"] == "baixado"
+    # Sem a fala pedida, o servidor não ouve nada: o de 8 s fica como sempre foi.
+    assert flow.conferir_a_producao() == "pronto" and "fala_conferida" not in flow.producao()
+    assert "Omni 1.2 Flash (24 créditos de IA)" in flow.legenda_da_producao(flow.producao())
