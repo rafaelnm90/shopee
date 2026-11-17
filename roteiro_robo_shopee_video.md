@@ -768,9 +768,14 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   (Adicionar mídia), o botão "Estender 8s" e o Gerar (a seta), desligado com a caixa vazia. O
   voltar fecha o teclado e, de novo, o painel, sem gerar. A amostra de 16 s (P246 1) escreve a
   continuação, confere a caixa, o "Estender 8s" e o "1 de 1" e só então toca no Gerar; não
-  toca no "Estender 8s". Falta ver o que o app mostra enquanto estende (a amostra guarda a
-  tela nos primeiros minutos) e se o Baixar da versão estendida traz os 16 s ou só a
-  continuação (o robô confere a duração do arquivo e, curto, junta a original).
+  toca no "Estender 8s".
+- O Estender gerando (visto na 1ª amostra de 16 s, 17/11/2026): logo depois do Gerar, o vídeo
+  aberto mostra "Gerando..." com a porcentagem no lugar do player, a coluna das versões com a
+  original e a nova, e o Estender apagado; no projeto, o mesmo quadro mostra a porcentagem e,
+  pronto, o ícone de várias versões (a continuação ficou pronta em pouco mais de 1 min). O
+  Baixar da versão estendida trouxe os 16 s juntos (a original e a continuação), no tamanho
+  original: o 1080p não estava livre nessa janela. O robô continua conferindo a duração do
+  arquivo e, curto, junta a original.
 
 ## O que não se faz
 
