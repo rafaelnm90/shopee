@@ -1,4 +1,6 @@
 """A medição da P135: os sinais de tendência dos produtos dos vídeos da fonte do robô da Shopee Vídeo."""
+import asyncio
+import types
 from datetime import datetime, timedelta
 
 import pytest
@@ -139,6 +141,55 @@ def test_sem_videos_na_fonte_o_registro_diz_e_erro_nao_derruba_o_bot(monkeypatch
     monkeypatch.setattr(tv.assistente, "_candidatos", quebrado)
     assert rodar(tv.anotar(AGORA)) == "falhou (RuntimeError)"
     assert _registro() == [("falhou", "RuntimeError", 0), ("sem vídeos na fonte", "0 vídeo(s) na fonte", None)]
+
+
+def test_canais_do_espiao_por_produto_para_a_escolha_do_video_de_ia(monkeypatch):
+    # P252 1 (18/11): o 2º nível da escolha do produto do vídeo de IA olha em quantos canais do Espião o produto
+    # apareceu nos últimos 3 dias. Pelo id do produto (a oferta da API não diz a loja); o do Canal Afiliados e o de
+    # mais de 3 dias não contam, o mesmo canal conta uma vez, e o link de vídeo não é produto.
+    recente, velho = "2026-11-02 20:00:00", "2026-10-29 20:00:00"
+    _espiao(("-100A", DO_PRODUTO, recente), ("-100B", DO_OUTRO, recente), ("-100A", DO_OUTRO, recente),
+            (pedidos_do_canal.CANAL, DO_PRODUTO, recente), ("-100C", DO_PRODUTO, velho), ("-100D", DE_VIDEO, recente))
+    seguidos = _links(monkeypatch)
+    # Sem seguir (a sonda do video_ia.py, que não muda nada): só o que já foi seguido conta.
+    assert rodar(tv.canais_do_espiao(AGORA, seguir=False)) == ({}, 4) and seguidos == []
+    assert rodar(tv.canais_do_espiao(AGORA)) == ({"2": 2}, 0)
+    assert sorted(seguidos) == sorted([DO_PRODUTO, DO_OUTRO, DO_OUTRO, DE_VIDEO])
+    # Os links seguidos ficam guardados: a próxima escolha (e a anotação do dia) não vai de novo à Shopee.
+    antes = len(seguidos)
+    assert rodar(tv.canais_do_espiao(AGORA, seguir=False)) == ({"2": 2}, 0)
+    assert rodar(tv.canais_do_espiao(AGORA)) == ({"2": 2}, 0) and len(seguidos) == antes
+
+
+def test_canais_do_espiao_seguem_poucos_links_e_por_pouco_tempo(monkeypatch):
+    # Na escolha, a rodada do robô não espera mais que LINKS_NA_ESCOLHA links nem SEGUNDOS_NA_ESCOLHA segundos; o
+    # que fica sem seguir vai na conta (e é seguido na próxima vez ou na anotação do dia).
+    recente = "2026-11-02 20:00:00"
+    _espiao(*[(f"-100{n}", f"https://s.shopee.com.br/p{n}", recente) for n in range(5)])
+    relogio = {"agora": 0.0}
+    seguidos = []
+
+    async def converter(link):
+        seguidos.append(link)
+        relogio["agora"] += 50
+        return f"https://shopee.com.br/product/1/{link[-1]}"
+
+    monkeypatch.setattr(tv.api_shopee, "link_para_converter", converter)
+    monkeypatch.setattr(tv, "relogio", types.SimpleNamespace(monotonic=lambda: relogio["agora"]))
+    # 90 s no total, 50 s cada: o 1º e o 2º começam a tempo; o 3º, não.
+    assert rodar(tv.canais_do_espiao(AGORA)) == ({"0": 1, "1": 1}, 3) and len(seguidos) == 2
+    monkeypatch.setattr(tv, "LINKS_NA_ESCOLHA", 1)
+    relogio["agora"] = 0.0
+    assert rodar(tv.canais_do_espiao(AGORA)) == ({"0": 1, "1": 1, "2": 1}, 2) and len(seguidos) == 3
+
+    # O link que demora mais que SEGUNDOS_POR_LINK fica para a próxima vez, sem segurar os outros.
+    async def demorado(link):
+        await asyncio.sleep(5)
+        return link
+
+    monkeypatch.setattr(tv.api_shopee, "link_para_converter", demorado)
+    monkeypatch.setattr(tv, "SEGUNDOS_POR_LINK", 0.01)
+    assert rodar(tv.canais_do_espiao(AGORA)) == ({"0": 1, "1": 1, "2": 1}, 2)
 
 
 def test_bot_sobe_sem_a_anotacao_do_dia_e_agenda_uma(bm, monkeypatch, relogio):
