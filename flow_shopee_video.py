@@ -1779,6 +1779,9 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
                      item=escolhido.get("item", ""), valor=escolhido.get("valor"), origem=escolhido.get("origem", ""),
                      foto=foto, estilo=escolhido["estilo"], prompt=escolhido["prompt"], cena=escolhido["cena"],
                      modelo=modelo, custo=custo, escolhido_em=agora(),
+                     # O nível da escolha em que o produto entrou e os números dele (P252 1), para o aviso.
+                     **({"nivel": escolhido["nivel"], "filtros": escolhido.get("filtros")}
+                        if escolhido.get("nivel") else {}),
                      **({"longa": True, "continuacao": escolhido["continuacao"], "fala": escolhido.get("fala", "")}
                         if longa else {}))
     if not longa:

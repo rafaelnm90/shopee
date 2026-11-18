@@ -9464,8 +9464,8 @@ def test_video_de_ia_pega_da_lista_da_api_o_que_paga_mais_com_a_foto_boa(monkeyp
     assert robo.escolher_para_o_video_de_ia(momento("2026-10-23 08:05"))[0]["item"] == "14" and foram == ["14"]
     # O registro (o checkup é público) tem só a lista, as contagens da peneira e a posição: nenhum nome ou link.
     linhas = _registro_do_video_de_ia()
-    assert linhas[0] == ("produto escolhido",
-                         f"{EM_ALTA}: 7 da lista; 5 com a nota; 4 pagam o mínimo; 3 novos; o 2º; estilo fala")
+    assert linhas[0] == ("produto escolhido", f"{EM_ALTA}: 7 da lista; 5 com a nota; 4 pagam o mínimo; 3 novos; "
+                         "0 no 2º nível; o 2º; do 1º nível; estilo fala")
     assert not any("Produto" in detalhe or "shopee.com" in detalhe for _, detalhe in linhas)
 
 
@@ -9480,16 +9480,16 @@ def test_video_de_ia_pula_o_produto_que_a_ia_de_video_muda(monkeypatch):
     assert escolhido["item"] == "15" and foram == ["13", "14", "15"] and restam
     assert robo.flow.fotos_recusadas() == ["13", "14"]
     assert _registro_do_video_de_ia()[-1] == (
-        "produto escolhido", f"{EM_ALTA}: 3 da lista; 3 com a nota; 3 pagam o mínimo; 3 novos; o 3º; estilo fala; "
-        "1 pulado(s) pelo que a IA de vídeo muda")
+        "produto escolhido", f"{EM_ALTA}: 3 da lista; 3 com a nota; 3 pagam o mínimo; 3 novos; 0 no 2º nível; o 3º; "
+        "do 1º nível; estilo fala; 1 pulado(s) pelo que a IA de vídeo muda")
     # Sem nenhum que sirva, o registro separa os recusados pela foto dos pulados pelo que a IA de vídeo muda.
     foram = _lista_da_api(monkeypatch, [_oferta_da_lista("20", comissao=0.09), _oferta_da_lista("21", comissao=0.08)],
                           recusadas={"21"}, mudam={"20"})
     escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"))
     assert escolhido is None and not restam and foram == ["20", "21"]
     assert _registro_do_video_de_ia()[-1] == (
-        "sem produto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 2 foto(s) olhada(s), "
-        "1 recusada(s), 1 com o que a IA de vídeo muda")
+        "sem produto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 0 no 2º nível; "
+        "2 foto(s) olhada(s), 1 recusada(s), 1 com o que a IA de vídeo muda")
 
 
 def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
@@ -9536,10 +9536,123 @@ def test_candidatos_do_video_de_ia_pela_peneira(monkeypatch):
     assert [(bom["item"], round(bom["valor"], 2)) for bom in bons] == [("3", 4.0), ("1", 2.0)]
     assert contagem == {"lista": 3, "nota": 3, "minimo": 2, "novos": 2}
     assert bons[0] == {"item": "3", "link": "https://shopee.com.br/product/1/3", "nome": "Produto 3",
-                       "imagem": "https://cf.shopee.com.br/file/3", "valor": 4.0, "vendas": 10}
+                       "imagem": "https://cf.shopee.com.br/file/3", "valor": 4.0, "vendas": 10, "preco": 200.0}
     # Os já postados e os que já tiveram vídeo ou a foto recusada saem por último, depois da nota e do mínimo.
     bons, contagem = robo.candidatos_do_video_de_ia(ofertas, {"3"}, ["1"])
     assert bons == [] and contagem == {"lista": 3, "nota": 3, "minimo": 2, "novos": 0}
+
+
+def _canais_do_espiao(monkeypatch, canais, sem_seguir=0):
+    """Em quantos canais do Espião cada produto apareceu (tendencia.canais_do_espiao), sem seguir link nenhum."""
+    chamadas = []
+
+    async def contar(agora=None, seguir=True):
+        chamadas.append(seguir)
+        if isinstance(canais, Exception):
+            raise canais
+        return dict(canais), sem_seguir
+
+    monkeypatch.setattr(robo.tendencia, "canais_do_espiao", contar)
+    return chamadas
+
+
+def test_video_de_ia_escolhe_primeiro_pelo_segundo_nivel(monkeypatch):
+    # Escolha do Rafael (18/11, P252 1): dos produtos que passam no 1º nível (o de hoje), vêm primeiro os que já
+    # venderam 1.000 ou mais, custam a partir de R$ 20 (sem preço máximo) e apareceram em até 2 canais do Espião em 3
+    # dias; entre eles, o que paga mais por venda. Sem nenhum que sirva, vale o 1º nível.
+    ofertas = [_oferta_da_lista("20", preco=300.0, comissao=0.04, vendas=500),     # R$ 12,00: vende pouco
+               _oferta_da_lista("21", preco=200.0, comissao=0.05, vendas=5000),    # R$ 10,00: 3 canais do Espião
+               _oferta_da_lista("22", preco=15.0, comissao=0.5, vendas=9000),      # R$ 7,50: barato demais
+               _oferta_da_lista("23", preco=800.0, comissao=0.008, vendas=1000),   # R$ 6,40: passa (preço alto)
+               _oferta_da_lista("24", preco=20.0, comissao=0.15, vendas=30000)]    # R$ 3,00: passa, 2 canais
+    foram = _lista_da_api(monkeypatch, ofertas, recusadas={"23"})
+    chamadas = _canais_do_espiao(monkeypatch, {"21": 3, "24": 2, "23": 1})
+    escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    # O 23 paga mais entre os do 2º nível, mas a IA recusou a foto: vai o 24, mesmo pagando menos que os outros.
+    assert foram == ["23", "24"] and escolhido["item"] == "24" and escolhido["nivel"] == 2 and restam
+    assert escolhido["filtros"] == robo.FILTROS_DO_VIDEO_DE_IA and escolhido["posicao"] == 2 and chamadas == [True]
+    assert _registro_do_video_de_ia()[-1] == (
+        "produto escolhido", f"{EM_ALTA}: 5 da lista; 5 com a nota; 5 pagam o mínimo; 5 novos; 2 no 2º nível; o 2º; "
+        "do 2º nível; estilo fala")
+    # Sem nenhum do 2º nível que sirva (o 24 já teve um vídeo), vale o 1º: o que paga mais por venda.
+    robo.flow.lembrar_item_gerado("24")
+    foram.clear()
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-23 08:05"))
+    assert foram == ["20"] and escolhido["item"] == "20" and escolhido["nivel"] == 1
+    assert _registro_do_video_de_ia()[-1] == (
+        "produto escolhido", f"{EM_ALTA}: 5 da lista; 5 com a nota; 5 pagam o mínimo; 3 novos; 0 no 2º nível; o 1º; "
+        "do 1º nível; estilo fala")
+
+
+def test_numeros_do_segundo_nivel_vem_do_painel(monkeypatch):
+    # P252 1: "Os números mudam no painel" (Vídeo de IA ✨), nas chaves de shopee_video; o que falta fica o de começo.
+    assert robo.filtros_do_video_de_ia({}) == {"video_ia_vendidos_minimos": 1000, "video_ia_preco_minimo": 20.0,
+                                               "video_ia_canais_maximos": 2}
+    ativar(video_ia_vendidos_minimos=0, video_ia_canais_maximos=5)
+    assert robo.filtros_do_video_de_ia() == {"video_ia_vendidos_minimos": 0, "video_ia_preco_minimo": 20.0,
+                                             "video_ia_canais_maximos": 5}
+    ofertas = [_oferta_da_lista("30", preco=300.0, comissao=0.04, vendas=10),      # R$ 12,00: passa com 0 vendidos
+               _oferta_da_lista("31", preco=10.0, comissao=0.9, vendas=10)]       # R$ 9,00: barato demais
+    foram = _lista_da_api(monkeypatch, ofertas)
+    _canais_do_espiao(monkeypatch, {"30": 5})
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert foram == ["30"] and escolhido["nivel"] == 2
+    assert escolhido["filtros"]["video_ia_vendidos_minimos"] == 0
+    # A conta dos cortes: vendidos e preço pelo mínimo, os canais pelo máximo (0 canal sempre passa).
+    filtros = robo.filtros_do_video_de_ia({})
+    bom = {"item": "9", "vendas": 1000, "preco": 20.0}
+    assert robo.no_segundo_nivel(bom, {}, filtros) and robo.no_segundo_nivel(bom, {"9": 2}, filtros)
+    assert not robo.no_segundo_nivel(bom, {"9": 3}, filtros)
+    assert not robo.no_segundo_nivel(dict(bom, vendas=999), {}, filtros)
+    assert not robo.no_segundo_nivel(dict(bom, preco=19.99), {}, filtros)
+
+
+def test_segundo_nivel_sem_a_contagem_do_espiao_ou_com_links_por_seguir(monkeypatch):
+    # A contagem dos canais que falha não para a escolha: o corte dos canais fica de fora desta vez (os outros dois
+    # valem), e o registro diz. Os links do Espião que ficaram sem seguir também vão ao registro, só como número.
+    ofertas = [_oferta_da_lista("40", preco=100.0, comissao=0.05, vendas=2000)]
+    _lista_da_api(monkeypatch, ofertas)
+    _canais_do_espiao(monkeypatch, RuntimeError("rede"))
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert escolhido["nivel"] == 2
+    assert "1 novos; 1 no 2º nível (sem a contagem do Espião); o 1º; do 2º nível" in _registro_do_video_de_ia()[-1][1]
+    robo.flow.lembrar_item_gerado("40")
+    _lista_da_api(monkeypatch, [_oferta_da_lista("41", preco=100.0, comissao=0.05, vendas=2000)])
+    _canais_do_espiao(monkeypatch, {"41": 3}, sem_seguir=4)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"))
+    assert escolhido["nivel"] == 1
+    assert "1 novos; 0 no 2º nível (4 link(s) do Espião sem seguir); o 1º; do 1º nível" in \
+        _registro_do_video_de_ia()[-1][1]
+    # Sem candidato nenhum, os canais nem são contados (nada de ir à Shopee à toa).
+    _lista_da_api(monkeypatch, [])
+    chamadas = _canais_do_espiao(monkeypatch, {})
+    assert robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:30"))[0] is None and chamadas == []
+
+
+def test_aviso_do_video_de_ia_pronto_diz_o_nivel_da_escolha(monkeypatch, tmp_path):
+    # O aviso do vídeo de IA pronto (no privado) diz se o produto entrou pelo 2º nível (P252 1), com os números.
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    escolhido = {"id": "ia:2026-10-22", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "fala",
+                 "prompt": "p", "cena": "c", "item": "2", "valor": 6.4, "posicao": 1, "origem": EM_ALTA, "nivel": 2,
+                 "filtros": dict(robo.FILTROS_DO_VIDEO_DE_IA, video_ia_canais_maximos=1)}
+    atual = robo.flow.comecar_producao("2026-10-22", escolhido, 1)
+    assert (atual["nivel"], atual["filtros"]["video_ia_canais_maximos"]) == (2, 1)
+    assert robo.de_onde_veio_o_produto_do_video_de_ia(atual) == (
+        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee que já venderam 1.000 ou "
+        "mais, custam a partir de R$ 20,00 e apareceram em até 1 canal do Espião nos últimos 3 dias, ainda não "
+        "postado.\n")
+    atual = robo.flow.comecar_producao("2026-10-22", dict(escolhido, nivel=1), 1)
+    assert robo.de_onde_veio_o_produto_do_video_de_ia(atual) == (
+        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee, ainda não postado, pelo 1º "
+        "nível (nenhum produto do 2º nível serviu).\n")
+    # O vídeo escolhido antes do 2º nível (sem o nível) avisa como antes.
+    sem_nivel = {chave: valor for chave, valor in escolhido.items() if chave not in ("nivel", "filtros")}
+    atual = robo.flow.comecar_producao("2026-10-22", sem_nivel, 1)
+    assert "nivel" not in atual and robo.de_onde_veio_o_produto_do_video_de_ia(atual) == (
+        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee, ainda não postado.\n")
+    assert robo.texto_dos_filtros({"video_ia_vendidos_minimos": 0, "video_ia_preco_minimo": 0,
+                                   "video_ia_canais_maximos": 0}) == \
+        "não apareceram em nenhum canal do Espião nos últimos 3 dias"
 
 
 def test_video_de_ia_sem_foto_boa_tenta_de_novo_e_sem_produto_fecha_o_dia(monkeypatch, tmp_path):
@@ -9567,10 +9680,10 @@ def test_video_de_ia_sem_foto_boa_tenta_de_novo_e_sem_produto_fecha_o_dia(monkey
     assert not robo.video_de_ia_pendente(config, agora)
     assert robo.video_de_ia_pendente(config, momento("2026-10-23 08:05"))
     assert _registro_do_video_de_ia() == [
-        ("sem foto", f"{EM_ALTA}: 7 da lista; 7 com a nota; 7 pagam o mínimo; 7 novos; 5 foto(s) olhada(s), "
-         "5 recusada(s)"),
-        ("sem produto", f"{EM_ALTA}: 7 da lista; 7 com a nota; 7 pagam o mínimo; 2 novos; 2 foto(s) olhada(s), "
-         "2 recusada(s)")]
+        ("sem foto", f"{EM_ALTA}: 7 da lista; 7 com a nota; 7 pagam o mínimo; 7 novos; 0 no 2º nível; "
+         "5 foto(s) olhada(s), 5 recusada(s)"),
+        ("sem produto", f"{EM_ALTA}: 7 da lista; 7 com a nota; 7 pagam o mínimo; 2 novos; 0 no 2º nível; "
+         "2 foto(s) olhada(s), 2 recusada(s)")]
     assert _tentativas_do_video_de_ia() == [("video_ia", "sem vídeo", "vídeo de IA no Flow")] * 2
 
 
@@ -9583,8 +9696,8 @@ def test_video_de_ia_sem_resposta_da_ia_ou_sem_link_curto_nao_recusa_o_produto(m
     escolhido, _origem, restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
     assert escolhido is None and restam and foram == ["6"] and robo.flow.fotos_recusadas() == []
     assert _registro_do_video_de_ia() == [
-        ("sem foto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 1 foto(s) olhada(s), "
-         "0 recusada(s), 1 sem o link curto")]
+        ("sem foto", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 0 no 2º nível; "
+         "1 foto(s) olhada(s), 0 recusada(s), 1 sem o link curto")]
     assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05")) == \
         "vídeo de IA: nenhum produto da lista da Shopee serviu desta vez"
     assert robo.flow.producao()["estado"] == "sem foto"
