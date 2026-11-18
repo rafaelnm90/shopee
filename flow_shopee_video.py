@@ -155,11 +155,18 @@ VERSOES_NO_QUADRO = re.compile(r",\s*(\d+)\s+(?:item|itens|items)\s*$", re.I)
 # "Gerando…" no lugar do player, com o Estender apagado (visto na amostra nº 5, 17/11/2026). Fechado antes disso, o
 # Flow pode perder a continuação: o vídeo fica com uma versão só e nada é gerado (visto no 1º vídeo de IA de 16 s da
 # produção, 17/11/2026). O robô só sai do vídeo (o Flow é aberto de novo, do zero, para a espera no projeto) com a
-# continuação à vista, esperando até ESPERA_DA_CONTINUACAO s.
+# continuação à vista, esperando até ESPERA_DA_CONTINUACAO s, e ainda PAUSA_DEPOIS_DA_CONTINUACAO s com ela à vista
+# (nas amostras, que não a perderam, a tela guardada nesse momento dava esses segundos ao app antes de ele ser fechado).
 ESPERA_DA_CONTINUACAO = 30
+PAUSA_DEPOIS_DA_CONTINUACAO = 10
 # Na espera do Estender no projeto, o quadro mais novo com uma versão só e nada sendo gerado por ESPERA_SEM_CONTINUACAO
-# s seguidos: a continuação não está vindo, e a vez acaba sem esperar a ESPERA_DA_GERACAO inteira.
-ESPERA_SEM_CONTINUACAO = 60
+# s seguidos: a continuação não está vindo, e a vez acaba sem esperar a ESPERA_DA_GERACAO inteira. No projeto, o quadro
+# do vídeo que o Flow estende mostra a porcentagem (roteiro, 1ª amostra de 16 s, 17/11/2026): com ou sem o "Gerando…"
+# escrito, ela conta como algo sendo gerado (porcentagem_no_projeto). Os 4 min dão folga ao Estender que demora mais
+# que o da 1ª amostra (pouco mais de 1 min) e ainda acabam a vez de um vídeo que perdeu a continuação.
+ESPERA_SEM_CONTINUACAO = 4 * 60
+# A porcentagem do que o Flow está gerando, sozinha numa linha do quadro ("45%").
+PORCENTAGEM = re.compile(r"^\s*\d{1,3}\s?%\s*$", re.M)
 # O porquê da vez que acaba sem o vídeo de 16 s (no andamento, "espera"; o robô anota no registro).
 ESPERA_DOS_8_S = "os 8 s sem ficar prontos"
 ESPERA_DA_EXTENSAO = "a continuação sem ficar pronta"
@@ -1042,10 +1049,20 @@ def continuacao_na_tela(xml):
     return gerando(xml) or len(versoes_do_video(xml)) >= 2
 
 
+def porcentagem_no_projeto(xml):
+    """
+    Um quadro do Flow com a porcentagem do que está sendo gerado ("45%"), com ou sem o "Gerando…" escrito: o do vídeo
+    que o Estender continua mostra a porcentagem no projeto. A barra do player ("23%", SeekBar) não conta.
+    """
+    return any(el["pacote"] == PACOTE and el["classe"] != "SeekBar"
+               and PORCENTAGEM.search(f"{el['texto']}\n{el['descricao']}") for el in ps.elementos(xml))
+
+
 def esperar_a_extensao(d, guardar_telas=True):
     """
     No projeto (aberto de novo depois do Gerar do Estender): espera a versão estendida ficar pronta, o quadro mais novo
-    com 2 versões ou mais e nada "Gerando…" na tela, em PRONTO_SEGUIDAS leituras seguidas. A tela vai aos casos nos
+    com 2 versões ou mais e nada sendo gerado na tela (nem "Gerando…" nem a porcentagem num quadro), em PRONTO_SEGUIDAS
+    leituras seguidas. A tela vai aos casos nos
     primeiros CASOS_DO_ESTENDER minutos (guardar_telas=False na produção do dia, como na espera dos 8 s). (os segundos
     até ficar pronta, "") ou, sem ela, (None, o porquê): ESPERA_DA_EXTENSAO, se não ficou em ESPERA_DA_GERACAO, ou
     SEM_CONTINUACAO, com o quadro mais novo de uma versão só e nada sendo gerado por ESPERA_SEM_CONTINUACAO s seguidos.
@@ -1060,13 +1077,15 @@ def esperar_a_extensao(d, guardar_telas=True):
         if xml and tem_termos(xml):
             raise Parada("estender: tela de termos ou de consentimento; o robô nunca aceita pelo Rafael")
         versoes = versoes_do_mais_novo(xml) if xml else 0
-        if xml and not gerando(xml) and versoes >= 2:
+        # O "Gerando…" escrito ou só a porcentagem no quadro: a continuação ainda está sendo feita.
+        em_andamento = bool(xml) and (gerando(xml) or porcentagem_no_projeto(xml))
+        if xml and not em_andamento and versoes >= 2:
             seguidas += 1
             if seguidas >= PRONTO_SEGUIDAS:
                 return int(passado), ""
         else:
             seguidas = 0
-        if xml and not gerando(xml) and versoes == 1:
+        if xml and not em_andamento and versoes == 1:
             sem_continuacao = passado if sem_continuacao is None else sem_continuacao
             if passado - sem_continuacao >= ESPERA_SEM_CONTINUACAO:
                 return None, SEM_CONTINUACAO
@@ -1550,6 +1569,7 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False, guar
                 if not esperar(d, continuacao_na_tela, ESPERA_DA_CONTINUACAO):
                     raise Parada("estender: a continuação não apareceu sendo gerada no vídeo")
                 print("Flow: a continuação está sendo gerada")
+                time.sleep(PAUSA_DEPOIS_DA_CONTINUACAO)
             if guardar_telas:
                 casos_robo.guardar(d, "flow", "tela", "depois do Gerar do Estender", passo="flow estender")
             # De volta ao projeto, do alto, onde o quadro do vídeo mostra as versões.
