@@ -28,6 +28,10 @@ resposta, e o link da conversa. No log, só o código.
     python3 perguntas_rafael.py respondida P3          # no servidor (avisar.yml)
 
 O JSON: {"pergunta": "...", "opcoes": [{"rotulo": "...", "descricao": "..."}], "link": "https://..."}.
+O aviso guarda até TAMANHO_DA_PERGUNTA letras da pergunta e, de cada opção, TAMANHO_DO_ROTULO do
+rótulo e TAMANHO_DA_DESCRICAO da descrição (e TAMANHO_DA_INFORMACAO da informação): o cifrar recusa o
+que passa (passa_do_limite), porque o servidor corta calado e o fim que sumiria costuma ser o exemplo
+prático que o Rafael pediu em toda pergunta (11/11).
 
 As informações importantes do Claude vão pelo mesmo caminho (pedido do Rafael, 09/11): o que
 o Claude traz e importa (a resposta a uma pergunta dele, o resultado de uma conferência ou
@@ -505,6 +509,36 @@ def cifrar(dados, valor_chave):
     return Fernet(valor_chave).encrypt(json.dumps(dados, ensure_ascii=False).encode()).decode()
 
 
+def passa_do_limite(dados):
+    """
+    O que da pergunta ou da informação passaria do tamanho que o aviso do privado guarda: o servidor corta
+    calado (nova, _opcoes e nova_informacao), e o fim que some costuma ser o exemplo prático que o Rafael
+    pediu em toda pergunta. Lista vazia: tudo cabe.
+    """
+    problemas = []
+    if "pergunta" in dados:
+        letras = len(" ".join(str(dados.get("pergunta") or "").split()))
+        if letras > TAMANHO_DA_PERGUNTA:
+            problemas.append(f"pergunta com {letras} letras (máximo {TAMANHO_DA_PERGUNTA})")
+        opcoes = dados.get("opcoes") or []
+        if len(opcoes) > MAXIMO_DE_OPCOES:
+            problemas.append(f"{len(opcoes)} opções (máximo {MAXIMO_DE_OPCOES})")
+        for numero, opcao in enumerate(opcoes, 1):
+            rotulo, descricao = ((opcao.get("rotulo"), opcao.get("descricao")) if isinstance(opcao, dict)
+                                 else (opcao, ""))
+            rotulo, descricao = str(rotulo or "").strip(), str(descricao or "").strip()
+            if len(rotulo) > TAMANHO_DO_ROTULO:
+                problemas.append(f"rótulo da opção {numero} com {len(rotulo)} letras (máximo {TAMANHO_DO_ROTULO})")
+            if len(descricao) > TAMANHO_DA_DESCRICAO:
+                problemas.append(f"descrição da opção {numero} com {len(descricao)} letras "
+                                 f"(máximo {TAMANHO_DA_DESCRICAO})")
+    if "informacao" in dados:
+        letras = len(str(dados.get("informacao") or "").strip())
+        if letras > TAMANHO_DA_INFORMACAO:
+            problemas.append(f"informação com {letras} letras (máximo {TAMANHO_DA_INFORMACAO})")
+    return problemas
+
+
 def abrir(texto_cifrado, valor_chave):
     from cryptography.fernet import Fernet
     return json.loads(Fernet(valor_chave).decrypt(texto_cifrado.strip().encode()).decode())
@@ -537,7 +571,13 @@ def main(argumentos):
                 print(f"❌ {registro_privado.VARIAVEL_CHAVE} ausente no ambiente")
                 return 1
             with open(valor, encoding="utf-8") as arquivo:
-                print(cifrar(json.load(arquivo), chave))
+                dados = json.load(arquivo)
+            problemas = passa_do_limite(dados)
+            if problemas:
+                # Nada é cifrado até caber: no stderr, para o arquivo do texto cifrado ficar vazio.
+                print("❌ Não cabe no aviso do privado: " + "; ".join(problemas), file=sys.stderr)
+                return 1
+            print(cifrar(dados, chave))
             return 0
         if acao == "nova":
             print(f"✅ Pergunta {receber(valor)} guardada e enviada ao Rafael; lembrete de hora em hora.")

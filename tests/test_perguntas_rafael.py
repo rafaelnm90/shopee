@@ -1,4 +1,5 @@
 """perguntas_rafael.py: a pergunta do Claude vai ao privado e é lembrada de hora em hora até a resposta."""
+import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -68,6 +69,29 @@ def test_pergunta_cifrada_chega_aberta_ao_servidor(monkeypatch):
     assert mandados[0][1] is True and "Pergunta secreta?" in mandados[0][0]
     assert pr.vencidas(AGORA + timedelta(minutes=30)) == []                     # já avisada agora
     assert pr.mensagens_de("P1") == [501]
+
+
+
+def test_cifrar_recusa_o_que_o_aviso_do_privado_cortaria(tmp_path, monkeypatch, capsys):
+    # O servidor guarda só 900 letras da pergunta e 220 de cada descrição, sem avisar: em 18/11, a cópia
+    # de uma pergunta no privado perdeu o exemplo prático, que vinha no fim. O cifrar recusa antes.
+    from cryptography.fernet import Fernet
+    import registro_privado
+    chave = Fernet.generate_key().decode()
+    monkeypatch.setenv(registro_privado.VARIAVEL_CHAVE, chave)
+    arquivo = tmp_path / "pergunta.json"
+    arquivo.write_text(json.dumps({"pergunta": "palavra " * 120, "link": LINK,
+                                   "opcoes": [{"rotulo": "Sim", "descricao": "d" * 221}]}), encoding="utf-8")
+    assert pr.main(["cifrar", str(arquivo)]) == 1
+    saida = capsys.readouterr()
+    assert saida.out == ""                                                     # nada cifrado
+    assert "pergunta com 959 letras" in saida.err and "descrição da opção 1 com 221 letras" in saida.err
+    arquivo.write_text(json.dumps({"informacao": "i" * 3001, "link": LINK}), encoding="utf-8")
+    assert pr.main(["cifrar", str(arquivo)]) == 1
+    assert "informação com 3001 letras" in capsys.readouterr().err
+    arquivo.write_text(json.dumps({"pergunta": "Cabe?", "opcoes": OPCOES, "link": LINK}), encoding="utf-8")
+    assert pr.main(["cifrar", str(arquivo)]) == 0
+    assert pr.abrir(capsys.readouterr().out, chave)["pergunta"] == "Cabe?"
 
 
 def test_robo_lembra_pelo_privado(bm, monkeypatch):
