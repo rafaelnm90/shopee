@@ -6,15 +6,19 @@ quanto cresceu de um dia para o outro), a nota, a comissão e o preço (o valor 
 desses vídeos o produto está e em quantos canais diferentes o Espião o viu nos últimos dias (o que
 está viralizando entre os afiliados). Toda segunda, o Claude compara com o que vendeu (comparacao,
 no relatório cifrado do vendas.py), como um analista, e avisa o Rafael quando vê uma mudança, com o
-que fazer. Nada aqui muda a escolha do robô.
+que fazer. A anotação não muda a escolha do robô; a do produto do vídeo de IA usa daqui em quantos
+canais do Espião cada produto apareceu (canais_do_espiao, o 2º nível da P252 1).
 
 Só ids e números no banco (tabelas shopee_video_tendencia e shopee_video_tendencia_links, por
-DIAS_GUARDADOS dias); no registro, só contagens. Usado pelo bot_mestre (anotar, todo dia).
-Escolhas do Rafael (P135 e P195): DECISOES.md, Shopee Vídeo.
+DIAS_GUARDADOS dias); no registro, só contagens. Usado pelo bot_mestre (anotar, todo dia) e pelo
+robo_shopee_video (canais_do_espiao, na escolha do produto do vídeo de IA).
+Escolhas do Rafael (P135, P195 e P252 1): DECISOES.md, Shopee Vídeo.
 """
+import asyncio
 import json
 import logging
 import re
+import time as relogio
 from datetime import datetime, time, timedelta
 
 import aiohttp
@@ -36,6 +40,12 @@ VIDEOS_DA_FONTE = 30
 DIAS_DO_ESPIAO = 3
 # Links novos seguidos numa vez (cada um é uma ida à Shopee); o resto fica para o dia seguinte.
 LINKS_POR_VEZ = 100
+# Na escolha do produto do vídeo de IA (P252 1), os links do Espião que chegaram depois da anotação do dia são
+# seguidos na hora, até estes e por no máximo SEGUNDOS_NA_ESCOLHA no total (cada um com até SEGUNDOS_POR_LINK): a
+# rodada do robô não espera mais que isso, e o que ficou sem seguir vai como contagem ao registro.
+LINKS_NA_ESCOLHA = 40
+SEGUNDOS_NA_ESCOLHA = 90
+SEGUNDOS_POR_LINK = 10
 # Quatro semanas, para a análise de toda segunda comparar a semana com as anteriores (P195).
 DIAS_GUARDADOS = 28
 # A hora da anotação do dia (o job do bot_mestre). Na subida, o dia sem a anotação só ganha uma
@@ -66,11 +76,12 @@ async def _produto_do_link(link):
     return achado.group(1), achado.group(2), "produto"
 
 
-async def _produtos(origens, momento):
+async def _produtos(origens, momento, limite=LINKS_POR_VEZ, segundos=None):
     """
     {origem: (loja, item, tipo)} das origens [(origem, link)]: o que já foi seguido fica guardado;
-    os novos, até LINKS_POR_VEZ, seguem o link. O link que não deu para seguir fica de fora e é
-    seguido no dia seguinte.
+    os novos, até `limite` (e, com `segundos`, só enquanto dá tempo, cada um com até
+    SEGUNDOS_POR_LINK), seguem o link. O link que não deu para seguir fica de fora e é seguido
+    na próxima vez.
     """
     with db.conexao() as con:
         _criar_tabelas(con)
@@ -78,9 +89,13 @@ async def _produtos(origens, momento):
                      con.execute("SELECT origem, loja, item, tipo FROM shopee_video_tendencia_links")}
     novos = [(origem, link) for origem, link in dict(origens).items() if origem not in guardados and link]
     achados = {}
-    for origem, link in novos[:LINKS_POR_VEZ]:
+    fim = relogio.monotonic() + segundos if segundos else None
+    for origem, link in novos[:limite]:
+        if fim is not None and relogio.monotonic() >= fim:
+            break
         try:
-            achados[origem] = await _produto_do_link(link)
+            seguir = _produto_do_link(link)
+            achados[origem] = await (asyncio.wait_for(seguir, SEGUNDOS_POR_LINK) if fim is not None else seguir)
         except Exception as e:
             logger.warning(f"⚠️ [Tendência] Um link não deu para seguir: {type(e).__name__}")
     if achados:
@@ -110,6 +125,51 @@ async def _oferta(loja, item):
     no = nos[0]
     return {"vendas": int(assistente._numero(no.get("sales"))), "nota": assistente._numero(no.get("ratingStar")),
             "comissao": assistente._numero(no.get("commissionRate")), "preco": assistente._numero(no.get("priceMin"))}
+
+
+def _do_espiao(agora):
+    """
+    [(origem, link, canal)] do que o Espião trouxe nos últimos DIAS_DO_ESPIAO dias. O que ele trouxe
+    do Canal Afiliados é nosso (os posts do robô e do Rafael): não conta como outro canal. O id é o
+    mesmo da fonte Viral do assistente, para o link ser seguido uma vez.
+    """
+    corte = (agora - timedelta(days=DIAS_DO_ESPIAO)).strftime("%Y-%m-%d %H:%M:%S")
+    return [(f"viral:{item.get('id')}", item.get("link_original"), str(item.get("chat_origem")))
+            for item in (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
+            if (item.get("data_captura") or "") >= corte and item.get("link_original")
+            and str(item.get("chat_origem")) != pedidos_do_canal.CANAL]
+
+
+async def canais_do_espiao(agora=None, seguir=True):
+    """
+    ({id do produto: em quantos canais diferentes do Espião ele apareceu nos últimos DIAS_DO_ESPIAO
+    dias}, quantos links do Espião desses dias ficaram sem seguir), para o 2º nível da escolha do
+    produto do vídeo de IA (P252 1): o mais perto que temos de quantos afiliados divulgam o produto.
+    Pelo id do produto, porque a oferta da API de afiliado não diz a loja. seguir: os links que a
+    anotação do dia ainda não seguiu são seguidos agora (LINKS_NA_ESCOLHA, SEGUNDOS_NA_ESCOLHA) e
+    ficam guardados; seguir=False só conta o que já foi seguido (a sonda do video_ia.py, que não
+    muda nada).
+    """
+    agora = agora or datetime.now(fuso_horario)
+    espiao = _do_espiao(agora)
+    links = [(origem, link) for origem, link, _canal in espiao]
+    if seguir:
+        produtos = await _produtos(links, agora.strftime("%Y-%m-%d %H:%M:%S"), limite=LINKS_NA_ESCOLHA,
+                                   segundos=SEGUNDOS_NA_ESCOLHA)
+    else:
+        with db.conexao() as con:
+            _criar_tabelas(con)
+            produtos = {linha[0]: tuple(linha[1:]) for linha in
+                        con.execute("SELECT origem, loja, item, tipo FROM shopee_video_tendencia_links")}
+    canais, sem_seguir = {}, 0
+    for origem, _link, canal in espiao:
+        if origem not in produtos:
+            sem_seguir += 1
+            continue
+        _loja, item, tipo = produtos[origem]
+        if tipo == "produto":
+            canais.setdefault(str(item), set()).add(canal)
+    return {item: len(grupo) for item, grupo in canais.items()}, sem_seguir
 
 
 def ja_anotou(agora=None):
@@ -145,14 +205,7 @@ async def _anotar(agora):
     candidatos = [(origem, link) for origem, _arquivo, link, _legenda in candidatos if link][:VIDEOS_DA_FONTE]
     if not candidatos:
         return "0 vídeo(s) na fonte", False
-    corte = (agora - timedelta(days=DIAS_DO_ESPIAO)).strftime("%Y-%m-%d %H:%M:%S")
-    # O que o Espião trouxe do Canal Afiliados é nosso (os posts do robô e do Rafael): não conta
-    # como outro canal. O id é o mesmo da fonte Viral do assistente, para o link ser seguido uma vez.
-    espiao = [item for item in (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
-              if (item.get("data_captura") or "") >= corte and item.get("link_original")
-              and str(item.get("chat_origem")) != pedidos_do_canal.CANAL]
-    no_espiao = [(f"viral:{item.get('id')}", item.get("link_original"), str(item.get("chat_origem")))
-                 for item in espiao]
+    no_espiao = _do_espiao(agora)
     produtos = await _produtos(candidatos + [(origem, link) for origem, link, _canal in no_espiao], momento)
 
     videos, tipos = {}, dict.fromkeys(TIPOS + ("link não seguido",), 0)
