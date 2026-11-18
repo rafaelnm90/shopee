@@ -124,6 +124,10 @@ def test_a_sonda_dos_produtos_so_mostra_contagens_no_log(monkeypatch, capsys):
     # O que a escolha do robô acharia agora (P234 1), sem a IA: a lista e as contagens da peneira dele.
     assert ("== A escolha do robô agora: os produtos em alta da Shopee: 3 da lista; 2 com a nota; 1 pagam o mínimo; "
             "1 novos") in saida
+    # E, dos novos, quantos passam em cada corte do 2º nível (P252 1) e nos três, só pelos links do Espião já
+    # seguidos: a sonda não vai à Shopee seguir link nenhum.
+    assert ("1 novos; dos novos, 0 com os vendidos, 1 com o preço e 1 com os canais do Espião; 0 no 2º nível "
+            "(0 link(s) do Espião sem seguir)") in saida
     # A palavra de busca vai à API, nunca ao log; nem o nome, o link ou a foto do produto.
     assert any('keyword: "organizador secreto", sortType: 2, limit: 50' == argumentos for argumentos, _ in pedidos)
     for privado in ("organizador", "coleira", "Garrafa", "shopee.com.br", "img.exemplo", "Casa", "Pet"):

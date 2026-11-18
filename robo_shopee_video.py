@@ -96,6 +96,7 @@ import interacoes_shopee_video as interacoes
 import pedidos_do_canal
 import postador_shopee_video as ps
 import registro_processos
+import tendencia_shopee_video as tendencia
 import videos
 import visualizacoes_shopee_video as visualizacoes
 from api_shopee import eh_video, link_para_converter
@@ -3342,6 +3343,16 @@ ORIGEM_DOS_NICHOS = "os mais vendidos dos nichos dos Achadinhos"
 PALAVRAS_DOS_NICHOS_POR_VEZ = 6
 OFERTAS_POR_PALAVRA = 40
 MOTIVO_DA_LISTA_NEGADA = "a API da Shopee negou a lista de produtos"
+# O 2º nível da escolha (P252 1, com os parâmetros da criadora do vídeo do YouTube de 18/11): dos produtos que passam
+# no 1º (o de cima), vêm primeiro os que já venderam bastante (as vendas que a API dá), os de preço bom para vender (a
+# partir de um mínimo, sem máximo: "exceto a qstao do preço não tem limite máximo") e os que poucos afiliados
+# divulgam (o mais perto que temos: em quantos canais do Espião o produto apareceu nos últimos dias,
+# tendencia.canais_do_espiao); entre eles, do que paga mais por venda para o que paga menos. Sem nenhum que sirva
+# (nenhum passa, ou a IA recusa a foto dos que passam), vale o 1º nível. Os números ficam nestas chaves de
+# shopee_video, que o Rafael muda no painel (Vídeo de IA ✨), com estes valores de começo.
+# Escolha do Rafael (18/11/2026, P252 1): DECISOES.md, Shopee Vídeo.
+FILTROS_DO_VIDEO_DE_IA = {"video_ia_vendidos_minimos": 1000, "video_ia_preco_minimo": 20.0,
+                          "video_ia_canais_maximos": 2}
 # As amostras do vídeo de IA (P236 1, flow_shopee_video.amostra) escolhem o produto como a produção, com o registro
 # à parte: o checkup conta o vídeo do dia sem elas.
 PROCESSO_DA_AMOSTRA = "amostra do vídeo de IA"
@@ -3510,28 +3521,83 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
             continue
         contagem["novos"] += 1
         bons.append({"item": item, "link": link, "nome": nome, "imagem": imagem, "valor": valor,
-                     "vendas": int(assistente._numero(oferta.get("sales")))})
+                     "vendas": int(assistente._numero(oferta.get("sales"))), "preco": preco})
     return sorted(bons, key=lambda bom: (-bom["valor"], -bom["vendas"])), contagem
+
+
+def filtros_do_video_de_ia(config=None):
+    """Os números do 2º nível da escolha (P252 1): os do painel e, no que faltar, os de FILTROS_DO_VIDEO_DE_IA."""
+    config = ler_config() if config is None else config
+    return {chave: padrao if config.get(chave) is None else config[chave]
+            for chave, padrao in FILTROS_DO_VIDEO_DE_IA.items()}
+
+
+def texto_dos_filtros(filtros):
+    """Os cortes do 2º nível em palavras (P252 1), para a tela do Vídeo de IA ✨ e o aviso do vídeo pronto."""
+    partes = []
+    if filtros["video_ia_vendidos_minimos"]:
+        partes.append(f"já venderam {int(filtros['video_ia_vendidos_minimos']):,} ou mais".replace(",", "."))
+    if filtros["video_ia_preco_minimo"]:
+        partes.append(f"custam a partir de {assistente._reais(float(filtros['video_ia_preco_minimo']))}")
+    canais = int(filtros["video_ia_canais_maximos"])
+    partes.append((f"apareceram em até {canais} {'canal' if canais == 1 else 'canais'} do Espião" if canais
+                   else "não apareceram em nenhum canal do Espião") + f" nos últimos {tendencia.DIAS_DO_ESPIAO} dias")
+    return " e ".join(partes) if len(partes) < 3 else f"{partes[0]}, {partes[1]} e {partes[2]}"
+
+
+def no_segundo_nivel(bom, canais, filtros):
+    """O produto passa nos cortes do 2º nível (P252 1)? canais: {item: em quantos canais do Espião ele apareceu}."""
+    return (bom["vendas"] >= filtros["video_ia_vendidos_minimos"] and bom["preco"] >= filtros["video_ia_preco_minimo"]
+            and canais.get(bom["item"], 0) <= filtros["video_ia_canais_maximos"])
+
+
+def pelos_dois_niveis(bons, canais, filtros):
+    """
+    (os candidatos na ordem da escolha, quantos passam no 2º nível) (P252 1): primeiro os que passam nos cortes do 2º
+    nível e depois os outros, cada grupo na ordem do 1º (do que paga mais por venda para o que paga menos; no empate,
+    o que vende mais). Cada um com o "nivel" (2 ou 1) em que entrou.
+    """
+    marcados = [dict(bom, nivel=2 if no_segundo_nivel(bom, canais, filtros) else 1) for bom in bons]
+    # O sorted é estável: dentro de cada nível, fica a ordem do 1º.
+    return sorted(marcados, key=lambda bom: -bom["nivel"]), sum(1 for bom in marcados if bom["nivel"] == 2)
+
+
+def _canais_do_espiao(agora=None):
+    """
+    (os canais do Espião por produto, quantos links do Espião ficaram sem seguir) (tendencia.canais_do_espiao). Sem a
+    contagem (um erro), (None, 0): o corte dos canais fica de fora nesta escolha, e o registro diz.
+    """
+    try:
+        return asyncio.run(tendencia.canais_do_espiao(agora_br(agora)))
+    except Exception as e:
+        logger.warning(f"⚠️ [Vídeo de IA] Sem a contagem dos canais do Espião: {type(e).__name__}")
+        return None, 0
 
 
 def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True):
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
-    lista da API de afiliado (candidatos_do_video_de_ia), do que paga mais por venda para o que paga menos, o 1º, até
-    FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio),
-    o link curto que o celular abre, "id" (o nome do vídeo de IA entre os vídeos do robô), "item", "valor", "posicao"
-    e "origem". Sem nenhum, o pedido é None; a foto que a IA recusou fica lembrada, e o produto não volta, como o que a
-    IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à parte no registro. api_shopee.BuscaNegada quando a
-    API não deu a lista. fora: mais produtos que ficam de fora (os das amostras já feitas); amostra=True: a escolha de
-    uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com uma pessoa vendendo o produto (P246
-    1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo diferente dos últimos vídeos (as
-    amostras de 8 s).
+    lista da API de afiliado (candidatos_do_video_de_ia), primeiro os do 2º nível (P252 1, pelos_dois_niveis) e depois
+    os outros, cada grupo do que paga mais por venda para o que paga menos, o 1º, até FOTOS_PARA_A_IA, cuja foto do
+    anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio), o link curto que o celular
+    abre, "id" (o nome do vídeo de IA entre os vídeos do robô), "item", "valor", "posicao", "origem", "nivel" (2 ou 1)
+    e os "filtros" do 2º nível. Sem nenhum, o pedido é None; a foto que a IA recusou fica lembrada, e o produto não
+    volta, como o que a IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à parte no registro.
+    api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que ficam de fora (os das amostras já
+    feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com
+    uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
+    diferente dos últimos vídeos (as amostras de 8 s).
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
                                                flow.itens_gerados() + flow.fotos_recusadas() + list(fora))
+    filtros = filtros_do_video_de_ia()
+    canais, sem_seguir = _canais_do_espiao(agora) if bons else ({}, 0)
+    bons, no_segundo = pelos_dois_niveis(bons, canais or {}, filtros)
     peneira = (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
-               f"mínimo; {contagem['novos']} novos")
+               f"mínimo; {contagem['novos']} novos; {no_segundo} no 2º nível"
+               + (" (sem a contagem do Espião)" if canais is None else "")
+               + (f" ({sem_seguir} link(s) do Espião sem seguir)" if sem_seguir else ""))
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
     olhadas = recusadas = mudam = sem_link = seguidos = 0
     for posicao, bom in enumerate(bons, 1):
@@ -3549,10 +3615,12 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True):
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
                                                    longo=longo)
         if pedido:
-            _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; estilo {pedido['estilo']}"
+            _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
+                              f"estilo {pedido['estilo']}"
                               + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)
             return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
-                         valor=bom["valor"], posicao=posicao, origem=origem), origem, True)
+                         valor=bom["valor"], posicao=posicao, origem=origem, nivel=bom["nivel"],
+                         filtros=filtros), origem, True)
         if serve is False:
             recusadas += 1
             flow.lembrar_foto_recusada(bom["item"])
@@ -3667,11 +3735,20 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
 
 
 def de_onde_veio_o_produto_do_video_de_ia(atual):
-    """A linha do aviso do vídeo de IA pronto que diz a escolha do produto (P234 1); "" sem a lista de onde veio."""
+    """
+    A linha do aviso do vídeo de IA pronto que diz a escolha do produto (P234 1), com o nível em que ele entrou (P252
+    1); "" sem a lista de onde veio.
+    """
     if not atual.get("origem"):
         return ""
-    return (f"Escolha: o que paga mais por venda ({assistente._reais(atual.get('valor') or 0)}) entre "
-            f"{atual['origem']}, ainda não postado.\n")
+    valor = assistente._reais(atual.get("valor") or 0)
+    if atual.get("nivel") == 2 and atual.get("filtros"):
+        return (f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']} que "
+                f"{texto_dos_filtros(atual['filtros'])}, ainda não postado.\n")
+    if atual.get("nivel") == 1:
+        return (f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']}, ainda não postado, pelo 1º "
+                "nível (nenhum produto do 2º nível serviu).\n")
+    return f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']}, ainda não postado.\n"
 
 
 # O vídeo gerado que não chega ao servidor em tantas rodadas é dado por perdido (o crédito já foi).

@@ -296,17 +296,26 @@ def sondar_produtos():
 
 def escolha_do_robo(robo, ja_postados):
     """
-    O que a escolha do produto do vídeo de IA acharia agora (P234 1), sem a IA e sem mudar nada: de que lista viriam
-    os produtos e as contagens da peneira do robô (com os que já tiveram vídeo ou a foto recusada de fora).
+    O que a escolha do produto do vídeo de IA acharia agora (P234 1 e P252 1), sem a IA e sem mudar nada: de que
+    lista viriam os produtos, as contagens da peneira do robô (com os que já tiveram vídeo ou a foto recusada de fora)
+    e, dos novos, quantos passam em cada corte do 2º nível e nos três, pelos links do Espião já seguidos (os outros
+    ficam sem seguir aqui, e a conta diz quantos).
     """
     try:
         ofertas, origem = robo.ofertas_para_o_video_de_ia()
     except api_shopee.BuscaNegada as e:
         return f"a API negou a lista ({e})"
-    _bons, contagem = robo.candidatos_do_video_de_ia(
+    bons, contagem = robo.candidatos_do_video_de_ia(
         ofertas, ja_postados, robo.flow.itens_gerados() + robo.flow.fotos_recusadas())
+    canais, sem_seguir = asyncio.run(robo.tendencia.canais_do_espiao(seguir=False))
+    filtros = robo.filtros_do_video_de_ia()
+    _ordem, no_segundo = robo.pelos_dois_niveis(bons, canais, filtros)
+    vendidos = sum(1 for bom in bons if bom["vendas"] >= filtros["video_ia_vendidos_minimos"])
+    preco = sum(1 for bom in bons if bom["preco"] >= filtros["video_ia_preco_minimo"])
+    poucos = sum(1 for bom in bons if canais.get(bom["item"], 0) <= filtros["video_ia_canais_maximos"])
     return (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
-            f"mínimo; {contagem['novos']} novos")
+            f"mínimo; {contagem['novos']} novos; dos novos, {vendidos} com os vendidos, {preco} com o preço e {poucos} "
+            f"com os canais do Espião; {no_segundo} no 2º nível ({sem_seguir} link(s) do Espião sem seguir)")
 
 
 def main(argumentos):
