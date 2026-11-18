@@ -434,6 +434,7 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_escolha_celular = State()
     aguardando_pareamento = State()
     aguardando_porta = State()
+    aguardando_filtro_video_ia = State()
 
 
 # --- Configuração ---
@@ -714,6 +715,17 @@ BOTAO_DESLIGAR_A_MAIS = "Desligar Produtos a Mais ⏸️"
 BOTAO_VIDEO_IA = "Vídeo de IA ✨"
 BOTAO_LIGAR_VIDEO_IA = "Ligar Vídeo de IA ✅"
 BOTAO_DESLIGAR_VIDEO_IA = "Desligar Vídeo de IA ⏸️"
+# Os números do 2º nível da escolha do produto do vídeo de IA (P252 1), um botão para cada: a chave em shopee_video,
+# o nome do exemplo (exemplos.py) e o exemplo de começo.
+BOTAO_VENDIDOS_VIDEO_IA = "Vendidos Mínimos 📦"
+BOTAO_PRECO_VIDEO_IA = "Preço Mínimo 💲"
+BOTAO_CANAIS_VIDEO_IA = "Canais do Espião 🕵️"
+FILTROS_DO_PAINEL = {BOTAO_VENDIDOS_VIDEO_IA: ("video_ia_vendidos_minimos", "video_ia_vendidos", "1000"),
+                     BOTAO_PRECO_VIDEO_IA: ("video_ia_preco_minimo", "video_ia_preco", "20"),
+                     BOTAO_CANAIS_VIDEO_IA: ("video_ia_canais_maximos", "video_ia_canais", "2")}
+# Só o nome do número no registro (o checkup é público): nunca o valor.
+NOMES_DOS_FILTROS = {"video_ia_vendidos_minimos": "vendidos mínimos", "video_ia_preco_minimo": "preço mínimo",
+                     "video_ia_canais_maximos": "canais do Espião"}
 # O processo do vídeo de IA no registro: o mesmo do robo_shopee_video (o teste confere).
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
@@ -840,7 +852,10 @@ def teclado_preparar():
 
 def teclado_video_ia(config):
     liga = BOTAO_DESLIGAR_VIDEO_IA if robo.video_de_ia_ligado(config) else BOTAO_LIGAR_VIDEO_IA
-    return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+    return montar_teclado([[KeyboardButton(text=liga)],
+                           [KeyboardButton(text=BOTAO_VENDIDOS_VIDEO_IA), KeyboardButton(text=BOTAO_PRECO_VIDEO_IA)],
+                           [KeyboardButton(text=BOTAO_CANAIS_VIDEO_IA)],
+                           [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
 def teclado_assistente(config):
@@ -1327,6 +1342,8 @@ ESTADOS_DO_RASCUNHO = ("aguardando_produtos_a_tirar", "editando_rascunho")
 ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
                          "aguardando_confirmacao_janela", "aguardando_confirmacao_pausa", "menu_assistente")
 ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_pareamento", "aguardando_porta")
+# Dos números do 2º nível (P252 1), o Cancelar ❌ volta à tela do Vídeo de IA ✨.
+ESTADOS_DO_VIDEO_IA = ("aguardando_filtro_video_ia",)
 
 
 async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, estado_anterior, dados=None):
@@ -1341,6 +1358,8 @@ async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, e
         await mostrar_assistente(message, state)
     elif nome in ESTADOS_DO_CELULAR:
         await mostrar_celular(message, state)
+    elif nome in ESTADOS_DO_VIDEO_IA:
+        await mostrar_video_ia(message, state)
     else:
         await mostrar_painel(message, state)
 
@@ -1646,11 +1665,13 @@ def limite_dos_videos_de_ia():
 
 def texto_video_ia(config, agora=None):
     """
-    A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1): DECISOES.md, Shopee Vídeo.
+    A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1; 18/11, P252 1): DECISOES.md,
+    Shopee Vídeo.
     """
     modelo, custo = robo.flow.MODELO_DA_PRODUCAO[0], robo.flow.CUSTO_DA_PRODUCAO
     ligado = robo.video_de_ia_ligado(config)
     minimo = robo.assistente._reais(robo.MINIMO_POR_VENDA)
+    segundo_nivel = robo.texto_dos_filtros(robo.filtros_do_video_de_ia(config))
     nota = f"{robo.NOTA_MINIMA_DO_VIDEO_DE_IA:.1f}".replace(".", ",")
     return (
         "✨ <b>Vídeo de IA</b>\n"
@@ -1658,9 +1679,11 @@ def texto_video_ia(config, agora=None):
         "com uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada): os 8 s "
         f"gerados pela foto do anúncio e mais 8 s do Estender, no {modelo} ({custo} créditos, dentro dos "
         f"{robo.flow.CREDITOS_GRATIS_DO_DIA} grátis do dia). O produto vem da própria Shopee, sem depender dos "
-        f"vídeos da fonte: entre os produtos em alta, os de nota {nota} ou mais, que pagam pelo menos {minimo} por "
-        "venda e que você ainda não postou, o robô pega o que paga mais por venda (sem a lista dos produtos em alta, "
-        "os mais vendidos dos nichos dos seus Achadinhos). A IA olha a foto do anúncio antes (se não servir, vai para "
+        "vídeos da fonte, em 2 níveis. No 1º, entre os produtos em alta (sem essa lista, os mais vendidos dos nichos "
+        f"dos seus Achadinhos), ficam os de nota {nota} ou mais, que pagam pelo menos {minimo} por venda e que você "
+        f"ainda não postou. No 2º, desses, vêm primeiro os que {segundo_nivel} (os que poucos afiliados "
+        "divulgam), e o robô pega o que paga mais por venda entre eles; se nenhum deles servir, vale o 1º nível: o "
+        "que paga mais por venda. A IA olha a foto do anúncio antes (se não servir, vai para "
         "o próximo), escreve as duas partes e a fala (a pessoa só segura, vira e aponta o produto, no mesmo lugar, "
         "com fala curta) e confere o vídeo pronto com a foto; o servidor ouve a fala, e o rascunho avisa se ela saiu "
         "embolada ou cortada. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
@@ -1672,6 +1695,8 @@ def texto_video_ia(config, agora=None):
         "<b>O que cada botão faz</b>\n"
         f"✅ <b>{BOTAO_LIGAR_VIDEO_IA}</b> / ⏸️ <b>{BOTAO_DESLIGAR_VIDEO_IA}</b>: liga ou desliga o vídeo de IA dos "
         "próximos rascunhos (os já salvos ficam como estão).\n"
+        f"📦 <b>{BOTAO_VENDIDOS_VIDEO_IA}</b>, 💲 <b>{BOTAO_PRECO_VIDEO_IA}</b> e 🕵️ <b>{BOTAO_CANAIS_VIDEO_IA}</b>: "
+        "mudam os números do 2º nível, um de cada vez; o novo vale a partir da próxima escolha do produto.\n"
         f"🔙 <b>{BOTAO_VOLTAR_ROBO}</b>: volta à tela do Robô Automático."
     )
 
@@ -1697,6 +1722,65 @@ async def ligar_video_ia_handler(message: types.Message, state: FSMContext):
                                  "ligado no painel" if ligar else "desligado no painel", ok=True)
     logger.info(f"✨ [Shopee Vídeo] Vídeo de IA {'ligado' if ligar else 'desligado'} pelo painel.")
     await mostrar_video_ia(message, state)
+
+
+def _milhar(numero):
+    return f"{int(numero):,}".replace(",", ".")
+
+
+def _preco_escrito(valor):
+    """O preço como o Rafael escreve, sem o R$ (20 ou 19,90): o exemplo da pergunta."""
+    return f"{float(valor):.2f}".replace(".", ",").removesuffix(",00")
+
+
+def _valor_do_filtro(chave, valor):
+    """O número de um filtro do 2º nível (P252 1) para mostrar."""
+    if chave == "video_ia_preco_minimo":
+        return robo.assistente._reais(float(valor))
+    return _milhar(valor)
+
+
+def pergunta_do_filtro(chave, atual, exemplo):
+    """A pergunta de um número do 2º nível da escolha do produto do vídeo de IA (P252 1)."""
+    agora = f"Agora: <b>{_valor_do_filtro(chave, atual)}</b>."
+    if chave == "video_ia_vendidos_minimos":
+        return ("📦 <b>Vendidos mínimos</b> (2º nível do vídeo de IA): ficam os produtos que já venderam pelo menos "
+                f"este tanto, o total que a Shopee mostra no anúncio. {agora}\n\n"
+                f"Mande o novo número (ex.: <code>{exemplo}</code>); <code>0</code> tira este corte.")
+    if chave == "video_ia_preco_minimo":
+        return ("💲 <b>Preço mínimo</b> (2º nível do vídeo de IA): ficam os produtos que custam a partir deste preço, "
+                f"o \"a partir de\" do anúncio, sem preço máximo. {agora}\n\n"
+                f"Mande o novo preço em reais (ex.: <code>{exemplo}</code>); <code>0</code> tira este corte.")
+    return ("🕵️ <b>Canais do Espião</b> (2º nível do vídeo de IA): ficam os produtos que apareceram em até este "
+            f"número de canais do Espião nos últimos {robo.tendencia.DIAS_DO_ESPIAO} dias, os que poucos afiliados "
+            f"divulgam. {agora}\n\n"
+            f"Mande o novo número (ex.: <code>{exemplo}</code>); <code>0</code> deixa só os que o Espião não viu.")
+
+
+def interpretar_filtro(chave, texto):
+    """O número mandado para um filtro do 2º nível (P252 1): 1000 ou 1.000; 20, 19,90 ou R$ 20. None se não serve."""
+    texto = (texto or "").upper().replace("R$", "").strip()
+    if chave == "video_ia_preco_minimo":
+        if "," in texto:
+            texto = texto.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"\d{1,3}(\.\d{3})+", texto):
+            texto = texto.replace(".", "")
+        return float(texto) if re.fullmatch(r"\d{1,6}(\.\d{1,2})?", texto) else None
+    texto = texto.replace(".", "")
+    digitos = 7 if chave == "video_ia_vendidos_minimos" else 3
+    return int(texto) if re.fullmatch(rf"\d{{1,{digitos}}}", texto) else None
+
+
+@router.message(F.text.in_(list(FILTROS_DO_PAINEL)), StateFilter("*"))
+async def filtro_video_ia_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    chave, nome, padrao = FILTROS_DO_PAINEL[message.text]
+    atual = robo.filtros_do_video_de_ia(ler_config())[chave]
+    escrito = _preco_escrito(atual) if chave == "video_ia_preco_minimo" else str(int(atual))
+    await state.set_state(ShopeeVideoFluxo.aguardando_filtro_video_ia)
+    await state.update_data(filtro_video_ia=message.text)
+    await message.answer(pergunta_do_filtro(chave, atual, exemplos.exemplo(nome, padrao, escrito)), parse_mode="HTML",
+                         reply_markup=teclado_cancelar)
 
 
 async def mostrar_produtos_a_mais(message, state):
@@ -3611,6 +3695,31 @@ async def receber_pareamento(message: types.Message, state: FSMContext):
         "<b>Endereço IP e porta</b>: mande aqui só a <b>porta</b>, o número depois dos dois-pontos "
         "(ex.: <code>41235</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(ShopeeVideoFluxo.aguardando_porta)
+
+
+# Depois dos botões do painel (registrados antes, eles ganham deste): o número de um filtro do 2º nível (P252 1).
+@router.message(ShopeeVideoFluxo.aguardando_filtro_video_ia)
+async def receber_filtro_video_ia(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    botao = (await state.get_data()).get("filtro_video_ia")
+    if botao not in FILTROS_DO_PAINEL:
+        await mostrar_video_ia(message, state)
+        return
+    chave, nome, padrao = FILTROS_DO_PAINEL[botao]
+    valor = interpretar_filtro(chave, message.text)
+    if valor is None:
+        jeito = ("em reais (ex.: <code>20</code> ou <code>19,90</code>)" if chave == "video_ia_preco_minimo"
+                 else f"(ex.: <code>{exemplos.exemplo(nome, padrao)}</code>)")
+        await message.answer(f"⚠️ Mande só o número {jeito}.", parse_mode="HTML", reply_markup=teclado_cancelar)
+        return
+    alterar_config(**{chave: valor})
+    exemplos.lembrar(nome, _preco_escrito(valor) if chave == "video_ia_preco_minimo" else valor)
+    registro_processos.registrar("shopee_video", PROCESSO_DO_VIDEO_DE_IA, "filtro do produto mudado no painel",
+                                 NOMES_DOS_FILTROS[chave], ok=True)
+    logger.info(f"✨ [Shopee Vídeo] Vídeo de IA: {NOMES_DOS_FILTROS[chave]} mudado pelo painel.")
+    await message.answer(f"✅ Pronto: {NOMES_DOS_FILTROS[chave]} agora é <b>{_valor_do_filtro(chave, valor)}</b>. "
+                         "Vale a partir da próxima escolha do produto do vídeo de IA.", parse_mode="HTML")
+    await mostrar_video_ia(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_porta)

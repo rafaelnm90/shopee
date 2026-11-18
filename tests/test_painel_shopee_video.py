@@ -432,6 +432,51 @@ def test_cancelar_na_escolha_de_faixa_ou_fixo_volta_a_tela_de_origem(bm, Msg, Es
         assert est.estado == tela
 
 
+def test_numeros_do_segundo_nivel_do_video_de_ia_mudam_no_painel(bm, Msg, Est):
+    # Escolha do Rafael (18/11, P252 1): "Os números mudam no painel": vendidos mínimos, preço mínimo (sem máximo) e
+    # canais do Espião, um botão para cada, na tela do Vídeo de IA ✨.
+    sv, est = _painel(bm), Est()
+    msg = Msg("Vendidos Mínimos 📦")
+    rodar(sv.filtro_video_ia_handler(msg, est))
+    assert est.estado == sv.ShopeeVideoFluxo.aguardando_filtro_video_ia
+    assert "Agora: <b>1.000</b>" in msg.saidas[-1] and "(ex.: <code>1000</code>)" in msg.saidas[-1]
+    assert "<code>0</code> tira este corte" in msg.saidas[-1]
+    # O que não é número não muda nada e pergunta de novo.
+    msg = Msg("muitos")
+    rodar(sv.receber_filtro_video_ia(msg, est))
+    assert "Mande só o número" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.aguardando_filtro_video_ia
+    assert sv.robo.filtros_do_video_de_ia()["video_ia_vendidos_minimos"] == 1000
+    msg = Msg("2.500")
+    rodar(sv.receber_filtro_video_ia(msg, est))
+    assert sv.robo.ler_config()["video_ia_vendidos_minimos"] == 2500
+    assert "vendidos mínimos agora é <b>2.500</b>" in msg.saidas[-2]
+    assert "já venderam 2.500 ou mais" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.menu_robo
+    # O preço aceita vírgula e o R$; o exemplo da próxima pergunta é o de agora.
+    rodar(sv.filtro_video_ia_handler(Msg("Preço Mínimo 💲"), est))
+    msg = Msg("R$ 19,90")
+    rodar(sv.receber_filtro_video_ia(msg, est))
+    assert sv.robo.ler_config()["video_ia_preco_minimo"] == 19.9 and "custam a partir de R$ 19,90" in msg.saidas[-1]
+    msg = Msg("Preço Mínimo 💲")
+    rodar(sv.filtro_video_ia_handler(msg, est))
+    assert "Agora: <b>R$ 19,90</b>" in msg.saidas[-1] and "(ex.: <code>19,90</code>)" in msg.saidas[-1]
+    # Canais: 0 deixa só os que o Espião não viu.
+    rodar(sv.filtro_video_ia_handler(Msg("Canais do Espião 🕵️"), est))
+    msg = Msg("0")
+    rodar(sv.receber_filtro_video_ia(msg, est))
+    assert sv.robo.ler_config()["video_ia_canais_maximos"] == 0
+    assert "não apareceram em nenhum canal do Espião" in msg.saidas[-1]
+    assert sv.interpretar_filtro("video_ia_canais_maximos", "1000") is None
+    assert sv.interpretar_filtro("video_ia_preco_minimo", "1.200") == 1200.0
+    assert sv.interpretar_filtro("video_ia_preco_minimo", "20.5") == 20.5
+    # No registro (o checkup é público), só qual número mudou, nunca o valor.
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY id DESC LIMIT 1",
+                     sv.PROCESSO_DO_VIDEO_DE_IA) == ("filtro do produto mudado no painel", "canais do Espião")
+    # O Cancelar ❌ volta à tela do Vídeo de IA ✨, sem mudar nada.
+    est, msg = Est(), Msg("Cancelar ❌")
+    rodar(sv.voltar_depois_de_cancelar(msg, est, "ShopeeVideoFluxo:aguardando_filtro_video_ia"))
+    assert "✨ <b>Vídeo de IA</b>" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.menu_robo
+
+
 class MsgComMidia:
     """Mensagem que também guarda os vídeos e as fotos mandados."""
 
@@ -2346,12 +2391,19 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
         "No máximo 5 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨ "
         "(48 créditos cada; passando dos 50 grátis do dia, os outros saem do plano)")
     # Escolha do Rafael (15/11, P234 1): o produto vem da API de afiliado da Shopee, sem depender da fonte.
-    for trecho in ("sem depender dos vídeos da fonte", "entre os produtos em alta, os de nota 4,5 ou mais, que pagam "
-                   "pelo menos R$ 2,00 por venda e que você ainda não postou", "o que paga mais por venda",
+    for trecho in ("sem depender dos vídeos da fonte", "ficam os de nota 4,5 ou mais, que pagam pelo menos R$ 2,00 por "
+                   "venda e que você ainda não postou", "o que paga mais por venda",
                    "os mais vendidos dos nichos dos seus Achadinhos", "não ganha outro"):
         assert trecho in msg.saidas[-1]
+    # Escolha do Rafael (18/11, P252 1): o 2º nível, com os números de agora e os botões que os mudam.
+    for trecho in ("em 2 níveis", "No 2º, desses, vêm primeiro os que já venderam 1.000 ou mais, custam a partir de "
+                   "R$ 20,00 e apareceram em até 2 canais do Espião nos últimos 3 dias (os que poucos afiliados "
+                   "divulgam)", "se nenhum deles servir, vale o 1º nível", "<b>Vendidos Mínimos 📦</b>",
+                   "<b>Preço Mínimo 💲</b>", "<b>Canais do Espião 🕵️</b>"):
+        assert trecho in msg.saidas[-1], trecho
     assert "próximos 10" not in msg.saidas[-1]
-    assert _textos(sv.teclado_video_ia(sv.ler_config())) == ["Desligar Vídeo de IA ⏸️", "Voltar ao Robô 🔙"]
+    assert _textos(sv.teclado_video_ia(sv.ler_config())) == [
+        "Desligar Vídeo de IA ⏸️", "Vendidos Mínimos 📦", "Preço Mínimo 💲", "Canais do Espião 🕵️", "Voltar ao Robô 🔙"]
     rodar(sv.ligar_video_ia_handler(Msg("Desligar Vídeo de IA ⏸️"), est))
     assert sv.robo.ler_config()["robo_video_ia"] is False
     assert "Vídeo de IA: ⏸️ <b>desligado</b>" in sv.texto_robo(sv.ler_config())
