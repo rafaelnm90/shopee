@@ -731,6 +731,12 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   escolha da resolução (só 16:9 ou 9:16 e x1 a x4, visto em 15/11). O robô escolhe primeiro
   o modelo e depois as opções dele.
 - O voltar com a lista dos modelos aberta fecha o pedido inteiro, de volta ao projeto.
+- O modo Imagem (mapeado em 18/11/2026 para a P253 1, sem gerar nada): no pedido, o Imagem fica à esquerda do
+  Vídeo e do Agente; marcado, o botão do modelo mostra "Nano Banana 2.1" e "x1", e as opções dele mostram
+  **"A geração vai usar 0 créditos de IA"** (a imagem não gasta crédito do plano), os formatos 16:9, 4:3, 1:1,
+  3:4 e 9:16 (o 9:16 marcado), de x1 a x4 e a lista dos modelos. O voltar com as opções abertas fecha o pedido,
+  de volta ao projeto, como no Vídeo. O modo fica marcado para o pedido seguinte; o robô toca no Vídeo antes de
+  montar o pedido do vídeo (`montar_o_pedido`), então o Imagem deixado marcado não atrapalha.
 - Depois do Gerar (mapeado no 1º vídeo do teste, 15/11/2026): o pedido fecha e o vídeo
   novo aparece no projeto como o 1º quadro da grade, com "1% Gerando…" (e um Reutilizar
   comando dentro). O do Veo 3.1 - Lite ficou pronto em menos de 1 min: o quadro passa a
