@@ -113,6 +113,10 @@ HORA_DO_DESCURTIR_SV = 4
 # A rodada da hora do descurtir que não chegou à limpeza, com o porquê (o mesmo do
 # robo_shopee_video.PROCESSO_SEM_LIMPEZA; o tests/test_checkup.py confere).
 PROCESSO_SEM_LIMPEZA_SV = "hora do descurtir: rodada sem a limpeza"
+# Cada rodada que o bot põe no celular (o painel_shopee_video anota o início) e o mais que uma dura: o
+# robo_shopee_video.MAXIMO_DA_RODADA e o minuto a mais do systemd (o tests/test_checkup.py confere).
+PROCESSO_DA_RODADA_SV = "rodada fora do bot"
+DURACAO_DA_RODADA_SV = timedelta(minutes=31)
 # O alerta do celular de antes que ficou no privado: pela P205 1 ele sai quando vem o novo (os mesmos
 # textos do robo_shopee_video.PROCESSO_DO_ALERTA e O_DE_ANTES_FICOU; o tests/test_checkup.py confere).
 PROCESSO_DO_ALERTA_SV = "alerta do celular"
@@ -416,7 +420,7 @@ SEM_META = {
     ("shopee_video", "fazer agora"),
     ("shopee_video", "link do post"), ("shopee_video", "leitura da tela"),
     ("shopee_video", "preparo interrompido"),
-    ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
+    ("shopee_video", PROCESSO_DA_RODADA_SV), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"), ("shopee_video", "app reaberto"),
     ("shopee_video", "produto de loja de férias"), ("shopee_video", "comissão: "),
     ("shopee_video", "edição do vídeo: "), ("shopee_video", "visualizações na grade"),
@@ -1594,11 +1598,23 @@ def sobreposicoes(agora=None):
         quando = datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")
         return any(b <= quando <= b + PREPARO_DO_BOTAO for b in botao)
 
-    no_descurtir, pedidos_no_botao = [], []
+    # A rodada que o bot pôs no celular antes da hora do descurtir e passou dela (o rascunho começado às 03:55 que
+    # acaba às 04:01) não furou a vez da limpeza: o robô não escolheu outra coisa na hora, e a limpeza é a 1ª coisa
+    # que ele começa nela (P161 1). Vem à parte; a que começa na hora e faz outra coisa antes da limpeza é ponto.
+    inicios = [m for m, *_ in registro_processos.sequencia("shopee_video", PROCESSO_DA_RODADA_SV, desde)]
+
+    def da_rodada_de_antes(momento):
+        inicio = max((m for m in inicios if m <= momento), default="")
+        return (inicio != "" and inicio < f"{momento[:10]} {HORA_DO_DESCURTIR_SV:02d}:00:00"
+                and datetime.strptime(momento, "%Y-%m-%d %H:%M:%S")
+                - datetime.strptime(inicio, "%Y-%m-%d %H:%M:%S") <= DURACAO_DA_RODADA_SV)
+
+    no_descurtir, pedidos_no_botao, de_antes = [], [], []
     for momento, tipo, o_que in atividades:
         if (int(momento[11:13]) == HORA_DO_DESCURTIR_SV and tipo != "descurtir"
                 and momento < fim_da_limpeza.get(momento[:10], "")):
-            (pedidos_no_botao if pedido_no_botao(momento) else no_descurtir).append((momento[11:16], o_que))
+            (pedidos_no_botao if pedido_no_botao(momento) else de_antes if da_rodada_de_antes(momento)
+             else no_descurtir).append((momento[11:16], o_que))
 
     def fora_do_dia(momento):
         return not DURANTE_O_DIA_SV[0] <= int(momento[11:13]) < DURANTE_O_DIA_SV[1]
@@ -1620,7 +1636,7 @@ def sobreposicoes(agora=None):
         "shopee_video", "assistente: envio", desde)]
     rodadas, sem_limpeza = rodadas_na_hora_do_descurtir(agora)
     return {"no_descurtir": no_descurtir, "pedidos_no_botao": pedidos_no_botao, "rodadas_no_descurtir": rodadas,
-            "sem_limpeza": sem_limpeza,
+            "sem_limpeza": sem_limpeza, "da_rodada_de_antes": de_antes,
             "leituras_fora": leituras_fora, "leituras_coladas": leituras_coladas, "antigo_fora": antigo_fora,
             "rotinas_coladas": coladas, "assistente": assistente,
             "robo_ativo": not config.get("robo_pausado", True)}
@@ -1633,7 +1649,7 @@ def rodadas_na_hora_do_descurtir(agora=None):
     limpeza que não rodou na hora, diz se o robô nem rodou ou o que o segurou.
     """
     desde = _momento(_agora(agora) - timedelta(hours=24))
-    rodadas = [momento[11:16] for momento, *_ in registro_processos.sequencia("shopee_video", "rodada fora do bot",
+    rodadas = [momento[11:16] for momento, *_ in registro_processos.sequencia("shopee_video", PROCESSO_DA_RODADA_SV,
                                                                               desde)
                if int(momento[11:13]) == HORA_DO_DESCURTIR_SV]
     sem_limpeza = [(momento[11:16], resultado) for momento, _p, resultado, _d, _o in registro_processos.sequencia(
@@ -2261,6 +2277,10 @@ def main():
     if sobre["pedidos_no_botao"]:
         print(f"   à parte, pedidos nos botões do painel (valem a qualquer hora): {len(sobre['pedidos_no_botao'])} - "
               + ", ".join(hora for hora, _o in sobre["pedidos_no_botao"][:10]))
+    if sobre["da_rodada_de_antes"]:
+        print(f"   à parte, da rodada que começou antes das {HORA_DO_DESCURTIR_SV}h (não furou a vez da limpeza): "
+              f"{len(sobre['da_rodada_de_antes'])} - "
+              + ", ".join(f"{hora} {o_que}" for hora, o_que in sobre["da_rodada_de_antes"][:10]))
     print("Rotinas de texto coladas (menos de "
           f"{INTERVALO_CURTO_ROTINA} min no mesmo canal): {sum(len(v) for v in sobre['rotinas_coladas'].values())}")
     for canal, pares in sobre["rotinas_coladas"].items():

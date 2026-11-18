@@ -588,6 +588,49 @@ def test_pedido_nos_botoes_nao_e_sobreposicao():
     assert checkup.sobreposicoes(AGORA)["leituras_fora"] == []
 
 
+def test_rodada_de_antes_das_4h_que_passa_delas_nao_e_sobreposicao():
+    # 18/11: o rascunho da rodada das 03:55 anexou às 04:00 e salvou às 04:01, e a limpeza veio na rodada
+    # das 04:10, a 1ª da hora. O robô não escolheu outra coisa na hora do descurtir (P161 1): o checkup
+    # mostra à parte, sem ponto de atenção. A rodada que começa na hora e faz outra coisa antes continua ponto.
+    import os
+    import robo_shopee_video as robo
+    import registro_processos
+    from conftest import RAIZ
+    assert checkup.DURACAO_DA_RODADA_SV == timedelta(seconds=robo.MAXIMO_DA_RODADA + 60)
+    with open(os.path.join(RAIZ, "painel_shopee_video.py"), encoding="utf-8") as arquivo:
+        assert f'"shopee_video", "{checkup.PROCESSO_DA_RODADA_SV}", "unidade própria"' in arquivo.read()
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    registro_processos.registrar("shopee_video", checkup.PROCESSO_DA_RODADA_SV, "unidade própria", agora=em("03:55"))
+    registro_processos.registrar("shopee_video", "anexar o produto", "anexado", agora=em("04:00"))
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("04:01"))
+    registro_processos.registrar("shopee_video", "descurtir no fim do rascunho", "descurtido", agora=em("04:01"))
+    registro_processos.registrar("shopee_video", checkup.PROCESSO_DA_RODADA_SV, "unidade própria", agora=em("04:10"))
+    robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:12"))
+    r = checkup.sobreposicoes(AGORA)
+    assert r["no_descurtir"] == [] and r["pedidos_no_botao"] == []
+    assert [hora for hora, _o in r["da_rodada_de_antes"]] == ["04:00", "04:01", "04:01"]
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "ruins": [], "salvos": 0, "vencidos": 0},
+                                       {}, None, AGORA, sobre=r)
+    assert not any(p.startswith("Sobreposição") for p in pontos)
+    # Com a rodada da hora antes da atividade, ela é da hora: ponto de atenção, como sempre.
+    registro_processos.registrar("shopee_video", checkup.PROCESSO_DA_RODADA_SV, "unidade própria", agora=em("04:02"))
+    robo.registrar_tentativa("feed", "comentado", agora=em("04:03"))
+    r = checkup.sobreposicoes(AGORA)
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:03"]
+    # A rodada de antes da hora que já teria passado do máximo de uma rodada não explica a atividade.
+    with db.conexao() as conexao:
+        conexao.execute("DELETE FROM registro_processos WHERE processo = ?", (checkup.PROCESSO_DA_RODADA_SV,))
+    registro_processos.registrar("shopee_video", checkup.PROCESSO_DA_RODADA_SV, "unidade própria", agora=em("03:25"))
+    r = checkup.sobreposicoes(AGORA)
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:00", "04:01", "04:01", "04:03"]
+    assert r["da_rodada_de_antes"] == []
+
+
 def test_pontos_de_atencao():
     erros = [{"origem": "bot_mestre.py", "lugar": "bot_mestre.py:10", "texto": "x", "tipo": "ValueError",
               "qtd": 1, "ultimo": "10:00", "novo": True},
