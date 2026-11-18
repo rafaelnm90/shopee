@@ -323,6 +323,17 @@ def marcar_vista(cod, agora=None):
         return cursor.rowcount > 0
 
 
+def ja_vista(cod):
+    """A informação existe e já foi vista (o Vi ✅ no privado ou um "ok" anterior na conversa)?"""
+    numero = _numero_da_informacao(cod)
+    if numero is None:
+        return False
+    with db.conexao() as con:
+        _criar_tabela_das_informacoes(con)
+        linha = con.execute("SELECT vista FROM informacoes_rafael WHERE id = ?", (numero,)).fetchone()
+    return bool(linha and linha[0])
+
+
 def marcar_aviso_da_informacao(ident, agora=None, mensagem=None):
     """O aviso da informação saiu; mensagem: o id dele no privado, para tirar os lembretes depois."""
     with db.conexao() as con:
@@ -538,7 +549,12 @@ def main(argumentos):
         if acao == "vista":
             cod = valor.strip().upper()
             if not marcar_vista(cod):
-                print("⚠️ Código não encontrado ou já visto.")
+                if ja_vista(cod):
+                    # O Rafael já tocou no Vi ✅ do aviso (o bot tirou os lembretes) e também disse "ok" na
+                    # conversa: não é erro, e nada mais muda no privado.
+                    print(f"✅ {cod} já estava vista: nada a fazer.")
+                    return 0
+                print("⚠️ Código não encontrado.")
                 return 1
             apagadas, total = tirar_lembretes_pelo_servidor(cod)
             print(f"✅ {cod} vista: os lembretes pararam; {apagadas} de {total} lembretes apagados do privado.")
@@ -550,7 +566,12 @@ def main(argumentos):
             avisar_rafael.mandar_texto(texto_da_confirmacao(cod, apagadas, total))
             print(f"✅ {cod} respondida: os lembretes pararam; {apagadas} de {total} mensagens apagadas do privado.")
             return 0
-        print("⚠️ Código não encontrado ou já respondido.")
+        numero = valor.strip().upper().lstrip("P")
+        if numero.isdigit() and _foi_respondida(int(numero)):
+            # A que já estava respondida não é erro: os lembretes já pararam, e nada mais muda no privado.
+            print(f"✅ {valor.strip().upper()} já estava respondida: nada a fazer.")
+            return 0
+        print("⚠️ Código não encontrado.")
         return 1
     except Exception as e:
         # Só o tipo: a mensagem pode trazer o texto da pergunta ou a URL com o token.

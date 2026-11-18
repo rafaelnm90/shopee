@@ -159,7 +159,9 @@ def test_respondida_sai_do_privado_com_os_lembretes(monkeypatch):
     assert pr.main(["respondida", "p1"]) == 0
     assert apagadas == [32, 33] and editadas[0][0] == 31 and "P1 respondida" in editadas[0][1]
     assert "Recebi a sua resposta da pergunta P1" in mandadas[0] and "2 mensagem(ns)" in mandadas[0]
-    assert pr.main(["respondida", "P1"]) == 1 and len(mandadas) == 1          # a segunda vez não mexe em nada
+    # A segunda vez não mexe em nada e não é erro (o avisar.yml fica verde); o código que não existe é.
+    assert pr.main(["respondida", "P1"]) == 0 and len(mandadas) == 1 and apagadas == [32, 33]
+    assert pr.main(["respondida", "P9"]) == 1
     assert "apaguei daqui a pergunta e os lembretes dela" in pr.texto_da_confirmacao("P2", 3, 3)
     assert pr.texto_da_confirmacao("P2", 0, 0).endswith("Parei de lembrar.")
 
@@ -234,7 +236,29 @@ def test_vista_pela_conversa_tira_os_lembretes_e_deixa_o_aviso(monkeypatch):
     assert ident == 41 and html is True and "você viu em" in aviso and "(I1)" in aviso
     assert "Informação." in aviso and LINK in aviso and "Toque em" not in aviso and "Lembro" not in aviso
     assert pr.mensagens_da_informacao("I1") == [41, 42]
-    assert pr.main(["vista", "I1"]) == 1 and pr.main(["vista", "P1"]) == 1
+    assert pr.main(["vista", "I1"]) == 0 and apagadas == [43]          # a segunda vez: nada muda, sem erro
+    assert pr.main(["vista", "P1"]) == 1 and pr.main(["vista", "I9"]) == 1
+
+
+def test_ok_na_conversa_depois_do_vi_no_privado_nao_e_erro(monkeypatch):
+    # 18/11: o Rafael tocou no Vi ✅ de 5 informações no privado e também mandou o "ok" delas na conversa;
+    # os 5 avisar.yml (vista) saíram vermelhos, com as informações já vistas. A já vista não é erro: nada
+    # muda no privado e o workflow fica verde. O código que não existe continua erro.
+    import avisar_rafael
+    pr.nova_informacao("Informação.", LINK, AGORA)
+    assert pr.marcar_vista("I1", AGORA)                                  # o Vi ✅ no privado
+    mexidas = []
+    monkeypatch.setattr(avisar_rafael, "apagar_mensagem", lambda ident: mexidas.append(ident) or True)
+    monkeypatch.setattr(avisar_rafael, "editar_texto",
+                        lambda ident, texto, html=False: mexidas.append(ident) or True)
+    monkeypatch.setattr(avisar_rafael, "tirar_botoes", lambda ident: mexidas.append(ident) or True)
+    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto, html=False: mexidas.append(texto) or True)
+    assert pr.main(["vista", "i1"]) == 0 and mexidas == []
+    assert pr.main(["vista", "I2"]) == 1 and mexidas == []
+    pr.nova("Pergunta?", OPCOES, LINK, AGORA)
+    assert pr.marcar_respondida("P1", AGORA)
+    assert pr.main(["respondida", "p1"]) == 0 and mexidas == []
+    assert pr.main(["respondida", "P2"]) == 1 and pr.main(["respondida", "xyz"]) == 1
 
 
 def test_lembrete_novo_da_informacao_apaga_o_anterior():
