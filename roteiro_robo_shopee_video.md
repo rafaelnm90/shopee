@@ -775,7 +775,9 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   pronto, o ícone de várias versões (a continuação ficou pronta em pouco mais de 1 min). Fechado
   à força logo depois do Gerar, antes de mostrar a continuação, o Flow a perdeu: o vídeo ficou
   com uma versão só e nada sendo gerado (visto no 1º vídeo de 16 s da produção, 17/11/2026); o
-  robô só sai do vídeo com o "Gerando..." à vista (`continuacao_na_tela`). O
+  robô só sai do vídeo com o "Gerando..." à vista (`continuacao_na_tela`) e mais 10 s. Na
+  espera no projeto, a porcentagem no quadro conta como a continuação sendo gerada, com ou sem
+  o "Gerando..." escrito (`porcentagem_no_projeto`; a barra do player não conta). O
   Baixar da versão estendida trouxe os 16 s juntos (a original e a continuação), no tamanho
   original: o 1080p não estava livre nessa janela. O robô continua conferindo a duração do
   arquivo e, curto, junta a original.

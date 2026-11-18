@@ -1425,6 +1425,40 @@ def test_espera_da_extensao_diz_por_que_acabou(monkeypatch):
     assert segundos is not None and porque == ""
 
 
+class _Telas:
+    """Um celular de mentira que mostra as telas da lista, uma por leitura (a última fica)."""
+
+    def __init__(self, *telas):
+        self.telas, self.lidas = list(telas), 0
+
+    def dump_hierarchy(self):
+        self.lidas += 1
+        return "<hierarchy>" + "".join(self.telas[min(self.lidas, len(self.telas)) - 1]) + "</hierarchy>"
+
+
+def test_porcentagem_no_quadro_e_a_continuacao_ainda_sendo_gerada(monkeypatch):
+    # No projeto, o quadro do vídeo que o Flow estende mostra a porcentagem (roteiro, 1ª amostra de 16 s, 17/11). Sem o
+    # "Gerando…" escrito, a espera não pode concluir que a continuação não veio (o vídeo de IA pedido sairia sem
+    # rascunho): espera o quadro ficar com as 2 versões.
+    monkeypatch.setattr(flow.time, "sleep", lambda segundos: None)
+    monkeypatch.setattr(flow, "ESPERA_SEM_CONTINUACAO", 0)
+    monkeypatch.setattr(flow, "ESPERA_DA_GERACAO", 30)
+    uma = _no((0, 466, 537, 1422), desc="Mulher usando o copo, 1 item")
+    duas = _no((0, 466, 537, 1422), desc="Mulher usando o copo, 2 itens")
+    porcentagem = _no((0, 466, 537, 1422), desc="45%", clicavel=False)
+    foto = _no((543, 466, 1080, 1004), desc="Copo na mesa, 1 item")
+    celular = _Telas(*[(porcentagem, uma, foto)] * 6, (duas, foto))
+    segundos, porque = flow.esperar_a_extensao(celular, guardar_telas=False)
+    assert segundos is not None and porque == "" and celular.lidas >= 6 + flow.PRONTO_SEGUIDAS
+    # A porcentagem no quadro do projeto conta, com ou sem o "Gerando…"; a barra do player e a bateria, não.
+    barra = _no((271, 2058, 397, 2184), "android.widget.SeekBar", desc="23%")
+    bateria = _no((888, 49, 959, 96), texto="81%", pacote="com.android.systemui")
+    gerando = _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False)
+    assert flow.porcentagem_no_projeto("<hierarchy>" + porcentagem + "</hierarchy>")
+    assert flow.porcentagem_no_projeto("<hierarchy>" + gerando + "</hierarchy>")
+    assert not flow.porcentagem_no_projeto("<hierarchy>" + barra + bateria + uma + foto + "</hierarchy>")
+
+
 def test_leitura_do_painel_do_estender():
     painel = ('<hierarchy>' + _no((0, 152, 1080, 1096), desc="1 de 1")
               + _no((45, 1319, 1035, 1445), "android.widget.EditText", texto=CONTINUACAO)
