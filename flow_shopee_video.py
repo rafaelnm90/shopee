@@ -54,11 +54,13 @@ vídeo, no privado.
     python3 flow_shopee_video.py amostra --longa --fala-inteira  # a de 16 s falando o tempo todo, sem o parado (P255 1)
     python3 flow_shopee_video.py personagens          # as fotos dos personagens que faltam (P250 1 e P258 1)
     python3 flow_shopee_video.py personagens vovo     # a foto da Vovó de novo (outra)
+    python3 flow_shopee_video.py aprovar-personagens  # o OK do Rafael às fotos mandadas (P259 1); com chaves, só essas
     python3 flow_shopee_video.py imagem-teste         # a imagem de teste de um personagem com o produto (P253 1)
 
 As fotos dos 10 personagens fixos (P250 1 e P258 1, 19/11/2026): no modo Imagem do Flow, que não gasta crédito (o
 Nano Banana 2.1, conferido na tela com "0 créditos de IA" antes do Gerar), uma por personagem, baixada no tamanho
-original e mandada ao privado do Rafael para ele aprovar ou pedir outra (fotos_dos_personagens).
+original e mandada ao privado do Rafael para ele aprovar ou pedir outra (fotos_dos_personagens). O OK dele, dado na
+conversa com o Claude, fica anotado em cada foto (aprovar_as_fotos), e só as aprovadas valem (fotos_aprovadas).
 """
 import asyncio
 import difflib
@@ -2469,12 +2471,41 @@ def gerar_a_imagem(d, prompt, local, com_foto=False):
 
 
 def fotos_guardadas():
-    """{chave: {"arquivo", "feita_em", "mandada_em"}} das fotos dos personagens."""
+    """{chave: {"arquivo", "feita_em", "mandada_em", "aprovada_em"}} das fotos dos personagens."""
     return dict((db.ler_config(CHAVE, {}) or {}).get("personagens") or {})
 
 
 def marcar_foto(chave, **campos):
     db.atualizar_config(CHAVE, lambda dados: dados.setdefault("personagens", {}).setdefault(chave, {}).update(campos))
+
+
+def fotos_aprovadas():
+    """As fotos que valem (P250 1): {chave: arquivo} das que o Rafael aprovou e continuam no servidor."""
+    return {chave: foto["arquivo"] for chave, foto in fotos_guardadas().items()
+            if foto.get("aprovada_em") and foto.get("mandada_em") and os.path.exists(foto.get("arquivo") or "")}
+
+
+def aprovar_as_fotos(chaves=None):
+    """
+    O OK do Rafael às fotos dos personagens (P259 1), dado na conversa com o Claude: marca como aprovadas as fotos
+    que ele viu no privado; sem chaves, todas as dos 10 personagens; com chaves, essas. Nada é marcado quando uma
+    chave não existe ou quando uma das fotos pedidas não foi ao privado (ele não a viu). A foto refeita perde a marca
+    ao ser feita e só volta a valer com um OK novo. 0 aprovou, 1 não. Só chaves e números no log.
+    """
+    if chaves and not set(chaves) <= {p["chave"] for p in PERSONAGENS}:
+        print("Personagens: chave desconhecida; as chaves são " + ", ".join(p["chave"] for p in PERSONAGENS))
+        return 1
+    guardadas = fotos_guardadas()
+    pedidas = [p["chave"] for p in PERSONAGENS if not chaves or p["chave"] in chaves]
+    sem_ver = [chave for chave in pedidas if not (guardadas.get(chave, {}).get("mandada_em")
+                                                  and os.path.exists(guardadas[chave].get("arquivo") or ""))]
+    if sem_ver:
+        print("Personagens: nada foi aprovado; sem a foto no privado: " + ", ".join(sem_ver))
+        return 1
+    for chave in pedidas:
+        marcar_foto(chave, aprovada_em=agora())
+    print(f"Personagens: {len(pedidas)} foto(s) aprovada(s); valendo: {len(fotos_aprovadas())} de {len(PERSONAGENS)}")
+    return 0
 
 
 def legenda_do_personagem(p, numero, total):
@@ -2557,7 +2588,8 @@ def _fotos_no_celular(lista):
         for p in lista:
             local = os.path.join(PASTA_DOS_PERSONAGENS, f"{p['chave']}.jpg")
             gerar_a_imagem(d, pedido_do_personagem(p), local)
-            marcar_foto(p["chave"], arquivo=local, feita_em=agora(), mandada_em="")
+            # A foto nova ainda não foi vista: vai ao privado de novo e só vale com um OK novo (P259 1).
+            marcar_foto(p["chave"], arquivo=local, feita_em=agora(), mandada_em="", aprovada_em="")
             print(f"Personagens: a foto de {p['chave']} foi feita ({os.path.getsize(local) // 1024} KB)")
     except Parada as e:
         casos_robo.guardar(d, "flow", "parou", str(e), passo="flow imagem")
@@ -3191,11 +3223,14 @@ def main(argumentos):
             return 1
         finally:
             logging.disable(logging.NOTSET)
-    if argumentos and argumentos[0] == "personagens":
-        # As chaves vêm do campo "quais" do video_ia.yml, separadas por vírgula ou espaço; vazio = as que faltam.
+    if argumentos and argumentos[0] in ("personagens", "aprovar-personagens"):
+        # As chaves vêm do campo "quais" do video_ia.yml, separadas por vírgula ou espaço; vazio = as que faltam (no
+        # aprovar, todas).
         chaves = [c for c in " ".join(argumentos[1:]).replace(",", " ").split() if c]
         logging.disable(logging.CRITICAL)
         try:
+            if argumentos[0] == "aprovar-personagens":
+                return aprovar_as_fotos(chaves or None)
             return fotos_dos_personagens(chaves or None)
         except Exception as e:
             print(f"Flow: erro inesperado ({type(e).__name__})")

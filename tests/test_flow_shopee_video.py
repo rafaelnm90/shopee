@@ -521,6 +521,8 @@ def celular(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(flow, "ESPERA_DA_CONTINUACAO", 0.3)
     monkeypatch.setattr(flow, "ESPERA_SEM_CONTINUACAO", 0.2)
     monkeypatch.setattr(flow, "PASTA", str(tmp_path / "flow"))
+    # A pasta das fotos dos personagens sai da PASTA na importação: sem isto, o teste grava na casa do usuário.
+    monkeypatch.setattr(flow, "PASTA_DOS_PERSONAGENS", str(tmp_path / "flow" / "personagens"))
     monkeypatch.setattr(flow.celular_robo, "conectado", lambda: True)
     monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
     monkeypatch.setattr(flow.celular_robo, "trava", contextlib.contextmanager(lambda: (yield True)))
@@ -2165,6 +2167,36 @@ def test_foto_feita_que_nao_chegou_ao_privado_vai_sem_gerar_outra(celular, monke
     monkeypatch.setattr(flow.celular_robo, "conectado", lambda: pytest.fail("não precisa do celular"))
     assert flow.main(["personagens"]) == 0
     assert len(celular.textos_das_imagens) == 10 and len(celular.fotos) == 10
+
+
+def test_ok_do_rafael_aprova_as_fotos_e_a_refeita_precisa_de_outro_ok(celular, capsys):
+    # P259 1: o OK dele às 10 fotos, dado na conversa, fica anotado sem tocar no celular; só as aprovadas valem.
+    assert flow.main(["personagens"]) == 0 and flow.fotos_aprovadas() == {}
+    toques = len(celular.toques)
+    capsys.readouterr()
+    assert flow.main(["aprovar-personagens"]) == 0 and len(celular.toques) == toques
+    aprovadas = flow.fotos_aprovadas()
+    assert sorted(aprovadas) == sorted(p["chave"] for p in flow.PERSONAGENS)
+    assert aprovadas["vovo"].endswith(os.path.join("personagens", "vovo.jpg"))
+    assert "Personagens: 10 foto(s) aprovada(s); valendo: 10 de 10" in capsys.readouterr().out
+    # A foto refeita é outra, que ele ainda não viu: perde a aprovação até um OK novo, só dela.
+    assert flow.main(["personagens", "vovo"]) == 0
+    assert "vovo" not in flow.fotos_aprovadas() and len(flow.fotos_aprovadas()) == 9
+    assert flow.main(["aprovar-personagens", "vovo"]) == 0 and len(flow.fotos_aprovadas()) == 10
+
+
+def test_aprovar_sem_a_foto_no_privado_ou_com_chave_desconhecida_nao_aprova_nada(celular, monkeypatch, capsys):
+    assert flow.main(["aprovar-personagens"]) == 1 and flow.fotos_guardadas() == {}
+    assert "nada foi aprovado; sem a foto no privado: bonitao" in capsys.readouterr().out
+    assert flow.main(["aprovar-personagens", "vovo,gago"]) == 1 and flow.fotos_guardadas() == {}
+    assert "chave desconhecida" in capsys.readouterr().out
+    # A foto feita que não chegou ao privado ele não viu: não é aprovada, nem junto com uma que ele viu.
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto", lambda caminho, legenda="": False)
+    assert flow.main(["personagens", "vovo"]) == 1
+    assert flow.main(["aprovar-personagens", "vovo"]) == 1 and flow.fotos_aprovadas() == {}
+    flow.marcar_foto("faz_tudo", arquivo=flow.fotos_guardadas()["vovo"]["arquivo"], mandada_em="2026-11-19 11:23:00")
+    assert flow.main(["aprovar-personagens", "faz_tudo", "vovo"]) == 1 and flow.fotos_aprovadas() == {}
+    assert flow.main(["aprovar-personagens", "faz_tudo"]) == 0 and list(flow.fotos_aprovadas()) == ["faz_tudo"]
 
 
 def test_imagem_com_custo_na_tela_nao_e_gerada(celular, capsys):
