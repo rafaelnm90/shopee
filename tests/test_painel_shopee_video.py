@@ -2452,6 +2452,12 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
                    "mais 8 s do Estender", "o rascunho avisa se ela saiu embolada ou cortada"):
         assert trecho in msg.saidas[-1], trecho
     assert "vídeo de 8 s" not in msg.saidas[-1] and "estilo que varia" not in msg.saidas[-1]
+    # Escolhas do Rafael (19/11, P256 2 e P260 1, com a P251 1): o unboxing e a comédia, e o vídeo começa pela imagem
+    # de um dos personagens aprovados com o produto, sem crédito.
+    for trecho in ("o unboxing (só as mãos abrindo a caixa, nunca dois seguidos)", "no máximo 1 a cada 3",
+                   "um dos personagens que você aprovou", "feita no modo Imagem do Flow, sem crédito",
+                   "sem ela, sai pela foto do anúncio"):
+        assert trecho in msg.saidas[-1], trecho
     # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243).
     assert sv.limite_dos_videos_de_ia() == (
         "No máximo 5 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨ "

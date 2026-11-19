@@ -110,6 +110,8 @@ class Flow:
         self.imagem_pronta = self.imagem_baixada = self.imagem_nao_baixa = self.imagem_falha = False
         self.imagens_feitas = 0
         self.original_da_imagem = True
+        # O vídeo gerado depois de uma imagem (P260 1) fica no 1º lugar da grade, e a imagem passa ao 2º, como no app.
+        self.video_depois_da_imagem = False
         # O modelo marcado no modo Imagem e os da lista dele.
         self.modelo_da_imagem, self.lista_da_imagem = "Nano Banana 2.1", ("Nano Banana 2.1", "Outra Imagem")
 
@@ -249,7 +251,8 @@ class Flow:
                 nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False), ""))
             elif self.imagem_pronta:
                 nome = f"Retrato {self.imagens_feitas}, 1 item"
-                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc=nome), "imagem"))
+                caixa = (543, 466, 1080, 1004) if self.video_depois_da_imagem else (0, 466, 537, 1422)
+                nos.append((caixa, _no(caixa, desc=nome), "imagem"))
             if self.video_de_antes:
                 nos.append(((0, 1427, 537, 1964), _no((0, 1427, 537, 1964), desc="Copo de antes, 1 item"), "antes"))
             if not self.filtro:
@@ -441,7 +444,7 @@ class Flow:
             self.tela, self.imagem_baixada = "imagem", not self.imagem_nao_baixa
         elif acao == "gerar":
             self.geracoes += 1
-            self.tela = "projeto"
+            self.tela, self.video_depois_da_imagem = "projeto", self.imagem_pronta
             if not self.falha_ao_gerar:
                 self.gerado, self.gerando_leituras, self.modelo_do_video = True, self.leituras_ao_gerar, self.modelo
         elif acao == "estender":
@@ -2393,3 +2396,271 @@ def test_imagem_sem_a_miniatura_da_foto_para_antes_do_gerar(celular, monkeypatch
     assert flow.main(["imagem-teste"]) == 1
     assert celular.textos_das_imagens == [] and celular.fotos == []
     assert ("parou", "foto no pedido da imagem: a miniatura não apareceu") in celular.guardados
+
+
+# --- O vídeo de IA começa pela imagem do personagem com o produto, e a comédia entra (P260 1 e P251 1) ---
+
+CONTINUACAO_PELA_IMAGEM = "Same shot, she points at the lid and smiles."
+FALA_PELA_IMAGEM = "Gelo o dia inteiro? Esse segura! Garanta o seu!"
+PEDIDO_PELA_IMAGEM = json.dumps({"prompt": "The grandma from the image holds the tumbler and says the hook.",
+                                 "continuacao": CONTINUACAO_PELA_IMAGEM, "fala": FALA_PELA_IMAGEM,
+                                 "cena": "A vovó vende o copo na cozinha."})
+IMAGEM_CONFIRMADA = '{"mesmo_produto": true, "mesma_pessoa": true, "diferencas": "", "defeitos": ""}'
+
+
+def _aprovadas(tmp_path, *chaves):
+    """As fotos dos personagens que o Rafael aprovou (P259 1)."""
+    for chave in chaves:
+        caminho = tmp_path / f"{chave}.jpg"
+        caminho.write_bytes(_foto_colorida(90, 160, (120, 160, 200)))
+        flow.marcar_foto(chave, arquivo=str(caminho), feita_em="2026-11-19 11:20:00", mandada_em="2026-11-19 11:23:00",
+                         aprovada_em="2026-11-19 13:10:00")
+
+
+def _ia_da_imagem(monkeypatch, respostas):
+    """As respostas da IA, na ordem: a escolha do personagem, as conferências da imagem e o pedido pela imagem."""
+    pedidos = []
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append((prompt, len(imagens or [])))
+        return respostas.pop(0) if respostas else None
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    return pedidos
+
+
+def _galeria(monkeypatch):
+    """Os arquivos que foram à galeria do celular, na ordem."""
+    fotos, original = [], flow.foto_na_galeria
+
+    def por(d, foto, sufixo=""):
+        fotos.append(foto)
+        return original(d, foto, sufixo)
+
+    monkeypatch.setattr(flow, "foto_na_galeria", por)
+    return fotos
+
+
+def _do_formato(formato=flow.ESTILO_DO_VENDEDOR):
+    """O pedido de 16 s da escolha do robô desde a P260 1: com o formato que a IA escolheu."""
+    return dict(_escolhido_longo(), formato=formato)
+
+
+def _referencia_saiu_da_galeria(celular):
+    return any(partes[:2] == ["rm", "-f"] and partes[-1].endswith("_referencia.jpg") for partes in celular.comandos
+               if partes and partes[0] == "rm")
+
+
+def test_producao_comeca_pela_imagem_do_personagem_e_o_video_sai_dela(celular, monkeypatch, tmp_path, capsys):
+    # Escolha do Rafael (19/11, P260 1): com o OK à imagem de teste, o vídeo de IA do dia e o De IA ✨ começam pela
+    # imagem de um personagem com o produto, feita no modo Imagem do Flow, sem crédito; o Flow anima a imagem.
+    _aprovadas(tmp_path, "vovo", "largadao", "faz_tudo")
+    pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, PEDIDO_PELA_IMAGEM])
+    galeria = _galeria(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    atual = flow.comecar_producao("2026-11-19", _do_formato(), 1)
+    assert atual["formato"] == flow.ESTILO_DO_VENDEDOR and flow.pede_a_imagem(atual)
+    assert flow.producao_no_celular(celular, atual) is True
+    # A escolha viu só os personagens do vendedor com a foto aprovada: o Largadão é só da comédia (P250 1).
+    escolha, conferencia, pelo_video = pedidos
+    assert "- vovo: Vovó" in escolha[0] and "- faz_tudo: Faz-Tudo" in escolha[0] and "largadao" not in escolha[0]
+    assert "Os de comédia também valem" not in escolha[0] and escolha[1] == 1
+    assert conferencia == (flow.PEDIDO_DA_CONFERENCIA_DA_IMAGEM, 3)
+    # O pedido do vídeo foi escrito pela imagem feita, com a foto do anúncio junto.
+    assert pelo_video[1] == 2 and "o personagem Vovó" in pelo_video[0] and "Copo Térmico Inox" in pelo_video[0]
+    assert "a pessoa só segura o produto" in pelo_video[0] and "depois, calada" in pelo_video[0]
+    # A imagem saiu de graça, pela foto de referência, depois do saldo lido (os créditos do vídeo).
+    assert celular.textos_das_imagens == [flow.PEDIDO_DA_IMAGEM_COM_O_PRODUTO.format(
+        acao="holding the stainless steel tumbler at chest height", cena="in a cozy kitchen")]
+    assert celular.fotos_das_imagens == [True] and celular.toques_proibidos == [] and celular.contas_abertas == 2
+    assert _referencia_saiu_da_galeria(celular)
+    # O vídeo saiu da imagem, com o pedido escrito por ela.
+    atual = flow.producao()
+    assert [os.path.basename(foto) for foto in galeria] == ["producao_2026-11-19_referencia.jpg",
+                                                            "producao_2026-11-19_imagem.jpg"]
+    assert atual["foto_do_video"] == galeria[1] and atual["personagem"] == "vovo"
+    assert atual["imagem"]["estado"] == "feita" and atual["imagem"]["tentativas"] == 1
+    assert celular.texto == json.loads(PEDIDO_PELA_IMAGEM)["prompt"]
+    assert celular.texto_estendido == CONTINUACAO_PELA_IMAGEM
+    assert atual["fala"] == FALA_PELA_IMAGEM and atual["estilo"] == flow.ESTILO_DO_VENDEDOR
+    assert atual["estado"] == "baixado" and celular.geracoes == 1 and celular.extensoes == 1
+    # O formato do vídeo gerado fica lembrado, para o limite da comédia (P251 1).
+    assert flow.formatos_recentes() == [flow.ESTILO_DO_VENDEDOR]
+    # A conferência do vídeo pronto continua sendo com a foto do anúncio.
+    vistas = []
+    monkeypatch.setattr(flow, "conferir_o_video", lambda caminho, foto: vistas.append(foto) or {
+        "mesmo": True, "diferencas": "", "defeitos": ""})
+    _ouvir(monkeypatch, FALA_PELA_IMAGEM)
+    assert flow.conferir_a_producao() == "pronto" and vistas == [atual["foto"]]
+    assert atual["foto"].endswith("producao_2026-11-19.jpg")
+    legenda = flow.legenda_da_producao(flow.producao())
+    assert ("👤 Personagem: Vovó (o vídeo saiu da imagem do personagem com o produto, feita no modo Imagem do Flow, "
+            "sem crédito)") in legenda and f"🗣️ Fala: {FALA_PELA_IMAGEM}" in legenda
+    saida = capsys.readouterr().out
+    assert "personagem vovo" in saida and "a imagem vale" in saida
+    for privado in ("Copo", "tumbler", "kitchen", "Gelo", "grandma"):
+        assert privado not in saida, privado
+
+
+def test_imagem_que_a_ia_nao_confirma_e_refeita_uma_vez_e_o_video_sai_pela_foto(celular, monkeypatch, tmp_path):
+    # P253 1: a IA confere a imagem com a foto do anúncio e a do personagem; sem o mesmo produto e a mesma pessoa, o
+    # robô a refaz uma vez, e sem ela o vídeo sai como antes, pela foto do anúncio e com o pedido escrito por ela.
+    _aprovadas(tmp_path, "vovo")
+    pessoa_mudou = '{"mesmo_produto": true, "mesma_pessoa": false, "diferencas": "o cabelo mudou", "defeitos": ""}'
+    outro_produto = '{"mesmo_produto": false, "mesma_pessoa": true, "diferencas": "a tampa é outra", "defeitos": ""}'
+    pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, pessoa_mudou, outro_produto])
+    galeria = _galeria(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    escolhido = _do_formato()
+    flow.comecar_producao("2026-11-19", escolhido, 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    assert len(celular.textos_das_imagens) == 2 and len(pedidos) == 3
+    atual = flow.producao()
+    motivo = "a IA não confirmou o produto e a pessoa em 2 imagens"
+    assert atual["imagem"]["estado"] == "sem" and atual["imagem"]["motivo"] == motivo
+    assert "foto_do_video" not in atual and "personagem" not in atual
+    assert os.path.basename(galeria[-1]) == "producao_2026-11-19.jpg" and celular.texto == escolhido["prompt"]
+    assert celular.texto_estendido == CONTINUACAO and celular.geracoes == 1 and _referencia_saiu_da_galeria(celular)
+    assert (f"👤 Sem personagem desta vez ({motivo}): o vídeo saiu pela foto do anúncio, como antes"
+            in flow.legenda_da_producao(atual))
+
+
+def test_imagem_confirmada_na_segunda_vez_vale(celular, monkeypatch, tmp_path):
+    _aprovadas(tmp_path, "vovo")
+    _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, '{"mesmo_produto": false, "mesma_pessoa": true}', IMAGEM_CONFIRMADA,
+                                PEDIDO_PELA_IMAGEM])
+    _duracoes(monkeypatch, celular, estendida=16)
+    flow.comecar_producao("2026-11-19", _do_formato(), 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    atual = flow.producao()
+    assert len(celular.textos_das_imagens) == 2 and atual["imagem"]["tentativas"] == 2
+    assert atual["foto_do_video"].endswith("producao_2026-11-19_imagem.jpg") and atual["fala"] == FALA_PELA_IMAGEM
+
+
+def test_imagem_parada_no_flow_guarda_o_caso_e_o_video_sai_pela_foto(celular, monkeypatch, tmp_path):
+    _aprovadas(tmp_path, "vovo")
+    _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO])
+    _duracoes(monkeypatch, celular, estendida=16)
+    celular.imagem_falha = True
+    flow.comecar_producao("2026-11-19", _do_formato(), 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    parada = "baixar a imagem: o mais novo do projeto ainda é o de antes do Gerar; a imagem não foi feita"
+    assert ("parou", f"imagem do personagem: {parada}") in celular.guardados
+    atual = flow.producao()
+    assert atual["imagem"]["estado"] == "sem" and atual["imagem"]["motivo"] == f"o Flow parou na imagem: {parada}"
+    assert atual["estado"] == "baixado" and celular.geracoes == 1 and _referencia_saiu_da_galeria(celular)
+
+
+def test_sem_credito_nem_a_imagem_e_feita(celular, monkeypatch, tmp_path):
+    # Pedido do Rafael (19/11): sem os créditos do vídeo, nada de vídeo de IA; a imagem nem é feita.
+    _aprovadas(tmp_path, "vovo")
+    _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO])
+    celular.saldo = 30
+    flow.comecar_producao("2026-11-19", _do_formato(), 1)
+    with pytest.raises(flow.SemCreditos):
+        flow.producao_no_celular(celular, flow.producao())
+    assert celular.textos_das_imagens == [] and celular.geracoes == 0 and celular.guardados == []
+    assert "imagem" not in flow.producao() and celular.contas_abertas == 1 and _referencia_saiu_da_galeria(celular)
+
+
+def test_comedia_pela_imagem_com_os_personagens_da_comedia(celular, monkeypatch, tmp_path):
+    # Escolhas do Rafael (P251 1 e P258 1): na comédia, o Largadão, a Desastrada, a Desconfiada e o Exagerado; a graça
+    # vem do jeito deles diante do produto, nunca do corpo; a 1ª parte é a situação engraçada e a 2ª, o mesmo
+    # personagem vendendo.
+    _aprovadas(tmp_path, "vovo", "largadao", "desconfiada")
+    escolha = ('{"personagem": "desconfiada", "acao": "holding the tumbler at arm\'s length with a raised eyebrow", '
+               '"cena": "in a living room"}')
+    pedidos = _ia_da_imagem(monkeypatch, [escolha, IMAGEM_CONFIRMADA, PEDIDO_PELA_IMAGEM])
+    _duracoes(monkeypatch, celular, estendida=16)
+    flow.comecar_producao("2026-11-19", _do_formato(flow.ESTILO_DA_COMEDIA), 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    lista = pedidos[0][0]
+    assert "- largadao: Largadão (o preguiçoso bem-humorado" in lista
+    assert "- desconfiada: Desconfiada (a desconfiada" in lista
+    assert "vovo" not in lista and "gordo" not in lista and "É um vídeo de comédia" in lista
+    assert "situação engraçada do dia a dia" in pedidos[2][0] and "agora convencido" in pedidos[2][0]
+    assert "o personagem Desconfiada (a desconfiada" in pedidos[2][0]
+    atual = flow.producao()
+    assert atual["estilo"] == flow.ESTILO_DA_COMEDIA and atual["personagem"] == "desconfiada"
+    assert flow.formatos_recentes() == [flow.ESTILO_DA_COMEDIA] and flow.comedia_pode() is False
+    legenda = flow.legenda_da_producao(atual)
+    assert "🎭 Estilo: comédia: um personagem numa situação engraçada com o produto, e depois vendendo (16 s)" in legenda
+    assert "👤 Personagem: Desconfiada" in legenda
+
+
+def test_comedia_no_maximo_1_a_cada_3_e_so_com_personagem_dela_aprovado(celular, tmp_path):
+    assert flow.comedia_pode() is False
+    _aprovadas(tmp_path, "vovo")
+    assert flow.comedia_pode() is False
+    _aprovadas(tmp_path, "exagerado")
+    assert flow.comedia_pode() is True
+    # Depois de uma comédia, os 2 vídeos seguintes não são de comédia; o 3º pode.
+    for formato, pode in ((flow.ESTILO_DA_COMEDIA, False), (flow.ESTILO_DO_VENDEDOR, False),
+                          (flow.ESTILO_DO_UNBOXING, True)):
+        flow.lembrar_o_formato(formato)
+        assert flow.comedia_pode() is pode, formato
+    # O formato entra no 1º Gerar do vídeo; o andamento marcado de novo não o conta outra vez.
+    flow.comecar_producao("2026-11-19", _do_formato(flow.ESTILO_DA_COMEDIA), 1)
+    flow.guardar_producao(estilo=flow.ESTILO_DA_COMEDIA)
+    flow._marcar_a_producao(estado="gerando", gerado_em="2026-11-19 08:00:00", custo=24)
+    flow._marcar_a_producao(estado="gerando", gerado_em="2026-11-19 08:01:00")
+    assert flow.formatos_recentes()[-2:] == [flow.ESTILO_DO_UNBOXING, flow.ESTILO_DA_COMEDIA]
+    assert flow.comedia_pode() is False
+
+
+def test_a_ia_escolhe_a_comedia_so_quando_ela_pode_e_o_pedido_e_o_do_vendedor(monkeypatch):
+    pedidos, respostas = [], []
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return respostas.pop(0)
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    link = "https://s.shopee.com.br/abc"
+    respostas[:] = ['{"formato": "comédia", "motivo": "rende uma cena engraçada"}', PEDIDO_DO_VENDEDOR_JSON]
+    pedido, serve = flow.pedido_para_o_anuncio(link, "Copo Térmico", _jpeg(), longo=True, com_unboxing=True,
+                                               com_comedia=True)
+    # O pedido de agora é o do vendedor, pela foto do anúncio: vale quando a imagem do personagem não sai.
+    assert serve is True and pedido["formato"] == flow.ESTILO_DA_COMEDIA and pedido["estilo"] == flow.ESTILO_DO_VENDEDOR
+    assert '"vendedor", "unboxing" ou "comedia"' in pedidos[0] and "nunca de zombar do corpo" in pedidos[0]
+    assert "depois, calada" in pedidos[1]
+    # Sem poder a comédia, o pedido do formato nem a oferece, e a resposta "comedia" vale o vendedor.
+    pedidos.clear()
+    respostas[:] = ['{"formato": "comedia"}', PEDIDO_DO_VENDEDOR_JSON]
+    pedido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico", _jpeg(), longo=True, com_unboxing=True)
+    assert pedido["formato"] == flow.ESTILO_DO_VENDEDOR and "comedia" not in pedidos[0]
+    # Logo depois de um unboxing, com a comédia podendo: o vendedor ou a comédia.
+    pedidos.clear()
+    respostas[:] = ['{"formato": "unboxing"}', PEDIDO_DO_VENDEDOR_JSON]
+    pedido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico", _jpeg(), longo=True, com_comedia=True)
+    assert pedido["formato"] == flow.ESTILO_DO_VENDEDOR and '"vendedor" ou "comedia"' in pedidos[0]
+    assert "unboxing" not in pedidos[0]
+
+
+def test_unboxing_e_o_andamento_de_antes_da_p260_nao_fazem_a_imagem(celular, monkeypatch, tmp_path):
+    # O unboxing (P256 2) não tem rosto: sai como antes, pela foto do anúncio; o andamento sem o formato também.
+    _aprovadas(tmp_path, "vovo")
+    assert not flow.pede_a_imagem(flow.comecar_producao("2026-11-19", _escolhido_longo(), 1))
+    assert not flow.pede_a_imagem(dict(flow.comecar_producao("2026-11-19", _do_formato(), 1), estado="gerando"))
+    _duracoes(monkeypatch, celular, estendida=16)
+    unboxing = dict(_do_formato(flow.ESTILO_DO_UNBOXING), estilo=flow.ESTILO_DO_UNBOXING, fala="")
+    atual = flow.comecar_producao("2026-11-19", unboxing, 1)
+    assert not flow.pede_a_imagem(atual)
+    assert flow.producao_no_celular(celular, atual) is True
+    assert celular.textos_das_imagens == [] and celular.contas_abertas == 1 and "imagem" not in flow.producao()
+    assert flow.formatos_recentes() == [flow.ESTILO_DO_UNBOXING] and flow.linha_do_personagem(flow.producao()) == ""
+
+
+def test_sem_foto_aprovada_o_video_sai_pela_foto_sem_tocar_na_imagem(celular, monkeypatch, tmp_path):
+    # Só valem as fotos aprovadas (P259 1): a refeita sem o OK novo não entra, e sem nenhuma o vídeo sai como antes.
+    _aprovadas(tmp_path, "vovo")
+    flow.marcar_foto("vovo", aprovada_em="")
+    _duracoes(monkeypatch, celular, estendida=16)
+    flow.comecar_producao("2026-11-19", _do_formato(), 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    atual = flow.producao()
+    assert atual["imagem"]["motivo"] == flow.SEM_FOTO_APROVADA and celular.textos_das_imagens == []
+    assert celular.contas_abertas == 1 and celular.geracoes == 1
+    # Na comédia que ficou sem a imagem, a legenda diz que ela fica para outro vídeo (saiu o vendedor).
+    assert flow.linha_do_personagem(dict(atual, formato=flow.ESTILO_DA_COMEDIA)).endswith(
+        "como antes; a comédia fica para outro vídeo")

@@ -24,7 +24,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # "aprovar-personagens" anota o OK do Rafael às fotos que ele viu no privado (P259 1), dado na conversa com o Claude;
 # sem "quais", as 10; com "quais", só essas. Só as aprovadas valem no vídeo de IA; a refeita precisa de um OK novo.
 # "imagem-teste" faz a imagem de teste da P253 1: um personagem (o que a IA escolhe pelo produto) com o produto da última
-# amostra, no modo Imagem do Flow, sem crédito, só no privado do Rafael (o vídeo de IA do dia só muda depois do OK dele).
+# amostra, no modo Imagem do Flow, sem crédito, só no privado do Rafael (com o OK dele, P260 1, o vídeo de IA do dia já
+# começa por uma imagem assim).
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
