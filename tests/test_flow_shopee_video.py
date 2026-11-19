@@ -91,6 +91,9 @@ class Flow:
         # gerada ("2 de 2", "Gerando…"); fechado à força antes disso, ele a perde, e o vídeo fica com uma versão só
         # (visto no 1º vídeo de IA de 16 s da produção, 17/11).
         self.atraso_da_continuacao, self.continuacao_pendente, self.continuacao_perdida = 0, 0, False
+        # A tela Conta (a foto da conta no alto do início, como na gravação do Rafael de 14/11): o saldo do Flow e
+        # quantas vezes ela foi aberta.
+        self.saldo, self.contas_abertas = 1050, 0
 
     def continuacao_registrada(self):
         return self.extensoes > 0 and not self.continuacao_perdida and self.continuacao_pendente <= 0
@@ -112,6 +115,11 @@ class Flow:
 
     def screen_on(self):
         pass
+
+    def press(self, tecla):
+        # O voltar do Android: da tela Conta, de volta ao início.
+        if tecla == "back" and self.tela == "conta":
+            self.tela = "inicio"
 
     def window_size(self):
         return 1080, 2400
@@ -143,6 +151,8 @@ class Flow:
         """(caixa, xml do nó, o que o toque faz) da tela de agora."""
         nos = []
         if self.tela == "inicio":
+            nos.append(((936, 131, 1038, 233), _no((936, 131, 1038, 233), "android.widget.ImageView",
+                                                   "Perfil, Maria Exemplo"), "conta"))
             nos.append(((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "novo"))
             for i, nome in enumerate(self.projetos[self.rolagem:self.rolagem + self.cabem]):
                 # Como no Flow (15/11): a descrição diz o título e, com algo dentro, quantos vídeos e
@@ -154,6 +164,15 @@ class Flow:
                                                            "Mais opções"), "proibido")]
             if self.termos:
                 nos.append(((0, 2300, 1080, 2400), _no((0, 2300, 1080, 2400), texto="Aceitar os Termos de Serviço"), ""))
+        elif self.tela == "conta":
+            # A tela Conta: o nome e o e-mail da conta, o saldo e o Ver atividade (que o robô nunca toca).
+            nos += [((42, 131, 168, 257), _no((42, 131, 168, 257), "android.widget.Button", "Voltar"), "inicio"),
+                    ((63, 290, 1017, 470), _no((63, 290, 1017, 470), texto="Maria Exemplo\nmaria@exemplo.com\nPRO",
+                                               clicavel=False), ""),
+                    ((63, 520, 1017, 600), _no((63, 520, 1017, 600), "android.widget.TextView",
+                                               texto=f"{self.saldo} créditos do Google Flow", clicavel=False), ""),
+                    ((84, 620, 996, 700), _no((84, 620, 996, 700), "android.widget.Button", "Ver atividade"),
+                     "proibido")]
         elif self.tela == "menu_projeto":
             # O menu do Mais opções do alto do projeto (15/11): o robô só pode tocar no Renomear.
             nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "projeto"))
@@ -345,6 +364,8 @@ class Flow:
             self.fora_do_projeto.append("novo")
         elif acao in ("inicio", "menu_projeto"):
             self.tela = acao
+        elif acao == "conta":
+            self.tela, self.contas_abertas = "conta", self.contas_abertas + 1
         elif acao == "renomear":
             self.tela, self.nome_no_campo = "renomear", self.aberto
         elif acao == "ok_nome":
@@ -1673,6 +1694,63 @@ def test_producao_de_16_s_gera_estende_baixa_e_ouve_a_fala(celular, monkeypatch,
     assert "Gerar do Estender tocado (8 s, 24 créditos)" in saida and "vídeo de 16 s baixado" in saida
     for privado in ("Copo", "tumbler", "Gelo"):
         assert privado not in saida, privado
+
+
+def test_sem_credito_para_os_16_s_nao_gera_e_nao_entra_no_projeto(celular, monkeypatch, capsys):
+    # Pedido do Rafael (19/11): "qndo os créditos do flow acabar, nós vamos parar de fazer vídeo por ia". Antes do
+    # Gerar, o robô lê o saldo na tela Conta (a foto da conta, no alto do início): sem os 48 das duas partes, nada.
+    celular.saldo = 30
+    atual = flow.comecar_producao("2026-11-19", _escolhido_longo(), 1)
+    with pytest.raises(flow.SemCreditos) as erro:
+        flow.producao_no_celular(celular, atual)
+    assert (erro.value.saldo, erro.value.preciso) == (30, flow.CUSTO_DA_PRODUCAO)
+    assert celular.contas_abertas == 1 and celular.tela == "inicio" and celular.aberto == ""
+    assert celular.geracoes == 0 and celular.extensoes == 0 and celular.toques_proibidos == []
+    # Nada deu errado no app: sem caso guardado. No log, só os números.
+    assert celular.guardados == [] and flow.itens_gerados() == []
+    saida = capsys.readouterr().out
+    assert "Flow: 30 créditos na conta" in saida and "Maria" not in saida and "exemplo" not in saida
+    # O saldo que paga as duas partes segue como sempre.
+    celular.saldo = 48
+    _duracoes(monkeypatch, celular, estendida=16)
+    assert flow.producao_no_celular(celular, flow.producao()) is True and celular.geracoes == 1
+
+
+def test_amostra_sem_credito_nao_gera_e_o_video_ja_gerado_segue_sem_ler_o_saldo(celular, monkeypatch, capsys):
+    celular.saldo = 20
+    atual = dict(_escolhido_longo(), modelo="Omni 1.2 Flash", custo=24, estado="escolhido", longa=True, numero=1)
+    atual["foto"] = celular.teste["foto"]
+    assert flow._amostra_no_celular(atual, sem_gerar=False, so_baixar=False) == 1
+    assert "Amostra: sem créditos do Flow: 20 na conta, o vídeo pede 48; nada foi gerado" in capsys.readouterr().out
+    assert celular.geracoes == 0 and celular.guardados == []
+    # Com sem_gerar, o saldo só é lido e mostrado; o pedido é montado como sempre.
+    assert flow._amostra_no_celular(atual, sem_gerar=True, so_baixar=False) == 0
+    assert "Flow: 20 créditos na conta" in capsys.readouterr().out and celular.geracoes == 0
+    # O vídeo já gerado (o crédito já foi) segue de onde parou, sem abrir a tela Conta.
+    contas = celular.contas_abertas
+    _duracoes(monkeypatch, celular, estendida=16)
+    flow.comecar_producao("2026-11-19", _escolhido_longo(), 1)
+    flow.guardar_producao(estado="gerando", gerado_em="2026-11-19 08:00:00")
+    celular.gerado, celular.modelo_do_video = True, "Omni 1.2 Flash"
+    flow.producao_no_celular(celular, flow.producao())
+    assert celular.contas_abertas == contas
+
+
+def test_leitura_do_saldo_e_da_foto_da_conta():
+    def tela(*nos):
+        return '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(nos) + "</hierarchy>"
+
+    # Como na gravação do Rafael (14/11): "1050 créditos do Google Flow"; com o ponto do milhar, também.
+    for texto, saldo in (("1050 créditos do Google Flow", 1050), ("1.050 créditos do Google Flow", 1050),
+                         ("2 créditos do Google Flow", 2)):
+        assert flow.saldo_na_tela(tela(_no((63, 520, 1017, 600), texto=texto, clicavel=False))) == saldo
+    # O custo do pedido ("24 créditos de IA") não é o saldo, nem o que vem de outro app.
+    assert flow.saldo_na_tela(tela(_no((0, 0, 9, 9), texto="24 créditos de IA"))) is None
+    assert flow.saldo_na_tela(tela(_no((0, 0, 9, 9), texto="50 créditos do Google Flow", pacote="outro"))) is None
+    # A foto da conta é a do alto do início; uma descrição parecida mais abaixo não conta.
+    alto = _no((936, 131, 1038, 233), "android.widget.ImageView", "Perfil, Maria Exemplo")
+    assert flow.foto_da_conta(tela(alto)) == (987, 182)
+    assert flow.foto_da_conta(tela(_no((936, 1131, 1038, 1233), desc="Perfil, Maria Exemplo"))) is None
 
 
 def test_producao_de_16_s_continua_de_onde_parou_sem_outro_gerar(celular, monkeypatch):

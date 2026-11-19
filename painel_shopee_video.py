@@ -1661,6 +1661,8 @@ SITUACOES_DO_VIDEO_DE_IA = {
     "descartado": "não virou rascunho (a IA viu outro produto no vídeo, ou o vídeo não chegou do Flow)",
     "usado": "virou rascunho",
     "desistiu": "não virou rascunho (o celular ou o app falharam em todas as tentativas)",
+    "sem créditos": "sem créditos do Google Flow para o vídeo (nada foi gasto): os rascunhos saem dos vídeos dos "
+                    "grupos, e o robô confere o saldo de novo a cada 2 h, até o crédito voltar",
 }
 
 
