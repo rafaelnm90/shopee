@@ -222,15 +222,20 @@ def test_ver_tela_do_celular_manda_o_link_so_conectado(bm, cr, monkeypatch, Msg,
 
 
 def test_acha_a_porta_aberta_da_depuracao(cr):
+    # Só portas que o teste controla: as vizinhas da porta aberta podem estar em uso por outro programa da máquina.
+    # A presa sem ouvir recusa a conexão, como a porta fechada do celular.
     import socket
     servidor = socket.socket()
     servidor.bind(("127.0.0.1", 0))
     servidor.listen()
     porta = servidor.getsockname()[1]
+    calada = socket.socket()
+    calada.bind(("127.0.0.1", 0))
     try:
-        assert cr.portas_abertas("127.0.0.1", range(porta - 2, porta + 3)) == [porta]
+        assert cr.portas_abertas("127.0.0.1", [calada.getsockname()[1], porta]) == [porta]
     finally:
         servidor.close()
+        calada.close()
 
 
 def test_reconecta_sozinho_procurando_a_porta_nova(cr, monkeypatch):
