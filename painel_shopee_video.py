@@ -1838,8 +1838,10 @@ def texto_aprovacao(config, agora=None):
         "sozinho cada rascunho novo logo depois de salvar, e ele vai ao ar como depois do seu Aprovar: no Horário do "
         f"Robô, um de cada vez, com pelo menos {robo.ESPACO_MINIMO} min entre um post e outro. Você recebe aqui o "
         "aviso de cada um, com a hora, e depois o link do post. Vale para todos os rascunhos novos, também o do "
-        f"vídeo de IA e os do {BOTAO_PREPARAR}. O rascunho que volta para você depois de um post que não deu certo "
-        "continua esperando você. Para segurar os aprovados, o Pausar Postagem ⏸️ do robô.\n\n"
+        f"vídeo de IA e os do {BOTAO_PREPARAR}. O que o robô aprovou sozinho e não consegue ir ao ar em "
+        f"{robo.TENTATIVAS_DE_POSTAR} tentativas é recusado sozinho: sai do celular, e o de hoje dá lugar a outro "
+        "vídeo, como no Recusar (P254 3); o que você aprovou volta para você. Para segurar os aprovados, o Pausar "
+        "Postagem ⏸️ do robô.\n\n"
         f"Agora: {rotulo_aprovacao(config)}\n"
         f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | ✅ Aprovados na fila: "
         f"<b>{len(robo.listar('aprovado'))}</b>\n"
@@ -1882,7 +1884,9 @@ async def pedir_desligar_aprovacao(message: types.Message, state: FSMContext):
     esperando = [r for r in robo.esperando_aprovacao() if not r.get("versao_de")]
     pergunta = ("⚠️ <b>Desligar a aprovação?</b> Daqui em diante, cada rascunho novo vai ao ar sozinho, sem esperar "
                 "você: o robô aprova logo depois de salvar no celular e posta no Horário do Robô, um de cada vez, com "
-                f"pelo menos {robo.ESPACO_MINIMO} min entre um post e outro. {linha_dos_pontos_e_do_bloqueio()}")
+                f"pelo menos {robo.ESPACO_MINIMO} min entre um post e outro. O que não conseguir ir ao ar em "
+                f"{robo.TENTATIVAS_DE_POSTAR} tentativas, o robô recusa sozinho, e ele sai do celular. "
+                f"{linha_dos_pontos_e_do_bloqueio()}")
     if esperando:
         um = len(esperando) == 1
         quais = "o rascunho que já espera" if um else "os <b>" + str(len(esperando)) + "</b> rascunhos que já esperam"
@@ -1902,8 +1906,9 @@ async def pedir_desligar_aprovacao(message: types.Message, state: FSMContext):
 async def desligar_aprovacao(message: types.Message, state: FSMContext):
     """
     Desliga a aprovação: os rascunhos novos vão ao ar sozinhos (robo.aprovar_sozinho). Com o Aprovar Também os
-    que Esperam, os que já esperavam são aprovados agora, como no Aprovar de cada um (a versão de antes de um
-    rascunho editado, que só se recusa, fica). Pedido do Rafael (18/11): DECISOES.md, Shopee Vídeo.
+    que Esperam, o robô aprova agora os que já esperavam, como no Aprovar de cada um, e eles contam como aprovados
+    sozinhos (P254 3); a versão de antes de um rascunho editado, que só se recusa, fica. Pedido do Rafael (18/11):
+    DECISOES.md, Shopee Vídeo.
     """
     if not _admin(message): return
     alterar_config(robo_aprovacao=False)
@@ -1911,7 +1916,7 @@ async def desligar_aprovacao(message: types.Message, state: FSMContext):
     if message.text == BOTAO_DESLIGAR_E_APROVAR:
         for rascunho in robo.esperando_aprovacao():
             if not rascunho.get("versao_de"):
-                aprovados.append(robo.aprovar(rascunho["id"]))
+                aprovados.append(robo.aprovar(rascunho["id"], por=robo.APROVADO_PELO_ROBO))
     detalhe = (f"{len(aprovados)} que esperavam aprovados" if message.text == BOTAO_DESLIGAR_E_APROVAR
                else "os que esperavam continuam esperando" if message.text == BOTAO_DESLIGAR_SO_NOVOS
                else "nenhum esperando")

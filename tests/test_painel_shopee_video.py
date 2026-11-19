@@ -487,13 +487,16 @@ def test_aprovacao_liga_e_desliga_no_painel_e_decide_os_que_esperam(bm, Msg, Est
     msg = Msg("Aprovação 👍")
     rodar(sv.aprovacao_handler(msg, est))
     for trecho in ("Agora: ✅ <b>ligada</b>", "Desligada, o robô aprova sozinho cada rascunho novo",
-                   "ponto(s) de penalidade", "O que cada botão faz"):
+                   "ponto(s) de penalidade", "O que cada botão faz", "é recusado sozinho: sai do celular",
+                   "o que você aprovou volta para você"):
         assert trecho in msg.saidas[-1], trecho
     assert _textos(sv.teclado_aprovacao(sv.ler_config())) == ["Desligar Aprovação ⏸️", "Voltar ao Robô 🔙"]
     # Sem rascunho esperando: só a confirmação.
     msg = Msg("Desligar Aprovação ⏸️")
     rodar(sv.pedir_desligar_aprovacao(msg, est))
     assert "<b>Desligar a aprovação?</b>" in msg.saidas[-1] and "já espera" not in msg.saidas[-1]
+    # A confirmação diz o que acontece com o que não consegue ir ao ar (P254 3).
+    assert "O que não conseguir ir ao ar em 3 tentativas, o robô recusa sozinho" in msg.saidas[-1]
     assert est.estado == sv.ShopeeVideoFluxo.aguardando_confirmacao_aprovacao
     # O Cancelar ❌ volta à tela, sem mudar nada.
     msg = Msg("Cancelar ❌")
@@ -527,6 +530,8 @@ def test_aprovacao_liga_e_desliga_no_painel_e_decide_os_que_esperam(bm, Msg, Est
     rodar(sv.desligar_aprovacao(msg, est))
     assert [r["id"] for r in sv.robo.esperando_aprovacao()] == [antes]
     assert sorted(r["id"] for r in sv.robo.listar("aprovado")) == sorted([um, dois])
+    # Os que o robô aprovou no Aprovar Também os que Esperam contam como aprovados sozinhos (P254 3).
+    assert {sv.robo.pegar(i)["aprovado_por"] for i in (um, dois)} == {sv.robo.APROVADO_PELO_ROBO}
     assert "Os 2 que esperavam foram aprovados: o 1º vai ao ar por volta de" in msg.saidas[-2]
     # No registro (o checkup é público), só o que mudou e quantos.
     with sv.robo.db.conexao() as con:
