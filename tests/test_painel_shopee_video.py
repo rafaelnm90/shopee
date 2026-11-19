@@ -58,7 +58,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
         "Preparar 1 Agora ⚡",
         "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
         "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Fazer Agora ⏩", "Produtos a Mais 🛍️",
-        "Testar Caminho 🧭", "Celular do Robô 📱", "Vídeo de IA ✨", "Voltar à Shopee Vídeo 🔙"]
+        "Testar Caminho 🧭", "Celular do Robô 📱", "Vídeo de IA ✨", "Aprovação 👍", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
     for trecho in ("Um cobre o outro", "Depuração por Wi-Fi", "Retomar Postagem ▶️", "Passo a Passo 📖"):
@@ -475,6 +475,67 @@ def test_numeros_do_segundo_nivel_do_video_de_ia_mudam_no_painel(bm, Msg, Est):
     est, msg = Est(), Msg("Cancelar ❌")
     rodar(sv.voltar_depois_de_cancelar(msg, est, "ShopeeVideoFluxo:aguardando_filtro_video_ia"))
     assert "✨ <b>Vídeo de IA</b>" in msg.saidas[-1] and est.estado == sv.ShopeeVideoFluxo.menu_robo
+
+
+def test_aprovacao_liga_e_desliga_no_painel_e_decide_os_que_esperam(bm, Msg, Est, monkeypatch):
+    # Pedido do Rafael (18/11): um botão para ligar ou desligar a validação dele, ligada de começo (P227); desligada,
+    # o robô posta sozinho. Desligar pede confirmação e pergunta o que fazer com os rascunhos que já esperam.
+    sv, est = _painel(bm), Est()
+    assert sv.PROCESSO_DA_APROVACAO == sv.robo.PROCESSO_DA_APROVACAO
+    assert "👍 Aprovação: ✅ <b>ligada</b>" in sv.texto_robo(sv.ler_config())
+    assert "só posta o que você aprovar" in sv.texto_robo(sv.ler_config())
+    msg = Msg("Aprovação 👍")
+    rodar(sv.aprovacao_handler(msg, est))
+    for trecho in ("Agora: ✅ <b>ligada</b>", "Desligada, o robô aprova sozinho cada rascunho novo",
+                   "ponto(s) de penalidade", "O que cada botão faz"):
+        assert trecho in msg.saidas[-1], trecho
+    assert _textos(sv.teclado_aprovacao(sv.ler_config())) == ["Desligar Aprovação ⏸️", "Voltar ao Robô 🔙"]
+    # Sem rascunho esperando: só a confirmação.
+    msg = Msg("Desligar Aprovação ⏸️")
+    rodar(sv.pedir_desligar_aprovacao(msg, est))
+    assert "<b>Desligar a aprovação?</b>" in msg.saidas[-1] and "já espera" not in msg.saidas[-1]
+    assert est.estado == sv.ShopeeVideoFluxo.aguardando_confirmacao_aprovacao
+    # O Cancelar ❌ volta à tela, sem mudar nada.
+    msg = Msg("Cancelar ❌")
+    rodar(sv.voltar_depois_de_cancelar(msg, est, "ShopeeVideoFluxo:aguardando_confirmacao_aprovacao"))
+    assert "👍 <b>Aprovação dos rascunhos</b>" in msg.saidas[-1] and sv.robo.aprovacao_ligada()
+    rodar(sv.pedir_desligar_aprovacao(Msg("Desligar Aprovação ⏸️"), est))
+    msg = Msg(sv.BOTAO_CONFIRMAR_DESLIGAR)
+    rodar(sv.desligar_aprovacao(msg, est))
+    assert sv.robo.aprovacao_ligada() is False and "Aprovação <b>desligada</b>" in msg.saidas[-2]
+    assert "Agora: ⏸️ <b>desligada</b>" in msg.saidas[-1]
+    assert "posta sozinho cada rascunho novo" in sv.texto_robo(sv.ler_config())
+    # Ligar vale na hora.
+    msg = Msg("Ligar Aprovação ✅")
+    rodar(sv.ligar_aprovacao_handler(msg, est))
+    assert sv.robo.aprovacao_ligada() is True and "Aprovação <b>ligada</b>" in msg.saidas[-2]
+    # Com rascunhos esperando: ele escolhe se eles vão também ou só os novos. A versão de antes de um rascunho
+    # editado, que só se recusa, nunca é aprovada.
+    um, dois = _rascunho(sv, "Um 👗"), _rascunho(sv, "Dois 👗")
+    antes = _rascunho(sv, "Antes 👗")
+    sv.robo.atualizar(antes, versao_de=dois)
+    msg = MsgComMidia(Msg, "Desligar Aprovação ⏸️")
+    rodar(sv.pedir_desligar_aprovacao(msg, est))
+    assert "os <b>2</b> rascunhos que já esperam" in msg.saidas[-1]
+    assert _textos(msg.teclados[-1]) == ["Aprovar Também os que Esperam ✅", "Só os Rascunhos Novos ⏭️", "Cancelar ❌"]
+    msg = Msg(sv.BOTAO_DESLIGAR_SO_NOVOS)
+    rodar(sv.desligar_aprovacao(msg, est))
+    assert [r["id"] for r in sv.robo.esperando_aprovacao()] == [um, dois, antes]
+    rodar(sv.ligar_aprovacao_handler(Msg("Ligar Aprovação ✅"), est))
+    rodar(sv.pedir_desligar_aprovacao(Msg("Desligar Aprovação ⏸️"), est))
+    msg = Msg(sv.BOTAO_DESLIGAR_E_APROVAR)
+    rodar(sv.desligar_aprovacao(msg, est))
+    assert [r["id"] for r in sv.robo.esperando_aprovacao()] == [antes]
+    assert sorted(r["id"] for r in sv.robo.listar("aprovado")) == sorted([um, dois])
+    assert "Os 2 que esperavam foram aprovados: o 1º vai ao ar por volta de" in msg.saidas[-2]
+    # No registro (o checkup é público), só o que mudou e quantos.
+    with sv.robo.db.conexao() as con:
+        linhas = con.execute("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY id",
+                             (sv.PROCESSO_DA_APROVACAO,)).fetchall()
+    assert [tuple(linha) for linha in linhas] == [
+        ("desligada no painel", "nenhum esperando"), ("ligada no painel", ""),
+        ("desligada no painel", "os que esperavam continuam esperando"), ("ligada no painel", ""),
+        ("desligada no painel", "2 que esperavam aprovados")]
 
 
 class MsgComMidia:

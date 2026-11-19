@@ -435,6 +435,7 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_pareamento = State()
     aguardando_porta = State()
     aguardando_filtro_video_ia = State()
+    aguardando_confirmacao_aprovacao = State()
 
 
 # --- Configuração ---
@@ -728,6 +729,17 @@ NOMES_DOS_FILTROS = {"video_ia_vendidos_minimos": "vendidos mínimos", "video_ia
                      "video_ia_canais_maximos": "canais do Espião"}
 # O processo do vídeo de IA no registro: o mesmo do robo_shopee_video (o teste confere).
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
+# A aprovação dos rascunhos (pedido do Rafael, 18/11): ligada, o padrão, todo rascunho espera o Aprovar dele;
+# desligada, o robô aprova sozinho cada rascunho novo. Desligar pede confirmação e pergunta o que fazer com os
+# rascunhos que já esperam; ligar vale na hora.
+BOTAO_APROVACAO = "Aprovação 👍"
+# O processo da aprovação no registro: o mesmo do robo_shopee_video (o teste confere).
+PROCESSO_DA_APROVACAO = "aprovação dos rascunhos"
+BOTAO_LIGAR_APROVACAO = "Ligar Aprovação ✅"
+BOTAO_DESLIGAR_APROVACAO = "Desligar Aprovação ⏸️"
+BOTAO_DESLIGAR_E_APROVAR = "Aprovar Também os que Esperam ✅"
+BOTAO_DESLIGAR_SO_NOVOS = "Só os Rascunhos Novos ⏭️"
+BOTAO_CONFIRMAR_DESLIGAR = "Confirmar: Desligar Aprovação ✅"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -787,7 +799,7 @@ def teclado_robo(config):
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
         [KeyboardButton(text=BOTAO_FAZER_AGORA), KeyboardButton(text=BOTAO_PRODUTOS_A_MAIS)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
-        [KeyboardButton(text=BOTAO_VIDEO_IA)],
+        [KeyboardButton(text=BOTAO_VIDEO_IA), KeyboardButton(text=BOTAO_APROVACAO)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
 
@@ -856,6 +868,11 @@ def teclado_video_ia(config):
                            [KeyboardButton(text=BOTAO_VENDIDOS_VIDEO_IA), KeyboardButton(text=BOTAO_PRECO_VIDEO_IA)],
                            [KeyboardButton(text=BOTAO_CANAIS_VIDEO_IA)],
                            [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+
+
+def teclado_aprovacao(config):
+    liga = BOTAO_DESLIGAR_APROVACAO if robo.aprovacao_ligada(config) else BOTAO_LIGAR_APROVACAO
+    return montar_teclado([[KeyboardButton(text=liga)], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
 def teclado_assistente(config):
@@ -966,8 +983,10 @@ def texto_robo(config, agora=None, celular=None):
                          else f"📱 Celular: ⚠️ <b>desconectado</b> (veja em {BOTAO_CELULAR})\n")
     return (
         "🤖 <b>Robô Automático</b>\n"
-        "Prepara os vídeos sozinho no Motorola e só posta o que você aprovar. Com ele ligado, o "
-        "assistente fica em espera.\n\n"
+        + ("Prepara os vídeos sozinho no Motorola e só posta o que você aprovar. " if robo.aprovacao_ligada(config)
+           else "Prepara os vídeos sozinho no Motorola e, com a aprovação desligada, posta sozinho cada rascunho "
+                "novo. ")
+        + "Com ele ligado, o assistente fica em espera.\n\n"
         f"Status: {status_robo(config)}\n"
         f"{linha_celular}"
         f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
@@ -988,6 +1007,7 @@ def texto_robo(config, agora=None, celular=None):
         f"🛍️ Produtos a mais: {rotulo_produtos_a_mais(config)}\n"
         f"✨ Vídeo de IA: {'✅ <b>ligado</b>' if robo.video_de_ia_ligado(config) else '⏸️ <b>desligado</b>'} "
         f"({html_escape(linha_do_video_de_ia_de_hoje(agora))})\n"
+        f"👍 Aprovação: {rotulo_aprovacao(config)}\n"
         f"🧭 Treino: {_linha_treino()}\n\n"
         "<b>O que cada botão faz</b>\n"
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
@@ -1016,6 +1036,8 @@ def texto_robo(config, agora=None, celular=None):
         "espaços livres (até 6 produtos); ligar ou desligar.\n"
         f"✨ <b>{BOTAO_VIDEO_IA}</b>: 1 vídeo por dia feito por IA no Google Flow, com um produto da fonte; ele vira "
         "um dos rascunhos do dia, para você aprovar; ligar ou desligar.\n"
+        f"👍 <b>{BOTAO_APROVACAO}</b>: ligar ou desligar a sua aprovação dos rascunhos; desligada, o robô posta "
+        "sozinho cada rascunho novo.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
@@ -1288,7 +1310,8 @@ def texto_assistente(config, agora=None):
 COMO_FUNCIONA = (
     "❓ <b>Como funciona a Shopee Vídeo</b>\n\n"
     "1️⃣ <b>Dois robôs.</b> O 🤖 Robô Automático prepara os vídeos sozinho no Motorola e só posta o que "
-    "você aprovar. O 📲 Assistente manda tudo pronto aqui no privado para você postar à mão.\n\n"
+    "você aprovar (com a Aprovação 👍 desligada, ele posta sozinho). O 📲 Assistente manda tudo pronto aqui no "
+    "privado para você postar à mão.\n\n"
     "2️⃣ <b>Um cobre o outro.</b> Com o robô ligado, o assistente fica em espera. Pausou o robô (ou o "
     "Motorola desconectou), o assistente volta a mandar. Nunca os dois juntos.\n\n"
     "3️⃣ <b>No dia a dia.</b> O robô avisa quando deixa um rascunho pronto. Toque em Rascunhos do Robô 📝 "
@@ -1344,6 +1367,8 @@ ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardand
 ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_pareamento", "aguardando_porta")
 # Dos números do 2º nível (P252 1), o Cancelar ❌ volta à tela do Vídeo de IA ✨.
 ESTADOS_DO_VIDEO_IA = ("aguardando_filtro_video_ia",)
+# Da confirmação de desligar a aprovação (pedido de 18/11), o Cancelar ❌ volta à tela dela, sem mudar nada.
+ESTADOS_DA_APROVACAO = ("aguardando_confirmacao_aprovacao",)
 
 
 async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, estado_anterior, dados=None):
@@ -1360,6 +1385,8 @@ async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, e
         await mostrar_celular(message, state)
     elif nome in ESTADOS_DO_VIDEO_IA:
         await mostrar_video_ia(message, state)
+    elif nome in ESTADOS_DA_APROVACAO:
+        await mostrar_aprovacao(message, state)
     else:
         await mostrar_painel(message, state)
 
@@ -1687,7 +1714,8 @@ def texto_video_ia(config, agora=None):
         "o próximo), escreve as duas partes e a fala (a pessoa só segura, vira e aponta o produto, no mesmo lugar, "
         "com fala curta) e confere o vídeo pronto com a foto; o servidor ouve a fala, e o rascunho avisa se ela saiu "
         "embolada ou cortada. Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
-        f"a nossa edição, os produtos e o Rótulo de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar. Se a IA "
+        f"a nossa edição, os produtos e o Rótulo de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar (com a "
+        f"{BOTAO_APROVACAO} desligada, vai ao ar sozinho). Se a IA "
         f"vir outro produto no vídeo, ele não vira rascunho. {limite_dos_videos_de_ia()}, e o produto que já ganhou "
         "um vídeo de IA não ganha outro.\n\n"
         f"Agora: {'✅ <b>ligado</b>' if ligado else '⏸️ <b>desligado</b> (o robô não faz nem usa o vídeo de IA)'}\n"
@@ -1781,6 +1809,124 @@ async def filtro_video_ia_handler(message: types.Message, state: FSMContext):
     await state.update_data(filtro_video_ia=message.text)
     await message.answer(pergunta_do_filtro(chave, atual, exemplos.exemplo(nome, padrao, escrito)), parse_mode="HTML",
                          reply_markup=teclado_cancelar)
+
+
+def rotulo_aprovacao(config):
+    """A aprovação dos rascunhos na tela do robô (pedido de 18/11)."""
+    if robo.aprovacao_ligada(config):
+        return "✅ <b>ligada</b> (todo rascunho espera você)"
+    return "⏸️ <b>desligada</b> (o robô posta sozinho cada rascunho novo)"
+
+
+def linha_dos_pontos_e_do_bloqueio(agora=None):
+    """Os pontos de penalidade de agora e com quantos a Shopee bloqueia os posts (apelacoes.BANIMENTOS)."""
+    pontos = apelacoes.pontos_de_agora(robo.ler_estado(), agora)
+    proximos = sorted((limite, dias) for limite, dias in apelacoes.BANIMENTOS if limite > pontos)
+    texto = f"Hoje a conta tem <b>{pontos}</b> ponto(s) de penalidade"
+    if proximos:
+        limite, dias = proximos[0]
+        texto += f" (com {limite}, a Shopee bloqueia os posts {'de vez' if dias is None else f'por {dias} dias'})"
+    return texto + "."
+
+
+def texto_aprovacao(config, agora=None):
+    """A tela da Aprovação 👍. Pedido do Rafael (18/11): DECISOES.md, Shopee Vídeo."""
+    return (
+        "👍 <b>Aprovação dos rascunhos</b>\n"
+        f"Ligada (o padrão), todo rascunho que o robô salva no celular espera você em {BOTAO_RASCUNHOS} (aprovar, "
+        f"recusar, {BOTAO_TIRAR} ou {BOTAO_EDITAR}), e nada vai ao ar sem o seu Aprovar. Desligada, o robô aprova "
+        "sozinho cada rascunho novo logo depois de salvar, e ele vai ao ar como depois do seu Aprovar: no Horário do "
+        f"Robô, um de cada vez, com pelo menos {robo.ESPACO_MINIMO} min entre um post e outro. Você recebe aqui o "
+        "aviso de cada um, com a hora, e depois o link do post. Vale para todos os rascunhos novos, também o do "
+        f"vídeo de IA e os do {BOTAO_PREPARAR}. O rascunho que volta para você depois de um post que não deu certo "
+        "continua esperando você. Para segurar os aprovados, o Pausar Postagem ⏸️ do robô.\n\n"
+        f"Agora: {rotulo_aprovacao(config)}\n"
+        f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | ✅ Aprovados na fila: "
+        f"<b>{len(robo.listar('aprovado'))}</b>\n"
+        f"{linha_dos_pontos_e_do_bloqueio(agora)}\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"⏸️ <b>{BOTAO_DESLIGAR_APROVACAO}</b>: depois de confirmar, os próximos rascunhos vão ao ar sozinhos; você "
+        "escolhe também o que fazer com os que já esperam.\n"
+        f"✅ <b>{BOTAO_LIGAR_APROVACAO}</b>: na hora, os próximos rascunhos voltam a esperar você (os já aprovados "
+        f"continuam em {BOTAO_APROVADOS}).\n"
+        f"🔙 <b>{BOTAO_VOLTAR_ROBO}</b>: volta à tela do Robô Automático."
+    )
+
+
+async def mostrar_aprovacao(message, state):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    await message.answer(texto_aprovacao(config), parse_mode="HTML", reply_markup=teclado_aprovacao(config))
+
+
+@router.message(F.text == BOTAO_APROVACAO, StateFilter("*"))
+async def aprovacao_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_aprovacao(message, state)
+
+
+@router.message(F.text == BOTAO_LIGAR_APROVACAO, StateFilter("*"))
+async def ligar_aprovacao_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    alterar_config(robo_aprovacao=True)
+    registro_processos.registrar("shopee_video", PROCESSO_DA_APROVACAO, "ligada no painel", ok=True)
+    logger.info("👍 [Shopee Vídeo] Aprovação dos rascunhos ligada pelo painel.")
+    await message.answer(f"✅ Aprovação <b>ligada</b>: os próximos rascunhos esperam você em {BOTAO_RASCUNHOS}. Os já "
+                         f"aprovados continuam em {BOTAO_APROVADOS}.", parse_mode="HTML")
+    await mostrar_aprovacao(message, state)
+
+
+@router.message(F.text == BOTAO_DESLIGAR_APROVACAO, StateFilter("*"))
+async def pedir_desligar_aprovacao(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    esperando = [r for r in robo.esperando_aprovacao() if not r.get("versao_de")]
+    pergunta = ("⚠️ <b>Desligar a aprovação?</b> Daqui em diante, cada rascunho novo vai ao ar sozinho, sem esperar "
+                "você: o robô aprova logo depois de salvar no celular e posta no Horário do Robô, um de cada vez, com "
+                f"pelo menos {robo.ESPACO_MINIMO} min entre um post e outro. {linha_dos_pontos_e_do_bloqueio()}")
+    if esperando:
+        um = len(esperando) == 1
+        quais = "o rascunho que já espera" if um else "os <b>" + str(len(esperando)) + "</b> rascunhos que já esperam"
+        pergunta += (f"\n\nE {quais} você em {BOTAO_RASCUNHOS}? <b>{BOTAO_DESLIGAR_E_APROVAR}</b>: o robô aprova "
+                     f"{'ele' if um else 'todos'} agora. <b>{BOTAO_DESLIGAR_SO_NOVOS}</b>: "
+                     f"{'ele continua' if um else 'eles continuam'} esperando você, e só os novos vão sozinhos.")
+        linhas = [[KeyboardButton(text=BOTAO_DESLIGAR_E_APROVAR)], [KeyboardButton(text=BOTAO_DESLIGAR_SO_NOVOS)]]
+    else:
+        linhas = [[KeyboardButton(text=BOTAO_CONFIRMAR_DESLIGAR)]]
+    await message.answer(pergunta, parse_mode="HTML",
+                         reply_markup=montar_teclado(linhas + [[KeyboardButton(text="Cancelar ❌")]]))
+    await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_aprovacao)
+
+
+@router.message(ShopeeVideoFluxo.aguardando_confirmacao_aprovacao,
+                F.text.in_([BOTAO_DESLIGAR_E_APROVAR, BOTAO_DESLIGAR_SO_NOVOS, BOTAO_CONFIRMAR_DESLIGAR]))
+async def desligar_aprovacao(message: types.Message, state: FSMContext):
+    """
+    Desliga a aprovação: os rascunhos novos vão ao ar sozinhos (robo.aprovar_sozinho). Com o Aprovar Também os
+    que Esperam, os que já esperavam são aprovados agora, como no Aprovar de cada um (a versão de antes de um
+    rascunho editado, que só se recusa, fica). Pedido do Rafael (18/11): DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    alterar_config(robo_aprovacao=False)
+    aprovados = []
+    if message.text == BOTAO_DESLIGAR_E_APROVAR:
+        for rascunho in robo.esperando_aprovacao():
+            if not rascunho.get("versao_de"):
+                aprovados.append(robo.aprovar(rascunho["id"]))
+    detalhe = (f"{len(aprovados)} que esperavam aprovados" if message.text == BOTAO_DESLIGAR_E_APROVAR
+               else "os que esperavam continuam esperando" if message.text == BOTAO_DESLIGAR_SO_NOVOS
+               else "nenhum esperando")
+    registro_processos.registrar("shopee_video", PROCESSO_DA_APROVACAO, "desligada no painel", detalhe, ok=True)
+    logger.info(f"👍 [Shopee Vídeo] Aprovação dos rascunhos desligada pelo painel ({detalhe}).")
+    texto = ("⏸️ Aprovação <b>desligada</b>: daqui em diante, cada rascunho novo vai ao ar sozinho, e o aviso de "
+             "cada um chega aqui, com a hora.")
+    horas = sorted(hora for hora in aprovados if hora)
+    if aprovados:
+        texto += (" O rascunho que esperava foi aprovado" if len(aprovados) == 1
+                  else " Os " + str(len(aprovados)) + " que esperavam foram aprovados")
+        texto += (f": o 1º vai ao ar por volta de <b>{_data_curta(horas[0])}</b>, em {BOTAO_APROVADOS}." if horas
+                  else ".")
+    await message.answer(texto, parse_mode="HTML")
+    await mostrar_aprovacao(message, state)
 
 
 async def mostrar_produtos_a_mais(message, state):
