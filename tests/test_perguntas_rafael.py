@@ -379,3 +379,158 @@ def test_robo_lembra_a_informacao_e_o_vi_tira_os_lembretes(bm, monkeypatch):
                                answer=responder)
     rodar(bm.informacao_vista(estranho))
     assert [i["codigo"] for i in pr.informacoes_abertas()] == ["I2"]
+
+
+# --- As informações abertas juntas numa mensagem (pedido do Rafael, 19/11) ---
+
+def test_informacoes_abertas_vao_juntas_numa_mensagem_com_o_vi_de_cada_uma():
+    # "qndo tiver varias assim, vc pode unificar em uma só, para facilitar": o lembrete da hora leva
+    # todas as que esperam o ok numa mensagem, com o Vi ✅ de cada uma; o lembrete de antes sai uma
+    # vez só, e o aviso de onde cada uma veio fica.
+    pr.nova_informacao("Vendas: <subiram>.", LINK, AGORA)
+    pr.nova_informacao("Seguidores: +3.", LINK, AGORA + timedelta(minutes=30))
+    pr.marcar_aviso_da_informacao(1, AGORA, 11)
+    pr.marcar_aviso_da_informacao(2, AGORA + timedelta(minutes=30), 12)
+    enviados, apagadas = [], []
+
+    async def enviar(texto, teclado):
+        enviados.append((texto, teclado))
+        return 20 + len(enviados)
+
+    async def apagar(ident):
+        apagadas.append(ident)
+        return True
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(minutes=59), apagar=apagar)) == 0
+    # A I1 faz 1 h: as duas vão juntas, também a I2, que ainda não fazia.
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=1), apagar=apagar)) == 2
+    texto, teclado = enviados[0]
+    assert "2 informações do Claude esperam o seu ok" in texto and "(I1, I2)" in texto
+    assert "Vendas: &lt;subiram&gt;." in texto and "Seguidores: +3." in texto
+    assert "<b>I1</b> (de 23/10, 21:00)" in texto and "<b>I2</b> (de 23/10, 21:30)" in texto
+    assert texto.count(LINK) == 1 and len(texto) < 4096
+    assert teclado == {"inline_keyboard": [[{"text": "Vi I1 ✅", "callback_data": "info_vi:1"}],
+                                           [{"text": "Vi I2 ✅", "callback_data": "info_vi:2"}]]}
+    assert pr.mensagens_da_informacao("I1") == [11, 21] and pr.mensagens_da_informacao("I2") == [12, 21]
+    assert apagadas == []
+    # A hora seguinte: uma mensagem nova com as duas, e a de antes sai uma vez só.
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA + timedelta(hours=2), apagar=apagar)) == 2
+    assert apagadas == [21] and pr.mensagens_da_informacao("I1") == [11, 22]
+    assert pr.mensagens_da_informacao("I2") == [12, 22]
+
+
+def test_informacoes_que_nao_cabem_vao_na_mensagem_seguinte():
+    # O Telegram leva até 4096 caracteres por mensagem: a que não cabe vai na mensagem seguinte, e a
+    # que fica sozinha vai no aviso de sempre, com o Vi ✅ dela.
+    for n in range(3):
+        pr.nova_informacao(f"Informação {n + 1}: " + "x" * 1600, LINK, AGORA)
+    enviados = []
+
+    async def enviar(texto, teclado):
+        enviados.append((texto, teclado))
+        return 30 + len(enviados)
+    assert rodar(pr.lembrar_informacoes(enviar, AGORA)) == 3
+    assert len(enviados) == 2 and all(pr._visivel(texto) <= pr.LIMITE_DA_MENSAGEM for texto, _t in enviados)
+    assert "(I1, I2)" in enviados[0][0] and len(enviados[0][1]["inline_keyboard"]) == 2
+    assert "(I3)" in enviados[1][0] and enviados[1][1] == pr.teclado_da_informacao({"id": 3})
+    assert pr.mensagens_da_informacao("I1") == [31] and pr.mensagens_da_informacao("I3") == [32]
+
+
+def test_reenviar_manda_as_abertas_na_hora(monkeypatch, capsys):
+    # "Sempre qndo tiver essas I20, I21, I22, etc em aberto para eu ver, vai mandando no meu particular":
+    # o Claude lista as abertas na conversa e chama o reenviar (avisar.yml, informacoes). Elas vão de
+    # novo ao privado na hora, juntas, sem esperar a hora, e o lembrete de antes sai. No log, só os códigos.
+    import avisar_rafael
+    mandados, apagadas = [], []
+    monkeypatch.setattr(avisar_rafael, "mandar_texto_com_id", lambda texto, html=False, teclado=None:
+                        mandados.append((texto, html, teclado)) or 700 + len(mandados))
+    monkeypatch.setattr(avisar_rafael, "apagar_mensagem", lambda ident: apagadas.append(ident) or True)
+    assert pr.main(["reenviar"]) == 0 and "Nenhuma informação em aberto" in capsys.readouterr().out
+    assert mandados == []
+    pr.nova_informacao("Primeira.", LINK)
+    pr.nova_informacao("Segunda.", LINK)
+    pr.marcar_aviso_da_informacao(1, None, 61)
+    pr.marcar_aviso_da_informacao(1, None, 62)                      # o lembrete da hora
+    pr.marcar_aviso_da_informacao(2, None, 63)
+    assert pr.main(["reenviar"]) == 0
+    saida = capsys.readouterr().out
+    assert "Em aberto: I1, I2. 2 de 2" in saida and "Primeira" not in saida and "Segunda" not in saida
+    texto, html, teclado = mandados[0]
+    assert html is True and "Primeira." in texto and "Segunda." in texto and len(teclado["inline_keyboard"]) == 2
+    assert apagadas == [62] and pr.mensagens_da_informacao("I1") == [61, 701]
+    assert pr.mensagens_da_informacao("I2") == [63, 701]
+
+
+def test_vi_no_lembrete_junto_tira_so_a_vista(bm, monkeypatch):
+    # O Vi I1 ✅ no lembrete junto: a I1 fica vista e sai da mensagem, que fica só com a I2 e o Vi ✅
+    # dela; o aviso de onde a I1 veio fica marcado como visto. O Vi da última apaga o lembrete.
+    pr.nova_informacao("Primeira.", LINK)
+    pr.nova_informacao("Segunda.", LINK)
+    pr.marcar_aviso_da_informacao(1, None, 801)
+    pr.marcar_aviso_da_informacao(2, None, 802)
+    enviados, apagadas, editadas, teclados, avisos = [], [], [], [], []
+
+    async def send_message(chat_id, texto, **k):
+        enviados.append((texto, k.get("reply_markup")))
+        return SimpleNamespace(message_id=810 + len(enviados))
+
+    async def delete_message(chat_id, mensagem):
+        apagadas.append(mensagem)
+
+    async def edit_message_text(texto, chat_id=None, message_id=None, **k):
+        editadas.append((message_id, texto, k.get("reply_markup")))
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm.bot, "delete_message", delete_message)
+    monkeypatch.setattr(bm.bot, "edit_message_text", edit_message_text)
+    with pr.db.conexao() as con:
+        con.execute("UPDATE informacoes_rafael SET ultimo_aviso = '2000-01-01 00:00:00'")
+    rodar(bm.lembrar_perguntas_do_claude())
+    texto, botoes = enviados[0]
+    assert "(I1, I2)" in texto and [linha[0].text for linha in botoes.inline_keyboard] == ["Vi I1 ✅", "Vi I2 ✅"]
+    mensagem = SimpleNamespace(message_id=811)
+
+    async def tirar(reply_markup=None):
+        teclados.append(reply_markup)
+    mensagem.edit_reply_markup = tirar
+
+    async def responder(texto, **k):
+        avisos.append(texto)
+    rodar(bm.informacao_vista(SimpleNamespace(data=botoes.inline_keyboard[0][0].callback_data, message=mensagem,
+                                              from_user=SimpleNamespace(id=bm.ADMIN_ID), answer=responder)))
+    assert "você viu" in avisos[0] and teclados == [] and apagadas == []
+    (refeita, texto_novo, botoes_novos), (aviso, texto_visto, _b) = editadas
+    assert refeita == 811 and "Segunda." in texto_novo and "Primeira." not in texto_novo
+    assert [(b.text, b.callback_data) for linha in botoes_novos.inline_keyboard for b in linha] == [
+        ("Vi ✅", "info_vi:2")]
+    assert aviso == 801 and "você viu em" in texto_visto and "(I1)" in texto_visto
+    assert pr.mensagens_da_informacao("I1") == [801] and pr.mensagens_da_informacao("I2") == [802, 811]
+    # O Vi ✅ da I2 no mesmo lembrete: agora ele sai, e o aviso da I2 fica marcado como visto.
+    rodar(bm.informacao_vista(SimpleNamespace(data="info_vi:2", from_user=SimpleNamespace(id=bm.ADMIN_ID),
+                                              message=mensagem, answer=responder)))
+    assert apagadas == [811] and teclados == [None] and editadas[-1][0] == 802
+    assert pr.informacoes_abertas() == []
+
+
+def test_ok_na_conversa_tira_a_vista_do_lembrete_junto(monkeypatch):
+    # O "ok" na conversa (avisar.yml, vista): o lembrete junto fica, sem a vista e com o Vi ✅ da outra.
+    import avisar_rafael
+    pr.nova_informacao("Primeira.", LINK)
+    pr.nova_informacao("Segunda.", LINK)
+    for ident, mensagem in ((1, 61), (2, 62), (1, 70), (2, 70)):
+        pr.marcar_aviso_da_informacao(ident, None, mensagem)
+    apagadas, editadas = [], []
+    monkeypatch.setattr(avisar_rafael, "apagar_mensagem", lambda ident: apagadas.append(ident) or True)
+    monkeypatch.setattr(avisar_rafael, "editar_texto", lambda ident, texto, html=False, teclado=None:
+                        editadas.append((ident, texto, teclado)) or True)
+    monkeypatch.setattr(avisar_rafael, "tirar_botoes", lambda ident: True)
+    assert pr.main(["vista", "I2"]) == 0 and apagadas == []
+    (refeita, texto, teclado), (aviso, visto, _t) = editadas
+    assert refeita == 70 and "Primeira." in texto and "Segunda." not in texto
+    assert teclado == pr.teclado_da_informacao({"id": 1})
+    assert aviso == 62 and "você viu" in visto
+    assert pr.mensagens_da_informacao("I1") == [61, 70] and pr.mensagens_da_informacao("I2") == [62]
+    # Sem o aviso guardado, o 1º da lista é um lembrete junto: ele é refeito, e nada fica marcado como visto.
+    pr.nova_informacao("Terceira.", LINK)
+    pr.marcar_aviso_da_informacao(3, None, 70)
+    assert pr.marcar_vista("I3")
+    fica, sair, refazer = pr.depois_da_vista("I3", 70)
+    assert fica is None and sair == [70] and [i["codigo"] for i in refazer[70]] == ["I1"]

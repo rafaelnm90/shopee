@@ -2177,8 +2177,12 @@ def main():
               + (f"\n   {regras}" if regras else ""))
 
     abertas = [p["codigo"] for p in perguntas_rafael.abertas()]
+    # As informações também: a que o Rafael viu pelo Vi ✅ no privado sai da lista do Claude por aqui.
+    informacoes = [i["codigo"] for i in perguntas_rafael.informacoes_abertas()]
     print(f"\n== Perguntas do Claude ao Rafael\nsem resposta: {len(abertas)}"
-          + (f" ({', '.join(abertas)}; o bot lembra de hora em hora)" if abertas else ""))
+          + (f" ({', '.join(abertas)}; o bot lembra de hora em hora)" if abertas else "")
+          + f"\ninformações sem o Vi ✅: {len(informacoes)}"
+          + (f" ({', '.join(informacoes)}; o bot lembra de hora em hora, todas juntas)" if informacoes else ""))
 
     print("\n== Postagens de hoje")
     filas = postagens_de_hoje(agora)

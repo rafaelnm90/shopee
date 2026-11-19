@@ -13,6 +13,9 @@ name: Avisar o Rafael
 #               código (I1, I2...);
 #   vista       o código da informação em "dados" (o "ok" do Rafael na conversa): os lembretes
 #               param e saem do privado.
+#   informacoes as informações ainda sem o Vi ✅ de novo no privado, na hora, juntas numa mensagem
+#               com o Vi ✅ de cada uma (o Claude chama quando as lista na conversa; pedido do Rafael,
+#               19/11); o log mostra só os códigos em aberto.
 #   print       o print da tela final e o 1º quadro do vídeo do rascunho mais novo esperando a
 #               aprovação, feito desde "dados" (AAAA-MM-DDTHH:MM, opcional), para o Rafael conferir a
 #               capa (robo_shopee_video.py --print-do-rascunho); o log mostra só o horário do rascunho.
@@ -28,10 +31,10 @@ on:
   workflow_dispatch:
     inputs:
       acao:
-        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada), respondida, informacao (cifrada), vista, print (do rascunho mais novo) ou acesso (cifrado)"
+        description: "aviso (lembrete diário ou pedido de ajuda), pergunta (nova, cifrada), respondida, informacao (cifrada), vista, informacoes (as abertas de novo, juntas), print (do rascunho mais novo) ou acesso (cifrado)"
         required: false
         type: choice
-        options: [aviso, pergunta, respondida, informacao, vista, print, acesso]
+        options: [aviso, pergunta, respondida, informacao, vista, informacoes, print, acesso]
         default: aviso
       assunto:
         description: "Só no aviso: assunto em poucas palavras e sem dado privado"
@@ -74,6 +77,7 @@ jobs:
               respondida) venv/bin/python3 perguntas_rafael.py respondida "$DADOS" ;;
               informacao) venv/bin/python3 perguntas_rafael.py informacao "$DADOS" ;;
               vista) venv/bin/python3 perguntas_rafael.py vista "$DADOS" ;;
+              informacoes) venv/bin/python3 perguntas_rafael.py reenviar ;;
               print) venv/bin/python3 robo_shopee_video.py --print-do-rascunho "$DADOS" ;;
               acesso) venv/bin/python3 painel_acessos.py guardar "$DADOS" ;;
               *) venv/bin/python3 avisar_rafael.py "$ASSUNTO" "$LINK" ;;

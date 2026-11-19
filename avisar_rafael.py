@@ -97,14 +97,17 @@ def apagar_mensagem(ident):
         return False
 
 
-def editar_texto(ident, texto, html=False):
+def editar_texto(ident, texto, html=False, teclado=None):
     """
     Troca o texto de uma mensagem do bot no privado (o que já não dá para apagar, ou o aviso
-    marcado como visto). html=True: o texto vem em HTML. Os botões da mensagem saem.
+    marcado como visto). html=True: o texto vem em HTML. Os botões da mensagem saem, menos os de
+    teclado, no formato do Bot API (o lembrete das informações juntas, refeito sem a que foi vista).
     """
     campos = {"message_id": ident, "text": texto}
     if html:
         campos.update(parse_mode="HTML", disable_web_page_preview="true")
+    if teclado:
+        campos["reply_markup"] = json.dumps(teclado, ensure_ascii=False)
     try:
         return bool(_chamar("editMessageText", campos).get("ok"))
     except Exception:
