@@ -8451,6 +8451,9 @@ def _responder_um(d, texto, agora=None):
             registro_processos.registrar(REGISTRO, "responder comentário", "respondido", visto, ok=True,
                                          origem=marca)
             registrar_tentativa("responder", "respondido", produto=produto, agora=agora)
+            avisar_com_o_link(d, "resposta", f"💬 Robô da Shopee Vídeo: respondi um comentário no seu vídeo de "
+                                             f"{produto or 'um produto'}:\n\n{nome}: {comentario}\n"
+                                             f"Resposta: {resposta}", agora)
             return "respondido"
         if lugar == "outro lugar":
             # Erro grave (P12): a resposta foi parar embaixo de outro comentário ou solta.
@@ -8460,9 +8463,10 @@ def _responder_um(d, texto, agora=None):
                                          ok=False, origem=marca)
             registrar_tentativa("responder", "parou", motivo, produto, agora)
             _guardar_caso(d, "responder", "lugar errado", f"{motivo} ({visto})", agora=agora)
-            avisar(f"⚠️ Robô da Shopee Vídeo: a resposta a um comentário no vídeo de {produto or 'um produto'} "
-                   f"não ficou embaixo do comentário certo. Confira no app e apague à mão se precisar: "
-                   f"\"{resposta}\". Não vou responder esse comentário de novo.")
+            avisar_com_o_link(d, "resposta", f"⚠️ Robô da Shopee Vídeo: a resposta a um comentário no vídeo de "
+                                             f"{produto or 'um produto'} não ficou embaixo do comentário certo. "
+                                             f"Confira no app e apague à mão se precisar: \"{resposta}\". Não vou "
+                                             "responder esse comentário de novo.", agora)
             return "lugar errado"
         raise Parada(f"a resposta não apareceu embaixo do comentário; {visto}")
     except Parada as e:
@@ -8746,11 +8750,19 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
                                      ok=False, origem=marca)
         registrar_tentativa("feed", "parou", MOTIVO_DO_FEED_SEM_O_COMENTARIO, agora=agora)
         _guardar_caso(d, "feed", "parou", MOTIVO_DO_FEED_SEM_O_COMENTARIO, agora=agora)
+        _avisar_o_comentario_do_feed(d, video, texto, "não confirmado", agora)
         return "feed: comentário enviado sem aparecer na lista"
     _feito_no_feed(marca, "comentado", agora)
     registro_processos.registrar(REGISTRO, "feed: comentar", "comentado", ok=True, origem=marca)
     registrar_tentativa("feed", "comentado", agora=agora)
+    _avisar_o_comentario_do_feed(d, video, texto, "comentado", agora)
     return "feed: 1 vídeo curtido e comentado"
+
+
+def _avisar_o_comentario_do_feed(d, video, texto, resultado, agora=None):
+    """O comentário no vídeo de outro criador no privado do Rafael, com o link do vídeo (pedido de 19/11/2026)."""
+    onde = f"no vídeo de {video['autor']} (outro criador), no feed Para você,"
+    avisar_com_o_link(d, "feed", _aviso_do_comentario(resultado, texto, ("curtido", ""), onde), agora)
 
 
 def _feito_no_feed(marca, estado, agora=None):
@@ -8990,7 +9002,7 @@ def tentar_o_comentario_do_post(d, rascunho, agora=None):
         registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, resultado, ok=resultado == "comentado",
                                      origem=marca, agora=agora)
         registrar_tentativa("comentar_post", resultado, agora=agora)
-        avisar(_aviso_do_comentario(resultado, texto, curtidas))
+        avisar(_aviso_do_comentario(resultado, texto, curtidas) + linha_do_link(rascunho["link_post"]))
         return resultado
     tentativas = interacoes.guardar_falha(marca, interacoes.TIPO_DO_POST, agora)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "parou", motivo, ok=False, origem=marca,
@@ -9008,12 +9020,96 @@ def tentar_o_comentario_do_post(d, rascunho, agora=None):
     return "parou"
 
 
-def _aviso_do_comentario(resultado, texto, curtidas):
-    """O aviso do comentário de depois do post: o texto e só as curtidas que saíram."""
+def _aviso_do_comentario(resultado, texto, curtidas, onde="no vídeo que foi ao ar"):
+    """O aviso de um comentário do robô: onde, o texto e só as curtidas que saíram (o link vem em linha_do_link)."""
     feitas = [nome for nome, curtida in zip(("o vídeo", "o comentário"), curtidas) if curtida in ("curtido", "já curtido")]
     curti = f" e curti {' e '.join(feitas)}" if feitas else ""
     enviado = "" if resultado == "comentado" else " (enviado, mas não apareceu na lista)"
-    return f"💬 Robô da Shopee Vídeo: comentei no vídeo que foi ao ar{curti}{enviado}:\n\n{texto}"
+    return f"💬 Robô da Shopee Vídeo: comentei {onde}{curti}{enviado}:\n\n{texto}"
+
+
+# Todo comentário que o robô escreve (no vídeo dele depois do post, no post antigo, no feed e nas respostas aos
+# comentários) vai ao privado do Rafael com o texto e o link do vídeo, para ele conferir no app. Pedido do Rafael
+# (19/11/2026): DECISOES.md, Shopee Vídeo.
+def linha_do_link(link, porque=""):
+    """A linha do link do vídeo comentado no fim do aviso; sem ele, o porquê."""
+    if link:
+        return f"\n\n🔗 {link}"
+    return f"\n\n🔗 O link do vídeo não saiu ({porque or 'sem o link'})."
+
+
+def _dia_do_post(rascunho):
+    """O dia do post (DD/MM), para o aviso do comentário no post antigo."""
+    data = (rascunho.get("postado_em") or "")[:10]
+    return f"{data[8:10]}/{data[5:7]}" if len(data) == 10 else "outro dia"
+
+
+# O link do vídeo que o robô comentou fora dos posts dele (o do feed e o das respostas): o compartilhar do player e o
+# Copiar link, como no link do post, com a área de transferência limpa antes, para um link antigo nunca passar pelo
+# deste vídeo. O registro diz se saiu (só rótulos fixos).
+PROCESSO_DO_LINK_COMENTADO = "link do vídeo comentado"
+
+
+def link_do_video_aberto(d, onde, agora=None):
+    """
+    O link do vídeo aberto no player, depois do comentário (onde: "feed" ou "resposta", para o registro): fecha o
+    teclado e o painel de comentários, toca no compartilhar e no Copiar link e lê o link copiado. (link, "") ou ("", o
+    porquê, num texto fixo). Nada aqui para a rodada (o comentário já saiu); a Verificação segue adiante.
+    """
+    def sem(porque):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_COMENTADO, "sem o link", f"{onde}: {porque}",
+                                     ok=False, agora=agora)
+        return "", porque
+
+    try:
+        _fechar_teclado(d)
+        for _ in range(2):
+            if not interacoes.painel_aberto(tela(d)):
+                break
+            d.press("back")
+            pausa(2)
+        xml = tela(d)
+        if interacoes.painel_aberto(xml):
+            return sem("o painel de comentários não fechou")
+        compartilhar = interacoes.compartilhar_do_video(xml)
+        if not compartilhar:
+            return sem("sem o compartilhar no vídeo")
+        if ps.proibido_no_ponto(xml, *compartilhar):
+            return sem("recusado")
+        try:
+            d.set_clipboard("")
+        except Exception:
+            return sem("a área de transferência não foi limpa")
+        d.click(*compartilhar)
+        pausa(4)
+        if not tem(tela(d), "Copiar link"):
+            d.press("back")
+            pausa(2)
+            return sem("sem o Copiar link")
+        tocar(d, "Copiar link", 3)
+        link = ps.link_copiado(d)
+        if not link:
+            return sem("o Copiar link não deixou o link copiado")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_COMENTADO, "copiado", onde, ok=True, agora=agora)
+        return link, ""
+    except Verificacao:
+        sem("verificação da Shopee na tela")
+        raise
+    except Parada:
+        return sem("parou no caminho do Copiar link")
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O link do vídeo comentado não saiu: {type(e).__name__}")
+        return sem(f"erro inesperado ({type(e).__name__})")
+
+
+def avisar_com_o_link(d, onde, aviso, agora=None):
+    """O aviso do comentário com o link do vídeo aberto (link_do_video_aberto); na Verificação, vai sem ele antes."""
+    try:
+        link, porque = link_do_video_aberto(d, onde, agora)
+    except Verificacao:
+        avisar(aviso + linha_do_link("", "verificação da Shopee na tela"))
+        raise
+    avisar(aviso + linha_do_link(link, porque))
 
 
 def comentario_do_post_pendente(agora=None):
@@ -9155,7 +9251,7 @@ def comentar_post_antigo(d, rascunho, agora=None):
                   antigo_em=_momento(agora))
     marca = interacoes.marca_do_post(rascunho["link_post"])
     try:
-        resultado, _texto, _curtidas = comentar_no_post(d, rascunho, antigo=True, agora=agora)
+        resultado, texto, curtidas = comentar_no_post(d, rascunho, antigo=True, agora=agora)
     except Parada as e:
         registro_processos.registrar(REGISTRO, PROCESSO_DO_ANTIGO, "parou", e.motivo, ok=False, origem=marca,
                                      agora=agora)
@@ -9166,6 +9262,9 @@ def comentar_post_antigo(d, rascunho, agora=None):
     registro_processos.registrar(REGISTRO, PROCESSO_DO_ANTIGO, resultado, ok=resultado == "comentado", origem=marca,
                                  agora=agora)
     registrar_tentativa("post_antigo", resultado, agora=agora)
+    avisar(_aviso_do_comentario(resultado, texto, curtidas,
+                                f"no seu vídeo de {_dia_do_post(rascunho)} (o comentário do dia num post antigo)")
+           + linha_do_link(rascunho["link_post"]))
     return ("post antigo: comentado e curtido" if resultado == "comentado"
             else "post antigo: comentário enviado sem aparecer na lista")
 
