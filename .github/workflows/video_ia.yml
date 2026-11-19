@@ -16,6 +16,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # ao fim, nos 8 s gerados e em mais 8 s do Estender do Flow (48 créditos), só no privado do Rafael.
 # "amostra-16s-mesmo" é a da P248 1 (17/11): a de 16 s de novo com o produto da amostra anterior, com as
 # mudanças contra as alucinações, para o Rafael comparar as duas.
+# "amostra-16s-fala-inteira" é a da P255 1 (19/11): a de 16 s com a pessoa falando do começo ao fim de cada parte
+# e o parado que sobrar cortado pelo servidor; vão ao privado o vídeo cortado e o original.
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
@@ -26,7 +28,8 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s, amostra-16s-mesmo]
+        options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s, amostra-16s-mesmo,
+                  amostra-16s-fala-inteira]
         default: modelos
 
 permissions:
@@ -55,5 +58,6 @@ jobs:
               amostra) venv/bin/python3 flow_shopee_video.py amostra ;;
               amostra-16s) venv/bin/python3 flow_shopee_video.py amostra --longa ;;
               amostra-16s-mesmo) venv/bin/python3 flow_shopee_video.py amostra --longa --mesmo ;;
+              amostra-16s-fala-inteira) venv/bin/python3 flow_shopee_video.py amostra --longa --fala-inteira ;;
               *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
             esac

@@ -9490,7 +9490,7 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
         item = link.rsplit("/", 1)[-1]
         return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
 
-    def pedido(link, nome, foto, evitar="", longo=False):
+    def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False):
         item = link.split("curto")[-1]
         foram.append(item)
         assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
@@ -9575,10 +9575,11 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     # (com a continuação do Estender). Desde a P247 1 (17/11), a escolha do vídeo do dia também pede o de 16 s; o de
     # 8 s fica só para as amostras de 8 s.
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
-    pedido, longos = robo.flow.pedido_para_o_anuncio, []
+    pedido, longos, falas = robo.flow.pedido_para_o_anuncio, [], []
 
-    def anotar(*argumentos, longo=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False):
         longos.append(longo)
+        falas.append(fala_inteira)
         return pedido(*argumentos, longo=longo)
 
     monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", anotar)
@@ -9588,6 +9589,9 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
     robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:10"), amostra=True, longo=False)
     assert longos == [True, True, False]
+    # A amostra da fala do começo ao fim (P255 1) pede o jeito novo; o vídeo de IA do dia continua no de antes.
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:15"), amostra=True, longo=True, fala_inteira=True)
+    assert falas == [False, False, False, True]
 
 
 def test_escolha_da_amostra_deixa_de_fora_as_feitas_e_fica_no_registro_dela(monkeypatch):

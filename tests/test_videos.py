@@ -265,6 +265,22 @@ def test_cada_imagem_entra_na_tabela_do_hd_e_o_video_do_criador_fica_como_veio()
     assert remontado[-len(videos.ETIQUETA_DAS_CORES) - 3:-3] == videos.ETIQUETA_DAS_CORES
 
 
+def test_cortes_e_ritmo_com_zoom_aproxima_o_trecho_em_9_por_16():
+    # O corte do parado do vídeo de IA (P255 1): o trecho depois de cada corte entra com um zoom leve, para o pulo
+    # parecer de propósito. Cada trecho já vai a 720x1280 antes da emenda, e o recorte do zoom fica em 9:16 exato.
+    assert videos.recorte_do_zoom(1.08) == "crop=666:1184,scale=720:1280,setsar=1"
+    comando = videos.comando_cortes_e_ritmo("v.mp4", [(0, 3.59, 1.0, 1.0), (8.37, 13.29, 1.0, 1.08)], "d.mp4", True)
+    filtro = comando[comando.index("-filter_complex") + 1]
+    assert f"setpts=(PTS-STARTPTS)/1,{videos.FILTRO_720P},setsar=1[c0]" in filtro
+    assert (f"setpts=(PTS-STARTPTS)/1,{videos.FILTRO_720P},setsar=1,crop=666:1184,scale=720:1280,setsar=1[c1]"
+            in filtro)
+    assert "concat=n=2:v=1:a=1" in filtro
+    # Sem zoom em nenhum trecho, o comando é o de sempre (o do Editor 2).
+    sem_zoom = videos.comando_cortes_e_ritmo("v.mp4", [(0, 2, 1.0)], "d.mp4", False)
+    filtro = sem_zoom[sem_zoom.index("-filter_complex") + 1]
+    assert "crop=" not in filtro and "setpts=(PTS-STARTPTS)/1[c0]" in filtro
+
+
 def test_letreiro_animado_comeca_a_animacao_na_hora_em_que_entra():
     # P240 1: a caixa do alto com o pulinho (APNG) começa a animação no início dela; a parada (a legenda da fala)
     # vale o vídeo todo, sem atraso.

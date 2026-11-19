@@ -3604,7 +3604,7 @@ def _canais_do_espiao(agora=None):
         return None, 0
 
 
-def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True):
+def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, fala_inteira=False):
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
     lista da API de afiliado (candidatos_do_video_de_ia), primeiro os do 2º nível (P252 1, pelos_dois_niveis) e depois
@@ -3616,7 +3616,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True):
     api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que ficam de fora (os das amostras já
     feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
-    diferente dos últimos vídeos (as amostras de 8 s).
+    diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
+    parte (P255 1), por enquanto só na amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3643,7 +3644,7 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True):
         seguidos = 0
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
-                                                   longo=longo)
+                                                   longo=longo, fala_inteira=fala_inteira)
         if pedido:
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
                               f"estilo {pedido['estilo']}"
