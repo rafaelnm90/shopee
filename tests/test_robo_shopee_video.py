@@ -10164,6 +10164,10 @@ def test_video_de_ia_sem_creditos_fica_nos_videos_dos_grupos_ate_o_credito_volta
         robo._criar_tabela_tentativas(con)
         assert con.execute("SELECT COUNT(*) FROM shopee_video_tentativas").fetchone()[0] == 0 and casos == []
     assert ("sem créditos", "30 na conta, o vídeo pede 48") in _registro_do_video_de_ia()
+    # P257 1: o aviso no privado quando os créditos acabam, uma vez só.
+    acabaram = ("🪙 Robô da Shopee Vídeo: os créditos do Google Flow acabaram: 30 na conta, e o vídeo de IA pede 48. "
+                "Fico só nos vídeos dos grupos e confiro o saldo de novo a cada 2 h; aviso quando o crédito voltar.")
+    assert _avisos_dos_creditos(avisos) == [acabaram]
     # Até 2 h depois da leitura, a rodada fica nos vídeos dos grupos, e o De IA ✨ e o Aleatório 🎲 dizem por quê.
     antes = momento("2026-10-22 10:04")
     assert not robo.video_de_ia_pendente(config, antes)
@@ -10180,6 +10184,8 @@ def test_video_de_ia_sem_creditos_fica_nos_videos_dos_grupos_ate_o_credito_volta
     robo.fazer_o_video_de_ia(Intocavel(), config, depois)
     assert len(escolhas) == 1 and robo.flow.producao()["sem_creditos_em"] == "2026-10-22 10:06:00"
     assert robo.flow.producao()["saldo"] == 10
+    # A leitura que ainda não acha crédito (e o De IA ✨ tocado na espera) não avisa de novo.
+    assert _avisos_dos_creditos(avisos) == [acabaram]
     # Com o crédito de volta (os 50 do dia), o vídeo de IA sai como sempre.
     saldos[0] = 50
     monkeypatch.setattr(robo.flow, "producao_no_celular", baixa)
@@ -10187,6 +10193,15 @@ def test_video_de_ia_sem_creditos_fica_nos_videos_dos_grupos_ate_o_credito_volta
         "vídeo de IA: pronto para o rascunho"
     assert len(escolhas) == 2 and ("créditos de volta", "50 na conta") in _registro_do_video_de_ia()
     assert robo.flow.producao()["tentativas_de_gerar"] == 1
+    # E o aviso de quando voltam, também uma vez só; o registro diz que os dois chegaram ao privado.
+    assert _avisos_dos_creditos(avisos) == [acabaram, "✅ Robô da Shopee Vídeo: os créditos do Google Flow voltaram: "
+                                            "50 na conta. O vídeo de IA volta a sair."]
+    assert [linha for linha in _registro_do_video_de_ia() if linha[0] == "aviso dos créditos"] == [
+        ("aviso dos créditos", "acabaram - no privado"), ("aviso dos créditos", "voltaram - no privado")]
+
+
+def _avisos_dos_creditos(avisos):
+    return [a for a in avisos if isinstance(a, str) and "os créditos do Google Flow" in a]
 
 
 def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, avisos, tmp_path,
