@@ -172,7 +172,12 @@ class Flow:
                     ((63, 520, 1017, 600), _no((63, 520, 1017, 600), "android.widget.TextView",
                                                texto=f"{self.saldo} créditos do Google Flow", clicavel=False), ""),
                     ((84, 620, 996, 700), _no((84, 620, 996, 700), "android.widget.Button", "Ver atividade"),
-                     "proibido")]
+                     "proibido"),
+                    # Mais abaixo, os links dos termos e da privacidade: não são a tela de termos.
+                    ((63, 2150, 1017, 2230), _no((63, 2150, 1017, 2230), "android.widget.Button",
+                                                 "Termos de Serviço"), "proibido"),
+                    ((63, 2240, 1017, 2320), _no((63, 2240, 1017, 2320), "android.widget.Button",
+                                                 "Política de Privacidade"), "proibido")]
         elif self.tela == "menu_projeto":
             # O menu do Mais opções do alto do projeto (15/11): o robô só pode tocar no Renomear.
             nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "projeto"))

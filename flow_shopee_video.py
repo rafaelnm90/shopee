@@ -923,10 +923,12 @@ def ler_o_saldo(d):
     if not ponto:
         raise Parada("saldo: a foto da conta não apareceu no alto do início do Flow")
     d.click(*ponto)
-    xml = esperar(d, lambda x: saldo_na_tela(x) is not None or tem_termos(x), ESPERA_DO_SALDO)
-    if not xml or tem_termos(xml):
-        raise Parada("saldo: a tela Conta não mostrou os créditos do Flow" if not xml else
-                     "saldo: tela de termos; o robô nunca aceita pelo Rafael")
+    # O saldo vem primeiro: a tela Conta pode ter, mais abaixo, os links dos termos e da privacidade, que não são a
+    # tela de termos. Ela só conta quando o saldo não aparece.
+    xml = esperar(d, lambda x: saldo_na_tela(x) is not None, ESPERA_DO_SALDO)
+    if not xml:
+        raise Parada("saldo: tela de termos; o robô nunca aceita pelo Rafael" if tem_termos(_tela(d)) else
+                     "saldo: a tela Conta não mostrou os créditos do Flow")
     saldo = saldo_na_tela(xml)
     d.press("back")
     if not esperar(d, lambda x: ps.achar(x, "Novo"), 30):
