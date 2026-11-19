@@ -750,6 +750,16 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   3:4 e 9:16 (o 9:16 marcado), de x1 a x4 e a lista dos modelos. O voltar com as opções abertas fecha o pedido,
   de volta ao projeto, como no Vídeo. O modo fica marcado para o pedido seguinte; o robô toca no Vídeo antes de
   montar o pedido do vídeo (`montar_o_pedido`), então o Imagem deixado marcado não atrapalha.
+- A imagem gerada (mapeada no celular do robô em 19/11/2026, com uma imagem de teste que não gastou crédito; o Gerar
+  do explorar só vale com "0 créditos de IA" na tela, `gerar_com_custo`): o pedido fecha e a imagem aparece no
+  projeto como o 1º quadro da grade, com o "Gerando…", e fica pronta em menos de 1 min (o quadro passa a ter o nome
+  que o Flow dá, com ", 1 item"). Aberta: Fechar e Mais opções no alto, o título com o nome, o modelo e o tamanho
+  ("…\n.. Nano Banana 2.1\n768p", sem toque), a imagem ("1 de 1") e, embaixo, Editar e Animar (o robô não toca nos
+  dois). Mais opções → Baixar abre a janela **"Baixar imagem"**: 1K "Tamanho original" (marcado), 2K "Aumentar a
+  resolução", o 4K desligado (só com um plano maior, ao lado do "Assine um plano com IA do Google") e o Baixar. O
+  robô baixa no 1K, sem custo, e procura o arquivo de imagem (.png, .jpg, .jpeg ou .webp) mais novo que a marca do
+  Baixar, nas pastas do vídeo (`gerar_a_imagem`, `baixar_a_imagem`); nunca toca no 2K, no 4K nem no plano. As fotos
+  dos 10 personagens (P250 1 e P258 1) saem por esse caminho (`fotos_dos_personagens`, `video_ia.yml` personagens).
 - Depois do Gerar (mapeado no 1º vídeo do teste, 15/11/2026): o pedido fecha e o vídeo
   novo aparece no projeto como o 1º quadro da grade, com "1% Gerando…" (e um Reutilizar
   comando dentro). O do Veo 3.1 - Lite ficou pronto em menos de 1 min: o quadro passa a

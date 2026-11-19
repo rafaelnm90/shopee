@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import os
 from xml.sax.saxutils import quoteattr
 
 import pytest
@@ -17,6 +18,11 @@ BAIXADO = "/sdcard/Download/Mulher usando o copo.mp4"
 MENU_DO_VIDEO = (("Gostei", 278, ""), ("Renomear", 425, ""), ("Reutilizar comando", 530, ""), ("Favorito", 635, ""),
                  ("Baixar", 740, "baixar"), ("Enviar", 845, ""), ("Compartilhar", 950, ""),
                  ("Compartilhar no YouTube", 1055, ""), ("Enviar feedback", 1202, ""))
+# A imagem do modo Imagem (19/11): o arquivo que o Baixar deixa no celular e o menu do Mais opções dela.
+IMAGEM_BAIXADA = "/sdcard/Download/Retrato.png"
+MENU_DA_IMAGEM = (("Gostei", 278, ""), ("Renomear", 425, ""), ("Reutilizar comando", 530, ""), ("Favorito", 635, ""),
+                  ("Copiar", 740, ""), ("Baixar", 845, "baixar_imagem"), ("Enviar", 950, ""),
+                  ("Compartilhar", 1055, ""), ("Enviar feedback", 1202, ""))
 
 
 def _no(caixa, classe="android.view.View", desc="", texto="", pacote=flow.PACOTE, clicavel=True, rid="", marcado=False,
@@ -94,6 +100,18 @@ class Flow:
         # A tela Conta (a foto da conta no alto do início, como na gravação do Rafael de 14/11): o saldo do Flow e
         # quantas vezes ela foi aberta.
         self.saldo, self.contas_abertas = 1050, 0
+        # O modo Imagem (P253 1, mapeado em 18/11 e 19/11): o modo do pedido, o custo que a folha mostra na imagem
+        # (0 no app), quantas leituras o "Gerando…" da imagem dura, os textos dos Gerar da imagem, se a janela
+        # "Baixar imagem" vem com o tamanho original marcado e se o arquivo da imagem está no celular.
+        self.modo, self.custo_da_imagem, self.imagem_leituras, self.textos_das_imagens = "video", 0, 0, []
+        self.imagem_pronta = self.imagem_baixada = self.imagem_nao_baixa = self.imagem_falha = False
+        self.imagens_feitas = 0
+        self.original_da_imagem = True
+        # O modelo marcado no modo Imagem e os da lista dele.
+        self.modelo_da_imagem, self.lista_da_imagem = "Nano Banana 2.1", ("Nano Banana 2.1", "Outra Imagem")
+
+    def modelo_atual(self):
+        return self.modelo_da_imagem if self.modo == "imagem" else self.modelo
 
     def continuacao_registrada(self):
         return self.extensoes > 0 and not self.continuacao_perdida and self.continuacao_pendente <= 0
@@ -137,12 +155,21 @@ class Flow:
 
     def shell(self, partes):
         self.comandos.append(partes)
+        if partes and partes[0] == "rm" and IMAGEM_BAIXADA in partes:
+            self.imagem_baixada = False
+        if partes and partes[0] == "find" and "*.png" in partes:
+            return Resposta(f"1763216000 345678 {IMAGEM_BAIXADA}\n" if self.imagem_baixada else "")
+        if partes and partes[0] == "find" and "*.mp4" not in partes:
+            return Resposta("")
         if partes and partes[0] == "find":
             return Resposta(f"1763216000 2345678 {BAIXADO}\n" if self.baixado else "")
         return Resposta(self.na_galeria if "content" in partes else "")
 
     def pull(self, origem, destino):
         self.puxados.append(origem)
+        if origem == IMAGEM_BAIXADA:
+            Image.new("RGB", (96, 172), (90, 120, 200)).save(destino, "PNG")
+            return
         # Cada Baixar traz o arquivo da versão que estava à vista.
         with open(destino, "wb") as arquivo:
             arquivo.write(b"\0" * 2048 + str(self.baixadas[-1] if self.baixadas else 0).encode())
@@ -214,6 +241,12 @@ class Flow:
                 itens = f"{quantas} itens" if quantas > 1 else "1 item"
                 quadro = _no((0, 466, 537, 1422), desc=f"Mulher usando o copo, {itens}")
                 nos.append(((0, 466, 537, 1422), quadro, "video"))
+            # Cada imagem com o nome que o Flow dá (outro a cada uma); a que falha não aparece.
+            if self.imagem_leituras > 0:
+                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False), ""))
+            elif self.imagem_pronta:
+                nome = f"Retrato {self.imagens_feitas}, 1 item"
+                nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc=nome), "imagem"))
             if self.video_de_antes:
                 nos.append(((0, 1427, 537, 1964), _no((0, 1427, 537, 1964), desc="Copo de antes, 1 item"), "antes"))
             if not self.filtro:
@@ -249,6 +282,37 @@ class Flow:
                     ((888, 1445, 1014, 1571), _no((888, 1445, 1014, 1571), "android.widget.Button", "Gerar",
                                                   clicavel=False, ligado=bool(self.texto_do_estender)),
                      "gerar_estender")]
+        elif self.tela == "imagem":
+            nos += [((0, 131, 1080, 299), _no((0, 131, 1080, 299), clicavel=False,
+                                               desc=f"Retrato {self.imagens_feitas}\n.. Nano Banana 2.1\n768p"), ""),
+                    ((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Fechar"), "projeto"),
+                    ((891, 152, 1017, 278), _no((891, 152, 1017, 278), "android.widget.Button", "Mais opções"),
+                     "menu_imagem"),
+                    ((0, 309, 1080, 2184), _no((0, 309, 1080, 2184), "android.widget.ImageView", "1 de 1"), ""),
+                    ((42, 2216, 530, 2363), _no((42, 2216, 530, 2363), "android.widget.Button", "Editar"), "proibido"),
+                    ((551, 2216, 1038, 2363), _no((551, 2216, 1038, 2363), "android.widget.Button", "Animar"),
+                     "proibido")]
+        elif self.tela == "menu_imagem":
+            nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "imagem"))
+            nos += [((341, y, 954, y + 105), _no((341, y, 954, y + 105), "android.widget.Button", nome), acao)
+                    for nome, y, acao in MENU_DA_IMAGEM]
+        elif self.tela == "tamanho_imagem":
+            # A janela "Baixar imagem" como no celular do robô (19/11): 1K (o tamanho original), 2K e o 4K do plano.
+            nos += [((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar"), "imagem"),
+                    ((168, 874, 912, 947), _no((168, 874, 912, 947), desc="Baixar imagem", clicavel=False), ""),
+                    ((168, 989, 912, 1451), _no((168, 989, 912, 1451), "android.widget.RadioGroup", clicavel=False,
+                                                desc="Escolha uma resolução para fazer o download.\n4K"), ""),
+                    ((168, 1136, 912, 1241), _no((168, 1136, 912, 1241), desc="1K\nTamanho original"),
+                     "original_imagem"),
+                    ((168, 1165, 215, 1212), _no((168, 1165, 215, 1212), "android.widget.RadioButton",
+                                                 marcado=self.original_da_imagem), "original_imagem"),
+                    ((168, 1241, 912, 1346), _no((168, 1241, 912, 1346), desc="2K\nAumentar a resolução"), "proibido"),
+                    ((168, 1270, 215, 1317), _no((168, 1270, 215, 1317), "android.widget.RadioButton",
+                                                 marcado=not self.original_da_imagem), "proibido"),
+                    ((302, 1378, 807, 1420), _no((302, 1378, 807, 1420), desc="Assine um plano com IA do Google"),
+                     "plano"),
+                    ((677, 1514, 912, 1640), _no((677, 1514, 912, 1640), "android.widget.Button", "Baixar"),
+                     "confirmar_imagem")]
         elif self.tela == "menu_video":
             nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "video"))
             nos += [((341, y, 954, y + 105), _no((341, y, 954, y + 105), "android.widget.Button", nome), acao)
@@ -282,11 +346,13 @@ class Flow:
                     ((700, 2230, 1070, 2330), _no((700, 2230, 1070, 2330), "android.widget.Button", texto="Adicionar (1)",
                                                    pacote=SELETOR, rid=f"{SELETOR}:id/button_add"), "adicionar")]
         elif self.tela in ("pedido", "menu"):
-            nos += [((272, 900, 398, 1000), _no((272, 900, 398, 1000), "android.widget.Button", "Imagem"), ""),
-                    ((419, 900, 661, 1000), _no((419, 900, 661, 1000), "android.widget.Button", "Vídeo"), ""),
+            nos += [((272, 900, 398, 1000), _no((272, 900, 398, 1000), "android.widget.Button", "Imagem"),
+                     "modo:imagem"),
+                    ((419, 900, 661, 1000), _no((419, 900, 661, 1000), "android.widget.Button", "Vídeo"), "modo:video"),
                     ((45, 1100, 1035, 1200), _no((45, 1100, 1035, 1200), "android.widget.EditText", texto=self.texto), ""),
                     ((45, 1200, 171, 1300), _no((45, 1200, 171, 1300), "android.widget.Button", "Adicionar mídia"), "menu"),
-                    ((548, 1200, 867, 1300), _no((548, 1200, 867, 1300), "android.widget.Button", f"{self.modelo}\nx1"), "folha"),
+                    ((548, 1200, 867, 1300), _no((548, 1200, 867, 1300), "android.widget.Button",
+                                                 f"{self.modelo_atual()}\nx1"), "folha"),
                     ((888, 1200, 1014, 1300), _no((888, 1200, 1014, 1300), "android.widget.Button", "Gerar"), "gerar")]
             if self.foto:
                 nos.append(((66, 1000, 213, 1095), _no((66, 1000, 213, 1095), "android.widget.ImageView"), ""))
@@ -294,16 +360,20 @@ class Flow:
                 nos += [((63, 700, 383, 790), _no((63, 700, 383, 790), "android.widget.Button", "Capturar"), ""),
                         ((63, 790, 383, 880), _no((63, 790, 383, 880), "android.widget.Button", "Imagens"), "seletor")]
             if self.folha:
+                custo = self.custo_da_imagem if self.modo == "imagem" else self.custos[self.modelo]
                 nos += [((259, 1400, 823, 1460), _no((259, 1400, 823, 1460), desc="A geração vai usar ", clicavel=False), ""),
                         ((535, 1460, 823, 1520), _no((535, 1460, 823, 1520), "android.widget.Button",
-                                                      f"{self.custos[self.modelo]} créditos de IA"), ""),
+                                                      f"{custo} créditos de IA"), ""),
                         ((540, 1550, 1051, 1650), _no((540, 1550, 1051, 1650), desc="9:16\nGuia 2 de 2"), "")]
-                # Como no app (15/11): o Veo 3.1 - Lite não tem a escolha da resolução.
-                if self.modelo != "Veo 3.1 - Lite":
+                # Como no app (15/11): o Veo 3.1 - Lite não tem a escolha da resolução, nem a imagem.
+                if self.modo == "video" and self.modelo != "Veo 3.1 - Lite":
                     nos.append(((540, 1660, 1051, 1760), _no((540, 1660, 1051, 1760), desc="720p\nGuia 2 de 2"), ""))
                 nos += [((29, 1770, 284, 1870), _no((29, 1770, 284, 1870), desc="x1\nGuia 1 de 4"), ""),
-                        ((24, 2244, 1056, 2370), _no((24, 2244, 1056, 2370), desc=self.modelo), "lista")]
-            if self.lista:
+                        ((24, 2244, 1056, 2370), _no((24, 2244, 1056, 2370), desc=self.modelo_atual()), "lista")]
+            if self.lista and self.modo == "imagem":
+                nos += [((24, y, 1056, y + 100), _no((24, y, 1056, y + 100), desc=f"{nome}\n0 créditos / imagem"),
+                         f"img:{nome}") for y, nome in zip(range(1880, 2240, 110), self.lista_da_imagem)]
+            elif self.lista:
                 nos += [((24, 1880, 1056, 1990), _no((24, 1880, 1056, 1990), desc="Omni 1.1 Flash\n12 créditos / video"),
                          "Omni 1.1 Flash"),
                         ((24, 2000, 1056, 2100), _no((24, 2000, 1056, 2100), desc="Veo 3.1 - Lite\n10 créditos / video"),
@@ -316,6 +386,8 @@ class Flow:
         xml = '<?xml version="1.0" ?><hierarchy rotation="0">' + "".join(no for _, no, _ in self.nos()) + "</hierarchy>"
         if self.tela == "projeto" and self.gerando_leituras > 0:
             self.gerando_leituras -= 1
+        if self.tela == "projeto" and self.imagem_leituras > 0:
+            self.imagem_leituras -= 1
         if self.tela == "projeto" and self.estendendo():
             self.estendendo_leituras -= 1
         if self.tela == "video":
@@ -344,6 +416,24 @@ class Flow:
             self.marcada = True
         elif acao == "adicionar" and self.marcada:
             self.tela, self.foto = "pedido", True
+        elif acao == "gerar" and self.modo == "imagem":
+            # Como no app (19/11): o pedido fecha vazio, e a imagem aparece no alto do projeto, "Gerando…" antes.
+            self.textos_das_imagens.append(self.texto)
+            self.tela, self.texto, self.folha, self.imagem_leituras = "projeto", "", False, 2
+            if not self.imagem_falha:
+                self.imagem_pronta, self.imagens_feitas = True, self.imagens_feitas + 1
+        elif acao.startswith("modo:"):
+            self.modo = acao.split(":", 1)[1]
+        elif acao.startswith("img:"):
+            self.modelo_da_imagem, self.lista = acao.split(":", 1)[1], False
+        elif acao in ("imagem", "menu_imagem"):
+            self.tela = acao
+        elif acao == "baixar_imagem":
+            self.tela = "tamanho_imagem"
+        elif acao == "original_imagem":
+            self.original_da_imagem = True
+        elif acao == "confirmar_imagem":
+            self.tela, self.imagem_baixada = "imagem", not self.imagem_nao_baixa
         elif acao == "gerar":
             self.geracoes += 1
             self.tela = "projeto"
@@ -2007,3 +2097,146 @@ def test_unboxing_nunca_sai_dois_seguidos_e_a_legenda_diz_o_formato(bm):
     flow.guardar_producao(estilo=flow.ESTILO_DO_VENDEDOR)
     assert flow.ultimo_foi_unboxing() is False
 
+
+# --- As fotos dos personagens no modo Imagem do Flow (P253 1, P250 1 e P258 1) ---
+
+
+def test_fotos_dos_personagens_saem_de_graca_no_tamanho_original_e_vao_ao_privado(celular, monkeypatch, capsys):
+    # Pedido do Rafael (P250 1 e P258 1): a foto de cada um dos 10 personagens, feita no modo Imagem do Flow, que não
+    # gasta crédito, e mandada ao privado dele para aprovar antes de valer.
+    assert flow.main(["personagens"]) == 0
+    assert len(celular.textos_das_imagens) == 10 and celular.geracoes == 0
+    assert celular.textos_das_imagens[4] == flow.pedido_do_personagem(flow.personagem("vovo"))
+    assert "uma senhora de uns 70 anos" in celular.textos_das_imagens[4]
+    # Baixada no tamanho original, sem tocar no Editar, no Animar, no 2K, no 4K nem no plano; o celular fica sem o
+    # arquivo e sem a marca do Baixar, e o saldo do Flow nem é lido.
+    assert celular.toques_proibidos == [] and celular.puxados == [IMAGEM_BAIXADA] * 10
+    assert ["rm", "-f", IMAGEM_BAIXADA, flow.MARCA_DO_BAIXAR] in celular.comandos
+    assert celular.tela == "projeto" and celular.fora_do_projeto == [] and celular.contas_abertas == 0
+    assert len(celular.fotos) == 10
+    caminho, legenda = celular.fotos[4]
+    assert caminho.endswith(os.path.join("personagens", "vovo.jpg"))
+    with Image.open(caminho) as foto:
+        assert foto.format == "JPEG"
+    assert legenda.startswith("👤 Personagem 5 de 10: Vovó (cozinha, saúde e casa)") and "seu OK" in legenda
+    guardadas = flow.fotos_guardadas()
+    assert sorted(guardadas) == sorted(p["chave"] for p in flow.PERSONAGENS)
+    assert all(foto["mandada_em"] and foto["feita_em"] for foto in guardadas.values())
+    # O log público tem só as chaves e os números, nunca o pedido.
+    saida = capsys.readouterr().out
+    assert "Personagens: a foto de vovo foi feita" in saida and "Personagens: 10 foto(s) no privado" in saida
+    assert "senhora" not in saida and "Foto realista" not in saida
+    # Com todas no privado, a vez seguinte não toca no celular.
+    monkeypatch.setattr(flow.celular_robo, "conectado", lambda: pytest.fail("não precisa do celular"))
+    assert flow.main(["personagens"]) == 0 and len(celular.fotos) == 10
+    assert "todas as fotos já foram mandadas" in capsys.readouterr().out
+
+
+def test_personagem_refeito_ganha_outra_foto_que_vai_de_novo_ao_privado(celular, monkeypatch):
+    # Tudo no mesmo segundo: a foto refeita vai ao privado mesmo com a hora igual à do envio de antes.
+    monkeypatch.setattr(flow, "agora", lambda: "2026-11-19 10:00:00")
+    assert flow.main(["personagens"]) == 0 and len(celular.fotos) == 10
+    antes = flow.fotos_guardadas()
+    assert flow.main(["personagens", "vovo,faz_tudo"]) == 0
+    assert len(celular.textos_das_imagens) == 12 and len(celular.fotos) == 12
+    assert [os.path.basename(caminho) for caminho, _ in celular.fotos[10:]] == ["vovo.jpg", "faz_tudo.jpg"]
+    assert "Personagem 5 de 10: Vovó" in celular.fotos[10][1]
+    assert "Personagem 8 de 10: Faz-Tudo" in celular.fotos[11][1]
+    depois = flow.fotos_guardadas()
+    assert depois["bonitao"] == antes["bonitao"] and depois["vovo"]["mandada_em"]
+
+
+def test_personagem_com_chave_desconhecida_nao_toca_no_celular(celular, capsys):
+    assert flow.main(["personagens", "vovo", "gago"]) == 1
+    assert celular.toques == [] and celular.fotos == [] and flow.fotos_guardadas() == {}
+    assert "chave desconhecida" in capsys.readouterr().out
+
+
+def test_foto_feita_que_nao_chegou_ao_privado_vai_sem_gerar_outra(celular, monkeypatch):
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto", lambda caminho, legenda="": False)
+    assert flow.main(["personagens"]) == 1 and len(celular.textos_das_imagens) == 10
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto",
+                        lambda caminho, legenda="": celular.fotos.append((caminho, legenda)) or True)
+    monkeypatch.setattr(flow.celular_robo, "conectado", lambda: pytest.fail("não precisa do celular"))
+    assert flow.main(["personagens"]) == 0
+    assert len(celular.textos_das_imagens) == 10 and len(celular.fotos) == 10
+
+
+def test_imagem_com_custo_na_tela_nao_e_gerada(celular, capsys):
+    celular.custo_da_imagem = 4
+    assert flow.main(["personagens", "vovo"]) == 1
+    assert celular.textos_das_imagens == [] and celular.fotos == [] and flow.fotos_guardadas() == {}
+    assert ("parou", "antes do Gerar da imagem: a imagem não sai de graça") in celular.guardados
+    assert "Personagens: parou: antes do Gerar da imagem" in capsys.readouterr().out
+
+
+def test_modo_imagem_em_outro_modelo_troca_para_o_da_imagem_e_sem_ele_nao_gera(celular, monkeypatch):
+    # O botão que não aparece espera o ESPERA_DA_TELA do teste, e não os 20 s do celular.
+    monkeypatch.setattr(flow.tocar, "__defaults__", (flow.ESPERA_DA_TELA,))
+    celular.modelo_da_imagem = "Outra Imagem"
+    assert flow.main(["personagens", "vovo"]) == 0
+    assert celular.modelo_da_imagem == flow.MODELO_DA_IMAGEM and len(celular.textos_das_imagens) == 1
+    # Sem o modelo da imagem na lista, para antes do Gerar.
+    celular.modelo_da_imagem, celular.lista_da_imagem = "Outra Imagem", ("Outra Imagem",)
+    assert flow.main(["personagens", "vovo"]) == 1
+    assert len(celular.textos_das_imagens) == 1 and len(celular.fotos) == 1
+    assert any(resultado == "parou" and "modelo da imagem" in motivo for resultado, motivo in celular.guardados)
+
+
+def test_pedido_da_imagem_com_foto_de_antes_para_sem_gerar(celular):
+    celular.foto = True
+    assert flow.main(["personagens", "vovo"]) == 1
+    assert celular.textos_das_imagens == []
+    assert ("parou", "pedido da imagem: já tinha foto ou texto de antes") in celular.guardados
+
+
+def test_imagem_que_o_flow_nao_faz_nao_vira_a_foto_de_antes(celular):
+    # O "Gerando…" some sem a imagem nova: no alto fica a do personagem de antes, que não vai como a do seguinte.
+    assert flow.main(["personagens", "vovo"]) == 0 and len(celular.fotos) == 1
+    celular.imagem_falha = True
+    assert flow.main(["personagens", "faz_tudo"]) == 1
+    assert len(celular.fotos) == 1 and celular.puxados == [IMAGEM_BAIXADA] and "faz_tudo" not in flow.fotos_guardadas()
+    assert ("parou", "baixar a imagem: o mais novo do projeto ainda é o de antes do Gerar; a imagem não foi feita") \
+        in celular.guardados
+
+
+def test_janela_da_imagem_com_outro_tamanho_marcado_baixa_o_original(celular):
+    celular.original_da_imagem = False
+    assert flow.main(["personagens", "vovo"]) == 0
+    assert celular.original_da_imagem and celular.toques_proibidos == [] and len(celular.fotos) == 1
+
+
+def test_imagem_que_nao_chega_ao_celular_para_e_guarda_o_caso(celular, monkeypatch):
+    monkeypatch.setattr(flow, "ESPERA_DO_BAIXAR", 0.2)
+    celular.imagem_nao_baixa = True
+    assert flow.main(["personagens", "vovo"]) == 1
+    assert celular.fotos == [] and celular.puxados == [] and flow.fotos_guardadas() == {}
+    assert ("parou", "baixar a imagem: o arquivo da imagem não apareceu no celular") in celular.guardados
+
+
+def test_arquivos_novos_das_imagens_procura_cada_extensao():
+    class Celular:
+        def __init__(self):
+            self.nomes = []
+
+        def shell(self, partes):
+            nome = partes[partes.index("-name") + 1]
+            self.nomes.append(nome)
+            return Resposta({"*.png": "1763216100 2048 /sdcard/Download/Retrato.png\n",
+                             "*.jpg": "1763216200 1024 /sdcard/Pictures/Outra.jpg\n"
+                                      "1763216300 512 /sdcard/Download/.pending-1-Foto.jpg\n"}.get(nome, ""))
+
+    aparelho = Celular()
+    assert flow.arquivos_novos(aparelho, flow.EXTENSOES_DA_IMAGEM) == [("/sdcard/Pictures/Outra.jpg", 1024),
+                                                                       ("/sdcard/Download/Retrato.png", 2048)]
+    assert aparelho.nomes == ["*.png", "*.jpg", "*.jpeg", "*.webp"]
+
+
+def test_os_10_personagens_e_o_pedido_da_foto():
+    assert len(flow.PERSONAGENS) == 10 and len({p["chave"] for p in flow.PERSONAGENS}) == 10
+    assert [p["nome"] for p in flow.PERSONAGENS[-2:]] == ["Desconfiada", "Exagerado"]
+    for p in flow.PERSONAGENS:
+        pedido = flow.pedido_do_personagem(p)
+        assert p["quem"] in pedido and "que não se pareça com ninguém famoso" in pedido
+        assert "Sem texto, sem logotipo, sem marca-d'água e sem nada nas mãos" in pedido
+    assert flow.personagem("gago") is None and flow.personagem("vovo")["nome"] == "Vovó"

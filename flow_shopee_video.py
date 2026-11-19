@@ -52,6 +52,12 @@ vídeo, no privado.
     python3 flow_shopee_video.py amostra --longa    # a amostra do vídeo de 16 s, com o Estender (P246 1)
     python3 flow_shopee_video.py amostra --longa --mesmo  # a de 16 s com o produto da anterior (P248 1)
     python3 flow_shopee_video.py amostra --longa --fala-inteira  # a de 16 s falando o tempo todo, sem o parado (P255 1)
+    python3 flow_shopee_video.py personagens          # as fotos dos personagens que faltam (P250 1 e P258 1)
+    python3 flow_shopee_video.py personagens vovo     # a foto da Vovó de novo (outra)
+
+As fotos dos 10 personagens fixos (P250 1 e P258 1, 19/11/2026): no modo Imagem do Flow, que não gasta crédito (o
+Nano Banana 2.1, conferido na tela com "0 créditos de IA" antes do Gerar), uma por personagem, baixada no tamanho
+original e mandada ao privado do Rafael para ele aprovar ou pedir outra (fotos_dos_personagens).
 """
 import asyncio
 import difflib
@@ -1056,14 +1062,26 @@ def esperar_o_video(d, ja_gerado=False, guardar_telas=True):
         time.sleep(PAUSA_DA_LEITURA)
 
 
-def quadro_mais_novo(xml):
-    """O centro do quadro mais novo do projeto (o 1º da grade: o mais alto e, empatado, o da esquerda); None sem quadro."""
+def _mais_novo(xml):
+    """O quadro mais novo do projeto (o 1º da grade: o mais alto e, empatado, o da esquerda); None sem quadro."""
     quadros = [el for el in ps.elementos(xml)
                if el["pacote"] == PACOTE and el["clicavel"] and ITEM_DO_PROJETO.search(el["descricao"] or "")]
-    if not quadros:
+    return min(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0])) if quadros else None
+
+
+def quadro_mais_novo(xml):
+    """O centro do quadro mais novo do projeto; None sem quadro."""
+    quadro = _mais_novo(xml)
+    if not quadro:
         return None
-    x1, y1, x2, y2 = min(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0]))["caixa"]
+    x1, y1, x2, y2 = quadro["caixa"]
     return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def descricao_do_mais_novo(xml):
+    """A descrição do quadro mais novo do projeto (o nome que o Flow deu e os itens: "…, 1 item"); "" sem quadro."""
+    quadro = _mais_novo(xml)
+    return quadro["descricao"] if quadro else ""
 
 
 def titulo_do_video(xml):
@@ -1321,21 +1339,25 @@ def escolher_a_versao(d, estendida, modelo):
     raise Parada(f"estender: a versão {'estendida' if estendida else 'original'} não ficou à vista")
 
 
-def arquivos_novos(d):
-    """Os vídeos (.mp4) que apareceram no celular depois da marca do Baixar: [(caminho, bytes)], o mais novo primeiro."""
-    comando = ["find", *PASTAS_DO_BAIXAR, "-type", "f", "-name", "*.mp4", "-newer", MARCA_DO_BAIXAR,
-               "-exec", "stat", "-c", "%Y %s %n", "{}", "+"]
-    try:
-        saida = d.shell(comando).output or ""
-    except Exception:
-        return []
+def arquivos_novos(d, extensoes=(".mp4",)):
+    """
+    Os arquivos com essas extensões (os vídeos, ou as imagens do modo Imagem) que apareceram no celular depois da
+    marca do Baixar: [(caminho, bytes)], o mais novo primeiro.
+    """
     achados = []
-    for linha in saida.splitlines():
-        partes = linha.strip().split(" ", 2)
-        # O arquivo com ponto na frente (o ".pending-…" do Android) ainda está sendo gravado.
-        if len(partes) == 3 and partes[0].isdigit() and partes[1].isdigit() \
-                and not os.path.basename(partes[2]).startswith("."):
-            achados.append((int(partes[0]), int(partes[1]), partes[2]))
+    for extensao in extensoes:
+        comando = ["find", *PASTAS_DO_BAIXAR, "-type", "f", "-name", f"*{extensao}", "-newer", MARCA_DO_BAIXAR,
+                   "-exec", "stat", "-c", "%Y %s %n", "{}", "+"]
+        try:
+            saida = d.shell(comando).output or ""
+        except Exception:
+            continue
+        for linha in saida.splitlines():
+            partes = linha.strip().split(" ", 2)
+            # O arquivo com ponto na frente (o ".pending-…" do Android) ainda está sendo gravado.
+            if len(partes) == 3 and partes[0].isdigit() and partes[1].isdigit() \
+                    and not os.path.basename(partes[2]).startswith("."):
+                achados.append((int(partes[0]), int(partes[1]), partes[2]))
     return [(caminho, tamanho) for _, tamanho, caminho in sorted(achados, reverse=True)]
 
 
@@ -1446,17 +1468,17 @@ def baixar(d):
         time.sleep(2)
 
 
-def puxar(d, remoto, local):
-    """Traz o vídeo do celular para o servidor e tira do celular o arquivo e a marca do Baixar."""
+def puxar(d, remoto, local, o_que="o vídeo"):
+    """Traz o arquivo (o vídeo ou a imagem) do celular ao servidor e tira do celular o arquivo e a marca do Baixar."""
     os.makedirs(os.path.dirname(local), exist_ok=True)
     try:
         d.pull(remoto, local)
     except Exception as e:
-        raise Parada(f"baixar: o vídeo não veio do celular para o servidor ({type(e).__name__})")
+        raise Parada(f"baixar: {o_que} não veio do celular para o servidor ({type(e).__name__})")
     d.shell(["rm", "-f", remoto, MARCA_DO_BAIXAR])
     d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + remoto])
     if not os.path.exists(local) or not os.path.getsize(local):
-        raise Parada("baixar: o vídeo não veio do celular para o servidor")
+        raise Parada(f"baixar: {o_que} não veio do celular para o servidor")
 
 
 def ler_conferencia(texto):
@@ -2192,6 +2214,342 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     return "\n".join(linhas)
 
 
+# --- Os personagens fixos e a imagem do modo Imagem (P253 1, P250 1 e P258 1) ---
+# Os 10 personagens fixos do vídeo de IA: os 4 do Rafael (Bonitão, Clássica, Largadão e Desastrada, os dois
+# últimos para a comédia), os 4 que o Claude sugeriu (Vovó, Mãe Prática, Jovem Antenado e Faz-Tudo) e a
+# Desconfiada e o Exagerado (P258 1). Cada um é uma pessoa inventada, sem parecer ninguém famoso, com tons de pele
+# variados; a foto de cada um é feita uma vez, no modo Imagem do Flow, que não gasta crédito (0 créditos de IA,
+# lido em 18/11/2026), e vai só ao privado do Rafael para aprovar antes de valer. Na comédia, a graça é da
+# situação, nunca do corpo, da aparência ou de um grupo (15/11). Escolhas do Rafael (P250 1 e P258 1): DECISOES.md,
+# Shopee Vídeo.
+PERSONAGENS = (
+    {"chave": "bonitao", "nome": "Bonitão", "resumo": "homem forte e bonito",
+     "quem": "um homem de uns 30 anos, forte e bonito, de pele morena, cabelo curto e barba bem aparada, com "
+             "camiseta lisa azul-marinho", "jeito": "um sorriso confiante", "onde": "numa sala moderna e clara"},
+    {"chave": "classica", "nome": "Clássica", "resumo": "mulher bonita, de beleza clássica",
+     "quem": "uma mulher de uns 35 anos, bonita, de beleza clássica e elegante, de pele clara, cabelo castanho "
+             "liso preso num coque baixo, com blusa de seda cor creme", "jeito": "um sorriso discreto",
+     "onde": "numa sala clara com plantas"},
+    {"chave": "largadao", "nome": "Largadão", "resumo": "homem gordo e desleixado, para a comédia",
+     "quem": "um homem de uns 40 anos, gordo, de jeito largado e bem-humorado, de pele parda, barba por fazer, "
+             "com camiseta folgada", "jeito": "um sorriso preguiçoso e simpático",
+     "onde": "sentado num sofá de uma sala simples"},
+    {"chave": "desastrada", "nome": "Desastrada", "resumo": "mulher gorda e atrapalhada, para a comédia",
+     "quem": "uma mulher de uns 30 anos, gorda, alegre e de jeito atrapalhado, de pele negra, cabelo cacheado "
+             "volumoso, com blusa colorida", "jeito": "uma risada espontânea", "onde": "numa cozinha de casa"},
+    {"chave": "vovo", "nome": "Vovó", "resumo": "cozinha, saúde e casa",
+     "quem": "uma senhora de uns 70 anos, carinhosa, de pele clara, cabelo grisalho curto e óculos, com avental "
+             "florido", "jeito": "um sorriso acolhedor", "onde": "numa cozinha aconchegante"},
+    {"chave": "mae_pratica", "nome": "Mãe Prática", "resumo": "organização, limpeza e coisas de criança",
+     "quem": "uma mulher de uns 38 anos, prática e organizada, de pele morena, cabelo preso num rabo de cavalo, "
+             "com roupa confortável de ficar em casa", "jeito": "um sorriso decidido",
+     "onde": "numa sala arrumada, sem ninguém mais na cena"},
+    {"chave": "jovem_antenado", "nome": "Jovem Antenado", "resumo": "celular, fone e aparelhos",
+     "quem": "um rapaz de uns 22 anos, antenado em tecnologia, de pele negra, cabelo curto moderno, com moletom",
+     "jeito": "uma cara animada", "onde": "num quarto com uma luz de LED azul ao fundo"},
+    {"chave": "faz_tudo", "nome": "Faz-Tudo", "resumo": "ferramentas, carro e reparos",
+     "quem": "um homem de uns 50 anos, de mão na massa, de pele parda, bigode, com camisa xadrez de trabalho",
+     "jeito": "um sorriso de quem resolve", "onde": "numa garagem com ferramentas penduradas ao fundo"},
+    {"chave": "desconfiada", "nome": "Desconfiada", "resumo": "duvida do produto até ele provar que funciona",
+     "quem": "uma mulher de uns 45 anos, de pele clara com sardas, cabelo ruivo curto, com blusa de tricô",
+     "jeito": "cara de desconfiada, com uma sobrancelha levantada", "onde": "numa sala de estar"},
+    {"chave": "exagerado", "nome": "Exagerado", "resumo": "se espanta com tudo",
+     "quem": "um homem de uns 35 anos, muito expressivo, de pele morena, cabelo cacheado, com camisa estampada",
+     "jeito": "cara de espanto exagerado, de olhos arregalados e boca aberta", "onde": "numa sala de estar"},
+)
+# O pedido da foto de cada personagem no modo Imagem: só a pessoa, em pé no quadro (9:16), como num vídeo de
+# celular, sem produto (o produto entra depois, na imagem do personagem com ele, P253 1).
+PEDIDO_DO_PERSONAGEM = (
+    "Foto realista e natural, na vertical, como o quadro de um vídeo de celular de um criador de conteúdo "
+    "brasileiro: {quem}, com {jeito}, da cintura para cima, olhando para a câmera, {onde}, com luz natural "
+    "suave. Uma pessoa inventada, que não se pareça com ninguém famoso. Sem texto, sem logotipo, sem marca-d'água "
+    "e sem nada nas mãos."
+)
+
+
+def personagem(chave):
+    """O personagem pela chave ("vovo"); None sem ele."""
+    return next((p for p in PERSONAGENS if p["chave"] == chave), None)
+
+
+def pedido_do_personagem(p):
+    """O texto do pedido da foto do personagem no modo Imagem."""
+    return PEDIDO_DO_PERSONAGEM.format(quem=p["quem"], jeito=p["jeito"], onde=p["onde"])
+
+
+# O modo Imagem (mapeado no celular do robô em 18/11 e 19/11/2026): Criar → Imagem → o texto → o modelo da imagem
+# (Nano Banana 2.1, 9:16, x1, "A geração vai usar 0 créditos de IA") → Gerar. A imagem fica pronta em menos de 1 min
+# como o 1º quadro do projeto, com o "Gerando…" antes, como o vídeo; aberta, o título traz o nome que o Flow dá, o
+# modelo e o tamanho ("Red apple on wooden table\n.. Nano Banana 2.1\n768p"), com Fechar, Mais opções, Editar e
+# Animar. Mais opções → Baixar abre a janela "Baixar imagem": 1K (o tamanho original, marcado), 2K (aumentar a
+# resolução) e 4K (só com um plano maior, ao lado do "Assine um plano com IA do Google"). O robô baixa no tamanho
+# original, sem custo, e nunca toca no 2K, no 4K nem no plano.
+MODELO_DA_IMAGEM = "Nano Banana 2.1"
+TITULO_DA_JANELA_DA_IMAGEM = "baixar imagem"
+EXTENSOES_DA_IMAGEM = (".png", ".jpg", ".jpeg", ".webp")
+PASTA_DOS_PERSONAGENS = os.path.join(PASTA, "personagens")
+
+
+def montar_o_pedido_da_imagem(d, prompt):
+    """Criar → Imagem → o texto → o modelo da imagem (9:16, x1); a tela pronta para o Gerar (Parada no que falhar)."""
+    tocar(d, "Criar", "criar")
+    tocar(d, "Imagem", "modo imagem")
+    # Como no pedido do vídeo: o pedido guardado de antes (foto ou texto) não é apagado às cegas.
+    xml = esperar(d, lambda x: any(el["classe"] == "EditText" for el in ps.elementos(x)))
+    if not xml:
+        raise Parada("pedido da imagem: a caixa do pedido não apareceu")
+    if fotos_no_pedido(xml) or texto_do_pedido(xml).strip():
+        raise Parada("pedido da imagem: já tinha foto ou texto de antes")
+    ponto = ponto_parado(d, centro_da_caixa, "texto do pedido da imagem")
+    if not ponto:
+        raise Parada("pedido da imagem: a caixa não apareceu")
+    d.click(*ponto)
+    time.sleep(1)
+    ps.escrever(d, prompt)
+    if not esperar(d, lambda x: " ".join(texto_do_pedido(x).split())[:40] == " ".join(prompt.split())[:40], 10):
+        raise Parada("pedido da imagem: o texto não entrou na caixa")
+    atual = modelo_no_pedido(_tela(d))
+    if not atual:
+        raise Parada("pedido da imagem: o botão do modelo não apareceu")
+    tocar(d, f"{atual} x", "abrir o modelo da imagem")
+    if atual != MODELO_DA_IMAGEM:
+        tocar(d, atual, "lista de modelos da imagem")
+        tocar(d, MODELO_DA_IMAGEM, "escolher o modelo da imagem")
+        if not esperar(d, lambda x: modelo_no_pedido(x) == MODELO_DA_IMAGEM):
+            raise Parada("pedido da imagem: o modelo da imagem não ficou marcado")
+    for opcao in ("9:16", "x1"):
+        tocar(d, opcao, f"opção {opcao} da imagem")
+    return esperar(d, lambda x: custo_na_tela(x) is not None) or _tela(d)
+
+
+def pronto_para_gerar_a_imagem(xml, prompt):
+    """
+    "" quando o pedido da imagem está certo (sem foto, com o texto, no modelo da imagem e sem custo); senão, o que
+    falta.
+    """
+    if fotos_no_pedido(xml):
+        return "o pedido da imagem tem foto"
+    if " ".join(texto_do_pedido(xml).split())[:40] != " ".join(prompt.split())[:40]:
+        return "o texto do pedido não entrou"
+    if modelo_no_pedido(xml) != MODELO_DA_IMAGEM:
+        return "o modelo marcado não é o da imagem"
+    if custo_na_tela(xml) != 0:
+        return "a imagem não sai de graça"
+    return ""
+
+
+def titulo_da_imagem(xml):
+    """As linhas do título da imagem aberta (o nome, o modelo e o tamanho); None fora da imagem aberta."""
+    for el in ps.elementos(xml):
+        descricao = el["descricao"] or ""
+        if el["pacote"] == PACOTE and not el["clicavel"] and MODELO_DA_IMAGEM in descricao and "\n" in descricao:
+            return [" ".join(linha.split()) for linha in descricao.split("\n")]
+    return None
+
+
+def abrir_a_imagem_nova(d, antes=""):
+    """
+    No projeto: o quadro mais novo (a imagem que acabou de ficar pronta), conferindo no título que é uma imagem.
+    antes: a descrição do mais novo antes do Gerar; com ela ainda no alto, o Flow não fez a imagem, e o robô não
+    abre a de antes (ela iria ao Rafael como a foto de outro personagem).
+    """
+    ponto = ponto_parado(d, quadro_mais_novo, "imagem nova")
+    if not ponto:
+        raise Parada("baixar a imagem: a imagem nova não apareceu no projeto")
+    if antes and descricao_do_mais_novo(_tela(d)) == antes:
+        raise Parada("baixar a imagem: o mais novo do projeto ainda é o de antes do Gerar; a imagem não foi feita")
+    d.click(*ponto)
+    if not esperar(d, lambda x: titulo_da_imagem(x) is not None):
+        raise Parada("baixar a imagem: o mais novo do projeto não abriu como uma imagem do modelo da imagem")
+
+
+def janela_da_imagem(xml):
+    """
+    A janela "Baixar imagem": {"original": {"centro" (o botão redondo da linha do tamanho original), "marcada"},
+    "baixar" (o centro do Baixar da janela)}; None sem ela, sem a linha do tamanho original ou sem o Baixar.
+    """
+    elementos = [el for el in ps.elementos(xml) if el["pacote"] == PACOTE]
+
+    def texto(el):
+        return " ".join(f"{el['texto']} {el['descricao']}".split()).casefold()
+    if not any(texto(el) == TITULO_DA_JANELA_DA_IMAGEM for el in elementos):
+        return None
+    linha = next((el for el in elementos if el["classe"] != "RadioGroup" and "tamanho original" in texto(el)), None)
+    if not linha:
+        return None
+    x1, y1, x2, y2 = linha["caixa"]
+    redondo = next((el for el in elementos if el["classe"] == "RadioButton" and x1 <= el["caixa"][0]
+                    and el["caixa"][2] <= x2 and y1 <= el["caixa"][1] and el["caixa"][3] <= y2), None)
+    botao = next((el for el in elementos if el["classe"] == "Button" and texto(el) == "baixar"), None)
+    if not redondo or not botao:
+        return None
+    return {"original": {"centro": _centro(redondo), "marcada": redondo["marcado"]}, "baixar": _centro(botao)}
+
+
+def baixar_a_imagem(d):
+    """
+    Na imagem aberta: Mais opções → Baixar → na janela "Baixar imagem", o tamanho original (1K, sem custo) → Baixar.
+    O caminho do arquivo no celular, quando ele para de crescer. Nunca toca no 2K, no 4K nem no plano.
+    """
+    d.shell(["touch", MARCA_DO_BAIXAR])
+    # A hora do arquivo baixado tem de passar a da marca.
+    time.sleep(1.1)
+    tocar(d, "Mais opções", "mais opções da imagem")
+    tocar(d, "Baixar", "baixar a imagem")
+    xml = esperar(d, lambda x: janela_da_imagem(x) is not None, ESPERA_DA_JANELA_DO_BAIXAR)
+    if not xml:
+        raise Parada("baixar a imagem: a janela do tamanho não apareceu")
+    janela = janela_da_imagem(xml)
+    if not janela["original"]["marcada"]:
+        d.click(*janela["original"]["centro"])
+        xml = esperar(d, lambda x: bool(((janela_da_imagem(x) or {}).get("original") or {}).get("marcada")),
+                      ESPERA_DA_JANELA_DO_BAIXAR)
+        if not xml:
+            raise Parada("baixar a imagem: o tamanho original não ficou marcado; o robô não baixa em outro")
+        janela = janela_da_imagem(xml)
+    d.click(*janela["baixar"])
+    if not esperar(d, lambda x: janela_da_imagem(x) is None, ESPERA_PARA_A_JANELA_FECHAR):
+        raise Parada("baixar a imagem: a janela do tamanho não fechou depois do Baixar")
+    fim, anterior = time.monotonic() + ESPERA_DO_BAIXAR, None
+    while True:
+        xml = _tela(d)
+        if xml and (tem_termos(xml) or pede_escolha(xml)):
+            raise Parada("baixar a imagem: o Flow pediu outra escolha; o robô não escolhe pelo Rafael")
+        novos = arquivos_novos(d, EXTENSOES_DA_IMAGEM)
+        if novos and novos[0][1] > 0 and novos[0] == anterior:
+            return novos[0][0]
+        anterior = novos[0] if novos else None
+        if time.monotonic() >= fim:
+            raise Parada("baixar a imagem: o arquivo da imagem não apareceu no celular")
+        time.sleep(2)
+
+
+def gerar_a_imagem(d, prompt, local):
+    """
+    No projeto do robô já aberto: a imagem do pedido no modo Imagem, com tudo conferido na tela antes do Gerar (o
+    modelo da imagem e os 0 créditos), baixada no tamanho original e trazida ao servidor em local, em JPEG sem
+    metadados; no fim, a imagem fecha e o robô volta ao projeto. Parada com o passo que parou.
+    """
+    antes = descricao_do_mais_novo(_tela(d))
+    xml = montar_o_pedido_da_imagem(d, prompt)
+    falta = pronto_para_gerar_a_imagem(xml, prompt)
+    if falta:
+        raise Parada(f"antes do Gerar da imagem: {falta}")
+    tocar(d, "Gerar", "gerar a imagem")
+    if esperar_o_video(d, guardar_telas=False) is None:
+        raise Parada(f"gerar a imagem: a imagem não ficou pronta em {ESPERA_DA_GERACAO // 60} min")
+    abrir_a_imagem_nova(d, antes)
+    remoto = baixar_a_imagem(d)
+    baixada = local + ".baixada"
+    puxar(d, remoto, baixada, "a imagem")
+    with open(baixada, "rb") as arquivo:
+        dados = jpeg_sem_metadados(arquivo.read())
+    os.remove(baixada)
+    if not dados:
+        raise Parada("baixar a imagem: o arquivo que veio não é uma imagem")
+    with open(local, "wb") as arquivo:
+        arquivo.write(dados)
+    tocar(d, "Fechar", "fechar a imagem")
+
+
+def fotos_guardadas():
+    """{chave: {"arquivo", "feita_em", "mandada_em"}} das fotos dos personagens."""
+    return dict((db.ler_config(CHAVE, {}) or {}).get("personagens") or {})
+
+
+def marcar_foto(chave, **campos):
+    db.atualizar_config(CHAVE, lambda dados: dados.setdefault("personagens", {}).setdefault(chave, {}).update(campos))
+
+
+def legenda_do_personagem(p, numero, total):
+    """A legenda da foto no privado do Rafael: quem é e o que ele faz com ela."""
+    return (f"👤 Personagem {numero} de {total}: {p['nome']} ({p['resumo']})\n"
+            "Foto feita no Google Flow, no modo Imagem, sem gastar crédito (P250 1). Ela só vale depois do seu OK: "
+            "aprove ou peça outra na conversa com o Claude.")
+
+
+def fotos_dos_personagens(chaves=None):
+    """
+    As fotos dos personagens (P250 1 e P258 1) no modo Imagem do Flow, que não gasta crédito: uma por personagem,
+    baixada para o servidor (PASTA_DOS_PERSONAGENS) e mandada ao privado do Rafael com o nome e o jeito, para ele
+    aprovar ou pedir outra. Sem chaves, as que ainda não foram mandadas; com chaves, essas, de novo (outra foto).
+    A feita e não mandada (o privado falhou) vai na próxima vez, sem gerar outra. 0 deu certo, 1 parou. Só rótulos
+    fixos, chaves e números no log.
+    """
+    guardadas = fotos_guardadas()
+    lista = [p for p in PERSONAGENS if (p["chave"] in chaves if chaves else not guardadas.get(p["chave"], {}).get(
+        "mandada_em"))]
+    if chaves and len(lista) != len(set(chaves)):
+        print("Personagens: chave desconhecida; as chaves são " + ", ".join(p["chave"] for p in PERSONAGENS))
+        return 1
+    if not lista:
+        print("Personagens: todas as fotos já foram mandadas; para refazer, passe as chaves")
+        return 0
+    por_gerar = [p for p in lista if chaves or not os.path.exists(guardadas.get(p["chave"], {}).get("arquivo") or "")]
+    if por_gerar:
+        if not celular_robo.conectado():
+            print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
+            return 1
+        tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
+        for tentativa in range(tentativas):
+            with celular_robo.trava() as livre:
+                if livre:
+                    codigo = _fotos_no_celular(por_gerar)
+                    break
+            if tentativa == 0:
+                print(f"celular: o robô automático está tocando no celular; esperando ele soltar "
+                      f"(até {ps.ESPERA_DO_CELULAR // 60} min)")
+            if tentativa < tentativas - 1:
+                time.sleep(ps.PAUSA_DA_ESPERA)
+        else:
+            print("celular: o robô automático continua tocando no celular; nada foi tocado")
+            return 1
+    else:
+        codigo = 0
+    # As fotos vão ao privado com o celular já solto para o robô automático; a refeita perdeu o "mandada_em" ao ser
+    # feita, e a que o celular não refez fica como estava.
+    guardadas, mandadas = fotos_guardadas(), 0
+    for numero, p in enumerate(PERSONAGENS, 1):
+        foto = guardadas.get(p["chave"], {})
+        if p not in lista or foto.get("mandada_em") or not os.path.exists(foto.get("arquivo") or ""):
+            continue
+        if avisar_rafael.mandar_foto(foto["arquivo"], legenda_do_personagem(p, numero, len(PERSONAGENS))):
+            marcar_foto(p["chave"], mandada_em=agora())
+            mandadas += 1
+            print(f"Personagens: a foto de {p['chave']} foi ao privado")
+        else:
+            print(f"Personagens: a foto de {p['chave']} não chegou ao privado; vai na próxima vez")
+            codigo = 1
+    print(f"Personagens: {mandadas} foto(s) no privado")
+    return codigo
+
+
+def _fotos_no_celular(lista):
+    """As fotos no celular, com a trava na mão: a tela, o projeto do robô e uma imagem por personagem. 0 ou 1."""
+    if celular_robo.tela_acesa() is False:
+        ps.conectar(celular=True).screen_on()
+        time.sleep(2)
+    if celular_robo.tela_acesa() is False or celular_robo.tela_de_bloqueio():
+        print("celular: a tela está apagada ou na tela de bloqueio; nada foi tocado")
+        return 1
+    d = ps.conectar(celular=True)
+    os.makedirs(PASTA_DOS_PERSONAGENS, exist_ok=True)
+    try:
+        # A imagem não gasta crédito: o saldo não é lido.
+        if abrir_o_projeto(d):
+            print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
+        for p in lista:
+            local = os.path.join(PASTA_DOS_PERSONAGENS, f"{p['chave']}.jpg")
+            gerar_a_imagem(d, pedido_do_personagem(p), local)
+            marcar_foto(p["chave"], arquivo=local, feita_em=agora(), mandada_em="")
+            print(f"Personagens: a foto de {p['chave']} foi feita ({os.path.getsize(local) // 1024} KB)")
+    except Parada as e:
+        casos_robo.guardar(d, "flow", "parou", str(e), passo="flow imagem")
+        print(f"Personagens: parou: {e}")
+        return 1
+    return 0
+
+
 # --- As amostras: vídeos de teste da produção, só no privado do Rafael (P236 1) ---
 # Pedido do Rafael (16/11, P236 1): ver como os vídeos de IA estão ficando sem esperar o do dia. Cada amostra é um
 # vídeo como o da produção (o produto pela lista da API de afiliado, P234 1, o pedido da IA num estilo que varia e o
@@ -2548,6 +2906,17 @@ def teste(sem_gerar=False):
 
 
 def main(argumentos):
+    if argumentos and argumentos[0] == "personagens":
+        # As chaves vêm do campo "quais" do video_ia.yml, separadas por vírgula ou espaço; vazio = as que faltam.
+        chaves = [c for c in " ".join(argumentos[1:]).replace(",", " ").split() if c]
+        logging.disable(logging.CRITICAL)
+        try:
+            return fotos_dos_personagens(chaves or None)
+        except Exception as e:
+            print(f"Flow: erro inesperado ({type(e).__name__})")
+            return 1
+        finally:
+            logging.disable(logging.NOTSET)
     opcoes = set(argumentos[1:])
     if argumentos and ((argumentos[0] == "teste" and opcoes <= {"--sem-gerar"})
                        or (argumentos[0] == "amostra"
