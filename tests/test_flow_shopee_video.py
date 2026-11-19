@@ -151,7 +151,8 @@ class Flow:
         """(caixa, xml do nó, o que o toque faz) da tela de agora."""
         nos = []
         if self.tela == "inicio":
-            nos.append(((936, 131, 1038, 233), _no((936, 131, 1038, 233), "android.widget.ImageView",
+            # A foto da conta no alto do início (mapeada no celular do robô em 19/11): a descrição começa com "Perfil".
+            nos.append(((936, 163, 1034, 265), _no((936, 163, 1034, 265), "android.widget.ImageView",
                                                    "Perfil, Maria Exemplo"), "conta"))
             nos.append(((775, 908, 1038, 1034), _no((775, 908, 1038, 1034), "android.widget.Button", "Novo"), "novo"))
             for i, nome in enumerate(self.projetos[self.rolagem:self.rolagem + self.cabem]):
@@ -165,19 +166,22 @@ class Flow:
             if self.termos:
                 nos.append(((0, 2300, 1080, 2400), _no((0, 2300, 1080, 2400), texto="Aceitar os Termos de Serviço"), ""))
         elif self.tela == "conta":
-            # A tela Conta: o nome e o e-mail da conta, o saldo e o Ver atividade (que o robô nunca toca).
-            nos += [((42, 131, 168, 257), _no((42, 131, 168, 257), "android.widget.Button", "Voltar"), "inicio"),
-                    ((63, 290, 1017, 470), _no((63, 290, 1017, 470), texto="Maria Exemplo\nmaria@exemplo.com\nPRO",
-                                               clicavel=False), ""),
-                    ((63, 520, 1017, 600), _no((63, 520, 1017, 600), "android.widget.TextView",
-                                               texto=f"{self.saldo} créditos do Google Flow", clicavel=False), ""),
-                    ((84, 620, 996, 700), _no((84, 620, 996, 700), "android.widget.Button", "Ver atividade"),
+            # A tela Conta, como no celular do robô (19/11): a conta (com a foto dela, que também diz "Perfil"), o
+            # saldo na descrição de uma View e o Ver atividade (que o robô nunca toca).
+            nos += [((42, 152, 168, 278), _no((42, 152, 168, 278), "android.widget.Button", "Voltar"), "inicio"),
+                    ((42, 420, 1038, 588), _no((42, 420, 1038, 588), desc="Maria Exemplo\nmaria@exemplo.com\nPRO"),
+                     "proibido"),
+                    ((84, 456, 190, 554), _no((84, 456, 190, 554), "android.widget.ImageView",
+                                              "Perfil, Maria Exemplo"), "proibido"),
+                    ((126, 760, 1038, 828), _no((126, 760, 1038, 828), desc=f"{self.saldo} créditos do Google Flow",
+                                                clicavel=False), ""),
+                    ((84, 852, 996, 936), _no((84, 852, 996, 936), "android.widget.Button", "Ver atividade"),
                      "proibido"),
                     # Mais abaixo, os links dos termos e da privacidade: não são a tela de termos.
-                    ((63, 2150, 1017, 2230), _no((63, 2150, 1017, 2230), "android.widget.Button",
+                    ((42, 2140, 1038, 2210), _no((42, 2140, 1038, 2210), "android.widget.Button",
                                                  "Termos de Serviço"), "proibido"),
-                    ((63, 2240, 1017, 2320), _no((63, 2240, 1017, 2320), "android.widget.Button",
-                                                 "Política de Privacidade"), "proibido")]
+                    ((42, 2270, 1038, 2354), _no((42, 2270, 1038, 2354), "android.widget.Button",
+                                                 "Aviso de Privacidade"), "proibido")]
         elif self.tela == "menu_projeto":
             # O menu do Mais opções do alto do projeto (15/11): o robô só pode tocar no Renomear.
             nos.append(((0, 0, 1080, 2520), _no((0, 0, 1080, 2520), desc="Dispensar menu"), "projeto"))
@@ -1753,9 +1757,12 @@ def test_leitura_do_saldo_e_da_foto_da_conta():
     assert flow.saldo_na_tela(tela(_no((0, 0, 9, 9), texto="24 créditos de IA"))) is None
     assert flow.saldo_na_tela(tela(_no((0, 0, 9, 9), texto="50 créditos do Google Flow", pacote="outro"))) is None
     # A foto da conta é a do alto do início; uma descrição parecida mais abaixo não conta.
-    alto = _no((936, 131, 1038, 233), "android.widget.ImageView", "Perfil, Maria Exemplo")
-    assert flow.foto_da_conta(tela(alto)) == (987, 182)
-    assert flow.foto_da_conta(tela(_no((936, 1131, 1038, 1233), desc="Perfil, Maria Exemplo"))) is None
+    alto = _no((936, 163, 1034, 265), "android.widget.ImageView", "Perfil, Maria Exemplo")
+    assert flow.foto_da_conta(tela(alto)) == (985, 214)
+    # A da tela Conta, mais abaixo, não conta.
+    assert flow.foto_da_conta(tela(_no((84, 456, 190, 554), desc="Perfil, Maria Exemplo"))) is None
+    # O saldo na descrição, como no celular do robô.
+    assert flow.saldo_na_tela(tela(_no((126, 760, 1038, 828), desc="1050 créditos do Google Flow"))) == 1050
 
 
 def test_producao_de_16_s_continua_de_onde_parou_sem_outro_gerar(celular, monkeypatch):

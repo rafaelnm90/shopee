@@ -731,15 +731,19 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   escolha da resolução (só 16:9 ou 9:16 e x1 a x4, visto em 15/11). O robô escolhe primeiro
   o modelo e depois as opções dele.
 - O voltar com a lista dos modelos aberta fecha o pedido inteiro, de volta ao projeto.
-- O saldo (visto na gravação do Rafael de 14/11/2026): a foto da conta, no alto do início, à
-  direita do sino (a descrição começa com "Perfil", seguida do nome da conta), abre a tela
-  **Conta**: o nome e o e-mail da conta com o selo PRO, um carregando e, logo depois, a caixa
-  "N créditos do Google Flow" (os 1.000 do mês e os 50 do dia, que não acumulam e são gastos
-  primeiro) com o botão Ver atividade (abre a página de atividade do Google One, com os
-  créditos do Flow e os Créditos de IA). Mais abaixo, Criar avatar, as chaves da
-  Marca-d'água visível e do Ajude a deixar o Flow ainda melhor, Discord, YouTube e a Central de
-  Ajuda. O robô só lê o número antes de cada Gerar (`ler_o_saldo`) e volta ao início; nunca
-  toca em nada da conta.
+- O saldo (visto na gravação do Rafael de 14/11/2026 e conferido no celular do robô pelo
+  explorar em 19/11/2026): no início, a foto da conta fica no alto, à direita das
+  Notificações (uma ImageView cuja descrição começa com "Perfil", seguida do nome da conta).
+  Ela abre a tela **Conta** ("Conta" no alto, com o Voltar): a conta (nome, e-mail e o selo
+  PRO, com a foto dela de novo, mais abaixo), a caixa "N créditos do Google Flow" (na
+  descrição de uma View; os 1.000 do mês e os 50 do dia, que não acumulam e são gastos
+  primeiro) com o botão Ver atividade (abre a página de atividade do Google One), e mais
+  abaixo Criar avatar, as chaves da Marca-d'água visível e do Ajude a deixar o Flow ainda
+  melhor, Discord, YouTube, Central de Ajuda do Flow, Enviar feedback sobre o app, Denunciar
+  uma questão jurídica e Aviso de privacidade. O voltar volta ao início. O robô só lê o
+  número antes de cada Gerar (`ler_o_saldo`) e volta; nunca toca em nada da conta. O
+  explorar com `abrir:flow` abre o Flow onde ele estava (no vídeo aberto da última vez):
+  para chegar ao início, Fechar e Voltar.
 - O modo Imagem (mapeado em 18/11/2026 para a P253 1, sem gerar nada): no pedido, o Imagem fica à esquerda do
   Vídeo e do Agente; marcado, o botão do modelo mostra "Nano Banana 2.1" e "x1", e as opções dele mostram
   **"A geração vai usar 0 créditos de IA"** (a imagem não gasta crédito do plano), os formatos 16:9, 4:3, 1:1,
