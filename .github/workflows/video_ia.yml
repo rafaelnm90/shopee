@@ -18,6 +18,9 @@ name: Vídeo de IA (Shopee Vídeo)
 # mudanças contra as alucinações, para o Rafael comparar as duas.
 # "amostra-16s-fala-inteira" é a da P255 1 (19/11): a de 16 s com a pessoa falando do começo ao fim de cada parte
 # e o parado que sobrar cortado pelo servidor; vão ao privado o vídeo cortado e o original.
+# "personagens" faz as fotos dos 10 personagens fixos (P250 1 e P258 1) no modo Imagem do Flow, que não gasta
+# crédito, e manda cada uma ao privado do Rafael para aprovar; sem "quais", as que faltam; com "quais" (as chaves
+# separadas por vírgula, ex.: bonitao,vovo), essas de novo.
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
@@ -29,8 +32,12 @@ on:
         description: "O que fazer"
         type: choice
         options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s, amostra-16s-mesmo,
-                  amostra-16s-fala-inteira]
+                  amostra-16s-fala-inteira, personagens]
         default: modelos
+      quais:
+        description: "Só no personagens: as chaves para refazer, separadas por vírgula (ex.: bonitao,vovo); vazio = as que faltam"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -42,6 +49,8 @@ jobs:
     steps:
       - name: Vídeo de IA no servidor
         uses: appleboy/ssh-action@master
+        env:
+          QUAIS: ${{ inputs.quais }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
@@ -50,6 +59,7 @@ jobs:
           # Gerar e espera o Baixar no 1080p por até 5 min. A amostra de 16 s espera também o Estender;
           # a que não acaba no tempo continua na próxima vez, de onde parou.
           command_timeout: 45m
+          envs: QUAIS
           script: |
             cd ~/shopee
             case "${{ inputs.acao }}" in
@@ -59,5 +69,6 @@ jobs:
               amostra-16s) venv/bin/python3 flow_shopee_video.py amostra --longa ;;
               amostra-16s-mesmo) venv/bin/python3 flow_shopee_video.py amostra --longa --mesmo ;;
               amostra-16s-fala-inteira) venv/bin/python3 flow_shopee_video.py amostra --longa --fala-inteira ;;
+              personagens) venv/bin/python3 flow_shopee_video.py personagens "$QUAIS" ;;
               *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
             esac
