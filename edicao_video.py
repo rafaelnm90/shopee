@@ -236,16 +236,17 @@ def ligada():
     return bool((db.ler_config("shopee_video", {}) or {}).get("edicao_ligada"))
 
 
-def musicas_de_fundo(video, quantas=1, ouviu_fala=False, anotar=None, escolhida=None):
+def musicas_de_fundo(video, quantas=1, ouviu_fala=False, anotar=None, escolhida=None, forcar=False):
     """
     A música (nome, caminho) de cada um dos `quantas` vídeos que saem deste (o original e as
     versões): a 1ª é a que a IA escolheu para o vídeo (escolhida, um nome de MUSICAS, P241 1) ou, sem ela, a da
     vez, que anda uma casa, e as das versões vêm na ordem depois dela; [None] * quantas quando o vídeo tem som. O
     de som baixo demais em que ninguém fala também ganha a música (fala_no_som_baixinho, P237 1; ouviu_fala: a IA
     ouviu alguém falar nele). anotar (dict), quando vem, recebe em "baixinho" o porquê e o som medido do
-    som baixo demais, com ou sem a música, e em "musica" a do vídeo e se foi a IA que a escolheu.
+    som baixo demais, com ou sem a música, e em "musica" a do vídeo e se foi a IA que a escolheu. forcar: a música
+    vai mesmo com o som do vídeo (o vídeo de IA de unboxing, sem fala, P256 2).
     """
-    if not videos.mudo(video):
+    if not forcar and not videos.mudo(video):
         fala, medido = fala_no_som_baixinho(video, ouviu_fala)
         if fala and anotar is not None:
             anotar["baixinho"] = {"fala": fala, "medido": round(medido, 1)}
@@ -3657,7 +3658,7 @@ def _avisado(avisos, com_capa, musica, miniatura, outras_fotos, escolhas, cor, p
 
 
 def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
-                       anotar=None, escolhas=None):
+                       anotar=None, escolhas=None, musica_no_lugar=False):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -3692,9 +3693,13 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     COM_A_MINIATURA_NO_OUTRO_CANTO, e o Editar ✏️ guarda o canto em que ela saiu), e os textos da tela ficam
     sempre no alto, ao lado da miniatura, e o que, na hora dele, cobriria o que o criador pôs por cima, o
     produto ou um rosto não aparece (P220 1). O som do vídeo vai ao volume das nossas músicas, sem estourar, e o
-    registro anota quanto ele subiu ou desceu (P222 1). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+    registro anota quanto ele subiu ou desceu (P222 1). Com musica_no_lugar (o vídeo de IA de unboxing, sem fala,
+    P256 2), a música de fundo vai no lugar do som, mesmo com o som do vídeo, e sem a legenda da fala. Escolhas do
+    Rafael: DECISOES.md, Shopee Vídeo.
     """
     escolhas = escolhas_certas(escolhas_do_painel() if escolhas is None else escolhas)
+    if musica_no_lugar:
+        escolhas = dict(escolhas, legenda=False)
     lado = escolhas["miniatura"]
     if not foto:
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
@@ -3705,7 +3710,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     # ouviu evita perguntar ao reconhecimento de voz.
     som = {}
     musica_da_vez = musicas_de_fundo(video, ouviu_fala=bool(textos.get("legendas") or textos.get("falas")),
-                                     anotar=som, escolhida=textos.get("musica"))[0]
+                                     anotar=som, escolhida=textos.get("musica"), forcar=musica_no_lugar)[0]
     musica = _caminho(musica_da_vez)
     # A cor do produto no lugar do laranja e do preto (P159 2); o registro conta cada uma.
     cor = cor_do_produto(textos.get("cor"))

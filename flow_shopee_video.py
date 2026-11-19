@@ -10,7 +10,9 @@ ligado, e o Rafael aprova em Rascunhos do Robô 📝). A IA vê a foto do anúnc
 escreve o pedido do vídeo (a cena, o movimento da câmera e a luz), sempre com o produto igual ao da
 foto; o Flow gera o vídeo a partir da foto. Desde a P247 1 (17/11/2026), o vídeo da produção (o do dia e
 o do Preparar 1 Agora ⚡ → De IA ✨) é o de 16 s com uma pessoa vendendo o produto, como a amostra de 16 s
-(abaixo), e a fala que o servidor ouve vai no rascunho.
+(abaixo), e a fala que o servidor ouve vai no rascunho. Desde a P256 2 (19/11/2026), ele pode ser também o
+unboxing (as mãos abrindo a caixa com o produto, sem rosto e sem fala), que a IA escolhe pelo produto, nunca dois
+seguidos.
 
 O caminho no app (mapeado no Motorola em 15/11/2026, sem gerar nada; as telas estão no
 roteiro_robo_shopee_video.md): o ícone "Flow" → o projeto do robô na lista ("Shopee Video";
@@ -219,9 +221,17 @@ PACOTE_DO_TECLADO = "com.google.android.inputmethod.latin"
 # O vídeo de 16 s (P246 1) tem um jeito só, fora dos que a IA escolhe: uma pessoa vendendo o produto do começo ao
 # fim.
 ESTILO_DO_VENDEDOR = "vendedor"
+# O unboxing (P256 2, 19/11/2026): mais um formato do vídeo de IA de 16 s, além da pessoa vendendo. Só as mãos de quem
+# recebeu a encomenda, sem rosto e sem fala, abrindo a caixa e mostrando o produto de perto, com a câmera na mão e a
+# luz do dia (o "POV de unboxing" dos vídeos que o Rafael mandou), e a música de fundo da nossa edição no lugar do som.
+# A IA escolhe pelo produto (PEDIDO_DO_FORMATO), e nunca saem dois seguidos: depois de um unboxing, o vídeo é o
+# vendedor ("não quero vídeos apenas de unboxing (...), farão parte dos vídeos produzidos, mas não serão únicos").
+# Escolha do Rafael (P256 2): DECISOES.md, Shopee Vídeo.
+ESTILO_DO_UNBOXING = "unboxing"
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
-           ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada (16 s)"}
+           ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada (16 s)",
+           ESTILO_DO_UNBOXING: "unboxing: as mãos abrindo a caixa com o produto, sem rosto e sem fala (16 s)"}
 ESTILO_PADRAO = "demonstracao"
 # Quantos estilos dos últimos vídeos a IA recebe, para variar (o Rafael pediu vídeos variados, "para não
 # ficar um padrão, para ser mais orgânico", 15/11/2026).
@@ -332,6 +342,49 @@ PEDIDO_DO_VENDEDOR_FALANDO = _COMECO_DO_VENDEDOR + (
     "hoje!\"); enquanto fala, aponta e mostra de perto a vantagem, só virando o produto ou aproximando-o da câmera. "
     "Escreva no pedido que ela fala sem parar até perto do fim, sem pausa longa.\n"
 ) + _FIM_DO_VENDEDOR
+# A escolha do formato do vídeo de 16 s pelo produto (P256 2): o vendedor ou o unboxing.
+PEDIDO_DO_FORMATO = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto do anúncio do "
+    "produto \"{nome}\". Escolha o formato do vídeo de 16 segundos feito por IA que mais combina com este produto e "
+    "mais faz quem está rolando o feed parar e comprar: \"vendedor\" (uma pessoa comum segura o produto e fala dele "
+    "com quem assiste, mostrando as vantagens de perto: bom para o produto que precisa de explicação, como "
+    "utilidades, aparelhos e o que resolve um problema) ou \"unboxing\" (só as mãos de quem recebeu a encomenda, "
+    "sem rosto e sem fala, abrindo a caixa e mostrando o produto de perto, com a câmera na mão: bom para o produto "
+    "que se vende pela aparência e cabe numa caixa de encomenda, como calçados, bolsas, roupas, acessórios, "
+    "maquiagem e decoração). Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"formato": "vendedor" ou "unboxing", "motivo": "o porquê, em poucas palavras"}}'
+)
+# O pedido do unboxing de 16 s (P256 2), com os cuidados contra as alucinações da P248 1: o produto aparece inteiro
+# e do jeito que vem, nada muda de estado, as mãos só abrem a caixa, levantam e viram o produto, e os 16 s ficam no
+# mesmo lugar, sem corte. Sem fala: a música de fundo vai no lugar do som na nossa edição.
+PEDIDO_DO_UNBOXING = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A imagem é a foto oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo "
+    "de 16 segundos, em pé (9:16) e com som, em duas partes de 8 segundos: a 1ª a partir dessa foto e a 2ª "
+    "continuando a 1ª, na mesma cena. É um unboxing filmado pelos olhos de quem recebeu a encomenda (primeira "
+    "pessoa): só as mãos aparecem, sem rosto e sem ninguém falando, com a câmera na mão, como um vídeo de celular "
+    "de verdade, numa casa simples e arrumada do Brasil, com a luz do dia. A IA de vídeo inventa coisas quando a "
+    "cena pede demais; por isso, o produto aparece inteiro, idêntico ao da foto e do jeito que vem na embalagem, "
+    "sem nada mudar de estado; as mãos só abrem a caixa, afastam o papel, levantam o produto e o viram devagar, sem "
+    "montar, vestir, ligar ou desmontar nada; e os 16 segundos ficam no mesmo lugar, sem corte e sem aparecer "
+    "pessoa, objeto ou produto novo. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "continuacao": '
+    '"...", "cena": "..."}}\n'
+    + REGRAS_DA_FOTO +
+    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos, em primeira pessoa, com a câmera na mão: uma "
+    "caixa de papelão de encomenda fechada na mesa; as mãos tiram a fita e abrem a caixa, e lá dentro, no papel de "
+    "seda, está o produto da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada "
+    "acrescentado, tirado ou trocado) e bem à vista; a mão para um instante ao ver o produto. Escreva no pedido: "
+    "authentic handheld smartphone footage, natural daylight, realistic home, packaging sounds, no face, no "
+    "dialogue, no subtitles, no text.\n"
+    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
+    "mesmo lugar, com as mesmas mãos e o mesmo produto, idêntico: as mãos levantam o produto da caixa, aproximam da "
+    "câmera e o viram devagar na luz da janela, mostrando os detalhes de perto, sem montar, vestir ou ligar nada. "
+    "Escreva no pedido: no face, no dialogue, no subtitles, no text.\n"
+    "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
+    "Sem marca, sem preço, sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; nada perigoso, "
+    "nojento ou com criança."
+)
 # Bebida alcoólica fica de lado enquanto as diretrizes a deixam em espera (P111): o vídeo nem é gerado, para não
 # gastar o crédito de um vídeo que o rascunho deixaria de lado.
 TRECHO_DA_BEBIDA = ", ou é bebida alcoólica (em espera nas diretrizes)"
@@ -391,11 +444,12 @@ def evitar_os_recentes(recentes):
             "se ele também combinar com este produto, para os vídeos não ficarem num padrão só.")
 
 
-def ler_resposta(texto, longo=False):
+def ler_resposta(texto, longo=False, unboxing=False):
     """
     {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
     veio num JSON ou disse que serve sem escrever o pedido. longo: a resposta do pedido de 16 s (P246 1), com a
-    "continuacao" (o pedido do Estender, sem ela também None) e a "fala", no estilo do vendedor.
+    "continuacao" (o pedido do Estender, sem ela também None) e a "fala", no estilo do vendedor; unboxing: a do
+    unboxing de 16 s (P256 2), sem fala.
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
@@ -413,10 +467,12 @@ def ler_resposta(texto, longo=False):
         return None
     resposta = {"serve": serve, "muda_na_ia": dados.get("muda_na_ia") is True,
                 "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
-                "estilo": ESTILO_DO_VENDEDOR if longo else nome_do_estilo(dados.get("estilo")),
+                "estilo": (ESTILO_DO_UNBOXING if unboxing else ESTILO_DO_VENDEDOR) if longo
+                else nome_do_estilo(dados.get("estilo")),
                 "prompt": prompt[:1000], "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
     if longo:
-        resposta.update(continuacao=continuacao[:1000], fala=" ".join(str(dados.get("fala") or "").split())[:400])
+        fala = "" if unboxing else " ".join(str(dados.get("fala") or "").split())[:400]
+        resposta.update(continuacao=continuacao[:1000], fala=fala)
     return resposta
 
 
@@ -436,7 +492,27 @@ def jpeg_sem_metadados(dados):
         return None
 
 
-def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira=False):
+def formato_do_video(nome, foto):
+    """
+    O formato do vídeo de 16 s que a IA escolhe pela foto do anúncio (já em JPEG) e pelo nome (P256 2):
+    ESTILO_DO_UNBOXING ou ESTILO_DO_VENDEDOR; o vendedor quando ela não responde num JSON.
+    """
+    texto = asyncio.run(api_gemini.gerar_texto_gemini(PEDIDO_DO_FORMATO.format(nome=nome),
+                                                      imagens=[(foto, "image/jpeg")]))
+    achado = re.search(r"\{.*\}", texto or "", re.S)
+    try:
+        formato = json.loads(achado.group(0)).get("formato") if achado else ""
+    except (ValueError, AttributeError):
+        formato = ""
+    return ESTILO_DO_UNBOXING if str(formato or "").strip().lower() == ESTILO_DO_UNBOXING else ESTILO_DO_VENDEDOR
+
+
+def ultimo_foi_unboxing():
+    """Se o vídeo de IA mais recente da produção foi um unboxing (P256 2): o seguinte é o vendedor."""
+    return producao().get("estilo") == ESTILO_DO_UNBOXING
+
+
+def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False):
     """
     O pedido do vídeo para o anúncio já em mãos (o link, o nome e os bytes da foto do anúncio): a foto sem os
     dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
@@ -445,15 +521,23 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     serve, MUDA_NA_IA quando o produto tem o que a IA de vídeo costuma mudar (P245 1) e None quando não deu
     para saber (a foto não é uma imagem, ou a IA não respondeu). longo: o pedido do vídeo de 16 s com uma pessoa
     vendendo o produto (P246 1), com a "continuacao" do Estender e a "fala"; fala_inteira: o de 16 s com a fala do
-    começo ao fim de cada parte (P255 1, a amostra).
+    começo ao fim de cada parte (P255 1, a amostra). com_unboxing (só no de 16 s): a IA escolhe pelo produto entre o
+    vendedor e o unboxing (P256 2, formato_do_video); o do unboxing vem sem fala.
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
         return None, None
-    pedido = (PEDIDO_DO_VENDEDOR_FALANDO if fala_inteira else PEDIDO_DO_VENDEDOR) if longo else PEDIDO_DA_IA
+    unboxing = bool(longo and com_unboxing and not fala_inteira
+                    and formato_do_video(nome, foto) == ESTILO_DO_UNBOXING)
+    if unboxing:
+        pedido = PEDIDO_DO_UNBOXING
+    elif longo:
+        pedido = PEDIDO_DO_VENDEDOR_FALANDO if fala_inteira else PEDIDO_DO_VENDEDOR
+    else:
+        pedido = PEDIDO_DA_IA
     resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
         pedido.format(nome=nome, evitar=evitar, bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
-        imagens=[(foto, "image/jpeg")])), longo=longo)
+        imagens=[(foto, "image/jpeg")])), longo=longo, unboxing=unboxing)
     if not resposta:
         return None, None
     if not resposta["serve"]:
