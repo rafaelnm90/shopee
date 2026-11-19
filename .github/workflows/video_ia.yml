@@ -21,6 +21,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # "personagens" faz as fotos dos 10 personagens fixos (P250 1 e P258 1) no modo Imagem do Flow, que não gasta
 # crédito, e manda cada uma ao privado do Rafael para aprovar; sem "quais", as que faltam; com "quais" (as chaves
 # separadas por vírgula, ex.: bonitao,vovo), essas de novo.
+# "imagem-teste" faz a imagem de teste da P253 1: um personagem (o que a IA escolhe pelo produto) com o produto da última
+# amostra, no modo Imagem do Flow, sem crédito, só no privado do Rafael (o vídeo de IA do dia só muda depois do OK dele).
 #
 # O repositório é público, e os logs do Actions também: o video_ia.py e o flow_shopee_video.py
 # imprimem só nomes de modelo, estados e números; o produto, o pedido e o vídeo ficam no banco
@@ -32,7 +34,7 @@ on:
         description: "O que fazer"
         type: choice
         options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s, amostra-16s-mesmo,
-                  amostra-16s-fala-inteira, personagens]
+                  amostra-16s-fala-inteira, personagens, imagem-teste]
         default: modelos
       quais:
         description: "Só no personagens: as chaves para refazer, separadas por vírgula (ex.: bonitao,vovo); vazio = as que faltam"
@@ -70,5 +72,6 @@ jobs:
               amostra-16s-mesmo) venv/bin/python3 flow_shopee_video.py amostra --longa --mesmo ;;
               amostra-16s-fala-inteira) venv/bin/python3 flow_shopee_video.py amostra --longa --fala-inteira ;;
               personagens) venv/bin/python3 flow_shopee_video.py personagens "$QUAIS" ;;
+              imagem-teste) venv/bin/python3 flow_shopee_video.py imagem-teste ;;
               *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
             esac
