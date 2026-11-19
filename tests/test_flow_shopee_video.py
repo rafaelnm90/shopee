@@ -104,6 +104,9 @@ class Flow:
         # (0 no app), quantas leituras o "Gerando…" da imagem dura, os textos dos Gerar da imagem, se a janela
         # "Baixar imagem" vem com o tamanho original marcado e se o arquivo da imagem está no celular.
         self.modo, self.custo_da_imagem, self.imagem_leituras, self.textos_das_imagens = "video", 0, 0, []
+        # Se cada Gerar da imagem levou a foto de referência (a imagem de teste da P253 1) e se o Adicionar deixa de pôr
+        # a foto no pedido.
+        self.fotos_das_imagens, self.foto_nao_entra = [], False
         self.imagem_pronta = self.imagem_baixada = self.imagem_nao_baixa = self.imagem_falha = False
         self.imagens_feitas = 0
         self.original_da_imagem = True
@@ -415,11 +418,13 @@ class Flow:
         elif acao == "marcar":
             self.marcada = True
         elif acao == "adicionar" and self.marcada:
-            self.tela, self.foto = "pedido", True
+            self.tela, self.foto = "pedido", not self.foto_nao_entra
         elif acao == "gerar" and self.modo == "imagem":
             # Como no app (19/11): o pedido fecha vazio, e a imagem aparece no alto do projeto, "Gerando…" antes.
             self.textos_das_imagens.append(self.texto)
+            self.fotos_das_imagens.append(self.foto)
             self.tela, self.texto, self.folha, self.imagem_leituras = "projeto", "", False, 2
+            self.foto = self.marcada = False
             if not self.imagem_falha:
                 self.imagem_pronta, self.imagens_feitas = True, self.imagens_feitas + 1
         elif acao.startswith("modo:"):
@@ -2240,3 +2245,119 @@ def test_os_10_personagens_e_o_pedido_da_foto():
         assert p["quem"] in pedido and "que não se pareça com ninguém famoso" in pedido
         assert "Sem texto, sem logotipo, sem marca-d'água e sem nada nas mãos" in pedido
     assert flow.personagem("gago") is None and flow.personagem("vovo")["nome"] == "Vovó"
+
+
+# --- A imagem de teste do personagem com o produto (P253 1) ---
+
+
+def _foto_colorida(largura, altura, cor):
+    saida = io.BytesIO()
+    Image.new("RGB", (largura, altura), cor).save(saida, "JPEG")
+    return saida.getvalue()
+
+
+def test_foto_de_referencia_tem_o_personagem_a_esquerda_e_o_produto_a_direita():
+    referencia = flow.foto_do_personagem_com_o_produto(_foto_colorida(90, 160, (200, 30, 30)),
+                                                       _foto_colorida(100, 50, (30, 30, 200)))
+    with Image.open(io.BytesIO(referencia)) as imagem:
+        altura = flow.ALTURA_DA_REFERENCIA
+        assert imagem.format == "JPEG" and imagem.height == altura
+        largura_da_pessoa = round(90 * altura / 160)
+        assert imagem.width == largura_da_pessoa + flow.FOLGA_DA_REFERENCIA + altura
+        vermelho, azul, branco = (imagem.getpixel((10, altura // 2)), imagem.getpixel((imagem.width - altura // 2,
+                                                                                      altura // 2)),
+                                  imagem.getpixel((imagem.width - altura // 2, 20)))
+    assert vermelho[0] > 150 and vermelho[2] < 80 and azul[2] > 150 and azul[0] < 80 and min(branco) > 240
+    assert flow.foto_do_personagem_com_o_produto(b"nada", _foto_colorida(10, 10, (0, 0, 0))) is None
+
+
+def _pronto_para_a_imagem_de_teste(monkeypatch, celular, tmp_path, respostas):
+    """As fotos de 3 personagens, a amostra de antes (o produto) e as respostas da IA, na ordem."""
+    for chave, cor in (("vovo", (220, 220, 220)), ("faz_tudo", (90, 60, 30)), ("exagerado", (240, 200, 120))):
+        caminho = tmp_path / f"{chave}.jpg"
+        caminho.write_bytes(_foto_colorida(90, 160, cor))
+        flow.marcar_foto(chave, arquivo=str(caminho), feita_em="2026-11-19 11:20:00", mandada_em="2026-11-19 11:23:00")
+    flow.guardar(amostra={"link": "https://s.shopee.com.br/abc", "nome": "Copo Térmico Inox", "item": "456",
+                          "foto": celular.teste["foto"], "estado": "enviado", "numero": 6})
+    pedidos = []
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append((prompt, len(imagens or [])))
+        return respostas.pop(0) if respostas else None
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    return pedidos
+
+
+ESCOLHA_DA_VOVO = ('{"personagem": "vovo", "acao": "holding the stainless steel tumbler at chest height", '
+                   '"cena": "in a cozy kitchen"}')
+
+
+def test_imagem_de_teste_escolhe_o_personagem_e_gera_com_a_foto_de_referencia(celular, monkeypatch, tmp_path, capsys):
+    pedidos = _pronto_para_a_imagem_de_teste(monkeypatch, celular, tmp_path, [
+        ESCOLHA_DA_VOVO,
+        '{"mesmo_produto": true, "mesma_pessoa": true, "diferencas": "", "defeitos": "um dedo a mais"}'])
+    assert flow.main(["imagem-teste"]) == 0
+    # A escolha da IA viu a foto do anúncio e a lista dos personagens com foto; a conferência, as 3 imagens.
+    assert pedidos[0][1] == 1 and "- vovo: Vovó" in pedidos[0][0] and "- bonitao" not in pedidos[0][0]
+    assert pedidos[1] == (flow.PEDIDO_DA_CONFERENCIA_DA_IMAGEM, 3)
+    # O pedido no Flow levou a foto de referência (as duas juntas) e o texto com o que a IA escolheu, de graça.
+    assert celular.fotos_das_imagens == [True] and celular.toques_proibidos == []
+    texto, = celular.textos_das_imagens
+    assert texto == flow.PEDIDO_DA_IMAGEM_COM_O_PRODUTO.format(
+        acao="holding the stainless steel tumbler at chest height", cena="in a cozy kitchen")
+    # A foto de referência saiu da galeria no fim.
+    assert any(partes[:2] == ["rm", "-f"] and partes[-1].endswith("_referencia.jpg") for partes in celular.comandos
+               if partes and partes[0] == "rm")
+    (imagem, legenda), (anuncio, legenda_do_anuncio) = celular.fotos
+    assert imagem.endswith("imagem_de_teste.jpg") and anuncio == celular.teste["foto"]
+    for trecho in ("Imagem de teste nº 1 do vídeo de IA (P253 1)", "👤 Vovó com Copo Térmico Inox",
+                   "sem gastar crédito", "mesmo produto",
+                   "a pessoa é a mesma do personagem", "Defeitos: um dedo a mais", "Nada foi postado"):
+        assert trecho in legenda, trecho
+    assert "Anúncio: https://shopee.com.br/product/123/456" in legenda_do_anuncio
+    atual = flow.imagem_de_teste_guardada()
+    assert atual["estado"] == "enviada" and atual["personagem"] == "vovo" and atual["mesmo_produto"] is True
+    saida = capsys.readouterr().out
+    assert "Imagem de teste nº 1: personagem vovo" in saida and "mandada no privado do Rafael" in saida
+    for privado in ("Copo", "tumbler", "shopee.com.br", "kitchen"):
+        assert privado not in saida, privado
+
+
+def test_imagem_de_teste_com_resposta_ruim_da_ia_nao_toca_no_celular(celular, monkeypatch, tmp_path, capsys):
+    resposta = '{"personagem": "bonitao", "acao": "x", "cena": "y"}'
+    _pronto_para_a_imagem_de_teste(monkeypatch, celular, tmp_path, [resposta])
+    assert flow.main(["imagem-teste"]) == 1
+    assert celular.toques == [] and celular.fotos == []
+    assert "a IA não escolheu o personagem" in capsys.readouterr().out
+
+
+def test_imagem_de_teste_sem_a_amostra_ou_sem_as_fotos_nao_toca_no_celular(celular, capsys):
+    assert flow.main(["imagem-teste"]) == 1
+    assert "sem a amostra de antes" in capsys.readouterr().out
+    flow.guardar(amostra={"link": "https://s.shopee.com.br/abc", "nome": "Copo", "foto": celular.teste["foto"]})
+    assert flow.main(["imagem-teste"]) == 1 and celular.toques == []
+    assert "sem as fotos dos personagens" in capsys.readouterr().out
+
+
+def test_imagem_de_teste_feita_que_nao_chegou_vai_sem_gerar_outra(celular, monkeypatch, tmp_path):
+    _pronto_para_a_imagem_de_teste(monkeypatch, celular, tmp_path, [ESCOLHA_DA_VOVO, "{}", "{}"])
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto", lambda caminho, legenda="": False)
+    assert flow.main(["imagem-teste"]) == 1 and len(celular.textos_das_imagens) == 1
+    assert flow.imagem_de_teste_guardada()["estado"] == "feita"
+    monkeypatch.setattr(flow.avisar_rafael, "mandar_foto",
+                        lambda caminho, legenda="": celular.fotos.append((caminho, legenda)) or True)
+    monkeypatch.setattr(flow.celular_robo, "conectado", lambda: pytest.fail("não precisa do celular"))
+    assert flow.main(["imagem-teste"]) == 0
+    assert len(celular.textos_das_imagens) == 1 and len(celular.fotos) == 2
+    assert "sem resposta" in celular.fotos[0][1] and flow.imagem_de_teste_guardada()["estado"] == "enviada"
+
+
+def test_imagem_sem_a_miniatura_da_foto_para_antes_do_gerar(celular, monkeypatch, tmp_path):
+    _pronto_para_a_imagem_de_teste(monkeypatch, celular, tmp_path, [ESCOLHA_DA_VOVO])
+    esperar = flow.esperar
+    monkeypatch.setattr(flow, "esperar", lambda d, condicao, espera=0.2: esperar(d, condicao, min(espera, 0.2)))
+    celular.foto_nao_entra = True
+    assert flow.main(["imagem-teste"]) == 1
+    assert celular.textos_das_imagens == [] and celular.fotos == []
+    assert ("parou", "foto no pedido da imagem: a miniatura não apareceu") in celular.guardados

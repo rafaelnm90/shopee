@@ -760,6 +760,13 @@ O app de vídeo por IA do Google, no Motorola, com a conta Pro do Rafael (pacote
   robô baixa no 1K, sem custo, e procura o arquivo de imagem (.png, .jpg, .jpeg ou .webp) mais novo que a marca do
   Baixar, nas pastas do vídeo (`gerar_a_imagem`, `baixar_a_imagem`); nunca toca no 2K, no 4K nem no plano. As fotos
   dos 10 personagens (P250 1 e P258 1) saem por esse caminho (`fotos_dos_personagens`, `video_ia.yml` personagens).
+- A foto de referência no modo Imagem (mapeada em 19/11/2026, com imagens de teste sem crédito): o + abre o mesmo menu
+  do vídeo (Capturar, Imagens e Biblioteca) e o Imagens, o seletor de fotos do Android, que deixa marcar mais de uma
+  ("Adicionar (2)"); mas o pedido do modo Imagem fica só com a 1ª marcada: uma miniatura acima da caixa, um quadro
+  cinza por uns segundos enquanto ela sobe e depois a foto. Com ela, as opções do modelo continuam com "0 créditos de
+  IA". A foto entra no projeto como um quadro, e a imagem gerada vem como o 1º quadro da grade. Por isso, a imagem de
+  teste do personagem com o produto (P253 1) vai com uma foto só, que o servidor monta com os dois lado a lado
+  (`foto_do_personagem_com_o_produto`, `imagem_de_teste`). O voltar no seletor fecha sem pôr nada no pedido.
 - Depois do Gerar (mapeado no 1º vídeo do teste, 15/11/2026): o pedido fecha e o vídeo
   novo aparece no projeto como o 1º quadro da grade, com "1% Gerando…" (e um Reutilizar
   comando dentro). O do Veo 3.1 - Lite ficou pronto em menos de 1 min: o quadro passa a

@@ -54,6 +54,7 @@ vídeo, no privado.
     python3 flow_shopee_video.py amostra --longa --fala-inteira  # a de 16 s falando o tempo todo, sem o parado (P255 1)
     python3 flow_shopee_video.py personagens          # as fotos dos personagens que faltam (P250 1 e P258 1)
     python3 flow_shopee_video.py personagens vovo     # a foto da Vovó de novo (outra)
+    python3 flow_shopee_video.py imagem-teste         # a imagem de teste de um personagem com o produto (P253 1)
 
 As fotos dos 10 personagens fixos (P250 1 e P258 1, 19/11/2026): no modo Imagem do Flow, que não gasta crédito (o
 Nano Banana 2.1, conferido na tela com "0 créditos de IA" antes do Gerar), uma por personagem, baixada no tamanho
@@ -1765,10 +1766,10 @@ def mandar_o_baixado(modelo, custo):
     return mandar_ao_rafael(teste, modelo, custo, video["arquivo"])
 
 
-def foto_na_galeria(d, foto):
+def foto_na_galeria(d, foto, sufixo=""):
     """Põe a foto do produto na galeria do celular, com nome novo; o nome do arquivo ("" se não apareceu)."""
     with open(foto, "rb") as arquivo:
-        return ps.por_foto_na_galeria(d, arquivo.read(), nome=f"flow_{int(time.time())}")
+        return ps.por_foto_na_galeria(d, arquivo.read(), nome=f"flow_{int(time.time())}{sufixo}")
 
 
 def tirar_da_galeria(d, nome):
@@ -2290,8 +2291,11 @@ EXTENSOES_DA_IMAGEM = (".png", ".jpg", ".jpeg", ".webp")
 PASTA_DOS_PERSONAGENS = os.path.join(PASTA, "personagens")
 
 
-def montar_o_pedido_da_imagem(d, prompt):
-    """Criar → Imagem → o texto → o modelo da imagem (9:16, x1); a tela pronta para o Gerar (Parada no que falhar)."""
+def montar_o_pedido_da_imagem(d, prompt, com_foto=False):
+    """
+    Criar → Imagem → (com_foto: a foto mais nova da galeria, como no pedido do vídeo) → o texto → o modelo da imagem
+    (9:16, x1); a tela pronta para o Gerar (Parada no que falhar).
+    """
     tocar(d, "Criar", "criar")
     tocar(d, "Imagem", "modo imagem")
     # Como no pedido do vídeo: o pedido guardado de antes (foto ou texto) não é apagado às cegas.
@@ -2300,6 +2304,17 @@ def montar_o_pedido_da_imagem(d, prompt):
         raise Parada("pedido da imagem: a caixa do pedido não apareceu")
     if fotos_no_pedido(xml) or texto_do_pedido(xml).strip():
         raise Parada("pedido da imagem: já tinha foto ou texto de antes")
+    if com_foto:
+        # O modo Imagem usa uma foto de referência só (com duas marcadas no seletor, só a 1ª entrou, 19/11/2026).
+        tocar(d, "Adicionar mídia", "adicionar a foto da imagem")
+        tocar(d, "Imagens", "imagens da imagem")
+        if not esperar(d, lambda x: PACOTE_DO_SELETOR in x and ps.achar(x, "Item Foto")):
+            raise Parada("seletor de fotos: a foto da imagem não apareceu")
+        tocar(d, "Item Foto", "escolher a foto da imagem")
+        tocar(d, "@button_add", "adicionar a foto da imagem")
+        # A miniatura sobe ao Flow antes de aparecer (um quadro cinza, sem a imagem, por uns segundos).
+        if not esperar(d, foto_no_pedido, 30):
+            raise Parada("foto no pedido da imagem: a miniatura não apareceu")
     ponto = ponto_parado(d, centro_da_caixa, "texto do pedido da imagem")
     if not ponto:
         raise Parada("pedido da imagem: a caixa não apareceu")
@@ -2322,13 +2337,13 @@ def montar_o_pedido_da_imagem(d, prompt):
     return esperar(d, lambda x: custo_na_tela(x) is not None) or _tela(d)
 
 
-def pronto_para_gerar_a_imagem(xml, prompt):
+def pronto_para_gerar_a_imagem(xml, prompt, fotos=0):
     """
-    "" quando o pedido da imagem está certo (sem foto, com o texto, no modelo da imagem e sem custo); senão, o que
+    "" quando o pedido da imagem está certo (as fotos pedidas, o texto, o modelo da imagem e sem custo); senão, o que
     falta.
     """
-    if fotos_no_pedido(xml):
-        return "o pedido da imagem tem foto"
+    if fotos_no_pedido(xml) != fotos:
+        return "a foto da imagem não está no pedido" if fotos else "o pedido da imagem tem foto"
     if " ".join(texto_do_pedido(xml).split())[:40] != " ".join(prompt.split())[:40]:
         return "o texto do pedido não entrou"
     if modelo_no_pedido(xml) != MODELO_DA_IMAGEM:
@@ -2424,15 +2439,16 @@ def baixar_a_imagem(d):
         time.sleep(2)
 
 
-def gerar_a_imagem(d, prompt, local):
+def gerar_a_imagem(d, prompt, local, com_foto=False):
     """
     No projeto do robô já aberto: a imagem do pedido no modo Imagem, com tudo conferido na tela antes do Gerar (o
     modelo da imagem e os 0 créditos), baixada no tamanho original e trazida ao servidor em local, em JPEG sem
-    metadados; no fim, a imagem fecha e o robô volta ao projeto. Parada com o passo que parou.
+    metadados; no fim, a imagem fecha e o robô volta ao projeto. com_foto: com a foto mais nova da galeria de
+    referência. Parada com o passo que parou.
     """
     antes = descricao_do_mais_novo(_tela(d))
-    xml = montar_o_pedido_da_imagem(d, prompt)
-    falta = pronto_para_gerar_a_imagem(xml, prompt)
+    xml = montar_o_pedido_da_imagem(d, prompt, com_foto)
+    falta = pronto_para_gerar_a_imagem(xml, prompt, 1 if com_foto else 0)
     if falta:
         raise Parada(f"antes do Gerar da imagem: {falta}")
     tocar(d, "Gerar", "gerar a imagem")
@@ -2547,6 +2563,266 @@ def _fotos_no_celular(lista):
         casos_robo.guardar(d, "flow", "parou", str(e), passo="flow imagem")
         print(f"Personagens: parou: {e}")
         return 1
+    return 0
+
+
+# --- A imagem de teste do personagem com o produto (P253 1) ---
+# A 1ª imagem do vídeo de IA com um personagem (P253 1): a IA escolhe pelo produto qual dos personagens combina mais com
+# ele e diz, em inglês, o que a pessoa faz com o produto e onde; o modo Imagem do Flow (sem crédito) faz a imagem a
+# partir de uma foto de referência só (com duas marcadas no seletor, só a 1ª entrou no pedido, visto em 19/11/2026),
+# e por isso o servidor junta as duas: o personagem à esquerda e o produto à direita, num fundo branco
+# (foto_do_personagem_com_o_produto). A IA confere a imagem com a foto do anúncio e a do personagem, e a imagem vai
+# só ao privado do Rafael, seguida da foto do anúncio com o link; o vídeo de IA do dia só muda depois do OK dele.
+# Escolha do Rafael (P253 1): DECISOES.md, Shopee Vídeo.
+ALTURA_DA_REFERENCIA = 1024
+FOLGA_DA_REFERENCIA = 24
+PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO = (
+    "Você monta a primeira cena de um vídeo de venda da Shopee Vídeo: um dos personagens fixos com o produto da foto "
+    "({nome}). Os personagens:\n{personagens}\n"
+    "Escolha pela foto e pelo nome quem combina mais com o produto (quem compraria ou usaria). Os de comédia também "
+    "valem, e a graça é da situação, nunca do corpo, da aparência ou de um grupo. Responda só com um JSON, sem mais "
+    "nada: {{\"personagem\": \"a chave\", \"acao\": \"em inglês, começando por um verbo no gerúndio, o que a "
+    "pessoa faz com o produto: segurando-o inteiro e virado para a câmera, ou vestindo ou usando, se for roupa, "
+    "calçado ou acessório\", \"cena\": \"em inglês, o lugar, combinando com o produto e com o personagem\"}}"
+)
+PEDIDO_DA_IMAGEM_COM_O_PRODUTO = (
+    "The reference image has two parts: the person on the left and the product on the right. Create one new "
+    "realistic vertical photo, like a frame of a Brazilian content creator's smartphone video: the same person from "
+    "the left side (same face, hair, skin tone and body; same clothes unless the product is something to wear) "
+    "{acao}, {cena}, looking at the camera, natural "
+    "soft light. The product must look exactly like on the right side: same shape, colors, materials, logos, text "
+    "and proportions, whole and clearly visible. Only this one person and this one product, nobody else. No "
+    "collage, no split screen, no white background, no text, no captions and no watermark."
+)
+PEDIDO_DA_CONFERENCIA_DA_IMAGEM = (
+    "A 1ª imagem foi feita por IA para a primeira cena de um vídeo de venda. A 2ª é a foto do anúncio do produto e a "
+    "3ª é a foto do personagem. Compare só o que se vê nas imagens. Responda só com um JSON, sem mais nada: "
+    "{\"mesmo_produto\": true ou false (o produto da 1ª é o mesmo da 2ª: forma, cores, logotipo e letras), "
+    "\"mesma_pessoa\": true ou false (a pessoa da 1ª é a mesma da 3ª: rosto, cabelo e tom de pele), "
+    "\"diferencas\": \"em português, curto, o que mudou no produto ou na pessoa; vazio se nada\", "
+    "\"defeitos\": \"em português, curto, defeitos visíveis, como mãos, dedos, rosto ou letras estranhas; vazio se "
+    "nada\"}"
+)
+ROTULOS_DA_PESSOA = {True: "a pessoa é a mesma do personagem", False: "a pessoa mudou", None: "a pessoa sem resposta"}
+
+
+def foto_do_personagem_com_o_produto(foto_do_personagem, foto_do_produto):
+    """
+    A foto de referência da imagem de teste (bytes JPEG): a do personagem à esquerda, na altura ALTURA_DA_REFERENCIA, e
+    a do produto à direita, inteira, num quadrado da mesma altura, num fundo branco. None quando uma não é imagem.
+    """
+    from PIL import Image
+    try:
+        with Image.open(io.BytesIO(foto_do_personagem)) as pessoa, Image.open(io.BytesIO(foto_do_produto)) as produto:
+            altura = ALTURA_DA_REFERENCIA
+            pessoa = pessoa.convert("RGB")
+            pessoa = pessoa.resize((max(1, round(pessoa.width * altura / pessoa.height)), altura))
+            produto = produto.convert("RGB")
+            escala = min(altura / produto.width, altura / produto.height)
+            produto = produto.resize((max(1, round(produto.width * escala)), max(1, round(produto.height * escala))))
+            tela = Image.new("RGB", (pessoa.width + FOLGA_DA_REFERENCIA + altura, altura), (255, 255, 255))
+            tela.paste(pessoa, (0, 0))
+            tela.paste(produto, (pessoa.width + FOLGA_DA_REFERENCIA + (altura - produto.width) // 2,
+                                 (altura - produto.height) // 2))
+            saida = io.BytesIO()
+            tela.save(saida, "JPEG", quality=92)
+            return saida.getvalue()
+    except Exception:
+        return None
+
+
+def escolher_o_personagem(nome, foto, personagens):
+    """
+    A escolha da IA para a imagem de teste: {"personagem" (a chave, entre os personagens dados), "acao", "cena"}; None
+    sem resposta ou com uma chave de fora.
+    """
+    lista = "\n".join(f"- {p['chave']}: {p['nome']} ({p['resumo']})" for p in personagens)
+    try:
+        texto = asyncio.run(api_gemini.gerar_texto_gemini(
+            PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO.format(nome=nome, personagens=lista), imagens=[(foto, "image/jpeg")]))
+    except Exception:
+        texto = None
+    achado = re.search(r"\{.*\}", texto or "", re.S)
+    try:
+        dados = json.loads(achado.group(0)) if achado else None
+    except ValueError:
+        dados = None
+    if not isinstance(dados, dict):
+        return None
+    escolha = {campo: " ".join(str(dados.get(campo) or "").split()) for campo in ("personagem", "acao", "cena")}
+    if escolha["personagem"] not in {p["chave"] for p in personagens} or not escolha["acao"] or not escolha["cena"]:
+        return None
+    escolha["acao"], escolha["cena"] = escolha["acao"][:200].rstrip(" ,."), escolha["cena"][:120].rstrip(" ,.")
+    return escolha
+
+
+def conferir_a_imagem(imagem, foto, foto_do_personagem):
+    """A conferência da IA da imagem de teste: {"mesmo", "pessoa", "diferencas", "defeitos"} (None: sem resposta)."""
+    try:
+        imagens = []
+        for caminho in (imagem, foto, foto_do_personagem):
+            with open(caminho, "rb") as arquivo:
+                imagens.append((jpeg_sem_metadados(arquivo.read()), "image/jpeg"))
+        texto = asyncio.run(api_gemini.gerar_texto_gemini(PEDIDO_DA_CONFERENCIA_DA_IMAGEM, imagens=imagens))
+    except Exception:
+        texto = None
+    conferencia = ler_conferencia(texto)
+    achado = re.search(r"\{.*\}", texto or "", re.S)
+    try:
+        pessoa = json.loads(achado.group(0)).get("mesma_pessoa") if achado else None
+    except (ValueError, AttributeError):
+        pessoa = None
+    conferencia["pessoa"] = pessoa if isinstance(pessoa, bool) else None
+    return conferencia
+
+
+def imagem_de_teste_guardada():
+    """A imagem de teste de agora (o personagem, o produto, o pedido e a imagem), do banco; {} sem nenhuma."""
+    return dict((db.ler_config(CHAVE, {}) or {}).get("imagem_de_teste") or {})
+
+
+def marcar_imagem_de_teste(**campos):
+    db.atualizar_config(CHAVE, lambda dados: dados.setdefault("imagem_de_teste", {}).update(campos))
+
+
+def legenda_da_imagem_de_teste(atual, conferencia):
+    """O texto que vai com a imagem de teste no privado do Rafael (até 1000 letras)."""
+    p = personagem(atual["personagem"]) or {"nome": atual["personagem"], "resumo": ""}
+    linhas = [f"🧪 Imagem de teste nº {atual.get('numero', 1)} do vídeo de IA (P253 1)",
+              f"👤 {p['nome']} com {atual.get('nome') or 'o produto'}",
+              "Feita no modo Imagem do Flow, sem gastar crédito, a partir da foto do personagem e da foto do anúncio.",
+              f"🔎 Conferência da IA: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}; "
+              f"{ROTULOS_DA_PESSOA[conferencia['pessoa']]}"]
+    if conferencia["diferencas"]:
+        linhas.append(f"O que mudou: {conferencia['diferencas']}")
+    if conferencia["defeitos"]:
+        linhas.append(f"Defeitos: {conferencia['defeitos']}")
+    linhas.append("Nada foi postado. O vídeo de IA do dia só muda depois do seu OK a esta imagem.")
+    return "\n".join(linhas)[:1000]
+
+
+def imagem_de_teste():
+    """
+    A imagem de teste da P253 1, só no privado do Rafael: o produto da última amostra (que ele já viu em vídeo), o
+    personagem que a IA escolhe entre os que têm foto, a foto de referência dos dois e a imagem no modo Imagem do Flow,
+    sem crédito. A feita e não mandada vai sem gerar outra. 0 deu certo, 1 parou. Só rótulos, chaves e números no log.
+    """
+    atual = imagem_de_teste_guardada()
+    if atual.get("estado") == "feita" and os.path.exists(atual.get("arquivo") or ""):
+        print(f"Imagem de teste nº {atual.get('numero', 1)}: já feita; falta mandar")
+        return mandar_a_imagem_de_teste()
+    produto = amostra_guardada()
+    if not (produto.get("nome") and produto.get("link")):
+        print("Imagem de teste: sem a amostra de antes para pegar o produto; nada foi tocado")
+        return 1
+    guardadas = fotos_guardadas()
+    com_foto = [p for p in PERSONAGENS if os.path.exists(guardadas.get(p["chave"], {}).get("arquivo") or "")]
+    if not com_foto:
+        print("Imagem de teste: sem as fotos dos personagens (video_ia.yml personagens); nada foi tocado")
+        return 1
+    with open(produto["foto"], "rb") as arquivo:
+        foto_do_produto = jpeg_sem_metadados(arquivo.read())
+    escolha = escolher_o_personagem(produto["nome"], foto_do_produto, com_foto) if foto_do_produto else None
+    if not escolha:
+        print("Imagem de teste: a IA não escolheu o personagem; nada foi tocado")
+        return 1
+    with open(guardadas[escolha["personagem"]]["arquivo"], "rb") as arquivo:
+        referencia = foto_do_personagem_com_o_produto(arquivo.read(), foto_do_produto)
+    if not referencia:
+        print("Imagem de teste: a foto de referência não saiu; nada foi tocado")
+        return 1
+    os.makedirs(PASTA, exist_ok=True)
+    caminho = os.path.join(PASTA, "imagem_de_teste_referencia.jpg")
+    with open(caminho, "wb") as arquivo:
+        arquivo.write(referencia)
+    atual = {"numero": int(atual.get("numero") or 0) + 1, "personagem": escolha["personagem"],
+             "link": produto["link"], "nome": produto["nome"], "foto": produto["foto"], "referencia": caminho,
+             "prompt": PEDIDO_DA_IMAGEM_COM_O_PRODUTO.format(acao=escolha["acao"], cena=escolha["cena"]),
+             "estado": "escolhido", "criado_em": agora()}
+    guardar(imagem_de_teste=atual)
+    print(f"Imagem de teste nº {atual['numero']}: personagem {atual['personagem']}; "
+          f"pedido com {len(atual['prompt'].split())} palavras")
+    if not celular_robo.conectado():
+        print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
+        return 1
+    tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
+    for tentativa in range(tentativas):
+        with celular_robo.trava() as livre:
+            if livre:
+                codigo = _imagem_de_teste_no_celular(atual)
+                break
+        if tentativa == 0:
+            print(f"celular: o robô automático está tocando no celular; esperando ele soltar "
+                  f"(até {ps.ESPERA_DO_CELULAR // 60} min)")
+        if tentativa < tentativas - 1:
+            time.sleep(ps.PAUSA_DA_ESPERA)
+    else:
+        print("celular: o robô automático continua tocando no celular; nada foi tocado")
+        return 1
+    # A conferência da IA e o envio ao privado vêm com o celular já solto para o robô automático.
+    return mandar_a_imagem_de_teste() if codigo == 0 else codigo
+
+
+def _imagem_de_teste_no_celular(atual):
+    """A imagem de teste no celular, com a trava na mão: a foto de referência na galeria, o projeto e a imagem. 0/1."""
+    if celular_robo.tela_acesa() is False:
+        ps.conectar(celular=True).screen_on()
+        time.sleep(2)
+    if celular_robo.tela_acesa() is False or celular_robo.tela_de_bloqueio():
+        print("celular: a tela está apagada ou na tela de bloqueio; nada foi tocado")
+        return 1
+    d = ps.conectar(celular=True)
+    nome_na_galeria = foto_na_galeria(d, atual["referencia"], "_referencia")
+    if not nome_na_galeria:
+        print("Imagem de teste: a foto de referência não apareceu na galeria do celular")
+        return 1
+    local = os.path.join(PASTA, "imagem_de_teste.jpg")
+    try:
+        if abrir_o_projeto(d):
+            print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
+        gerar_a_imagem(d, atual["prompt"], local, com_foto=True)
+    except Parada as e:
+        casos_robo.guardar(d, "flow", "parou", str(e), passo="flow imagem de teste")
+        print(f"Imagem de teste: parou: {e}")
+        return 1
+    finally:
+        tirar_da_galeria(d, nome_na_galeria)
+    marcar_imagem_de_teste(arquivo=local, estado="feita", feita_em=agora())
+    print(f"Imagem de teste nº {atual['numero']}: feita ({os.path.getsize(local) // 1024} KB)")
+    return 0
+
+
+def mandar_a_imagem_de_teste():
+    """
+    Confere a imagem de teste pela IA e a manda ao privado do Rafael (sem o celular), e logo depois a foto do anúncio
+    com o link dele. 0 mandada, 1 não.
+    """
+    atual = imagem_de_teste_guardada()
+    foto_do_personagem = fotos_guardadas().get(atual.get("personagem"), {}).get("arquivo") or ""
+    if atual.get("estado") != "feita" or not os.path.exists(atual.get("arquivo") or ""):
+        print("Imagem de teste: a imagem não está no servidor")
+        return 1
+    conferencia = conferir_a_imagem(atual["arquivo"], atual["foto"], foto_do_personagem)
+    print(f"Imagem de teste: conferência da IA: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}; "
+          f"{ROTULOS_DA_PESSOA[conferencia['pessoa']]}")
+    try:
+        ok = avisar_rafael.mandar_foto(atual["arquivo"], legenda_da_imagem_de_teste(atual, conferencia))
+    except Exception:
+        ok = False
+    if not ok:
+        print("Imagem de teste: a imagem não chegou ao privado; vai na próxima vez, sem gerar outra")
+        return 1
+    marcar_imagem_de_teste(estado="enviada", mandada_em=agora(), mesmo_produto=conferencia["mesmo"],
+                           mesma_pessoa=conferencia["pessoa"])
+    print(f"Imagem de teste nº {atual.get('numero', 1)}: mandada no privado do Rafael")
+    try:
+        foto = avisar_rafael.mandar_foto(atual["foto"], (
+            f"🖼️ Foto do anúncio, para comparar com a imagem de teste nº {atual.get('numero', 1)}\n"
+            f"🔗 Anúncio: {link_do_anuncio(atual.get('link', ''))}")[:1000])
+    except Exception:
+        foto = False
+    print("Imagem de teste: foto e link do anúncio mandados" if foto
+          else "Imagem de teste: a foto do anúncio não foi ao privado")
     return 0
 
 
@@ -2906,6 +3182,15 @@ def teste(sem_gerar=False):
 
 
 def main(argumentos):
+    if argumentos == ["imagem-teste"]:
+        logging.disable(logging.CRITICAL)
+        try:
+            return imagem_de_teste()
+        except Exception as e:
+            print(f"Flow: erro inesperado ({type(e).__name__})")
+            return 1
+        finally:
+            logging.disable(logging.NOTSET)
     if argumentos and argumentos[0] == "personagens":
         # As chaves vêm do campo "quais" do video_ia.yml, separadas por vírgula ou espaço; vazio = as que faltam.
         chaves = [c for c in " ".join(argumentos[1:]).replace(",", " ").split() if c]
