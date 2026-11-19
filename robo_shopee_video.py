@@ -986,7 +986,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
            "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor", "edicao",
-           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto", "video_ia")
+           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto", "video_ia", "aprovado_por")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -1041,11 +1041,13 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # (visualizacoes_shopee_video.comparar_a_foto).
 # video_ia: no rascunho do vídeo de IA do dia (P232 1), o que o Flow fez ({modelo, custo, estilo, cena, conferencia,
 # gerado_em, resolucao}); {} nos vídeos da fonte. A medição de quais posts levam punição (P146 2) separa por ele.
+# aprovado_por: APROVADO_PELO_ROBO quando o robô aprovou o rascunho sozinho (a aprovação desligada, pedido de 18/11);
+# vazio quando foi o Rafael. O aprovado sozinho que não vai ao ar é recusado sozinho (P254 3, _nao_saiu_o_post).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
                  "postar_agora_em", "letras", "valor", "edicao", "nova_versao", "versao_de", "no_app_em",
-                 "segundos_da_foto", "video_ia")
+                 "segundos_da_foto", "video_ia", "aprovado_por")
 
 
 def _criar_tabela(con):
@@ -1517,10 +1519,13 @@ def esperando_aprovacao():
 
 # A aprovação dos rascunhos (pedido do Rafael, 18/11): ligada, o padrão, todo rascunho espera o Aprovar dele em
 # Rascunhos do Robô 📝 (P227); desligada no painel (Robô Automático 🤖 → Aprovação 👍), o robô aprova sozinho cada
-# rascunho novo logo depois de salvar, e ele vai ao ar como depois do Aprovar (proxima_postagem). O rascunho que
-# volta para o Rafael (o post ou o refazer que não deu certo, o recusado que não saiu do celular) espera ele.
-# Pedido do Rafael (18/11/2026): DECISOES.md, Shopee Vídeo.
+# rascunho novo logo depois de salvar, e ele vai ao ar como depois do Aprovar (proxima_postagem). O aprovado
+# sozinho que não vai ao ar em TENTATIVAS_DE_POSTAR tentativas é recusado sozinho, com a aprovação ainda desligada
+# (P254 3); o que o Rafael aprovou, o refazer que não deu certo e o recusado que não saiu do celular voltam para ele.
+# Pedido do Rafael (18/11/2026) e P254 3: DECISOES.md, Shopee Vídeo.
 PROCESSO_DA_APROVACAO = "aprovação dos rascunhos"
+# Quem aprovou (coluna aprovado_por): o robô, sozinho (aprovar_sozinho e o Aprovar Também os que Esperam do painel).
+APROVADO_PELO_ROBO = "robô"
 
 
 def aprovacao_ligada(config=None):
@@ -1534,7 +1539,7 @@ def aprovar_sozinho(ident, agora=None):
     O rascunho recém-salvo com a aprovação desligada: o robô aprova por ele, e o rascunho ganha a hora de ir ao ar
     como no Aprovar (aprovar). Devolve essa hora.
     """
-    quando = aprovar(ident, agora)
+    quando = aprovar(ident, agora, por=APROVADO_PELO_ROBO)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_APROVACAO, "aprovado sozinho", "aprovação desligada", ok=True)
     return quando
 
@@ -1599,21 +1604,22 @@ def postou_ha_pouco(agora=None):
     return bool(ultimo) and ultimo > _momento(agora_br(agora) - timedelta(minutes=ESPACO_MINIMO))
 
 
-def aprovar(ident, agora=None):
+def aprovar(ident, agora=None, por=""):
     """
     O Rafael aprovou no bot: o rascunho ganha a hora de ir ao ar. Devolve essa hora. Com a nova versão do
     Editar ✏️, o robô primeiro refaz o rascunho no app com ela ("refazer", P192 1), e a hora de ir ao ar sai
-    quando ele estiver refeito: devolve None.
+    quando ele estiver refeito: devolve None. por: APROVADO_PELO_ROBO quando o robô aprova sozinho; vazio, o Rafael
+    (o Aprovar dele num aprovado sozinho que voltou tira a marca).
     """
     rascunho = pegar(ident)
     arquivo = ((rascunho or {}).get("nova_versao") or {}).get("arquivo")
     if arquivo and os.path.exists(arquivo):
         atualizar(ident, estado="refazer", aprovado_em=_momento(agora), postar_em=None, falhas_ao_postar="0",
-                  postar_agora_em=None, motivo="")
+                  postar_agora_em=None, motivo="", aprovado_por=por)
         return None
     quando = proxima_postagem(ler_config(), agora)
     atualizar(ident, estado="aprovado", aprovado_em=_momento(agora), postar_em=quando, falhas_ao_postar="0",
-              postar_agora_em=None)
+              postar_agora_em=None, aprovado_por=por)
     return quando
 
 
@@ -9530,7 +9536,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None, de
             except Verificacao:
                 verificacao = True
         if acao == "postar":
-            _nao_saiu_o_post(ident, e.motivo, pedido)
+            _nao_saiu_o_post(ident, e.motivo, pedido, agora)
         elif acao == "refazer":
             _nao_saiu_o_refazer(ident, e.motivo)
         elif acao == "apagar":
@@ -9559,7 +9565,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None, de
             _guardar_caso(d, acao, "erro", f"erro inesperado ({type(e).__name__})", ident=ident, agora=agora)
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
         if acao == "postar":
-            _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})", pedido)
+            _nao_saiu_o_post(ident, f"erro inesperado ({type(e).__name__})", pedido, agora)
         elif acao == "refazer":
             _nao_saiu_o_refazer(ident, f"erro inesperado ({type(e).__name__})")
         _limpeza_de_novo(acao)
@@ -9592,10 +9598,11 @@ TENTATIVAS_DE_POSTAR = 3
 PROCESSO_DO_POSTAR_AGORA = "postar agora"
 
 
-def _nao_saiu_o_post(ident, motivo, pedido=False):
+def _nao_saiu_o_post(ident, motivo, pedido=False, agora=None):
     """
-    Conta a vez em que o aprovado não saiu e avisa: tenta de novo, ou volta para o Rafael na última.
-    O pedido no Postar Agora 🚀 não conta: o aprovado fica como estava.
+    Conta a vez em que o aprovado não saiu e avisa: tenta de novo, ou volta para o Rafael na última; o aprovado
+    sozinho, com a aprovação ainda desligada, é recusado sozinho na última (P254 3). O pedido no Postar Agora 🚀
+    não conta: o aprovado fica como estava.
     """
     if pedido:
         # Volta para Aprovados para Postar ⏳ (postando_agora).
@@ -9604,17 +9611,42 @@ def _nao_saiu_o_post(ident, motivo, pedido=False):
                "toquei em mais nada. Ele continua aprovado, em Aprovados para Postar ⏳: vai ao ar na hora "
                "marcada, ou toque de novo em Postar Agora 🚀.")
         return
-    falhas = int((pegar(ident) or {}).get("falhas_ao_postar") or 0) + 1
+    rascunho = pegar(ident) or {}
+    falhas = int(rascunho.get("falhas_ao_postar") or 0) + 1
     if falhas < TENTATIVAS_DE_POSTAR:
         atualizar(ident, falhas_ao_postar=str(falhas), motivo=motivo)
         avisar(f"⚠️ Robô da Shopee Vídeo: não consegui postar o rascunho aprovado ({motivo}). Não toquei em mais "
                f"nada. Ele continua aprovado: tento de novo na próxima rodada (tentativa {falhas + 1} de "
                f"{TENTATIVAS_DE_POSTAR}).")
         return
+    if rascunho.get("aprovado_por") == APROVADO_PELO_ROBO and not aprovacao_ligada():
+        _recusar_o_aprovado_sozinho(ident, motivo, agora)
+        return
     atualizar(ident, estado="rascunho", postar_em=None, falhas_ao_postar="0", motivo=motivo)
     avisar(f"⚠️ Robô da Shopee Vídeo: tentei postar o rascunho aprovado {TENTATIVAS_DE_POSTAR} vezes e não "
            f"consegui (da última vez: {motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝 "
            "para você decidir de novo.")
+
+
+def _recusar_o_aprovado_sozinho(ident, motivo, agora=None):
+    """
+    O aprovado sozinho que não foi ao ar em TENTATIVAS_DE_POSTAR tentativas, com a aprovação desligada: o robô o
+    recusa sozinho, como no Recusar do Rafael (sai do celular numa das próximas rodadas, e o de hoje abre mais um
+    horário hoje, repor_o_recusado, P235 1). Escolha do Rafael (P254 3): DECISOES.md, Shopee Vídeo.
+    """
+    atualizar(ident, postar_em=None, falhas_ao_postar="0", motivo=motivo)
+    novo, sem_repor = recusar(ident, agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_APROVACAO, "recusado sozinho",
+                                 f"{TENTATIVAS_DE_POSTAR} tentativas de post sem sair", ok=None)
+    if novo:
+        no_lugar = f" Ele era de hoje: no lugar dele, faço outro rascunho hoje, com outro vídeo, a partir das {novo}."
+    elif sem_repor == RECUSADO_SEM_ESPACO:
+        no_lugar = " Hoje não cabe outro rascunho no lugar dele no Horário do Robô."
+    else:
+        no_lugar = " Ele era de outro dia: só o de hoje ganha outro no lugar."
+    avisar(f"⚠️ Robô da Shopee Vídeo: tentei postar {TENTATIVAS_DE_POSTAR} vezes o rascunho que aprovei sozinho e não "
+           f"consegui (da última vez: {motivo}). Como a aprovação está desligada, recusei ele sozinho: sai do celular "
+           f"numa das próximas rodadas e não vai ao ar.{no_lugar}")
 
 
 def _nao_saiu_o_refazer(ident, motivo):
