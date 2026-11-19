@@ -18,7 +18,8 @@ para resolver. Com o robô automático (robo_shopee_video.py) tocando no celular
 
 Passos, separados por ponto e vírgula:
     abrir            abre o app da Shopee (fechar: fecha); abrir:flow abre o Google Flow
-    tocar:TEXTO      toca no botão com esse texto ou descrição (tocar:@id pelo id)
+    tocar:TEXTO      toca no botão com esse texto ou descrição (tocar:@id pelo id); no Google Flow, o
+                     Gerar só com "0 créditos de IA" na tela (a imagem do modo Imagem, que não gasta)
     xy:X,Y           toca nesse ponto da tela
     voltar, inicio   as teclas do Android
     rolar:baixo      arrasta a tela (rolar:cima)
@@ -560,6 +561,9 @@ TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicio
 COMECOS_PROIBIDOS = ("comprar", "compre")
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
 RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar (nem no Compartilhe para Ganhar)"
+# No Google Flow, o explorar só toca no Gerar com "0 créditos de IA" na tela (a imagem do modo Imagem, que
+# não gasta nada; P253 1): o que gasta crédito (o vídeo) só o robô gera, com tudo conferido antes.
+RECUSA_DO_GERAR = "recusado: no Google Flow, o explorar só toca no Gerar com 0 créditos de IA na tela"
 
 
 def texto_proibido(texto):
@@ -583,6 +587,15 @@ def proibido_no_ponto(xml, x, y):
                 el["id"] in IDS_PROIBIDOS or any(texto_proibido(el[campo]) for campo in ("texto", "descricao"))):
             return True
     return False
+
+
+def gerar_com_custo(xml, x, y):
+    """O toque cai no Gerar do Google Flow sem "0 créditos de IA" na tela (RECUSA_DO_GERAR)?"""
+    import flow_shopee_video as flow
+    no_gerar = any(el["pacote"] == APPS_DO_EXPLORAR["flow"] and el["descricao"] == "Gerar"
+                   and el["caixa"][0] <= x <= el["caixa"][2] and el["caixa"][1] <= y <= el["caixa"][3]
+                   for el in elementos(xml))
+    return no_gerar and flow.custo_na_tela(xml) != 0
 
 
 def video_da_fonte(de_video=False):
@@ -2622,6 +2635,8 @@ def fazer_passo(d, nome, argumento):
         x, y = ponto
         if proibido_no_ponto(tela, x, y):
             return False, RECUSA
+        if gerar_com_custo(tela, x, y):
+            return False, RECUSA_DO_GERAR
         if toca_em_rascunhos(tela, x, y):
             ok, resultado = conferir_tela_final(d, db.ler_config(CHAVE_TESTE, {}))
             if not ok:
@@ -2633,6 +2648,8 @@ def fazer_passo(d, nome, argumento):
         tela = d.dump_hierarchy()
         if proibido_no_ponto(tela, x, y):
             return False, RECUSA
+        if gerar_com_custo(tela, x, y):
+            return False, RECUSA_DO_GERAR
         if toca_em_rascunhos(tela, x, y):
             ok, resultado = conferir_tela_final(d, db.ler_config(CHAVE_TESTE, {}))
             if not ok:

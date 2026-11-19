@@ -2638,3 +2638,28 @@ def test_pagina_inicial_pelo_link_e_a_pagina_presa_carregando(monkeypatch):
     assert not ps.pagina_carregando(esqueleto.replace('text=""', 'text="Eu"', 1))
     assert not ps.pagina_carregando(esqueleto.replace('content-desc=""', 'content-desc="Voltar"', 1))
     assert not ps.pagina_carregando(TELA_EU) and not ps.pagina_carregando("")
+
+
+def _pedido_do_flow(custo):
+    """O pedido do Google Flow com as opções do modelo abertas: o Gerar e, com custo, o aviso dos créditos."""
+    aviso = (f'<node package="com.google.android.apps.labs.whisk" text="{custo} créditos de IA" '
+             'class="android.widget.TextView" bounds="[543,1845][814,1908]"/>') if custo is not None else ""
+    return ('<hierarchy><node package="com.google.android.apps.labs.whisk" class="android.widget.FrameLayout" '
+            'bounds="[0,0][1080,2400]"><node package="com.google.android.apps.labs.whisk" content-desc="Gerar" '
+            'class="android.widget.Button" clickable="true" bounds="[888,1445][1014,1571]"/>' + aviso
+            + '</node></hierarchy>')
+
+
+def test_explorar_so_toca_no_gerar_do_flow_sem_custo():
+    # P253 1: a imagem do modo Imagem do Flow sai com 0 créditos de IA, e o explorar pode gerá-la para o
+    # Claude mapear o caminho; o que gasta crédito (o vídeo), ou a tela sem o aviso, nunca.
+    aparelho = Aparelho(tela=_pedido_do_flow(0))
+    assert ps.fazer_passo(aparelho, "tocar", "Gerar") == (True, "tocado em (951, 1508)")
+    assert ps.fazer_passo(aparelho, "xy", "951,1508") == (True, "tocado em (951,1508)")
+    for custo in (24, None):
+        aparelho = Aparelho(tela=_pedido_do_flow(custo))
+        assert ps.fazer_passo(aparelho, "tocar", "Gerar") == (False, ps.RECUSA_DO_GERAR)
+        assert ps.fazer_passo(aparelho, "xy", "951,1508") == (False, ps.RECUSA_DO_GERAR)
+        assert aparelho.toques == []
+    # Fora do Gerar, o toque segue normal na mesma tela.
+    assert ps.fazer_passo(aparelho, "xy", "100,100") == (True, "tocado em (100,100)")
