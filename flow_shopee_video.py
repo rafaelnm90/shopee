@@ -208,6 +208,15 @@ ESPERA_DA_LISTA = 8
 ALTO_DO_PROJETO = 330
 PROIBIDO_NO_MENU_DO_PROJETO = re.compile(r"excluir|lixeira", re.I)
 CUSTO_NA_TELA = re.compile(r"(\d+)\s+créditos de IA", re.I)
+# O saldo do Flow (pedido do Rafael, 19/11/2026: "qndo os créditos do flow acabar, nós vamos parar de fazer vídeo
+# por ia e ficar só nos vídeos dos grupos ok? Até que o crédito volte"). A foto da conta, no alto do início, abre a
+# tela Conta com "N créditos do Google Flow": os 1.000 do plano no mês e os 50 do dia, que não acumulam e são gastos
+# primeiro (vistos na gravação do Rafael de 14/11). A descrição da foto começa com FOTO_DA_CONTA e segue com o nome
+# da conta, que nunca vai ao log. O robô só lê o número e volta: nunca toca no Ver atividade nem em nada da conta.
+SALDO_NA_TELA = re.compile(r"(\d[\d.]*)\s+créditos do Google Flow", re.I)
+FOTO_DA_CONTA = "perfil"
+ALTO_DO_INICIO = 330
+ESPERA_DO_SALDO = 20
 # A tela de termos ou de consentimento: o robô nunca aceita nada pelo Rafael. Também o aviso do
 # teclado (o do Google Tradutor, que abriu em 15/11 com um toque fora do lugar): OK e Cancelar
 # num diálogo do teclado.
@@ -419,6 +428,14 @@ ROTULOS_DA_FALA = {"igual": "igual à pedida", "embolada": "embolada", "cortada"
 
 class Parada(Exception):
     """O teste parou num passo: a mensagem é um texto fixo do código (vai para o log público)."""
+
+
+class SemCreditos(Parada):
+    """O saldo do Flow não paga o vídeo, e nada foi gerado: saldo e preciso são os números (só eles vão ao log)."""
+
+    def __init__(self, saldo, preciso):
+        super().__init__(f"sem créditos do Flow: {saldo} na conta, o vídeo pede {preciso}")
+        self.saldo, self.preciso = saldo, preciso
 
 
 def agora():
@@ -866,16 +883,76 @@ def criar_o_projeto(d):
         raise Parada(f"renomear o projeto: o título não ficou {PROJETO_DO_ROBO}")
 
 
-def abrir_o_projeto(d):
-    """
-    Abre o Flow do zero e entra no projeto do robô (PROJETO_DO_ROBO), conferindo o título no alto.
-    Sem ele em lugar nenhum da lista, cria um com esse nome (criar_o_projeto). True quando criou.
-    """
+def abrir_o_inicio(d):
+    """Abre o Flow do zero, no início (o Novo à vista). Parada sem ele ou na tela de termos."""
     d.app_start(PACOTE, stop=True, wait=True)
     xml = esperar(d, lambda x: ps.achar(x, "Novo") or tem_termos(x), 30)
     if not xml or tem_termos(xml):
         raise Parada("abrir o Flow: o início não apareceu" if not xml else
                      "abrir o Flow: tela de termos; o robô nunca aceita pelo Rafael")
+
+
+def foto_da_conta(xml):
+    """O centro da foto da conta no alto do início do Flow (a descrição começa com FOTO_DA_CONTA); None sem ela."""
+    for el in ps.elementos(xml):
+        if (el["pacote"] == PACOTE and el["caixa"][3] <= ALTO_DO_INICIO
+                and (el["descricao"] or "").strip().casefold().startswith(FOTO_DA_CONTA)):
+            x1, y1, x2, y2 = el["caixa"]
+            return (x1 + x2) // 2, (y1 + y2) // 2
+    return None
+
+
+def saldo_na_tela(xml):
+    """Os créditos do Flow que a tela Conta mostra ("1050 créditos do Google Flow"); None sem eles."""
+    for el in ps.elementos(xml):
+        if el["pacote"] != PACOTE:
+            continue
+        for valor in (el["texto"], el["descricao"]):
+            achado = SALDO_NA_TELA.search(" ".join((valor or "").split()))
+            if achado:
+                return int(achado.group(1).replace(".", ""))
+    return None
+
+
+def ler_o_saldo(d):
+    """
+    Os créditos do Flow agora, com o app no início: toca na foto da conta, lê o saldo na tela Conta e volta ao
+    início. Parada sem a foto, sem o saldo ou sem o início de volta: sem o saldo lido, nada é gerado.
+    """
+    ponto = ponto_parado(d, foto_da_conta, "saldo")
+    if not ponto:
+        raise Parada("saldo: a foto da conta não apareceu no alto do início do Flow")
+    d.click(*ponto)
+    xml = esperar(d, lambda x: saldo_na_tela(x) is not None or tem_termos(x), ESPERA_DO_SALDO)
+    if not xml or tem_termos(xml):
+        raise Parada("saldo: a tela Conta não mostrou os créditos do Flow" if not xml else
+                     "saldo: tela de termos; o robô nunca aceita pelo Rafael")
+    saldo = saldo_na_tela(xml)
+    d.press("back")
+    if not esperar(d, lambda x: ps.achar(x, "Novo"), 30):
+        raise Parada("saldo: o início do Flow não voltou depois da tela Conta")
+    return saldo
+
+
+def saldo_da_conta(d):
+    """Os créditos do Flow agora, abrindo o app do zero (ler_o_saldo). Parada como a dele."""
+    abrir_o_inicio(d)
+    return ler_o_saldo(d)
+
+
+def abrir_o_projeto(d, saldo_minimo=None):
+    """
+    Abre o Flow do zero e entra no projeto do robô (PROJETO_DO_ROBO), conferindo o título no alto.
+    Sem ele em lugar nenhum da lista, cria um com esse nome (criar_o_projeto). True quando criou.
+    saldo_minimo: o vídeo vai ser gerado, e antes o robô lê o saldo do Flow no início (ler_o_saldo):
+    abaixo dele, SemCreditos, sem entrar no projeto (0: só lê e mostra no log).
+    """
+    abrir_o_inicio(d)
+    if saldo_minimo is not None:
+        saldo = ler_o_saldo(d)
+        print(f"Flow: {saldo} créditos na conta")
+        if saldo < saldo_minimo:
+            raise SemCreditos(saldo, saldo_minimo)
     ponto = achar_o_projeto(d)
     if not ponto:
         # A lista rolada esconde o Novo, que fica no alto do início: o Flow abre de novo, do alto.
@@ -1696,7 +1773,7 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
         if not nome_na_galeria:
             raise Parada("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
     try:
-        if abrir_o_projeto(d):
+        if abrir_o_projeto(d, saldo_minimo=None if so_baixar else 0 if sem_gerar else custo):
             print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
         else:
             print("Flow: aberto no projeto do robô")
@@ -1752,11 +1829,13 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False, guar
         if not nome_na_galeria:
             raise Parada("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
     try:
-        if abrir_o_projeto(d):
+        # Antes do Gerar dos 8 s, o saldo paga as duas partes: os 8 s e o Estender.
+        gerar = estado not in ("gerando", "estendendo")
+        if abrir_o_projeto(d, saldo_minimo=(0 if sem_gerar else custo + CUSTO_DO_ESTENDER) if gerar else None):
             print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
         else:
             print("Flow: aberto no projeto do robô")
-        if estado not in ("gerando", "estendendo"):
+        if gerar:
             xml = montar_o_pedido(d, pedido["prompt"], modelo, custo)
             falta = pronto_para_gerar(xml, pedido["prompt"], modelo, custo)
             if falta:
@@ -1853,6 +1932,9 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
     try:
         feito = no_flow(d, teste, modelo, custo, local, lambda **campos: marcar_video(modelo, **campos),
                         sem_gerar=sem_gerar, so_baixar=so_baixar)
+    except SemCreditos as e:
+        print(f"Flow: {e}; nada foi gerado")
+        return 1
     except Parada as e:
         casos_robo.guardar(d, "flow", "parou", str(e), passo="flow")
         print(f"Flow: parou: {e}")
@@ -1861,21 +1943,24 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
 
 
 # --- A produção: 1 vídeo de IA por dia, que vira rascunho do robô (P232 1) ---
-# O andamento do vídeo do dia fica na chave do Flow, em "producao": a data, o estado, o nome que o vídeo de IA tem
-# entre os vídeos do robô ("id_video"), o produto ("link", "nome", "item", "valor") e de onde ele veio ("origem": a
-# lista da API de afiliado, P234 1), o pedido da IA ("estilo", "prompt", "cena"; no vídeo de 16 s, P247 1, "longa",
-# a "continuacao" do Estender e a "fala"), a foto e o vídeo no servidor e as conferências (a da IA e, no de 16 s, a
-# da fala, "fala_conferida"). Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou
-# boa nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
-# TENTATIVAS_ANTES_DO_GERAR; "sem produto" (nenhum produto da lista serve hoje), "gerando" (o Gerar foi tocado e
-# falta o vídeo chegar ao servidor; no de 16 s, falta também o Estender), "estendendo" (no de 16 s, o Gerar do
-# Estender foi tocado e falta baixar), "baixado" (falta a conferência), "pronto" (espera o rascunho), "descartado"
-# (a IA viu outro produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho) e "desistiu" (não virou
-# rascunho em TENTATIVAS_DO_RASCUNHO). O robô escolhe o produto pelas regras dele e chama a produção na rodada
-# dele, com a trava do celular na mão. Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 17/11/2026, P247 1):
-# DECISOES.md.
+# O andamento do vídeo do dia fica na chave do Flow, em "producao": a data, o estado, o nome que o vídeo de IA tem entre
+# os vídeos do robô ("id_video"), o produto ("link", "nome", "item", "valor") e de onde ele veio ("origem": a lista da
+# API de afiliado, P234 1), o pedido da IA ("estilo", "prompt", "cena"; no vídeo de 16 s, P247 1, "longa", a
+# "continuacao" do Estender e a "fala"), a foto e o vídeo no servidor e as conferências (a da IA e, no de 16 s, a da
+# fala, "fala_conferida"). Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou boa
+# nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
+# TENTATIVAS_ANTES_DO_GERAR; "sem produto" (nenhum produto da lista serve hoje), "gerando" (o Gerar foi tocado e falta o
+# vídeo chegar ao servidor; no de 16 s, falta também o Estender), "estendendo" (no de 16 s, o Gerar do Estender foi
+# tocado e falta baixar), "baixado" (falta a conferência), "pronto" (espera o rascunho), "descartado" (a IA viu outro
+# produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho), "desistiu" (não virou rascunho em
+# TENTATIVAS_DO_RASCUNHO) e "sem créditos" (o saldo do Flow não pagava o vídeo, SEM_CREDITOS). O robô escolhe o produto
+# pelas regras dele e chama a produção na rodada dele, com a trava do celular na mão. Escolhas do Rafael (15/11/2026,
+# P232 1 e P234 1; 17/11/2026, P247 1): DECISOES.md.
 ESTADOS_PENDENTES = ("gerando", "estendendo", "baixado")
 ESTADOS_DO_DIA_ACABADO = ("sem produto", "pronto", "descartado", "usado", "desistiu")
+# O saldo do Flow não pagava o vídeo (SemCreditos): nada foi gerado, e o robô fica nos vídeos dos grupos até o
+# crédito voltar (pedido do Rafael, 19/11/2026). Não fecha o dia: o saldo é lido de novo mais tarde.
+SEM_CREDITOS = "sem créditos"
 # A escolha do produto pela lista da API de afiliado (P234 1) vai sempre do que paga mais para o que paga menos:
 # sem uma memória, o produto que não deu certo num dia seria o 1º de novo no dia seguinte. Ficam de fora o produto
 # que já teve um vídeo gerado (itens_gerados: virou rascunho, foi recusado ou descartado) e o de foto que a IA não
@@ -2026,6 +2111,9 @@ def producao_no_celular(d, atual):
                                  guardar_telas=False)
         return no_flow(d, atual, atual["modelo"], atual["custo"], local, _marcar_a_producao,
                        so_baixar=atual.get("estado") == "gerando", guardar_telas=False)
+    except SemCreditos:
+        # Nada foi gerado nem deu errado no app: sem caso guardado (o robô para o vídeo de IA até o crédito voltar).
+        raise
     except Parada as e:
         casos_robo.guardar(d, "video de IA", "parou", str(e), passo="flow")
         raise
@@ -2383,6 +2471,9 @@ def _amostra_no_celular(atual, sem_gerar, so_baixar):
         else:
             feito = no_flow(d, atual, atual["modelo"], atual["custo"], os.path.join(PASTA, "amostra.mp4"),
                             marcar_amostra, sem_gerar=sem_gerar, so_baixar=so_baixar, guardar_telas=False)
+    except SemCreditos as e:
+        print(f"Amostra: {e}; nada foi gerado")
+        return 1
     except Parada as e:
         casos_robo.guardar(d, "flow", "parou", str(e), passo="flow")
         print(f"Amostra: parou: {e}")

@@ -3402,6 +3402,14 @@ VIDEOS_DE_IA_POR_DIA = 5
 # O rascunho do vídeo de IA do botão que não cabe na mesma rodada (o vídeo gerado e por baixar, ou pronto sem tempo
 # para o rascunho) fica pedido no estado do robô (rascunho_de_ia_pedido), e o painel chama a rodada seguinte na hora.
 DE_IA_NA_RODADA_SEGUINTE = "vídeo de IA pronto; o rascunho sai na rodada seguinte"
+# Sem créditos do Flow para o vídeo, o robô para os vídeos de IA e fica só nos vídeos dos grupos até o crédito voltar
+# (pedido do Rafael, 19/11/2026: "qndo os créditos do flow acabar, nós vamos parar de fazer vídeo por ia e ficar só
+# nos vídeos dos grupos ok? Até que o crédito volte"). O andamento fica "sem créditos" (flow.SEM_CREDITOS), sem
+# gastar nada e sem contar como tentativa do dia; o saldo é lido de novo depois de ESPERA_SEM_CREDITOS, antes de
+# escolher outro produto (os 50 do dia voltam uma vez por dia, numa hora que o app não diz). O De IA ✨ do Preparar 1
+# Agora ⚡ responde que está sem créditos, e o Aleatório 🎲 vai aos vídeos dos grupos.
+# Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+ESPERA_SEM_CREDITOS = timedelta(hours=2)
 
 
 class SemOVideoDeIa(Exception):
@@ -3422,14 +3430,36 @@ def cabe_outro_video_de_ia(dia, atual=None):
     return VIDEOS_DE_IA_POR_DIA is None or flow.gerados_no_dia(dia, atual) < VIDEOS_DE_IA_POR_DIA
 
 
+def creditos_podem_ter_voltado(atual, agora=None):
+    """
+    O andamento "sem créditos" (flow.SEM_CREDITOS) já esperou ESPERA_SEM_CREDITOS desde a última leitura do saldo?
+    Sem a hora da leitura, sim.
+    """
+    try:
+        lido = datetime.strptime(atual.get("sem_creditos_em") or "", "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return True
+    return agora_br(agora).replace(tzinfo=None) - lido >= ESPERA_SEM_CREDITOS
+
+
+def texto_sem_creditos(atual):
+    """O porquê do vídeo de IA parado sem créditos, com os números da última leitura do saldo."""
+    return (f"sem créditos do Google Flow ({atual.get('saldo', 0)} na conta; o vídeo pede "
+            f"{atual.get('preciso', flow.CUSTO_DA_PRODUCAO)}). Os vídeos de IA voltam quando o crédito voltar "
+            f"(os {flow.CREDITOS_GRATIS_DO_DIA} do dia ou os do mês); até lá, os rascunhos saem dos vídeos dos grupos")
+
+
 def o_de_ia_pode(agora=None):
     """
     (o De IA ✨ do Preparar 1 Agora ⚡ pode sair agora, por que não) (P243). Com o vídeo de IA pronto que espera ou o
-    gerado que falta baixar, sempre: nada novo é gerado. Sem eles, enquanto o dia cabe outro Gerar.
+    gerado que falta baixar, sempre: nada novo é gerado. Sem eles, enquanto o dia cabe outro Gerar e não está sem
+    créditos (a leitura sem crédito vale por ESPERA_SEM_CREDITOS; depois, o saldo é lido de novo).
     """
     atual = flow.producao()
     if flow.video_pronto() or atual.get("estado") in flow.ESTADOS_PENDENTES:
         return True, ""
+    if atual.get("estado") == flow.SEM_CREDITOS and not creditos_podem_ter_voltado(atual, agora):
+        return False, texto_sem_creditos(atual)
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     if cabe_outro_video_de_ia(hoje, atual):
         return True, ""
@@ -3465,6 +3495,9 @@ def video_de_ia_pendente(config, agora=None):
         return True
     # O pronto espera o rascunho; o que perdeu o arquivo conta como o vídeo do dia dele, e o do dia seguinte sai.
     if estado == "pronto" and os.path.exists(atual.get("arquivo") or ""):
+        return False
+    # Sem créditos, o saldo só é lido de novo depois da espera (até lá, os rascunhos saem dos vídeos dos grupos).
+    if estado == flow.SEM_CREDITOS and not creditos_podem_ter_voltado(atual, agora):
         return False
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     if flow.o_do_robo_saiu(hoje, atual) or not cabe_outro_video_de_ia(hoje, atual):
@@ -3704,6 +3737,17 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
         if atual.get("estado") == "escolhido":
             # A rodada de antes caiu no meio, antes do Gerar: a reserva dela sai.
             _soltar_a_fonte_do_video_de_ia(atual)
+        if atual.get("estado") == flow.SEM_CREDITOS:
+            # Depois de uma leitura sem crédito, o saldo de novo antes de escolher outro produto (a escolha pede
+            # à IA a foto e o pedido): sem crédito, fica como estava até a próxima leitura.
+            try:
+                saldo = flow.saldo_da_conta(d)
+            except flow.Parada as e:
+                return _video_de_ia_parou(str(e), agora)
+            if saldo < flow.CUSTO_DA_PRODUCAO:
+                return _video_de_ia_sem_creditos(flow.SemCreditos(saldo, flow.CUSTO_DA_PRODUCAO), agora)
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "créditos de volta",
+                                         f"{saldo} na conta", ok=True, agora=agora)
         de_hoje = (atual.get("data") == hoje and not _sem_produto_pela_fonte(atual)
                    and bool(atual.get("do_botao")) == do_botao)
         tentativas = (atual.get("tentativas_de_gerar", 0) if de_hoje else 0) + 1
@@ -3728,6 +3772,8 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
     if atual["estado"] != "baixado":
         try:
             baixado = flow.producao_no_celular(d, atual)
+        except flow.SemCreditos as e:
+            return _video_de_ia_sem_creditos(e, agora)
         except flow.Parada as e:
             return _video_de_ia_parou(str(e), agora)
         if not baixado:
@@ -3819,6 +3865,24 @@ def _video_de_ia_parou(motivo, agora=None):
     if perdido:
         _avisar_o_video_de_ia_perdido(atual, f"parou no Google Flow em {TENTATIVAS_DE_BAIXAR} rodadas depois do Gerar")
     return f"{motivo}; parado"
+
+
+def _video_de_ia_sem_creditos(e, agora=None):
+    """
+    O saldo do Flow não pagava o vídeo (flow.SemCreditos): nada foi gerado. O andamento fica "sem créditos", com o
+    saldo e a hora da leitura, sem contar como tentativa do dia (a reserva do produto sai), e o robô fica nos vídeos
+    dos grupos até o crédito voltar: a leitura seguinte vem depois de ESPERA_SEM_CREDITOS (pedido do Rafael,
+    19/11/2026). Devolve o resultado da rodada.
+    """
+    atual = flow.producao()
+    _soltar_a_fonte_do_video_de_ia(atual)
+    # A tentativa que esta rodada abriu (o "escolhido" do comecar_producao) não conta: o problema não é o produto.
+    tentativas = max(0, int(atual.get("tentativas_de_gerar") or 0) - (atual.get("estado") == "escolhido"))
+    flow.guardar_producao(estado=flow.SEM_CREDITOS, saldo=e.saldo, preciso=e.preciso, tentativas_de_gerar=tentativas,
+                          sem_creditos_em=agora_br(agora).strftime("%Y-%m-%d %H:%M:%S"))
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem créditos",
+                                 f"{e.saldo} na conta, o vídeo pede {e.preciso}", ok=None, agora=agora)
+    return f"vídeo de IA: {texto_sem_creditos(flow.producao())}"
 
 
 def _video_de_ia_sem_ficar_pronto(d, agora=None):

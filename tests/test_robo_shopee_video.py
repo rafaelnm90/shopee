@@ -10134,6 +10134,61 @@ def test_video_de_ia_que_nao_fica_pronto_sai_depois_de_3_rodadas(monkeypatch, av
         assert trecho in aviso, trecho
 
 
+def test_video_de_ia_sem_creditos_fica_nos_videos_dos_grupos_ate_o_credito_voltar(monkeypatch, avisos, tmp_path):
+    # Pedido do Rafael (19/11): "qndo os créditos do flow acabar, nós vamos parar de fazer vídeo por ia e ficar só nos
+    # vídeos dos grupos ok? Até que o crédito volte".
+    _fonte(monkeypatch)
+    ativar(fonte="autorais", robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
+    monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True)
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala: {
+        "situacao": "igual", "estranhas": [], "aos": None, "faltou": [], "ouvidas": 9})
+    baixa, escolher, escolhas = robo.flow.producao_no_celular, robo.escolher_para_o_video_de_ia, []
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia",
+                        lambda agora=None: escolhas.append(agora) or escolher(agora))
+    casos = []
+    monkeypatch.setattr(robo.casos_robo, "guardar",
+                        lambda d, acao, resultado, motivo, passo="", **extra: casos.append(motivo))
+
+    def sem_saldo(d, atual):
+        raise robo.flow.SemCreditos(30, robo.flow.CUSTO_DA_PRODUCAO)
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", sem_saldo)
+    config = robo.ler_config()
+    sem = "sem créditos do Google Flow (30 na conta; o vídeo pede 48)"
+    assert robo.fazer_o_video_de_ia(Intocavel(), config, momento("2026-10-22 08:05")).startswith(f"vídeo de IA: {sem}")
+    atual = robo.flow.producao()
+    # Nada foi gasto nem deu errado: não conta como tentativa do dia, sem caso nem tentativa ruim no histórico.
+    assert atual["estado"] == "sem créditos" and atual["tentativas_de_gerar"] == 0 and len(escolhas) == 1
+    with robo.db.conexao() as con:
+        robo._criar_tabela_tentativas(con)
+        assert con.execute("SELECT COUNT(*) FROM shopee_video_tentativas").fetchone()[0] == 0 and casos == []
+    assert ("sem créditos", "30 na conta, o vídeo pede 48") in _registro_do_video_de_ia()
+    # Até 2 h depois da leitura, a rodada fica nos vídeos dos grupos, e o De IA ✨ e o Aleatório 🎲 dizem por quê.
+    antes = momento("2026-10-22 10:04")
+    assert not robo.video_de_ia_pendente(config, antes)
+    assert robo.o_que_fazer(config, antes)[0] != "video_ia"
+    pode, motivo = robo.o_de_ia_pode(antes)
+    assert not pode and motivo.startswith(sem)
+    assert robo.sortear_a_origem(antes, sorteio=lambda: 0.1) == "fonte"
+    assert robo.preparar_o_pedido(Intocavel(), config, antes, de="ia").startswith(f"sem o vídeo de IA: {sem}")
+    # Depois da espera, o saldo é lido de novo antes de escolher outro produto: ainda sem crédito, fica como estava.
+    depois = momento("2026-10-22 10:06")
+    assert robo.video_de_ia_pendente(config, depois)
+    saldos = [10]
+    monkeypatch.setattr(robo.flow, "saldo_da_conta", lambda d: saldos[0])
+    robo.fazer_o_video_de_ia(Intocavel(), config, depois)
+    assert len(escolhas) == 1 and robo.flow.producao()["sem_creditos_em"] == "2026-10-22 10:06:00"
+    assert robo.flow.producao()["saldo"] == 10
+    # Com o crédito de volta (os 50 do dia), o vídeo de IA sai como sempre.
+    saldos[0] = 50
+    monkeypatch.setattr(robo.flow, "producao_no_celular", baixa)
+    assert robo.fazer_o_video_de_ia(Intocavel(), config, momento("2026-10-22 12:07")) == \
+        "vídeo de IA: pronto para o rascunho"
+    assert len(escolhas) == 2 and ("créditos de volta", "50 na conta") in _registro_do_video_de_ia()
+    assert robo.flow.producao()["tentativas_de_gerar"] == 1
+
+
 def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, avisos, tmp_path,
                                                                      caminho_do_rascunho):
     # O vídeo de IA pronto vira o rascunho do horário, no lugar de um da fonte, com o Rótulo de IA sempre ligado (P8).
