@@ -3748,6 +3748,7 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
                 return _video_de_ia_sem_creditos(flow.SemCreditos(saldo, flow.CUSTO_DA_PRODUCAO), agora)
             registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "créditos de volta",
                                          f"{saldo} na conta", ok=True, agora=agora)
+            _avisar_os_creditos(AVISO_DOS_CREDITOS_DE_VOLTA.format(saldo=saldo), "voltaram", agora)
         de_hoje = (atual.get("data") == hoje and not _sem_produto_pela_fonte(atual)
                    and bool(atual.get("do_botao")) == do_botao)
         tentativas = (atual.get("tentativas_de_gerar", 0) if de_hoje else 0) + 1
@@ -3875,6 +3876,8 @@ def _video_de_ia_sem_creditos(e, agora=None):
     19/11/2026). Devolve o resultado da rodada.
     """
     atual = flow.producao()
+    # A leitura de 2 em 2 h que ainda não acha crédito não avisa de novo: só a que muda o andamento (P257 1).
+    acabaram_agora = atual.get("estado") != flow.SEM_CREDITOS
     _soltar_a_fonte_do_video_de_ia(atual)
     # A tentativa que esta rodada abriu (o "escolhido" do comecar_producao) não conta: o problema não é o produto.
     tentativas = max(0, int(atual.get("tentativas_de_gerar") or 0) - (atual.get("estado") == "escolhido"))
@@ -3882,7 +3885,25 @@ def _video_de_ia_sem_creditos(e, agora=None):
                           sem_creditos_em=agora_br(agora).strftime("%Y-%m-%d %H:%M:%S"))
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem créditos",
                                  f"{e.saldo} na conta, o vídeo pede {e.preciso}", ok=None, agora=agora)
+    if acabaram_agora:
+        _avisar_os_creditos(AVISO_DOS_CREDITOS_ACABARAM.format(saldo=e.saldo, preciso=e.preciso), "acabaram", agora)
     return f"vídeo de IA: {texto_sem_creditos(flow.producao())}"
+
+
+# O aviso no privado quando os créditos do Flow acabam e quando voltam, uma vez cada (a leitura de 2 em 2 h que
+# ainda não acha crédito fica calada). Escolha do Rafael (19/11/2026, P257 1): DECISOES.md, Shopee Vídeo.
+AVISO_DOS_CREDITOS_ACABARAM = (
+    "🪙 Robô da Shopee Vídeo: os créditos do Google Flow acabaram: {saldo} na conta, e o vídeo de IA pede {preciso}. "
+    "Fico só nos vídeos dos grupos e confiro o saldo de novo a cada 2 h; aviso quando o crédito voltar.")
+AVISO_DOS_CREDITOS_DE_VOLTA = (
+    "✅ Robô da Shopee Vídeo: os créditos do Google Flow voltaram: {saldo} na conta. O vídeo de IA volta a sair.")
+
+
+def _avisar_os_creditos(texto, quando, agora=None):
+    """O aviso dos créditos do Flow no privado do Rafael (P257 1); o registro diz se chegou."""
+    chegou = avisar(texto)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "aviso dos créditos",
+                                 f"{quando} - {'no privado' if chegou else 'não chegou'}", ok=None, agora=agora)
 
 
 def _video_de_ia_sem_ficar_pronto(d, agora=None):
