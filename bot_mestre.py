@@ -17745,6 +17745,12 @@ def agendar_backup_atrasado():
 
 # --- Perguntas do Claude ao Rafael ---
 
+def _botoes_do_bot_api(teclado):
+    """Os botões no formato do Bot API (o do perguntas_rafael) como o aiogram manda."""
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(**botao) for botao in linha]
+                                                 for linha in teclado["inline_keyboard"]])
+
+
 async def lembrar_perguntas_do_claude():
     """
     A cada volta, manda de novo no privado cada pergunta do Claude ainda sem resposta
@@ -17769,17 +17775,16 @@ async def lembrar_perguntas_do_claude():
         logger.info(f"❓ [Perguntas do Claude] {enviados} lembrete(s) no privado.")
         registro_processos.registrar("bot_mestre", "lembrete de pergunta do Claude", "enviado", str(enviados), ok=True)
 
-    # As informações importantes do Claude, do mesmo jeito, até o Vi ✅ (pedido do Rafael, 09/11).
+    # As informações importantes do Claude, do mesmo jeito, até o Vi ✅ (pedido do Rafael, 09/11), e
+    # todas juntas numa mensagem, com o Vi ✅ de cada uma (pedido do Rafael, 19/11).
     async def enviar_com_botao(texto, teclado):
-        botoes = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(**botao) for botao in linha]
-                                                       for linha in teclado["inline_keyboard"]])
         mensagem = await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True,
-                                          reply_markup=botoes)
+                                          reply_markup=_botoes_do_bot_api(teclado))
         return mensagem.message_id
 
     informacoes = await perguntas_rafael.lembrar_informacoes(enviar_com_botao, apagar=apagar)
     if informacoes:
-        logger.info(f"📌 [Informações do Claude] {informacoes} lembrete(s) no privado.")
+        logger.info(f"📌 [Informações do Claude] {informacoes} informação(ões) lembrada(s) no privado.")
         registro_processos.registrar("bot_mestre", "lembrete de informação do Claude", "enviado", str(informacoes),
                                      ok=True)
 
@@ -17789,7 +17794,8 @@ async def informacao_vista(callback: types.CallbackQuery):
     """
     O Vi ✅ da informação importante do Claude: os lembretes param e todos saem do privado, também
     o tocado; fica o aviso de onde ela veio, marcado como visto, sem o botão. Pedidos do Rafael
-    (09/11 e 10/11): DECISOES.md, Trabalho com o Claude.
+    (09/11 e 10/11): DECISOES.md, Trabalho com o Claude. O lembrete junto de outras que ainda esperam
+    o ok fica, sem a vista e com o Vi ✅ das outras (pedido do Rafael, 19/11).
     """
     if callback.from_user is None or callback.from_user.id != ADMIN_ID:
         return
@@ -17797,16 +17803,28 @@ async def informacao_vista(callback: types.CallbackQuery):
     cod = perguntas_rafael.codigo_da_informacao(ident) if ident.isdigit() else ""
     mudou = bool(cod) and perguntas_rafael.marcar_vista(cod)
     await callback.answer("✅ Anotado: você viu. Parei de lembrar." if mudou else "Esta informação já estava vista.")
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    tocada = getattr(callback.message, "message_id", None)
+    fica, sair, refazer = perguntas_rafael.depois_da_vista(cod, tocada) if cod else (None, [], {})
+    if tocada not in refazer:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
     if not cod:
         return
     informacao = perguntas_rafael.informacao(cod)
-    fica, sair = perguntas_rafael.lembretes_para_tirar(cod, getattr(callback.message, "message_id", None))
     apagadas = []
     for mensagem in sair:
+        if mensagem in refazer:
+            # Junto de outras que ainda esperam o ok: fica, só com elas (sai da lista desta).
+            texto, teclado = perguntas_rafael.aviso_das_informacoes(refazer[mensagem])
+            try:
+                await bot.edit_message_text(texto, chat_id=ADMIN_ID, message_id=mensagem, parse_mode="HTML",
+                                            disable_web_page_preview=True, reply_markup=_botoes_do_bot_api(teclado))
+            except Exception:
+                pass
+            apagadas.append(mensagem)
+            continue
         try:
             await bot.delete_message(ADMIN_ID, mensagem)
             apagadas.append(mensagem)

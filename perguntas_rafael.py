@@ -41,10 +41,13 @@ um código I1, I2..., até ele dizer que viu: o botão Vi ✅ do aviso (o bot_me
 anterior: enquanto ela espera, ficam no privado o aviso e o último lembrete, que o Telegram ainda
 deixa apagar (só até 48 h depois do envio). Ao marcar, todos os lembretes saem do privado, também
 o tocado, e fica só o aviso de onde ela veio, marcado como visto, sem o botão, para consulta
-(pedido do Rafael, 10/11).
+(pedido do Rafael, 10/11). Com mais de uma esperando, o lembrete vai com todas juntas numa
+mensagem, com o Vi ✅ de cada uma, e sempre que o Claude lista as abertas na conversa, elas vão de
+novo ao privado na hora, juntas (reenviar, pelo avisar.yml; pedido do Rafael, 19/11).
 
     python3 perguntas_rafael.py informacao TEXTO_CIFRADO  # no servidor (avisar.yml)
     python3 perguntas_rafael.py vista I3                  # no servidor (avisar.yml)
+    python3 perguntas_rafael.py reenviar                  # no servidor (avisar.yml)
 
 O JSON da informação: {"informacao": "...", "link": "https://..."}; o cifrar é o mesmo.
 """
@@ -52,6 +55,7 @@ import html
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 
@@ -69,6 +73,9 @@ COMECO_DA_RESPOSTA = "Vc me enviou anteriormente a pergunta"
 TAMANHO_DA_INFORMACAO = 3000
 # O botão Vi ✅ do aviso da informação: o bot_mestre (informacao_vista) marca como vista.
 CALLBACK_VI = "info_vi:"
+# As informações juntas numa mensagem (pedido do Rafael, 19/11) param antes dos 4096 caracteres do
+# Telegram; a que não cabe vai na mensagem seguinte.
+LIMITE_DA_MENSAGEM = 3900
 
 
 def _momento(agora=None):
@@ -303,10 +310,10 @@ def informacoes_abertas():
     """As informações que o Rafael ainda não disse que viu, da mais velha para a mais nova."""
     with db.conexao() as con:
         _criar_tabela_das_informacoes(con)
-        linhas = con.execute("SELECT id, texto, link, ultimo_aviso, avisos FROM informacoes_rafael "
+        linhas = con.execute("SELECT id, texto, link, ultimo_aviso, avisos, criada FROM informacoes_rafael "
                              "WHERE vista IS NULL ORDER BY id").fetchall()
     return [{"id": linha[0], "codigo": codigo_da_informacao(linha[0]), "texto": linha[1], "link": linha[2],
-             "ultimo_aviso": linha[3], "avisos": linha[4] or 0} for linha in linhas]
+             "ultimo_aviso": linha[3], "avisos": linha[4] or 0, "criada": linha[5]} for linha in linhas]
 
 
 def informacoes_vencidas(agora=None):
@@ -422,33 +429,110 @@ def teclado_da_informacao(i):
     return {"inline_keyboard": [[{"text": "Vi ✅", "callback_data": f"{CALLBACK_VI}{i['id']}"}]]}
 
 
-async def lembrar_informacoes(enviar, agora=None, apagar=None):
+def _visivel(texto_html):
+    """O tamanho do texto como o Telegram conta: sem as marcas do HTML, e o &lt; contando 1."""
+    return len(html.unescape(re.sub(r"<[^>]+>", "", texto_html)))
+
+
+def _de_quando(i):
+    """ "de 18/11, 20:06": quando a informação chegou, para o Rafael achar o aviso de onde ela veio."""
+    try:
+        criada = datetime.strptime(str(i.get("criada") or ""), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return ""
+    return f" (de {criada:%d/%m}, {criada:%H:%M})"
+
+
+def montar_informacoes_juntas(infos):
     """
-    Manda de novo cada informação ainda não vista cujo último aviso tem 1 h ou mais.
+    O lembrete das informações que esperam o ok, todas numa mensagem, com o código e o texto de cada
+    uma e o link da conversa (uma vez só quando é o mesmo). Pedido do Rafael (19/11): DECISOES.md,
+    Trabalho com o Claude.
+    """
+    links = list(dict.fromkeys(i["link"] for i in infos if i.get("link")))
+    linhas = [f"🔔 <b>{len(infos)} informações do Claude esperam o seu ok</b> "
+              f"({', '.join(i['codigo'] for i in infos)})"]
+    for i in infos:
+        linhas += ["", f"📌 <b>{i['codigo']}</b>{_de_quando(i)}", html.escape(i["texto"])]
+        if len(links) > 1 and i.get("link"):
+            linhas.append(f"🔗 Abrir a conversa com o Claude: {html.escape(i['link'])}")
+    if len(links) == 1:
+        linhas += ["", f"🔗 Abrir a conversa com o Claude: {html.escape(links[0])}"]
+    linhas += ["", "Toque no <b>Vi ✅</b> de cada uma quando tiver lido (ou responda ok na conversa com o "
+                   "Claude). Lembro de hora em hora, todas juntas, até lá."]
+    return "\n".join(linhas)
+
+
+def teclado_das_informacoes(infos):
+    """Um Vi ✅ para cada informação da mensagem, com o código no botão."""
+    return {"inline_keyboard": [[{"text": f"Vi {i['codigo']} ✅", "callback_data": f"{CALLBACK_VI}{i['id']}"}]
+                                for i in infos]}
+
+
+def pacotes_das_informacoes(infos):
+    """As informações em grupos que cabem cada um numa mensagem do Telegram, na ordem em que vieram."""
+    pacotes = []
+    for i in infos:
+        if pacotes and _visivel(montar_informacoes_juntas(pacotes[-1] + [i])) <= LIMITE_DA_MENSAGEM:
+            pacotes[-1].append(i)
+        else:
+            pacotes.append([i])
+    return pacotes
+
+
+def aviso_das_informacoes(infos):
+    """(texto, teclado) do lembrete de um grupo de informações: com uma só, o aviso de sempre."""
+    if len(infos) == 1:
+        return montar_aviso_da_informacao(infos[0]), teclado_da_informacao(infos[0])
+    return montar_informacoes_juntas(infos), teclado_das_informacoes(infos)
+
+
+async def lembrar_informacoes(enviar, agora=None, apagar=None, todas=False):
+    """
+    Quando uma informação ainda não vista faz 1 h do último aviso, as não vistas vão de novo ao
+    privado, todas juntas numa mensagem, com o Vi ✅ de cada uma (a que não cabe vai na mensagem
+    seguinte). todas=True: na hora, sem esperar a hora (o Claude listou as abertas na conversa).
+    Pedido do Rafael (19/11): DECISOES.md, Trabalho com o Claude.
     enviar(texto, teclado) é a função do robô que manda no privado (async; teclado: o do Bot
-    API) e devolve o id da mensagem, que fica guardado para tirar os lembretes depois, ou True.
-    Com apagar(id) (async, True se saiu), o lembrete novo apaga os anteriores: no privado ficam o
-    aviso e o último lembrete, que o Telegram ainda deixa apagar quando ela for vista (só até
-    48 h depois do envio). O que não sai fica na lista, para sair na hora do visto. Um aviso que
-    não sai fica para a próxima volta. Devolve quantos saíram. Pedido do Rafael (10/11):
+    API) e devolve o id da mensagem, que fica guardado em cada informação dela para tirar os
+    lembretes depois, ou True. Com apagar(id) (async, True se saiu), o lembrete novo apaga os
+    anteriores: no privado ficam o aviso de cada uma e o último lembrete, que o Telegram ainda deixa
+    apagar quando ela for vista (só até 48 h depois do envio). O que não sai fica na lista, para sair
+    na hora do visto. Um lembrete que não sai fica para a próxima volta, e os anteriores das
+    informações dele ficam. Devolve quantas informações foram lembradas. Pedido do Rafael (10/11):
     DECISOES.md, Trabalho com o Claude.
     """
-    enviados = 0
-    for i in informacoes_vencidas(agora):
+    abertas = informacoes_abertas()
+    if not abertas or not (todas or informacoes_vencidas(agora)):
+        return 0
+    # Os lembretes de antes (o 1º de cada uma é o aviso de onde ela veio e fica) e de quem é cada um.
+    donas = {}
+    for i in abertas:
+        for mensagem in mensagens_da_informacao(i["codigo"])[1:]:
+            donas.setdefault(mensagem, []).append(i["id"])
+    lembradas, vistas_na_hora = set(), []
+    for grupo in pacotes_das_informacoes(abertas):
         try:
-            anteriores = mensagens_da_informacao(i["codigo"])[1:]
-            mensagem = await enviar(montar_aviso_da_informacao(i), teclado_da_informacao(i))
-            if mensagem:
-                marcar_aviso_da_informacao(i["id"], agora, mensagem)
-                enviados += 1
-                if apagar:
-                    # Vista enquanto o lembrete saía (o Vi ✅ ou o ok na mesma hora): ele sai também.
-                    vista = (informacao(i["codigo"]) or {}).get("vista")
-                    sair = anteriores + ([mensagem] if vista and type(mensagem) is int else [])
-                    tirar_mensagens_da_informacao(i["id"], [m for m in sair if await apagar(m)])
+            texto, teclado = aviso_das_informacoes(grupo)
+            mensagem = await enviar(texto, teclado)
         except Exception as e:
-            logger.warning(f"⚠️ [Informações do Claude] Lembrete de {i['codigo']} não saiu: {type(e).__name__}")
-    return enviados
+            codigos = ", ".join(i["codigo"] for i in grupo)
+            logger.warning(f"⚠️ [Informações do Claude] Lembrete de {codigos} não saiu: {type(e).__name__}")
+            continue
+        if not mensagem:
+            continue
+        for i in grupo:
+            marcar_aviso_da_informacao(i["id"], agora, mensagem)
+            lembradas.add(i["id"])
+        # Vistas enquanto o lembrete saía (o Vi ✅ ou o ok na mesma hora): ele sai também.
+        if type(mensagem) is int and all((informacao(i["codigo"]) or {}).get("vista") for i in grupo):
+            vistas_na_hora.append(mensagem)
+    if apagar and lembradas:
+        sair = [m for m, ids in donas.items() if all(ident in lembradas for ident in ids)] + vistas_na_hora
+        saidas = [m for m in sair if await apagar(m)]
+        for i in abertas:
+            tirar_mensagens_da_informacao(i["id"], saidas)
+    return len(lembradas)
 
 
 def lembretes_para_tirar(cod, tocada=None):
@@ -463,6 +547,28 @@ def lembretes_para_tirar(cod, tocada=None):
         return tocada, []
     sair = mensagens[1:] + ([tocada] if tocada is not None and tocada not in mensagens else [])
     return mensagens[0], sair
+
+
+def depois_da_vista(cod, tocada=None):
+    """
+    (fica, sair, refazer) no privado depois da informação vista: fica e sair como em
+    lembretes_para_tirar; refazer: {mensagem: [as informações ainda abertas nela]}, os lembretes
+    juntos de outras que esperam o ok, que não saem: o bot tira deles a vista e deixa as outras, com
+    o Vi ✅ delas (pedido do Rafael, 19/11). O lembrete junto que ficaria no lugar do aviso (o aviso
+    de onde ela veio não ficou guardado) também é refeito, e nenhuma mensagem fica marcada como vista.
+    """
+    fica, sair = lembretes_para_tirar(cod, tocada)
+    numero = _numero_da_informacao(cod)
+    outras = [i for i in informacoes_abertas() if i["id"] != numero]
+    listas = {i["id"]: mensagens_da_informacao(i["codigo"]) for i in outras}
+    refazer = {}
+    for mensagem in ([fica] if fica is not None else []) + sair:
+        nela = [i for i in outras if mensagem in listas[i["id"]]]
+        if nela:
+            refazer[mensagem] = nela
+    if fica is not None and fica in refazer:
+        fica, sair = None, [fica] + sair
+    return fica, sair, refazer
 
 
 def texto_da_vista(cod):
@@ -485,21 +591,51 @@ def receber_informacao(texto_cifrado, agora=None):
 
 
 def tirar_lembretes_pelo_servidor(cod):
-    """Vista pela conversa: os lembretes saem do privado, e o aviso de onde ela veio fica, marcado como visto."""
+    """
+    Vista pela conversa: os lembretes saem do privado, e o aviso de onde ela veio fica, marcado como
+    visto; o lembrete junto de outras que ainda esperam o ok fica, sem ela (pedido do Rafael, 19/11).
+    Devolve (apagados, refeitos, total).
+    """
     import avisar_rafael
-    fica, sair = lembretes_para_tirar(cod)
-    apagadas = []
+    fica, sair, refazer = depois_da_vista(cod)
+    saidas, apagadas = [], 0
     for ident in sair:
-        if avisar_rafael.apagar_mensagem(ident):
-            apagadas.append(ident)
+        if ident in refazer:
+            texto, teclado = aviso_das_informacoes(refazer[ident])
+            avisar_rafael.editar_texto(ident, texto, html=True, teclado=teclado)
+            saidas.append(ident)
+        elif avisar_rafael.apagar_mensagem(ident):
+            saidas.append(ident)
+            apagadas += 1
         else:
             avisar_rafael.editar_texto(ident, texto_da_vista(cod))
     i = informacao(cod)
     if i:
-        tirar_mensagens_da_informacao(i["id"], apagadas)
+        tirar_mensagens_da_informacao(i["id"], saidas)
     if fica is not None and not (i and avisar_rafael.editar_texto(fica, montar_aviso_visto(i), html=True)):
         avisar_rafael.tirar_botoes(fica)
-    return len(apagadas), len(sair)
+    return apagadas, len(refazer.keys() & set(sair)), len(sair)
+
+
+def reenviar_informacoes(agora=None):
+    """
+    No servidor (avisar.yml, informacoes): as informações ainda não vistas vão de novo ao privado, na
+    hora, juntas numa mensagem com o Vi ✅ de cada uma, e os lembretes de antes saem. O Claude chama
+    sempre que as lista na conversa (pedido do Rafael, 19/11: DECISOES.md, Trabalho com o Claude).
+    Devolve (os códigos em aberto, quantas foram ao privado).
+    """
+    import asyncio
+    import avisar_rafael
+
+    async def mandar_com_o_vi(texto, teclado):
+        return avisar_rafael.mandar_texto_com_id(texto, html=True, teclado=teclado)
+
+    async def apagar_do_privado(ident):
+        return avisar_rafael.apagar_mensagem(ident)
+    codigos = [i["codigo"] for i in informacoes_abertas()]
+    if not codigos:
+        return [], 0
+    return codigos, asyncio.run(lembrar_informacoes(mandar_com_o_vi, agora, apagar=apagar_do_privado, todas=True))
 
 
 # --- Linha de comando (avisar.yml no servidor; cifrar no ambiente do Claude) ---
@@ -558,9 +694,22 @@ def receber(texto_cifrado, agora=None):
 
 
 def main(argumentos):
+    if argumentos == ["reenviar"]:
+        try:
+            codigos, mandadas = reenviar_informacoes()
+        except Exception as e:
+            # Só o tipo: a mensagem pode trazer o texto da informação ou a URL com o token.
+            print(f"❌ Falhou: {type(e).__name__}")
+            return 1
+        if not codigos:
+            print("✅ Nenhuma informação em aberto: nada a mandar.")
+            return 0
+        print(f"✅ Em aberto: {', '.join(codigos)}. {mandadas} de {len(codigos)} de novo no privado, juntas, com o "
+              "Vi ✅ de cada uma.")
+        return 0 if mandadas == len(codigos) else 1
     if len(argumentos) != 2 or argumentos[0] not in ("cifrar", "nova", "respondida", "informacao", "vista"):
         print("uso: perguntas_rafael.py cifrar ARQUIVO.json | nova TEXTO_CIFRADO | respondida CODIGO | "
-              "informacao TEXTO_CIFRADO | vista CODIGO")
+              "informacao TEXTO_CIFRADO | vista CODIGO | reenviar")
         return 2
     acao, valor = argumentos
     try:
@@ -596,8 +745,9 @@ def main(argumentos):
                     return 0
                 print("⚠️ Código não encontrado.")
                 return 1
-            apagadas, total = tirar_lembretes_pelo_servidor(cod)
-            print(f"✅ {cod} vista: os lembretes pararam; {apagadas} de {total} lembretes apagados do privado.")
+            apagadas, refeitos, total = tirar_lembretes_pelo_servidor(cod)
+            juntos = f"; {refeitos} lembrete(s) junto(s) de outras ficou(aram) sem ela" if refeitos else ""
+            print(f"✅ {cod} vista: os lembretes pararam; {apagadas} de {total} lembretes apagados do privado{juntos}.")
             return 0
         if marcar_respondida(valor):
             import avisar_rafael

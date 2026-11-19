@@ -665,8 +665,11 @@ def test_saida_completa_sem_dado_privado(monkeypatch, capsys):
     monkeypatch.setattr(checkup, "ler_eventos_do_systemd", lambda servico: [
         ("22:09", checkup.MORTO_AO_PARAR)] if servico == "bot_mestre_bot" else [])
     monkeypatch.setattr(checkup.backup_dados, "ultimo_backup", lambda: None)
+    # A informação que espera o Vi ✅ aparece só pelo código (o Claude tira da lista dele a que já foi vista).
+    checkup.perguntas_rafael.nova_informacao("Resultado com conteúdo secreto.", "https://claude.ai/code/x")
     checkup.main()
     saida = capsys.readouterr().out
+    assert "informações sem o Vi ✅: 1 (I1; o bot lembra de hora em hora, todas juntas)" in saida
     assert "   systemd: 22:09 não parou no tempo e foi morto" in saida
     assert "bot_mestre_bot: não parou no tempo ao ser parado e o systemd o matou 1 vez(es)" in saida
     for secao in ("== Erros registrados", "== Log de cada robô", "== Processos dos robôs", "== Postagens de hoje",
