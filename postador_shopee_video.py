@@ -552,7 +552,8 @@ AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a 
 # no player de um vídeo, visto no Motorola em 23/10/2026): todo texto que começa com
 # "comprar" ou "compre". "Postar vídeo" não entra: só abre a câmera. Também o "Compartilhe
 # para Ganhar" da página de afiliado do produto, a que abre da busca pela foto (vídeo do
-# Rafael de 28/10/2026), no lugar do Compre Agora: o robô só compartilha o link do post.
+# Rafael de 28/10/2026), no lugar do Compre Agora: no compartilhar, o robô só toca no Copiar link (o do
+# post e o dos vídeos que ele comenta).
 # Postar: DECISOES.md, Shopee Vídeo.
 TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho",
                               "compartilhe para ganhar"})

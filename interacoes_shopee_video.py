@@ -553,6 +553,24 @@ def campo_de_comentar(xml):
     return ps._centro(el) if el else None
 
 
+def painel_aberto(xml):
+    """O painel de comentários está aberto (o "# Comentários" no alto dele)?"""
+    return _cabecalho(ps.elementos(xml)) is not None
+
+
+def compartilhar_do_video(xml):
+    """
+    O compartilhar da coluna da direita do player de vídeo ("share" na descrição; o "Compartilhar" escrito embaixo
+    dele), com o painel de comentários fechado: o caminho do Copiar link do vídeo aberto. None sem ele.
+    """
+    elementos = ps.elementos(xml)
+    if _cabecalho(elementos) or not any(el["id"].startswith("rn_vod_player_view") for el in elementos):
+        return None
+    el = next((el for el in elementos if el["clicavel"] and ps._centro(el)[0] > 900
+               and "share" in el["descricao"].casefold()), None)
+    return ps._centro(el) if el else None
+
+
 # --- O texto da IA ---
 
 PROMPT_RESPOSTA = """Você é o criador de um vídeo de achadinhos na Shopee Vídeo e vai responder um comentário que alguém deixou no seu vídeo.

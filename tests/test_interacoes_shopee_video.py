@@ -1110,6 +1110,8 @@ def test_depois_do_post_curte_o_video_comenta_e_curte_o_comentario(avisos, ia_do
     assert ia_do_proprio == [[TITULO_DO_POST]]
     assert robo.pegar(ident)["comentarios_proprios"] == [texto]
     assert any(texto in aviso and "curti o vídeo e o comentário" in aviso for aviso in avisos)
+    # Pedido do Rafael (19/11): o aviso traz também o link do vídeo, para ele conferir no app.
+    assert any(aviso.endswith(f"{texto}\n\n🔗 {LINK_DO_POST}") for aviso in avisos)
     assert it.situacao(it.marca_do_post(LINK_DO_POST), it.TIPO_DO_POST)["resultado"] == "comentado"
     assert {("próprio post: curtir o vídeo", "curtido"), ("próprio post: comentar", "comentado"),
             ("próprio post: curtir o comentário", "curtido")} <= set(_passos_do_proprio())
@@ -1221,6 +1223,9 @@ def test_post_antigo_sai_durante_o_dia_uma_vez_por_dia(monkeypatch, avisos, ia_d
     app = CelularDoPost()
     assert robo._agir(app, "post_antigo", ident, False, config, agora) == "post antigo: comentado e curtido"
     assert app.curtido and app.comentarios == ["Esse vale muito a pena! 1"]
+    # Pedido do Rafael (19/11): o comentário do post antigo também vai ao privado, com o texto e o link.
+    assert avisos == ["💬 Robô da Shopee Vídeo: comentei no seu vídeo de 28/10 (o comentário do dia num post antigo) "
+                      "e curti o vídeo e o comentário:\n\nEsse vale muito a pena! 1\n\n🔗 " + LINK_DO_POST]
     assert it.antigos_hoje(agora) == 1 and robo.post_antigo_pendente(momento("2026-11-01 20:40")) is None
     # No dia seguinte, o mesmo post não volta antes de 7 dias.
     assert robo.post_antigo_pendente(momento("2026-11-02 20:05")) is None
@@ -1259,3 +1264,118 @@ def test_erro_no_comentario_nunca_desfaz_o_post_e_o_aviso_diz_so_a_curtida_que_s
     aviso = robo._aviso_do_comentario("comentado", "Corre que vale!", ("não confirmado", "curtido"))
     assert "curti o comentário" in aviso and "curti o vídeo" not in aviso and aviso.endswith("Corre que vale!")
     assert "não apareceu na lista" in robo._aviso_do_comentario("não confirmado", "Oi", ("curtido", ""))
+
+
+# --- O aviso de cada comentário com o link do vídeo (pedido do Rafael, 19/11) ---
+
+LINK_ANTIGO = "https://s.shopee.com.br/linkAntigo"
+
+
+class ComCopiarLink:
+    """
+    O compartilhar do player abre a folha com o Copiar link (sem ele, com tem_copiar=False), e o toque nele copia o link
+    do vídeo aberto. A área de transferência começa com um link antigo, que nunca pode ir no aviso.
+    """
+
+    tem_copiar = True
+
+    def _iniciar_o_link(self):
+        self.clipboard, self.folha_aberta = LINK_ANTIGO, False
+
+    def set_clipboard(self, texto):
+        self.clipboard = texto
+
+    def _link_do_video(self):
+        raise NotImplementedError
+
+    def dump_hierarchy(self):
+        if self.folha_aberta:
+            nos = [_el("WhatsApp", caixa=(60, 1900, 260, 1960), clicavel=True)]
+            if self.tem_copiar:
+                nos.append(_el("Copiar link", caixa=(300, 1900, 500, 1960), clicavel=True))
+            return _xml(*nos)
+        return super().dump_hierarchy()
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        tocados = [el for el in ps.elementos(self.dump_hierarchy()) if ps._dentro((x, y), el["caixa"])]
+        textos = [el["texto"] or el["descricao"] for el in tocados]
+        if self.folha_aberta:
+            self.toques.append(textos[0] if textos else (x, y))
+            if "Copiar link" in textos:
+                self.clipboard, self.folha_aberta = self._link_do_video(), False
+            return
+        if self.atual == "player" and "video share icon" in textos:
+            self.toques.append("video share icon")
+            self.folha_aberta = True
+            return
+        super().click(x, y)
+
+    def press(self, tecla, meta=None):
+        if self.folha_aberta:
+            self.folha_aberta = False
+            return
+        super().press(tecla, meta)
+
+
+class CelularDoFeedComLink(ComCopiarLink, CelularDoFeed):
+    def __init__(self, *args, tem_copiar=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._iniciar_o_link()
+        self.tem_copiar = tem_copiar
+
+    def _link_do_video(self):
+        return f"https://s.shopee.com.br/video{self.indice}"
+
+
+class CelularDasRespostasComLink(ComCopiarLink, CelularDosComentarios):
+    """Como no Motorola: o voltar com o painel aberto (e sem o teclado) volta ao player do vídeo."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._iniciar_o_link()
+
+    def _link_do_video(self):
+        return "https://s.shopee.com.br/meuVideo"
+
+    def press(self, tecla, meta=None):
+        if not self.folha_aberta and not self.em_foco and self.atual in ("painel", "respondendo"):
+            self.atual = "player"
+            return
+        super().press(tecla, meta)
+
+
+def _linhas_do_link():
+    return [(r, d) for _m, _p, r, d, _o in robo.registro_processos.sequencia(
+        "shopee_video", robo.PROCESSO_DO_LINK_COMENTADO, "2000-01-01 00:00:00")]
+
+
+def test_comentario_no_feed_vai_ao_privado_com_o_texto_e_o_link_do_video(avisos, ia_do_feed):
+    app = CelularDoFeedComLink(videos=[("Ana Achados", "Copo térmico que gela")])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {0: ["Que achado! 0"]}
+    assert avisos == ["💬 Robô da Shopee Vídeo: comentei no vídeo de Ana Achados (outro criador), no feed Para você, e "
+                      "curti o vídeo:\n\nQue achado! 0\n\n🔗 https://s.shopee.com.br/video0"]
+    # O painel fechou antes do compartilhar, e só o Copiar link foi tocado na folha.
+    assert app.toques[-2:] == ["video share icon", "Copiar link"]
+    assert _linhas_do_link() == [("copiado", "feed")]
+
+
+def test_sem_o_copiar_link_o_aviso_vai_sem_o_link_e_nunca_com_um_link_antigo(avisos, ia_do_feed):
+    app = CelularDoFeedComLink(videos=[("Ana Achados", "Copo térmico que gela")], tem_copiar=False)
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert len(avisos) == 1 and "Que achado! 0" in avisos[0] and LINK_ANTIGO not in avisos[0]
+    assert avisos[0].endswith("🔗 O link do vídeo não saiu (sem o Copiar link).")
+    assert not app.folha_aberta and "WhatsApp" not in app.toques
+    assert _linhas_do_link() == [("sem o link", "feed: sem o Copiar link")]
+
+
+def test_resposta_ao_comentario_vai_ao_privado_com_o_comentario_a_resposta_e_o_link(avisos, ia):
+    robo.gravar_estado(respostas_topo=it.marca("Ana curtiu seu vídeo."))
+    app = CelularDasRespostasComLink(linhas=(NOTIFICACAO, "Ana curtiu seu vídeo."))
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
+    assert app.enviadas == ["Tem sim! Corre que esse vestido é sucesso"]
+    assert avisos == ["💬 Robô da Shopee Vídeo: respondi um comentário no seu vídeo de Vestido Infantil Gatinho "
+                      "Estampado:\n\nMaria Souza: Amei esse vestido, tem tamanho 10?\nResposta: Tem sim! Corre que "
+                      "esse vestido é sucesso\n\n🔗 https://s.shopee.com.br/meuVideo"]
+    assert _linhas_do_link() == [("copiado", "resposta")]
