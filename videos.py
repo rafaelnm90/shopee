@@ -629,22 +629,37 @@ def palavras_faladas(caminho):
 EMENDA_DO_SOM = 0.03
 
 
+def recorte_do_zoom(zoom):
+    """
+    O filtro do zoom leve de um trecho já em 720x1280 (o corte do parado do vídeo de IA, P255 1): o miolo do quadro,
+    em 9:16 e com a largura múltipla de 18 (a altura sai inteira e par), aumentado de volta para 720x1280.
+    """
+    largura = int(720 / zoom) // 18 * 18
+    return f"crop={largura}:{largura * 16 // 9},scale=720:1280,setsar=1"
+
+
 def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
     """
     O ffmpeg do vídeo remontado: trechos = [(início, fim, velocidade)], cada pedaço do vídeo
     original na ordem da lista (que pode trocar a ordem do original), na velocidade dele (o som acompanha, sem mudar o tom; o que não está
     em nenhum trecho sai). Sai em 720x1280. letreiros = [(imagem, início, fim, x, y)]: cada
     imagem (PNG com fundo transparente; a terminada em .apng, animada desde o início) por cima, com o canto de
-    cima à esquerda em (x, y), nesses segundos do vídeo já remontado.
+    cima à esquerda em (x, y), nesses segundos do vídeo já remontado. O trecho com um 4º número maior que 1 (o zoom)
+    entra aproximado por ele (recorte_do_zoom); com algum assim, cada trecho já vai a 720x1280 antes da emenda.
     """
     quantos = len(trechos)
     filtro = f"[0:v]split={quantos}" + "".join(f"[v{i}]" for i in range(quantos)) + ";"
     if com_audio:
         filtro += f"[0:a]asplit={quantos}" + "".join(f"[a{i}]" for i in range(quantos)) + ";"
+    zooms = [trecho[3] if len(trecho) > 3 else 1.0 for trecho in trechos]
     juntar = ""
-    for i, (inicio, fim, velocidade) in enumerate(trechos):
+    for i, trecho in enumerate(trechos):
+        inicio, fim, velocidade = trecho[:3]
+        tamanho = ""
+        if any(zoom > 1 for zoom in zooms):
+            tamanho = f",{FILTRO_720P},setsar=1" + (f",{recorte_do_zoom(zooms[i])}" if zooms[i] > 1 else "")
         filtro += (f"[v{i}]trim=start={inicio:.3f}:end={fim:.3f},"
-                   f"setpts=(PTS-STARTPTS)/{velocidade:g}[c{i}];")
+                   f"setpts=(PTS-STARTPTS)/{velocidade:g}{tamanho}[c{i}];")
         juntar += f"[c{i}]"
         if com_audio:
             fica = (fim - inicio) / velocidade

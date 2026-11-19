@@ -1127,7 +1127,7 @@ def _escolha_da_amostra(monkeypatch):
     import robo_shopee_video as robo
     pedidos = []
 
-    def escolher(agora=None, fora=(), amostra=False, longo=False):
+    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False):
         pedidos.append((list(fora), amostra))
         item = str(455 + len(pedidos))
         return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
@@ -1191,14 +1191,14 @@ def test_amostra_ja_gerada_so_baixa_e_a_que_nao_foi_ao_privado_vai_sem_gerar(cel
 def test_amostra_sem_produto_ou_com_a_lista_negada_nao_toca_no_celular(celular, monkeypatch, capsys):
     import robo_shopee_video as robo
 
-    def negada(agora=None, fora=(), amostra=False, longo=False):
+    def negada(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False):
         raise robo.api_shopee.BuscaNegada("código 10.000")
 
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", negada)
     assert flow.amostra() == 1
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia",
-                        lambda agora=None, fora=(), amostra=False, longo=False: (None, "os produtos em alta da Shopee",
-                                                                               False))
+                        lambda agora=None, fora=(), amostra=False, longo=False, fala_inteira=False: (
+                            None, "os produtos em alta da Shopee", False))
     assert flow.amostra() == 1
     saida = capsys.readouterr().out
     assert "negou a lista de produtos (código 10.000)" in saida and "nenhum produto da lista serviu" in saida
@@ -1242,8 +1242,8 @@ def _escolha_longa(monkeypatch):
     import robo_shopee_video as robo
     pedidos = []
 
-    def escolher(agora=None, fora=(), amostra=False, longo=False):
-        pedidos.append((list(fora), amostra, longo))
+    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False):
+        pedidos.append((list(fora), amostra, longo) + (("fala inteira",) if fala_inteira else ()))
         item = str(455 + len(pedidos))
         return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
                  "foto": _jpeg(), "estilo": flow.ESTILO_DO_VENDEDOR,
@@ -1721,3 +1721,144 @@ def test_producao_de_8_s_de_antes_da_p247_continua_pelo_caminho_de_8_s(celular):
     # Sem a fala pedida, o servidor não ouve nada: o de 8 s fica como sempre foi.
     assert flow.conferir_a_producao() == "pronto" and "fala_conferida" not in flow.producao()
     assert "Omni 1.2 Flash (24 créditos de IA)" in flow.legenda_da_producao(flow.producao())
+
+
+# --- A fala do começo ao fim e o corte do parado (P255 1) ---
+
+# As palavras do vídeo de IA do hidratante (19/11), nos segundos do vídeo de 16 s: 5,4 s calada no meio e 3,3 s no fim.
+FALA_DO_HIDRATANTE = [(0.37, 0.9, "Sua"), (0.9, 1.45, "pele"), (1.45, 2.27, "descasca"), (2.27, 2.45, "e"),
+                      (2.45, 2.87, "pinica"), (2.87, 3.29, "muito?"), (8.67, 9.51, "Hidratação"),
+                      (9.51, 10.03, "profunda"), (10.03, 10.27, "sem"), (10.27, 10.59, "grudar"),
+                      (10.59, 10.99, "nada."),
+                      (11.45, 12.09, "Aproveite"), (12.09, 12.23, "e"), (12.23, 12.45, "compre"), (12.45, 12.69, "já.")]
+
+
+def test_pedido_de_16_s_com_a_fala_inteira_fala_o_tempo_todo_e_o_do_dia_continua_igual(monkeypatch):
+    # Escolha do Rafael (19/11, P255 1): no vídeo de IA do hidratante, a moça falou 6,5 s dos 16 e ficou calada e
+    # parada no resto, porque o pedido mandava terminar a fala antes dos 6 s e depois ficar calada. A amostra pede a
+    # fala do começo ao fim de cada parte; o vídeo de IA do dia continua com o pedido de antes até o OK dele.
+    falando = flow.PEDIDO_DO_VENDEDOR_FALANDO.format(nome="Loção Hidratante", evitar="", bebida="")
+    for trecho in (f"2 frases curtas com até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras",
+                   "do 1º segundo até por volta dos 7 segundos", "sem ficar calada no meio",
+                   "fala sem parar até perto do fim", "só segura o produto, vira devagar e aponta", "câmera parada",
+                   "sem número, sigla, palavra estrangeira", "Loção Hidratante"):
+        assert trecho in falando, trecho
+    assert flow.PALAVRAS_DA_FALA_INTEIRA == 14
+    assert "depois, calada" not in falando and "terminando antes dos 6 segundos" not in falando
+    do_dia = flow.PEDIDO_DO_VENDEDOR.format(nome="Loção Hidratante", evitar="", bebida="")
+    assert "depois, calada" in do_dia and "terminando antes dos 6 segundos" in do_dia
+    pedidos = []
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "She talks the whole time.", '
+                '"continuacao": "Same shot, she keeps talking.", "fala": "Pele seca? Nunca mais!", "cena": "c"}')
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    link = "https://s.shopee.com.br/abc"
+    assert flow.pedido_para_o_anuncio(link, "Loção Hidratante", _jpeg(), longo=True, fala_inteira=True)[1] is True
+    assert flow.pedido_para_o_anuncio(link, "Loção Hidratante", _jpeg(), longo=True)[1] is True
+    assert "sem ficar calada no meio" in pedidos[0] and "depois, calada" in pedidos[1]
+
+
+def test_corte_do_parado_tira_o_silencio_do_hidratante():
+    assert flow.tempo_com_fala(FALA_DO_HIDRATANTE, 16.0) == 6.9
+    # Fica do começo até 0,3 s depois da 1ª fala e de 0,3 s antes da 2ª até 0,6 s depois dela; o resto sai.
+    assert flow.trechos_sem_o_parado(FALA_DO_HIDRATANTE, 16.0) == [(0.0, 3.59), (8.37, 13.29)]
+    # Sem silêncio de mais de 1 s, nada é cortado; sem fala, também não.
+    continua = [(0.5 * i + 0.2, 0.5 * i + 0.6, "palavra") for i in range(31)]
+    assert flow.trechos_sem_o_parado(continua, 16.0) == []
+    assert flow.trechos_sem_o_parado([], 16.0) == [] and flow.trechos_sem_o_parado(None, 16.0) == []
+    # O silêncio comprido do começo também sai, com a folga antes da 1ª palavra.
+    assert flow.trechos_sem_o_parado([(2.5, 3.0, "Olha"), (3.1, 15.8, "isso")], 16.0) == [(2.2, 16.0)]
+
+
+def test_cortar_o_parado_monta_um_trecho_sim_um_nao_com_o_zoom(monkeypatch, tmp_path):
+    montagens = []
+    resposta = {"motivo": ""}
+
+    def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+        montagens.append((video, trechos, destino))
+        if not resposta["motivo"]:
+            with open(destino, "wb") as arquivo:
+                arquivo.write(b"\0")
+        return resposta["motivo"]
+
+    monkeypatch.setattr(flow.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 16.0)
+    original = str(tmp_path / "amostra.mp4")
+    cortado = str(tmp_path / "amostra_sem_o_parado.mp4")
+    corte = flow.cortar_o_parado(original, FALA_DO_HIDRATANTE)
+    assert montagens == [(original, [(0.0, 3.59, 1.0, 1.0), (8.37, 13.29, 1.0, flow.ZOOM_DO_CORTE)], cortado)]
+    assert corte == {"arquivo": cortado, "antes": 16.0, "depois": 8.5, "cortes": 2, "motivo": ""}
+    assert flow.texto_do_corte(corte, 6.9) == [
+        "⏱️ Com fala: 6,9 s dos 16,0 s do vídeo",
+        "✂️ Parado cortado: de 16,0 s para 8,5 s (2 pedaço(s) parado(s) tirado(s), com um zoom leve depois de cada "
+        "corte); o vídeo sem o corte vem logo abaixo, para comparar"]
+    # Sem ouvir a fala, sem o que cortar ou com o ffmpeg falhando, o vídeo fica como veio, com o porquê.
+    assert flow.cortar_o_parado(original, None)["motivo"] == "não deu para ouvir a fala"
+    assert flow.cortar_o_parado(original, [(0.2, 15.8, "tudo")])["motivo"] == "nada parado para cortar"
+    resposta["motivo"] = "o ffmpeg falhou (código 1)"
+    falhou = flow.cortar_o_parado(original, FALA_DO_HIDRATANTE)
+    assert falhou["arquivo"] is None and falhou["motivo"] == "o ffmpeg falhou (código 1)"
+    assert flow.texto_do_corte(falhou, None) == ["✂️ Corte do parado: o ffmpeg falhou (código 1)"]
+
+
+def _corte_falso(monkeypatch):
+    """O corte do parado sem o ffmpeg: grava o cortado e anota os trechos."""
+    montagens = []
+
+    def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+        montagens.append(trechos)
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"\0" * 2048)
+        return ""
+
+    monkeypatch.setattr(flow.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
+    return montagens
+
+
+def test_amostra_com_a_fala_inteira_manda_o_cortado_e_depois_o_original(celular, monkeypatch, capsys):
+    # Escolha do Rafael (19/11, P255 1): a amostra de 16 s com a fala do começo ao fim vai só ao privado dele, primeiro
+    # o vídeo sem o parado e logo depois o original, para comparar; o robô só muda com o OK dele.
+    pedidos = _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_HIDRATANTE)
+    montagens = _corte_falso(monkeypatch)
+    assert flow.main(["amostra", "--longa", "--fala-inteira"]) == 0
+    assert pedidos == [([], True, True, "fala inteira")] and len(montagens) == 1
+    (cortado, legenda), (original, comparar) = celular.mandados
+    assert cortado.endswith("amostra_sem_o_parado.mp4") and original.endswith("amostra.mp4")
+    for trecho in ("Amostra nº 1 do vídeo de IA de 16 s com a fala do começo ao fim e o corte do parado (P255 1)",
+                   "⏱️ Com fala: 6,9 s dos 16,0 s do vídeo",
+                   "✂️ Parado cortado: de 16,0 s para 8,5 s (2 pedaço(s) parado(s) tirado(s)",
+                   "Gostando, me diga na conversa: o vídeo de IA do dia e o De IA ✨ passam a sair assim"):
+        assert trecho in legenda, trecho
+    assert "O vídeo de IA do dia sai normalmente" not in legenda
+    assert comparar == "🎬 A amostra nº 1 sem o corte do parado (16,0 s), para comparar com a de cima"
+    atual = flow.amostra_guardada()
+    assert atual["fala_inteira"] and atual["estado"] == "enviado" and atual["com_fala"] == 6.9
+    assert atual["corte"] == {"antes": 16.0, "depois": 8.5, "cortes": 2}
+    assert len(celular.fotos) == 1
+    saida = capsys.readouterr().out
+    for trecho in ("com a fala do começo ao fim (P255 1)", "tempo com fala: 6.9 s de 16.0 s",
+                   "parado cortado: de 16.0 s para 8.5 s (2 pedaço(s) tirado(s))",
+                   "o vídeo sem o corte também foi ao privado"):
+        assert trecho in saida, trecho
+    for privado in ("Copo", "tumbler", "Gelo", "Hidrata", "shopee.com.br", "6,50"):
+        assert privado not in saida, privado
+
+
+def test_amostra_com_a_fala_inteira_sem_parado_vai_so_o_original(celular, monkeypatch, capsys):
+    # A IA de vídeo falou o tempo todo: não há o que cortar, e vai só o vídeo como veio, dizendo isso.
+    _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    continua = [(0.5 * i + 0.2, 0.5 * i + 0.6, "palavra") for i in range(31)]
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: continua)
+    montagens = _corte_falso(monkeypatch)
+    assert flow.main(["amostra", "--longa", "--fala-inteira"]) == 0
+    (caminho, legenda), = celular.mandados
+    assert caminho.endswith("amostra.mp4") and montagens == []
+    assert "✂️ Corte do parado: nada parado para cortar" in legenda and "⏱️ Com fala: 15,4 s dos 16,0 s" in legenda
+    assert "corte do parado: nada parado para cortar" in capsys.readouterr().out
+
