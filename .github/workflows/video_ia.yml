@@ -21,6 +21,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # "personagens" faz as fotos dos 10 personagens fixos (P250 1 e P258 1) no modo Imagem do Flow, que não gasta
 # crédito, e manda cada uma ao privado do Rafael para aprovar; sem "quais", as que faltam; com "quais" (as chaves
 # separadas por vírgula, ex.: bonitao,vovo), essas de novo.
+# "aprovar-personagens" anota o OK do Rafael às fotos que ele viu no privado (P259 1), dado na conversa com o Claude;
+# sem "quais", as 10; com "quais", só essas. Só as aprovadas valem no vídeo de IA; a refeita precisa de um OK novo.
 # "imagem-teste" faz a imagem de teste da P253 1: um personagem (o que a IA escolhe pelo produto) com o produto da última
 # amostra, no modo Imagem do Flow, sem crédito, só no privado do Rafael (o vídeo de IA do dia só muda depois do OK dele).
 #
@@ -34,10 +36,10 @@ on:
         description: "O que fazer"
         type: choice
         options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s, amostra-16s-mesmo,
-                  amostra-16s-fala-inteira, personagens, imagem-teste]
+                  amostra-16s-fala-inteira, personagens, aprovar-personagens, imagem-teste]
         default: modelos
       quais:
-        description: "Só no personagens: as chaves para refazer, separadas por vírgula (ex.: bonitao,vovo); vazio = as que faltam"
+        description: "Só no personagens (refazer) e no aprovar-personagens: as chaves, separadas por vírgula (ex.: bonitao,vovo); vazio = as que faltam (no aprovar, as 10)"
         required: false
         type: string
 
@@ -72,6 +74,7 @@ jobs:
               amostra-16s-mesmo) venv/bin/python3 flow_shopee_video.py amostra --longa --mesmo ;;
               amostra-16s-fala-inteira) venv/bin/python3 flow_shopee_video.py amostra --longa --fala-inteira ;;
               personagens) venv/bin/python3 flow_shopee_video.py personagens "$QUAIS" ;;
+              aprovar-personagens) venv/bin/python3 flow_shopee_video.py aprovar-personagens "$QUAIS" ;;
               imagem-teste) venv/bin/python3 flow_shopee_video.py imagem-teste ;;
               *) venv/bin/python3 video_ia.py ${{ inputs.acao }} ;;
             esac
