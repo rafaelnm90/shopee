@@ -9490,7 +9490,7 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
         item = link.rsplit("/", 1)[-1]
         return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
 
-    def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False):
+    def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False):
         item = link.split("curto")[-1]
         foram.append(item)
         assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
@@ -9577,7 +9577,7 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, longos, falas, unboxings = robo.flow.pedido_para_o_anuncio, [], [], []
 
-    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False):
         longos.append(longo)
         falas.append(fala_inteira)
         unboxings.append(com_unboxing)
@@ -9600,6 +9600,81 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     robo.flow.guardar_producao(estilo=robo.flow.ESTILO_DO_VENDEDOR)
     robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:25"))
     assert unboxings[-2:] == [False, True]
+
+
+def test_video_de_ia_oferece_a_comedia_so_quando_ela_pode(monkeypatch):
+    # Escolha do Rafael (P251 1, com os personagens da P260 1): a comédia entra no vídeo de IA da produção, no máximo
+    # 1 a cada 3 (flow.comedia_pode); as amostras ficam como estão. O registro diz o formato à parte do estilo do
+    # pedido (na comédia, o pedido pela foto do anúncio é o do vendedor, para quando a imagem não vale).
+    _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
+    pedido, comedias = robo.flow.pedido_para_o_anuncio, []
+
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False):
+        comedias.append(com_comedia)
+        escolhido, serve = pedido(*argumentos, longo=longo)
+        return (dict(escolhido, formato=robo.flow.ESTILO_DA_COMEDIA) if com_comedia else escolhido), serve
+
+    monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", anotar)
+    monkeypatch.setattr(robo.flow, "comedia_pode", lambda: True)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert escolhido["formato"] == robo.flow.ESTILO_DA_COMEDIA
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:10"), amostra=True, longo=True)
+    monkeypatch.setattr(robo.flow, "comedia_pode", lambda: False)
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:15"))
+    assert comedias == [True, False, False]
+    linhas = _registro_do_video_de_ia()
+    assert linhas[0][1].endswith("; estilo fala; formato comedia_16s") and linhas[1][1].endswith("; estilo fala")
+
+
+def test_video_de_ia_anota_a_imagem_do_personagem_e_o_rascunho_leva_o_personagem(monkeypatch, avisos, tmp_path):
+    # P260 1: o registro diz o personagem da imagem (só a chave) ou o porquê sem ela; o aviso e o rascunho dizem quem
+    # está no vídeo. Sem foto aprovada não é falha; a imagem que não saiu, sim (o checkup cobra).
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True)
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala: {
+        "situacao": "igual", "estranhas": [], "aos": None, "faltou": [], "ouvidas": 9})
+    no_celular = robo.flow.producao_no_celular
+
+    def com_a_imagem(d, atual):
+        robo.flow.guardar_producao(personagem="vovo", imagem={
+            "estado": "feita", "personagem": "vovo", "tentativas": 2,
+            "conferencia": {"mesmo": True, "pessoa": True, "diferencas": "", "defeitos": "um dedo a mais"}})
+        return no_celular(d, atual)
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", com_a_imagem)
+    resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
+    assert resultado == "vídeo de IA: pronto para o rascunho"
+    assert ("imagem do personagem", "vovo; 2 imagem(ns)") in _registro_do_video_de_ia()
+    aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
+    assert "👤 Personagem: Vovó" in aviso
+    # O rascunho guarda o personagem e o que houve com a imagem, sem o que a IA viu nela.
+    resumo = robo.resumo_do_video_de_ia(robo.flow.video_pronto())
+    assert resumo["personagem"] == "vovo" and resumo["imagem"] == {"estado": "feita", "personagem": "vovo",
+                                                                  "tentativas": 2}
+    assert "👤 Personagem: Vovó" in robo.flow.legenda_da_producao(resumo)
+    for motivo, ok in ((robo.flow.SEM_FOTO_APROVADA, None), ("a IA não escolheu o personagem", 0)):
+        robo.flow.guardar_producao(imagem={"estado": "sem", "motivo": motivo, "personagem": ""})
+        robo._anotar_a_imagem(momento("2026-10-22 09:00"))
+        assert consultar("SELECT resultado, detalhe, ok FROM registro_processos ORDER BY id DESC LIMIT 1") == (
+            "sem a imagem do personagem", motivo, ok)
+
+
+def test_video_de_ia_parado_depois_da_imagem_anota_a_imagem(monkeypatch, avisos, tmp_path):
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True)
+    motivo = "o Flow parou na imagem: gerar a imagem: a imagem não ficou pronta a tempo"
+
+    def para_depois_da_imagem(d, atual):
+        robo.flow.guardar_producao(imagem={"estado": "sem", "motivo": motivo, "personagem": "vovo"})
+        raise robo.flow.Parada("pedido: a caixa do pedido não apareceu")
+
+    monkeypatch.setattr(robo.flow, "producao_no_celular", para_depois_da_imagem)
+    assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05")).startswith(
+        "vídeo de IA: pedido:")
+    linhas = _registro_do_video_de_ia()
+    assert ("parou", "antes do Gerar") in linhas and ("sem a imagem do personagem", motivo) in linhas
 
 
 def test_rascunho_do_unboxing_vai_com_a_musica_no_lugar_do_som(monkeypatch, tmp_path):

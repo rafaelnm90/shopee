@@ -61,6 +61,11 @@ As fotos dos 10 personagens fixos (P250 1 e P258 1, 19/11/2026): no modo Imagem 
 Nano Banana 2.1, conferido na tela com "0 créditos de IA" antes do Gerar), uma por personagem, baixada no tamanho
 original e mandada ao privado do Rafael para ele aprovar ou pedir outra (fotos_dos_personagens). O OK dele, dado na
 conversa com o Claude, fica anotado em cada foto (aprovar_as_fotos), e só as aprovadas valem (fotos_aprovadas).
+
+Desde a P260 1 (19/11/2026), o vídeo de IA do dia e o De IA ✨ começam pela imagem de um personagem com o produto, como
+a imagem de teste da P253 1 (imagem_da_producao): a IA escolhe o personagem pelo produto, o modo Imagem faz a imagem
+sem crédito, a IA a confere (refeita uma vez) e escreve o pedido do vídeo por ela; sem ela, o vídeo sai pela foto do
+anúncio, como antes. O formato pode ser também a comédia (P251 1), no máximo 1 a cada 3 vídeos de IA.
 """
 import asyncio
 import difflib
@@ -246,10 +251,18 @@ ESTILO_DO_VENDEDOR = "vendedor"
 # vendedor ("não quero vídeos apenas de unboxing (...), farão parte dos vídeos produzidos, mas não serão únicos").
 # Escolha do Rafael (P256 2): DECISOES.md, Shopee Vídeo.
 ESTILO_DO_UNBOXING = "unboxing"
+# A comédia de 16 s (P251 1), com os personagens (P250 1 e P258 1), desde a P260 1 (19/11/2026): na 1ª parte (os 8 s
+# gerados), um personagem da comédia numa situação engraçada com o produto à vista; na 2ª (o Estender), o mesmo
+# personagem mostrando o produto e vendendo. A IA escolhe pelo produto (vendedor na maioria; a comédia quando o
+# produto pede uma situação engraçada), e no máximo 1 a cada VIDEOS_POR_COMEDIA vídeos de IA é comédia: nenhuma
+# quando um dos últimos gerados foi (formatos_recentes). Escolha do Rafael (P251 1): DECISOES.md, Shopee Vídeo.
+ESTILO_DA_COMEDIA = "comedia_16s"
+VIDEOS_POR_COMEDIA = 3
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
            ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada (16 s)",
-           ESTILO_DO_UNBOXING: "unboxing: as mãos abrindo a caixa com o produto, sem rosto e sem fala (16 s)"}
+           ESTILO_DO_UNBOXING: "unboxing: as mãos abrindo a caixa com o produto, sem rosto e sem fala (16 s)",
+           ESTILO_DA_COMEDIA: "comédia: um personagem numa situação engraçada com o produto, e depois vendendo (16 s)"}
 ESTILO_PADRAO = "demonstracao"
 # Quantos estilos dos últimos vídeos a IA recebe, para variar (o Rafael pediu vídeos variados, "para não
 # ficar um padrão, para ser mais orgânico", 15/11/2026).
@@ -327,6 +340,14 @@ _FIM_DO_VENDEDOR = (
     "corpo, da aparência ou de um grupo de ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, "
     "nojento ou com criança. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos."
 )
+# A 2ª parte do vendedor (o Estender), igual no pedido pela foto do anúncio e no pela imagem do personagem (P260 1).
+_CONTINUACAO_DO_VENDEDOR = (
+    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
+    "mesmo lugar e enquadramento, com a mesma pessoa, a mesma roupa e o mesmo produto, idêntico: ela aponta e "
+    "mostra de perto uma vantagem que se vê no produto, só virando-o ou aproximando-o da câmera, e fala logo no "
+    f"começo, entre aspas, em português do Brasil, até {PALAVRAS_POR_PARTE} palavras, a vantagem e uma chamada curta "
+    "para comprar (por exemplo: \"Nada gruda e limpa fácil. Garanta a sua!\"), terminando antes dos 6 segundos.\n"
+)
 PEDIDO_DO_VENDEDOR = _COMECO_DO_VENDEDOR + (
     "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos: a pessoa olha para a câmera, segura o produto "
     "da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
@@ -334,12 +355,7 @@ PEDIDO_DO_VENDEDOR = _COMECO_DO_VENDEDOR + (
     f"{PALAVRAS_POR_PARTE} palavras: uma dor que o produto resolve, uma pergunta ou uma surpresa (por exemplo: "
     "\"Orelha rasgada? Nunca mais!\"), terminando antes dos 6 segundos; depois, calada, vira o produto devagar para "
     "a câmera. Numa cena real do Brasil, com luz natural, fotorrealista, a câmera parada na altura do peito.\n"
-    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
-    "mesmo lugar e enquadramento, com a mesma pessoa, a mesma roupa e o mesmo produto, idêntico: ela aponta e "
-    "mostra de perto uma vantagem que se vê no produto, só virando-o ou aproximando-o da câmera, e fala logo no "
-    f"começo, entre aspas, em português do Brasil, até {PALAVRAS_POR_PARTE} palavras, a vantagem e uma chamada curta "
-    "para comprar (por exemplo: \"Nada gruda e limpa fácil. Garanta a sua!\"), terminando antes dos 6 segundos.\n"
-) + _FIM_DO_VENDEDOR
+) + _CONTINUACAO_DO_VENDEDOR + _FIM_DO_VENDEDOR
 # O pedido de 16 s com a fala do começo ao fim de cada parte (P255 1): o resto igual ao PEDIDO_DO_VENDEDOR (só segurar,
 # virar e apontar o produto, no mesmo lugar e enquadramento, com a câmera parada), sem o "depois, calada". Por enquanto
 # só na amostra (amostra --longa --fala-inteira).
@@ -360,17 +376,25 @@ PEDIDO_DO_VENDEDOR_FALANDO = _COMECO_DO_VENDEDOR + (
     "hoje!\"); enquanto fala, aponta e mostra de perto a vantagem, só virando o produto ou aproximando-o da câmera. "
     "Escreva no pedido que ela fala sem parar até perto do fim, sem pausa longa.\n"
 ) + _FIM_DO_VENDEDOR
-# A escolha do formato do vídeo de 16 s pelo produto (P256 2): o vendedor ou o unboxing.
+# A escolha do formato do vídeo de 16 s pelo produto, só entre os que podem sair agora (pedido_do_formato): o
+# vendedor, o unboxing (P256 2) e a comédia (P251 1).
+_FORMATO_DO_VENDEDOR = (
+    "\"vendedor\" (uma pessoa comum segura o produto e fala dele com quem assiste, mostrando as vantagens de perto: "
+    "bom para o produto que precisa de explicação, como utilidades, aparelhos e o que resolve um problema)")
+_FORMATO_DO_UNBOXING = (
+    "\"unboxing\" (só as mãos de quem recebeu a encomenda, sem rosto e sem fala, abrindo a caixa e mostrando o "
+    "produto de perto, com a câmera na mão: bom para o produto que se vende pela aparência e cabe numa caixa de "
+    "encomenda, como calçados, bolsas, roupas, acessórios, maquiagem e decoração)")
+_FORMATO_DA_COMEDIA = (
+    "\"comedia\" (um personagem engraçado reage ao produto do jeito dele, numa situação engraçada do dia a dia, e "
+    "depois mostra o produto e vende: só quando o produto pede mesmo uma situação engraçada; na dúvida, o vendedor, "
+    "que é o da maioria dos vídeos. A graça é da situação e da reação, nunca de zombar do corpo, da aparência ou de "
+    "um grupo de ninguém)")
 PEDIDO_DO_FORMATO = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto do anúncio do "
     "produto \"{nome}\". Escolha o formato do vídeo de 16 segundos feito por IA que mais combina com este produto e "
-    "mais faz quem está rolando o feed parar e comprar: \"vendedor\" (uma pessoa comum segura o produto e fala dele "
-    "com quem assiste, mostrando as vantagens de perto: bom para o produto que precisa de explicação, como "
-    "utilidades, aparelhos e o que resolve um problema) ou \"unboxing\" (só as mãos de quem recebeu a encomenda, "
-    "sem rosto e sem fala, abrindo a caixa e mostrando o produto de perto, com a câmera na mão: bom para o produto "
-    "que se vende pela aparência e cabe numa caixa de encomenda, como calçados, bolsas, roupas, acessórios, "
-    "maquiagem e decoração). Responda só com um JSON, sem nada antes ou depois:\n"
-    '{{"formato": "vendedor" ou "unboxing", "motivo": "o porquê, em poucas palavras"}}'
+    "mais faz quem está rolando o feed parar e comprar: {opcoes}. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"formato": {nomes}, "motivo": "o porquê, em poucas palavras"}}'
 )
 # O pedido do unboxing de 16 s (P256 2), com os cuidados contra as alucinações da P248 1: o produto aparece inteiro
 # e do jeito que vem, nada muda de estado, as mãos só abrem a caixa, levantam e viram o produto, e os 16 s ficam no
@@ -518,19 +542,36 @@ def jpeg_sem_metadados(dados):
         return None
 
 
-def formato_do_video(nome, foto):
+def pedido_do_formato(nome, com_unboxing=True, com_comedia=False):
+    """O pedido da escolha do formato do vídeo de 16 s, só com os formatos que podem sair agora (o vendedor sempre)."""
+    formatos = ([("vendedor", _FORMATO_DO_VENDEDOR)] + ([("unboxing", _FORMATO_DO_UNBOXING)] if com_unboxing else [])
+                + ([("comedia", _FORMATO_DA_COMEDIA)] if com_comedia else []))
+
+    def juntar(partes):
+        return ", ".join(partes[:-1]) + " ou " + partes[-1]
+    return PEDIDO_DO_FORMATO.format(nome=nome, opcoes=juntar([texto for _, texto in formatos]),
+                                    nomes=juntar([f'"{chave}"' for chave, _ in formatos]))
+
+
+def formato_do_video(nome, foto, com_unboxing=True, com_comedia=False):
     """
-    O formato do vídeo de 16 s que a IA escolhe pela foto do anúncio (já em JPEG) e pelo nome (P256 2):
-    ESTILO_DO_UNBOXING ou ESTILO_DO_VENDEDOR; o vendedor quando ela não responde num JSON.
+    O formato do vídeo de 16 s que a IA escolhe pela foto do anúncio (já em JPEG) e pelo nome, entre os que podem sair
+    agora: ESTILO_DO_UNBOXING (P256 2), ESTILO_DA_COMEDIA (P251 1) ou ESTILO_DO_VENDEDOR, que vale também quando ela
+    não responde num JSON ou responde um formato que não podia sair.
     """
-    texto = asyncio.run(api_gemini.gerar_texto_gemini(PEDIDO_DO_FORMATO.format(nome=nome),
+    texto = asyncio.run(api_gemini.gerar_texto_gemini(pedido_do_formato(nome, com_unboxing, com_comedia),
                                                       imagens=[(foto, "image/jpeg")]))
     achado = re.search(r"\{.*\}", texto or "", re.S)
     try:
         formato = json.loads(achado.group(0)).get("formato") if achado else ""
     except (ValueError, AttributeError):
         formato = ""
-    return ESTILO_DO_UNBOXING if str(formato or "").strip().lower() == ESTILO_DO_UNBOXING else ESTILO_DO_VENDEDOR
+    formato = unicodedata.normalize("NFKD", str(formato or "")).encode("ascii", "ignore").decode().strip().lower()
+    if com_unboxing and formato == ESTILO_DO_UNBOXING:
+        return ESTILO_DO_UNBOXING
+    if com_comedia and formato == "comedia":
+        return ESTILO_DA_COMEDIA
+    return ESTILO_DO_VENDEDOR
 
 
 def ultimo_foi_unboxing():
@@ -538,7 +579,8 @@ def ultimo_foi_unboxing():
     return producao().get("estilo") == ESTILO_DO_UNBOXING
 
 
-def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False):
+def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False,
+                          com_comedia=False):
     """
     O pedido do vídeo para o anúncio já em mãos (o link, o nome e os bytes da foto do anúncio): a foto sem os
     dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
@@ -546,15 +588,19 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     "prompt", "cena"} quando a IA acha a foto boa para o vídeo; serve é False quando ela disse que a foto não
     serve, MUDA_NA_IA quando o produto tem o que a IA de vídeo costuma mudar (P245 1) e None quando não deu
     para saber (a foto não é uma imagem, ou a IA não respondeu). longo: o pedido do vídeo de 16 s com uma pessoa
-    vendendo o produto (P246 1), com a "continuacao" do Estender e a "fala"; fala_inteira: o de 16 s com a fala do
-    começo ao fim de cada parte (P255 1, a amostra). com_unboxing (só no de 16 s): a IA escolhe pelo produto entre o
-    vendedor e o unboxing (P256 2, formato_do_video); o do unboxing vem sem fala.
+    vendendo o produto (P246 1), com a "continuacao" do Estender, a "fala" e o "formato"; fala_inteira: o de 16 s com
+    a fala do começo ao fim de cada parte (P255 1, a amostra). com_unboxing e com_comedia (só no de 16 s): a IA
+    escolhe pelo produto entre o vendedor, o unboxing (P256 2) e a comédia (P251 1) (formato_do_video); o do unboxing
+    vem sem fala. Na comédia, o pedido daqui é o do vendedor, pela foto do anúncio: o da comédia sai da imagem do
+    personagem com o produto (imagem_da_producao), e este fica para quando a imagem não vale.
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
         return None, None
-    unboxing = bool(longo and com_unboxing and not fala_inteira
-                    and formato_do_video(nome, foto) == ESTILO_DO_UNBOXING)
+    formato = ESTILO_DO_VENDEDOR
+    if longo and not fala_inteira and (com_unboxing or com_comedia):
+        formato = formato_do_video(nome, foto, com_unboxing, com_comedia)
+    unboxing = formato == ESTILO_DO_UNBOXING
     if unboxing:
         pedido = PEDIDO_DO_UNBOXING
     elif longo:
@@ -573,7 +619,7 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     escolhido = {"link": link, "nome": nome, "foto": foto, "estilo": resposta["estilo"], "prompt": resposta["prompt"],
                  "cena": resposta["cena"]}
     if longo:
-        escolhido.update(continuacao=resposta["continuacao"], fala=resposta["fala"])
+        escolhido.update(continuacao=resposta["continuacao"], fala=resposta["fala"], formato=formato)
     return escolhido, True
 
 
@@ -1032,15 +1078,16 @@ def gerando(xml):
                for el in ps.elementos(xml))
 
 
-def esperar_o_video(d, ja_gerado=False, guardar_telas=True):
+def esperar_o_video(d, ja_gerado=False, guardar_telas=True, espera=None):
     """
     Espera o vídeo novo ficar pronto no projeto, guardando a tela a cada INTERVALO_DOS_CASOS
     (casos_robo; guardar_telas=False na produção do dia, para as telas da espera não tirarem do
     servidor os casos das falhas, que ficam no máximo 30). Logo depois do Gerar, o "Gerando…" tem de
     aparecer em ESPERA_DO_GERANDO s (Parada sem ele: o Flow não gerou). ja_gerado=True (gerado numa
     vez anterior): pronto se ele não aparece. Os segundos até ficar pronto; None se não ficou em
-    ESPERA_DA_GERACAO.
+    espera s (sem ela, ESPERA_DA_GERACAO; a imagem do modo Imagem espera menos, ESPERA_DA_IMAGEM).
     """
+    limite = ESPERA_DA_GERACAO if espera is None else espera
     inicio, proximo_caso, visto, seguidas = time.monotonic(), 0.0, ja_gerado, 0
     while True:
         passado = time.monotonic() - inicio
@@ -1060,7 +1107,7 @@ def esperar_o_video(d, ja_gerado=False, guardar_telas=True):
             seguidas = 0
             if not visto and passado >= ESPERA_DO_GERANDO:
                 raise Parada("gerar: o Flow não mostrou o vídeo sendo gerado")
-        if passado >= ESPERA_DA_GERACAO:
+        if passado >= limite:
             return None
         time.sleep(PAUSA_DA_LEITURA)
 
@@ -1848,11 +1895,13 @@ def no_flow_longo(d, pedido, modelo, custo, local, marcar, sem_gerar=False, guar
     parte não ficou pronta a tempo (a próxima vez continua; o porquê vai em "espera"); Parada com o passo que parou.
     A foto sai da galeria no fim, dê certo ou não. guardar_telas: as telas do Estender vão aos casos (False na
     produção do dia, P247 1: todo dia, elas tirariam do servidor os casos das falhas, que ficam no máximo 30).
+    A foto do Gerar é a da imagem do personagem com o produto, quando ela valeu ("foto_do_video", P260 1), ou a do
+    anúncio.
     """
     estado = pedido.get("estado")
     nome_na_galeria = ""
     if estado not in ("gerando", "estendendo"):
-        nome_na_galeria = foto_na_galeria(d, pedido["foto"])
+        nome_na_galeria = foto_na_galeria(d, pedido.get("foto_do_video") or pedido["foto"])
         if not nome_na_galeria:
             raise Parada("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
     try:
@@ -1973,16 +2022,18 @@ def no_celular(teste, modelo, custo, sem_gerar, so_baixar=False):
 # O andamento do vídeo do dia fica na chave do Flow, em "producao": a data, o estado, o nome que o vídeo de IA tem entre
 # os vídeos do robô ("id_video"), o produto ("link", "nome", "item", "valor") e de onde ele veio ("origem": a lista da
 # API de afiliado, P234 1), o pedido da IA ("estilo", "prompt", "cena"; no vídeo de 16 s, P247 1, "longa", a
-# "continuacao" do Estender e a "fala"), a foto e o vídeo no servidor e as conferências (a da IA e, no de 16 s, a da
-# fala, "fala_conferida"). Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou boa
-# nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
+# "continuacao" do Estender, a "fala" e o "formato"), a foto e o vídeo no servidor e as conferências (a da IA e, no de
+# 16 s, a da fala, "fala_conferida"). Desde a P260 1, o de 16 s do vendedor e o da comédia guardam também a imagem do
+# personagem com o produto ("imagem": o que houve com ela; "foto_do_video" e "personagem" quando ela valeu, e o pedido
+# passa a ser o escrito por ela). Os estados: "parou" (antes do Gerar, sem gastar crédito) e "sem foto" (a IA não achou
+# boa nenhuma das fotos desta vez, e há outros produtos para olhar), que tentam de novo no dia, até
 # TENTATIVAS_ANTES_DO_GERAR; "sem produto" (nenhum produto da lista serve hoje), "gerando" (o Gerar foi tocado e falta o
 # vídeo chegar ao servidor; no de 16 s, falta também o Estender), "estendendo" (no de 16 s, o Gerar do Estender foi
 # tocado e falta baixar), "baixado" (falta a conferência), "pronto" (espera o rascunho), "descartado" (a IA viu outro
 # produto no vídeo, ou o Flow não o entregou), "usado" (virou rascunho), "desistiu" (não virou rascunho em
 # TENTATIVAS_DO_RASCUNHO) e "sem créditos" (o saldo do Flow não pagava o vídeo, SEM_CREDITOS). O robô escolhe o produto
 # pelas regras dele e chama a produção na rodada dele, com a trava do celular na mão. Escolhas do Rafael (15/11/2026,
-# P232 1 e P234 1; 17/11/2026, P247 1): DECISOES.md.
+# P232 1 e P234 1; 17/11/2026, P247 1; 19/11/2026, P260 1): DECISOES.md.
 ESTADOS_PENDENTES = ("gerando", "estendendo", "baixado")
 ESTADOS_DO_DIA_ACABADO = ("sem produto", "pronto", "descartado", "usado", "desistiu")
 # O saldo do Flow não pagava o vídeo (SemCreditos): nada foi gerado, e o robô fica nos vídeos dos grupos até o
@@ -1993,6 +2044,9 @@ SEM_CREDITOS = "sem créditos"
 # que já teve um vídeo gerado (itens_gerados: virou rascunho, foi recusado ou descartado) e o de foto que a IA não
 # achou boa para o vídeo (fotos_recusadas). Só os números dos produtos, os ITENS_LEMBRADOS mais novos de cada lista.
 ITENS_LEMBRADOS = 600
+# O formato de cada vídeo de IA da produção gerado no Flow (o estilo dele), anotado no Gerar: o limite da comédia (1 a
+# cada VIDEOS_POR_COMEDIA, P251 1) olha os últimos. Só os FORMATOS_LEMBRADOS mais novos.
+FORMATOS_LEMBRADOS = 6
 
 
 def producao():
@@ -2091,14 +2145,36 @@ def lembrar_foto_recusada(item):
     _lembrar("fotos_recusadas", item)
 
 
+def formatos_recentes():
+    """Os formatos (o estilo) dos últimos vídeos de IA da produção gerados no Flow, o mais novo por último."""
+    return [str(formato) for formato in (db.ler_config(CHAVE, {}) or {}).get("formatos") or []][-FORMATOS_LEMBRADOS:]
+
+
+def lembrar_o_formato(estilo):
+    """O vídeo de IA da produção foi gerado: o formato dele entra nos formatos_recentes."""
+    def alterar(dados):
+        dados["formatos"] = (list(dados.get("formatos") or []) + [str(estilo or "")])[-FORMATOS_LEMBRADOS:]
+    db.atualizar_config(CHAVE, alterar)
+
+
+def comedia_pode():
+    """
+    A comédia (P251 1) pode sair no próximo vídeo de IA? No máximo 1 a cada VIDEOS_POR_COMEDIA vídeos (nenhuma entre
+    os últimos gerados) e só com a foto aprovada de um personagem da comédia (P259 1).
+    """
+    if ESTILO_DA_COMEDIA in formatos_recentes()[-(VIDEOS_POR_COMEDIA - 1):]:
+        return False
+    return any(chave in fotos_aprovadas() for chave in PERSONAGENS_DA_COMEDIA)
+
+
 def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     """
     Guarda o pedido do vídeo do dia (escolhido: o pedido_para_o_anuncio com o nome do vídeo de IA entre os
     vídeos do robô, "id", o produto, "item" e "valor", e de onde ele veio, "origem"), no estado "escolhido". A foto
     vai a um arquivo ao lado dos vídeos; o banco fica com o caminho. O pedido de 16 s (P247 1), com a "continuacao"
-    do Estender, fica "longa", com a fala, e tem um jeito só, fora da lista dos estilos dos últimos vídeos, a das
-    amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. do_botao: o vídeo pedido no De IA ✨ do
-    Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
+    do Estender, fica "longa", com a fala e o formato (o vendedor, o unboxing ou a comédia), fora da lista dos estilos
+    dos últimos vídeos, a das amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. do_botao: o
+    vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
     """
     recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar,
                        **({"do_botao": True} if do_botao else {}))
@@ -2116,7 +2192,8 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
                      **({"nivel": escolhido["nivel"], "filtros": escolhido.get("filtros")}
                         if escolhido.get("nivel") else {}),
                      **({"longa": True, "continuacao": escolhido["continuacao"], "fala": escolhido.get("fala", "")}
-                        if longa else {}))
+                        if longa else {}),
+                     **({"formato": escolhido["formato"]} if longa and escolhido.get("formato") else {}))
     if not longa:
         guardar(estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
     return producao()
@@ -2126,12 +2203,16 @@ def producao_no_celular(d, atual):
     """
     O vídeo do dia no Flow, na rodada do robô (a trava e a tela já conferidas por ele). O de 16 s ("longa", P247
     1): o Gerar dos 8 s no MODELO_DA_PRODUCAO, o Estender e o Baixar, em etapas que a rodada seguinte retoma pelo
-    estado (no_flow_longo). O de 8 s (o andamento de antes da P247 1): o Gerar e o Baixar, ou só o Baixar do que já foi
-    gerado ("gerando"). True com o vídeo no servidor ("baixado"), False quando ele não ficou pronto a tempo (a
-    próxima rodada continua); Parada com o passo que parou, com o caso guardado.
+    estado (no_flow_longo); antes do Gerar do vendedor e da comédia, a imagem do personagem com o produto (P260 1,
+    imagem_da_producao): valendo, o vídeo sai dela; sem ela, pela foto do anúncio, como antes. O de 8 s (o andamento
+    de antes da P247 1): o Gerar e o Baixar, ou só o Baixar do que já foi gerado ("gerando"). True com o vídeo no
+    servidor ("baixado"), False quando ele não ficou pronto a tempo (a próxima rodada continua); Parada com o passo
+    que parou, com o caso guardado.
     """
     local = os.path.join(PASTA, f"producao_{atual['data']}.mp4")
     try:
+        if pede_a_imagem(atual):
+            atual = imagem_da_producao(d, atual)
         # Sem as telas da espera nos casos: todo dia, elas tirariam do servidor os casos das falhas.
         if atual.get("longa"):
             return no_flow_longo(d, atual, atual["modelo"], atual["custo"], local, _marcar_a_producao,
@@ -2150,14 +2231,19 @@ def _marcar_a_producao(**campos):
     """
     Guarda o andamento do vídeo do dia; no toque do Gerar ("gerado_em"), o produto entra nos que já tiveram um
     vídeo gerado (itens_gerados), na mesma hora: a rodada que cai logo depois não deixa o produto voltar à escolha.
-    O Gerar conta também entre os do dia (gerados_no_dia, P243).
+    O Gerar conta também entre os do dia (gerados_no_dia, P243), e o formato do vídeo entra nos formatos_recentes (o
+    limite da comédia, P251 1).
     """
+    primeiro_gerar = False
     if campos.get("gerado_em"):
         atual = producao()
-        campos["gerados_no_dia"] = gerados_no_dia(atual.get("data"), atual) + (0 if atual.get("gerado_em") else 1)
+        primeiro_gerar = not atual.get("gerado_em")
+        campos["gerados_no_dia"] = gerados_no_dia(atual.get("data"), atual) + (1 if primeiro_gerar else 0)
     guardar_producao(**campos)
     if campos.get("gerado_em"):
         lembrar_item_gerado(producao().get("item"))
+    if primeiro_gerar:
+        lembrar_o_formato(producao().get("estilo"))
 
 
 def conferir_a_producao():
@@ -2189,7 +2275,8 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     """
     As linhas do vídeo de IA no aviso e no texto do rascunho: o modelo, o custo, o estilo, a cena e a conferência do
     Flow (com_a_conferencia=False: sem ela, no aviso do vídeo que outra conferência descartou, P245 1). No de 16 s
-    (P247 1), a duração, o custo das duas partes, a fala pedida e a fala que o servidor ouviu (P248 1).
+    (P247 1), a duração, o custo das duas partes, a fala pedida e a fala que o servidor ouviu (P248 1), e o personagem
+    ou por que o vídeo saiu sem ele (P260 1, linha_do_personagem).
     """
     conferencia = atual.get("conferencia") or {}
     if conferencia.get("mesmo") is True:
@@ -2204,6 +2291,8 @@ def legenda_da_producao(atual, com_a_conferencia=True):
               if atual.get("longa") and custo > CUSTO_DO_ESTENDER else "")
     linhas = [f"🤖 Feito por IA no Google Flow: {atual.get('modelo', '')}{duracao} ({custo} créditos de IA{partes})",
               f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}"]
+    if linha_do_personagem(atual):
+        linhas.append(linha_do_personagem(atual))
     if atual.get("fala"):
         linhas.append(f"🗣️ Fala: {atual['fala']}")
     linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
@@ -2260,6 +2349,17 @@ PERSONAGENS = (
      "quem": "um homem de uns 35 anos, muito expressivo, de pele morena, cabelo cacheado, com camisa estampada",
      "jeito": "cara de espanto exagerado, de olhos arregalados e boca aberta", "onde": "numa sala de estar"},
 )
+# Quem entra em cada formato do vídeo de IA (P250 1 e P258 1): o Largadão e a Desastrada são só da comédia; na
+# comédia, a Desconfiada e o Exagerado se juntam a eles; no vendedor, os outros 8. Na comédia, a graça vem do jeito
+# de cada um diante do produto, nunca do corpo, da aparência ou de um grupo: é o que a IA recebe de cada um.
+SO_NA_COMEDIA = ("largadao", "desastrada")
+GRACA_NA_COMEDIA = {
+    "largadao": "o preguiçoso bem-humorado, que se anima quando o produto facilita a vida",
+    "desastrada": "a atrapalhada alegre, que ri das próprias trapalhadas",
+    "desconfiada": "a desconfiada, de sobrancelha levantada, que duvida do produto até ele provar que funciona",
+    "exagerado": "o exagerado, que se espanta com tudo, de olhos arregalados",
+}
+PERSONAGENS_DA_COMEDIA = tuple(GRACA_NA_COMEDIA)
 # O pedido da foto de cada personagem no modo Imagem: só a pessoa, em pé no quadro (9:16), como num vídeo de
 # celular, sem produto (o produto entra depois, na imagem do personagem com ele, P253 1).
 PEDIDO_DO_PERSONAGEM = (
@@ -2288,6 +2388,8 @@ def pedido_do_personagem(p):
 # resolução) e 4K (só com um plano maior, ao lado do "Assine um plano com IA do Google"). O robô baixa no tamanho
 # original, sem custo, e nunca toca no 2K, no 4K nem no plano.
 MODELO_DA_IMAGEM = "Nano Banana 2.1"
+# A imagem fica pronta em menos de 1 min: a que passa disto não vem mais (o vídeo espera ESPERA_DA_GERACAO).
+ESPERA_DA_IMAGEM = 3 * 60
 TITULO_DA_JANELA_DA_IMAGEM = "baixar imagem"
 EXTENSOES_DA_IMAGEM = (".png", ".jpg", ".jpeg", ".webp")
 PASTA_DOS_PERSONAGENS = os.path.join(PASTA, "personagens")
@@ -2446,7 +2548,7 @@ def gerar_a_imagem(d, prompt, local, com_foto=False):
     No projeto do robô já aberto: a imagem do pedido no modo Imagem, com tudo conferido na tela antes do Gerar (o
     modelo da imagem e os 0 créditos), baixada no tamanho original e trazida ao servidor em local, em JPEG sem
     metadados; no fim, a imagem fecha e o robô volta ao projeto. com_foto: com a foto mais nova da galeria de
-    referência. Parada com o passo que parou.
+    referência. Parada com o passo que parou; a imagem que não fica pronta em ESPERA_DA_IMAGEM também.
     """
     antes = descricao_do_mais_novo(_tela(d))
     xml = montar_o_pedido_da_imagem(d, prompt, com_foto)
@@ -2454,8 +2556,8 @@ def gerar_a_imagem(d, prompt, local, com_foto=False):
     if falta:
         raise Parada(f"antes do Gerar da imagem: {falta}")
     tocar(d, "Gerar", "gerar a imagem")
-    if esperar_o_video(d, guardar_telas=False) is None:
-        raise Parada(f"gerar a imagem: a imagem não ficou pronta em {ESPERA_DA_GERACAO // 60} min")
+    if esperar_o_video(d, guardar_telas=False, espera=ESPERA_DA_IMAGEM) is None:
+        raise Parada("gerar a imagem: a imagem não ficou pronta a tempo")
     abrir_a_imagem_nova(d, antes)
     remoto = baixar_a_imagem(d)
     baixada = local + ".baixada"
@@ -2604,16 +2706,25 @@ def _fotos_no_celular(lista):
 # partir de uma foto de referência só (com duas marcadas no seletor, só a 1ª entrou no pedido, visto em 19/11/2026),
 # e por isso o servidor junta as duas: o personagem à esquerda e o produto à direita, num fundo branco
 # (foto_do_personagem_com_o_produto). A IA confere a imagem com a foto do anúncio e a do personagem, e a imagem vai
-# só ao privado do Rafael, seguida da foto do anúncio com o link; o vídeo de IA do dia só muda depois do OK dele.
+# só ao privado do Rafael, seguida da foto do anúncio com o link. Com o OK dele a ela (P260 1), o vídeo de IA do dia
+# começa por uma imagem assim (imagem_da_producao, abaixo).
 # Escolha do Rafael (P253 1): DECISOES.md, Shopee Vídeo.
 ALTURA_DA_REFERENCIA = 1024
 FOLGA_DA_REFERENCIA = 24
+# O trecho do pedido da escolha do personagem em cada uso: na imagem de teste (P253 1), todos os personagens valem; no
+# vídeo de IA da produção (P260 1), a lista já vem só com os do formato, e a comédia (P251 1) pede a situação engraçada.
+TRECHO_DA_IMAGEM_DE_TESTE = ("Os de comédia também valem, e a graça é da situação, nunca do corpo, da aparência ou de "
+                             "um grupo. ")
+TRECHO_DA_COMEDIA = (
+    "É um vídeo de comédia: a ação é o começo de uma situação engraçada, com o jeito do personagem diante do produto "
+    "(por exemplo, olhando-o de lado, com cara de desconfiada), sempre com o produto inteiro e virado para a câmera; "
+    "a graça é da situação, nunca do corpo, da aparência ou de um grupo. ")
 PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO = (
     "Você monta a primeira cena de um vídeo de venda da Shopee Vídeo: um dos personagens fixos com o produto da foto "
     "({nome}). Os personagens:\n{personagens}\n"
-    "Escolha pela foto e pelo nome quem combina mais com o produto (quem compraria ou usaria). Os de comédia também "
-    "valem, e a graça é da situação, nunca do corpo, da aparência ou de um grupo. Responda só com um JSON, sem mais "
-    "nada: {{\"personagem\": \"a chave\", \"acao\": \"em inglês, começando por um verbo no gerúndio, o que a "
+    "Escolha pela foto e pelo nome quem combina mais com o produto (quem compraria ou usaria). {trecho}Responda só "
+    "com um JSON, sem mais nada: {{\"personagem\": \"a chave\", \"acao\": \"em inglês, começando por um verbo no "
+    "gerúndio, o que a "
     "pessoa faz com o produto: segurando-o inteiro e virado para a câmera, ou vestindo ou usando, se for roupa, "
     "calçado ou acessório\", \"cena\": \"em inglês, o lugar, combinando com o produto e com o personagem\"}}"
 )
@@ -2663,15 +2774,22 @@ def foto_do_personagem_com_o_produto(foto_do_personagem, foto_do_produto):
         return None
 
 
-def escolher_o_personagem(nome, foto, personagens):
+def escolher_o_personagem(nome, foto, personagens, formato=None):
     """
-    A escolha da IA para a imagem de teste: {"personagem" (a chave, entre os personagens dados), "acao", "cena"}; None
-    sem resposta ou com uma chave de fora.
+    A escolha da IA para a imagem do personagem com o produto: {"personagem" (a chave, entre os personagens dados),
+    "acao", "cena"}; None sem resposta ou com uma chave de fora. formato: None na imagem de teste (P253 1);
+    ESTILO_DO_VENDEDOR ou ESTILO_DA_COMEDIA no vídeo de IA da produção (P260 1), com cada personagem da comédia
+    descrito pela graça dele (GRACA_NA_COMEDIA).
     """
-    lista = "\n".join(f"- {p['chave']}: {p['nome']} ({p['resumo']})" for p in personagens)
+    comedia = formato == ESTILO_DA_COMEDIA
+    trecho = TRECHO_DA_COMEDIA if comedia else TRECHO_DA_IMAGEM_DE_TESTE if formato is None else ""
+    lista = "\n".join(f"- {p['chave']}: {p['nome']} "
+                      f"({GRACA_NA_COMEDIA.get(p['chave'], p['resumo']) if comedia else p['resumo']})"
+                      for p in personagens)
     try:
         texto = asyncio.run(api_gemini.gerar_texto_gemini(
-            PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO.format(nome=nome, personagens=lista), imagens=[(foto, "image/jpeg")]))
+            PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO.format(nome=nome, personagens=lista, trecho=trecho),
+            imagens=[(foto, "image/jpeg")]))
     except Exception:
         texto = None
     achado = re.search(r"\{.*\}", texto or "", re.S)
@@ -2729,7 +2847,7 @@ def legenda_da_imagem_de_teste(atual, conferencia):
         linhas.append(f"O que mudou: {conferencia['diferencas']}")
     if conferencia["defeitos"]:
         linhas.append(f"Defeitos: {conferencia['defeitos']}")
-    linhas.append("Nada foi postado. O vídeo de IA do dia só muda depois do seu OK a esta imagem.")
+    linhas.append("Nada foi postado: é só um teste.")
     return "\n".join(linhas)[:1000]
 
 
@@ -2856,6 +2974,220 @@ def mandar_a_imagem_de_teste():
     print("Imagem de teste: foto e link do anúncio mandados" if foto
           else "Imagem de teste: a foto do anúncio não foi ao privado")
     return 0
+
+
+# --- A imagem do personagem com o produto no vídeo de IA da produção (P260 1) ---
+# Com o OK do Rafael à imagem de teste (P260 1), o vídeo de IA do dia e o De IA ✨ começam por uma imagem como a de
+# teste (P253 1): antes do Gerar do vídeo de 16 s do vendedor ou da comédia, com o celular na mão, a IA escolhe pelo
+# produto o personagem, só entre os de foto aprovada (P259 1) e do formato (elenco_do_formato), e o que ele faz com o
+# produto; o modo Imagem do Flow faz a imagem, sem crédito, pela foto de referência dos dois, e a IA a confere com a
+# foto do anúncio e a do personagem: vale com o mesmo produto e a mesma pessoa; sem isso, o robô a refaz uma vez
+# (TENTATIVAS_DA_IMAGEM). Valendo, a IA escreve o pedido do vídeo pela imagem (pedido_pela_imagem), e o Flow anima a
+# imagem nos 16 s da P247 1, com as regras contra as alucinações da P248 1. Sem a imagem (nenhuma valeu, o Flow
+# parou, a IA não respondeu), o vídeo sai pela foto do anúncio, como antes, e o porquê vai na legenda. O saldo do Flow
+# é lido antes da imagem: sem os créditos do vídeo, nem ela é feita. O unboxing (P256 2) não tem rosto e sai como
+# antes, e a conferência do vídeo pronto continua sendo com a foto do anúncio. Escolhas do Rafael (P253 1, P250 1,
+# P258 1, P251 1, P259 1 e P260 1): DECISOES.md, Shopee Vídeo.
+TENTATIVAS_DA_IMAGEM = 2
+SEM_FOTO_APROVADA = "nenhuma foto de personagem aprovada para este formato"
+# O começo do pedido do vídeo pela imagem: a 1ª imagem é o 1º quadro (o que o Flow anima), e a foto do anúncio vai
+# junto, para o produto ficar idêntico. Os cuidados contra as alucinações são os do PEDIDO_DO_VENDEDOR (P248 1).
+_COMECO_PELA_IMAGEM = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A 1ª imagem é o primeiro quadro do vídeo: {quem}, já com o produto \"{nome}\". A 2ª é a foto "
+    "oficial do anúncio, para o produto ficar idêntico a ela. O Google Flow vai animar a 1ª imagem num vídeo de 16 "
+    "segundos, em pé (9:16) e com som, em duas partes de 8 segundos: a 1ª a partir da imagem e a 2ª continuando a "
+    "1ª, na mesma cena, com a mesma pessoa e a mesma voz. A IA de vídeo inventa coisas quando a cena pede demais; por "
+    "isso, nas duas partes: a pessoa só segura o produto (ou fica com ele no corpo, se na imagem o veste ou usa), "
+    "vira devagar e aponta para ele, sem abrir, fechar, desmontar, encaixar, despejar, cozinhar, vestir, tirar ou "
+    "trocar o produto de mão, e nada muda de estado; os 16 segundos ficam no lugar da imagem, com o mesmo fundo, o "
+    "mesmo enquadramento e a câmera parada, sem corte, sem ir a outro lugar e sem aparecer comida, objeto ou pessoa "
+    "nova. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"prompt": "...", "continuacao": "...", "fala": "...", "cena": "..."}}\n'
+)
+PEDIDO_DO_VENDEDOR_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
+    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos, a partir da imagem: a pessoa da imagem olha para "
+    "a câmera, com o produto como na imagem, idêntico ao da foto do anúncio (mesma forma, cor, material, tamanho, "
+    "quantidade e detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e diz logo no começo o gancho, entre "
+    f"aspas, em português do Brasil, até {PALAVRAS_POR_PARTE} palavras: uma dor que o produto resolve, uma pergunta "
+    "ou uma surpresa (por exemplo: \"Orelha rasgada? Nunca mais!\"), terminando antes dos 6 segundos; depois, calada, "
+    "vira o produto devagar para a câmera. Fotorrealista, com a luz da imagem e a câmera parada.\n"
+) + _CONTINUACAO_DO_VENDEDOR + _FIM_DO_VENDEDOR
+# A comédia de 16 s (P251 1): na 1ª parte, a situação engraçada, com a graça vinda do jeito do personagem diante do
+# produto e da fala, só com movimentos pequenos; na 2ª, o mesmo personagem, convencido, mostrando o produto e vendendo.
+PEDIDO_DA_COMEDIA_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
+    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos, a partir da imagem: uma situação engraçada do dia "
+    "a dia com o produto à vista o tempo todo, idêntico ao da foto do anúncio (mesma forma, cor, material, tamanho, "
+    "quantidade e detalhes; nada acrescentado, tirado ou trocado). A graça vem do jeito do personagem diante do "
+    "produto (a cara, a reação) e de uma fala engraçada logo no começo, entre aspas, em português do Brasil, até "
+    f"{PALAVRAS_POR_PARTE} palavras, terminando antes dos 6 segundos (por exemplo, a desconfiada olha o copo de "
+    "sobrancelha levantada e diz: \"Gelo o dia todo? Duvido!\"); só movimentos pequenos (a cara, um gesto, virar o "
+    "produto), sem cair, derrubar, correr, pular ou mexer em outra coisa. Fotorrealista, com a luz da imagem e a "
+    "câmera parada.\n"
+    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
+    "mesmo lugar e enquadramento, com a mesma pessoa, a mesma roupa e o mesmo produto, idêntico: agora convencido, o "
+    "personagem aponta e mostra de perto uma vantagem que se vê no produto, só virando-o ou aproximando-o da câmera, "
+    f"e fala logo no começo, entre aspas, em português do Brasil, até {PALAVRAS_POR_PARTE} palavras, a vantagem e "
+    "uma chamada curta para comprar (por exemplo: \"Nada gruda e limpa fácil. Garanta a sua!\"), terminando antes "
+    "dos 6 segundos.\n"
+) + _FIM_DO_VENDEDOR
+
+
+def pede_a_imagem(atual):
+    """
+    O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia, antes do
+    Gerar e sem a imagem tentada; o unboxing (sem rosto, P256 2) e o andamento sem o formato (de antes dela), não.
+    """
+    return bool(atual.get("longa") and atual.get("estado") == "escolhido" and not atual.get("imagem")
+                and atual.get("formato") in (ESTILO_DO_VENDEDOR, ESTILO_DA_COMEDIA))
+
+
+def elenco_do_formato(formato, aprovadas=None):
+    """
+    Os personagens que podem estar no vídeo de IA do formato, só os de foto aprovada (P259 1): na comédia, os
+    PERSONAGENS_DA_COMEDIA; no vendedor, os que não são só da comédia (SO_NA_COMEDIA).
+    """
+    aprovadas = fotos_aprovadas() if aprovadas is None else aprovadas
+    if formato == ESTILO_DA_COMEDIA:
+        return [p for p in PERSONAGENS if p["chave"] in aprovadas and p["chave"] in PERSONAGENS_DA_COMEDIA]
+    return [p for p in PERSONAGENS if p["chave"] in aprovadas and p["chave"] not in SO_NA_COMEDIA]
+
+
+def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False):
+    """
+    O pedido do vídeo de 16 s pela imagem do personagem com o produto (P260 1), com a foto do anúncio junto: {"estilo",
+    "prompt", "continuacao", "fala", "cena"}, no vendedor ou na comédia (P251 1); None sem a resposta da IA ou sem uma
+    das partes (o prompt, a continuação ou a fala).
+    """
+    p = personagem(chave) or {"nome": chave, "resumo": ""}
+    descricao = GRACA_NA_COMEDIA.get(chave, p["resumo"]) if comedia else p["resumo"]
+    imagens = []
+    for caminho in (imagem, foto):
+        try:
+            with open(caminho, "rb") as arquivo:
+                dados = jpeg_sem_metadados(arquivo.read())
+        except OSError:
+            dados = None
+        if not dados:
+            return None
+        imagens.append((dados, "image/jpeg"))
+    pedido = PEDIDO_DA_COMEDIA_PELA_IMAGEM if comedia else PEDIDO_DO_VENDEDOR_PELA_IMAGEM
+    try:
+        texto = asyncio.run(api_gemini.gerar_texto_gemini(
+            pedido.format(nome=nome, quem=f"o personagem {p['nome']} ({descricao})"), imagens=imagens))
+    except Exception:
+        texto = None
+    achado = re.search(r"\{.*\}", texto or "", re.S)
+    try:
+        resposta = json.loads(achado.group(0)) if achado else None
+    except ValueError:
+        resposta = None
+    if not isinstance(resposta, dict):
+        return None
+    partes = {campo: " ".join(str(resposta.get(campo) or "").split())
+              for campo in ("prompt", "continuacao", "fala", "cena")}
+    if not (partes["prompt"] and partes["continuacao"] and partes["fala"]):
+        return None
+    return {"estilo": ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR, "prompt": partes["prompt"][:1000],
+            "continuacao": partes["continuacao"][:1000], "fala": partes["fala"][:400], "cena": partes["cena"][:300]}
+
+
+def _sem_a_imagem(motivo, chave="", conferencia=None):
+    """
+    A imagem do personagem não vale desta vez: o vídeo sai pela foto do anúncio, como antes (P253 1), com o porquê no
+    andamento (no log, só o texto fixo do código). Devolve o andamento.
+    """
+    guardar_producao(imagem={"estado": "sem", "motivo": motivo, "personagem": chave, "em": agora(),
+                             **({"conferencia": conferencia} if conferencia else {})})
+    print(f"Vídeo de IA: sem a imagem do personagem ({motivo}); o vídeo sai pela foto do anúncio")
+    return producao()
+
+
+def imagem_da_producao(d, atual):
+    """
+    A imagem do personagem com o produto antes do Gerar do vídeo de 16 s (P260 1), com a trava do celular na mão: a
+    escolha do personagem pela IA, a foto de referência na galeria, o saldo do Flow (SemCreditos sem os créditos do
+    vídeo: nem a imagem é feita), a imagem no modo Imagem, sem crédito, e a conferência da IA, refeita uma vez;
+    valendo, o pedido do vídeo pela imagem ("foto_do_video", "personagem" e o pedido novo no andamento). Sem ela, o
+    porquê fica no andamento e o vídeo sai pela foto do anúncio (a parada no Flow fica nos casos). Devolve o andamento.
+    """
+    formato = atual.get("formato")
+    aprovadas = fotos_aprovadas()
+    elenco = elenco_do_formato(formato, aprovadas)
+    if not elenco:
+        return _sem_a_imagem(SEM_FOTO_APROVADA)
+    try:
+        with open(atual["foto"], "rb") as arquivo:
+            foto = jpeg_sem_metadados(arquivo.read())
+    except OSError:
+        foto = None
+    escolha = escolher_o_personagem(atual.get("nome", ""), foto, elenco, formato) if foto else None
+    if not escolha:
+        return _sem_a_imagem("a IA não escolheu o personagem")
+    chave = escolha["personagem"]
+    try:
+        with open(aprovadas[chave], "rb") as arquivo:
+            referencia = foto_do_personagem_com_o_produto(arquivo.read(), foto)
+    except OSError:
+        referencia = None
+    if not referencia:
+        return _sem_a_imagem("a foto de referência não saiu", chave)
+    os.makedirs(PASTA, exist_ok=True)
+    caminho = os.path.join(PASTA, f"producao_{atual['data']}_referencia.jpg")
+    with open(caminho, "wb") as arquivo:
+        arquivo.write(referencia)
+    imagem = os.path.join(PASTA, f"producao_{atual['data']}_imagem.jpg")
+    prompt = PEDIDO_DA_IMAGEM_COM_O_PRODUTO.format(acao=escolha["acao"], cena=escolha["cena"])
+    print(f"Vídeo de IA: personagem {chave}; a imagem com o produto antes do vídeo")
+    nome_na_galeria = foto_na_galeria(d, caminho, "_referencia")
+    if not nome_na_galeria:
+        return _sem_a_imagem("a foto de referência não apareceu na galeria do celular", chave)
+    conferencia, feitas, vale = None, 0, False
+    try:
+        # O saldo antes da imagem: sem os créditos do vídeo, nem ela é feita (o SemCreditos sobe ao robô).
+        if abrir_o_projeto(d, saldo_minimo=atual["custo"] + CUSTO_DO_ESTENDER):
+            print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
+        while feitas < TENTATIVAS_DA_IMAGEM and not vale:
+            feitas += 1
+            gerar_a_imagem(d, prompt, imagem, com_foto=True)
+            conferencia = conferir_a_imagem(imagem, atual["foto"], aprovadas[chave])
+            vale = conferencia["mesmo"] is True and conferencia["pessoa"] is True
+            print(f"Vídeo de IA: imagem {feitas} feita; a IA conferiu: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}"
+                  f"; {ROTULOS_DA_PESSOA[conferencia['pessoa']]}")
+    except SemCreditos:
+        raise
+    except Parada as e:
+        casos_robo.guardar(d, "video de IA", "parou", f"imagem do personagem: {e}", passo="flow imagem")
+        return _sem_a_imagem(f"o Flow parou na imagem: {e}", chave, conferencia)
+    finally:
+        tirar_da_galeria(d, nome_na_galeria)
+    if not vale:
+        return _sem_a_imagem(f"a IA não confirmou o produto e a pessoa em {feitas} imagens", chave, conferencia)
+    pedido = pedido_pela_imagem(atual.get("nome", ""), imagem, atual["foto"], chave, formato == ESTILO_DA_COMEDIA)
+    if not pedido:
+        return _sem_a_imagem("a IA não escreveu o pedido do vídeo pela imagem", chave, conferencia)
+    guardar_producao(foto_do_video=imagem, personagem=chave, **pedido,
+                     imagem={"estado": "feita", "personagem": chave, "tentativas": feitas, "conferencia": conferencia,
+                             "em": agora()})
+    print(f"Vídeo de IA: a imagem vale ({feitas} imagem(ns)); o vídeo sai dela")
+    return producao()
+
+
+def linha_do_personagem(atual):
+    """
+    A linha do personagem no aviso e no rascunho do vídeo de IA (P260 1): quem está no vídeo ou por que ele saiu sem
+    personagem; "" sem a imagem tentada.
+    """
+    imagem = atual.get("imagem") or {}
+    if imagem.get("estado") == "feita":
+        p = personagem(imagem.get("personagem")) or {"nome": imagem.get("personagem") or "?"}
+        return (f"👤 Personagem: {p['nome']} (o vídeo saiu da imagem do personagem com o produto, feita no modo Imagem "
+                "do Flow, sem crédito)")
+    if imagem.get("estado") == "sem":
+        comedia = "; a comédia fica para outro vídeo" if atual.get("formato") == ESTILO_DA_COMEDIA else ""
+        return (f"👤 Sem personagem desta vez ({imagem.get('motivo') or 'sem detalhes'}): o vídeo saiu pela foto do "
+                f"anúncio, como antes{comedia}")
+    return ""
 
 
 # --- As amostras: vídeos de teste da produção, só no privado do Rafael (P236 1) ---

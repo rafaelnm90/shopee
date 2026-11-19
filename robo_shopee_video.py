@@ -3349,10 +3349,13 @@ def preparar_o_de_ia(d, config, agora=None, comeco=None):
 # vídeo com a foto. Pronto, ele vira o rascunho do próximo horário (preparar_rascunho), com a nossa edição, a troca
 # de loja, os produtos a mais, as conferências de sempre e o Rótulo de IA ligado; o Rafael aprova em Rascunhos do
 # Robô 📝. Desde a P247 1, o vídeo é o de 16 s com uma pessoa vendendo o produto (os 8 s gerados e mais 8 s do
-# Estender), e a fala que o servidor ouve vai no rascunho (P248 1). O do robô é 1 por dia (48 créditos, dentro dos 50
-# grátis do dia); os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No
-# registro, só rótulos fixos e números.
-# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1): DECISOES.md, Shopee Vídeo.
+# Estender), e a fala que o servidor ouve vai no rascunho (P248 1). Desde a P260 1, o vídeo começa pela imagem de um
+# personagem com o produto (flow.imagem_da_producao; sem ela, sai pela foto do anúncio, como antes), e o formato pode
+# ser também a comédia (P251 1). O do robô é 1 por dia (48 créditos, dentro dos 50 grátis do dia); os do Preparar 1
+# Agora ⚡ → De IA ✨ contam junto no limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos, chaves
+# e números.
+# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1; 19/11/2026, P260 1):
+# DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 # Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
@@ -3651,7 +3654,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
     diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
     parte (P255 1), por enquanto só na amostra. No vídeo de 16 s da produção, a IA escolhe pelo produto entre o
-    vendedor e o unboxing (P256 2), menos logo depois de um unboxing: nunca saem dois seguidos.
+    vendedor, o unboxing (P256 2) e a comédia (P251 1, com os personagens da P260 1): nunca dois unboxing seguidos, e
+    no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode).
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3664,8 +3668,11 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
                + (" (sem a contagem do Espião)" if canais is None else "")
                + (f" ({sem_seguir} link(s) do Espião sem seguir)" if sem_seguir else ""))
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
-    # O unboxing (P256 2) é mais um formato, nunca o único: fora das amostras e do vídeo logo depois de um unboxing.
-    com_unboxing = longo and not amostra and not fala_inteira and not flow.ultimo_foi_unboxing()
+    # O unboxing (P256 2) é mais um formato, nunca o único: fora das amostras e do vídeo logo depois de um unboxing. A
+    # comédia (P251 1), no máximo 1 a cada 3 vídeos de IA e só com a foto aprovada de um personagem dela.
+    da_producao = longo and not amostra and not fala_inteira
+    com_unboxing = da_producao and not flow.ultimo_foi_unboxing()
+    com_comedia = da_producao and flow.comedia_pode()
     olhadas = recusadas = mudam = sem_link = seguidos = 0
     for posicao, bom in enumerate(bons, 1):
         if olhadas >= FOTOS_PARA_A_IA or seguidos >= SEM_LINK_CURTO_SEGUIDOS:
@@ -3680,10 +3687,15 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
         seguidos = 0
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
-                                                   longo=longo, fala_inteira=fala_inteira, com_unboxing=com_unboxing)
+                                                   longo=longo, fala_inteira=fala_inteira, com_unboxing=com_unboxing,
+                                                   com_comedia=com_comedia)
         if pedido:
+            # Na comédia, o pedido daqui é o do vendedor (para quando a imagem do personagem não vale): o formato à
+            # parte.
+            formato = pedido.get("formato")
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
                               f"estilo {pedido['estilo']}"
+                              + (f"; formato {formato}" if formato and formato != pedido["estilo"] else "")
                               + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)
             return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
                          valor=bom["valor"], posicao=posicao, origem=origem, nivel=bom["nivel"],
@@ -3771,12 +3783,17 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
             return "vídeo de IA: nenhum produto da lista da Shopee serviu desta vez"
         atual = flow.comecar_producao(hoje, escolhido, tentativas, do_botao=do_botao)
     if atual["estado"] != "baixado":
+        # A imagem do personagem com o produto (P260 1) sai no começo da produção, uma vez: o registro diz o que houve.
+        imagem_antes = bool(atual.get("imagem"))
         try:
             baixado = flow.producao_no_celular(d, atual)
         except flow.SemCreditos as e:
             return _video_de_ia_sem_creditos(e, agora)
         except flow.Parada as e:
             return _video_de_ia_parou(str(e), agora)
+        finally:
+            if not imagem_antes:
+                _anotar_a_imagem(agora)
         if not baixado:
             return _video_de_ia_sem_ficar_pronto(d, agora)
     estado = flow.conferir_a_producao()
@@ -3816,6 +3833,22 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
            f"Produto: {atual.get('nome', '')}\n{de_onde_veio_o_produto_do_video_de_ia(atual)}"
            f"{flow.legenda_da_producao(atual)}")
     return "vídeo de IA: pronto para o rascunho"
+
+
+def _anotar_a_imagem(agora=None):
+    """
+    O que houve com a imagem do personagem com o produto (P260 1) no registro: o personagem (a chave) e quantas
+    imagens, ou o porquê sem ela (o texto fixo do código; sem foto aprovada não é falha). Nada sem a imagem tentada.
+    """
+    imagem = flow.producao().get("imagem") or {}
+    if imagem.get("estado") == "feita":
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "imagem do personagem",
+                                     f"{imagem.get('personagem')}; {imagem.get('tentativas', 1)} imagem(ns)", ok=True,
+                                     agora=agora)
+    elif imagem.get("estado") == "sem":
+        motivo = imagem.get("motivo") or "?"
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem a imagem do personagem", motivo,
+                                     ok=None if motivo == flow.SEM_FOTO_APROVADA else False, agora=agora)
 
 
 def de_onde_veio_o_produto_do_video_de_ia(atual):
@@ -3970,11 +4003,16 @@ def video_de_ia_para_o_rascunho(evitar=(), ja_postados=None):
 def resumo_do_video_de_ia(atual):
     """
     O que fica no rascunho (coluna video_ia) do vídeo que o Flow fez; no de 16 s (P247 1), também a duração, a fala
-    pedida e a que o servidor ouviu, que o Rafael vê em Rascunhos do Robô 📝 antes de aprovar (P248 1).
+    pedida e a que o servidor ouviu, que o Rafael vê em Rascunhos do Robô 📝 antes de aprovar (P248 1), e o formato e o
+    personagem, ou por que o vídeo saiu sem ele (P260 1).
     """
     resumo = {chave: atual.get(chave) for chave in ("modelo", "custo", "estilo", "cena", "conferencia", "gerado_em",
                                                     "resolucao")}
-    resumo.update({chave: atual[chave] for chave in ("longa", "duracao", "fala", "fala_conferida") if atual.get(chave)})
+    resumo.update({chave: atual[chave] for chave in ("longa", "duracao", "fala", "fala_conferida", "formato",
+                                                      "personagem") if atual.get(chave)})
+    if atual.get("imagem"):
+        resumo["imagem"] = {chave: atual["imagem"][chave] for chave in ("estado", "personagem", "motivo", "tentativas")
+                            if chave in atual["imagem"]}
     return resumo
 
 

@@ -1694,8 +1694,8 @@ def limite_dos_videos_de_ia():
 
 def texto_video_ia(config, agora=None):
     """
-    A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1; 18/11, P252 1): DECISOES.md,
-    Shopee Vídeo.
+    A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1; 18/11, P252 1; 19/11, P256 2 e
+    P260 1): DECISOES.md, Shopee Vídeo.
     """
     modelo, custo = robo.flow.MODELO_DA_PRODUCAO[0], robo.flow.CUSTO_DA_PRODUCAO
     ligado = robo.video_de_ia_ligado(config)
@@ -1704,10 +1704,14 @@ def texto_video_ia(config, agora=None):
     nota = f"{robo.NOTA_MINIMA_DO_VIDEO_DE_IA:.1f}".replace(".", ",")
     return (
         "✨ <b>Vídeo de IA</b>\n"
-        "Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo de 16 s feito por IA, "
-        "com uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada): os 8 s "
-        f"gerados pela foto do anúncio e mais 8 s do Estender, no {modelo} ({custo} créditos, dentro dos "
-        f"{robo.flow.CREDITOS_GRATIS_DO_DIA} grátis do dia). O produto vem da própria Shopee, sem depender dos "
+        "Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo de 16 s feito por IA. "
+        "Na maioria, é uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada); "
+        "às vezes, o unboxing (só as mãos abrindo a caixa, nunca dois seguidos) ou a comédia (o personagem numa "
+        "situação engraçada com o produto e depois vendendo, no máximo 1 a cada 3). A pessoa é um dos personagens "
+        "que você aprovou: o vídeo começa por uma imagem dele com o produto, feita no modo Imagem do Flow, sem "
+        "crédito, e conferida pela IA; sem ela, sai pela foto do anúncio. São os 8 s gerados e mais 8 s do Estender, "
+        f"no {modelo} ({custo} créditos, dentro dos {robo.flow.CREDITOS_GRATIS_DO_DIA} grátis do dia). O produto vem "
+        "da própria Shopee, sem depender dos "
         "vídeos da fonte, em 2 níveis. No 1º, entre os produtos em alta (sem essa lista, os mais vendidos dos nichos "
         f"dos seus Achadinhos), ficam os de nota {nota} ou mais, que pagam pelo menos {minimo} por venda e que você "
         f"ainda não postou. No 2º, desses, vêm primeiro os que {segundo_nivel} (os que poucos afiliados "
