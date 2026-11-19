@@ -890,6 +890,27 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert robo.assistente.proximo_video("autorais") is None
 
 
+def test_aprovacao_desligada_aprova_sozinho_o_rascunho_novo(monkeypatch, avisos):
+    # Pedido do Rafael (18/11): um botão para ligar ou desligar a validação dele; ligada, o padrão (P227), todo
+    # rascunho espera o Aprovar; desligada, o robô aprova sozinho o rascunho recém-salvo, e ele vai ao ar como
+    # depois do Aprovar (a hora de proxima_postagem, em Aprovados para Postar ⏳).
+    assert robo.PADRAO["robo_aprovacao"] is True and robo.aprovacao_ligada({}) is True
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, robo_aprovacao=False)
+    assert robo.aprovacao_ligada() is False
+    app = AppDeMentira()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    # Nada de Postar na mesma rodada: o post sai na hora marcada, numa rodada seguinte.
+    assert "Postar" not in app.toques and "@btn_post" not in app.toques and "@tv_drafts_box" in app.toques
+    assert robo.esperando_aprovacao() == []
+    aprovado = robo.listar("aprovado")[0]
+    assert aprovado["titulo"] == TITULO and aprovado["aprovado_em"] and aprovado["postar_em"] > "2026-10-22 23:59:00"
+    assert "aprovado sozinho, porque a aprovação está desligada" in avisos[-1]
+    assert "Aprovados para Postar ⏳" in avisos[-1] and "esperando a sua aprovação" not in avisos[-1]
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_APROVACAO) == ("aprovado sozinho", "aprovação desligada", 1)
+
+
 def _tela(monkeypatch, acesa, energia=None, bloqueio=False, acende=None):
     """
     A tela do celular lida pelo adb (celular_robo), sem o celular de verdade: acesa ou apagada, a carga,
