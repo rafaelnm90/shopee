@@ -114,7 +114,7 @@ CHAVE_CONFIG = "shopee_video"  # a mesma chave do painel_shopee_video
 # Rafael desligar no painel (Vídeo de IA ✨).
 PADRAO = {"robo_pausado": True, "robo_limite_min": 1, "robo_limite_max": 2,
           "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1],
-          "robo_produtos_a_mais": True, "robo_video_ia": True}
+          "robo_produtos_a_mais": True, "robo_video_ia": True, "robo_aprovacao": True}
 MAXIMO_POR_DIA = 20
 CHAVE_DIA = "shopee_video_robo_dia"
 # Rascunho do plano que não deu certo volta nas rodadas seguintes: até estas vezes a mais
@@ -1513,6 +1513,30 @@ def aviso_rascunho_nao_saiu(config, agora=None):
 
 def esperando_aprovacao():
     return listar("rascunho")
+
+
+# A aprovação dos rascunhos (pedido do Rafael, 18/11): ligada, o padrão, todo rascunho espera o Aprovar dele em
+# Rascunhos do Robô 📝 (P227); desligada no painel (Robô Automático 🤖 → Aprovação 👍), o robô aprova sozinho cada
+# rascunho novo logo depois de salvar, e ele vai ao ar como depois do Aprovar (proxima_postagem). O rascunho que
+# volta para o Rafael (o post ou o refazer que não deu certo, o recusado que não saiu do celular) espera ele.
+# Pedido do Rafael (18/11/2026): DECISOES.md, Shopee Vídeo.
+PROCESSO_DA_APROVACAO = "aprovação dos rascunhos"
+
+
+def aprovacao_ligada(config=None):
+    """Os rascunhos esperam o Aprovar do Rafael? Ligada até ele desligar no painel (pedido de 18/11)."""
+    config = ler_config() if config is None else config
+    return bool(config.get("robo_aprovacao", True))
+
+
+def aprovar_sozinho(ident, agora=None):
+    """
+    O rascunho recém-salvo com a aprovação desligada: o robô aprova por ele, e o rascunho ganha a hora de ir ao ar
+    como no Aprovar (aprovar). Devolve essa hora.
+    """
+    quando = aprovar(ident, agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_APROVACAO, "aprovado sozinho", "aprovação desligada", ok=True)
+    return quando
 
 
 # O aprovado que o Rafael mandou postar no Postar Agora 🚀 sai de Aprovados para Postar ⏳ enquanto o
@@ -3727,8 +3751,11 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
                         video=atual.get("id_video", ""))
     vira = ("que você pediu no Google Flow. Agora ele vira o rascunho" if atual.get("do_botao")
             else "do dia no Google Flow. Ele vira o próximo rascunho")
-    avisar(f"🎞️ Robô da Shopee Vídeo: fiz o vídeo de IA {vira}, com a nossa edição e o Rótulo de IA ligado, e chega "
-           "em Rascunhos do Robô 📝 para você aprovar.\n\n"
+    # Com a aprovação desligada (pedido de 18/11), o rascunho dele também vai ao ar sozinho.
+    chega = ("chega em Rascunhos do Robô 📝 para você aprovar" if aprovacao_ligada(config)
+             else "vai ao ar sozinho, porque a aprovação está desligada (o aviso do rascunho diz a hora)")
+    avisar(f"🎞️ Robô da Shopee Vídeo: fiz o vídeo de IA {vira}, com a nossa edição e o Rótulo de IA ligado, e "
+           f"{chega}.\n\n"
            f"Produto: {atual.get('nome', '')}\n{de_onde_veio_o_produto_do_video_de_ia(atual)}"
            f"{flow.legenda_da_producao(atual)}")
     return "vídeo de IA: pronto para o rascunho"
@@ -6532,16 +6559,24 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     if tem(tela(d), "@btn_post"):
         raise Parada("toquei em Rascunhos, mas o app continuou na tela final")
     atualizar(ident, estado="rascunho", print=print_tela)
+    # Com a aprovação desligada no painel (pedido de 18/11), o robô aprova por ele na hora.
+    quando = None if aprovacao_ligada() else aprovar_sozinho(ident, agora)
     esperando = len(esperando_aprovacao())
     a_mais_no_post = sum(1 for i in no_post if i in a_mais)
     em_outra_cor = sum(1 for i in no_post if i in a_mais and (produtos or do_ver_produtos or [])[i].get("outra_cor"))
     de_outras_lojas = (f"{a_mais_no_post} de outras lojas: {a_mais_no_post - em_outra_cor} iguais e {em_outra_cor} "
                        "em outra cor, com a foto na miniatura" if em_outra_cor
                        else f"{a_mais_no_post} iguais de outras lojas")
-    avisar("📝 Robô da Shopee Vídeo: rascunho novo salvo no celular"
-           + (f", com {len(anexados)} produtos ({'os' if do_ver_produtos else 'o'} do vídeo e {de_outras_lojas})"
-              if a_mais_no_post else "")
-           + f". {esperando} esperando a sua aprovação em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
+    com_produtos = (f", com {len(anexados)} produtos ({'os' if do_ver_produtos else 'o'} do vídeo e {de_outras_lojas})"
+                    if a_mais_no_post else "")
+    if quando:
+        avisar(f"📝 Robô da Shopee Vídeo: rascunho novo salvo no celular{com_produtos} e aprovado sozinho, porque a "
+               f"aprovação está desligada. Ele vai ao ar por volta de {quando[8:10]}/{quando[5:7]} às {quando[11:16]} "
+               "e fica até lá em Shopee Vídeo 🎬 → Aprovados para Postar ⏳ (o Postar Agora 🚀 posta na hora; o Pausar "
+               "Postagem ⏸️ segura todos).")
+    else:
+        avisar(f"📝 Robô da Shopee Vídeo: rascunho novo salvo no celular{com_produtos}. {esperando} esperando a sua "
+               "aprovação em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
 
 
 PROCESSO_DA_EDICAO = "edição do vídeo: rascunho do robô"
