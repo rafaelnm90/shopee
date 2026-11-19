@@ -907,6 +907,8 @@ def test_aprovacao_desligada_aprova_sozinho_o_rascunho_novo(monkeypatch, avisos)
     assert aprovado["titulo"] == TITULO and aprovado["aprovado_em"] and aprovado["postar_em"] > "2026-10-22 23:59:00"
     assert "aprovado sozinho, porque a aprovação está desligada" in avisos[-1]
     assert "Aprovados para Postar ⏳" in avisos[-1] and "esperando a sua aprovação" not in avisos[-1]
+    # Fica anotado que foi o robô quem aprovou (P254 3).
+    assert aprovado["aprovado_por"] == robo.APROVADO_PELO_ROBO
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_APROVACAO) == ("aprovado sozinho", "aprovação desligada", 1)
 
@@ -3061,6 +3063,61 @@ def test_rascunho_aberto_com_outro_titulo_nao_e_postado(monkeypatch, avisos, cam
     robo.atualizar(ident, falhas_ao_postar="2")
     robo.aprovar(ident, agora=momento("2026-10-23 08:00"))
     assert robo.pegar(ident)["falhas_ao_postar"] == "0"
+
+
+def test_aprovado_sozinho_que_nao_sai_em_3_tentativas_e_recusado_sozinho(monkeypatch, avisos):
+    # Escolha do Rafael (P254 3): com a aprovação desligada, o rascunho que o robô aprovou sozinho e não vai ao ar em
+    # 3 tentativas é recusado sozinho, como no Recusar dele: sai do celular, e o de hoje abre outro horário hoje
+    # (P235 1). O que o Rafael aprovou volta para ele, como antes, e o aprovado sozinho também, com a aprovação
+    # religada.
+    ativar(robo_inicio=0, robo_fim=24, robo_aprovacao=False)
+    agora = momento("2026-10-22 15:00")
+    sozinho, dele = _rascunho(), _rascunho()
+    assert robo.aprovar_sozinho(sozinho, agora) and robo.aprovar(dele, agora)
+    assert robo.pegar(sozinho)["aprovado_por"] == robo.APROVADO_PELO_ROBO and not robo.pegar(dele)["aprovado_por"]
+    for vez in range(1, robo.TENTATIVAS_DE_POSTAR + 1):
+        robo._nao_saiu_o_post(sozinho, "o app travou na tela de postar", agora=agora)
+        robo._nao_saiu_o_post(dele, "o app travou na tela de postar", agora=agora)
+        if vez < robo.TENTATIVAS_DE_POSTAR:
+            assert robo.pegar(sozinho)["estado"] == "aprovado" and robo.pegar(dele)["estado"] == "aprovado"
+    recusado = robo.pegar(sozinho)
+    assert recusado["estado"] == "recusado" and not recusado["postar_em"] and recusado["falhas_ao_postar"] == "0"
+    aviso = next(a for a in avisos if "aprovei sozinho" in a)
+    assert "recusei ele sozinho" in aviso and "o app travou na tela de postar" in aviso
+    assert "faço outro rascunho hoje" in aviso and "a partir das" in aviso
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? AND resultado = ?",
+                     robo.PROCESSO_DA_APROVACAO, "recusado sozinho") == (
+        "recusado sozinho", "3 tentativas de post sem sair")
+    # O que o Rafael aprovou volta para ele decidir, como antes.
+    assert robo.pegar(dele)["estado"] == "rascunho"
+    assert "tentei postar o rascunho aprovado 3 vezes" in avisos[-1]
+    # Aprovado de novo por ele, deixa de ser um aprovado sozinho.
+    robo.aprovar_sozinho(dele, agora)
+    robo.aprovar(dele, agora)
+    assert not robo.pegar(dele)["aprovado_por"]
+
+    # Com a aprovação religada, o aprovado sozinho que não sai volta para o Rafael, como os outros.
+    outro = _rascunho()
+    robo.aprovar_sozinho(outro, agora)
+    ativar(robo_inicio=0, robo_fim=24, robo_aprovacao=True)
+    for _ in range(robo.TENTATIVAS_DE_POSTAR):
+        robo._nao_saiu_o_post(outro, "o app travou na tela de postar", agora=agora)
+    assert robo.pegar(outro)["estado"] == "rascunho" and "tentei postar o rascunho aprovado 3 vezes" in avisos[-1]
+
+
+def test_aprovado_sozinho_recusado_tarde_da_noite_fica_sem_outro_no_lugar(monkeypatch, avisos, caminho_do_rascunho):
+    # O mesmo na rodada de verdade, perto do fim do Horário do Robô: o aprovado sozinho que não sai na 3ª vez é
+    # recusado sozinho, e não cabe outro rascunho hoje no lugar dele (P254 3 e P235 1).
+    ident = _aprovado(monkeypatch)
+    ativar(robo_inicio=0, robo_fim=24, robo_aprovacao=False)
+    robo.atualizar(ident, aprovado_por=robo.APROVADO_PELO_ROBO)
+    for hora in ("23:57", "23:58", "23:59"):
+        app = AppComQuadros()
+        app.legenda, app.com_produto = "Outro título de outro rascunho qualquer #outro", True
+        assert "parado" in robo.rodada(d=app, agora=momento(f"2026-10-22 {hora}"))
+        assert "@btn_post" not in app.toques
+    assert robo.pegar(ident)["estado"] == "recusado"
+    assert "recusei ele sozinho" in avisos[-1] and "Hoje não cabe outro rascunho" in avisos[-1]
 
 
 def test_postar_agora_posta_o_aprovado_na_hora_mesmo_pausado_e_fora_do_horario(monkeypatch, avisos,
