@@ -1226,6 +1226,32 @@ def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatc
     assert resumo["nao_entraram"] == {"pelo_criador": 0, "pelo_produto": 3}
 
 
+def test_unboxing_vai_com_a_musica_no_lugar_do_som_e_sem_a_legenda_da_fala(monkeypatch, tmp_path):
+    # Escolha do Rafael (19/11, P256 2): o vídeo de IA de unboxing não tem fala; a música de fundo vai no lugar do
+    # som, mesmo com o som da embalagem, e sem a legenda da fala. O vídeo com som de sempre continua sem a música.
+    _versoes_de_mentira(monkeypatch)
+    _textos_da_tela(monkeypatch, {"nome": "Sandália", "vantagem": "Confortável", "falas": [], "lugar": "alto"})
+    monkeypatch.setattr(edicao_video.videos, "mudo", lambda video: False)
+    monkeypatch.setattr(edicao_video, "fala_no_som_baixinho", lambda video, ouviu_fala=False: ("", -14.0))
+    repasses = []
+
+    def editar_2(*args, **opcoes):
+        repasses.append((args[8], opcoes["escolhas"]["legenda"]))
+        return "", {"textos": ["Sandália"], "legendas": 0}
+
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    destino = str(tmp_path / "r.mp4")
+    anotado = {}
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Sandália", musica_no_lugar=True,
+                                           anotar=anotado)[0] == ""
+    assert edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Sandália")[0] == ""
+    (musica, legenda), (sem_musica, com_legenda) = repasses
+    assert musica and musica.endswith(".m4a") and legenda is False
+    assert sem_musica is None and com_legenda is True
+    # O Editar ✏️ do rascunho refaz com a mesma música e sem a legenda.
+    assert anotado["refazer"]["musica"] and anotado["refazer"]["escolhas"]["legenda"] is False
+
+
 def _textos_da_tela(monkeypatch, textos):
     """A IA de mentira dos textos da tela; devolve os nomes de produto que ela recebeu."""
     pedidos = []

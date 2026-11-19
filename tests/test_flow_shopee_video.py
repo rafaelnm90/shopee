@@ -1862,3 +1862,58 @@ def test_amostra_com_a_fala_inteira_sem_parado_vai_so_o_original(celular, monkey
     assert "✂️ Corte do parado: nada parado para cortar" in legenda and "⏱️ Com fala: 15,4 s dos 16,0 s" in legenda
     assert "corte do parado: nada parado para cortar" in capsys.readouterr().out
 
+
+# --- O unboxing como mais um formato do vídeo de IA de 16 s (P256 2) ---
+
+PEDIDO_DO_VENDEDOR_JSON = ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "She holds the sandal.", '
+                           '"continuacao": "Same shot, she points.", "fala": "Pé cansado? Olha essa!", "cena": "c"}')
+
+
+def test_unboxing_a_ia_escolhe_o_formato_pelo_produto_e_o_pedido_vem_sem_fala(monkeypatch):
+    # Escolha do Rafael (19/11, P256 2): o unboxing dos vídeos que ele mandou (as mãos abrindo a caixa, sem rosto e
+    # sem fala) entra como mais um formato do vídeo de IA de 16 s, que a IA escolhe pelo produto.
+    pedidos, respostas = [], []
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return respostas.pop(0)
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    link = "https://s.shopee.com.br/abc"
+    respostas[:] = ['{"formato": "unboxing", "motivo": "calçado bonito na caixa"}',
+                    '{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "POV hands open a parcel box.", '
+                    '"continuacao": "Same shot, the hands lift the sandal.", "fala": "não devia vir", '
+                    '"cena": "As mãos abrem a caixa."}']
+    pedido, serve = flow.pedido_para_o_anuncio(link, "Sandália Plataforma", _jpeg(), longo=True, com_unboxing=True)
+    assert serve is True and pedido["estilo"] == flow.ESTILO_DO_UNBOXING and pedido["fala"] == ""
+    assert pedido["continuacao"] == "Same shot, the hands lift the sandal."
+    assert '"vendedor" ou "unboxing"' in pedidos[0] and "Sandália Plataforma" in pedidos[0]
+    for trecho in ("filmado pelos olhos de quem recebeu a encomenda", "sem rosto e sem ninguém falando",
+                   "no face, no dialogue, no subtitles, no text", "sem nada mudar de estado", "Sandália Plataforma"):
+        assert trecho in pedidos[1], trecho
+    # O vendedor escolhido pela IA (ou a resposta que não diz o formato) vai com o pedido de sempre.
+    for formato in ('{"formato": "vendedor", "motivo": "precisa de explicação"}', "não sei"):
+        pedidos.clear()
+        respostas[:] = [formato, PEDIDO_DO_VENDEDOR_JSON]
+        pedido, _ = flow.pedido_para_o_anuncio(link, "Sandália Plataforma", _jpeg(), longo=True, com_unboxing=True)
+        assert pedido["estilo"] == flow.ESTILO_DO_VENDEDOR and pedido["fala"] == "Pé cansado? Olha essa!"
+        assert "depois, calada" in pedidos[1]
+    # Sem com_unboxing (as amostras e o vídeo logo depois de um unboxing), nem pergunta o formato.
+    pedidos.clear()
+    respostas[:] = [PEDIDO_DO_VENDEDOR_JSON]
+    assert flow.pedido_para_o_anuncio(link, "Sandália", _jpeg(), longo=True)[0]["estilo"] == flow.ESTILO_DO_VENDEDOR
+    assert len(pedidos) == 1 and "depois, calada" in pedidos[0]
+
+
+def test_unboxing_nunca_sai_dois_seguidos_e_a_legenda_diz_o_formato(bm):
+    # "não quero vídeos apenas de unboxing (...), farão parte dos vídeos produzidos, mas não serão únicos".
+    assert flow.ultimo_foi_unboxing() is False
+    flow.guardar_producao(estilo=flow.ESTILO_DO_UNBOXING, modelo="Omni 1.2 Flash", custo=48, longa=True,
+                          cena="As mãos abrem a caixa.", conferencia={"mesmo": True}, duracao=16)
+    assert flow.ultimo_foi_unboxing() is True
+    legenda = flow.legenda_da_producao(flow.producao())
+    assert "🎭 Estilo: unboxing: as mãos abrindo a caixa com o produto, sem rosto e sem fala (16 s)" in legenda
+    assert "🗣️ Fala" not in legenda and "Fala no vídeo" not in legenda
+    flow.guardar_producao(estilo=flow.ESTILO_DO_VENDEDOR)
+    assert flow.ultimo_foi_unboxing() is False
+

@@ -3617,7 +3617,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
     diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
-    parte (P255 1), por enquanto só na amostra.
+    parte (P255 1), por enquanto só na amostra. No vídeo de 16 s da produção, a IA escolhe pelo produto entre o
+    vendedor e o unboxing (P256 2), menos logo depois de um unboxing: nunca saem dois seguidos.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3630,6 +3631,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
                + (" (sem a contagem do Espião)" if canais is None else "")
                + (f" ({sem_seguir} link(s) do Espião sem seguir)" if sem_seguir else ""))
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
+    # O unboxing (P256 2) é mais um formato, nunca o único: fora das amostras e do vídeo logo depois de um unboxing.
+    com_unboxing = longo and not amostra and not fala_inteira and not flow.ultimo_foi_unboxing()
     olhadas = recusadas = mudam = sem_link = seguidos = 0
     for posicao, bom in enumerate(bons, 1):
         if olhadas >= FOTOS_PARA_A_IA or seguidos >= SEM_LINK_CURTO_SEGUIDOS:
@@ -3644,7 +3647,7 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
         seguidos = 0
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
-                                                   longo=longo, fala_inteira=fala_inteira)
+                                                   longo=longo, fala_inteira=fala_inteira, com_unboxing=com_unboxing)
         if pedido:
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
                               f"estilo {pedido['estilo']}"
@@ -6636,10 +6639,13 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     else:
         anuncio = ps.anuncio_do_produto(video)
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
+    # O vídeo de IA de unboxing vai sem fala, com a música de fundo no lugar do som (P256 2).
+    unboxing = (video.get("video_ia") or {}).get("estilo") == flow.ESTILO_DO_UNBOXING
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
                                                             anuncio.get("nome", ""), avisos=alcool,
                                                             outras_fotos=trocam, rotulo_de_ia=rotulo_de_ia,
-                                                            anotar=edicao)
+                                                            anotar=edicao,
+                                                            **({"musica_no_lugar": True} if unboxing else {}))
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
