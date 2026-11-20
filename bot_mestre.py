@@ -17608,6 +17608,11 @@ async def backup_diario():
 # nova; a senha é própria, vai uma vez, e ele a guarda fora do Telegram. Pedido do Rafael
 # (P146 1): DECISOES.md, Monitor, deploy e servidor.
 PROCESSO_DA_COPIA = "cópia do backup fora do servidor"
+# A rede até o Telegram às vezes cai por um tempo (de madrugada, o Viral e a cópia caíram
+# juntos por uns 40 min): a cópia que não sai por falha de rede tenta de novo com o mesmo
+# pacote, a cada 30 min, até 4 vezes, e o aviso no privado só vem quando a última não sai.
+TENTATIVAS_DA_COPIA_NA_REDE = 4
+ESPERA_DA_COPIA_NA_REDE_MIN = 30
 
 def texto_da_senha_da_copia(valor):
     """A mensagem com a senha da cópia, mandada uma vez por senha."""
@@ -17648,11 +17653,23 @@ async def mandar_senha_da_copia():
                         lambda s: s.update(avisado_chave=marca, mensagem_da_chave=mensagem.message_id))
     logger.info("🔐 [Backup] Senha da cópia fora do servidor enviada ao admin.")
 
-async def mandar_copia_fora(pacote):
+def agendar_copia_de_novo(pacote, tentativa):
+    """A cópia que a falha de rede não deixou sair volta daqui a pouco, com o mesmo pacote."""
+    scheduler.add_job(mandar_copia_fora, 'date',
+                      run_date=datetime.now(fuso_horario) + timedelta(minutes=ESPERA_DA_COPIA_NA_REDE_MIN),
+                      args=[pacote, tentativa + 1], id='copia_do_backup_de_novo', replace_existing=True)
+    logger.warning(f"🌐 [Backup] A cópia fora do servidor não saiu por falha de rede "
+                   f"({tentativa}/{TENTATIVAS_DA_COPIA_NA_REDE}): tento de novo em "
+                   f"{ESPERA_DA_COPIA_NA_REDE_MIN} min.")
+    registro_processos.registrar("bot_mestre", PROCESSO_DA_COPIA, "adiada (rede)", f"{tentativa}ª vez", ok=None)
+
+
+async def mandar_copia_fora(pacote, tentativa=1):
     """
     Manda o pacote cifrado no privado (sem som) e apaga a cópia de antes: fica só a mais
     nova. A nova sai antes de a velha sumir, para nunca ficar sem nenhuma. A de mais de
-    48 h o Telegram não deixa o bot apagar: fica lá.
+    48 h o Telegram não deixa o bot apagar: fica lá. A que a rede não deixa sair tenta de
+    novo (agendar_copia_de_novo); tentativa é a vez desta.
     """
     cifrado = None
     try:
@@ -17683,6 +17700,9 @@ async def mandar_copia_fora(pacote):
                                      f"{tamanho / 1024 / 1024:.1f} MB", ok=True)
         logger.info(f"💾 [Backup] Cópia cifrada no privado do admin ({tamanho / 1024 / 1024:.1f} MB).")
     except Exception as e:
+        if isinstance(e, TelegramNetworkError) and tentativa < TENTATIVAS_DA_COPIA_NA_REDE:
+            agendar_copia_de_novo(pacote, tentativa)
+            return
         logger.error(f"❌ [Backup] A cópia fora do servidor falhou ({type(e).__name__})")
         registro_processos.registrar("bot_mestre", PROCESSO_DA_COPIA, "falhou", type(e).__name__, ok=False)
         registrar_erro_json(f"mandar_copia_fora: {type(e).__name__}", origem="backup_dados.py")
