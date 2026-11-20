@@ -3640,7 +3640,8 @@ def _canais_do_espiao(agora=None):
         return None, 0
 
 
-def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, fala_inteira=False):
+def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, fala_inteira=False,
+                                maos_e_voz=False):
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
     lista da API de afiliado (candidatos_do_video_de_ia), primeiro os do 2º nível (P252 1, pelos_dois_niveis) e depois
@@ -3655,7 +3656,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
     parte (P255 1), por enquanto só na amostra. No vídeo de 16 s da produção, a IA escolhe pelo produto entre o
     vendedor, o unboxing (P256 2) e a comédia (P251 1, com os personagens da P260 1): nunca dois unboxing seguidos, e
-    no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode).
+    no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode). maos_e_voz: o de 16 s no formato mãos e voz (P261
+    1), por enquanto só na amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3688,7 +3690,7 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
                                                    longo=longo, fala_inteira=fala_inteira, com_unboxing=com_unboxing,
-                                                   com_comedia=com_comedia)
+                                                   com_comedia=com_comedia, maos_e_voz=maos_e_voz)
         if pedido:
             # Na comédia, o pedido daqui é o do vendedor (para quando a imagem do personagem não vale): o formato à
             # parte.

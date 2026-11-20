@@ -40,9 +40,13 @@ ou cortada vai na legenda (conferir_a_fala). A amostra pode repetir o produto da
 da fala do começo ao fim (P255 1, 19/11/2026; --fala-inteira): duas frases curtas em cada parte, faladas do 1º
 segundo até por volta dos 7 s (PEDIDO_DO_VENDEDOR_FALANDO), e o servidor corta o parado que sobrar (o silêncio de
 mais de 1 s, com um zoom leve depois de cada corte, cortar_o_parado); vão ao privado o vídeo cortado e o original.
+A amostra do formato mãos e voz (P261 1, 20/11/2026; --maos-e-voz), como o vídeo que o Rafael mandou: só as mãos de
+quem usa o produto, sem rosto, a câmera sempre nele, e uma voz contando do começo ao fim (o gancho, o produto, o uso
+mais simples com o resultado à vista e a chamada "clica no carrinho laranja"), sem a cena da loja lotada do vídeo
+dele (PEDIDO_DAS_MAOS_E_VOZ); vai ao privado com o tempo com fala.
 
-Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo ou
-amostra-16s-fala-inteira). O
+Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo,
+amostra-16s-fala-inteira ou amostra-16s-maos-e-voz). O
 log do Actions é público: saem só estados, modelos e números; o produto e o pedido ficam no banco, e o
 vídeo, no privado.
 
@@ -52,6 +56,7 @@ vídeo, no privado.
     python3 flow_shopee_video.py amostra --longa    # a amostra do vídeo de 16 s, com o Estender (P246 1)
     python3 flow_shopee_video.py amostra --longa --mesmo  # a de 16 s com o produto da anterior (P248 1)
     python3 flow_shopee_video.py amostra --longa --fala-inteira  # a de 16 s falando o tempo todo, sem o parado (P255 1)
+    python3 flow_shopee_video.py amostra --longa --maos-e-voz  # a de 16 s só com as mãos e a voz contando (P261 1)
     python3 flow_shopee_video.py personagens          # as fotos dos personagens que faltam (P250 1 e P258 1)
     python3 flow_shopee_video.py personagens vovo     # a foto da Vovó de novo (outra)
     python3 flow_shopee_video.py aprovar-personagens  # o OK do Rafael às fotos mandadas (P259 1); com chaves, só essas
@@ -258,11 +263,17 @@ ESTILO_DO_UNBOXING = "unboxing"
 # quando um dos últimos gerados foi (formatos_recentes). Escolha do Rafael (P251 1): DECISOES.md, Shopee Vídeo.
 ESTILO_DA_COMEDIA = "comedia_16s"
 VIDEOS_POR_COMEDIA = 3
+# O formato mãos e voz (P261 1, 20/11/2026), por enquanto só na amostra (amostra --longa --maos-e-voz): como o vídeo
+# que o Rafael mandou ("foco mais no produto em si"), só as mãos de quem usa o produto, sem rosto, a câmera sempre
+# nele, e uma voz contando do começo ao fim. O vídeo de IA do dia e o De IA ✨ só ganham o formato com o OK dele à
+# amostra. Escolha do Rafael (P261 1): DECISOES.md, Shopee Vídeo.
+ESTILO_DAS_MAOS_E_VOZ = "maos_e_voz"
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
            ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada (16 s)",
            ESTILO_DO_UNBOXING: "unboxing: as mãos abrindo a caixa com o produto, sem rosto e sem fala (16 s)",
-           ESTILO_DA_COMEDIA: "comédia: um personagem numa situação engraçada com o produto, e depois vendendo (16 s)"}
+           ESTILO_DA_COMEDIA: "comédia: um personagem numa situação engraçada com o produto, e depois vendendo (16 s)",
+           ESTILO_DAS_MAOS_E_VOZ: "mãos e voz: só as mãos usando o produto, com uma voz contando (16 s)"}
 ESTILO_PADRAO = "demonstracao"
 # Quantos estilos dos últimos vídeos a IA recebe, para variar (o Rafael pediu vídeos variados, "para não
 # ficar um padrão, para ser mais orgânico", 15/11/2026).
@@ -427,6 +438,49 @@ PEDIDO_DO_UNBOXING = (
     "Sem marca, sem preço, sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; nada perigoso, "
     "nojento ou com criança."
 )
+# O pedido do formato mãos e voz de 16 s (P261 1), como o vídeo que o Rafael mandou: só as mãos, a câmera sempre no
+# produto e uma voz contando do começo ao fim, em duas frases curtas por parte (como a amostra da P255 1). Sem a cena
+# da loja lotada do vídeo dele: inventada (todo mundo comprando, com placa de preço), e as diretrizes punem
+# desinformação e preço no vídeo. O produto em uso é o que a IA de vídeo mais erra (P248 1): um uso só, o mais
+# simples, sem montar nem trocar peça, com o resultado logo à vista, no mesmo lugar.
+PEDIDO_DAS_MAOS_E_VOZ = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A imagem é a foto oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo "
+    "de 16 segundos, em pé (9:16) e com som, em duas partes de 8 segundos: a 1ª a partir dessa foto e a 2ª "
+    "continuando a 1ª, no mesmo lugar e com a mesma voz. É uma demonstração filmada pelos olhos de quem usa o "
+    "produto (primeira pessoa): só as mãos aparecem, sem rosto, com a câmera na mão e sempre no produto, numa casa "
+    "simples e arrumada do Brasil, com a luz do dia; por cima, a voz de uma pessoa comum, brasileira e animada, conta "
+    "do começo ao fim, como quem mostra uma descoberta para uma amiga (a narração de quem filma, sem ninguém falando "
+    "na tela). A IA de vídeo inventa coisas quando a cena pede demais; por isso, o produto aparece inteiro, idêntico "
+    "ao da foto, sem mudar de forma, cor ou tamanho; as mãos fazem um uso só, o mais simples do produto, com um gesto "
+    "curto (apertar, ligar, encher, passar, colocar no lugar), sem montar, desmontar, cortar, cozinhar ou vestir, e o "
+    "resultado aparece logo, de perto (por exemplo, a luz acesa, a fumacinha saindo, a superfície limpa); os 16 "
+    "segundos ficam no mesmo lugar, sem aparecer pessoa, objeto ou produto novo, com no máximo um corte por parte, "
+    "para um plano mais de perto do mesmo produto. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "continuacao": '
+    '"...", "fala": "...", "cena": "..."}}\n'
+    + REGRAS_DA_FOTO +
+    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos, em primeira pessoa: as mãos seguram o produto da "
+    "foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
+    "trocado), bem perto da câmera, e o põem na mesa com o que vem com ele; a voz fala do 1º segundo até por volta "
+    "dos 7 segundos, sem pausa longa, entre aspas, em português do Brasil, 2 frases curtas com até "
+    f"{PALAVRAS_DA_FALA_INTEIRA} palavras ao todo: o gancho (uma surpresa, uma dor que o produto resolve ou uma "
+    "pergunta) e o que é o produto (por exemplo: \"Gente, olha esse umidificador! Já vem com as essências.\"). "
+    "Escreva no pedido: Brazilian Portuguese voice-over narration from the person filming, no one speaks on camera, "
+    "no face, authentic handheld smartphone footage, natural daylight, realistic home, no subtitles, no text.\n"
+    "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando no mesmo lugar, com as mesmas "
+    "mãos, a mesma voz e o mesmo produto, idêntico: as mãos fazem o uso mais simples do produto, e o resultado "
+    "aparece de perto; a voz continua do 1º segundo até por volta dos 7 segundos, sem pausa longa, entre aspas, em "
+    f"português do Brasil, 2 frases curtas com até {PALAVRAS_DA_FALA_INTEIRA} palavras ao todo: a vantagem que se "
+    "vê e a chamada \"clica no carrinho laranja\" (por exemplo: \"O quarto fica cheiroso na hora. Clica no carrinho "
+    "laranja!\"). Escreva no pedido: the same voice-over narration, no face, no subtitles, no text.\n"
+    "- fala: tudo o que a voz fala, em português, as duas partes juntas, como vai sair no vídeo.\n"
+    "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
+    "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
+    "que a IA de vídeo embola), sem marca, sem preço, sem dizer que todo mundo está comprando ou que vai acabar e "
+    "sem prometer o que o produto não faz. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; "
+    "nada perigoso, nojento ou com criança."
+)
 # Bebida alcoólica fica de lado enquanto as diretrizes a deixam em espera (P111): o vídeo nem é gerado, para não
 # gastar o crédito de um vídeo que o rascunho deixaria de lado.
 TRECHO_DA_BEBIDA = ", ou é bebida alcoólica (em espera nas diretrizes)"
@@ -494,12 +548,12 @@ def evitar_os_recentes(recentes):
             "se ele também combinar com este produto, para os vídeos não ficarem num padrão só.")
 
 
-def ler_resposta(texto, longo=False, unboxing=False):
+def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False):
     """
     {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
     veio num JSON ou disse que serve sem escrever o pedido. longo: a resposta do pedido de 16 s (P246 1), com a
     "continuacao" (o pedido do Estender, sem ela também None) e a "fala", no estilo do vendedor; unboxing: a do
-    unboxing de 16 s (P256 2), sem fala.
+    unboxing de 16 s (P256 2), sem fala; maos_e_voz: a do formato mãos e voz (P261 1), com a fala da voz.
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
@@ -515,10 +569,13 @@ def ler_resposta(texto, longo=False, unboxing=False):
     continuacao = " ".join(str(dados.get("continuacao") or "").split())
     if serve and (not prompt or (longo and not continuacao)):
         return None
+    if longo:
+        estilo = (ESTILO_DO_UNBOXING if unboxing else ESTILO_DAS_MAOS_E_VOZ if maos_e_voz
+                  else ESTILO_DO_VENDEDOR)
+    else:
+        estilo = nome_do_estilo(dados.get("estilo"))
     resposta = {"serve": serve, "muda_na_ia": dados.get("muda_na_ia") is True,
-                "motivo": " ".join(str(dados.get("motivo") or "").split())[:200],
-                "estilo": (ESTILO_DO_UNBOXING if unboxing else ESTILO_DO_VENDEDOR) if longo
-                else nome_do_estilo(dados.get("estilo")),
+                "motivo": " ".join(str(dados.get("motivo") or "").split())[:200], "estilo": estilo,
                 "prompt": prompt[:1000], "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
     if longo:
         fala = "" if unboxing else " ".join(str(dados.get("fala") or "").split())[:400]
@@ -580,7 +637,7 @@ def ultimo_foi_unboxing():
 
 
 def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False,
-                          com_comedia=False):
+                          com_comedia=False, maos_e_voz=False):
     """
     O pedido do vídeo para o anúncio já em mãos (o link, o nome e os bytes da foto do anúncio): a foto sem os
     dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
@@ -592,24 +649,30 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     a fala do começo ao fim de cada parte (P255 1, a amostra). com_unboxing e com_comedia (só no de 16 s): a IA
     escolhe pelo produto entre o vendedor, o unboxing (P256 2) e a comédia (P251 1) (formato_do_video); o do unboxing
     vem sem fala. Na comédia, o pedido daqui é o do vendedor, pela foto do anúncio: o da comédia sai da imagem do
-    personagem com o produto (imagem_da_producao), e este fica para quando a imagem não vale.
+    personagem com o produto (imagem_da_producao), e este fica para quando a imagem não vale. maos_e_voz (só no de
+    16 s): o pedido do formato mãos e voz (P261 1, por enquanto só a amostra), sem a escolha do formato.
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
         return None, None
     formato = ESTILO_DO_VENDEDOR
-    if longo and not fala_inteira and (com_unboxing or com_comedia):
+    if longo and maos_e_voz:
+        formato = ESTILO_DAS_MAOS_E_VOZ
+    elif longo and not fala_inteira and (com_unboxing or com_comedia):
         formato = formato_do_video(nome, foto, com_unboxing, com_comedia)
     unboxing = formato == ESTILO_DO_UNBOXING
+    maos = formato == ESTILO_DAS_MAOS_E_VOZ
     if unboxing:
         pedido = PEDIDO_DO_UNBOXING
+    elif maos:
+        pedido = PEDIDO_DAS_MAOS_E_VOZ
     elif longo:
         pedido = PEDIDO_DO_VENDEDOR_FALANDO if fala_inteira else PEDIDO_DO_VENDEDOR
     else:
         pedido = PEDIDO_DA_IA
     resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
         pedido.format(nome=nome, evitar=evitar, bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
-        imagens=[(foto, "image/jpeg")])), longo=longo, unboxing=unboxing)
+        imagens=[(foto, "image/jpeg")])), longo=longo, unboxing=unboxing, maos_e_voz=maos)
     if not resposta:
         return None, None
     if not resposta["serve"]:
@@ -3232,7 +3295,10 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
     paga = (f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
             f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
     if atual.get("longa"):
-        if atual.get("fala_inteira"):
+        if atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ:
+            jeito = "no formato mãos e voz (P261 1: só as mãos usando o produto, com uma voz contando)"
+            de_novo = f", com o mesmo produto da nº {atual['mesmo_de']}" if atual.get("mesmo_de") else ""
+        elif atual.get("fala_inteira"):
             jeito = "com a fala do começo ao fim e o corte do parado (P255 1)"
             de_novo = f", com o mesmo produto da nº {atual['mesmo_de']}" if atual.get("mesmo_de") else ""
         else:
@@ -3249,6 +3315,8 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
             linhas.append(texto_da_fala(fala_ouvida))
         if corte is not None:
             linhas.extend(texto_do_corte(corte, com_fala))
+        elif com_fala is not None:
+            linhas.append(f"⏱️ Com fala: {_segundos(com_fala)} dos {_segundos(atual.get('duracao') or 0)} do vídeo")
     else:
         linhas = [f"🎬 Amostra do vídeo de IA nº {atual.get('numero', 1)} (teste da P236 1)",
                   f"🤖 Modelo: {atual.get('modelo', '')} ({custo} créditos de IA)",
@@ -3263,7 +3331,12 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
                       + (f", {atual['duracao']} s" if atual.get("duracao") else ""))
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
-    if atual.get("fala_inteira"):
+    if atual.get("longa") and atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ:
+        # O formato só entra no vídeo de IA do dia com o OK do Rafael a esta amostra (P261 1).
+        linhas.append("Nada foi postado. Gostando, me diga na conversa: o formato mãos e voz entra no vídeo de IA do "
+                      "dia e no De IA ✨, escolhido pela IA quando combinar com o produto. Até lá, saem como hoje.")
+        linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
+    elif atual.get("fala_inteira"):
         # O vídeo de IA do dia só muda com o OK do Rafael a esta amostra (P255 1).
         linhas.append("Nada foi postado. Gostando, me diga na conversa: o vídeo de IA do dia e o De IA ✨ passam a "
                       "sair assim. Até lá, saem como hoje.")
@@ -3312,6 +3385,13 @@ def mandar_a_amostra():
         else:
             print(f"Amostra: corte do parado: {corte['motivo']}")
         marcar_amostra(com_fala=com_fala, corte={chave: corte[chave] for chave in ("antes", "depois", "cortes")})
+    elif atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ and ouvidas is not None:
+        # A voz do começo ao fim do formato mãos e voz (P261 1), medida como na P255 1, sem o corte do parado.
+        duracao = videos.duracao(atual["arquivo"])
+        if duracao:
+            com_fala = tempo_com_fala(ouvidas, duracao)
+            print(f"Amostra: tempo com fala: {com_fala} s de {round(duracao, 1)} s")
+            marcar_amostra(com_fala=com_fala)
     try:
         ok = avisar_rafael.mandar_video(principal, legenda_da_amostra(atual, conferencia, fala_ouvida, corte, com_fala))
     except Exception as e:
@@ -3346,11 +3426,11 @@ def mandar_a_amostra():
     return 0
 
 
-def _pedido_do_mesmo_produto(anterior, longa, fala_inteira=False):
+def _pedido_do_mesmo_produto(anterior, longa, fala_inteira=False, maos_e_voz=False):
     """
     O pedido novo da IA para o produto da amostra anterior (o link, o nome e a foto dela), com as regras de agora: a
     amostra de 16 s de novo com o mesmo produto, para o Rafael comparar (P248 1); fala_inteira: com a fala do começo
-    ao fim (P255 1). None sem a amostra anterior ou sem o pedido da IA.
+    ao fim (P255 1); maos_e_voz: no formato mãos e voz (P261 1). None sem a amostra anterior ou sem o pedido da IA.
     """
     if not (anterior.get("link") and anterior.get("nome") and anterior.get("item")):
         return None
@@ -3360,22 +3440,24 @@ def _pedido_do_mesmo_produto(anterior, longa, fala_inteira=False):
     except (KeyError, OSError):
         return None
     escolhido, _serve = pedido_para_o_anuncio(anterior["link"], anterior["nome"], foto, longo=longa,
-                                              fala_inteira=fala_inteira)
+                                              fala_inteira=fala_inteira, maos_e_voz=maos_e_voz)
     if not escolhido:
         return None
     return dict(escolhido, item=anterior["item"], valor=anterior.get("valor"), origem=anterior.get("origem"))
 
 
-def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False):
+def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_e_voz=False):
     """
     A próxima amostra do vídeo de IA (P236 1): escolhe o produto como a produção, gera no MODELO_DA_PRODUCAO, baixa
     e manda no privado do Rafael. A que já foi gerada só é baixada e mandada (nunca dois Gerar para a mesma amostra).
     sem_gerar: tudo até o Gerar, sem tocar nele. longa: a amostra do vídeo de 16 s com uma pessoa vendendo o produto
     (P246 1), com o Estender; a que ficou pela metade continua do jeito dela. mesmo: com o produto da amostra
     anterior e um pedido novo da IA (P248 1). fala_inteira (só com longa): a de 16 s com a fala do começo ao fim de
-    cada parte e o corte do parado (P255 1). 0 deu certo, 1 parou. Só rótulos fixos e números no log.
+    cada parte e o corte do parado (P255 1). maos_e_voz (só com longa, sem fala_inteira): a de 16 s no formato mãos e
+    voz (P261 1). 0 deu certo, 1 parou. Só rótulos fixos e números no log.
     """
     fala_inteira = fala_inteira and longa
+    maos_e_voz = maos_e_voz and longa and not fala_inteira
     atual = amostra_guardada()
     if atual.get("estado") == "baixado" and os.path.exists(atual.get("arquivo") or ""):
         print(f"Amostra nº {atual.get('numero', 1)}: já baixada; falta mandar")
@@ -3389,7 +3471,7 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False):
     else:
         numero_anterior = int(atual.get("numero") or 0)
         if mesmo:
-            escolhido, origem = _pedido_do_mesmo_produto(atual, longa, fala_inteira), ""
+            escolhido, origem = _pedido_do_mesmo_produto(atual, longa, fala_inteira, maos_e_voz), ""
             if not escolhido:
                 print("Amostra: sem a amostra anterior ou sem o pedido novo da IA para o mesmo produto; "
                       "nada foi tocado")
@@ -3399,7 +3481,8 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False):
             import robo_shopee_video as robo
             try:
                 escolhido, origem, _restam = robo.escolher_para_o_video_de_ia(fora=amostras_feitas(), amostra=True,
-                                                                              longo=longa, fala_inteira=fala_inteira)
+                                                                              longo=longa, fala_inteira=fala_inteira,
+                                                                              maos_e_voz=maos_e_voz)
             except api_shopee.BuscaNegada as e:
                 print(f"Amostra: a API da Shopee negou a lista de produtos ({e}); nada foi tocado")
                 return 1
@@ -3423,6 +3506,8 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False):
             atual.update(longa=True, continuacao=escolhido.get("continuacao", ""), fala=escolhido.get("fala", ""))
             if fala_inteira:
                 atual.update(fala_inteira=True)
+            if maos_e_voz:
+                atual.update(formato=ESTILO_DAS_MAOS_E_VOZ)
             guardar(amostra=atual)
         else:
             guardar(amostra=atual, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
@@ -3431,7 +3516,8 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False):
         print(f"Amostra nº {atual['numero']}: {escolha}; "
               f"estilo {escolhido['estilo']}; pedido da IA com {len(escolhido['prompt'].split())} palavras"
               + (f" e a continuação com {len(atual['continuacao'].split())}" if longa else "")
-              + ("; com a fala do começo ao fim (P255 1)" if fala_inteira else ""))
+              + ("; com a fala do começo ao fim (P255 1)" if fala_inteira else "")
+              + ("; no formato mãos e voz (P261 1)" if maos_e_voz else ""))
     if not celular_robo.conectado():
         print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
         return 1
@@ -3570,16 +3656,19 @@ def main(argumentos):
         finally:
             logging.disable(logging.NOTSET)
     opcoes = set(argumentos[1:])
-    if argumentos and ((argumentos[0] == "teste" and opcoes <= {"--sem-gerar"})
-                       or (argumentos[0] == "amostra"
-                           and opcoes <= {"--sem-gerar", "--longa", "--mesmo", "--fala-inteira"})):
+    # O formato mãos e voz (P261 1) é só da amostra de 16 s e tem a voz dele: nem sem o --longa, nem com a fala inteira.
+    maos_sem_jeito = "--maos-e-voz" in opcoes and ("--longa" not in opcoes or "--fala-inteira" in opcoes)
+    if argumentos and not maos_sem_jeito and ((argumentos[0] == "teste" and opcoes <= {"--sem-gerar"})
+                                             or (argumentos[0] == "amostra"
+                                                 and opcoes <= {"--sem-gerar", "--longa", "--mesmo", "--fala-inteira",
+                                                                "--maos-e-voz"})):
         # Os módulos logam nomes e links; aqui o log é público, e o resultado sai pelos prints.
         logging.disable(logging.CRITICAL)
         try:
             if argumentos[0] == "teste":
                 return teste(sem_gerar="--sem-gerar" in opcoes)
             return amostra(sem_gerar="--sem-gerar" in opcoes, longa="--longa" in opcoes, mesmo="--mesmo" in opcoes,
-                           fala_inteira="--fala-inteira" in opcoes)
+                           fala_inteira="--fala-inteira" in opcoes, maos_e_voz="--maos-e-voz" in opcoes)
         except Exception as e:
             # Só o tipo: a mensagem de um erro inesperado pode trazer o nome do arquivo do vídeo.
             print(f"Flow: erro inesperado ({type(e).__name__})")
