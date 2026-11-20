@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from aiogram.exceptions import TelegramNetworkError
 from cryptography.fernet import Fernet, InvalidToken
 
 import backup_dados
@@ -144,9 +145,12 @@ def test_copia_cifrada_so_abre_com_a_senha_dela(tmp_path, monkeypatch):
     banco.close()
 
 
-def _bot_falso(bm, monkeypatch, falhar_documento=False):
-    """O bot do teste: guarda as mensagens, os arquivos (lidos na hora do envio) e o que apagou."""
-    enviados = {"mensagens": [], "documentos": [], "apagados": []}
+def _bot_falso(bm, monkeypatch, falhar_documento=False, falhas_de_rede=0):
+    """
+    O bot do teste: guarda as mensagens, os arquivos (lidos na hora do envio) e o que apagou.
+    Os primeiros falhas_de_rede envios do arquivo caem como a rede até o Telegram cai.
+    """
+    enviados = {"mensagens": [], "documentos": [], "apagados": [], "quedas": 0}
     ids = iter(range(100, 200))
 
     async def send_message(chat, texto, **k):
@@ -156,6 +160,9 @@ def _bot_falso(bm, monkeypatch, falhar_documento=False):
     async def send_document(chat, documento, **k):
         if falhar_documento:
             raise ConnectionError("rede")
+        if enviados["quedas"] < falhas_de_rede:
+            enviados["quedas"] += 1
+            raise TelegramNetworkError(method=None, message="ClientConnectorError: Cannot connect to host")
         with open(documento.path, "rb") as f:
             enviados["documentos"].append((f.read(), documento.filename, k))
         return SimpleNamespace(message_id=next(ids))
@@ -240,6 +247,42 @@ def test_copia_que_nao_sai_avisa_e_nao_deixa_o_arquivo(bm, monkeypatch, tmp_path
     assert not glob.glob(str(destino / f"*{backup_dados.SUFIXO_CIFRADO}"))
     # O backup do servidor ficou feito.
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = 'backup diário'") == ("feito",)
+
+
+def test_copia_que_a_rede_derruba_tenta_de_novo_e_so_avisa_na_ultima(bm, monkeypatch, tmp_path):
+    # A rede até o Telegram caiu de madrugada (o Viral e a cópia juntos, uns 40 min): a cópia
+    # volta daqui a pouco com o mesmo pacote, sem aviso; só a última vez que não sai avisa.
+    _senha_no_tmp(monkeypatch, tmp_path)
+    destino = _backup_de_teste(bm, monkeypatch, tmp_path)
+    enviados = _bot_falso(bm, monkeypatch, falhas_de_rede=1)
+
+    rodar(bm.backup_diario())
+
+    volta = bm.scheduler.get_job("copia_do_backup_de_novo")
+    assert volta is not None and volta.args[1] == 2 and os.path.exists(volta.args[0])
+    espera = (volta.trigger.run_date - datetime.now(bm.fuso_horario)).total_seconds() / 60
+    assert bm.ESPERA_DA_COPIA_NA_REDE_MIN - 1 < espera <= bm.ESPERA_DA_COPIA_NA_REDE_MIN
+    assert not any("cópia do backup não foi" in t for t, _m in enviados["mensagens"])
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     bm.PROCESSO_DA_COPIA) == ("adiada (rede)", "1ª vez", None)
+    assert consultar("SELECT COUNT(*) FROM erros_logs")[0] == 0
+    assert not glob.glob(str(destino / f"*{backup_dados.SUFIXO_CIFRADO}"))
+    bm.scheduler.remove_job("copia_do_backup_de_novo")
+
+    # Na volta, com a rede de pé, a cópia sai do mesmo pacote.
+    rodar(bm.mandar_copia_fora(*volta.args))
+    assert len(enviados["documentos"]) == 1 and enviados["documentos"][0][1].endswith(".cifrado")
+    assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ? AND resultado = 'enviada'",
+                     bm.PROCESSO_DA_COPIA)[0] == 1
+
+    # A última vez que a rede não deixa sair avisa, como antes, e não marca outra volta.
+    enviados = _bot_falso(bm, monkeypatch, falhas_de_rede=1)
+    rodar(bm.mandar_copia_fora(volta.args[0], bm.TENTATIVAS_DA_COPIA_NA_REDE))
+    assert bm.scheduler.get_job("copia_do_backup_de_novo") is None
+    assert any("cópia do backup não foi" in t for t, _m in enviados["mensagens"])
+    assert consultar("SELECT COUNT(*) FROM registro_processos WHERE processo = ? AND resultado = 'falhou'",
+                     bm.PROCESSO_DA_COPIA)[0] == 1
+    assert not glob.glob(str(destino / f"*{backup_dados.SUFIXO_CIFRADO}"))
 
 
 def test_guardei_a_senha_apaga_a_mensagem_dela(bm):
