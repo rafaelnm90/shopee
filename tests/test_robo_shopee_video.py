@@ -9490,7 +9490,8 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
         item = link.rsplit("/", 1)[-1]
         return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
 
-    def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False):
+    def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False,
+               maos_e_voz=False):
         item = link.split("curto")[-1]
         foram.append(item)
         assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
@@ -9577,7 +9578,7 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, longos, falas, unboxings = robo.flow.pedido_para_o_anuncio, [], [], []
 
-    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False):
         longos.append(longo)
         falas.append(fala_inteira)
         unboxings.append(com_unboxing)
@@ -9609,7 +9610,7 @@ def test_video_de_ia_oferece_a_comedia_so_quando_ela_pode(monkeypatch):
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, comedias = robo.flow.pedido_para_o_anuncio, []
 
-    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False):
         comedias.append(com_comedia)
         escolhido, serve = pedido(*argumentos, longo=longo)
         return (dict(escolhido, formato=robo.flow.ESTILO_DA_COMEDIA) if com_comedia else escolhido), serve
@@ -9624,6 +9625,25 @@ def test_video_de_ia_oferece_a_comedia_so_quando_ela_pode(monkeypatch):
     assert comedias == [True, False, False]
     linhas = _registro_do_video_de_ia()
     assert linhas[0][1].endswith("; estilo fala; formato comedia_16s") and linhas[1][1].endswith("; estilo fala")
+
+
+def test_amostra_maos_e_voz_pede_o_formato_novo_e_o_video_do_dia_continua_igual(monkeypatch):
+    # Escolha do Rafael (20/11, P261 1): o formato mãos e voz vai primeiro numa amostra, só no privado dele; o vídeo de
+    # IA do dia continua com a escolha de antes (o vendedor, o unboxing ou a comédia) até o OK dele.
+    _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
+    pedido, maos, unboxings = robo.flow.pedido_para_o_anuncio, [], []
+
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False):
+        maos.append(maos_e_voz)
+        unboxings.append(com_unboxing)
+        return pedido(*argumentos, longo=longo)
+
+    monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", anotar)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"), amostra=True,
+                                                                    longo=True, maos_e_voz=True)
+    assert escolhido["item"] == "13"
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:10"))
+    assert maos == [True, False] and unboxings == [False, True]
 
 
 def test_video_de_ia_anota_a_imagem_do_personagem_e_o_rascunho_leva_o_personagem(monkeypatch, avisos, tmp_path):

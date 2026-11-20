@@ -1257,7 +1257,7 @@ def _escolha_da_amostra(monkeypatch):
     import robo_shopee_video as robo
     pedidos = []
 
-    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False):
+    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False, maos_e_voz=False):
         pedidos.append((list(fora), amostra))
         item = str(455 + len(pedidos))
         return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
@@ -1321,13 +1321,13 @@ def test_amostra_ja_gerada_so_baixa_e_a_que_nao_foi_ao_privado_vai_sem_gerar(cel
 def test_amostra_sem_produto_ou_com_a_lista_negada_nao_toca_no_celular(celular, monkeypatch, capsys):
     import robo_shopee_video as robo
 
-    def negada(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False):
+    def negada(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False, maos_e_voz=False):
         raise robo.api_shopee.BuscaNegada("código 10.000")
 
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", negada)
     assert flow.amostra() == 1
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia",
-                        lambda agora=None, fora=(), amostra=False, longo=False, fala_inteira=False: (
+                        lambda agora=None, fora=(), amostra=False, longo=False, fala_inteira=False, maos_e_voz=False: (
                             None, "os produtos em alta da Shopee", False))
     assert flow.amostra() == 1
     saida = capsys.readouterr().out
@@ -1372,11 +1372,12 @@ def _escolha_longa(monkeypatch):
     import robo_shopee_video as robo
     pedidos = []
 
-    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False):
-        pedidos.append((list(fora), amostra, longo) + (("fala inteira",) if fala_inteira else ()))
+    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False, maos_e_voz=False):
+        pedidos.append((list(fora), amostra, longo) + (("fala inteira",) if fala_inteira else ())
+                       + (("mãos e voz",) if maos_e_voz else ()))
         item = str(455 + len(pedidos))
         return ({"id": "ia:2026-11-16", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Copo Térmico Inox",
-                 "foto": _jpeg(), "estilo": flow.ESTILO_DO_VENDEDOR,
+                 "foto": _jpeg(), "estilo": flow.ESTILO_DAS_MAOS_E_VOZ if maos_e_voz else flow.ESTILO_DO_VENDEDOR,
                  "prompt": "A woman holds the exact tumbler and says the hook.", "continuacao": CONTINUACAO,
                  "fala": "Gelo que dura o dia todo? Olha esse copo! Garanta já o seu!",
                  "cena": "Uma moça vende o copo na cozinha.", "item": item, "valor": 6.5, "posicao": 1,
@@ -2051,6 +2052,80 @@ def test_amostra_com_a_fala_inteira_sem_parado_vai_so_o_original(celular, monkey
     assert caminho.endswith("amostra.mp4") and montagens == []
     assert "✂️ Corte do parado: nada parado para cortar" in legenda and "⏱️ Com fala: 15,4 s dos 16,0 s" in legenda
     assert "corte do parado: nada parado para cortar" in capsys.readouterr().out
+
+
+# --- O formato mãos e voz, só na amostra até o OK do Rafael (P261 1) ---
+
+def test_pedido_das_maos_e_voz_tem_so_as_maos_a_voz_e_nenhuma_loja_lotada(monkeypatch):
+    # Escolha do Rafael (20/11, P261 1): o formato do vídeo que ele mandou, "foco mais no produto em si": só as mãos,
+    # a câmera sempre no produto, o uso mais simples com o resultado à vista e uma voz contando do começo ao fim. A
+    # cena da loja lotada do vídeo dele fica de fora (inventada, com placa de preço).
+    maos = flow.PEDIDO_DAS_MAOS_E_VOZ.format(nome="Umidificador com Essências", evitar="", bebida="")
+    for trecho in ("só as mãos aparecem, sem rosto", "voice-over narration", "no one speaks on camera",
+                   f"2 frases curtas com até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras ao todo",
+                   "do 1º segundo até por volta dos 7 segundos", "um uso só, o mais simples do produto",
+                   "o resultado aparece logo", "clica no carrinho laranja",
+                   "sem dizer que todo mundo está comprando ou que vai acabar", "sem preço",
+                   "Umidificador com Essências", '{"serve": true ou false'):
+        assert trecho in maos, trecho
+    pedidos = []
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "Hands show the humidifier.", '
+                '"continuacao": "Same table, the hands turn it on.", '
+                '"fala": "Gente, olha esse umidificador! Clica no carrinho laranja!", "cena": "c"}')
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    link = "https://s.shopee.com.br/abc"
+    escolhido, serve = flow.pedido_para_o_anuncio(link, "Umidificador", _jpeg(), longo=True, com_unboxing=True,
+                                                  maos_e_voz=True)
+    # Um pedido só (sem a escolha do formato), o das mãos e voz, e a fala da voz fica para a conferência.
+    assert serve is True and len(pedidos) == 1 and "voice-over narration" in pedidos[0]
+    assert escolhido["estilo"] == escolhido["formato"] == flow.ESTILO_DAS_MAOS_E_VOZ
+    assert escolhido["fala"] == "Gente, olha esse umidificador! Clica no carrinho laranja!"
+    assert escolhido["continuacao"] == "Same table, the hands turn it on."
+    # Sem o pedido do formato, o de 16 s continua o do vendedor.
+    flow.pedido_para_o_anuncio(link, "Umidificador", _jpeg(), longo=True)
+    assert "voice-over narration" not in pedidos[-1] and "vende o produto" in pedidos[-1]
+
+
+def test_amostra_maos_e_voz_vai_so_ao_privado_com_o_tempo_com_fala(celular, monkeypatch, capsys):
+    # P261 1: a amostra do formato mãos e voz vai só ao privado do Rafael, sem o corte do parado, com o tempo em que a
+    # voz fala; o vídeo de IA do dia só ganha o formato com o OK dele.
+    pedidos = _escolha_longa(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=16)
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_HIDRATANTE)
+    montagens = _corte_falso(monkeypatch)
+    assert flow.main(["amostra", "--longa", "--maos-e-voz"]) == 0
+    assert pedidos == [([], True, True, "mãos e voz")] and montagens == []
+    assert celular.geracoes == 1 and celular.extensoes == 1
+    (caminho, legenda), = celular.mandados
+    assert caminho.endswith("amostra.mp4")
+    for trecho in ("Amostra nº 1 do vídeo de IA de 16 s no formato mãos e voz (P261 1",
+                   "⏱️ Com fala: 6,9 s dos 16,0 s do vídeo",
+                   "Gostando, me diga na conversa: o formato mãos e voz entra no vídeo de IA do dia"):
+        assert trecho in legenda, trecho
+    for fora in ("O vídeo de IA do dia sai normalmente", "Corte do parado", "Parado cortado"):
+        assert fora not in legenda, fora
+    atual = flow.amostra_guardada()
+    assert atual["formato"] == flow.ESTILO_DAS_MAOS_E_VOZ and atual["estado"] == "enviado"
+    assert atual["com_fala"] == 6.9 and "corte" not in atual and not atual.get("fala_inteira")
+    # Não vira rascunho nem muda o vídeo de IA do dia.
+    assert flow.producao() == {} and flow.itens_gerados() == []
+    saida = capsys.readouterr().out
+    for trecho in ("no formato mãos e voz (P261 1)", "tempo com fala: 6.9 s de 16.0 s"):
+        assert trecho in saida, trecho
+    for privado in ("Copo", "Gelo", "Hidrata", "shopee.com.br", "6,50"):
+        assert privado not in saida, privado
+
+
+def test_amostra_maos_e_voz_so_com_a_de_16_s_e_sem_a_fala_inteira(celular, monkeypatch):
+    # O formato tem a voz dele e é de 16 s: sem o --longa ou junto da fala inteira (P255 1), nada é tocado.
+    pedidos = _escolha_longa(monkeypatch)
+    assert flow.main(["amostra", "--maos-e-voz"]) == 2
+    assert flow.main(["amostra", "--longa", "--fala-inteira", "--maos-e-voz"]) == 2
+    assert pedidos == [] and celular.geracoes == 0 and celular.mandados == []
 
 
 # --- O unboxing como mais um formato do vídeo de IA de 16 s (P256 2) ---
