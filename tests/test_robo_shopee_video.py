@@ -54,6 +54,9 @@ def sem_espera(monkeypatch):
     # O vídeo de IA do dia (P232 1) também tem testes próprios, no fim deste arquivo.
     monkeypatch.setattr(robo, "video_de_ia_pendente", lambda config, agora=None: False)
     monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
+    # O nome da IA nos produtos e a lista de cupons (P265 1) têm testes próprios: aqui, nenhum nome e nenhuma lista.
+    monkeypatch.setattr(robo, "nomes_da_ia", lambda nomes: {})
+    monkeypatch.setattr(robo, "_olhar_os_cupons", lambda d, video: None)
     # No servidor a tabela já existe (o bot_mestre cria).
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
 
@@ -1573,7 +1576,7 @@ def test_ver_produtos_com_o_produto_trocado_leva_o_link_e_a_foto_da_troca(monkey
         return ""
 
     def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
-                  voltaram=None):
+                  voltaram=None, novos=None, anuncios=None, cupons=False):
         anexar.update(nomes=list(nomes), de_fora=curtidos_de_fora)
         return list(nomes), list(range(len(nomes)))
 
@@ -4490,7 +4493,7 @@ def test_rascunho_de_ver_produtos_com_produto_a_mais_leva_o_album_e_a_medicao(mo
     anexar = {}
 
     def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
-                  voltaram=None):
+                  voltaram=None, novos=None, anuncios=None, cupons=False):
         anexar.update(nomes=list(nomes), a_mais=set(a_mais))
         return list(nomes), list(range(len(nomes)))
 
@@ -7410,7 +7413,7 @@ def test_ver_produtos_com_o_trocado_fora_de_minhas_curtidas_leva_o_do_criador(mo
     anexar = {}
 
     def anexar_os(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
-                  voltaram=None):
+                  voltaram=None, novos=None, anuncios=None, cupons=False):
         anexar.update(nomes=list(nomes), no_lugar=dict(do_criador or {}))
         voltaram.add(0)
         return [PRODUTO_B, PRODUTO_A], [0, 1]
@@ -9169,7 +9172,7 @@ def _celular_do_refazer(monkeypatch, passos, anexados=None):
     monkeypatch.setattr(robo, "seguir", lambda d, caminho: None)
 
     def anexar(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
-               voltaram=None):
+               voltaram=None, novos=None, anuncios=None, cupons=False):
         passos.append(("anexar", list(nomes), tuple(a_mais)))
         feitos = list(range(len(nomes))) if anexados is None else anexados
         return [nomes[i] for i in feitos], feitos
@@ -10631,3 +10634,259 @@ def test_linha_de_comando_do_preparar_com_a_origem(monkeypatch):
     assert robo.main(["--preparar"]) == 0 and rodadas[-1]["de"] is None
     assert robo.main(["--preparar", "--de", "outra"]) == 2 and robo.main(["--rodada", "--de", "ia"]) == 2
     assert len(rodadas) == 2
+
+
+# --- O nome da IA e o cupom na janela do produto (P265 1) ---
+# O nome da IA e a lista de cupons ficam de fora dos outros testes (sem_espera): aqui, os de verdade.
+NOMES_DA_IA = robo.nomes_da_ia
+OLHAR_OS_CUPONS = robo._olhar_os_cupons
+
+
+def _no_da_janela(texto="", caixa=(0, 0, 10, 10), classe="android.widget.TextView", clicavel=False,
+                  pacote="com.shopee.br", ident=""):
+    x1, y1, x2, y2 = caixa
+    rid = f' resource-id="{pacote}:id/{ident}"' if ident else ""
+    return (f'<node text="{escape(texto, {chr(34): "&quot;"})}" class="{classe}" package="{pacote}"{rid} '
+            f'clickable="{"true" if clicavel else "false"}" bounds="[{x1},{y1}][{x2},{y2}]"></node>')
+
+
+class JanelaDoProduto:
+    """
+    A janela "Editar informações do produto" do Adicionar, como o Rafael gravou em 21/11: o campo Nome do produto,
+    o aviso de nome curto (menos de 10 letras), o Selecionar Cupom, que abre a tela dos cupons, e o Feito. O voltar
+    fecha o teclado, sai da tela dos cupons ou, sem nenhum dos dois, fecha a janela.
+    """
+    CAMPO = (58, 1924, 1049, 1971)
+    SELECIONAR = (718, 2159, 1049, 2210)
+    CRIAR_CUPOM = (40, 2200, 1040, 2300)
+
+    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False):
+        self.tela, self.campo, self.teclado, self.foco = "janela", "", False, False
+        self.escreve, self.cupom_vazio, self.voltar_fecha = escreve, cupom_vazio, voltar_fecha
+        self.toques, self.teclas = [], []
+
+    def dump_hierarchy(self):
+        if self.tela == "cupons":
+            nos = [_no_da_janela("Adicionar Cupom", (100, 150, 450, 210)),
+                   _no_da_janela("Criar e adicionar cupom ao seu vídeo para obter mais visualizações e pedidos"
+                                 if self.cupom_vazio else "Cupom de desconto da loja", (100, 600, 980, 700)),
+                   _no_da_janela("Adicionar Cupom", self.CRIAR_CUPOM, clicavel=True)]
+        elif self.tela == "janela":
+            nos = [_no_da_janela("Editar informações do produto", (253, 1316, 828, 1369)),
+                   _no_da_janela("Nome do produto", (32, 1837, 1049, 1879)),
+                   _no_da_janela(self.campo, self.CAMPO, classe="android.widget.EditText", clicavel=True),
+                   _no_da_janela("Adicionar cupom", (32, 2164, 313, 2206)),
+                   _no_da_janela("", self.SELECIONAR, classe="android.view.ViewGroup", clicavel=True),
+                   _no_da_janela("Selecionar Cupom", (718, 2159, 1018, 2210)),
+                   _no_da_janela("Feito", (494, 2289, 588, 2342))]
+            if 0 < len(self.campo) < 10:
+                nos.append(_no_da_janela(f"{10 - len(self.campo)} caracteres a mais necessários",
+                                         (64, 1980, 600, 2010)))
+        else:
+            nos = [_no_da_janela("Adicionar Produto", (100, 150, 450, 210))]
+        if self.teclado:
+            nos.append(_no_da_janela("q", (0, 1500, 100, 1600), pacote="com.google.android.inputmethod.latin",
+                                     ident="key_pos_0_0"))
+        raiz = '<node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+        return f'<hierarchy>{raiz}{"".join(nos)}</node></hierarchy>'
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        self.toques.append((x, y))
+        if self.tela == "janela" and ps._dentro((x, y), self.CAMPO):
+            self.teclado = self.foco = True
+        elif self.tela == "janela" and ps._dentro((x, y), self.SELECIONAR):
+            self.tela = "cupons"
+        elif self.tela == "cupons" and ps._dentro((x, y), self.CRIAR_CUPOM):
+            raise AssertionError("tocou no Adicionar Cupom, que cria cupom")
+
+    def __call__(self, **seletor):
+        janela = self
+
+        class Campo:
+            exists = janela.foco
+
+            def set_text(self, texto):
+                if janela.escreve or not texto:
+                    janela.campo = texto
+        return Campo()
+
+    def send_keys(self, texto):
+        raise AssertionError("o nome vai pelo campo em foco")
+
+    def press(self, tecla, meta=None):
+        self.teclas.append(tecla)
+        if self.teclado and not self.voltar_fecha:
+            self.teclado = self.foco = False
+        elif self.tela == "cupons":
+            self.tela = "janela"
+        else:
+            self.tela, self.teclado = "lista", False
+
+
+def _registro_do_nome():
+    return [(r[2], r[3]) for r in robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_NOME,
+                                                                     "2000-01-01 00:00:00")]
+
+
+def _registro_do_cupom():
+    return [(r[2], r[3]) for r in robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_CUPOM,
+                                                                     "2000-01-01 00:00:00")]
+
+
+NOME_DA_IA = "Caneca Geek Colecionável para Presente ☕"
+
+
+def test_nome_da_ia_fica_no_campo_do_produto():
+    # Vídeo do Rafael das 15:26 (21/11): o nome do produto trocado na janela do Adicionar, antes do Feito.
+    janela = JanelaDoProduto()
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) is True
+    assert janela.campo == NOME_DA_IA and janela.tela == "janela" and not janela.teclado
+    # O teclado fecha pelo voltar (ele cobre metade da janela), uma vez só: a janela continua aberta.
+    assert janela.teclas == ["back"]
+    assert _registro_do_nome() == [("nome da IA no produto", f"{robo.assistente.tamanho_no_app(NOME_DA_IA)} letras")]
+
+
+def test_nome_da_ia_que_nao_fica_deixa_o_do_anuncio():
+    # O campo que não aceita o texto fica vazio: vazio, vai o nome do anúncio, como antes, e o produto segue.
+    janela = JanelaDoProduto(escreve=False)
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) is False
+    assert janela.campo == "" and janela.tela == "janela"
+    assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: o campo vazio")]
+
+
+def test_nome_curto_volta_ao_do_anuncio():
+    # Com menos de 10 letras, o app avisa "N caracteres a mais necessários": o robô apaga e segue com o do anúncio.
+    janela = JanelaDoProduto()
+    assert robo._trocar_o_nome(janela, "Caneca") is False
+    assert janela.campo == ""
+    assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: com o aviso de nome curto")]
+
+
+def test_janela_que_fecha_no_nome_para_o_rascunho():
+    # O voltar que fecha a janela no lugar do teclado: o produto não foi anexado, e o rascunho para.
+    janela = JanelaDoProduto(voltar_fecha=True)
+    with pytest.raises(robo.Parada) as erro:
+        robo._trocar_o_nome(janela, NOME_DA_IA)
+    assert erro.value.motivo == robo.MOTIVO_DA_JANELA_DO_NOME
+
+
+def test_lista_de_cupons_vazia_volta_para_a_janela(avisos):
+    # Vídeo do Rafael das 15:27 (21/11): sem cupom, a tela só convida a criar um; o robô volta sem tocar nela.
+    janela = JanelaDoProduto()
+    OLHAR_OS_CUPONS(janela, {"link": LINK})
+    assert janela.tela == "janela" and janela.teclas == ["back"] and len(janela.toques) == 1
+    assert _registro_do_cupom() == [("lista sem cupom", "")] and avisos == []
+
+
+def test_lista_com_cupom_guarda_a_tela_uma_vez(monkeypatch, avisos):
+    # A lista que não vem vazia ainda não tem o toque de escolher: a tela vai num caso para o Claude e o Rafael é
+    # avisado uma vez; o post segue sem cupom, sem tocar em nada da lista.
+    guardados = []
+    monkeypatch.setattr(robo.casos_robo, "guardar", lambda d, acao, resultado, motivo, **k: guardados.append(acao))
+    for _ in range(2):
+        janela = JanelaDoProduto(cupom_vazio=False)
+        OLHAR_OS_CUPONS(janela, {"link": LINK})
+        assert janela.tela == "janela" and len(janela.toques) == 1
+    assert guardados == ["cupom"] and len(avisos) == 1 and "cupom" in avisos[0]
+    assert [r[0] for r in _registro_do_cupom()] == ["lista sem o aviso de vazia"] * 2
+
+
+def test_adicionar_cupom_nunca_e_tocado():
+    # O Adicionar Cupom da tela dos cupons cria cupom: ele está entre os botões que o robô nunca toca.
+    janela = JanelaDoProduto()
+    janela.tela = "cupons"
+    xml = janela.dump_hierarchy()
+    x, y = (JanelaDoProduto.CRIAR_CUPOM[0] + JanelaDoProduto.CRIAR_CUPOM[2]) // 2, 2250
+    assert robo.ps.proibido_no_ponto(xml, x, y) and robo.ps.texto_proibido("Adicionar Cupom")
+
+
+def test_anexar_leva_o_nome_da_ia_e_guarda_o_do_anuncio(monkeypatch):
+    # Cada produto procura o seu nome da IA; o que fica entra no lugar do nome da lista, que vai para os anúncios.
+    # A lista de cupons é olhada só na janela do 1º produto.
+    monkeypatch.setattr(robo, "seguir", lambda d, caminho: None)
+    monkeypatch.setattr(robo, "tocar", lambda d, alvo, espera: None)
+    monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1, nome="": True)
+    trocados, cupons = [], []
+    monkeypatch.setattr(robo, "_trocar_o_nome",
+                        lambda d, novo, anuncio="": trocados.append(novo) or novo != "Nome que não fica")
+    monkeypatch.setattr(robo, "_olhar_os_cupons", lambda d, video: cupons.append(video["link"]))
+
+    def adicionar(d, video, anexados=None, **outros):
+        anexados.append(f"{video['produto']} como a lista mostra")
+        return True, "anexado"
+
+    monkeypatch.setattr(robo.ps, "adicionar_produto", adicionar)
+    anuncios = []
+    anexados, no_post = robo.anexar_os_produtos(
+        None, {"link": LINK}, ["A", "B", "C"], a_mais={1, 2},
+        novos={"A": "Nome da IA para o A", "C": "Nome que não fica"}, anuncios=anuncios, cupons=True)
+    assert anexados == ["Nome da IA para o A", "B como a lista mostra", "C como a lista mostra"]
+    assert anuncios == ["A como a lista mostra", "B como a lista mostra", "C como a lista mostra"]
+    assert no_post == [0, 1, 2] and trocados == ["Nome da IA para o A", "Nome que não fica"] and cupons == [LINK]
+
+
+def test_rascunho_guarda_o_anuncio_e_o_tirar_produto_tambem(monkeypatch):
+    # O post mostra o nome da IA (produtos); o robô procura cada um pelo nome do anúncio (anuncios), também depois
+    # do Tirar Produto ➖, e o refazer leva de novo o nome da IA de cada um.
+    ident = robo.criar("v1")
+    robo.atualizar(ident, produtos=["Nome da IA 1", "Nome do anúncio 2", "Nome da IA 3"],
+                   anuncios=["Nome do anúncio 1", "Nome do anúncio 2", "Nome do anúncio 3"],
+                   link=LINK, mais_produtos=[{"nome": "2", "link": "https://s.shopee.com.br/2"},
+                                             {"nome": "3", "link": "https://s.shopee.com.br/3"}], tirar=[1])
+    rascunho = robo.pegar(ident)
+    assert robo.anuncios_do(rascunho) == ["Nome do anúncio 1", "Nome do anúncio 2", "Nome do anúncio 3"]
+    assert robo.nomes_da_ia_do(rascunho) == {"Nome do anúncio 1": "Nome da IA 1", "Nome do anúncio 3": "Nome da IA 3"}
+    ficam = robo.com_os_que_ficam(rascunho)
+    assert ficam["produtos"] == ["Nome do anúncio 2", "Nome da IA 3"]
+    assert robo.campos_que_ficam(ficam)["anuncios"] == ["Nome do anúncio 2", "Nome do anúncio 3"]
+    # O rascunho de antes, sem os anúncios: o nome do anúncio é o próprio produto.
+    robo.atualizar(ident, anuncios=[])
+    assert robo.anuncios_do(robo.pegar(ident)) == ["Nome da IA 1", "Nome do anúncio 2", "Nome da IA 3"]
+    assert robo.nomes_da_ia_do(robo.pegar(ident)) == {}
+
+
+def test_nomes_da_ia_sem_resposta_seguem_os_do_anuncio(monkeypatch):
+    # A IA que não responde não para o rascunho: cada produto vai com o nome do anúncio, como antes.
+    async def sem_resposta(nomes):
+        raise RuntimeError("sem rede")
+
+    monkeypatch.setattr(robo.assistente, "nomes_no_video", sem_resposta)
+    assert NOMES_DA_IA(["A", "B"]) == {}
+    assert _registro_do_nome() == [("nomes da IA pedidos", "0 de 2")]
+
+
+def test_refazer_procura_pelo_anuncio_e_leva_o_nome_da_ia(monkeypatch, avisos):
+    # P265 1: o rascunho refeito pelo Editar ✏️ curte e procura cada produto pelo nome do anúncio e leva de novo o
+    # nome da IA no cartão; o que fica na tela final é o que o rascunho guarda.
+    ativar(robo_inicio=0, robo_fim=24)
+    mais = [{"nome": "Vestido de Outra Loja", "link": "https://s.shopee.com.br/outra", "endereco": ""}]
+    ident = _editavel(monkeypatch, criado="2026-10-22 09:00:00")
+    robo.atualizar(ident, produtos=["Vestido Florido Leve para o Verão 👗", mais[0]["nome"]],
+                   anuncios=[VESTIDO, mais[0]["nome"]], mais_produtos=mais)
+    nova = os.path.join(robo.PASTA_RASCUNHOS, f"{ident}_nova_2.mp4")
+    with open(nova, "wb") as f:
+        f.write(b"nova")
+    robo.atualizar(ident, estado="refazer", nova_versao={"arquivo": nova, "versao": 2, "miniatura": "esquerda",
+                                                          "legenda": False})
+    passos, recebidos, conferidos = [], {}, []
+    _celular_do_refazer(monkeypatch, passos)
+
+    def anexar(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
+               voltaram=None, novos=None, anuncios=None, cupons=False):
+        recebidos.update(nomes=list(nomes), novos=dict(novos or {}), cupons=cupons)
+        anuncios.extend(nomes)
+        return [(novos or {}).get(nome, nome) for nome in nomes], list(range(len(nomes)))
+
+    monkeypatch.setattr(robo, "anexar_os_produtos", anexar)
+    monkeypatch.setattr(robo.ps, "conferir_tela_final",
+                        lambda d, video: conferidos.append(list(video["produtos"])) or (True, "tela final confere"))
+    resultado = robo.refazer_no_app(_Tela(), robo.pegar(ident), momento("2026-10-22 15:00"))
+    assert resultado == "rascunho editado refeito no app"
+    assert passos[0] == ("curtir", [(VESTIDO, LINK, True), (mais[0]["nome"], mais[0]["link"], False)])
+    assert recebidos == {"nomes": [VESTIDO, mais[0]["nome"]], "novos": {VESTIDO: "Vestido Florido Leve para o Verão 👗"},
+                         "cupons": False}
+    assert conferidos == [["Vestido Florido Leve para o Verão 👗", mais[0]["nome"]]]
+    refeito = robo.pegar(ident)
+    assert refeito["produtos"] == ["Vestido Florido Leve para o Verão 👗", mais[0]["nome"]]
+    assert refeito["anuncios"] == [VESTIDO, mais[0]["nome"]]

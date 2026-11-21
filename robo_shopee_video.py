@@ -6,8 +6,9 @@ Robô 📝, no painel_shopee_video.py). Usa os passos e as conferências do expl
 (postador_shopee_video.py): a IA confere o produto do link com o vídeo; no link de produto,
 a busca pela foto do app acha o mesmo item em outras lojas para os espaços livres, até 6
 produtos (P59); cada produto é achado no topo de Minhas Curtidas (pelo nome parecido ou,
-por último, pela foto conferida pela IA) e a tela final é conferida antes de salvar e de
-postar. No fim de cada rascunho, salvo ou não, descurte os produtos que curtiu para ele.
+por último, pela foto conferida pela IA), ganha o nome da IA no cartão do vídeo (P265 1) e
+a tela final é conferida antes de salvar e de postar. No fim de cada rascunho, salvo ou não,
+descurte os produtos que curtiu para ele.
 
 O painel (bot_mestre) chama uma rodada a cada 15 min, num processo à parte: o robô passa
 minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bot.
@@ -986,7 +987,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
            "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor", "edicao",
-           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto", "video_ia", "aprovado_por")
+           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto", "video_ia", "aprovado_por", "anuncios")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -1043,11 +1044,14 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # gerado_em, resolucao}); {} nos vídeos da fonte. A medição de quais posts levam punição (P146 2) separa por ele.
 # aprovado_por: APROVADO_PELO_ROBO quando o robô aprovou o rascunho sozinho (a aprovação desligada, pedido de 18/11);
 # vazio quando foi o Rafael. O aprovado sozinho que não vai ao ar é recusado sozinho (P254 3, _nao_saiu_o_post).
+# anuncios: o nome de cada produto como o anúncio o tem (o da lista de Minhas Curtidas), na ordem de produtos, que
+# guarda o nome que o post mostra: o da IA, quando ele ficou no cartão do produto (P265 1). Vazio nos de antes, em
+# que os dois são o mesmo (anuncios_do). O robô procura os produtos por ele (o refazer, o treino, os links).
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
                  "postar_agora_em", "letras", "valor", "edicao", "nova_versao", "versao_de", "no_app_em",
-                 "segundos_da_foto", "video_ia", "aprovado_por")
+                 "segundos_da_foto", "video_ia", "aprovado_por", "anuncios")
 
 
 def _criar_tabela(con):
@@ -1084,6 +1088,7 @@ def _linha_para_dict(linha):
     rascunho["edicao"] = json.loads(rascunho["edicao"] or "{}")
     rascunho["nova_versao"] = json.loads(rascunho["nova_versao"] or "{}")
     rascunho["video_ia"] = json.loads(rascunho["video_ia"] or "{}")
+    rascunho["anuncios"] = json.loads(rascunho["anuncios"] or "[]")
     return rascunho
 
 
@@ -1108,7 +1113,7 @@ def pegar(ident):
 def atualizar(ident, **campos):
     for coluna in ("produtos", "mais_produtos", "itens", "capas", "vistas", "links_dos_produtos", "outras_capas",
                    "recusadas", "outra_cor", "tirar", "comentarios_proprios", "itens_do_video", "busca_do_link",
-                   "edicao", "nova_versao", "video_ia"):
+                   "edicao", "nova_versao", "video_ia", "anuncios"):
         if coluna in campos:
             campos[coluna] = json.dumps(campos[coluna], ensure_ascii=False)
     with db.conexao() as con:
@@ -2968,6 +2973,23 @@ def video_do_rascunho(rascunho):
             "nome": (rascunho["produtos"] or [""])[0], "produtos": rascunho["produtos"] or []}
 
 
+def anuncios_do(rascunho):
+    """
+    O nome de cada produto como o anúncio o tem (o da lista de Minhas Curtidas), na ordem do post: o que o rascunho
+    guardou quando o post mostra o nome da IA (P265 1); nos de antes, os próprios produtos. É por ele que o robô
+    procura cada produto na lista, na página dele e na API.
+    """
+    produtos = list(rascunho.get("produtos") or [])
+    anuncios = list(rascunho.get("anuncios") or [])
+    return anuncios if len(anuncios) == len(produtos) else produtos
+
+
+def nomes_da_ia_do(rascunho):
+    """{nome do anúncio: nome da IA} dos produtos do rascunho que levam o nome da IA no post (P265 1)."""
+    return {anuncio: nome for anuncio, nome in zip(anuncios_do(rascunho), rascunho.get("produtos") or [])
+            if anuncio != nome}
+
+
 # --- Tirar produto no post (P123) ---
 # Em Rascunhos do Robô, o Rafael marca os produtos que saem do post (Tirar Produto ➖) e aprova; na
 # hora de postar, o robô os tira da tela final pelo X de cada um, confere a tela final e posta. O
@@ -3013,7 +3035,9 @@ def com_os_que_ficam(rascunho):
     def por_posicao(lista):
         return [lista[n - 1] for n in ficam] if len(lista) == len(nomes) else list(lista)
 
-    filtrado = dict(rascunho, tirar=[], produtos=por_posicao(nomes), itens=por_posicao(rascunho.get("itens") or []),
+    filtrado = dict(rascunho, tirar=[], produtos=por_posicao(nomes),
+                    anuncios=por_posicao(rascunho.get("anuncios") or []),
+                    itens=por_posicao(rascunho.get("itens") or []),
                     capas=[c for c in rascunho.get("capas") or [] if _posicao_da_capa(c) not in tirar],
                     outras_capas=[nova[n] for n in rascunho.get("outras_capas") or [] if n in nova],
                     outra_cor=[nova[n] for n in rascunho.get("outra_cor") or [] if n in nova])
@@ -3028,8 +3052,9 @@ def com_os_que_ficam(rascunho):
 
 def campos_que_ficam(filtrado):
     """O que o rascunho postado guarda depois de tirar os produtos marcados (com_os_que_ficam)."""
-    return {campo: filtrado[campo] for campo in ("produtos", "link", "mais_produtos", "itens", "capas", "outras_capas",
-                                                 "outra_cor", "links_dos_produtos", "tirar") if campo in filtrado}
+    return {campo: filtrado[campo] for campo in ("produtos", "anuncios", "link", "mais_produtos", "itens", "capas",
+                                                 "outras_capas", "outra_cor", "links_dos_produtos", "tirar")
+            if campo in filtrado}
 
 
 def avisar(texto):
@@ -5972,6 +5997,22 @@ def itens_postados():
     return [((r["postado_em"] or "")[:10], r["itens"]) for r in listar("postado") if r["itens"] and r["postado_em"]]
 
 
+def nomes_da_ia(nomes):
+    """
+    {nome procurado: nome da IA} dos produtos do rascunho (assistente.nomes_no_video, P265 1); {} quando a IA não
+    responde, e cada produto vai com o nome do anúncio, como antes. O registro conta quantos ganharam o nome.
+    """
+    try:
+        novos = asyncio.run(assistente.nomes_no_video(nomes))
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Os nomes da IA para os produtos não vieram: {type(e).__name__}")
+        novos = {}
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "nomes da IA pedidos",
+                                 f"{sum(1 for nome in dict.fromkeys(nomes) if nome in novos)} de "
+                                 f"{len(dict.fromkeys(nomes))}", ok=None)
+    return novos
+
+
 # Depois do Feito, o produto aparece na fileira da tela final. No Motorola, em 30/10 (06:17) e
 # em 31/10 (09:15 e 09:35), o 1º produto não ficou: a tela final voltou com a edição da legenda
 # aberta por cima (a legenda já escrita, em foco e com o texto marcado pela cópia) e a linha dos
@@ -5990,7 +6031,7 @@ ESPERA_LOGO_DEPOIS_DO_FEITO, ESPERA_DEPOIS_DO_FEITO = 1, 6
 
 
 def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curtidos_de_fora=0, do_criador=None,
-                       voltaram=None):
+                       voltaram=None, novos=None, anuncios=None, cupons=False):
     """
     Anexa os produtos curtidos, na ordem de nomes (o 1º pelo Adicionar produto, os outros
     pelo Adicionar Mais). O produto a mais (a posição está em a_mais, P59) que não anexa, ou
@@ -6003,10 +6044,14 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
     sem ele, anexado de novo uma vez (VEZES_DO_PRIMEIRO_PRODUTO). do_criador ({posição: nome}): o
     produto do criador, também curtido, de cada produto trocado pelo da loja que paga mais (P33 e P57); o
     trocado que não entra em Minhas Curtidas, com outros produtos na lista, dá lugar a ele, e voltaram (set)
-    recebe a posição (_anexar_um, P225 1).
+    recebe a posição (_anexar_um, P225 1). novos ({nome procurado: nome da IA}): o nome que cada produto leva no cartão
+    do vídeo, escrito na janela do Adicionar antes do Feito (P265 1); o que fica entra nos anexados no lugar do nome da
+    lista, e anuncios (lista) recebe, na mesma ordem, o nome da lista de cada anexado. cupons=True: olha a lista de
+    cupons na janela do 1º produto (P265 1).
     """
     anexados, no_post = [], []
     do_criador = do_criador or {}
+    anuncios = [] if anuncios is None else anuncios
     _AVISO_DO_FEITO.update(texto="", logo="")
     for i, nome in enumerate(nomes):
         if i in a_mais and prazo is not None and time.monotonic() > prazo:
@@ -6016,7 +6061,7 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
         primeiro = not anexados
         for vez in range(1, (VEZES_DO_PRIMEIRO_PRODUTO if primeiro else 1) + 1):
             anexado = _anexar_um(d, video, nome, anexados, len(nomes) - len(anexados) + curtidos_de_fora, limpa,
-                                 i in a_mais, do_criador.get(i, ""))
+                                 i in a_mais, do_criador.get(i, ""), novos, anuncios, cupons and primeiro and vez == 1)
             if not anexado:
                 break
             if voltaram is not None:
@@ -6031,6 +6076,7 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
                 break
             # O Feito não deixou o produto na tela final: ele sai da conta e vai de novo.
             anexados.clear()
+            anuncios.clear()
         else:
             # O produto que o app não deixa na tela final nem na 2ª vez: a falha é da hora, e o
             # vídeo volta mais tarde (P182 1).
@@ -6039,13 +6085,15 @@ def anexar_os_produtos(d, video, nomes, a_mais=(), limpa=False, prazo=None, curt
     return anexados, no_post
 
 
-def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais, criador=""):
+def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais, criador="", novos=None, anuncios=None, cupons=False):
     """
     Um produto: o caminho até Minhas Curtidas, o Adicionar dele e o Feito. False quando é um
     produto a mais que não anexou: ele fica de fora, e o robô volta à tela final. Com o criador (o
     nome do produto do criador, também curtido, do produto trocado pelo da loja que paga mais), o
     trocado que não entra em Minhas Curtidas, com outros produtos na lista, dá lugar a ele
-    (_o_do_criador_no_lugar, P225 1), e a volta é VOLTOU_AO_CRIADOR; senão, True.
+    (_o_do_criador_no_lugar, P225 1), e a volta é VOLTOU_AO_CRIADOR; senão, True. Antes do Feito, na janela do
+    produto, a lista de cupons (cupons=True) e o nome da IA do produto que entrou (novos), que fica no lugar do nome
+    da lista em anexados; anuncios recebe o nome da lista (P265 1).
     """
     seguir(d, CAMINHO_PRODUTO if not anexados else CAMINHO_MAIS_UM_PRODUTO)
     ok, motivo = ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=no_topo,
@@ -6076,6 +6124,14 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais, criador=""):
         raise Parada(motivo)
     _conferir((ok, motivo))
     limpar_aviso_do_app(d)
+    if anuncios is not None:
+        anuncios.append(anexados[-1])
+    # Na janela do produto, antes do Feito: a lista de cupons e o nome da IA (P265 1).
+    if cupons:
+        _olhar_os_cupons(d, video)
+    novo = (novos or {}).get(criador if voltou else nome, "")
+    if novo and _trocar_o_nome(d, novo, anexados[-1]):
+        anexados[-1] = novo
     # A tela de logo depois do Feito vai para o caso e, em rótulos fixos, para o registro do produto
     # que não ficou; a espera de depois do Feito continua a mesma.
     tocar(d, "Feito", ESPERA_LOGO_DEPOIS_DO_FEITO)
@@ -6089,6 +6145,125 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais, criador=""):
         _AVISO_DO_FEITO["logo"] = ""
     time.sleep(ESPERA_DEPOIS_DO_FEITO - ESPERA_LOGO_DEPOIS_DO_FEITO)
     return VOLTOU_AO_CRIADOR if voltou else True
+
+
+# --- O nome da IA e o cupom na janela do produto (P265 1) ---
+# Escolha do Rafael (21/11, P265 1; vídeos dele das 15:26 e 15:27): na janela "Editar informações do produto" que o
+# Adicionar abre, cada produto do post ganha o nome da IA (assistente.nomes_no_video), e o robô olha a lista de cupons
+# e escolhe um se houver, sem nunca criar cupom. O nome que não fica no campo sai (vazio, vai o nome do anúncio, como
+# antes), e o produto segue. A Shopee não dá cupom aos afiliados hoje (Central de Ajuda, artigo 171162), e a lista
+# veio vazia na gravação: o robô a olha na janela do 1º produto de cada rascunho; vazia, o post segue sem cupom. A
+# lista que não vem vazia ainda não tem o toque de escolher mapeado: a tela fica num caso para o Claude ensinar o
+# robô, o Rafael é avisado uma vez, e o post segue sem cupom. DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_NOME = "nome do produto no vídeo"
+PROCESSO_DO_CUPOM = "cupom do produto"
+ESPERA_DOS_CUPONS = 8
+MOTIVO_DA_JANELA_DO_NOME = "a janela do produto fechou enquanto o robô escrevia o nome da IA"
+MOTIVO_DA_JANELA_DOS_CUPONS = "a janela do produto não voltou depois da lista de cupons"
+MOTIVO_DO_CAMPO_DO_NOME = "o campo do nome do produto não voltou ao vazio depois do nome da IA que não ficou"
+# A 1ª lista de cupons que não vem vazia: quando a tela foi guardada para o Claude ({"guardada_em"}).
+CHAVE_DOS_CUPONS = "shopee_video_cupons"
+
+
+def _escrever_no_campo(d, campo, texto):
+    """Toca no campo do nome, escreve o texto ("" apaga) e fecha o teclado, que cobre metade da janela."""
+    d.click(*ps._centro(campo))
+    pausa(1)
+    ps.escrever(d, texto)
+    pausa(1)
+    _fechar_teclado(d)
+
+
+def _trocar_o_nome(d, novo, anuncio=""):
+    """
+    Escreve o nome da IA no campo Nome do produto da janela do Adicionar e confere: a janela aberta, o campo com o nome
+    e sem o aviso de nome curto. True quando ficou. Senão, apaga o que escreveu (o campo vazio leva o nome do anúncio,
+    como antes; anuncio: o nome da lista, que o campo vazio pode mostrar em cinza) e False. A janela que fecha no meio,
+    ou o campo que não volta ao vazio, para o rascunho. O registro diz o que houve, em rótulos fixos e números (o nome
+    não vai: o registro é público).
+    """
+    campo = ps.campo_do_nome(ps.elementos(tela(d)))
+    if not campo:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "ficou o do anúncio", "a janela sem o campo do nome",
+                                     ok=False)
+        return False
+    _escrever_no_campo(d, campo, novo)
+    lista = ps.elementos(tela(d))
+    if not ps.janela_de_editar_aberta(lista):
+        raise Parada(MOTIVO_DA_JANELA_DO_NOME)
+    campo = ps.campo_do_nome(lista)
+    curto = ps.nome_curto_na_janela(lista)
+    if campo and ps.mesmo_nome(campo["texto"], novo) and not curto:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "nome da IA no produto",
+                                     f"{assistente.tamanho_no_app(novo)} letras", ok=True)
+        return True
+    como = ("com o aviso de nome curto" if curto else "sem o campo" if not campo
+            else "o campo com outro texto" if campo["texto"] else "o campo vazio")
+    if campo:
+        _escrever_no_campo(d, campo, "")
+        lista = ps.elementos(tela(d))
+        if not ps.janela_de_editar_aberta(lista):
+            raise Parada(MOTIVO_DA_JANELA_DO_NOME)
+        campo = ps.campo_do_nome(lista)
+        if campo and campo["texto"].strip() and not (anuncio and ps.nome_na_pagina(campo["texto"], anuncio)):
+            raise Parada(MOTIVO_DO_CAMPO_DO_NOME)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "ficou o do anúncio", f"o nome da IA não ficou: {como}",
+                                 ok=False)
+    return False
+
+
+def _olhar_os_cupons(d, video):
+    """
+    Abre a lista de cupons pelo Selecionar Cupom da janela do produto e volta a ela pelo voltar (P265 1). Vazia (o de
+    hoje para afiliados), segue sem cupom. A que não vem vazia: a tela fica guardada para o Claude ensinar o toque de
+    escolher (_guardar_a_lista_de_cupons) e segue sem cupom; nenhum toque nela. Nunca toca no Adicionar Cupom (cria
+    cupom: ps.TEXTOS_PROIBIDOS). Sem a janela do produto de volta, para o rascunho.
+    """
+    xml = tela(d)
+    botao = ps.selecionar_cupom(ps.elementos(xml))
+    if not botao:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "sem o Selecionar Cupom na janela", ok=None)
+        return
+    x, y = ps._centro(botao)
+    if ps.proibido_no_ponto(xml, x, y):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "toque recusado", ps.RECUSA[:80], ok=False)
+        return
+    d.click(x, y)
+    lista = []
+    for _ in range(ESPERA_DOS_CUPONS // 2):
+        pausa(2)
+        lista = ps.elementos(tela(d))
+        if ps.na_lista_de_cupons(lista) and ps.sem_cupom_para_escolher(lista):
+            break
+    if not ps.na_lista_de_cupons(lista):
+        if ps.janela_de_editar_aberta(lista):
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "a lista não abriu", ok=False)
+            return
+        raise Parada(MOTIVO_DA_JANELA_DOS_CUPONS)
+    if ps.sem_cupom_para_escolher(lista):
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "lista sem cupom", ok=None)
+    else:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "lista sem o aviso de vazia",
+                                     "pode ter cupom; segue sem", ok=None)
+        _guardar_a_lista_de_cupons(d, video)
+    d.press("back")
+    pausa(2)
+    if not ps.janela_de_editar_aberta(ps.elementos(tela(d))):
+        raise Parada(MOTIVO_DA_JANELA_DOS_CUPONS)
+
+
+def _guardar_a_lista_de_cupons(d, video):
+    """
+    A 1ª lista de cupons que não vem vazia: o caso com a tela, para o Claude ensinar o robô a escolher o cupom, e o
+    aviso ao Rafael. Uma vez só (CHAVE_DOS_CUPONS): depois, só o registro.
+    """
+    if (db.ler_config(CHAVE_DOS_CUPONS, {}) or {}).get("guardada_em"):
+        return
+    casos_robo.guardar(d, "cupom", "lista de cupons", "a lista de cupons não veio vazia: a tela fica para o Claude "
+                       "ensinar o robô a escolher o cupom", passo=PROCESSO_DO_CUPOM, video=video)
+    db.salvar_config(CHAVE_DOS_CUPONS, {"guardada_em": _momento()})
+    avisar("🎟️ Robô da Shopee Vídeo: a lista de cupons do produto não veio vazia, como costuma vir para afiliados. "
+           "Guardei a tela para o Claude ensinar o robô a escolher o cupom; até lá, os rascunhos seguem sem cupom.")
 
 
 # O produto trocado pelo mesmo item da loja que paga mais (P33, no link de produto; P57, no Ver Produtos) que
@@ -6640,6 +6815,9 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         no_lugar = {i: do_criador["nome"] for i, p in enumerate(produtos) if reserva and p.get("do_video")}
     else:
         no_lugar = {i: p["trocado"] for i, p in enumerate(do_ver_produtos or []) if p.get("trocado")}
+    # O nome de cada produto no cartão do vídeo, pela IA, num pedido só; o do criador que pode entrar no lugar do
+    # trocado também ganha o dele (P265 1).
+    novos = nomes_da_ia(nomes + list(no_lugar.values()))
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia,
               mais_produtos=_mais_produtos(produtos[1:] if produtos else []),
@@ -6663,10 +6841,14 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     # Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado rolando a
     # lista inteira; o topo continua conferido. Escolha do Rafael (P27): DECISOES.md, Shopee Vídeo.
     a_mais = {i for i, produto in enumerate(produtos or do_ver_produtos or []) if not produto.get("do_video")}
-    voltaram = set()
+    voltaram, anuncios = set(), []
+    # Na janela de cada produto, o nome da IA e, na do 1º, a lista de cupons (P265 1).
     anexados, no_post = anexar_os_produtos(d, video, nomes, a_mais, lista_limpa(),
                                            inicio + MINUTOS_PARA_ANEXAR_OS_A_MAIS * 60, curtidos_de_fora,
-                                           no_lugar, voltaram)
+                                           no_lugar, voltaram, novos=novos, anuncios=anuncios, cupons=True)
+    if len(anuncios) != len(anexados):
+        # O nome da lista de cada anexado; sem ele, o próprio nome anexado (o post vai como antes da P265 1).
+        anuncios = list(anexados)
     if voltaram:
         # O post leva o do criador no lugar do trocado que não entrou em Minhas Curtidas (P225 1): o link, o
         # número do produto e a medição da troca (P146 2) passam a ser os dele.
@@ -6684,7 +6866,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         capas = guardar_capas(ident, video, ordem) if len(ordem) > 1 else []
         # Os de outra foto de capa que a do anúncio do post vêm marcados (P102).
         outras = com_outra_foto_de_capa(video, ordem, foto_do_anuncio(original.get("imagem"))) if capas else []
-        atualizar(ident, produtos=anexados, link=ordem[0]["link"], mais_produtos=_mais_produtos(ordem[1:]),
+        atualizar(ident, produtos=anexados, anuncios=anuncios, link=ordem[0]["link"],
+                  mais_produtos=_mais_produtos(ordem[1:]),
                   itens=_itens(ordem), capas=capas, outras_capas=outras,
                   recusadas=guardar_recusados(ident, recusados),
                   outra_cor=[n for n, produto in enumerate(ordem, 1) if produto.get("outra_cor")])
@@ -6705,8 +6888,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
             # lista do Ver Produtos, pelo nome da página dele; o trocado (P57) e o a mais, pelo link.
             atualizar(ident, edicao=dict(edicao["guardado"], curtir=[
                 {"nome": nomes[i], "link": links_conhecidos.get(nomes[i], "")} for i in no_post]))
-        atualizar(ident, produtos=anexados,
-                  links_dos_produtos=links_do_ver_produtos(anexados, [links_conhecidos.get(nomes[i], "")
+        atualizar(ident, produtos=anexados, anuncios=anuncios,
+                  links_dos_produtos=links_do_ver_produtos(anuncios, [links_conhecidos.get(nomes[i], "")
                                                                       for i in no_post]),
                   outra_cor=[n for n, i in enumerate(no_post, 1) if nomes[i] in de_outra_cor],
                   recusadas=guardar_recusados(ident, recusados), **a_mais_do_ver)
@@ -6729,6 +6912,11 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                        else f"{a_mais_no_post} iguais de outras lojas")
     com_produtos = (f", com {len(anexados)} produtos ({'os' if do_ver_produtos else 'o'} do vídeo e {de_outras_lojas})"
                     if a_mais_no_post else "")
+    # Quantos produtos levam o nome da IA no cartão do vídeo (P265 1).
+    com_o_nome = sum(1 for anuncio, nome in zip(anuncios, anexados) if anuncio != nome)
+    if com_o_nome:
+        com_produtos += (", com o nome da IA no cartão do produto" if len(anexados) == 1
+                         else f", {com_o_nome} de {len(anexados)} com o nome da IA no cartão do produto")
     if quando:
         avisar(f"📝 Robô da Shopee Vídeo: rascunho novo salvo no celular{com_produtos} e aprovado sozinho, porque a "
                f"aprovação está desligada. Ele vai ao ar por volta de {quando[8:10]}/{quando[5:7]} às {quando[11:16]} "
@@ -7880,7 +8068,8 @@ def links_para_o_canal(rascunho):
     """
     destino = asyncio.run(link_para_converter(rascunho["link"]))
     if eh_video(destino):
-        nomes = rascunho["produtos"] or []
+        # O produto sem link é achado na API pelo nome do anúncio, não pelo da IA no cartão (P265 1).
+        nomes = anuncios_do(rascunho)
         curtos = rascunho.get("links_dos_produtos") or []
         curtos = curtos if len(curtos) == len(nomes) else [""] * len(nomes)
         enderecos = [(api_shopee.produto_do_link(asyncio.run(link_para_converter(curto))) if curto else None)
@@ -7930,9 +8119,10 @@ def produtos_para_refazer(rascunho):
     Os produtos do rascunho na ordem do post, para o robô curtir de novo ao refazer o rascunho no app: no de
     link de produto, com o link de cada um (o 1º é o do vídeo, os outros os produtos a mais); no de Ver
     Produtos (P202 1), o que ele guardou: o do criador sem link (o nome da página dele, achado na lista do
-    Ver Produtos) e o trocado e o a mais com o link. [] sem o jeito de curtir algum.
+    Ver Produtos) e o trocado e o a mais com o link. [] sem o jeito de curtir algum. O nome é o do anúncio, não o da
+    IA no cartão (P265 1).
     """
-    nomes = list(rascunho.get("produtos") or [])
+    nomes = anuncios_do(rascunho)
     if de_ver_produtos(rascunho):
         curtir = (rascunho.get("edicao") or {}).get("curtir") or []
         if not nomes or len(curtir) != len(nomes) or not all(c.get("nome") for c in curtir):
@@ -7953,8 +8143,8 @@ def _guardar_a_versao_de_antes(rascunho):
     antigo = criar(rascunho["id_video"])
     atualizar(antigo, estado="recusado", criado_em=rascunho["criado_em"],
               no_app_em=rascunho.get("no_app_em") or rascunho["criado_em"], versao_de=str(rascunho["id"]),
-              titulo=rascunho["titulo"], produtos=rascunho["produtos"], link=rascunho["link"],
-              mais_produtos=rascunho.get("mais_produtos") or [], arquivo=rascunho["arquivo"],
+              titulo=rascunho["titulo"], produtos=rascunho["produtos"], anuncios=rascunho.get("anuncios") or [],
+              link=rascunho["link"], mais_produtos=rascunho.get("mais_produtos") or [], arquivo=rascunho["arquivo"],
               print=rascunho["print"], fonte=rascunho.get("fonte"), rotulo_ia=rascunho.get("rotulo_ia"),
               aprovado_em=_momento(), motivo="a versão de antes do Editar ✏️")
     return antigo
@@ -7992,13 +8182,17 @@ def refazer_no_app(d, rascunho, agora=None):
         seguir(d, CAMINHO_EDICAO[:1])
         efeitos_na_edicao(d)
         seguir(d, CAMINHO_EDICAO[1:])
-        # Todos os produtos de antes, na mesma ordem: o que não anexa para tudo (nenhum é "a mais" aqui).
-        nomes = list(rascunho["produtos"])
-        _anexados, no_post = anexar_os_produtos(d, video, nomes, (), lista_limpa())
+        # Todos os produtos de antes, na mesma ordem: o que não anexa para tudo (nenhum é "a mais" aqui). Cada um
+        # procurado pelo nome do anúncio e com o nome da IA de antes no cartão; o que fica é o da tela (P265 1).
+        nomes, anuncios = anuncios_do(rascunho), []
+        anexados, no_post = anexar_os_produtos(d, video, nomes, (), lista_limpa(), novos=nomes_da_ia_do(rascunho),
+                                               anuncios=anuncios)
+        if len(anuncios) != len(anexados):
+            anuncios = list(anexados)
         if len(no_post) != len(nomes):
             raise Parada(f"o rascunho novo ficou com {len(no_post)} de {len(nomes)} produto(s)")
         escrever_a_legenda(d, rascunho["titulo"])
-        _conferir(ps.conferir_tela_final(d, video_do_rascunho(rascunho)))
+        _conferir(ps.conferir_tela_final(d, dict(video_do_rascunho(rascunho), produtos=anexados)))
         _conferir(ps.ajustar_rotulo_de_ia(d, bool(rascunho.get("rotulo_ia"))))
         print_tela = os.path.join(PASTA_RASCUNHOS, f"{rascunho['id']}_nova_{versao}.png")
         d.screenshot(print_tela)
@@ -8011,6 +8205,7 @@ def refazer_no_app(d, rascunho, agora=None):
         escolhas.update(miniatura=nova.get("miniatura") or escolhas["miniatura"], legenda=bool(nova.get("legenda")))
         quando = proxima_postagem(ler_config(), agora)
         atualizar(rascunho["id"], arquivo=arquivo, print=print_tela, no_app_em=_momento(agora), nova_versao={},
+                  produtos=anexados, anuncios=anuncios,
                   edicao=dict(rascunho.get("edicao") or {}, versoes=versao, escolhas=escolhas), estado="aprovado",
                   postar_em=quando, falhas_ao_postar="0", postar_agora_em=None, motivo="")
         registro_processos.registrar(REGISTRO, PROCESSO_DO_REFAZER, "refeito no app",
@@ -8111,7 +8306,7 @@ def treinar(d, agora=None):
             pausa(12)
             # O nome guardado no rascunho, o que o app mostrou: a API pode não dizer mais o
             # produto de um link antigo (a oferta saiu), e o treino acusaria uma mudança no app.
-            video = dict(video_do_rascunho(ultimo), produto=ultimo["produtos"][0])
+            video = dict(video_do_rascunho(ultimo), produto=anuncios_do(ultimo)[0])
             ok, motivo, _ = ps.abrir_pagina_completa(d, video)
             if not ok:
                 raise Parada(f"página do produto: {motivo}")

@@ -557,8 +557,9 @@ AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a 
 # post e o dos vídeos que ele comenta) e no Fixar e no Desfixar do próprio vídeo (P263 1). E o Promover,
 # ao lado deles na folha do compartilhar do próprio vídeo, que pode cobrar (visto no Motorola em 20/11/2026).
 # Postar: DECISOES.md, Shopee Vídeo.
+# O Adicionar Cupom da tela dos cupons cria um cupom (P265 1): o robô só escolhe um cupom que já está na lista.
 TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho",
-                              "compartilhe para ganhar", "promover"})
+                              "compartilhe para ganhar", "promover", "adicionar cupom"})
 COMECOS_PROIBIDOS = ("comprar", "compre")
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
 RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar (nem no Compartilhe para Ganhar)"
@@ -1310,6 +1311,55 @@ def textos_longos(xml):
 def janela_de_editar_aberta(lista):
     """A janela "Editar nome do produto" (a do Feito) está na tela?"""
     return any(_normal(el["texto"]) == "feito" for el in lista)
+
+
+# --- O nome e o cupom do produto na janela do Adicionar (P265 1) ---
+# A janela "Editar informações do produto" (ReactTransparentActivity_) que o Adicionar abre, como o Rafael gravou em
+# 21/11: o campo Nome do produto (o EditText dela) começa vazio, com o nome do anúncio em cinza, e vazio vai o nome do
+# anúncio; escrito, aceita de 10 a 255 letras (com menos, "N caracteres a mais necessários" logo embaixo). Mais
+# abaixo, "Adicionar cupom" e o Selecionar Cupom, que abre a tela "Adicionar Cupom": sem cupom (o de hoje para
+# afiliados), ela só convida a criar um ("Criar e adicionar cupom ao seu vídeo...") e mostra o botão Adicionar Cupom,
+# que cria cupom e nunca se toca (TEXTOS_PROIBIDOS). O voltar dela leva de volta à janela, com o nome escrito.
+ROTULO_DO_NOME = "nome do produto"
+AVISO_DO_NOME_CURTO = "caracteres a mais necess"
+SELECIONAR_CUPOM = "selecionar cupom"
+TITULO_DOS_CUPONS = "adicionar cupom"
+SEM_CUPOM_PARA_ESCOLHER = "criar e adicionar cupom"
+
+
+def campo_do_nome(lista):
+    """O campo Nome do produto da janela do Adicionar (o EditText da Shopee logo abaixo do rótulo); None sem ele."""
+    rotulo = next((el for el in lista if _normal(el["texto"]) == ROTULO_DO_NOME), None)
+    campos = [el for el in lista if el["classe"] == "EditText" and el["pacote"] == PACOTE
+              and (rotulo is None or el["caixa"][1] >= rotulo["caixa"][1])]
+    return min(campos, key=lambda el: el["caixa"][1]) if campos else None
+
+
+def nome_curto_na_janela(lista):
+    """A janela avisa que o nome escrito tem menos letras que o mínimo do app ("N caracteres a mais necessários")?"""
+    return any(AVISO_DO_NOME_CURTO in _normal(el["texto"]) for el in lista)
+
+
+def mesmo_nome(na_tela, nome):
+    """O campo mostra esse nome? Sem caixa, sem os sinais e os emojis (_nome_normal), igual e não vazio."""
+    a, b = _nome_normal(na_tela), _nome_normal(nome)
+    return bool(a) and a == b
+
+
+def selecionar_cupom(lista):
+    """O Selecionar Cupom da janela do produto, ou None."""
+    return next((el for el in lista if _normal(el["texto"]) == SELECIONAR_CUPOM), None)
+
+
+def na_lista_de_cupons(lista):
+    """A tela é a dos cupons: o título Adicionar Cupom, sem o Feito nem o Nome do produto da janela do produto."""
+    return (any(_normal(el["texto"]) == TITULO_DOS_CUPONS for el in lista) and not janela_de_editar_aberta(lista)
+            and not any(_normal(el["texto"]) == ROTULO_DO_NOME for el in lista))
+
+
+def sem_cupom_para_escolher(lista):
+    """A tela dos cupons só convida a criar um (nenhum cupom na lista)?"""
+    return any(SEM_CUPOM_PARA_ESCOLHER in _normal(el["texto"]) for el in lista)
 
 
 def conferir_janela(d, nome, ponto):

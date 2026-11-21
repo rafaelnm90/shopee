@@ -41,6 +41,7 @@ import os
 import random
 import re
 import tempfile
+import unicodedata
 from datetime import datetime
 
 import aiohttp
@@ -674,6 +675,111 @@ async def textos_do_video(arquivo, nome_produto=""):
     return textos
 
 
+# --- O nome de cada produto no vídeo (P265 1) ---
+# Na janela "Editar informações do produto" que o Adicionar abre, o app deixa trocar o nome que o vídeo mostra no
+# cartão do produto (de 10 a 255 letras; com o campo vazio, vai o nome do anúncio). Escolha do Rafael (21/11, P265 1):
+# cada produto do post ganha um nome curto da IA, que destaca o produto e ajuda a vender, fiel ao anúncio, sem marca
+# nem personagem (diretriz 7: o nome genérico) e sem promoção inventada (diretriz 14); o modo assistente manda o nome
+# junto, para ele colar. DECISOES.md, Shopee Vídeo.
+LETRAS_DO_NOME_NO_VIDEO = (20, 40)
+# A régua de quem confere o nome na tela (o robô, na tela final e no Tirar Produto): sem os sinais e os emojis, pelo
+# menos LETRAS_MINIMAS_DO_NOME (a do nome cortado, postador_shopee_video.TAMANHO_MINIMO_DO_NOME); e no máximo
+# LETRAS_MAXIMAS_DO_NOME no contador da Shopee (cada emoji vale 2), para caber no cartão do vídeo.
+LETRAS_MINIMAS_DO_NOME = 15
+LETRAS_MAXIMAS_DO_NOME = 45
+# Preço, promoção e frete nunca vão no nome (diretriz 14): a IA é avisada, e o nome com um deles fica de fora.
+PALAVRAS_DE_PROMOCAO = ("desconto", "promoç", "promoc", "frete", "grátis", "gratis", "oferta", "cupom", "barat",
+                        "liquida", "queima", "imperdível", "imperdivel", "black friday", "r$", "%")
+PROMPT_DOS_NOMES = """Você escreve o nome que aparece no cartão do produto de um vídeo da Shopee Vídeo. \
+Para cada nome de anúncio da lista abaixo, escreva um nome novo que destaque o produto e ajude a vender, \
+seguindo todas as regras:
+1. De {minimo} a {maximo} letras, contando os espaços, terminado com um emoji que combine com o produto \
+(ex.: o anúncio "Caneca Personagem X Presente Geek Nerd Colecionável Pronta Entrega" vira "Caneca Geek \
+Colecionável para Presente ☕").
+2. Primeiro o que o produto é; depois a vantagem principal que o nome do anúncio diz.
+3. Fiel ao anúncio: só o que o nome do anúncio diz. Não invente material, tamanho, quantidade, cor, função, \
+garantia nem resultado.
+4. Sem marca, logo, slogan, personagem, time, filme, desenho, artista ou nome de loja: use o nome genérico \
+(diretriz 7 da Shopee Vídeo; ex.: "Copo Térmico", não a marca do copo).
+5. Sem preço, desconto, promoção, frete, cupom, porcentagem ou urgência (diretriz 14: nada de promoção \
+inventada nem informação falsa).
+6. Português do Brasil, com a ortografia certa, sem hashtag e sem o nome inteiro em CAIXA ALTA.
+7. Cada produto com um nome diferente dos outros da lista, mesmo quando são o mesmo item de lojas diferentes.
+
+Responda SOMENTE com um JSON, sem nada antes ou depois: uma lista com um objeto por produto, na ordem da lista, \
+cada um com "n" (o número do produto), "nome" (o nome novo) e "tirados" (as marcas, os personagens e os nomes de \
+loja que estavam no nome do anúncio e ficaram de fora; [] sem nenhum).
+
+Produtos:
+{produtos}"""
+
+
+def letras_do_nome(texto):
+    """O nome como o robô o compara na tela: sem caixa, sem os sinais e sem os emojis (ps._nome_normal)."""
+    texto = unicodedata.normalize("NFKC", str(texto or "")).casefold()
+    return " ".join("".join(c if c.isalnum() else " " for c in texto).split())
+
+
+def nome_valido(nome, tirados=()):
+    """
+    O nome da IA pode ir ao cartão do produto? Do tamanho da régua (LETRAS_MINIMAS_DO_NOME e LETRAS_MAXIMAS_DO_NOME),
+    sem preço, promoção nem frete (PALAVRAS_DE_PROMOCAO), sem hashtag e sem as marcas e os personagens que a própria IA
+    disse ter tirado (tirados).
+    """
+    nome = " ".join(str(nome or "").split())
+    if len(letras_do_nome(nome)) < LETRAS_MINIMAS_DO_NOME or tamanho_no_app(nome) > LETRAS_MAXIMAS_DO_NOME:
+        return False
+    if "#" in nome or any(palavra in nome.casefold() for palavra in PALAVRAS_DE_PROMOCAO):
+        return False
+    palavras = f" {letras_do_nome(nome)} "
+    return not any(f" {tirado} " in palavras for tirado in (letras_do_nome(t) for t in tirados or ()) if tirado)
+
+
+def ler_os_nomes(resposta, nomes):
+    """
+    {nome do anúncio: nome da IA} da resposta (a lista em JSON), na ordem de nomes: só os que passam na régua
+    (nome_valido) e sem repetir um nome (o 2º produto com o mesmo nome fica com o do anúncio). {} sem a lista.
+    """
+    achado = re.search(r"\[.*\]", resposta or "", re.S)
+    try:
+        itens = json.loads(achado.group(0)) if achado else []
+    except ValueError:
+        return {}
+    novos, vistos = {}, set()
+    for item in itens if isinstance(itens, list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            n = int(item.get("n"))
+        except (TypeError, ValueError):
+            continue
+        nome = " ".join(str(item.get("nome") or "").split()).strip("\"'“”")
+        tirados = [str(t) for t in item.get("tirados") or [] if isinstance(t, str)] \
+            if isinstance(item.get("tirados"), list) else []
+        if not 1 <= n <= len(nomes) or nomes[n - 1] in novos or not nome_valido(nome, tirados):
+            continue
+        if letras_do_nome(nome) in vistos:
+            continue
+        vistos.add(letras_do_nome(nome))
+        novos[nomes[n - 1]] = nome
+    return novos
+
+
+async def nomes_no_video(nomes):
+    """
+    O nome que cada produto leva no cartão do vídeo (P265 1): {nome do anúncio: nome da IA}, num pedido só para a lista
+    toda, só com os que passam na régua (ler_os_nomes); {} sem a resposta da IA. O que fica de fora vai com o nome do
+    anúncio, como antes.
+    """
+    nomes = [nome for nome in dict.fromkeys(str(n or "").strip() for n in nomes or ()) if nome]
+    if not nomes:
+        return {}
+    lista = "\n".join(f"{n}. {nome}" for n, nome in enumerate(nomes, 1))
+    resposta = await api_gemini.gerar_texto_gemini(PROMPT_DOS_NOMES.format(
+        minimo=LETRAS_DO_NOME_NO_VIDEO[0], maximo=LETRAS_DO_NOME_NO_VIDEO[1], produtos=lista))
+    return ler_os_nomes(resposta, nomes)
+
+
 # --- Mensagem ---
 
 def _reais(valor):
@@ -685,12 +791,31 @@ def _linha_do_produto(produto):
             f"comissão {produto['comissao']:.1f}%").replace(".0%", "%")
 
 
-def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False):
+def _passo_do_nome(produtos, nomes):
+    """
+    O nome da IA de cada produto, para o Rafael colar em Nome do produto, na janela que o Adicionar abre, antes do
+    Feito (P265 1); "" sem nenhum. O produto sem o nome da IA fica com o do anúncio (o campo vazio).
+    """
+    no_video = [nomes.get(p["nome"], "") for p in produtos]
+    if not any(no_video):
+        return ""
+    if len(no_video) == 1:
+        lista = f"<code>{html.escape(no_video[0])}</code>"
+    else:
+        lista = "\n".join(f"{n}. " + (f"<code>{html.escape(nome)}</code>" if nome
+                                      else "fica o nome do anúncio (deixe o campo vazio)")
+                          for n, nome in enumerate(no_video, 1))
+    return ("🏷️ <b>Nome no vídeo:</b> na janela que abre no Adicionar, toque em Nome do produto, cole o nome "
+            f"(toque para copiar) e depois em Feito.\n{lista}\n")
+
+
+def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=None):
     """
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
     copiar com um toque: salvar o vídeo, favoritar o produto, postar, comentar e tocar em
     Postei ✅ (o botão da mensagem; com cobrindo=True, o robô está sem o celular, e o passo diz
-    que o vídeo conta no plano do dia dele, P156 1).
+    que o vídeo conta no plano do dia dele, P156 1). nomes ({nome do anúncio: nome da IA}): o nome de
+    cada produto no vídeo, para copiar no Adicionar (P265 1).
     Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
     Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo que vai não
     tem som: o editado já leva a música de fundo, P55), o passo de postar lembra de pôr uma
@@ -732,7 +857,8 @@ def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False):
         f"{alcool}"
         f"📝 <b>Título</b> ({tamanho} caracteres{curto}; toque para copiar):\n"
         f"<code>{html.escape(textos['titulo'])}</code>\n"
-        f"{adicionar}\n\n"
+        f"{adicionar}\n"
+        f"{_passo_do_nome(produtos, nomes or {})}\n"
         "4️⃣ <b>Depois de postar, comente</b> no vídeo (toque para copiar):\n"
         f"<code>{html.escape(textos['comentario'])}</code>\n\n"
         f"5️⃣ <b>Postou?</b> Toque em <b>{BOTAO_POSTEI}</b> aqui embaixo."
@@ -853,9 +979,11 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     # O vídeo que vai sem som ganha uma música da Shopee na hora de postar (escolha do Rafael,
     # P48). O editado já leva a música de fundo (P55); só o que vai sem a edição chega mudo.
     mudo = await asyncio.to_thread(videos.mudo, arquivo)
+    # O nome de cada produto no vídeo, para o Rafael colar no Adicionar (P265 1).
+    nomes = await nomes_no_video([p["nome"] for p in produtos]) if produtos else {}
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
-    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo), parse_mode="HTML",
+    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo, nomes), parse_mode="HTML",
                            disable_web_page_preview=True, reply_markup=botao_postei(video["id"]))
     registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo,
               item=str(produtos[0].get("item") or "") if produtos else "")

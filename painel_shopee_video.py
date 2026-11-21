@@ -2612,6 +2612,10 @@ OUTRA_FOTO_NO_TEXTO = " ⚠️ outra foto de capa"
 OUTRA_COR_NO_TEXTO = " 🎨 outra cor (a foto vai na miniatura)"
 # A marca do produto que o Rafael marcou no Tirar Produto ➖ (P123): o robô o tira na hora de postar.
 TIRAR_NO_TEXTO = " ➖ sai do post"
+# O nome do anúncio embaixo do nome da IA que o produto leva no cartão do vídeo (P265 1), cortado no tamanho de uma
+# linha: o Rafael compara os dois antes de aprovar.
+NOME_DO_ANUNCIO_NO_TEXTO = "🏷️ No anúncio: "
+LETRAS_DO_ANUNCIO = 90
 
 
 def numeros_por_extenso(posicoes):
@@ -2644,10 +2648,16 @@ def linhas_dos_produtos(rascunho):
     # cor também, e o que o Rafael marcou para sair do post (P123).
     outras, de_outra_cor = set(rascunho.get("outras_capas") or []), set(rascunho.get("outra_cor") or [])
     tirar = set(rascunho.get("tirar") or [])
+    # O produto com o nome da IA no cartão do vídeo mostra também o nome do anúncio, para o Rafael comparar (P265 1).
+    anuncios = robo.anuncios_do(rascunho)
+
+    def do_anuncio(anuncio, nome):
+        return f"{NOME_DO_ANUNCIO_NO_TEXTO}{html_escape(anuncio[:LETRAS_DO_ANUNCIO])}\n" if anuncio != nome else ""
     return "".join(f"• {html_escape(nome)}{OUTRA_FOTO_NO_TEXTO if n in outras else ''}"
                    f"{OUTRA_COR_NO_TEXTO if n in de_outra_cor else ''}{TIRAR_NO_TEXTO if n in tirar else ''}\n"
+                   + do_anuncio(anuncio, nome)
                    + (f"🔗 {html_escape(link)}" if link else SEM_O_LINK_DO_PRODUTO) + "\n"
-                   for n, (nome, link) in enumerate(zip(nomes, links), 1)) + fim
+                   for n, (nome, link, anuncio) in enumerate(zip(nomes, links, anuncios), 1)) + fim
 
 
 def texto_rascunho(rascunho, posicao, total):

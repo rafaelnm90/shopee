@@ -410,6 +410,7 @@ SEM_META = {
     ("espiao", "vídeo sem link no grupo vigiado"), ("espelhador", "vídeo sem link na origem da rota"),
     ("notas", "envio de nota fiscal"),
     ("shopee_video", "anexar o produto"), ("shopee_video", "sinais do app no anexar"),
+    ("shopee_video", "nome do produto no vídeo"), ("shopee_video", "cupom do produto"),
     ("shopee_video", "assistente: envio"),
     ("shopee_video", "canal afiliados: "),
     ("shopee_video", "conferência da IA (produto × vídeo)"),
@@ -1505,7 +1506,7 @@ PROCESSOS_DO_FEED = ("feed:",)
 PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário")
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
-                        "preparo interrompido", "próprio post:")
+                        "preparo interrompido", "próprio post:", "nome do produto no vídeo", "cupom do produto")
 # O vídeo de IA do dia no Flow (P232 1) usa o celular como um preparo.
 ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("post_antigo",), ("rascunho", "postar", "comentar_post", "refazer", "video_ia")
 # Apagar um rascunho recusado não é preparo, mas conta na hora do descurtir. Decisão do Rafael:
