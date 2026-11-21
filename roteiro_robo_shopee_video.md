@@ -151,8 +151,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     robô só confirma com "Excluir (1)";
   - **link do post:** o vídeo no Perfil abre o player (`NativePlayerActivity`); o ícone de
     compartilhar fica na coluna da direita (~1001,1985, sem texto, só a descrição) e abre
-    a folha com os apps e, embaixo, **Copiar link** (~360,2251), Salvar e Fixar. O app
-    mostra "Link copiado". O robô lê o link copiado (testado com o passo `copiado`: um
+    a folha com os apps e, embaixo, **Promover** (nunca tocado), **Copiar link** (~360,2251),
+    Salvar e Fixar; no vídeo fixado, no lugar do Fixar, o Motorola mostra **"Desafixar"**
+    (~840,2251; caso de 21/11/2026), e a gravação do Rafael, "Desfixar": o robô aceita os dois
+    nomes (e o "Afixar", par do "Desafixar"). O título da folha é "Link copiado". O robô lê
+    o link copiado (testado com o passo `copiado`: um
     link curto da Shopee, sem nunca mostrá-lo no log). O ícone tem a descrição "... video
     share icon" e só vale no player (o Perfil tem um compartilhar do perfil, no alto).
   - **voltar da edição de um vídeo novo** (23/10/2026, ao descartar a postagem de teste):
