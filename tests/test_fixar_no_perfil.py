@@ -138,12 +138,15 @@ def test_videos_mais_curtidos_juntam_pela_capa_e_contam_so_as_24_h():
 # --- A folha do compartilhar e o coração ---
 
 FOLHA = ["Promover", "Copiar link", "Salvar"]
+# Os nomes do Fixar e do Desfixar: os da gravação do Rafael (20/11) e os do Motorola do robô (21/11; o "Afixar" é o
+# par do "Desafixar" que ele mostrou).
+DO_RAFAEL, DO_MOTOROLA = ("Fixar", "Desfixar"), ("Afixar", "Desafixar")
 
 
-def _folha(fixado):
+def _folha(fixado, rotulos=DO_RAFAEL):
     nos = [_el("Link copiado", desc="title of share panel", caixa=(434, 1738, 646, 1789)),
            _el("WhatsApp", caixa=(60, 2010, 180, 2050))]
-    for i, rotulo in enumerate(FOLHA + ["Desfixar" if fixado else "Fixar"]):
+    for i, rotulo in enumerate(FOLHA + [rotulos[1] if fixado else rotulos[0]]):
         nos.append(_el(rotulo, caixa=(65 + 250 * i, 2234, 190 + 250 * i, 2269)))
     return _xml(*nos)
 
@@ -155,6 +158,24 @@ def test_folha_do_compartilhar_nunca_confunde_o_fixar_com_o_desfixar():
     # O ps.achar pega "contendo" e cairia no Desfixar; o texto exato, não.
     assert ps.achar(_folha(fixado=True), "Fixar") is not None
     assert it.texto_exato(_folha(fixado=True), "Fixar") is None
+
+
+def test_folha_do_motorola_com_o_desafixar():
+    # Caso de 21/11 (17:24): no Motorola do robô, a folha do vídeo fixado mostra "Desafixar", e o robô só conhecia o
+    # "Desfixar" da gravação do Rafael: o comentário no 1º fixado parou com o vídeo fixado na tela.
+    fixado, solto = _folha(fixado=True, rotulos=DO_MOTOROLA), _folha(fixado=False, rotulos=DO_MOTOROLA)
+    assert it.estado_do_fixar(fixado) == "desfixar"
+    assert it.estado_do_fixar(solto) == "fixar"
+    assert it.rotulo_na_tela(fixado, it.DESFIXAR) == "Desafixar"
+    # O nome de fixar nunca casa com o de desfixar (nem o "Afixar" com o "Desafixar").
+    assert it.rotulo_na_tela(fixado, it.FIXAR) is None and it.rotulo_na_tela(solto, it.DESFIXAR) is None
+    assert not ps.eh_alvo_proibido("Desafixar") and not ps.eh_alvo_proibido("Afixar")
+
+
+def test_aviso_do_limite_de_fixados_com_os_dois_nomes():
+    for texto in ("Você só pode fixar até 3 vídeos", "Você só pode afixar até 3 vídeos"):
+        assert it.limite_de_fixados(_xml(_el(texto, caixa=(200, 1100, 880, 1180))))
+    assert not it.limite_de_fixados(_folha(fixado=True, rotulos=DO_MOTOROLA))
 
 
 def test_o_promover_nunca_e_tocado():
@@ -208,8 +229,9 @@ class CelularDasCurtidas:
     da 1ª vez que ele abre.
     """
 
-    def __init__(self, curtidas, fixados=("T1", "T2", "T3"), no_coracao=None, some_depois=None, limite=3):
-        self.curtidas, self.fixados = list(curtidas), list(fixados)
+    def __init__(self, curtidas, fixados=("T1", "T2", "T3"), no_coracao=None, some_depois=None, limite=3,
+                 rotulos=DO_RAFAEL):
+        self.curtidas, self.fixados, self.rotulos = list(curtidas), list(fixados), rotulos
         self.no_coracao = no_coracao or {}
         self.some_depois, self.limite = some_depois, limite
         self.atual, self.aberto, self.de_onde, self.inicio_da_lista = "inicio", None, None, 0
@@ -240,9 +262,10 @@ class CelularDasCurtidas:
         if self.atual == "player":
             return _player(f"Legenda do {self.aberto}", self.no_coracao.get(self.aberto, 57))
         if self.atual == "folha":
-            return _folha(self.aberto in self.fixados)
+            return _folha(self.aberto in self.fixados, self.rotulos)
         if self.atual == "limite":
-            return _xml(_el("Você só pode fixar até 3 vídeos", caixa=(200, 1100, 880, 1180)), *BARRA)
+            aviso = f"Você só pode {self.rotulos[0].lower()} até 3 vídeos"
+            return _xml(_el(aviso, caixa=(200, 1100, 880, 1180)), *BARRA)
         if self.atual == "perfil":
             return _xml(*self._grade()[0], *BARRA)
         return _xml(*BARRA)
@@ -280,10 +303,10 @@ class CelularDasCurtidas:
         elif self.atual == "folha":
             if "Copiar link" in textos:
                 self.clipboard, self.atual = f"https://s.shopee.com.br/{self.aberto}", "player"
-            elif "Desfixar" in textos:
+            elif self.rotulos[1] in textos:
                 self.fixados.remove(self.aberto)
                 self.atual = "player"
-            elif "Fixar" in textos:
+            elif self.rotulos[0] in textos:
                 if len(self.fixados) >= self.limite:
                     self.atual = "limite"
                 else:
@@ -494,6 +517,23 @@ def test_aviso_do_limite_de_fixados_para_sem_mais_toques(avisos):
     assert app.fixados == ["T1", "T3"] and not avisos
 
 
+def test_troca_dos_fixados_no_motorola_com_o_afixar_e_o_desafixar(avisos, comentarios):
+    app = CelularDasCurtidas(_curtidas("A", 10) + _curtidas("B", 2, desde=8) + [TOPO], rotulos=DO_MOTOROLA)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado de menos visualizações pelo "
+                                                     "vídeo que viraliza; comentei nele")
+    assert app.fixados == ["A", "T1", "T3"]
+    assert "Desafixar" in app.toques and "Afixar" in app.toques
+
+
+def test_aviso_do_limite_de_fixados_no_motorola_para_sem_mais_toques(avisos):
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], fixados=("T1", "T3"), limite=2, rotulos=DO_MOTOROLA)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: parou (o app disse que o limite de fixados "
+                                                     "acabou)")
+    assert app.fixados == ["T1", "T3"] and not avisos
+
+
 def test_as_curtidas_de_antes_do_topo_nao_contam_de_novo(avisos):
     app = CelularDasCurtidas(_curtidas("A", 6) + [TOPO] + _curtidas("A", 6, desde=8))
     _leitura(app)
@@ -616,6 +656,17 @@ def test_pedido_do_1o_fixado_sem_fixado_na_grade_tenta_3_vezes(avisos, comentari
             assert resultado == ""
     assert not comentarios["chamadas"] and not avisos and len(comentarios["casos"]) == 3
     assert [r for r, _d in _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO)] == ["parou"] * 3
+
+
+def test_pedido_do_1o_fixado_no_motorola_com_o_desafixar(avisos, comentarios, monkeypatch):
+    # Caso de 21/11 (17:24): o 1º fixado abriu e a folha mostrou o "Desafixar"; o robô agora o reconhece e comenta.
+    monkeypatch.setattr(robo, "PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO", ("2026-11-21",))
+    app = CelularDasCurtidas(_curtidas("B", 2) + [TOPO], fixados=("T1", "T2", "T3"), rotulos=DO_MOTOROLA)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == "fixar no perfil: 1º fixado do Perfil: comentei nele"
+    assert app.abertos == ["T1"] and app.fixados == ["T1", "T2", "T3"] and "Desafixar" not in app.toques
+    assert avisos == [_aviso_do_comentario(1, "T1")]
+    assert not comentarios["casos"]
 
 
 def test_legenda_do_player_vai_a_ia_sem_o_veja_mais():

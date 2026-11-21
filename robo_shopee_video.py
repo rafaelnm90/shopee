@@ -8939,12 +8939,17 @@ def _fechar_a_folha(d):
         pausa(2)
 
 
-def _tocar_exato(d, texto, espera=3):
-    """Toca no elemento de texto igual (interacoes.texto_exato: o Fixar nunca cai no Desfixar), nunca num proibido."""
+def _tocar_exato(d, rotulos, espera=3):
+    """
+    Toca no elemento de texto igual a um dos nomes do botão (rotulos: um texto ou os nomes dele em cada celular, como
+    interacoes.FIXAR; pelo texto exato, o Fixar nunca cai no Desfixar), nunca num proibido.
+    """
+    rotulos = (rotulos,) if isinstance(rotulos, str) else tuple(rotulos)
     xml = tela(d)
+    texto = interacoes.rotulo_na_tela(xml, rotulos)
+    if not texto:
+        raise Parada(f"{MOTIVO_DO_FIXAR}sem o {rotulos[0]} na folha do compartilhar")
     ponto = interacoes.texto_exato(xml, texto)
-    if not ponto:
-        raise Parada(f"{MOTIVO_DO_FIXAR}sem o {texto} na folha do compartilhar")
     if ps.eh_alvo_proibido(texto) or ps.proibido_no_ponto(xml, *ponto):
         raise Parada(ps.RECUSA)
     d.click(*ponto)
@@ -8995,7 +9000,7 @@ def _desfixar_o_de_menos_vistas(d, fixados, agora):
     if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
         raise Parada(MOTIVO_DO_FIXAR + "o vídeo do selo Fixado não mostrou o Desfixar")
     link = _copiar_link_da_folha(d)
-    if not interacoes.texto_exato(tela(d), interacoes.DESFIXAR):
+    if not interacoes.rotulo_na_tela(tela(d), interacoes.DESFIXAR):
         # O Copiar link fechou a folha.
         _abrir_a_folha(d)
     _tocar_exato(d, interacoes.DESFIXAR)

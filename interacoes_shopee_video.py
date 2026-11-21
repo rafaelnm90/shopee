@@ -94,8 +94,12 @@ HA_POUCO = re.compile(r"^h[aá]\s+(\d+)\s*(min|minutos?|h|horas?)$")
 # As curtidas contam nas últimas HORAS_DAS_CURTIDAS horas e ficam guardadas DIAS_DAS_CURTIDAS dias.
 HORAS_DAS_CURTIDAS = 24
 DIAS_DAS_CURTIDAS = 3
-# Os botões da folha do compartilhar do próprio vídeo, ao lado do Copiar link (Motorola, 20/11/2026).
-FIXAR, DESFIXAR = "Fixar", "Desfixar"
+# Os botões da folha do compartilhar do próprio vídeo, ao lado do Copiar link. O nome muda com o celular: "Fixar"
+# e "Desfixar" na gravação do Rafael (20/11/2026), "Desafixar" no Motorola do robô (21/11/2026), onde o de fixar,
+# pelo par, pode vir como "Afixar". O 1º nome de cada um é o dos motivos do registro.
+FIXAR, DESFIXAR = ("Fixar", "Afixar"), ("Desfixar", "Desafixar")
+# O aviso do app quando os 3 lugares dos fixados estão ocupados ("Você só pode fixar até 3 vídeos").
+LIMITE_DOS_FIXADOS = re.compile(r"pode\s+a?fixar")
 ASPAS = "\"“”'‘’"
 # A hora de cada linha das Notificações ("Hoje 10:15", "24-10 14:32").
 HORA_DA_LINHA = re.compile(r"^(?:\S+\s+)?\d{1,2}:\d{2}$")
@@ -569,18 +573,23 @@ def texto_exato(xml, texto):
     return ps._centro(el) if el else None
 
 
+def rotulo_na_tela(xml, rotulos):
+    """O nome do botão (um dos rotulos, os nomes dele em cada celular) que está na tela com o texto exato, ou None."""
+    return next((rotulo for rotulo in rotulos if texto_exato(xml, rotulo)), None)
+
+
 def estado_do_fixar(xml):
     """Na folha do compartilhar do próprio vídeo: "desfixar" (está fixado), "fixar" (não está) ou None (sem os dois)."""
-    if texto_exato(xml, DESFIXAR):
+    if rotulo_na_tela(xml, DESFIXAR):
         return "desfixar"
-    if texto_exato(xml, FIXAR):
+    if rotulo_na_tela(xml, FIXAR):
         return "fixar"
     return None
 
 
 def limite_de_fixados(xml):
     """O app disse que não dá para fixar mais ("Você só pode fixar até 3 vídeos")?"""
-    return any("pode fixar" in ps._normal(el["texto"]) for el in ps.elementos(xml))
+    return any(LIMITE_DOS_FIXADOS.search(ps._normal(el["texto"])) for el in ps.elementos(xml))
 
 
 # --- O painel de comentários ---
