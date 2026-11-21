@@ -8429,8 +8429,8 @@ SEM_O_LINK = "o link não saiu"
 # curte o comentário), e o aviso vai ao privado com o texto e o link. O que não sai volta nas leituras seguintes
 # das Notificações, pelo link do vídeo, até TENTATIVAS_DO_COMENTARIO_FIXADO vezes; na última, o Rafael recebe o
 # porquê e o link, para comentar à mão, se quiser. O vídeo comentado não ganha outro comentário do robô por
-# interacoes.DIAS_ENTRE_COMENTARIOS dias, como o post antigo. O vídeo que o robô acha já fixado fica como está.
-# DECISOES.md, Shopee Vídeo.
+# interacoes.DIAS_ENTRE_COMENTARIOS dias, como o post antigo. O vídeo que viraliza e o robô acha já fixado (pelo
+# Rafael, à mão) fica como está e ganha o comentário do mesmo jeito. DECISOES.md, Shopee Vídeo.
 TENTATIVAS_DO_COMENTARIO_FIXADO = 3
 PROCESSO_DO_COMENTARIO_FIXADO = "vídeo fixado: comentar"
 NO_VIDEO_FIXADO = "no vídeo que fixei no seu Perfil"
@@ -8528,8 +8528,9 @@ def _anotar_visto(video, agora=None):
 def fixar_o_que_viraliza(d, agora=None):
     """
     Depois das respostas de cada leitura das Notificações: o comentário no vídeo fixado que não saiu na leitura
-    de antes volta (_comentar_de_novo_no_fixado), e o vídeo com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas
-    24 h que não está fixado entra no lugar do fixado com menos visualizações e ganha o comentário
+    de antes volta (_comentar_de_novo_no_fixado), o pedido de uma vez do comentário no 1º fixado do Perfil sai
+    (_comentar_no_1o_fixado), e o vídeo com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas 24 h que não está
+    fixado entra no lugar do fixado com menos visualizações e ganha o comentário; o já fixado, só o comentário
     (_fixar_no_perfil), até CANDIDATOS_POR_LEITURA vídeos olhados. Uma vez por leitura: a continuação dela
     (respostas_continuar) não troca de novo. Devolve o que fez, para a rodada, ou "". O que para fica no registro,
     com o caso para o checkup do Claude; a Verificação segue adiante, como nas respostas.
@@ -8539,11 +8540,11 @@ def fixar_o_que_viraliza(d, agora=None):
     if ler_estado().get("fixar_leitura") == leitura:
         return ""
     gravar_estado(fixar_leitura=leitura)
-    de_novo = _comentar_de_novo_no_fixado(d, momento)
-    feito = _fixar_um(d, momento)
-    if de_novo and feito:
-        return f"{feito}; {de_novo.removeprefix(MOTIVO_DO_FIXAR)}"
-    return feito or de_novo
+    # A nova tentativa vem antes do pedido de uma vez e do fixar: o comentário que parar neles volta na leitura
+    # seguinte, e não nesta.
+    feitos = [f for f in (_comentar_de_novo_no_fixado(d, momento), _comentar_no_1o_fixado(d, momento),
+                          _fixar_um(d, momento)) if f]
+    return "; ".join(feitos[:1] + [f.removeprefix(MOTIVO_DO_FIXAR) for f in feitos[1:]])
 
 
 def _fixar_um(d, agora):
@@ -8585,9 +8586,9 @@ def _fixar_no_perfil(d, candidato, agora):
     O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: abre pela linha da curtida,
     confere no coração que ele tem as curtidas e, na folha do compartilhar, que não está fixado; copia o link,
     tira do Perfil o fixado de menos visualizações quando os FIXADOS_NO_PERFIL estão ocupados, abre o vídeo de
-    novo e o fixa, conferindo cada passo, e comenta nele (_comentar_no_fixado). Devolve o que fez, ou "" quando o
-    vídeo fica de fora (já fixado ou com menos curtidas no coração), para olhar o seguinte. O fixar que para
-    depois do desfixar avisa o Rafael.
+    novo e o fixa, conferindo cada passo, e comenta nele (_comentar_no_fixado); o já fixado só ganha o comentário,
+    se ainda não tem o do robô. Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado e comentado, ou com
+    menos curtidas no coração), para olhar o seguinte. O fixar que para depois do desfixar avisa o Rafael.
     """
     xml = _abrir_pela_curtida(d, candidato["video"])
     video = interacoes.video_do_feed(xml)
@@ -8603,10 +8604,17 @@ def _fixar_no_perfil(d, candidato, agora):
     legenda = video["legenda"]
     situacao = interacoes.estado_do_fixar(_abrir_a_folha(d))
     if situacao == "desfixar":
+        # Fixado pelo Rafael, à mão: fica como está, e o vídeo que viraliza ganha o comentário, se o robô ainda não
+        # comentou nele (pedido do Rafael, 21/11/2026).
+        sem_comentario = _do_mesmo_video(_comentarios_dos_fixados(ler_estado(), agora), candidato["video"]) is None
+        link = _copiar_link_da_folha(d) if sem_comentario else ""
         _fechar_a_folha(d)
         _anotar_visto(candidato["video"], agora)
         registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "já fixado", ok=None, agora=agora)
-        return ""
+        if not sem_comentario:
+            return ""
+        return (MOTIVO_DO_FIXAR + "o vídeo que viraliza já estava fixado; "
+                + _comentar_no_fixado(d, candidato["video"], link, agora))
     if situacao != "fixar":
         raise Parada(MOTIVO_DO_FIXAR + "sem o Fixar na folha do compartilhar")
     link = _copiar_link_da_folha(d)
@@ -8927,6 +8935,94 @@ def _comentar_de_novo_no_fixado(d, agora):
 
     return (f"{MOTIVO_DO_FIXAR}vídeo fixado antes: "
             + _comentar_no_fixado(d, pendente["video"], pendente.get("link") or "", agora, abrir))
+
+
+# O vídeo que o Rafael fixou à mão em 20/11 ficou sem o comentário, e ele o pediu (21/11/2026: "Esse caso é agora,
+# porque eu fixei nele ontem, mas não comentou"). Pedido de uma vez só, pela data: na leitura seguinte das
+# Notificações, o robô comenta no 1º fixado da grade do Perfil (o Fixar põe o vídeo no topo: o 1º é o mais novo),
+# conferido pelo Desfixar na folha do compartilhar. O que para antes do comentário volta na leitura seguinte, até
+# TENTATIVAS_DO_PEDIDO vezes; o comentário que para volta pelo link, como o do fixar. DECISOES.md, Shopee Vídeo.
+PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO = ("2026-11-21",)
+TENTATIVAS_DO_PEDIDO = 3
+# A marca do vídeo do pedido no estado dos comentários quando a capa da grade não carrega no print.
+MARCA_SEM_A_CAPA = "0" * 16
+
+
+def _pedido_do_1o_fixado():
+    """O pedido de comentário no 1º fixado ainda não feito e com tentativas sobrando, ou None."""
+    anotados = ler_estado().get("pedidos_do_fixado") or {}
+    return next((p for p in PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO
+                 if not (anotados.get(p) or {}).get("feito")
+                 and (anotados.get(p) or {}).get("tentativas", 0) < TENTATIVAS_DO_PEDIDO), None)
+
+
+def _anotar_o_pedido(pedido, feito):
+    """Conta mais uma tentativa do pedido de comentário no 1º fixado (feito: o vídeo chegou ao comentário)."""
+    def anotar(dados):
+        pedidos = dados.setdefault("pedidos_do_fixado", {})
+        atual = pedidos.setdefault(pedido, {"tentativas": 0, "feito": False})
+        atual["tentativas"] += 1
+        atual["feito"] = atual["feito"] or feito
+
+    db.atualizar_config(CHAVE_ESTADO, anotar)
+
+
+def _marca_do_quadro(d, quadro):
+    """A marca da capa do quadro da grade (visualizacoes.marca_da_capa), esperando ela carregar; ou MARCA_SEM_A_CAPA."""
+    for tentativa in range(TENTATIVAS_DA_MARCA):
+        if tentativa:
+            pausa(PAUSA_DA_MARCA)
+        marca = visualizacoes.marca_da_capa(d.screenshot(), quadro["caixa"])
+        if marca:
+            return marca
+    return MARCA_SEM_A_CAPA
+
+
+def _comentar_no_1o_fixado(d, agora):
+    """
+    O pedido de uma vez do comentário no 1º fixado da grade do Perfil (PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO): abre o
+    vídeo pela grade, confere na folha do compartilhar que ele está fixado (o Desfixar), copia o link e comenta
+    (_comentar_no_fixado, com a marca da capa da grade). Devolve o que fez, ou "" sem pedido. A Verificação segue
+    adiante.
+    """
+    pedido = _pedido_do_1o_fixado()
+    if not pedido:
+        return ""
+    try:
+        fixados = _fixados_do_perfil(d)
+        if not fixados:
+            raise Parada(MOTIVO_DO_FIXAR + "nenhum vídeo com o selo Fixado na grade do Perfil")
+        primeiro = fixados[0]
+        marca = _marca_do_quadro(d, primeiro)
+        xml, ponto = tela(d), ps._centro(primeiro)
+        if ps.proibido_no_ponto(xml, *ponto):
+            raise Parada(ps.RECUSA)
+        d.click(*ponto)
+        pausa(6)
+        _esperar_o_player(d)
+        if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
+            raise Parada(MOTIVO_DO_FIXAR + "o 1º vídeo do selo Fixado não mostrou o Desfixar")
+        link = _copiar_link_da_folha(d)
+        _fechar_a_folha(d)
+    except Verificacao:
+        raise
+    except Exception as e:
+        if isinstance(e, Parada):
+            porque, guardado = e.motivo.removeprefix(MOTIVO_DO_FIXAR), e.caso_guardado
+        else:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] O 1º fixado do Perfil não abriu: {type(e).__name__}")
+            porque, guardado = f"erro inesperado ({type(e).__name__})", False
+        _anotar_o_pedido(pedido, False)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_FIXADO, "parou", f"1º fixado: {porque}",
+                                     ok=False, agora=agora)
+        if not guardado:
+            try:
+                _guardar_caso(d, "fixar", "parou", f"comentar no 1º fixado: {porque}", agora=agora)
+            except Exception as erro:
+                logger.warning(f"⚠️ [Robô Shopee Vídeo] Caso do 1º fixado não guardado: {type(erro).__name__}")
+        return f"{MOTIVO_DO_FIXAR}1º fixado do Perfil: parou ({porque})"
+    _anotar_o_pedido(pedido, True)
+    return f"{MOTIVO_DO_FIXAR}1º fixado do Perfil: " + _comentar_no_fixado(d, marca, link, agora)
 
 
 def _abrir_comentarios(d):
