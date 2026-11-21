@@ -1,7 +1,8 @@
 """
 O vídeo que viraliza nos fixados do Perfil (P263 1): as curtidas de cada vídeo contadas nas linhas
 "curtiu seu vídeo." das Notificações (interacoes_shopee_video), juntadas pela marca da capa pequena
-(visualizacoes_shopee_video), e a troca no app (robo_shopee_video.fixar_o_que_viraliza).
+(visualizacoes_shopee_video), a troca no app (robo_shopee_video.fixar_o_que_viraliza) e o comentário
+no vídeo fixado (pedido do Rafael, 21/11/2026).
 """
 import random
 from datetime import datetime, timedelta
@@ -335,6 +336,33 @@ def avisos(monkeypatch):
     return mandados
 
 
+@pytest.fixture(autouse=True)
+def comentarios(monkeypatch):
+    """
+    O comentário no vídeo fixado sem o painel de comentários: o caminho dele no app (robo._comentar_no_aberto) é o
+    do comentário de depois do post, com os testes dele (test_interacoes_shopee_video). Aqui, cada chamada anota
+    o vídeo aberto no player e o que o robô passou; "falhas": os motivos das próximas chamadas, que param.
+    """
+    feitos = {"chamadas": [], "falhas": [], "casos": []}
+
+    def comentar(d, video, onde, produto, titulo, anteriores=(), agora=None, ident=None, ao_enviar=None):
+        feitos["chamadas"].append({"aberto": d.aberto, "tela": d.atual, "onde": onde, "produto": produto,
+                                   "titulo": titulo})
+        if feitos["falhas"]:
+            raise robo.Parada(feitos["falhas"].pop(0))
+        return "comentado", f"Esse vale muito a pena! {len(feitos['chamadas'])}", ("curtido", "curtido")
+
+    monkeypatch.setattr(robo, "_comentar_no_aberto", comentar)
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: feitos["casos"].append(
+        (acao, resultado, motivo)))
+    return feitos
+
+
+def _aviso_do_comentario(numero, video):
+    return (f"💬 Robô da Shopee Vídeo: comentei no vídeo que fixei no seu Perfil e curti o vídeo e o comentário:"
+            f"\n\nEsse vale muito a pena! {numero}\n\n🔗 https://s.shopee.com.br/{video}")
+
+
 def _curtidas(video, quantas, desde=9, direita=True):
     """Curtidas de hoje no vídeo, da mais nova para a mais velha, de 3 em 3 min a partir das 09:5x."""
     momento = AGORA.replace(hour=desde, minute=59)
@@ -361,33 +389,41 @@ def _registro(processo=robo.PROCESSO_DO_FIXAR):
                                                                             "2000-01-01 00:00:00")]
 
 
-def test_video_com_10_curtidas_entra_no_lugar_do_fixado_de_menos_visualizacoes(avisos):
+def test_video_com_10_curtidas_entra_no_lugar_do_fixado_de_menos_visualizacoes(avisos, comentarios):
     app = CelularDasCurtidas(_curtidas("A", 10) + _curtidas("B", 2, desde=8) + [TOPO])
     _leitura(app)
     assert it.videos_mais_curtidos(AGORA)[:2] == [{"video": it.videos_mais_curtidos(AGORA)[0]["video"], "curtidas": 10},
                                                    {"video": it.videos_mais_curtidos(AGORA)[1]["video"], "curtidas": 2}]
     assert _registro(robo.PROCESSO_DAS_CURTIDAS) == [("lidas", "12 nova(s); o vídeo mais curtido com 10 em 24 h")]
     assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado de menos visualizações pelo "
-                                                     "vídeo que viraliza")
+                                                     "vídeo que viraliza; comentei nele")
     # O de menos visualizações (o T2, com 1,2 mil) saiu, e o A entrou no topo dos fixados.
     assert app.fixados == ["A", "T1", "T3"]
     assert app.abertos == ["A", "T2", "A"]
+    # Pedido do Rafael (21/11): logo depois do Fixar, o robô comenta no vídeo fixado, que está no player, e o
+    # aviso do comentário vem com o texto e o link.
+    assert comentarios["chamadas"] == [{"aberto": "A", "tela": "player", "onde": robo.ONDE_DO_FIXADO, "produto": "",
+                                        "titulo": "Legenda do A"}]
     assert avisos == ["📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que está viralizando (10 curtidas nas "
                       "últimas 24 h, nas Notificações).\n\n📌 Fixado agora: https://s.shopee.com.br/A\n📤 Saiu dos "
-                      "fixados (o de menos visualizações, 1.200): https://s.shopee.com.br/T2"]
+                      "fixados (o de menos visualizações, 1.200): https://s.shopee.com.br/T2",
+                      _aviso_do_comentario(1, "A")]
+    assert _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO) == [("comentado", "")]
     assert _registro() == [("desfixado", "o de menos visualizações"),
                            ("trocado", "no lugar do fixado de menos visualizações")]
     # Uma troca por leitura: a continuação da mesma leitura não troca de novo.
     assert robo.fixar_o_que_viraliza(app, AGORA) == ""
 
 
-def test_video_ja_fixado_fica_como_esta_e_sai_da_conta_por_um_dia(avisos):
+def test_video_ja_fixado_fica_como_esta_e_sai_da_conta_por_um_dia(avisos, comentarios):
     app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T3"))
     _leitura(app)
     assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: nenhum dos vídeos com as curtidas em alta "
                                                      "ficou para fixar")
     assert app.fixados == ["T1", "A", "T3"] and "Desfixar" not in app.toques and not avisos
     assert _registro() == [("já fixado", "")]
+    # O comentário vai com o Fixar do robô: o vídeo que ele acha já fixado fica sem.
+    assert not comentarios["chamadas"]
     # Na leitura seguinte, o mesmo vídeo nem abre.
     robo.contar_leitura(AGORA + timedelta(hours=3))
     assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=3)) == ""
@@ -398,7 +434,7 @@ def test_video_ja_fixado_fica_como_esta_e_sai_da_conta_por_um_dia(avisos):
 def test_com_lugar_entre_os_fixados_so_fixa(avisos):
     app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], fixados=("T1", "T3"))
     _leitura(app)
-    assert robo.fixar_o_que_viraliza(app, AGORA) == "fixar no perfil: fixei o vídeo que viraliza"
+    assert robo.fixar_o_que_viraliza(app, AGORA) == "fixar no perfil: fixei o vídeo que viraliza; comentei nele"
     assert app.fixados == ["A", "T1", "T3"] and "Desfixar" not in app.toques
     assert avisos[0].endswith("📌 Fixado agora: https://s.shopee.com.br/A\n\nAinda havia lugar entre os 3 fixados: "
                               "nenhum saiu.")
@@ -455,6 +491,98 @@ def test_mesmo_video_pela_legenda_cortada_em_lugares_diferentes():
                              "Poltrona giratória estofada com... Veja mais")
     assert not robo._mesmo_video("Poltrona giratória estofada com couro", "Copo térmico que gela o dia todo")
     assert robo._mesmo_video("", "") and not robo._mesmo_video("Poltrona giratória estofada", "")
+
+
+def _abrir_pelo_link(monkeypatch):
+    """O link do vídeo (o copiado no fixar) abre o player dele, como o link do post."""
+    abertos = []
+
+    def abrir(d, link):
+        abertos.append(link)
+        d.__dict__.update(atual="player", aberto=link.rsplit("/", 1)[1], de_onde="inicio")
+
+    monkeypatch.setattr(robo.ps, "abrir_link", abrir)
+    return abertos
+
+
+def test_comentario_que_para_no_fixado_volta_na_leitura_seguinte_pelo_link(avisos, comentarios, monkeypatch):
+    abertos = _abrir_pelo_link(monkeypatch)
+    comentarios["falhas"].append("o painel de comentários do vídeo do post não abriu")
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], fixados=("T1", "T3"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == (
+        "fixar no perfil: fixei o vídeo que viraliza; o comentário nele parou (o painel de comentários do vídeo do "
+        "post não abriu), e volta na próxima leitura")
+    # O Fixar ficou; o comentário parou sem nada no privado além do aviso do Fixar, e o caso fica para o Claude.
+    assert app.fixados == ["A", "T1", "T3"] and len(avisos) == 1
+    assert comentarios["casos"] == [("fixar", "parou", "comentar no vídeo fixado: o painel de comentários do vídeo "
+                                                       "do post não abriu")]
+    assert robo.comentario_do_fixado_pendente(AGORA)["tentativas"] == 1
+    # Na leitura seguinte, o vídeo abre pelo link copiado no fixar, e o comentário sai.
+    depois = AGORA + timedelta(hours=3)
+    robo.contar_leitura(depois)
+    assert robo.fixar_o_que_viraliza(app, depois) == "fixar no perfil: vídeo fixado antes: comentei nele"
+    assert abertos == ["https://s.shopee.com.br/A"]
+    assert [c["aberto"] for c in comentarios["chamadas"]] == ["A", "A"]
+    assert avisos[1:] == [_aviso_do_comentario(2, "A")]
+    assert _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO) == [
+        ("parou", "o painel de comentários do vídeo do post não abriu"), ("comentado", "")]
+    assert robo.comentario_do_fixado_pendente(depois) is None
+
+
+def test_comentario_que_nao_sai_em_3_tentativas_vai_ao_rafael_com_o_link(avisos, comentarios, monkeypatch):
+    _abrir_pelo_link(monkeypatch)
+    comentarios["falhas"].extend(["a IA não escreveu o comentário do post"] * 3)
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], fixados=("T1", "T3"))
+    _leitura(app)
+    robo.fixar_o_que_viraliza(app, AGORA)
+    robo.contar_leitura(AGORA + timedelta(hours=3))
+    assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=3)) == (
+        "fixar no perfil: vídeo fixado antes: o comentário nele parou (a IA não escreveu o comentário do post), e "
+        "volta na próxima leitura")
+    robo.contar_leitura(AGORA + timedelta(hours=6))
+    assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=6)) == (
+        "fixar no perfil: vídeo fixado antes: o comentário nele parou (a IA não escreveu o comentário do post), na "
+        "última tentativa")
+    assert avisos[-1] == ("⚠️ Robô da Shopee Vídeo: não consegui comentar no vídeo que fixei no seu Perfil (a IA não "
+                          "escreveu o comentário do post), em 3 tentativas. Se quiser, comente à mão.\n\n🔗 "
+                          "https://s.shopee.com.br/A")
+    assert [r for r, _d in _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO)] == ["parou", "parou", "parou", "desistiu"]
+    # Depois da última, nada volta.
+    robo.contar_leitura(AGORA + timedelta(hours=9))
+    assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=9)) == ""
+    assert len(comentarios["chamadas"]) == 3
+
+
+def test_video_fixado_ja_comentado_nao_ganha_outro_comentario_por_7_dias(comentarios):
+    app = CelularDasCurtidas([], fixados=("A", "T1", "T3"))
+    app.atual, app.aberto = "player", "A"
+    marca = vz.marca_da_miniatura(_desenho("A"), (0, 0, 105, 105))
+    robo._anotar_o_comentario_do_fixado(marca, "https://s.shopee.com.br/A", "comentado", AGORA)
+    assert robo._comentar_no_fixado(app, marca, "https://s.shopee.com.br/A", AGORA + timedelta(days=2)) == (
+        "já tinha comentado nele")
+    assert not comentarios["chamadas"]
+    assert _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO) == [("já comentado", "há menos de 7 dias")]
+    # Passados os 7 dias (como no post antigo), o vídeo fixado de novo ganha outro comentário.
+    assert robo._comentar_no_fixado(app, marca, "https://s.shopee.com.br/A", AGORA + timedelta(days=8)) == (
+        "comentei nele")
+    assert len(comentarios["chamadas"]) == 1
+
+
+def test_legenda_do_player_vai_a_ia_sem_o_veja_mais():
+    assert robo._legenda_sem_o_corte("Poltrona giratória estofada com ... Veja mais") == (
+        "Poltrona giratória estofada com")
+    assert robo._legenda_sem_o_corte("Copo térmico… Veja mais") == "Copo térmico"
+    assert robo._legenda_sem_o_corte("") == ""
+
+
+def test_registro_do_comentario_no_fixado_tem_o_nome_proprio():
+    for onde, nome in ((robo.ONDE_DO_FIXADO, "vídeo fixado: curtir o vídeo"),
+                       (robo.ONDE_DO_ANTIGO, "post antigo: curtir o vídeo"),
+                       (True, "post antigo: curtir o vídeo"), (False, "próprio post: curtir o vídeo")):
+        robo._registrar_no_post(onde, "curtir o vídeo", "curtido", True, AGORA)
+        assert robo.registro_processos.sequencia("shopee_video", nome, "2000-01-01 00:00:00")
+    assert robo.ACAO_DO_CASO_DO_COMENTARIO[robo._onde_do_comentario(robo.ONDE_DO_FIXADO)] == "fixar"
 
 
 def test_rodada_das_respostas_fixa_depois_de_responder(monkeypatch):

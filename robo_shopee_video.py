@@ -8424,6 +8424,16 @@ PROCESSO_DAS_CURTIDAS = "curtidas nas notificações"
 PROCESSO_DO_FIXAR = "fixar no perfil"
 MOTIVO_DO_FIXAR = "fixar no perfil: "
 SEM_O_LINK = "o link não saiu"
+# O comentário no vídeo que o robô fixa (pedido do Rafael, 21/11/2026): logo depois do Fixar, ele comenta no
+# vídeo como no de depois do post (P148 2: curte o vídeo, a IA escreve um texto curto chamando para comprar e ele
+# curte o comentário), e o aviso vai ao privado com o texto e o link. O que não sai volta nas leituras seguintes
+# das Notificações, pelo link do vídeo, até TENTATIVAS_DO_COMENTARIO_FIXADO vezes; na última, o Rafael recebe o
+# porquê e o link, para comentar à mão, se quiser. O vídeo comentado não ganha outro comentário do robô por
+# interacoes.DIAS_ENTRE_COMENTARIOS dias, como o post antigo. O vídeo que o robô acha já fixado fica como está.
+# DECISOES.md, Shopee Vídeo.
+TENTATIVAS_DO_COMENTARIO_FIXADO = 3
+PROCESSO_DO_COMENTARIO_FIXADO = "vídeo fixado: comentar"
+NO_VIDEO_FIXADO = "no vídeo que fixei no seu Perfil"
 
 
 def _juntar_curtidas(d, xml, curtidas, agora=None):
@@ -8517,19 +8527,29 @@ def _anotar_visto(video, agora=None):
 
 def fixar_o_que_viraliza(d, agora=None):
     """
-    Depois das respostas de cada leitura das Notificações: o vídeo com MINIMO_DE_CURTIDAS curtidas ou mais nas
-    últimas 24 h que não está fixado entra no lugar do fixado com menos visualizações (_fixar_no_perfil), até
-    CANDIDATOS_POR_LEITURA vídeos olhados. Uma vez por leitura: a continuação dela (respostas_continuar) não
-    troca de novo. Devolve o que fez, para a rodada, ou "". O que para fica no registro, com o caso para o
-    checkup do Claude; a Verificação segue adiante, como nas respostas.
+    Depois das respostas de cada leitura das Notificações: o comentário no vídeo fixado que não saiu na leitura
+    de antes volta (_comentar_de_novo_no_fixado), e o vídeo com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas
+    24 h que não está fixado entra no lugar do fixado com menos visualizações e ganha o comentário
+    (_fixar_no_perfil), até CANDIDATOS_POR_LEITURA vídeos olhados. Uma vez por leitura: a continuação dela
+    (respostas_continuar) não troca de novo. Devolve o que fez, para a rodada, ou "". O que para fica no registro,
+    com o caso para o checkup do Claude; a Verificação segue adiante, como nas respostas.
     """
     momento = agora_br(agora)
     leitura = f"{momento:%Y-%m-%d}#{leituras_de_hoje(momento)}"
     if ler_estado().get("fixar_leitura") == leitura:
         return ""
     gravar_estado(fixar_leitura=leitura)
-    vistos = _ja_vistos(momento)
-    mais_curtidos = interacoes.videos_mais_curtidos(momento)
+    de_novo = _comentar_de_novo_no_fixado(d, momento)
+    feito = _fixar_um(d, momento)
+    if de_novo and feito:
+        return f"{feito}; {de_novo.removeprefix(MOTIVO_DO_FIXAR)}"
+    return feito or de_novo
+
+
+def _fixar_um(d, agora):
+    """O fixar de uma leitura (fixar_o_que_viraliza): o primeiro dos candidatos que dá certo, ou o que parou."""
+    vistos = _ja_vistos(agora)
+    mais_curtidos = interacoes.videos_mais_curtidos(agora)
     candidatos = [v for v in mais_curtidos if v["curtidas"] >= MINIMO_DE_CURTIDAS and not any(
         visualizacoes.diferenca(v["video"], visto) <= visualizacoes.MARCA_PARECIDA for visto in vistos)]
     if not candidatos:
@@ -8540,7 +8560,7 @@ def fixar_o_que_viraliza(d, agora=None):
         return ""
     for candidato in candidatos[:CANDIDATOS_POR_LEITURA]:
         try:
-            feito = _fixar_no_perfil(d, candidato, momento)
+            feito = _fixar_no_perfil(d, candidato, agora)
         except Verificacao:
             raise
         except Parada as e:
@@ -8565,8 +8585,9 @@ def _fixar_no_perfil(d, candidato, agora):
     O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: abre pela linha da curtida,
     confere no coração que ele tem as curtidas e, na folha do compartilhar, que não está fixado; copia o link,
     tira do Perfil o fixado de menos visualizações quando os FIXADOS_NO_PERFIL estão ocupados, abre o vídeo de
-    novo e o fixa, conferindo cada passo. Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado ou com
-    menos curtidas no coração), para olhar o seguinte. O fixar que para depois do desfixar avisa o Rafael.
+    novo e o fixa, conferindo cada passo, e comenta nele (_comentar_no_fixado). Devolve o que fez, ou "" quando o
+    vídeo fica de fora (já fixado ou com menos curtidas no coração), para olhar o seguinte. O fixar que para
+    depois do desfixar avisa o Rafael.
     """
     xml = _abrir_pela_curtida(d, candidato["video"])
     video = interacoes.video_do_feed(xml)
@@ -8614,8 +8635,9 @@ def _fixar_no_perfil(d, candidato, agora):
     else:
         aviso += f"\n\nAinda havia lugar entre os {FIXADOS_NO_PERFIL} fixados: nenhum saiu."
     avisar(aviso)
+    comentario = _comentar_no_fixado(d, candidato["video"], link, agora)
     return "fixar no perfil: " + ("troquei o fixado de menos visualizações pelo vídeo que viraliza" if saiu
-                                  else "fixei o vídeo que viraliza")
+                                  else "fixei o vídeo que viraliza") + f"; {comentario}"
 
 
 def _abrir_pela_curtida(d, video):
@@ -8791,6 +8813,120 @@ def _fixar_o_video(d, video, legenda):
     if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
         raise Parada(MOTIVO_DO_FIXAR + "o Fixar não ficou")
     _fechar_a_folha(d)
+
+
+def _comentarios_dos_fixados(dados, agora=None):
+    """Os comentários nos vídeos fixados (fixados_comentarios do estado) dos últimos DIAS_ENTRE_COMENTARIOS dias."""
+    limite = _momento(agora_br(agora) - timedelta(days=interacoes.DIAS_ENTRE_COMENTARIOS))
+    return [c for c in dados.get("fixados_comentarios") or [] if (c.get("em") or "") >= limite]
+
+
+def _do_mesmo_video(comentarios, video):
+    """O comentário do vídeo (a marca da capa das curtidas, parecida) entre os comentários, ou None."""
+    return next((c for c in comentarios
+                 if visualizacoes.diferenca(c["video"], video) <= visualizacoes.MARCA_PARECIDA), None)
+
+
+def _anotar_o_comentario_do_fixado(video, link, resultado, agora=None):
+    """
+    Anota o resultado do comentário no vídeo fixado ("falhou" conta mais uma tentativa) e devolve quantas
+    tentativas ele já teve. Os de mais de DIAS_ENTRE_COMENTARIOS dias saem do estado.
+    """
+    def anotar(dados):
+        comentarios = _comentarios_dos_fixados(dados, agora)
+        achado = _do_mesmo_video(comentarios, video)
+        if not achado:
+            achado = {"video": video, "link": link, "em": _momento(agora), "tentativas": 0}
+            comentarios.append(achado)
+        achado["link"] = achado.get("link") or link
+        achado["resultado"] = resultado
+        if resultado == "falhou":
+            achado["tentativas"] = achado.get("tentativas", 0) + 1
+        dados["fixados_comentarios"] = comentarios
+        return achado["tentativas"]
+
+    return db.atualizar_config(CHAVE_ESTADO, anotar) or 0
+
+
+def comentario_do_fixado_pendente(agora=None):
+    """
+    O vídeo fixado pelo robô cujo comentário não saiu e volta agora (menos de TENTATIVAS_DO_COMENTARIO_FIXADO
+    tentativas), o mais velho primeiro; None sem nenhum.
+    """
+    pendentes = [c for c in _comentarios_dos_fixados(ler_estado(), agora)
+                 if c.get("resultado") == "falhou" and c.get("tentativas", 0) < TENTATIVAS_DO_COMENTARIO_FIXADO]
+    return min(pendentes, key=lambda c: c.get("em") or "", default=None)
+
+
+def _legenda_sem_o_corte(legenda):
+    """A legenda do player sem o "... Veja mais" do corte: o título do vídeo para a IA."""
+    return re.split(r"\.\.\.|…|Veja mais", legenda or "")[0].strip()
+
+
+def _comentar_no_fixado(d, video, link, agora, abrir=None):
+    """
+    O comentário no vídeo fixado (video: a marca da capa das curtidas), que está no player ou abre por abrir() (na
+    nova tentativa): _comentar_no_aberto, com a legenda do player no lugar do título. O aviso vai ao privado com o
+    texto e o link. O que não dá certo fica no registro e no caso e volta na próxima leitura das Notificações
+    (comentario_do_fixado_pendente); na última tentativa, o Rafael recebe o porquê e o link. Devolve o que fez, numa
+    frase para o que o fixar devolve. A Verificação segue adiante.
+    """
+    anterior = _do_mesmo_video(_comentarios_dos_fixados(ler_estado(), agora), video)
+    if anterior and anterior.get("resultado") in interacoes.COMENTADOS_NO_PROPRIO:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_FIXADO, "já comentado",
+                                     f"há menos de {interacoes.DIAS_ENTRE_COMENTARIOS} dias", ok=None, agora=agora)
+        return "já tinha comentado nele"
+    guardado = False
+    try:
+        aberto = abrir() if abrir else interacoes.video_do_feed(_esperar_o_player(d))
+        resultado, texto, curtidas = _comentar_no_aberto(d, aberto, ONDE_DO_FIXADO, "",
+                                                         _legenda_sem_o_corte(aberto["legenda"]), agora=agora)
+    except Verificacao:
+        raise
+    except Parada as e:
+        motivo, guardado = e.motivo.removeprefix(MOTIVO_DO_FIXAR), e.caso_guardado
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O comentário no vídeo fixado não saiu: {type(e).__name__}")
+        motivo = f"erro inesperado ({type(e).__name__})"
+    else:
+        _anotar_o_comentario_do_fixado(video, link, resultado, agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_FIXADO, resultado, ok=resultado == "comentado",
+                                     agora=agora)
+        avisar(_aviso_do_comentario(resultado, texto, curtidas, onde=NO_VIDEO_FIXADO) + linha_do_link(link, SEM_O_LINK))
+        return "comentei nele" if resultado == "comentado" else "comentei nele, sem o comentário aparecer na lista"
+    tentativas = _anotar_o_comentario_do_fixado(video, link, "falhou", agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_FIXADO, "parou", motivo, ok=False, agora=agora)
+    if not guardado:
+        try:
+            _guardar_caso(d, "fixar", "parou", f"comentar no vídeo fixado: {motivo}", agora=agora)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Caso do comentário no fixado não guardado: {type(e).__name__}")
+    if tentativas < TENTATIVAS_DO_COMENTARIO_FIXADO:
+        return f"o comentário nele parou ({motivo}), e volta na próxima leitura"
+    _anotar_o_comentario_do_fixado(video, link, "desistiu", agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_FIXADO, "desistiu", motivo, ok=False, agora=agora)
+    avisar(f"⚠️ Robô da Shopee Vídeo: não consegui comentar {NO_VIDEO_FIXADO} ({motivo}), em "
+           f"{TENTATIVAS_DO_COMENTARIO_FIXADO} tentativas. Se quiser, comente à mão." + linha_do_link(link, SEM_O_LINK))
+    return f"o comentário nele parou ({motivo}), na última tentativa"
+
+
+def _comentar_de_novo_no_fixado(d, agora):
+    """
+    A nova tentativa do comentário no vídeo fixado que não saiu (comentario_do_fixado_pendente), uma por leitura das
+    Notificações: o vídeo abre pelo link copiado no fixar (como o do post, P148 2) ou, sem ele, pela linha da
+    curtida. Devolve o que fez, ou "" sem nenhuma pendente.
+    """
+    pendente = comentario_do_fixado_pendente(agora)
+    if not pendente:
+        return ""
+
+    def abrir():
+        if pendente.get("link"):
+            return _abrir_o_video_do_post(d, pendente["link"])
+        return interacoes.video_do_feed(_abrir_pela_curtida(d, pendente["video"]))
+
+    return (f"{MOTIVO_DO_FIXAR}vídeo fixado antes: "
+            + _comentar_no_fixado(d, pendente["video"], pendente.get("link") or "", agora, abrir))
 
 
 def _abrir_comentarios(d):
@@ -9289,10 +9425,29 @@ def _abrir_o_video_do_post(d, link):
     return video
 
 
+# Onde o comentário no vídeo do Rafael é feito, no nome do registro: o de depois do post e o do post antigo (P148 2)
+# e o do vídeo fixado no Perfil (pedido do Rafael, 21/11/2026). O antigo=True de antes é o post antigo.
+ONDE_DO_PROPRIO, ONDE_DO_ANTIGO, ONDE_DO_FIXADO = "próprio post", "post antigo", "vídeo fixado"
+ACAO_DO_CASO_DO_COMENTARIO = {ONDE_DO_PROPRIO: "comentar_post", ONDE_DO_ANTIGO: "post_antigo", ONDE_DO_FIXADO: "fixar"}
+
+
+def _onde_do_comentario(antigo):
+    """O lugar do comentário (ONDE_DO_*): antigo=True é o post antigo, False o próprio post; um texto é o lugar."""
+    if isinstance(antigo, str):
+        return antigo
+    return ONDE_DO_ANTIGO if antigo else ONDE_DO_PROPRIO
+
+
 def _registrar_no_post(antigo, passo, resultado, ok, agora=None):
-    """O passo do comentário no próprio vídeo no registro: o de post antigo é interação; o outro vai com o post."""
-    if antigo:
+    """
+    O passo do comentário no vídeo do Rafael no registro, com o lugar dele na frente (_onde_do_comentario): o de
+    post antigo e o do vídeo fixado são interações; o outro vai com o post.
+    """
+    onde = _onde_do_comentario(antigo)
+    if onde == ONDE_DO_ANTIGO:
         registro_processos.registrar(REGISTRO, f"post antigo: {passo}", resultado, ok=ok, agora=agora)
+    elif onde == ONDE_DO_FIXADO:
+        registro_processos.registrar(REGISTRO, f"vídeo fixado: {passo}", resultado, ok=ok, agora=agora)
     else:
         registro_processos.registrar(REGISTRO, f"próprio post: {passo}", resultado, ok=ok, agora=agora)
 
@@ -9392,7 +9547,7 @@ def _curtir_o_comentario_do_post(d, texto, antigo, agora=None, ident=None):
     ok = resultado in ("curtido", "já curtido")
     _registrar_no_post(antigo, "curtir o comentário", resultado, ok, agora)
     if not ok:
-        _guardar_caso(d, "post_antigo" if antigo else "comentar_post", "curtida não confirmada",
+        _guardar_caso(d, ACAO_DO_CASO_DO_COMENTARIO[_onde_do_comentario(antigo)], "curtida não confirmada",
                       f"a curtida no comentário do próprio post não se confirmou ({resultado})", ident=ident,
                       agora=agora)
     return resultado
@@ -9400,31 +9555,44 @@ def _curtir_o_comentario_do_post(d, texto, antigo, agora=None, ident=None):
 
 def comentar_no_post(d, rascunho, antigo=False, agora=None):
     """
-    O comentário do Rafael num post do robô (P148 2): abre o vídeo pelo link do post, curte o
-    vídeo (se ainda não está curtido), abre os comentários, pede à IA um texto curto chamando
-    para comprar, diferente dos comentários do Rafael na tela, dos que o robô já fez nesse post
-    e dos últimos de todos os posts, escreve, envia, confere que apareceu e curte o comentário.
-    Devolve (resultado, texto, curtidas): "comentado" ou "não confirmado" (enviado sem aparecer
-    na lista: pode ter saído, e não é repetido), o texto e o que saiu das duas curtidas (o vídeo e
-    o comentário). O que não dá certo antes de enviar para (Parada), sem nada escrito.
+    O comentário do Rafael num post do robô (P148 2): abre o vídeo pelo link do post e comenta nele
+    (_comentar_no_aberto), com o produto e o título do rascunho e sem repetir os que o robô já fez
+    nesse post. Devolve (resultado, texto, curtidas), como o _comentar_no_aberto.
     """
     video = _abrir_o_video_do_post(d, rascunho["link_post"])
-    curtiu_o_video = _curtir_o_video_do_post(d, video, antigo, agora)
+    feitos = rascunho.get("comentarios_proprios") or []
+    produto = (rascunho.get("produtos") or [""])[0]
+    return _comentar_no_aberto(
+        d, video, _onde_do_comentario(antigo), produto, rascunho.get("titulo") or "", feitos, agora, rascunho["id"],
+        ao_enviar=lambda texto: atualizar(rascunho["id"], comentarios_proprios=feitos + [texto]))
+
+
+def _comentar_no_aberto(d, video, onde, produto, titulo, feitos=(), agora=None, ident=None, ao_enviar=None):
+    """
+    O comentário do Rafael no vídeo dele que está no player (video, de interacoes.video_do_feed): curte
+    o vídeo (se ainda não está curtido), abre os comentários, pede à IA um texto curto chamando para
+    comprar, diferente dos comentários do Rafael na tela, dos já feitos nesse vídeo (feitos) e dos
+    últimos de todos, escreve, envia, confere que apareceu e curte o comentário. onde: o lugar no
+    registro (ONDE_DO_*); ao_enviar(texto), logo depois do envio. Devolve (resultado, texto, curtidas):
+    "comentado" ou "não confirmado" (enviado sem aparecer na lista: pode ter saído, e não é repetido),
+    o texto e o que saiu das duas curtidas (o vídeo e o comentário). O que não dá certo antes de
+    enviar para (Parada), sem nada escrito.
+    """
+    curtiu_o_video = _curtir_o_video_do_post(d, video, onde, agora)
     xml = _abrir_os_comentarios_do_post(d, video)
     na_tela = [c["texto"] for c in interacoes.comentarios_do_painel(xml) if c["criador"] and c["texto"]]
-    feitos = rascunho.get("comentarios_proprios") or []
     recentes = ler_estado().get("proprio_textos") or []
-    anteriores = list(dict.fromkeys(na_tela + feitos + recentes))
-    produto = (rascunho.get("produtos") or [""])[0]
-    texto = asyncio.run(interacoes.gerar_proprio(produto, rascunho.get("titulo") or "", anteriores))
+    anteriores = list(dict.fromkeys(na_tela + list(feitos) + recentes))
+    texto = asyncio.run(interacoes.gerar_proprio(produto, titulo, anteriores))
     if not texto:
         raise Parada("a IA não escreveu o comentário do post")
     _abrir_o_campo_do_post(d, xml)
     _escrever_e_enviar(d, texto)
     apareceu = _apareceu_no_painel(d, texto)
-    atualizar(rascunho["id"], comentarios_proprios=feitos + [texto])
+    if ao_enviar:
+        ao_enviar(texto)
     gravar_estado(proprio_textos=(recentes + [texto])[-TEXTOS_GUARDADOS_DO_PROPRIO:])
-    curtiu_o_comentario = _curtir_o_comentario_do_post(d, texto, antigo, agora, rascunho["id"]) if apareceu else ""
+    curtiu_o_comentario = _curtir_o_comentario_do_post(d, texto, onde, agora, ident) if apareceu else ""
     return ("comentado" if apareceu else "não confirmado"), texto, (curtiu_o_video, curtiu_o_comentario)
 
 

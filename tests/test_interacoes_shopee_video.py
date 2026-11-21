@@ -1161,6 +1161,28 @@ def test_depois_do_post_curte_o_video_comenta_e_curte_o_comentario(avisos, ia_do
             ("próprio post: curtir o comentário", "curtido")} <= set(_passos_do_proprio())
 
 
+def test_comentario_no_video_fixado_que_volta_pelo_link_e_o_de_depois_do_post(avisos, ia_do_proprio, pelo_link):
+    # Pedido do Rafael (21/11/2026): o vídeo que o robô fixa no Perfil ganha o comentário como o de depois do
+    # post; o que parou na hora do Fixar volta na leitura seguinte, pelo link copiado no fixar.
+    robo._anotar_o_comentario_do_fixado("0f0f0f0f0f0f0f0f", LINK_DO_POST, "falhou", momento("2026-11-01 10:00"))
+    app = CelularDoPost(comentarios=[TITULO_DO_POST])
+    assert robo._comentar_de_novo_no_fixado(app, momento("2026-11-01 13:00")) == (
+        "fixar no perfil: vídeo fixado antes: comentei nele")
+    texto = "Esse vale muito a pena! 1"
+    assert pelo_link == [LINK_DO_POST] and app.curtido
+    assert app.comentarios[0] == texto and texto in app.curtidos_no_painel
+    assert ia_do_proprio == [[TITULO_DO_POST]]
+    assert avisos[-1] == (f"💬 Robô da Shopee Vídeo: comentei no vídeo que fixei no seu Perfil e curti o vídeo e o "
+                          f"comentário:\n\n{texto}\n\n🔗 {LINK_DO_POST}")
+    passos = {(processo, resultado) for _m, processo, resultado, _d, _o in robo.registro_processos.sequencia(
+        "shopee_video", "vídeo fixado:", "2000-01-01 00:00:00")}
+    assert passos == {("vídeo fixado: curtir o vídeo", "curtido"), ("vídeo fixado: comentar", "comentado"),
+                      ("vídeo fixado: curtir o comentário", "curtido")}
+    assert robo.comentario_do_fixado_pendente(momento("2026-11-01 13:05")) is None
+    # O texto entra nos últimos do robô, para o próximo comentário não repetir.
+    assert robo.ler_estado()["proprio_textos"] == [texto]
+
+
 class CelularQueNaoCurteOComentario(CelularDoPost):
     """O coração do comentário não pega: o toque cai, e o comentário continua sem a curtida."""
 
