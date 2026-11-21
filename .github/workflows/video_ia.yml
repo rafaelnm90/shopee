@@ -20,6 +20,8 @@ name: Vídeo de IA (Shopee Vídeo)
 # e o parado que sobrar cortado pelo servidor; vão ao privado o vídeo cortado e o original.
 # "amostra-16s-maos-e-voz" é a da P261 1 (20/11): a de 16 s no formato mãos e voz, só as mãos usando o produto, sem
 # rosto, com uma voz contando do começo ao fim, só no privado do Rafael (o robô só muda com o OK dele).
+# "amostra-tv" é a da P268 1 (21/11): a de 8 s com cara de propaganda de TV, o produto em planos de comercial e um
+# locutor em off, sem ninguém falando para a câmera (24 créditos), só no privado do Rafael (o robô só muda com o OK dele).
 # "personagens" faz as fotos dos 10 personagens fixos (P250 1 e P258 1) no modo Imagem do Flow, que não gasta
 # crédito, e manda cada uma ao privado do Rafael para aprovar; sem "quais", as que faltam; com "quais" (as chaves
 # separadas por vírgula, ex.: bonitao,vovo), essas de novo.
@@ -39,7 +41,8 @@ on:
         description: "O que fazer"
         type: choice
         options: [modelos, testar, flow, flow-sem-gerar, produtos, amostra, amostra-16s, amostra-16s-mesmo,
-                  amostra-16s-fala-inteira, amostra-16s-maos-e-voz, personagens, aprovar-personagens, imagem-teste]
+                  amostra-16s-fala-inteira, amostra-16s-maos-e-voz, amostra-tv, personagens, aprovar-personagens,
+                  imagem-teste]
         default: modelos
       quais:
         description: "Só no personagens (refazer) e no aprovar-personagens: as chaves, separadas por vírgula (ex.: bonitao,vovo); vazio = as que faltam (no aprovar, as 10)"
@@ -77,6 +80,7 @@ jobs:
               amostra-16s-mesmo) venv/bin/python3 flow_shopee_video.py amostra --longa --mesmo ;;
               amostra-16s-fala-inteira) venv/bin/python3 flow_shopee_video.py amostra --longa --fala-inteira ;;
               amostra-16s-maos-e-voz) venv/bin/python3 flow_shopee_video.py amostra --longa --maos-e-voz ;;
+              amostra-tv) venv/bin/python3 flow_shopee_video.py amostra --tv ;;
               personagens) venv/bin/python3 flow_shopee_video.py personagens "$QUAIS" ;;
               aprovar-personagens) venv/bin/python3 flow_shopee_video.py aprovar-personagens "$QUAIS" ;;
               imagem-teste) venv/bin/python3 flow_shopee_video.py imagem-teste ;;

@@ -9677,6 +9677,25 @@ def test_amostra_maos_e_voz_pede_o_formato_novo_e_o_video_do_dia_continua_igual(
     assert maos == [True, False] and unboxings == [False, True]
 
 
+def test_amostra_da_propaganda_de_tv_pede_o_pedido_dela_e_o_video_do_dia_continua_igual(monkeypatch):
+    # Escolha do Rafael (21/11, P268 1): a propaganda de TV vai primeiro numa amostra de 8 s, só no privado dele; o
+    # vídeo de IA do dia continua com a escolha de antes até o OK dele.
+    _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
+    pedido, propagandas = robo.flow.pedido_para_o_anuncio, []
+
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False,
+               da_producao=False, propaganda=False):
+        propagandas.append((propaganda, longo, da_producao))
+        return pedido(*argumentos, longo=longo)
+
+    monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", anotar)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"), amostra=True,
+                                                                    longo=False, propaganda=True)
+    assert escolhido["item"] == "13"
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:10"))
+    assert propagandas == [(True, False, False), (False, True, True)]
+
+
 def test_video_de_ia_anota_a_imagem_do_personagem_e_o_rascunho_leva_o_personagem(monkeypatch, avisos, tmp_path):
     # P260 1: o registro diz o personagem da imagem (só a chave) ou o porquê sem ela; o aviso e o rascunho dizem quem
     # está no vídeo. Sem foto aprovada não é falha; a imagem que não saiu, sim (o checkup cobra).

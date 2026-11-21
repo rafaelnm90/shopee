@@ -2170,6 +2170,123 @@ def test_amostra_maos_e_voz_so_com_a_de_16_s_e_sem_a_fala_inteira(celular, monke
     assert pedidos == [] and celular.geracoes == 0 and celular.mandados == []
 
 
+# --- A amostra da propaganda de TV de 8 s (P268 1) ---
+
+FALA_DO_LOCUTOR = "Seu quarto merece outra luz. Na medida certa, onde você quiser. Garanta a sua."
+# As palavras que o servidor ouve no vídeo de 8 s, em segundos: o locutor do 1º segundo até perto do fim.
+FALA_DO_LOCUTOR_OUVIDA = [(0.4, 0.8, "Seu"), (0.8, 1.3, "quarto"), (1.3, 1.8, "merece"), (1.8, 2.2, "outra"),
+                          (2.2, 2.7, "luz."), (3.0, 3.3, "Na"), (3.3, 3.8, "medida"), (3.8, 4.3, "certa,"),
+                          (4.3, 4.6, "onde"), (4.6, 4.9, "você"), (4.9, 5.4, "quiser."), (5.7, 6.3, "Garanta"),
+                          (6.3, 6.4, "a"), (6.4, 6.9, "sua.")]
+
+
+def test_pedido_da_propaganda_de_tv_tem_os_planos_de_comercial_e_o_locutor_sem_ninguem_falando(monkeypatch):
+    # Escolha do Rafael (21/11, P268 1): o vídeo de IA com cara de propaganda de TV, de 8 s, "não com cara de IA, de
+    # Shopee": o produto em planos de comercial, com luz de estúdio, e um locutor em off; ninguém fala para a câmera.
+    tv = flow.PEDIDO_DA_PROPAGANDA.format(nome="Luminária de Mesa", evitar="", bebida="")
+    for trecho in ("cara de propaganda de TV de verdade", "2 ou 3 planos de cinema", "locutor profissional",
+                   "fala em off", "ninguém fala na tela", "premium TV commercial", "no one speaks on camera",
+                   "no text, no logo", f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras ao todo",
+                   "do 1º segundo até perto do fim", "o produto sozinho no centro do quadro",
+                   "idêntico ao da foto em todos os planos", "palavras curtas, comuns e fáceis de falar",
+                   "sem preço", "Luminária de Mesa", '{"serve": true ou false'):
+        assert trecho in tv, trecho
+    pedidos, respostas = [], []
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return respostas.pop(0)
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    link = "https://s.shopee.com.br/abc"
+    respostas[:] = ['{"serve": true, "muda_na_ia": false, "motivo": "", '
+                    '"prompt": "Premium TV commercial of the lamp.", '
+                    f'"fala": "{FALA_DO_LOCUTOR}", "cena": "A luminária acende num quarto escuro."}}']
+    escolhido, serve = flow.pedido_para_o_anuncio(link, "Luminária", _jpeg(), propaganda=True)
+    # Um pedido só (sem a escolha do formato), o da propaganda, de 8 s: a fala do locutor e nenhuma continuação.
+    assert serve is True and len(pedidos) == 1 and "premium TV commercial" in pedidos[0]
+    assert escolhido["estilo"] == escolhido["formato"] == flow.ESTILO_DA_PROPAGANDA
+    assert escolhido["fala"] == FALA_DO_LOCUTOR and "continuacao" not in escolhido
+    assert escolhido["prompt"] == flow.com_a_diccao("Premium TV commercial of the lamp.")
+    # Sem a fala do locutor, a resposta não vale.
+    respostas[:] = ['{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "Lamp.", "fala": "", "cena": "c"}']
+    assert flow.pedido_para_o_anuncio(link, "Luminária", _jpeg(), propaganda=True) == (None, None)
+    # Sem a propaganda, a amostra de 8 s continua com o pedido de antes, num dos estilos que variam.
+    respostas[:] = ['{"serve": true, "muda_na_ia": false, "motivo": "", "estilo": "fala", "prompt": "A woman.", '
+                    '"cena": "c"}']
+    escolhido, _serve = flow.pedido_para_o_anuncio(link, "Luminária", _jpeg())
+    assert "premium TV commercial" not in pedidos[-1] and escolhido["estilo"] == "fala"
+
+
+def _escolha_da_propaganda(monkeypatch):
+    """A escolha do robô de mentira para a amostra da propaganda de TV: o pedido de 8 s com a fala do locutor."""
+    import robo_shopee_video as robo
+    pedidos = []
+
+    def escolher(agora=None, fora=(), amostra=False, longo=False, fala_inteira=False, maos_e_voz=False,
+                 propaganda=False):
+        pedidos.append((list(fora), amostra, longo, propaganda))
+        item = str(455 + len(pedidos))
+        return ({"id": "ia:2026-11-21", "link": f"https://s.shopee.com.br/curto{item}", "nome": "Luminária de Mesa",
+                 "foto": _jpeg(), "estilo": flow.ESTILO_DA_PROPAGANDA, "formato": flow.ESTILO_DA_PROPAGANDA,
+                 "prompt": "Premium TV commercial of the exact lamp.", "fala": FALA_DO_LOCUTOR,
+                 "cena": "A luminária acende num quarto escuro.", "item": item, "valor": 6.5, "posicao": 1,
+                 "origem": "os produtos em alta da Shopee"}, "os produtos em alta da Shopee", True)
+
+    monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", escolher)
+    return pedidos
+
+
+def test_amostra_da_propaganda_de_tv_vai_so_ao_privado_com_o_locutor_conferido(celular, monkeypatch, capsys):
+    # P268 1: a amostra de 8 s com cara de propaganda de TV vai só ao privado do Rafael: um Gerar só, sem o Estender,
+    # com a fala do locutor conferida e o tempo com fala; o vídeo de IA do dia só muda com o OK dele.
+    pedidos = _escolha_da_propaganda(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=8)
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
+    assert flow.main(["amostra", "--tv"]) == 0
+    assert pedidos == [([], True, False, True)]
+    assert celular.geracoes == 1 and celular.extensoes == 0 and celular.modelo == "Omni 1.2 Flash"
+    assert celular.texto == "Premium TV commercial of the exact lamp."
+    (caminho, legenda), = celular.mandados
+    assert caminho.endswith("amostra.mp4")
+    for trecho in ("Amostra nº 1 do vídeo de IA de 8 s com cara de propaganda de TV (P268 1)",
+                   "Omni 1.2 Flash (24 créditos de IA)", f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
+                   "Fala no vídeo: igual à pedida", "⏱️ Com fala: 6,5 s dos 8,0 s do vídeo",
+                   "Paga R$ 6,50 por venda", "A luminária acende num quarto escuro.",
+                   "Os vídeos de IA do robô continuam como estão"):
+        assert trecho in legenda, trecho
+    for fora in ("16 s", "Estender", "O vídeo de IA do dia sai normalmente"):
+        assert fora not in legenda, fora
+    assert len(celular.fotos) == 1 and "amostra nº 1" in celular.fotos[0][1]
+    atual = flow.amostra_guardada()
+    assert atual["formato"] == flow.ESTILO_DA_PROPAGANDA and atual["estado"] == "enviado" and not atual.get("longa")
+    assert atual["com_fala"] == 6.5 and atual["fala_conferida"] == "igual"
+    # Não vira rascunho, não muda o vídeo de IA do dia nem entra nos estilos que variam nas amostras de 8 s.
+    assert flow.producao() == {} and flow.itens_gerados() == [] and flow.estilos_recentes() == []
+    assert flow.amostras_feitas() == ["456"]
+    saida = capsys.readouterr().out
+    for trecho in ("com cara de propaganda de TV (P268 1)", "Gerar tocado (Omni 1.2 Flash, 24 créditos)",
+                   "tempo com fala: 6.5 s de 8.0 s", "fala conferida: igual à pedida"):
+        assert trecho in saida, trecho
+    for privado in ("Luminária", "lamp", "quarto", "shopee.com.br", "6,50"):
+        assert privado not in saida, privado
+
+
+def test_amostra_da_propaganda_de_tv_so_sozinha_ou_sem_gerar(celular, monkeypatch, capsys):
+    # A propaganda de TV tem 8 s e o locutor dela: com o --longa, o --mesmo, a fala inteira, o mãos e voz ou no teste
+    # dos modelos, nada é tocado; com o --sem-gerar, o pedido fica pronto na tela, sem o Gerar.
+    pedidos = _escolha_da_propaganda(monkeypatch)
+    for opcoes in (["--tv", "--longa"], ["--tv", "--mesmo"], ["--tv", "--fala-inteira"],
+                   ["--tv", "--longa", "--maos-e-voz"]):
+        assert flow.main(["amostra"] + opcoes) == 2, opcoes
+    assert flow.main(["teste", "--tv"]) == 2
+    assert pedidos == [] and celular.geracoes == 0 and celular.mandados == []
+    assert flow.main(["amostra", "--tv", "--sem-gerar"]) == 0
+    assert pedidos == [([], True, False, True)] and celular.geracoes == 0 and celular.mandados == []
+    assert celular.texto == "Premium TV commercial of the exact lamp."
+    assert "Flow: sem gerar" in capsys.readouterr().out
+
+
 # --- O unboxing como mais um formato do vídeo de IA de 16 s (P256 2) ---
 
 PEDIDO_DO_VENDEDOR_JSON = ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "She holds the sandal.", '
