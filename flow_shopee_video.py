@@ -360,11 +360,27 @@ _COMECO_DO_VENDEDOR = (
     '"...", "fala": "...", "cena": "..."}}\n'
     + REGRAS_DA_FOTO
 )
+# A fala sem embolar (P264 4, 21/11/2026): o servidor ouviu embolada e cortada no fim a fala do 1º vídeo de 8 s, e o
+# Rafael quis a fala do mesmo tamanho ("tente evitar o máximo possível embolar, mas não qro reduzir fala nao"). A IA
+# escreve a fala com palavras curtas, comuns e fáceis de falar em voz alta, e pede no prompt a dicção clara, palavra
+# por palavra; o tanto de palavras e o tempo da fala continuam os mesmos. Escolha do Rafael (P264 4): DECISOES.md,
+# Shopee Vídeo.
+_FALA_SEM_EMBOLAR = (
+    "A fala é natural, em frases diretas, com palavras curtas, comuns e fáceis de falar em voz alta (sem número, "
+    "sigla, palavra estrangeira, nome difícil, palavra comprida ou trava-língua, que a IA de vídeo embola), e o "
+    "prompt (e a continuação, quando tem) pede em inglês a dicção clara: clear Brazilian Portuguese diction, every "
+    "word pronounced clearly."
+)
+# O pedido acima diz à IA para pôr a dicção clara no prompt; quando ela esquece, o servidor põe no fim do prompt e da
+# continuação do vídeo com fala (com_a_diccao). O unboxing, sem fala, fica sem.
+DICCAO_CLARA = "Clear Brazilian Portuguese diction, every word pronounced clearly."
+# O tanto de letras que o prompt e a continuação guardam.
+LETRAS_DO_PROMPT = 1000
 # A cena e as regras da fala, iguais no pedido de 16 s e no de 8 s (P262).
 _REGRAS_DA_FALA = (
     "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
-    "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
-    "que a IA de vídeo embola), sem marca, sem preço e sem prometer o que o produto não faz. Nada de zombar do "
+    + _FALA_SEM_EMBOLAR +
+    " A fala vai sem marca, sem preço e sem prometer o que o produto não faz. Nada de zombar do "
     "corpo, da aparência ou de um grupo de ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, "
     "nojento ou com criança. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos."
 )
@@ -552,8 +568,8 @@ PEDIDO_DAS_MAOS_E_VOZ = (
     "laranja!\"). Escreva no pedido: the same voice-over narration, no face, no subtitles, no text.\n"
     "- fala: tudo o que a voz fala, em português, as duas partes juntas, como vai sair no vídeo.\n"
     "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
-    "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
-    "que a IA de vídeo embola), sem marca, sem preço, sem dizer que todo mundo está comprando ou que vai acabar e "
+    + _FALA_SEM_EMBOLAR +
+    " A fala vai sem marca, sem preço, sem dizer que todo mundo está comprando ou que vai acabar e "
     "sem prometer o que o produto não faz. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; "
     "nada perigoso, nojento ou com criança."
 )
@@ -587,8 +603,8 @@ PEDIDO_DAS_MAOS_E_VOZ_CURTO = (
     "smartphone footage, natural daylight, realistic home, no subtitles, no text.\n"
     "- fala: tudo o que a voz fala, em português, como vai sair no vídeo.\n"
     "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
-    "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
-    "que a IA de vídeo embola), sem marca, sem preço, sem dizer que todo mundo está comprando ou que vai acabar e "
+    + _FALA_SEM_EMBOLAR +
+    " A fala vai sem marca, sem preço, sem dizer que todo mundo está comprando ou que vai acabar e "
     "sem prometer o que o produto não faz. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; "
     "nada perigoso, nojento ou com criança."
 )
@@ -659,6 +675,17 @@ def evitar_os_recentes(recentes):
             "se ele também combinar com este produto, para os vídeos não ficarem num padrão só.")
 
 
+def com_a_diccao(texto):
+    """
+    O prompt (ou a continuação) do vídeo com fala, com a DICCAO_CLARA no fim quando ele ainda não pede a dicção
+    (P264 4), dentro das LETRAS_DO_PROMPT; o vazio fica vazio.
+    """
+    texto = " ".join(str(texto or "").split())
+    if not texto or "diction" in texto.lower():
+        return texto[:LETRAS_DO_PROMPT]
+    return f"{texto[:LETRAS_DO_PROMPT - len(DICCAO_CLARA) - 1].rstrip()} {DICCAO_CLARA}"
+
+
 def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False, curto=False):
     """
     {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
@@ -675,7 +702,8 @@ def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False, curto=Fal
         fala = " ".join(str(achado.get("fala") or "").split())[:400]
         if resposta["serve"] and not fala:
             return None
-        return dict(resposta, estilo=ESTILO_DAS_MAOS_E_VOZ if maos_e_voz else ESTILO_DO_VENDEDOR, fala=fala)
+        return dict(resposta, estilo=ESTILO_DAS_MAOS_E_VOZ if maos_e_voz else ESTILO_DO_VENDEDOR, fala=fala,
+                    prompt=com_a_diccao(resposta["prompt"]) if fala else resposta["prompt"])
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
         return None
@@ -700,7 +728,9 @@ def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False, curto=Fal
                 "prompt": prompt[:1000], "cena": " ".join(str(dados.get("cena") or "").split())[:300]}
     if longo:
         fala = "" if unboxing else " ".join(str(dados.get("fala") or "").split())[:400]
-        resposta.update(continuacao=continuacao[:1000], fala=fala)
+        resposta.update(continuacao=continuacao[:LETRAS_DO_PROMPT], fala=fala)
+        if fala:
+            resposta.update(prompt=com_a_diccao(prompt), continuacao=com_a_diccao(continuacao))
     return resposta
 
 
@@ -3417,10 +3447,10 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False):
               for campo in ("prompt", "continuacao", "fala", "cena")}
     if not (partes["prompt"] and (curto or partes["continuacao"]) and partes["fala"]):
         return None
-    escrito = {"estilo": ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR, "prompt": partes["prompt"][:1000],
+    escrito = {"estilo": ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR, "prompt": com_a_diccao(partes["prompt"]),
                "fala": partes["fala"][:400], "cena": partes["cena"][:300]}
     if not curto:
-        escrito["continuacao"] = partes["continuacao"][:1000]
+        escrito["continuacao"] = com_a_diccao(partes["continuacao"])
     return escrito
 
 

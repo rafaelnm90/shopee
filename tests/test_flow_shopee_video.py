@@ -1613,8 +1613,8 @@ def test_resposta_e_pedido_do_video_de_16_s(monkeypatch):
     resposta = ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "Part one.", "continuacao": "Part two.", '
                 '"fala": "Gancho! Vantagens. Garanta já o seu!", "cena": "Uma moça vende o copo."}')
     lida = flow.ler_resposta(resposta, longo=True)
-    assert lida["estilo"] == flow.ESTILO_DO_VENDEDOR and lida["continuacao"] == "Part two."
-    assert lida["fala"] == "Gancho! Vantagens. Garanta já o seu!"
+    assert lida["estilo"] == flow.ESTILO_DO_VENDEDOR and lida["continuacao"] == f"Part two. {flow.DICCAO_CLARA}"
+    assert lida["fala"] == "Gancho! Vantagens. Garanta já o seu!" and lida["prompt"] == f"Part one. {flow.DICCAO_CLARA}"
     # Sem a continuação, o pedido de 16 s não serve; o de 8 s nem olha para ela.
     assert flow.ler_resposta(resposta.replace('"Part two."', '""'), longo=True) is None
     assert "continuacao" not in flow.ler_resposta(resposta)
@@ -1626,7 +1626,8 @@ def test_resposta_e_pedido_do_video_de_16_s(monkeypatch):
 
     monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
     pedido, serve = flow.pedido_para_o_anuncio("https://s.shopee.com.br/abc", "Copo Térmico Inox", _jpeg(), longo=True)
-    assert serve is True and pedido["continuacao"] == "Part two." and pedido["fala"].startswith("Gancho")
+    assert serve is True and pedido["continuacao"] == flow.com_a_diccao("Part two.")
+    assert pedido["fala"].startswith("Gancho")
     for trecho in ("16 segundos", "continuacao", "gancho", "Garanta a sua!", "muda_na_ia", "Copo Térmico Inox"):
         assert trecho in pedidos[-1], trecho
     flow.pedido_para_o_anuncio("https://s.shopee.com.br/abc", "Copo Térmico Inox", _jpeg())
@@ -1652,10 +1653,47 @@ def test_pedido_de_16_s_pede_acoes_simples_no_mesmo_lugar_e_fala_curta():
                    "no mesmo lugar, com o mesmo fundo e o mesmo enquadramento", "câmera parada", "sem corte",
                    "sem aparecer comida, objeto ou pessoa nova", "o vídeo já começa lá",
                    f"até {flow.PALAVRAS_POR_PARTE} palavras", "terminando antes dos 6 segundos",
-                   "palavras simples", "Jogo de Panelas"):
+                   "palavras curtas, comuns e fáceis de falar em voz alta", "every word pronounced clearly",
+                   "Jogo de Panelas"):
         assert trecho in pedido, trecho
     assert flow.PALAVRAS_POR_PARTE == 10
     assert "em uso" not in pedido and "16 palavras" not in pedido and "celular na mão" not in pedido
+
+
+def test_todo_pedido_com_fala_pede_a_fala_sem_embolar_do_mesmo_tamanho():
+    # Escolha do Rafael (21/11/2026, P264 4): "tente evitar o máximo possível embolar, mas não qro reduzir fala nao".
+    # Todo pedido com fala pede palavras fáceis de falar e a dicção clara; o tanto de palavras e o tempo da fala
+    # ficam os mesmos.
+    com_fala = {"vendedor": flow.PEDIDO_DO_VENDEDOR, "falando": flow.PEDIDO_DO_VENDEDOR_FALANDO,
+                "curto": flow.PEDIDO_DO_VENDEDOR_CURTO, "mãos e voz": flow.PEDIDO_DAS_MAOS_E_VOZ,
+                "mãos e voz curto": flow.PEDIDO_DAS_MAOS_E_VOZ_CURTO, "imagem": flow.PEDIDO_DO_VENDEDOR_PELA_IMAGEM,
+                "imagem curto": flow.PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO,
+                "comédia": flow.PEDIDO_DA_COMEDIA_PELA_IMAGEM}
+    for nome, pedido in com_fala.items():
+        assert flow._FALA_SEM_EMBOLAR in pedido, nome
+        assert "every word pronounced clearly" in pedido, nome
+    assert flow._FALA_SEM_EMBOLAR not in flow.PEDIDO_DO_UNBOXING
+    assert flow.PALAVRAS_DA_FALA_INTEIRA == 14 and flow.PALAVRAS_POR_PARTE == 10
+    assert "fala do 1º segundo até perto do fim" in flow.PEDIDO_DO_VENDEDOR_CURTO
+    assert "fala do 1º segundo até por volta dos 7 segundos" in flow.PEDIDO_DO_VENDEDOR_FALANDO
+
+
+def test_diccao_clara_no_prompt_com_fala_quando_a_ia_esquece():
+    pedido = "She holds the exact tumbler and says the hook."
+    assert flow.com_a_diccao(pedido) == f"{pedido} {flow.DICCAO_CLARA}"
+    assert flow.com_a_diccao(flow.com_a_diccao(pedido)) == flow.com_a_diccao(pedido)
+    ja_pede = "She talks with clear Brazilian Portuguese diction."
+    assert flow.com_a_diccao(ja_pede) == ja_pede and flow.com_a_diccao("") == ""
+    comprido = flow.com_a_diccao("word " * 300)
+    assert len(comprido) <= flow.LETRAS_DO_PROMPT and comprido.endswith(flow.DICCAO_CLARA)
+    # Só no vídeo com fala: o unboxing (sem fala) fica como a IA escreveu, e o de 8 s com fala ganha a dicção.
+    unboxing = json.dumps({"serve": True, "muda_na_ia": False, "motivo": "", "prompt": "Hands open the box.",
+                           "continuacao": "The hands show it.", "fala": "", "cena": "c"})
+    lida = flow.ler_resposta(unboxing, longo=True, unboxing=True)
+    assert lida["prompt"] == "Hands open the box." and lida["continuacao"] == "The hands show it."
+    curto = json.dumps({"serve": True, "muda_na_ia": False, "motivo": "", "prompt": "She talks the whole time.",
+                        "fala": "Olha isso! Garanta o seu!", "cena": "c"})
+    assert flow.ler_resposta(curto, curto=True)["prompt"] == f"She talks the whole time. {flow.DICCAO_CLARA}"
 
 
 def test_conferir_a_fala_acha_a_embolada_e_a_cortada_da_1a_amostra(monkeypatch):
@@ -1727,9 +1765,10 @@ def test_amostra_de_16_s_de_novo_com_o_mesmo_produto_e_a_fala_conferida(celular,
     assert "Copo Térmico Inox" in pedidos_da_ia[0][0] and "câmera parada" in pedidos_da_ia[0][0]
     atual = flow.amostra_guardada()
     assert atual["item"] == anterior["item"] and atual["link"] == anterior["link"] and atual["numero"] == 2
-    assert atual["mesmo_de"] == 1 and atual["continuacao"] == "Same shot, she points at the lid."
+    assert atual["mesmo_de"] == 1 and atual["continuacao"] == flow.com_a_diccao("Same shot, she points at the lid.")
     assert atual["estado"] == "enviado" and atual["fala_conferida"] == "igual"
-    assert novo.texto_estendido == "Same shot, she points at the lid." and novo.geracoes == novo.extensoes == 1
+    assert novo.texto_estendido == flow.com_a_diccao("Same shot, she points at the lid.")
+    assert novo.geracoes == novo.extensoes == 1
     legenda = celular.mandados[-1][1]
     for trecho in ("Amostra nº 2 do vídeo de IA de 16 s", "com o mesmo produto da nº 1 e as mudanças contra as "
                    "alucinações (P248 1)", "Gelo o dia todo? Olha! Tampa firme. Garanta o seu!",
@@ -2086,7 +2125,7 @@ def test_pedido_das_maos_e_voz_tem_so_as_maos_a_voz_e_nenhuma_loja_lotada(monkey
     assert serve is True and len(pedidos) == 1 and "voice-over narration" in pedidos[0]
     assert escolhido["estilo"] == escolhido["formato"] == flow.ESTILO_DAS_MAOS_E_VOZ
     assert escolhido["fala"] == "Gente, olha esse umidificador! Clica no carrinho laranja!"
-    assert escolhido["continuacao"] == "Same table, the hands turn it on."
+    assert escolhido["continuacao"] == flow.com_a_diccao("Same table, the hands turn it on.")
     # Sem o pedido do formato, o de 16 s continua o do vendedor.
     flow.pedido_para_o_anuncio(link, "Umidificador", _jpeg(), longo=True)
     assert "voice-over narration" not in pedidos[-1] and "vende o produto" in pedidos[-1]
@@ -2560,8 +2599,8 @@ def test_producao_comeca_pela_imagem_do_personagem_e_o_video_sai_dela(celular, m
                                                             "producao_2026-11-19_imagem.jpg"]
     assert atual["foto_do_video"] == galeria[1] and atual["personagem"] == "vovo"
     assert atual["imagem"]["estado"] == "feita" and atual["imagem"]["tentativas"] == 1
-    assert celular.texto == json.loads(PEDIDO_PELA_IMAGEM)["prompt"]
-    assert celular.texto_estendido == CONTINUACAO_PELA_IMAGEM
+    assert celular.texto == flow.com_a_diccao(json.loads(PEDIDO_PELA_IMAGEM)["prompt"])
+    assert celular.texto_estendido == flow.com_a_diccao(CONTINUACAO_PELA_IMAGEM)
     assert atual["fala"] == FALA_PELA_IMAGEM and atual["estilo"] == flow.ESTILO_DO_VENDEDOR
     assert atual["estado"] == "baixado" and celular.geracoes == 1 and celular.extensoes == 1
     # O formato do vídeo gerado fica lembrado, para o limite da comédia (P251 1).
@@ -2805,7 +2844,7 @@ def test_a_ia_escolhe_a_duracao_e_o_maos_e_voz_so_no_video_de_ia_do_dia(monkeypa
     pedidos = _ia_do_formato(monkeypatch, '{"formato": "vendedor", "duracao": 16, "motivo": "mostrar em uso"}',
                              RESPOSTA_DE_16_S)
     escolhido, _ = flow.pedido_para_o_anuncio(link, "Mop Giratório", _jpeg(), longo=True, da_producao=True)
-    assert escolhido["continuacao"] == CONTINUACAO and escolhido["duracao_pedida"] == 16
+    assert escolhido["continuacao"] == flow.com_a_diccao(CONTINUACAO) and escolhido["duracao_pedida"] == 16
     assert "sem ficar calada no meio" in pedidos[1] and "depois, calada" not in pedidos[1]
     # O unboxing e a comédia têm sempre 16 s, mesmo com a IA dizendo 8.
     pedidos = _ia_do_formato(monkeypatch, '{"formato": "unboxing", "duracao": 8, "motivo": "pela aparência"}',
@@ -2819,7 +2858,7 @@ def test_a_ia_escolhe_a_duracao_e_o_maos_e_voz_so_no_video_de_ia_do_dia(monkeypa
     escolhido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, com_comedia=True,
                                               da_producao=True)
     assert escolhido["formato"] == flow.ESTILO_DA_COMEDIA and escolhido["duracao_pedida"] == 16
-    assert escolhido["continuacao"] == CONTINUACAO
+    assert escolhido["continuacao"] == flow.com_a_diccao(CONTINUACAO)
     # Sem a resposta num JSON, o vendedor de 8 s; o pedido de 8 s sem a fala não vale.
     _ia_do_formato(monkeypatch, "não sei", RESPOSTA_DE_8_S)
     escolhido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, da_producao=True)
@@ -2896,7 +2935,7 @@ def test_producao_de_8_s_pela_imagem_do_personagem_pede_o_video_curto(celular, m
     assert '"continuacao"' not in pelo_video and "o personagem Vovó" in pelo_video
     atual = flow.producao()
     assert atual["personagem"] == "vovo" and atual["fala"] == FALA_PELA_IMAGEM and "continuacao" not in atual
-    assert celular.texto == "The grandma holds the tumbler and talks the whole time."
+    assert celular.texto == flow.com_a_diccao("The grandma holds the tumbler and talks the whole time.")
     assert celular.geracoes == 1 and celular.extensoes == 0 and celular.fotos_das_imagens == [True]
     assert atual["estado"] == "baixado" and atual["curta"] is True
 
