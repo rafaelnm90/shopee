@@ -353,6 +353,8 @@ def comentarios(monkeypatch):
         return "comentado", f"Esse vale muito a pena! {len(feitos['chamadas'])}", ("curtido", "curtido")
 
     monkeypatch.setattr(robo, "_comentar_no_aberto", comentar)
+    # O pedido de uma vez do 1º fixado tem os testes dele; nos outros, nenhum pedido.
+    monkeypatch.setattr(robo, "PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO", ())
     monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: feitos["casos"].append(
         (acao, resultado, motivo)))
     return feitos
@@ -415,20 +417,33 @@ def test_video_com_10_curtidas_entra_no_lugar_do_fixado_de_menos_visualizacoes(a
     assert robo.fixar_o_que_viraliza(app, AGORA) == ""
 
 
-def test_video_ja_fixado_fica_como_esta_e_sai_da_conta_por_um_dia(avisos, comentarios):
+def test_video_ja_fixado_fica_como_esta_ganha_o_comentario_e_sai_da_conta_por_um_dia(avisos, comentarios):
+    # Pedido do Rafael (21/11): o vídeo que viraliza e ele já fixou à mão também ganha o comentário do robô.
     app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T3"))
     _leitura(app)
-    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: nenhum dos vídeos com as curtidas em alta "
-                                                     "ficou para fixar")
-    assert app.fixados == ["T1", "A", "T3"] and "Desfixar" not in app.toques and not avisos
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
+                                                     "comentei nele")
+    assert app.fixados == ["T1", "A", "T3"] and "Desfixar" not in app.toques and "Fixar" not in app.toques
     assert _registro() == [("já fixado", "")]
-    # O comentário vai com o Fixar do robô: o vídeo que ele acha já fixado fica sem.
-    assert not comentarios["chamadas"]
+    assert comentarios["chamadas"] == [{"aberto": "A", "tela": "player", "onde": robo.ONDE_DO_FIXADO, "produto": "",
+                                        "titulo": "Legenda do A"}]
+    assert avisos == [_aviso_do_comentario(1, "A")]
     # Na leitura seguinte, o mesmo vídeo nem abre.
     robo.contar_leitura(AGORA + timedelta(hours=3))
     assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=3)) == ""
-    assert app.abertos == ["A"]
+    assert app.abertos == ["A"] and len(comentarios["chamadas"]) == 1
     assert _registro()[-1] == ("nenhum vídeo para fixar", "o mais curtido com 11 em 24 h, já visto")
+
+
+def test_video_ja_fixado_e_ja_comentado_pelo_robo_fica_sem_outro_comentario(avisos, comentarios):
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T3"))
+    _leitura(app)
+    marca = it.videos_mais_curtidos(AGORA)[0]["video"]
+    robo._anotar_o_comentario_do_fixado(marca, "https://s.shopee.com.br/A", "comentado", AGORA - timedelta(days=2))
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: nenhum dos vídeos com as curtidas em alta "
+                                                     "ficou para fixar")
+    assert not comentarios["chamadas"] and not avisos and "Copiar link" not in app.toques
+    assert _registro() == [("já fixado", "")]
 
 
 def test_com_lugar_entre_os_fixados_so_fixa(avisos):
@@ -567,6 +582,40 @@ def test_video_fixado_ja_comentado_nao_ganha_outro_comentario_por_7_dias(comenta
     assert robo._comentar_no_fixado(app, marca, "https://s.shopee.com.br/A", AGORA + timedelta(days=8)) == (
         "comentei nele")
     assert len(comentarios["chamadas"]) == 1
+
+
+def test_pedido_de_uma_vez_comenta_no_1o_fixado_do_perfil(avisos, comentarios, monkeypatch):
+    # Pedido do Rafael (21/11): o vídeo que ele fixou à mão em 20/11 (o 1º fixado da grade) ganha o comentário uma vez.
+    monkeypatch.setattr(robo, "PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO", ("2026-11-21",))
+    app = CelularDasCurtidas(_curtidas("B", 2) + [TOPO], fixados=("T1", "T2", "T3"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == "fixar no perfil: 1º fixado do Perfil: comentei nele"
+    assert app.abertos == ["T1"] and app.fixados == ["T1", "T2", "T3"]
+    assert "Desfixar" not in app.toques and "Fixar" not in app.toques
+    assert comentarios["chamadas"] == [{"aberto": "T1", "tela": "player", "onde": robo.ONDE_DO_FIXADO,
+                                        "produto": "", "titulo": "Legenda do T1"}]
+    assert avisos == [_aviso_do_comentario(1, "T1")]
+    # Uma vez só: na leitura seguinte, o pedido já foi feito.
+    robo.contar_leitura(AGORA + timedelta(hours=3))
+    assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=3)) == ""
+    assert len(comentarios["chamadas"]) == 1
+
+
+def test_pedido_do_1o_fixado_sem_fixado_na_grade_tenta_3_vezes(avisos, comentarios, monkeypatch):
+    monkeypatch.setattr(robo, "PEDIDOS_DE_COMENTARIO_NO_1O_FIXADO", ("2026-11-21",))
+    app = CelularDasCurtidas([TOPO], fixados=())
+    _leitura(app)
+    for vez in range(4):
+        momento = AGORA + timedelta(hours=3 * vez)
+        robo.contar_leitura(momento)
+        resultado = robo.fixar_o_que_viraliza(app, momento)
+        if vez < 3:
+            assert resultado == ("fixar no perfil: 1º fixado do Perfil: parou (nenhum vídeo com o selo Fixado na "
+                                 "grade do Perfil)")
+        else:
+            assert resultado == ""
+    assert not comentarios["chamadas"] and not avisos and len(comentarios["casos"]) == 3
+    assert [r for r, _d in _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO)] == ["parou"] * 3
 
 
 def test_legenda_do_player_vai_a_ia_sem_o_veja_mais():
