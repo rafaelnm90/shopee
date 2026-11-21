@@ -9677,9 +9677,9 @@ def test_amostra_maos_e_voz_pede_o_formato_novo_e_o_video_do_dia_continua_igual(
     assert maos == [True, False] and unboxings == [False, True]
 
 
-def test_amostra_da_propaganda_de_tv_pede_o_pedido_dela_e_o_video_do_dia_continua_igual(monkeypatch):
-    # Escolha do Rafael (21/11, P268 1): a propaganda de TV vai primeiro numa amostra de 8 s, só no privado dele; o
-    # vídeo de IA do dia continua com a escolha de antes até o OK dele.
+def test_amostra_da_propaganda_de_tv_pede_o_pedido_dela_e_o_video_do_dia_deixa_a_ia_escolher(monkeypatch):
+    # Escolha do Rafael (21/11, P268 1): a amostra de 8 s pede direto o pedido da propaganda de TV; no vídeo de IA do
+    # dia, desde a P269 1, a propaganda é mais um formato que a IA escolhe pelo produto (da_producao).
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, propagandas = robo.flow.pedido_para_o_anuncio, []
 
@@ -9764,13 +9764,14 @@ def test_rascunho_do_unboxing_vai_com_a_musica_no_lugar_do_som(monkeypatch, tmp_
     monkeypatch.setattr(robo.ps, "anuncio_do_produto", lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO})
     original = tmp_path / "ia.mp4"
     original.write_bytes(b"video")
-    for estilo in (robo.flow.ESTILO_DO_UNBOXING, robo.flow.ESTILO_DO_VENDEDOR, None):
+    # A propaganda de TV (P269 1) tem o locutor e a trilha dela: vai com o som, como o vendedor.
+    for estilo in (robo.flow.ESTILO_DO_UNBOXING, robo.flow.ESTILO_DO_VENDEDOR, robo.flow.ESTILO_DA_PROPAGANDA, None):
         video = {"arquivo": str(original), "link": "https://s.shopee.com.br/curto1"}
         if estilo:
             video["video_ia"] = {"estilo": estilo}
         assert robo.copiar_para_o_rascunho(video, "viral", str(tmp_path / "copia.mp4")) == \
             robo.edicao_video.COM_LEGENDAS
-    assert pedidos == [{"musica_no_lugar": True}, {}, {}]
+    assert pedidos == [{"musica_no_lugar": True}, {}, {}, {}]
 
 
 def test_escolha_da_amostra_deixa_de_fora_as_feitas_e_fica_no_registro_dela(monkeypatch):
@@ -10215,7 +10216,9 @@ def test_video_de_ia_com_o_silencio_cortado_vira_rascunho_do_video_cortado(monke
         "formato": robo.flow.ESTILO_DO_VENDEDOR, "duracao_pedida": 16, "motivo_da_duracao": "mostrar em uso"})
     cortado = tmp_path / "producao_2026-10-22_sem_o_parado.mp4"
 
-    def decidir(arquivo, palavras):
+    def decidir(arquivo, palavras, propaganda=False):
+        # O vídeo de 16 s do vendedor, não a propaganda de TV (que fica sempre inteira, P269 1).
+        assert propaganda is False
         cortado.write_bytes(b"cortado")
         return {"decisao": "cortado", "motivo": "", "antes": 16.0, "depois": 11.2, "cortes": 1, "arquivo": str(cortado)}
 

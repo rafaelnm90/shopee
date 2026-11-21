@@ -1347,6 +1347,40 @@ def test_medicao_da_foto_do_comeco_so_com_contagens_e_porcento():
     assert "1234" not in linha and "1851" not in linha and "9999" not in linha
 
 
+def test_medicao_dos_formatos_do_video_de_ia_so_com_os_formatos_contagens_e_porcento():
+    # Escolha do Rafael (21/11, P269 1): o checkup compara as visualizações de cada formato do vídeo de IA, como a
+    # propaganda de TV, com as dos outros vídeos de IA. O log é público: só os formatos (as chaves fixas do código),
+    # contagens e %; o formato fora da lista vai como "outro", e os vídeos da fonte ficam de fora.
+    import flow_shopee_video as flow
+    import robo_shopee_video as robo
+    assert set(checkup.FORMATOS_DO_VIDEO_DE_IA_SV) == set(flow.ESTILOS)
+    assert checkup.visualizacoes_shopee_video.FORMATO_DA_PROPAGANDA == flow.ESTILO_DA_PROPAGANDA
+    cabeca = "Formatos do vídeo de IA (P269 1): {} vídeo(s) de IA postado(s) com a marca da capa nestes 21 dias"
+    sem_ler = "com 3 dia(s): sem comparação ainda (0 contra 0)"
+    assert checkup._linhas_dos_formatos(checkup.formatos_do_video_de_ia_da_shopee_video(AGORA)) == [
+        cabeca.format(0) + "; cada formato contra os outros vídeos de IA",
+        "   propaganda_tv: 0 (lidos 0) | com 1 dia(s): sem comparação ainda (0 contra 0) | " + sem_ler]
+    for postado, video_ia, marca, vistas in (
+            ("2026-10-20 09:00:00", {"estilo": "propaganda_tv", "formato": "propaganda_tv", "curta": True}, "a",
+             [["2026-10-21 09:00:00", 3000]]),
+            ("2026-10-20 10:00:00", {"estilo": "vendedor", "formato": "vendedor", "longa": True}, "b",
+             [["2026-10-21 10:00:00", 1000]]),
+            ("2026-10-20 11:00:00", {"estilo": "demonstracao"}, "c", [["2026-10-21 11:00:00", 2000]]),
+            ("2026-10-20 12:00:00", {"estilo": "Copo Termico"}, "d", [["2026-10-21 12:00:00", 500]]),
+            ("2026-10-21 09:00:00", {"estilo": "vendedor", "formato": "vendedor"}, "", []),
+            ("2026-10-20 13:00:00", {}, "e", [["2026-10-21 13:00:00", 9999]])):
+        robo.atualizar(robo.criar("v", AGORA - timedelta(days=3)), estado="postado", postado_em=postado,
+                       marca=marca, vistas=vistas, video_ia=video_ia)
+    linhas = checkup._linhas_dos_formatos(checkup.formatos_do_video_de_ia_da_shopee_video(AGORA))
+    assert linhas == [cabeca.format(4) + " (1 sem a marca); cada formato contra os outros vídeos de IA",
+                      "   propaganda_tv: 1 (lidos 1) | com 1 dia(s): +200% (1 contra 3) | " + sem_ler,
+                      "   demonstracao: 1 (lidos 1) | com 1 dia(s): +100% (1 contra 3) | " + sem_ler,
+                      "   outro: 1 (lidos 1) | com 1 dia(s): -75% (1 contra 3) | " + sem_ler,
+                      "   vendedor: 1 (lidos 1) | com 1 dia(s): -50% (1 contra 3) | " + sem_ler]
+    for privado in ("3000", "2000", "1000", "9999", "Copo"):
+        assert privado not in "\n".join(linhas), privado
+
+
 def test_lugares_da_ia_nos_rascunhos_com_o_alto_ocupado_so_com_os_nomes_fixos():
     # P220 1: o texto nosso que, na hora dele, cairia em cima do produto ou de um rosto (pelos lugares livres de
     # cada momento que a IA deu) não aparece. No rascunho do filtro de café de 13/11, nenhum dos 3 entrou com o

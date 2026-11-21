@@ -3386,11 +3386,11 @@ def preparar_o_de_ia(d, config, agora=None, comeco=None):
 # Robô 📝. Desde a P247 1, o vídeo é o de 16 s com uma pessoa vendendo o produto (os 8 s gerados e mais 8 s do
 # Estender), e a fala que o servidor ouve vai no rascunho (P248 1). Desde a P260 1, o vídeo começa pela imagem de um
 # personagem com o produto (flow.imagem_da_producao; sem ela, sai pela foto do anúncio, como antes), e o formato pode
-# ser também a comédia (P251 1). O do robô é 1 por dia (48 créditos, dentro dos 50 grátis do dia); os do Preparar 1
-# Agora ⚡ → De IA ✨ contam junto no limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos, chaves
-# e números.
-# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1; 19/11/2026, P260 1):
-# DECISOES.md, Shopee Vídeo.
+# ser também a comédia (P251 1), o unboxing (P256 2), o mãos e voz (P262) ou a propaganda de TV de 8 s (P269 1). O
+# do robô é 1 por dia (48 créditos, dentro dos 50 grátis do dia); os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no
+# limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos, chaves e números.
+# Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1; 19/11/2026, P260 1;
+# 21/11/2026, P269 1): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 # Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
@@ -3690,8 +3690,9 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
     diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
     parte (P255 1), na amostra. No vídeo da produção, a IA escolhe pelo produto entre o vendedor, o mãos e voz (P262),
-    o unboxing (P256 2) e a comédia (P251 1, com os personagens da P260 1), e a duração, 8 ou 16 s (P262): nunca dois
-    unboxing seguidos, e no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode). maos_e_voz: o de 16 s no
+    o unboxing (P256 2), a comédia (P251 1, com os personagens da P260 1) e a propaganda de TV, sempre de 8 s (P269 1),
+    e a duração, 8 ou 16 s (P262): nunca dois unboxing seguidos, e no máximo 1 comédia a cada 3 vídeos de IA
+    (flow.comedia_pode). maos_e_voz: o de 16 s no
     formato mãos e voz (P261 1), a amostra. propaganda: o de 8 s com cara de propaganda de TV (P268 1), a amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)

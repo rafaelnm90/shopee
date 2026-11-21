@@ -52,7 +52,9 @@ fala do locutor conferida e o tempo com fala.
 Desde a P262 (20/11/2026), cada vídeo de IA do dia e do De IA ✨ tem a duração e o silêncio decididos vídeo a vídeo:
 a IA que escolhe o formato (agora também o mãos e voz) escolhe 8 s, um Gerar só com a fala do começo ao fim, ou 16 s
 (formato_do_video); o de 16 s do vendedor fala do começo ao fim de cada parte; e, com o vídeo pronto, o servidor corta
-o silêncio de mais de 1 s ou mantém o vídeo inteiro (decidir_o_silencio).
+o silêncio de mais de 1 s ou mantém o vídeo inteiro (decidir_o_silencio). Desde a P269 1 (21/11/2026), a propaganda de
+TV da amostra é mais um formato que a IA escolhe pelo produto, sempre de 8 s, pela foto do anúncio e inteira, sem o
+corte do silêncio; o checkup compara as visualizações dela com as dos outros formatos.
 
 Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo,
 amostra-16s-fala-inteira, amostra-16s-maos-e-voz ou amostra-tv). O
@@ -283,8 +285,9 @@ ESTILO_DAS_MAOS_E_VOZ = "maos_e_voz"
 # (...) desses streams de filmes", "não com cara de IA, de Shopee (...) mas sim cara de propaganda de TV. Curta, de 8
 # segundos". O produto em 2 ou 3 planos de comercial, com luz de estúdio e a câmera se movendo devagar (a revelação
 # dele, o uso num lugar bonito e, no fim, ele sozinho no centro), e um locutor em off; ninguém fala para a câmera.
-# Primeiro numa amostra de 8 s, só no privado dele (amostra --tv); o vídeo de IA do dia e o De IA ✨ só mudam com o OK
-# dele. Escolha do Rafael (P268 1): DECISOES.md, Shopee Vídeo.
+# Primeiro numa amostra de 8 s, só no privado dele (amostra --tv); depois dela, mais um formato que a IA escolhe pelo
+# produto no vídeo de IA do dia e no De IA ✨ (P269 1), e o checkup compara as visualizações dos formatos. Escolhas do
+# Rafael (P268 1 e P269 1): DECISOES.md, Shopee Vídeo.
 ESTILO_DA_PROPAGANDA = "propaganda_tv"
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
@@ -479,7 +482,7 @@ PEDIDO_DO_VENDEDOR_CURTO = _COMECO_DO_VENDEDOR_CURTO + (
 ) + _FIM_DO_CURTO
 # A escolha do formato do vídeo de 16 s pelo produto, só entre os que podem sair agora (pedido_do_formato): o
 # vendedor, o unboxing (P256 2) e a comédia (P251 1); no vídeo de IA do dia e no De IA ✨, também o mãos e voz e a
-# duração, 8 ou 16 s (P262).
+# duração, 8 ou 16 s (P262), e a propaganda de TV, sempre de 8 s (P269 1).
 _FORMATO_DO_VENDEDOR = (
     "\"vendedor\" (uma pessoa comum segura o produto e fala dele com quem assiste, mostrando as vantagens de perto: "
     "bom para o produto que precisa de explicação, como utilidades, aparelhos e o que resolve um problema)")
@@ -496,6 +499,11 @@ _FORMATO_DAS_MAOS_E_VOZ = (
     "\"maos_e_voz\" (só as mãos de quem usa o produto, sem rosto, a câmera sempre nele, e uma voz contando do começo "
     "ao fim: bom para o produto que se mostra fazendo, com um gesto simples e o resultado logo à vista, como "
     "luminárias, umidificadores, organizadores, utensílios e aparelhos pequenos)")
+_FORMATO_DA_PROPAGANDA = (
+    f"\"{ESTILO_DA_PROPAGANDA}\" (um comercial de TV de 8 segundos, com cara de propaganda profissional: o produto "
+    "em planos de cinema, com luz de estúdio, e um locutor em off, sem ninguém falando para a câmera: bom para o "
+    "produto bonito de se ver, que ganha valor num comercial caprichado, como decoração, beleza, acessórios e "
+    "utensílios de design)")
 PEDIDO_DO_FORMATO = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto do anúncio do "
     "produto \"{nome}\". Escolha o formato do vídeo {de_16_s}feito por IA que mais combina com este produto e mais "
@@ -511,6 +519,7 @@ TRECHO_DA_DURACAO = (
     "ou tem mais de uma vantagem que se vê (aparelhos, limpeza, cozinha, ferramentas). O vídeo curto prende mais e "
     "não fica com silêncio no meio: na dúvida, 8 segundos. O unboxing e a comédia têm sempre 16 segundos."
 )
+TRECHO_DA_PROPAGANDA = " A propaganda de TV tem sempre 8 segundos."
 CAMPO_DA_DURACAO = '"duracao": 8 ou 16, '
 # O pedido do unboxing de 16 s (P256 2), com os cuidados contra as alucinações da P248 1: o produto aparece inteiro
 # e do jeito que vem, nada muda de estado, as mãos só abrem a caixa, levantam e viram o produto, e os 16 s ficam no
@@ -803,35 +812,41 @@ def jpeg_sem_metadados(dados):
         return None
 
 
-def pedido_do_formato(nome, com_unboxing=True, com_comedia=False, com_maos_e_voz=False, com_duracao=False):
+def pedido_do_formato(nome, com_unboxing=True, com_comedia=False, com_maos_e_voz=False, com_duracao=False,
+                      com_propaganda=False):
     """
     O pedido da escolha do formato do vídeo de IA, só com os formatos que podem sair agora (o vendedor sempre);
-    com_duracao: a escolha da duração também, 8 ou 16 s (P262, TRECHO_DA_DURACAO).
+    com_duracao: a escolha da duração também, 8 ou 16 s (P262, TRECHO_DA_DURACAO); com_propaganda: a propaganda de TV
+    também, sempre de 8 s (P269 1, TRECHO_DA_PROPAGANDA).
     """
     formatos = ([("vendedor", _FORMATO_DO_VENDEDOR)]
                 + ([("maos_e_voz", _FORMATO_DAS_MAOS_E_VOZ)] if com_maos_e_voz else [])
                 + ([("unboxing", _FORMATO_DO_UNBOXING)] if com_unboxing else [])
-                + ([("comedia", _FORMATO_DA_COMEDIA)] if com_comedia else []))
+                + ([("comedia", _FORMATO_DA_COMEDIA)] if com_comedia else [])
+                + ([(ESTILO_DA_PROPAGANDA, _FORMATO_DA_PROPAGANDA)] if com_propaganda else []))
 
     def juntar(partes):
         return ", ".join(partes[:-1]) + " ou " + partes[-1] if len(partes) > 1 else partes[0]
     return PEDIDO_DO_FORMATO.format(nome=nome, opcoes=juntar([texto for _, texto in formatos]),
                                     nomes=juntar([f'"{chave}"' for chave, _ in formatos]),
-                                    de_16_s="" if com_duracao else "de 16 segundos ",
-                                    duracao=TRECHO_DA_DURACAO if com_duracao else "",
+                                    de_16_s="" if com_duracao or com_propaganda else "de 16 segundos ",
+                                    duracao=((TRECHO_DA_DURACAO if com_duracao else "")
+                                             + (TRECHO_DA_PROPAGANDA if com_propaganda else "")),
                                     campo=CAMPO_DA_DURACAO if com_duracao else "")
 
 
-def formato_do_video(nome, foto, com_unboxing=True, com_comedia=False, com_maos_e_voz=False, com_duracao=False):
+def formato_do_video(nome, foto, com_unboxing=True, com_comedia=False, com_maos_e_voz=False, com_duracao=False,
+                     com_propaganda=False):
     """
     (o formato, a duração em segundos, o porquê da IA) do vídeo de IA que a IA escolhe pela foto do anúncio (já em
     JPEG) e pelo nome, entre os formatos que podem sair agora: ESTILO_DO_UNBOXING (P256 2), ESTILO_DA_COMEDIA (P251 1),
-    ESTILO_DAS_MAOS_E_VOZ (P262) ou ESTILO_DO_VENDEDOR, que vale também quando ela não responde num JSON ou responde um
-    formato que não podia sair. com_duracao (P262): o vendedor e o mãos e voz saem com 8 s, a não ser que a IA diga 16
-    ("na dúvida, 8 segundos"); o unboxing e a comédia, e tudo sem com_duracao, com 16 s.
+    ESTILO_DAS_MAOS_E_VOZ (P262), ESTILO_DA_PROPAGANDA (P269 1) ou ESTILO_DO_VENDEDOR, que vale também quando ela não
+    responde num JSON ou responde um formato que não podia sair. com_duracao (P262): o vendedor e o mãos e voz saem com
+    8 s, a não ser que a IA diga 16 ("na dúvida, 8 segundos"); o unboxing e a comédia, e tudo sem com_duracao, com 16 s.
+    A propaganda de TV sai sempre com 8 s.
     """
     texto = asyncio.run(api_gemini.gerar_texto_gemini(
-        pedido_do_formato(nome, com_unboxing, com_comedia, com_maos_e_voz, com_duracao),
+        pedido_do_formato(nome, com_unboxing, com_comedia, com_maos_e_voz, com_duracao, com_propaganda),
         imagens=[(foto, "image/jpeg")]))
     achado = re.search(r"\{.*\}", texto or "", re.S)
     try:
@@ -848,10 +863,14 @@ def formato_do_video(nome, foto, com_unboxing=True, com_comedia=False, com_maos_
         formato = ESTILO_DA_COMEDIA
     elif com_maos_e_voz and pedido.replace(" ", "_") == ESTILO_DAS_MAOS_E_VOZ:
         formato = ESTILO_DAS_MAOS_E_VOZ
+    elif com_propaganda and pedido.startswith("propaganda"):
+        formato = ESTILO_DA_PROPAGANDA
     else:
         formato = ESTILO_DO_VENDEDOR
     duracao = DURACAO_LONGA
-    if com_duracao and formato in (ESTILO_DO_VENDEDOR, ESTILO_DAS_MAOS_E_VOZ):
+    if formato == ESTILO_DA_PROPAGANDA:
+        duracao = DURACAO_CURTA
+    elif com_duracao and formato in (ESTILO_DO_VENDEDOR, ESTILO_DAS_MAOS_E_VOZ):
         pedida = re.search(r"\d+", str(dados.get("duracao") or ""))
         duracao = DURACAO_LONGA if pedida and int(pedida.group(0)) == DURACAO_LONGA else DURACAO_CURTA
     return formato, duracao, " ".join(str(dados.get("motivo") or "").split())[:160]
@@ -877,10 +896,10 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     vem sem fala. Na comédia, o pedido daqui é o do vendedor, pela foto do anúncio: o da comédia sai da imagem do
     personagem com o produto (imagem_da_producao), e este fica para quando a imagem não vale. maos_e_voz (só no de
     16 s): o pedido do formato mãos e voz (P261 1, a amostra), sem a escolha do formato. da_producao (o vídeo de IA
-    do dia e o De IA ✨, P262): a IA escolhe também o mãos e voz e a duração; o de 8 s ("duracao_pedida" 8) vem sem
-    a continuação, com a fala do começo ao fim, e o de 16 s do vendedor, com a fala do começo ao fim de cada parte.
-    propaganda: o pedido de 8 s com cara de propaganda de TV (P268 1, a amostra), com a fala do locutor, sem a escolha
-    do formato.
+    do dia e o De IA ✨, P262): a IA escolhe também o mãos e voz, a propaganda de TV (P269 1) e a duração; o de 8 s
+    ("duracao_pedida" 8) vem sem a continuação, com a fala do começo ao fim, e o de 16 s do vendedor, com a fala do
+    começo ao fim de cada parte. propaganda: o pedido de 8 s com cara de propaganda de TV (P268 1, a amostra), com a
+    fala do locutor, sem a escolha do formato; o mesmo pedido vale quando a IA escolhe a propaganda na produção.
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
@@ -892,8 +911,11 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
         formato = ESTILO_DAS_MAOS_E_VOZ
     elif longo and not fala_inteira and (com_unboxing or com_comedia or da_producao):
         formato, duracao, motivo_da_duracao = formato_do_video(nome, foto, com_unboxing, com_comedia,
-                                                               com_maos_e_voz=da_producao, com_duracao=da_producao)
-    # A propaganda de TV é de 8 s, como o de 8 s da P262: um Gerar só, com a fala e sem a continuação.
+                                                               com_maos_e_voz=da_producao, com_duracao=da_producao,
+                                                               com_propaganda=da_producao)
+    # A propaganda de TV (a amostra da P268 1 ou a escolhida pela IA na produção, P269 1) é de 8 s, como o de 8 s da
+    # P262: um Gerar só, com a fala do locutor e sem a continuação.
+    propaganda = formato == ESTILO_DA_PROPAGANDA
     curto = propaganda or (longo and duracao == DURACAO_CURTA)
     unboxing = formato == ESTILO_DO_UNBOXING
     maos = formato == ESTILO_DAS_MAOS_E_VOZ
@@ -2485,8 +2507,8 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     vai a um arquivo ao lado dos vídeos; o banco fica com o caminho. O pedido de 16 s (P247 1), com a "continuacao"
     do Estender, fica "longa", com a fala e o formato (o vendedor, o unboxing ou a comédia), fora da lista dos estilos
     dos últimos vídeos, a das amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. O de 8 s que a
-    IA escolheu pelo produto (P262) fica "curta", com a fala e o formato, também fora dela. do_botao: o vídeo pedido no
-    De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
+    IA escolheu pelo produto (P262) fica "curta", com a fala e o formato, também fora dela; a propaganda de TV (P269 1)
+    também. do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
     """
     recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar,
                        **({"do_botao": True} if do_botao else {}))
@@ -2572,7 +2594,7 @@ def conferir_a_producao():
     ouve a fala e a compara com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o
     vídeo; o aviso vai no rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Com as mesmas palavras
     ouvidas, decide o silêncio (P262, decidir_o_silencio): cortado, o rascunho sai do vídeo sem ele ("arquivo"; o
-    inteiro fica em "arquivo_inteiro"). Devolve o estado novo.
+    inteiro fica em "arquivo_inteiro"); a propaganda de TV (P269 1) fica sempre inteira. Devolve o estado novo.
     """
     atual = producao()
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
@@ -2581,7 +2603,8 @@ def conferir_a_producao():
     if estado == "pronto" and (atual.get("longa") or atual.get("curta")) and atual.get("fala"):
         ouvidas = videos.palavras_faladas(atual["arquivo"])
         extra["fala_conferida"] = conferir_a_fala(atual["arquivo"], atual["fala"], ouvidas)
-        silencio = decidir_o_silencio(atual["arquivo"], ouvidas)
+        silencio = decidir_o_silencio(atual["arquivo"], ouvidas,
+                                      propaganda=atual.get("formato") == ESTILO_DA_PROPAGANDA)
         extra["silencio"] = {chave: valor for chave, valor in silencio.items() if chave != "arquivo"}
         if silencio.get("arquivo"):
             extra.update(arquivo=silencio["arquivo"], arquivo_inteiro=atual["arquivo"])
@@ -2595,18 +2618,25 @@ SEM_OUVIR = "não deu para ouvir a fala"
 SEM_DURACAO = "sem a duração do vídeo"
 SOBRARIA_POUCO = "sobraria pouco vídeo"
 CORTE_FALHOU = "o corte não saiu"
+# A propaganda de TV (P269 1) fica sempre inteira, como o Flow a gerou: os planos de cinema e o produto sozinho no fim,
+# depois da última frase do locutor, são o comercial; o corte do silêncio tiraria o fim e poria o pulo com o zoom no
+# meio dos planos (decisão do Claude pela P262, que deixou a ele o que fazer com o silêncio de cada vídeo).
+PROPAGANDA_INTEIRA = "a propaganda de TV fica inteira"
 
 
-def decidir_o_silencio(arquivo, palavras):
+def decidir_o_silencio(arquivo, palavras, propaganda=False):
     """
     O que fazer com o silêncio do vídeo de IA pronto (P262), pelas palavras ouvidas (videos.palavras_faladas):
     {"decisao": "cortado" ou "mantido", "motivo" (um dos porquês fixos; "" no cortado), "antes" e "depois" (as
     durações), "cortes" e, no cortado, "arquivo" (o vídeo sem o silêncio, ao lado do inteiro)}. Mantido sem silêncio de
     mais de PARADO_MAXIMO s, sem ouvir a fala ou ler a duração, quando o corte deixaria menos de
-    DURACAO_MINIMA_DO_CORTE s ou quando o ffmpeg falha.
+    DURACAO_MINIMA_DO_CORTE s ou quando o ffmpeg falha. propaganda: a propaganda de TV (P269 1), sempre mantida
+    (PROPAGANDA_INTEIRA).
     """
     antes = round(videos.duracao(arquivo) or 0.0, 1)
     mantido = {"decisao": "mantido", "antes": antes, "depois": antes, "cortes": 0}
+    if propaganda:
+        return dict(mantido, motivo=PROPAGANDA_INTEIRA)
     if palavras is None:
         return dict(mantido, motivo=SEM_OUVIR)
     if not antes:
@@ -2632,6 +2662,8 @@ def linha_da_duracao(atual):
     if not pedida:
         return ""
     porque = atual.get("motivo_da_duracao") or ""
+    if atual.get("formato") == ESTILO_DA_PROPAGANDA:
+        return "⏱️ 8 s, sem o Estender (a propaganda de TV tem sempre 8 s)"
     if pedida == DURACAO_CURTA:
         return f"⏱️ 8 s, sem o Estender (a IA escolheu pelo produto{': ' + porque if porque else ''})"
     if atual.get("formato") in (ESTILO_DO_UNBOXING, ESTILO_DA_COMEDIA):
@@ -2651,6 +2683,8 @@ def linha_do_silencio(atual):
                 SEM_DURACAO: "✂️ Silêncio não conferido (sem a duração do vídeo): o vídeo fica inteiro",
                 SOBRARIA_POUCO: (f"✂️ Silêncio não cortado: sobrariam menos de {_segundos(DURACAO_MINIMA_DO_CORTE)} "
                                  "de vídeo; ele fica inteiro, para você decidir na aprovação"),
+                PROPAGANDA_INTEIRA: ("✂️ Propaganda de TV: o vídeo fica inteiro, sem cortar o silêncio (os planos e o "
+                                     "produto no fim são o comercial)"),
                 }.get(silencio.get("motivo"), "✂️ Silêncio não cortado (o corte não saiu): o vídeo fica inteiro")
     return ""
 
@@ -2690,7 +2724,9 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     if linha_do_personagem(atual):
         linhas.append(linha_do_personagem(atual))
     if atual.get("fala"):
-        linhas.append(f"🗣️ Fala: {atual['fala']}")
+        # Na propaganda de TV (P269 1), a fala é a do locutor, em off.
+        rotulo = "🎙️ Locutor" if atual.get("formato") == ESTILO_DA_PROPAGANDA else "🗣️ Fala"
+        linhas.append(f"{rotulo}: {atual['fala']}")
     linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     if com_a_conferencia:
         linhas.append(f"🔎 A IA conferiu: {conferido}")
@@ -3454,8 +3490,9 @@ PEDIDO_DA_COMEDIA_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
 def pede_a_imagem(atual):
     """
     O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia e o de 8 s
-    do vendedor (P262), antes do Gerar e sem a imagem tentada; o unboxing e o mãos e voz (sem rosto) e o andamento sem
-    o formato (de antes dela), não.
+    do vendedor (P262), antes do Gerar e sem a imagem tentada; o unboxing e o mãos e voz (sem rosto), a propaganda de
+    TV (P269 1, pela foto do anúncio, sem ninguém falando para a câmera) e o andamento sem o formato (de antes dela),
+    não.
     """
     return bool((atual.get("longa") or atual.get("curta")) and atual.get("estado") == "escolhido"
                 and not atual.get("imagem") and atual.get("formato") in (ESTILO_DO_VENDEDOR, ESTILO_DA_COMEDIA))
@@ -3707,9 +3744,10 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     if propaganda:
-        # A propaganda de TV (P268 1) é só para ver: os vídeos de IA do robô só mudam com o OK do Rafael.
-        linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV. Os vídeos de IA do robô "
-                      "continuam como estão e só mudam com o seu OK.")
+        # A amostra da propaganda de TV (P268 1) é só para ver; desde a P269 1, a propaganda é também um dos formatos
+        # que a IA escolhe nos vídeos de IA do robô.
+        linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV, que é também um dos formatos "
+                      "que a IA escolhe nos vídeos de IA do robô (P269 1).")
         linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     elif atual.get("longa") and atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ:
         # Desde a P262, o formato mãos e voz já está entre os do vídeo de IA do dia (P261 1): a amostra é só para ver.
