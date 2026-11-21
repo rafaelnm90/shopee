@@ -1445,3 +1445,304 @@ def test_resposta_ao_comentario_vai_ao_privado_com_o_comentario_a_resposta_e_o_l
                       "Estampado:\n\nMaria Souza: Amei esse vestido, tem tamanho 10?\nResposta: Tem sim! Corre que "
                       "esse vestido é sucesso\n\n🔗 https://s.shopee.com.br/meuVideo"]
     assert _linhas_do_link() == [("copiado", "resposta")]
+
+
+# --- Quantos comentários por dia (P266) ---
+
+def _com_faixas(**faixas):
+    """A config do painel com as faixas de comentários por dia dos tipos dados (lives, antigos, feed)."""
+    config = {**robo.PADRAO, it.CHAVE_DOS_COMENTARIOS: {tipo: list(faixa) for tipo, faixa in faixas.items()}}
+    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
+    return config
+
+
+def test_numero_do_dia_sai_da_faixa_do_painel_e_sem_ela_fica_o_de_antes():
+    # Escolha do Rafael (P266): ele diz a faixa de cada tipo; sem ela, vale o de antes.
+    assert [it.comentarios_do_dia({}, tipo, "2026-11-21") for tipo in it.TIPOS_DE_COMENTARIO] == [0, 1, 5]
+    config = {it.CHAVE_DOS_COMENTARIOS: {"lives": [1, 3], "antigos": [2, 2], "feed": [0, 0]}}
+    dias = [f"2026-11-{dia:02d}" for dia in range(1, 29)]
+    sorteados = [it.comentarios_do_dia(config, it.LIVES, dia) for dia in dias]
+    assert set(sorteados) == {1, 2, 3}                                   # cada dia sorteia um número da faixa
+    assert sorteados == [it.comentarios_do_dia(config, it.LIVES, dia) for dia in dias]   # o mesmo o dia todo
+    assert it.comentarios_do_dia(config, it.ANTIGOS, "2026-11-21") == 2                   # um número só
+    assert it.comentarios_do_dia(config, it.FEED, "2026-11-21") == 0                      # 0 desliga
+    # A faixa que não serve (de trás para a frente, acima do máximo ou estragada) fica como a de antes.
+    for faixa in ([3, 1], [0, it.MAXIMO_DE_COMENTARIOS + 1], ["x"], None):
+        assert it.faixa_do_painel({it.CHAVE_DOS_COMENTARIOS: {"feed": faixa}}, it.FEED) is None
+
+
+def test_feed_pela_faixa_conta_so_os_comentarios_e_sem_ela_o_so_curtido_conta(monkeypatch):
+    agora = momento("2026-11-21 10:00")
+    it.guardar("v1", "video_feed", it.SO_CURTIDO, agora)
+    it.guardar("v2", "video_feed", "comentado", agora)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO})
+    assert robo.videos_do_feed_que_faltam(agora) == 3                    # sem a faixa: até 5, os dois contam (P151 1)
+    _com_faixas(feed=(3, 3))
+    assert robo.videos_do_feed_que_faltam(agora) == 2                    # pela faixa: só o comentado conta
+    it.guardar("v3", "video_feed", "não confirmado", agora)
+    assert robo.videos_do_feed_que_faltam(agora) == 1
+    _com_faixas(feed=(0, 0))
+    assert robo.videos_do_feed_que_faltam(agora) == 0 and not robo.feed_pendente(agora)
+
+
+def test_feed_pela_faixa_so_curtido_procura_outro_e_as_curtidas_sem_comentario_param_no_numero_do_dia(
+        monkeypatch, avisos, ia_do_feed):
+    # Pela faixa (P266), a curtida sem comentário não conta nem empurra o próximo: a rodada seguinte
+    # procura outro vídeo para o comentário. Essas curtidas ficam no máximo no número do dia.
+    async def so_curtir(legenda="", anteriores=(), imagem=None):
+        return it.CURTIR
+
+    monkeypatch.setattr(it, "gerar_comentario", so_curtir)
+    _com_faixas(feed=(1, 1))
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda"), ("Ana Achados", "Copo térmico")])
+    agora = momento("2026-11-21 10:00")
+    assert robo.interagir_no_feed(app, agora) == "feed: 1 vídeo curtido, sem comentário"
+    assert app.curtidos == {0} and "feed_em" not in robo.ler_estado()
+    assert robo.videos_do_feed_que_faltam(agora) == 1 and robo.feed_pendente(momento("2026-11-21 10:15"))
+    app.atual, app.indice = "inicio", 0
+    assert robo.interagir_no_feed(app, momento("2026-11-21 10:15")) == ("feed: vídeo sem nada para comentar, "
+                                                                        "deixado sem curtir")
+    assert app.curtidos == {0}                                           # a 2ª, sem comentário, não sai
+    assert it.resultado_de(it.marca("Ana Achados", "Copo térmico"), "video_feed") == "pulado"
+    linhas = [(r, d) for _m, _p, r, d, _o in robo.registro_processos.sequencia("shopee_video", "feed: comentar", "")]
+    assert linhas[-1] == ("pulado sem curtir", robo.MOTIVO_DAS_CURTIDAS_DO_DIA)
+
+
+def test_feed_pela_faixa_espalha_os_comentarios_do_dia_pelo_horario_do_robo():
+    config = _com_faixas(feed=(2, 2))
+    assert robo.intervalo_do_feed(config, momento("2026-11-21 10:00")) == timedelta(hours=6, minutes=55)   # 14h / 2
+    assert robo.intervalo_do_feed({**robo.PADRAO}) == timedelta(hours=2, minutes=40)                        # o de antes
+
+
+def test_post_antigo_pela_faixa_varios_por_dia_espalhados_e_3_falhas_param_o_dia(monkeypatch):
+    _com_faixas(antigos=(2, 2))
+    primeiro = _postado(link="https://s.shopee.com.br/postA", quando="2026-11-10 10:00:00")
+    segundo = _postado(link="https://s.shopee.com.br/postB", quando="2026-11-12 10:00:00")
+    assert robo.post_antigo_pendente(momento("2026-11-21 08:00"))["id"] == segundo     # o mais novo nunca comentado
+    it.guardar(it.marca_do_post("https://s.shopee.com.br/postB"), it.TIPO_DO_ANTIGO, "comentado",
+               momento("2026-11-21 08:05"))
+    robo.gravar_estado(antigo_dia="2026-11-21", antigo_tentativas=1, antigo_em="2026-11-21 08:05:00",
+                       antigo_feito_em="2026-11-21 08:05:00")
+    # O 2º do dia espera o espaço do dia (das 8h às 22h, dividido por 2: 6h55).
+    assert robo.post_antigo_pendente(momento("2026-11-21 12:00")) is None
+    assert robo.post_antigo_pendente(momento("2026-11-21 15:00"))["id"] == primeiro
+    it.guardar(it.marca_do_post("https://s.shopee.com.br/postA"), it.TIPO_DO_ANTIGO, "comentado",
+               momento("2026-11-21 15:05"))
+    assert robo.post_antigo_pendente(momento("2026-11-21 21:00")) is None              # os 2 do dia saíram
+    # 3 falhas no dia param o dia (a mesma regra das 3 tentativas de antes).
+    robo.gravar_estado(antigo_dia="2026-11-22", antigo_tentativas=3, antigo_em="2026-11-22 08:00:00")
+    _com_faixas(antigos=(5, 5))
+    assert robo.post_antigo_pendente(momento("2026-11-22 12:00")) is None
+
+
+def test_fazer_agora_segue_o_numero_do_dia_e_a_live_desligada_nao_e_pedida():
+    _com_faixas(lives=(0, 0), antigos=(3, 3), feed=(2, 2))
+    agora = momento("2026-11-21 10:00")
+    assert robo.feitas_hoje("live", agora) == (0, 0)
+    assert robo.pedir_agora("live", agora) == (False, 0, 0)
+    assert robo.feitas_hoje("post_antigo", agora) == (0, 3)
+    assert robo.feitas_hoje("feed", agora) == (0, 2)
+
+
+# --- As lives (P266) ---
+
+LINK_DA_LIVE = "https://s.shopee.com.br/liveDaAna"
+
+
+def _live(anfitriao, mensagens=()):
+    """A live na aba Lives como no Motorola (21/11/2026): quem apresenta, as mensagens e a barra de baixo."""
+    nos = [_el(ident="live_container_0", classe="LinearLayout", caixa=(0, 0, 1080, 2263)), *ABAS,
+           _el(anfitriao, ident="tv_anchor_name", caixa=(132, 268, 289, 308)),
+           _el("1,1mil Espectadores", ident="tv_audience_viewer_num", caixa=(132, 308, 349, 341)),
+           _el("Seguir", ident="btn_follow", caixa=(360, 268, 530, 342), clicavel=True),
+           _el("Compre Agora", ident="tv_show_product_buy_new", caixa=(43, 642, 257, 695))]
+    nos += [_el(texto, ident="tv_message", caixa=(53, 1725 + 70 * k, 617, 1765 + 70 * k))
+            for k, texto in enumerate(mensagens)]
+    nos += [_el("95", ident="tv_product_num", caixa=(32, 2134, 132, 2234), clicavel=True),
+            _el("Diga alguma coisa...", ident="tv_send_message", caixa=(174, 2134, 622, 2234), clicavel=True),
+            _el(ident="iv_share", classe="ImageView", caixa=(806, 2134, 906, 2234), clicavel=True),
+            _el(ident="iv_like", classe="ImageView", caixa=(948, 2134, 1048, 2234), clicavel=True), *BARRA]
+    return _xml(*nos)
+
+
+class CelularDasLives:
+    """
+    Live e Vídeo → Lives: uma live por vez, a seguinte com o arrasto. O Diga alguma coisa abre o campo com o teclado;
+    o enviar põe a mensagem entre as da live (com aparece=False, não põe) e deixa o campo aberto com o teclado,
+    como o pior caso. O compartilhar abre a folha com o Copiar link.
+    """
+
+    def __init__(self, lives=("Ana Achados", "Loja da Bia"), aparece=True):
+        self.lives, self.aparece = list(lives), aparece
+        self.atual, self.indice, self.mensagens = "inicio", 0, {}
+        self.em_foco, self.teclado, self.escrito, self.toques, self.arrastos = False, False, "", [], 0
+        self.clipboard = LINK_ANTIGO
+
+    def dump_hierarchy(self):
+        if self.atual == "inicio":
+            return _xml(*BARRA)
+        if self.atual == "para_voce":
+            return _player()
+        if self.atual == "campo":
+            nos = [_el(ident="rlv_input", classe="RelativeLayout", caixa=(0, 120, 1080, 1637), clicavel=True),
+                   _el(self.escrito or "Diga alguma coisa...", ident="et_input_message", classe="EditText",
+                       caixa=(32, 1521, 932, 1621), clicavel=True),
+                   _el(ident="confrim_btn", classe="ImageView", caixa=(964, 1529, 1048, 1613), clicavel=True)]
+            if self.teclado:
+                nos.append(_el(ident="keyboard_holder", classe="LinearLayout", caixa=(0, 1637, 1080, 2394)))
+            return _xml(*nos)
+        if self.atual == "folha":
+            return _xml(_el("WhatsApp", caixa=(60, 1900, 260, 1960), clicavel=True),
+                        _el("Copiar link", caixa=(300, 1900, 500, 1960), clicavel=True))
+        anfitriao = self.lives[self.indice]
+        return _live(anfitriao, ["Maria: oi"] + self.mensagens.get(self.indice, []))
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        tocados = [el for el in ps.elementos(self.dump_hierarchy()) if ps._dentro((x, y), el["caixa"])]
+        textos = [el["texto"] or el["descricao"] or el["id"] for el in tocados]
+        self.toques.append(textos[-1] if textos else (x, y))              # o de dentro, o botão tocado
+        if self.atual == "inicio" and "Live e Vídeo" in textos:
+            self.atual = "para_voce"
+        elif self.atual == "para_voce" and "Lives" in textos:
+            self.atual = "live"
+        elif self.atual == "live" and "Diga alguma coisa..." in textos:
+            self.atual, self.em_foco, self.teclado = "campo", True, True
+        elif self.atual == "live" and "iv_share" in textos:
+            self.atual = "folha"
+        elif self.atual == "folha" and "Copiar link" in textos:
+            self.clipboard, self.atual = LINK_DA_LIVE, "live"
+        elif self.atual == "campo" and "confrim_btn" in textos:
+            if self.aparece:
+                self.mensagens.setdefault(self.indice, []).append(f"Loja Rafa: {self.escrito}")
+            self.escrito = ""
+
+    def __call__(self, **seletor):
+        return Campo(self)
+
+    def press(self, tecla, meta=None):
+        if self.teclado:
+            self.teclado = False
+        elif self.atual in ("campo", "folha"):
+            self.atual, self.em_foco = "live", False
+        else:
+            self.atual = "inicio"
+
+    def app_start(self, pacote, wait=False):
+        pass
+
+    def window_size(self):
+        return 1080, 2400
+
+    def swipe(self, *pontos):
+        self.arrastos += 1
+        self.indice = min(self.indice + 1, len(self.lives) - 1)
+
+    def set_clipboard(self, texto):
+        self.clipboard = texto
+
+    def screenshot(self):
+        from PIL import Image
+        return Image.new("RGB", (1080, 2400), (90, 90, 90))
+
+
+@pytest.fixture
+def ia_da_live(monkeypatch):
+    pedidos = []
+
+    async def mensagem(imagem, anteriores=()):
+        pedidos.append(list(anteriores))
+        return f"Que lindo esse kit! {len(anteriores)}"
+
+    monkeypatch.setattr(it, "gerar_mensagem_da_live", mensagem)
+    return pedidos
+
+
+def test_live_le_quem_apresenta_e_acha_a_mensagem_do_robo_entre_as_outras():
+    assert it.ler_a_live(_live("Ana Achados")) == ({"anfitriao": "Ana Achados"}, "")
+    assert it.ler_a_live(_player()) == (None, "tela sem live")
+    assert it.ler_a_live(_live(""))[1] == "live sem o nome de quem apresenta"
+    xml = _live("Ana Achados", ["Maria: oi", "Loja Rafa: Que lindo esse kit!"])
+    assert it.mensagem_na_live(xml, "Que lindo esse kit!") and not it.mensagem_na_live(xml, "Outra coisa")
+
+
+def test_sem_a_faixa_as_lives_continuam_puladas():
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO})
+    assert not robo.live_pendente(momento("2026-11-21 10:00"))
+    _com_faixas(lives=(1, 1))
+    assert robo.live_pendente(momento("2026-11-21 10:00"))
+
+
+def test_live_manda_a_mensagem_pelo_campo_confere_e_avisa_com_o_link(avisos, ia_da_live):
+    _com_faixas(lives=(2, 2))
+    robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
+    app = CelularDasLives()
+    agora = momento("2026-11-21 10:00")
+    assert robo.comentar_numa_live(app, agora) == "live: mensagem enviada"
+    assert app.mensagens == {0: ["Loja Rafa: Que lindo esse kit! 0"]}
+    # Na live, só o Diga alguma coisa, o enviar, o compartilhar e o Copiar link: nunca o de comprar.
+    assert "Compre Agora" not in app.toques and "95" not in app.toques
+    assert {"Diga alguma coisa...", "confrim_btn", "iv_share", "Copiar link"} <= set(app.toques)
+    assert avisos == ["💬 Robô da Shopee Vídeo: comentei na live de Ana Achados (outro criador), em Live e Vídeo → "
+                      f"Lives:\n\nQue lindo esse kit! 0\n\n🔗 {LINK_DA_LIVE}"]
+    assert it.lives_hoje(agora) == 1 and robo.lives_que_faltam(agora) == 1
+    assert robo.ler_estado()["live_em"] == "2026-11-21 10:00:00"
+    # A 2ª do dia espera o espaço do dia (das 8h às 22h, dividido por 2) e vai a outra live.
+    assert not robo.live_pendente(momento("2026-11-21 12:00"))
+    assert robo.live_pendente(momento("2026-11-21 17:00"))
+    app.atual, app.indice = "inicio", 0
+    assert robo.comentar_numa_live(app, momento("2026-11-21 17:00")) == "live: mensagem enviada"
+    assert app.mensagens[1] == ["Loja Rafa: Que lindo esse kit! 1"]
+    vistas = [r for _m, _p, r, _d, _o in robo.registro_processos.sequencia("shopee_video", "live: olhada", "")]
+    assert vistas == ["escolhida", "já comentada hoje", "escolhida"]
+    assert robo.lives_que_faltam(momento("2026-11-21 17:00")) == 0
+
+
+def test_live_que_a_ia_pula_passa_para_a_seguinte_e_a_propria_live_nao_ganha_mensagem(monkeypatch, avisos):
+    pedidos = []
+
+    async def mensagem(imagem, anteriores=()):
+        pedidos.append(imagem)
+        return "" if len(pedidos) == 1 else "Esse kit ficou lindo!"
+
+    monkeypatch.setattr(it, "gerar_mensagem_da_live", mensagem)
+    _com_faixas(lives=(1, 1))
+    robo.gravar_estado(conta_marca=it.marca("Loja Rafa"))
+    app = CelularDasLives(lives=("Loja Rafa", "Ana Achados", "Loja da Bia"))
+    assert robo.comentar_numa_live(app, momento("2026-11-21 10:00")) == "live: mensagem enviada"
+    assert app.mensagens == {2: ["Loja Rafa: Esse kit ficou lindo!"]} and pedidos[0][:2] == b"\xff\xd8"
+    vistas = [r for _m, _p, r, _d, _o in robo.registro_processos.sequencia("shopee_video", "live: olhada", "")]
+    assert vistas == ["live do próprio perfil", "pulada pela IA", "escolhida"]
+    assert it.resultado_de(it.marca_da_live("Ana Achados", momento("2026-11-21 10:00")), it.TIPO_DA_LIVE) == "pulado"
+
+
+def test_live_sem_a_mensagem_na_tela_fica_como_nao_confirmada_e_guarda_o_caso(monkeypatch, avisos, ia_da_live):
+    casos = []
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **kw: casos.append((acao, motivo)))
+    _com_faixas(lives=(1, 1))
+    app = CelularDasLives(lives=("Ana Achados",), aparece=False)
+    agora = momento("2026-11-21 10:00")
+    assert robo.comentar_numa_live(app, agora) == "live: mensagem enviada sem aparecer nas mensagens"
+    assert casos == [("live", robo.MOTIVO_DA_LIVE_SEM_A_MENSAGEM)]
+    assert it.lives_hoje(agora) == 1                                     # pode ter saído: conta e não repete
+    assert "(enviado, mas não apareceu na lista)" in avisos[0]
+
+
+def test_live_no_registro_so_com_textos_fixos_e_a_marca(avisos, ia_da_live):
+    _com_faixas(lives=(1, 1))
+    robo.comentar_numa_live(CelularDasLives(), momento("2026-11-21 10:00"))
+    for _m, _p, resultado, detalhe, origem in robo.registro_processos.sequencia("shopee_video", "live: ", ""):
+        assert "Ana" not in f"{resultado} {detalhe} {origem}" and "kit" not in f"{resultado} {detalhe} {origem}"
+
+
+def test_rodada_da_live_vem_depois_do_post_antigo_e_antes_do_feed(monkeypatch):
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: False)
+    monkeypatch.setattr(robo, "post_antigo_pendente", lambda agora=None: None)
+    config = _com_faixas(lives=(1, 1), feed=(1, 1))
+    agora = momento("2026-11-21 10:00")
+    robo.gravar_estado(treino_semana=robo.semana(agora))
+    assert robo.o_que_fazer(config, agora) == ("live", None)
+    it.guardar(it.marca_da_live("Ana", agora), it.TIPO_DA_LIVE, "comentado", agora)
+    assert robo.o_que_fazer(config, agora) == ("feed", None)

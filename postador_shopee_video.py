@@ -2288,6 +2288,18 @@ def rolar(d, para_cima=False):
     d.swipe(largura // 2, int(altura * de), largura // 2, int(altura * ate), 0.4)
 
 
+# Na aba Lives, a parte de baixo da tela é a lista das mensagens da live, que rola sozinha com o arrasto do rolar e
+# deixa a mesma live na tela (Motorola, 21/11/2026): a próxima live vem com o arrasto no meio do vídeo, acima dela.
+ARRASTO_DA_LIVE = (0.45, 0.1)
+
+
+def proxima_live(d):
+    """Arrasta a live para cima pelo meio do vídeo, acima das mensagens: a próxima live entra na tela."""
+    largura, altura = d.window_size()
+    de, ate = ARRASTO_DA_LIVE
+    d.swipe(largura // 2, int(altura * de), largura // 2, int(altura * ate), 0.4)
+
+
 def mandar_print(d, legenda=LEGENDA_PRINT):
     """Print da tela no privado do Rafael. O arquivo sai do servidor logo depois."""
     descritor, caminho = tempfile.mkstemp(suffix=".png")

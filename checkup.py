@@ -443,7 +443,7 @@ SEM_META = {
     ("shopee_video", "vídeo de IA do dia"), ("shopee_video", "amostra do vídeo de IA"),
     ("shopee_video", "rascunho recusado"), ("shopee_video", "aprovação dos rascunhos"),
     ("shopee_video", "curtidas nas notificações"), ("shopee_video", "fixar no perfil"),
-    ("shopee_video", "vídeo fixado: "),
+    ("shopee_video", "vídeo fixado: "), ("shopee_video", "live: "), ("shopee_video", "comentários por dia"),
     ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
 }
 
@@ -1502,7 +1502,8 @@ PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)", "descurtir em Meus Favoritos (c
 # dia (P161 1); o feed se espalha pelo dia todo (P152). O comentário de depois do post vai com o
 # post (P148 2).
 PROCESSOS_DE_INTERACAO = ("post antigo:",)
-PROCESSOS_DO_FEED = ("feed:",)
+# As mensagens nas lives (P266) se espalham pelo dia como o feed e contam como ele.
+PROCESSOS_DO_FEED = ("feed:", "live:")
 PROCESSOS_DAS_RESPOSTAS = ("notificações (respostas)", "responder comentário")
 PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
                         "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
@@ -1529,7 +1530,7 @@ def _tipo_da_atividade(processo=None, acao=None):
     """
     if acao:
         return ("descurtir" if acao == "descurtir" else "interação" if acao in ACOES_DE_INTERACAO
-                else "feed" if acao == "feed" else "respostas" if acao == "responder"
+                else "feed" if acao in ("feed", "live") else "respostas" if acao == "responder"
                 else "preparo" if acao in ACOES_DE_PREPARO
                 else "apagar" if acao in ACOES_EM_QUALQUER_HORARIO else None)
     if processo.startswith(PROCESSOS_DO_DESCURTIR):
@@ -1759,6 +1760,20 @@ def _variacao(numero):
     return "sem leitura de antes" if numero is None else f"{numero:+d}"
 
 
+def comentarios_do_dia_sv(tipo, agora=None):
+    """
+    (número do dia, pela faixa do painel?) dos comentários do tipo ("lives", "antigos" ou "feed"), pela mesma conta
+    do robô (interacoes_shopee_video, P266). Sem conseguir ler, o de antes, sem a faixa.
+    """
+    try:
+        import interacoes_shopee_video
+        config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+        return (interacoes_shopee_video.comentarios_do_dia(config, tipo, _agora(agora).strftime("%Y-%m-%d")),
+                interacoes_shopee_video.faixa_do_painel(config, tipo) is not None)
+    except Exception:
+        return {"lives": 0, "antigos": POSTS_ANTIGOS_POR_DIA, "feed": VIDEOS_NO_FEED_POR_DIA}[tipo], False
+
+
 def interacoes_da_shopee_video(agora=None):
     """
     As respostas aos comentários dos vídeos e o feed, pelo registro de processos: cada
@@ -1787,6 +1802,14 @@ def interacoes_da_shopee_video(agora=None):
         "feed_hoje": sum(1 for momento, *_ in feed if momento >= hoje),
         "feed_so_curtidos": sum(1 for momento, _p, resultado, *_ in feed
                                 if momento >= hoje and resultado == SO_CURTIDO_NO_FEED),
+        # O número do dia de cada tipo de comentário e se ele vem da faixa do painel (P266).
+        **{f"{tipo}_do_dia": numero for tipo, (numero, _faixa) in
+           ((tipo, comentarios_do_dia_sv(tipo, agora)) for tipo in ("lives", "antigos", "feed"))},
+        "feed_pela_faixa": comentarios_do_dia_sv("feed", agora)[1],
+        "lives_hoje": sum(1 for _m, _p, resultado, _d, _o in registro_processos.sequencia(
+            "shopee_video", "live: comentar", hoje) if resultado in ("comentado", "não confirmado")),
+        "lives_nao_confirmadas": sum(1 for _m, _p, resultado, _d, _o in registro_processos.sequencia(
+            "shopee_video", "live: comentar", hoje) if resultado == "não confirmado"),
         "feed_horas": [momento[11:16] for momento, *_ in feed if momento >= hoje],
         "feed_repetidos": sum(1 for n in Counter(o for *_x, o in feed if o).values() if n > 1),
         "curtidas": dict(Counter(resultado for _m, _p, resultado, _d, _o in curtidas)),
@@ -1961,20 +1984,34 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
         if interacoes["duplicadas"]:
             pontos.append(f"Respostas da Shopee Vídeo: {interacoes['duplicadas']} comentário(s) com mais de uma "
                           "resposta do perfil")
-        if interacoes["feed_hoje"] > VIDEOS_NO_FEED_POR_DIA:
+        feed_do_dia = interacoes.get("feed_do_dia", VIDEOS_NO_FEED_POR_DIA)
+        if interacoes.get("feed_pela_faixa"):
+            # Pela faixa do painel (P266), os comentários contam no número do dia, e as curtidas sem comentário
+            # ficam no máximo nele.
+            comentados = interacoes["feed_hoje"] - interacoes.get("feed_so_curtidos", 0)
+            if comentados > feed_do_dia:
+                pontos.append(f"Feed da Shopee Vídeo: {comentados} comentários hoje (o número do dia é {feed_do_dia})")
+            if interacoes.get("feed_so_curtidos", 0) > feed_do_dia:
+                pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_so_curtidos']} curtidas sem comentário hoje "
+                              f"(o máximo é o número do dia, {feed_do_dia})")
+        elif interacoes["feed_hoje"] > feed_do_dia:
             pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} vídeos hoje (o limite é "
-                          f"{VIDEOS_NO_FEED_POR_DIA})")
+                          f"{feed_do_dia})")
+        if interacoes.get("lives_hoje", 0) > interacoes.get("lives_do_dia", 0):
+            pontos.append(f"Lives da Shopee Vídeo: {interacoes['lives_hoje']} mensagens hoje (o número do dia é "
+                          f"{interacoes.get('lives_do_dia', 0)})")
         if interacoes["feed_repetidos"]:
             pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_repetidos']} vídeo(s) comentado(s) mais de uma "
                           "vez em 3 dias")
         if interacoes.get("proprio", {}).get("desistiu"):
             pontos.append(f"Comentário no próprio vídeo: {interacoes['proprio']['desistiu']} post(s) sem o comentário "
                           "depois de 3 tentativas")
-        if interacoes.get("antigos_hoje", 0) > POSTS_ANTIGOS_POR_DIA:
+        antigos_do_dia = interacoes.get("antigos_do_dia", POSTS_ANTIGOS_POR_DIA)
+        if interacoes.get("antigos_hoje", 0) > antigos_do_dia:
             pontos.append(f"Comentário no próprio vídeo: {interacoes['antigos_hoje']} posts antigos comentados hoje (o "
-                          f"combinado é {POSTS_ANTIGOS_POR_DIA})")
-        # A meta do dia: com o robô no ar, as Notificações lidas e o post antigo. O feed tem limite,
-        # não meta: o dia com menos é normal (P151 1).
+                          f"número do dia é {antigos_do_dia})")
+        # A meta do dia: com o robô no ar, as Notificações lidas e o post antigo. O feed e as lives se espalham
+        # pelo dia inteiro e não são cobrados antes do fim dele (P151 1 e P266).
         if robo_sv["ativo"] and not robo_sv.get("suspenso") and agora.hour >= HORA_PARA_COBRAR:
             if not interacoes["rodou_hoje"]:
                 pontos.append("Respostas da Shopee Vídeo: as Notificações não foram lidas hoje")
@@ -1984,9 +2021,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             if not (interacoes.get("seguidores") or {"lido_hoje": True})["lido_hoje"]:
                 pontos.append("Seguidores da Shopee Vídeo: não lidos hoje (o robô lê no Perfil, com a Saúde "
                               "do Vídeo)")
-            if interacoes.get("antigos_hoje", 0) < POSTS_ANTIGOS_POR_DIA and interacoes.get("antigo_possivel"):
-                pontos.append(f"Comentário no próprio vídeo: {interacoes['antigos_hoje']} de {POSTS_ANTIGOS_POR_DIA} "
-                              "post antigo comentado hoje")
+            if interacoes.get("antigos_hoje", 0) < antigos_do_dia and interacoes.get("antigo_possivel"):
+                pontos.append(f"Comentário no próprio vídeo: {interacoes['antigos_hoje']} de {antigos_do_dia} "
+                              "post(s) antigo(s) comentado(s) hoje")
     if sobre:
         dia = f"das {DURANTE_O_DIA_SV[0]}h às {DURANTE_O_DIA_SV[1]}h"
         if sobre["no_descurtir"]:
@@ -2250,14 +2287,19 @@ def main():
           f"{interacoes['leituras_esperadas']} vezes | curtir o comentário respondido: {curtir or 'nenhum'}")
     curtidas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["curtidas"].items()))
     horas = f" ({', '.join(interacoes['feed_horas'])})" if interacoes.get("feed_horas") else ""
-    print(f"Feed: vídeos hoje {interacoes['feed_hoje']} (limite {VIDEOS_NO_FEED_POR_DIA}, sem meta; só curtidos "
-          f"{interacoes.get('feed_so_curtidos', 0)}){horas} | mesmo vídeo "
+    jeito_do_feed = ("pela faixa do painel, os comentários contam" if interacoes.get("feed_pela_faixa")
+                     else "limite, sem meta")
+    print(f"Feed: vídeos hoje {interacoes['feed_hoje']} (número do dia {interacoes.get('feed_do_dia')}, "
+          f"{jeito_do_feed}; só curtidos {interacoes.get('feed_so_curtidos', 0)}){horas} | mesmo vídeo "
           f"mais de uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
-          f"lives puladas (24 h): {interacoes['lives']}")
+          f"lives puladas no feed (24 h): {interacoes['lives']}")
+    print(f"Lives (P266): mensagens hoje {interacoes.get('lives_hoje', 0)} de {interacoes.get('lives_do_dia', 0)} "
+          f"(sem aparecer nas mensagens: {interacoes.get('lives_nao_confirmadas', 0)})")
     proprio = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["proprio"].items()))
     curtidas_do_proprio = " | ".join(f"{passo}: {qtd}" for passo, qtd in sorted(interacoes["proprio_curtidas"].items()))
     print(f"Comentário no próprio vídeo (P148 2): depois do post (24 h): {proprio or 'nenhum'} | posts antigos "
-          f"hoje: {interacoes['antigos_hoje']} de {POSTS_ANTIGOS_POR_DIA} (paradas: {interacoes['antigos_parados']}) | "
+          f"hoje: {interacoes['antigos_hoje']} de {interacoes.get('antigos_do_dia', POSTS_ANTIGOS_POR_DIA)} "
+          f"(paradas: {interacoes['antigos_parados']}) | "
           f"curtidas (24 h): {curtidas_do_proprio or 'nenhuma'}")
     seguidores = interacoes["seguidores"]
     print(f"Seguidores (Shopee Vídeo): lidos hoje: {'sim' if seguidores['lido_hoje'] else 'não'} | em 1 dia: "
