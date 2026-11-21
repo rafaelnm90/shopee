@@ -9491,7 +9491,7 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
         return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
 
     def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False,
-               maos_e_voz=False):
+               maos_e_voz=False, da_producao=False):
         item = link.split("curto")[-1]
         foram.append(item)
         assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
@@ -9548,6 +9548,31 @@ def test_video_de_ia_pega_da_lista_da_api_o_que_paga_mais_com_a_foto_boa(monkeyp
     assert not any("Produto" in detalhe or "shopee.com" in detalhe for _, detalhe in linhas)
 
 
+def test_video_de_ia_do_dia_pede_a_duracao_e_o_registro_diz_os_segundos(monkeypatch):
+    # P262 (20/11): no vídeo de IA do dia e no De IA ✨, a IA escolhe também a duração (8 ou 16 s) e o mãos e voz; nas
+    # amostras, não. No registro (o checkup é público), só os segundos.
+    _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.09)])
+    original, pedidos = robo.flow.pedido_para_o_anuncio, []
+
+    def com_duracao(*partes, **campos):
+        pedidos.append(campos.get("da_producao"))
+        pedido, serve = original(*partes, **campos)
+        if pedido and campos.get("da_producao"):
+            pedido.update(estilo=robo.flow.ESTILO_DO_VENDEDOR, formato=robo.flow.ESTILO_DO_VENDEDOR, duracao_pedida=8,
+                          motivo_da_duracao="se entende num olhar")
+        return pedido, serve
+
+    monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", com_duracao)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"))
+    assert pedidos == [True] and escolhido["duracao_pedida"] == 8
+    assert _registro_do_video_de_ia()[-1][1].endswith("; o 1º; do 1º nível; estilo vendedor; 8 s")
+    assert "olhar" not in _registro_do_video_de_ia()[-1][1]
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"), amostra=True)
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:30"), amostra=True, fala_inteira=True)
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:40"), amostra=True, maos_e_voz=True)
+    assert pedidos == [True, False, False, False]
+
+
 def test_video_de_ia_pula_o_produto_que_a_ia_de_video_muda(monkeypatch):
     # Escolha do Rafael (16/11, P245 1): em 16/11, os 2 vídeos de IA pedidos no De IA ✨ foram gerados e descartados
     # pelas conferências (a TV não saiu igual à da foto). O produto que a IA de vídeo costuma mudar sai da escolha
@@ -9578,7 +9603,8 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, longos, falas, unboxings = robo.flow.pedido_para_o_anuncio, [], [], []
 
-    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False,
+               da_producao=False):
         longos.append(longo)
         falas.append(fala_inteira)
         unboxings.append(com_unboxing)
@@ -9610,7 +9636,8 @@ def test_video_de_ia_oferece_a_comedia_so_quando_ela_pode(monkeypatch):
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, comedias = robo.flow.pedido_para_o_anuncio, []
 
-    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False,
+               da_producao=False):
         comedias.append(com_comedia)
         escolhido, serve = pedido(*argumentos, longo=longo)
         return (dict(escolhido, formato=robo.flow.ESTILO_DA_COMEDIA) if com_comedia else escolhido), serve
@@ -9633,7 +9660,8 @@ def test_amostra_maos_e_voz_pede_o_formato_novo_e_o_video_do_dia_continua_igual(
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, maos, unboxings = robo.flow.pedido_para_o_anuncio, [], []
 
-    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False):
+    def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False,
+               da_producao=False):
         maos.append(maos_e_voz)
         unboxings.append(com_unboxing)
         return pedido(*argumentos, longo=longo)
@@ -9652,7 +9680,7 @@ def test_video_de_ia_anota_a_imagem_do_personagem_e_o_rascunho_leva_o_personagem
     _fonte(monkeypatch)
     ativar(fonte="autorais")
     _flow_que_baixa(monkeypatch, tmp_path, longo=True)
-    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala: {
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala, ouvidas=None: {
         "situacao": "igual", "estranhas": [], "aos": None, "faltou": [], "ouvidas": 9})
     no_celular = robo.flow.producao_no_celular
 
@@ -10044,7 +10072,7 @@ def test_ofertas_do_video_de_ia_em_alta_e_pelos_nichos_quando_a_api_nao_da(monke
 FALA_DO_VESTIDO = "Vestido que gira? Olha só! Garanta o seu!"
 
 
-def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False):
+def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False, extra=None):
     monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
     escolhido = {"id": "ia:2026-10-22", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "comedia",
                  "prompt": "p", "cena": "Uma menina gira com o vestido.", "item": "2", "valor": 5.99, "posicao": 1,
@@ -10052,6 +10080,7 @@ def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False):
     if longo:
         # O pedido de 16 s, o padrão desde a P247 1: com a continuação do Estender e a fala.
         escolhido.update(estilo=robo.flow.ESTILO_DO_VENDEDOR, continuacao="c", fala=FALA_DO_VESTIDO)
+    escolhido.update(extra or {})
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia", lambda agora=None: (dict(escolhido), EM_ALTA, True))
     vezes = []
 
@@ -10136,13 +10165,14 @@ def test_video_de_ia_de_16_s_ouve_a_fala_e_o_rascunho_leva_o_aviso(monkeypatch, 
     _flow_que_baixa(monkeypatch, tmp_path, longo=True)
     embolada = {"situacao": "embolada", "estranhas": ["vou", "feitecer"], "aos": 6, "faltou": [], "ouvidas": 9}
     ouvidas = []
-    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala: ouvidas.append(fala) or dict(embolada))
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala, *_: ouvidas.append(fala) or dict(embolada))
     resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
     assert resultado == "vídeo de IA: pronto para o rascunho" and ouvidas == [FALA_DO_VESTIDO]
     pronto = robo.flow.video_pronto()
     assert pronto["longa"] is True and pronto["fala_conferida"]["situacao"] == "embolada"
-    # No registro, só o rótulo fixo da fala ouvida.
+    # No registro, só o rótulo fixo da fala ouvida e, sem ouvir as palavras, o vídeo inteiro (P262).
     assert ("fala conferida", "embolada") in _registro_do_video_de_ia()
+    assert ("silêncio mantido", robo.flow.SEM_OUVIR) in _registro_do_video_de_ia()
     aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
     for trecho in ("Omni 1.2 Flash, 16 s (48 créditos de IA: 24 dos 8 s gerados e 24 do Estender)",
                    f"🗣️ Fala: {FALA_DO_VESTIDO}", '⚠️ Fala no vídeo: embolada aos 6 s (ouvi "vou", "feitecer"'):
@@ -10152,6 +10182,39 @@ def test_video_de_ia_de_16_s_ouve_a_fala_e_o_rascunho_leva_o_aviso(monkeypatch, 
     assert resumo["longa"] is True and resumo["duracao"] == 16 and resumo["fala"] == FALA_DO_VESTIDO
     assert resumo["fala_conferida"] == pronto["fala_conferida"]
     assert "⚠️ Fala no vídeo: embolada aos 6 s" in robo.flow.legenda_da_producao(resumo)
+
+
+def test_video_de_ia_com_o_silencio_cortado_vira_rascunho_do_video_cortado(monkeypatch, avisos, tmp_path):
+    # P262 (20/11): o silêncio de mais de 1 s que sobrou no vídeo pronto sai pelo servidor; o rascunho é o cortado, e
+    # o aviso, o rascunho e o registro dizem a duração escolhida e o corte (no registro, só números).
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, longo=True, extra={
+        "formato": robo.flow.ESTILO_DO_VENDEDOR, "duracao_pedida": 16, "motivo_da_duracao": "mostrar em uso"})
+    cortado = tmp_path / "producao_2026-10-22_sem_o_parado.mp4"
+
+    def decidir(arquivo, palavras):
+        cortado.write_bytes(b"cortado")
+        return {"decisao": "cortado", "motivo": "", "antes": 16.0, "depois": 11.2, "cortes": 1, "arquivo": str(cortado)}
+
+    monkeypatch.setattr(robo.flow, "decidir_o_silencio", decidir)
+    resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
+    assert resultado == "vídeo de IA: pronto para o rascunho"
+    pronto = robo.flow.video_pronto()
+    assert pronto["arquivo"] == str(cortado) and pronto["arquivo_inteiro"].endswith("producao_2026-10-22.mp4")
+    assert ("silêncio cortado", "16 s; de 16.0 para 11.2 s, 1 pedaço(s) parado(s)") in _registro_do_video_de_ia()
+    assert robo.video_de_ia_para_o_rascunho()["arquivo"] == str(cortado)
+    aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
+    for trecho in ("⏱️ 16 s, com o Estender (a IA escolheu pelo produto: mostrar em uso)",
+                   "✂️ Silêncio cortado: de 16,0 s para 11,2 s (1 pedaço(s) parado(s) tirado(s)"):
+        assert trecho in aviso, trecho
+    resumo = robo.resumo_do_video_de_ia(pronto)
+    assert resumo["silencio"] == {"decisao": "cortado", "motivo": "", "antes": 16.0, "depois": 11.2, "cortes": 1}
+    assert (resumo["duracao_pedida"], resumo["motivo_da_duracao"]) == (16, "mostrar em uso")
+    assert "✂️ Silêncio cortado" in robo.flow.legenda_da_producao(resumo)
+    # O registro do silêncio mantido diz o porquê fixo, com a duração.
+    robo._anotar_o_silencio({"duracao_pedida": 8, "silencio": {"decisao": "mantido", "motivo": robo.flow.SEM_SILENCIO}})
+    assert ("silêncio mantido", f"8 s; {robo.flow.SEM_SILENCIO}") in _registro_do_video_de_ia()
 
 
 def test_video_de_ia_parado_depois_do_estender_segue_sem_recomecar(monkeypatch, avisos, tmp_path):
@@ -10236,7 +10299,7 @@ def test_video_de_ia_sem_creditos_fica_nos_videos_dos_grupos_ate_o_credito_volta
     ativar(fonte="autorais", robo_limite_min=2, robo_limite_max=2, robo_inicio=8, robo_fim=20)
     monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
     _flow_que_baixa(monkeypatch, tmp_path, longo=True)
-    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala: {
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda arquivo, fala, ouvidas=None: {
         "situacao": "igual", "estranhas": [], "aos": None, "faltou": [], "ouvidas": 9})
     baixa, escolher, escolhas = robo.flow.producao_no_celular, robo.escolher_para_o_video_de_ia, []
     monkeypatch.setattr(robo, "escolher_para_o_video_de_ia",

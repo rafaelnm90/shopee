@@ -3654,10 +3654,10 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
     diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
-    parte (P255 1), por enquanto só na amostra. No vídeo de 16 s da produção, a IA escolhe pelo produto entre o
-    vendedor, o unboxing (P256 2) e a comédia (P251 1, com os personagens da P260 1): nunca dois unboxing seguidos, e
-    no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode). maos_e_voz: o de 16 s no formato mãos e voz (P261
-    1), por enquanto só na amostra.
+    parte (P255 1), na amostra. No vídeo da produção, a IA escolhe pelo produto entre o vendedor, o mãos e voz (P262),
+    o unboxing (P256 2) e a comédia (P251 1, com os personagens da P260 1), e a duração, 8 ou 16 s (P262): nunca dois
+    unboxing seguidos, e no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode). maos_e_voz: o de 16 s no
+    formato mãos e voz (P261 1), a amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3690,14 +3690,16 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
         olhadas += 1
         pedido, serve = flow.pedido_para_o_anuncio(link, bom["nome"], foto_do_anuncio(bom["imagem"]), evitar,
                                                    longo=longo, fala_inteira=fala_inteira, com_unboxing=com_unboxing,
-                                                   com_comedia=com_comedia, maos_e_voz=maos_e_voz)
+                                                   com_comedia=com_comedia, maos_e_voz=maos_e_voz,
+                                                   da_producao=da_producao)
         if pedido:
             # Na comédia, o pedido daqui é o do vendedor (para quando a imagem do personagem não vale): o formato à
-            # parte.
+            # parte. A duração que a IA escolheu (P262) vai junto.
             formato = pedido.get("formato")
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
                               f"estilo {pedido['estilo']}"
                               + (f"; formato {formato}" if formato and formato != pedido["estilo"] else "")
+                              + (f"; {pedido['duracao_pedida']} s" if pedido.get("duracao_pedida") else "")
                               + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)
             return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
                          valor=bom["valor"], posicao=posicao, origem=origem, nivel=bom["nivel"],
@@ -3740,9 +3742,10 @@ def _soltar_a_fonte_do_video_de_ia(atual):
 def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
     """
     O vídeo de IA do dia na rodada (P232 1): escolhe o produto pela API de afiliado (P234 1), gera no Flow o vídeo de
-    16 s, com o Estender (P247 1), baixa e a IA confere com a foto do anúncio, e o servidor ouve a fala; o que já foi
-    gerado só segue de onde parou (nunca outro Gerar por cima dele). do_botao: o vídeo pedido no De IA ✨ do Preparar
-    1 Agora ⚡ (P243), com as tentativas dele à parte das do robô. Devolve o que aconteceu numa frase.
+    8 ou 16 s, que a IA escolhe pelo produto (P262; o de 16 s com o Estender, P247 1), baixa e a IA confere com a foto
+    do anúncio, e o servidor ouve a fala e corta o silêncio ou mantém o vídeo inteiro (P262); o que já foi gerado só
+    segue de onde parou (nunca outro Gerar por cima dele). do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡
+    (P243), com as tentativas dele à parte das do robô. Devolve o que aconteceu numa frase.
     """
     hoje = agora_br(agora).strftime("%Y-%m-%d")
     atual = flow.producao()
@@ -3805,6 +3808,9 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
         registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "fala conferida",
                                      flow.ROTULOS_DA_FALA.get(atual["fala_conferida"].get("situacao"), "?"),
                                      ok=None, agora=agora)
+    if atual.get("silencio"):
+        # O silêncio cortado ou o vídeo mantido inteiro (P262): a duração pedida, os porquês fixos e os números.
+        _anotar_o_silencio(atual, agora)
     if estado == "descartado":
         _soltar_a_fonte_do_video_de_ia(atual)
         registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "descartado", "a IA viu outro produto",
@@ -3835,6 +3841,22 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
            f"Produto: {atual.get('nome', '')}\n{de_onde_veio_o_produto_do_video_de_ia(atual)}"
            f"{flow.legenda_da_producao(atual)}")
     return "vídeo de IA: pronto para o rascunho"
+
+
+def _anotar_o_silencio(atual, agora=None):
+    """
+    A decisão do silêncio do vídeo de IA (P262) no registro: a duração que a IA escolheu, "cortado" com as durações
+    e os pedaços tirados, ou "mantido" com o porquê fixo do flow. Só números e textos fixos.
+    """
+    silencio = atual.get("silencio") or {}
+    pedida = f"{atual['duracao_pedida']} s; " if atual.get("duracao_pedida") else ""
+    if silencio.get("decisao") == "cortado":
+        detalhe = (f"{pedida}de {silencio.get('antes')} para {silencio.get('depois')} s, "
+                   f"{silencio.get('cortes')} pedaço(s) parado(s)")
+    else:
+        detalhe = f"{pedida}{silencio.get('motivo') or '?'}"
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, f"silêncio {silencio.get('decisao') or '?'}",
+                                 detalhe, ok=None, agora=agora)
 
 
 def _anotar_a_imagem(agora=None):
@@ -4006,12 +4028,14 @@ def resumo_do_video_de_ia(atual):
     """
     O que fica no rascunho (coluna video_ia) do vídeo que o Flow fez; no de 16 s (P247 1), também a duração, a fala
     pedida e a que o servidor ouviu, que o Rafael vê em Rascunhos do Robô 📝 antes de aprovar (P248 1), e o formato e o
-    personagem, ou por que o vídeo saiu sem ele (P260 1).
+    personagem, ou por que o vídeo saiu sem ele (P260 1). Desde a P262, a duração que a IA escolheu, com o porquê, e o
+    silêncio cortado ou mantido (o de 8 s, "curta", também).
     """
     resumo = {chave: atual.get(chave) for chave in ("modelo", "custo", "estilo", "cena", "conferencia", "gerado_em",
                                                     "resolucao")}
-    resumo.update({chave: atual[chave] for chave in ("longa", "duracao", "fala", "fala_conferida", "formato",
-                                                      "personagem") if atual.get(chave)})
+    resumo.update({chave: atual[chave] for chave in ("longa", "curta", "duracao", "fala", "fala_conferida", "formato",
+                                                      "personagem", "duracao_pedida", "motivo_da_duracao", "silencio")
+                   if atual.get(chave)})
     if atual.get("imagem"):
         resumo["imagem"] = {chave: atual["imagem"][chave] for chave in ("estado", "personagem", "motivo", "tentativas")
                             if chave in atual["imagem"]}
