@@ -2466,15 +2466,20 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     assert "Vídeo de IA: ✅ <b>ligado</b> (ainda não fez nenhum)" in sv.texto_robo(sv.ler_config())
     msg = Msg(sv.BOTAO_VIDEO_IA)
     rodar(sv.video_ia_handler(msg, est))
-    for trecho in ("Omni 1.2 Flash (48 créditos", "Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz",
-                   sv.limite_dos_videos_de_ia()):
+    for trecho in ("Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz", sv.limite_dos_videos_de_ia()):
         assert trecho in msg.saidas[-1]
-    # Escolha do Rafael (17/11, P247 1): o vídeo de IA tem 16 s, com uma pessoa vendendo o produto, e o rascunho
-    # avisa a fala embolada ou cortada (P248 1).
-    for trecho in ("um vídeo de 16 s feito por IA", "uma pessoa vendendo o produto do começo ao fim",
-                   "mais 8 s do Estender", "o rascunho avisa se ela saiu embolada ou cortada"):
+    # Escolha do Rafael (17/11, P247 1): uma pessoa vendendo o produto, e o rascunho avisa a fala embolada ou cortada
+    # (P248 1). Desde a P262, a IA escolhe 8 ou 16 s, e o silêncio é cortado ou o vídeo fica inteiro.
+    for trecho in ("um vídeo feito por IA, de 8 ou 16 s", "uma pessoa vendendo o produto do começo ao fim",
+                   "No Omni 1.2 Flash, o de 8 s é um Gerar só (24 créditos) e o de 16 s, os 8 s gerados e mais 8 s do "
+                   "Estender (48 créditos)", "o rascunho avisa se ela saiu embolada ou cortada",
+                   "só as mãos usando o produto com uma voz contando", "O silêncio de mais de 1 s é cortado"):
         assert trecho in msg.saidas[-1], trecho
-    assert "vídeo de 8 s" not in msg.saidas[-1] and "estilo que varia" not in msg.saidas[-1]
+    assert "vídeo de 16 s feito por IA" not in msg.saidas[-1] and "estilo que varia" not in msg.saidas[-1]
+    # Escolha do Rafael (21/11, P269 1): a propaganda de TV é mais um formato, sempre de 8 s e inteira.
+    for trecho in ("ou a propaganda de TV (8 s com cara de comercial: o produto em planos de cinema e um locutor em "
+                   "off)", "a propaganda de TV fica sempre inteira"):
+        assert trecho in msg.saidas[-1], trecho
     # Escolhas do Rafael (19/11, P256 2 e P260 1, com a P251 1): o unboxing e a comédia, e o vídeo começa pela imagem
     # de um dos personagens aprovados com o produto, sem crédito.
     for trecho in ("o unboxing (só as mãos abrindo a caixa, nunca dois seguidos)", "no máximo 1 a cada 3",

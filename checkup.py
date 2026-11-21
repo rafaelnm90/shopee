@@ -1256,6 +1256,67 @@ def _linha_da_foto_do_comeco(medicao):
     return " | ".join(partes)
 
 
+# Os formatos do vídeo de IA que o checkup mostra pelo nome (as chaves fixas de flow_shopee_video.ESTILOS, conferidas
+# no teste): o que não for um deles vai como OUTRO_FORMATO_SV, e nada além deles vai ao log (P269 1).
+FORMATOS_DO_VIDEO_DE_IA_SV = ("vendedor", "maos_e_voz", "unboxing", "comedia_16s", "propaganda_tv", "demonstracao",
+                              "fala", "inusitado", "comedia")
+OUTRO_FORMATO_SV = "outro"
+
+
+def formatos_do_video_de_ia_da_shopee_video(agora=None):
+    """
+    A medição dos formatos do vídeo de IA da Shopee Vídeo (P269 1): os vídeos de IA postados nestes últimos dias, cada
+    formato (o "formato" do rascunho, ou o "estilo" nos de antes dele) contra os outros vídeos de IA
+    (visualizacoes_shopee_video.comparar_os_formatos). O checkup só mostra os formatos, contagens e %.
+    """
+    limite = (_agora(agora) - timedelta(days=DIAS_DA_COMPARACAO_DA_CAPA)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT postado_em, video_ia, marca, vistas FROM shopee_video_rascunhos "
+                "WHERE estado = 'postado' AND postado_em >= ?", (limite,)).fetchall()
+    except sqlite3.OperationalError:
+        # A tabela sem a coluna (o robô a cria na rodada seguinte ao deploy): ainda não há o que comparar.
+        linhas = []
+    videos = []
+    for postado_em, video_ia, marca, vistas in linhas:
+        try:
+            dados = json.loads(video_ia or "{}")
+            vistas = json.loads(vistas or "[]")
+        except ValueError:
+            continue
+        if not isinstance(dados, dict) or not dados:
+            # Os vídeos da fonte ficam de fora: a medição é só entre os vídeos de IA.
+            continue
+        formato = str(dados.get("formato") or dados.get("estilo") or "")
+        videos.append({"postado_em": postado_em, "marca": marca, "vistas": vistas,
+                       "formato": formato if formato in FORMATOS_DO_VIDEO_DE_IA_SV else OUTRO_FORMATO_SV})
+    return visualizacoes_shopee_video.comparar_os_formatos(videos)
+
+
+def _linhas_dos_formatos(medicao):
+    """
+    As linhas da medição dos formatos do vídeo de IA (P269 1) no checkup: o total e, para cada formato, quantos
+    postados e lidos e a diferença em % contra os outros vídeos de IA em cada idade. Só formatos, contagens e %.
+    """
+    _, primeira = medicao[0]
+    total = primeira["com"]["videos"] + primeira["sem"]["videos"]
+    linhas = [f"Formatos do vídeo de IA (P269 1): {total} vídeo(s) de IA postado(s) com a marca da capa nestes "
+              f"{DIAS_DA_COMPARACAO_DA_CAPA} dias"
+              + (f" ({primeira['sem_marca']} sem a marca)" if primeira["sem_marca"] else "")
+              + "; cada formato contra os outros vídeos de IA"]
+    for formato, comparacao in medicao:
+        com, sem = comparacao["com"], comparacao["sem"]
+        partes = [f"   {formato}: {com['videos']} (lidos {com['lidos']})"]
+        for dias in visualizacoes_shopee_video.IDADES_DA_COMPARACAO:
+            diferenca = visualizacoes_shopee_video.diferenca_em_porcento(comparacao, dias)
+            comparado = f"{diferenca:+d}%" if diferenca is not None else "sem comparação ainda"
+            partes.append(f"com {dias} dia(s): {comparado} ({com['idades'][dias][0]} contra "
+                          f"{sem['idades'][dias][0]})")
+        linhas.append(" | ".join(partes))
+    return linhas
+
+
 # Os lugares livres do produto e do rosto que a IA deu em cada rascunho (P212 1 e P220 1), para achar por que um
 # texto nosso ficou de fora: os nomes da lista dela (os mesmos de edicao_video.LUGARES_DA_IA, conferidos no
 # teste), e nada além deles vai ao log.
@@ -2276,6 +2337,8 @@ def main():
     print(linha_das_punicoes_por_post(apelacoes_shopee_video.punicoes_por_tipo_de_post()))
     print(_linha_da_capa_com_chamada(capa_com_chamada_da_shopee_video(agora)))
     print(_linha_da_foto_do_comeco(foto_do_comeco_da_shopee_video(agora)))
+    for linha in _linhas_dos_formatos(formatos_do_video_de_ia_da_shopee_video(agora)):
+        print(linha)
     for linha in _linhas_dos_lugares_da_ia(lugares_da_ia_nos_rascunhos(agora)):
         print(linha)
 

@@ -67,6 +67,31 @@ def test_comparar_usa_a_leitura_mais_perto_de_cada_idade():
     assert (depois["sem"]["videos"], depois["com"]["videos"], depois["sem_marca"]) == (0, 2, 1)
 
 
+def test_comparar_os_formatos_poe_cada_formato_do_video_de_ia_contra_os_outros():
+    # Escolha do Rafael (21/11, P269 1): o checkup compara as visualizações dos formatos do vídeo de IA; a propaganda de
+    # TV vem sempre primeiro, mesmo antes do 1º vídeo dela, e depois os outros formatos, dos que têm mais vídeos.
+    videos = [
+        {"postado_em": "2026-11-22 10:00:00", "formato": "propaganda_tv", "marca": "a",
+         "vistas": [["2026-11-23 10:00:00", 300]]},
+        {"postado_em": "2026-11-22 12:00:00", "formato": "vendedor", "marca": "b",
+         "vistas": [["2026-11-23 12:00:00", 100]]},
+        {"postado_em": "2026-11-23 10:00:00", "formato": "vendedor", "marca": "c",
+         "vistas": [["2026-11-24 10:00:00", 200]]},
+        {"postado_em": "2026-11-23 12:00:00", "formato": "unboxing", "marca": "d",
+         "vistas": [["2026-11-24 12:00:00", 150]]},
+    ]
+    medicao = vsv.comparar_os_formatos(videos)
+    assert [formato for formato, _ in medicao] == ["propaganda_tv", "vendedor", "unboxing"]
+    tv, vendedor, unboxing = (comparacao for _, comparacao in medicao)
+    assert tv["com"] == {"videos": 1, "lidos": 1, "idades": {1: (1, 300), 3: (0, None)}}
+    assert tv["sem"] == {"videos": 3, "lidos": 3, "idades": {1: (3, 150), 3: (0, None)}}
+    assert vsv.diferenca_em_porcento(tv, 1) == 100 and vsv.diferenca_em_porcento(tv, 3) is None
+    assert vsv.diferenca_em_porcento(vendedor, 1) == -33 and vsv.diferenca_em_porcento(unboxing, 1) == -25
+    # Sem vídeo de IA nenhum, só a propaganda, sem comparação.
+    (formato, vazio), = vsv.comparar_os_formatos([])
+    assert formato == vsv.FORMATO_DA_PROPAGANDA and vsv.diferenca_em_porcento(vazio, 1) is None
+
+
 def test_comparar_a_foto_separa_os_de_1_5_s_dos_de_2_s_de_antes():
     # Escolha do Rafael (13/11, P221 1): a foto do começo de 1,5 s comparada com a de 2 s, como a capa com chamada.
     # Os de antes não anotavam o tempo da foto (foram com 2 s); o que foi sem a edição ("0", sem a foto) fica de fora.

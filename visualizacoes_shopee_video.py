@@ -11,8 +11,11 @@ painel (Capa com Chamada 🏷️, no privado, com os números) e o checkup (só 
 checkup compara a foto do começo de 1,5 s com a de 2 s de antes (escolha do Rafael de 13/11/2026, P221 1).
 A mesma marca, tirada da capa pequena de cada linha de curtida das Notificações (marca_da_miniatura), junta as
 curtidas do mesmo vídeo: o vídeo que começa a viralizar vai para os fixados do Perfil (P263 1).
+O checkup compara também as visualizações de cada formato do vídeo de IA com as dos outros vídeos de IA, como a
+propaganda de TV (escolha do Rafael de 21/11/2026, P269 1: comparar_os_formatos).
 """
 import statistics
+from collections import Counter
 from datetime import datetime
 
 # A faixa do quadro, em fração da altura, que entra na marca: sem o selo "Fixado" e a
@@ -32,6 +35,9 @@ MARGEM_DA_MINIATURA = 0.12
 # leitura: a leitura do dia mais perto da idade, até FOLGA_DA_IDADE_HORAS antes ou depois.
 IDADES_DA_COMPARACAO = (1, 3)
 FOLGA_DA_IDADE_HORAS = 12
+# O formato da propaganda de TV do vídeo de IA (P269 1), o mesmo de flow_shopee_video.ESTILO_DA_PROPAGANDA (conferido
+# no teste), sem importar o flow aqui: a medição dos formatos o mostra sempre, mesmo antes do 1º vídeo dele.
+FORMATO_DA_PROPAGANDA = "propaganda_tv"
 FORMATO = "%Y-%m-%d %H:%M:%S"
 
 
@@ -167,6 +173,21 @@ def comparar_a_foto(videos):
     anotados = {v["segundos_da_foto"] for v in com_a_foto if v.get("segundos_da_foto")}
     medicao["segundos"] = [s.replace(".", ",") for s in sorted(anotados, key=_numero)]
     return medicao
+
+
+def comparar_os_formatos(videos):
+    """
+    A medição dos formatos do vídeo de IA (P269 1): cada formato contra os outros vídeos de IA, como a da capa com
+    chamada (comparar), com o formato no grupo "com" e os outros vídeos de IA no "sem". videos: [{"postado_em",
+    "formato", "marca", "vistas"}], só os vídeos de IA postados. Devolve [(formato, a comparação)]: a propaganda de TV
+    (FORMATO_DA_PROPAGANDA) primeiro, mesmo sem nenhum vídeo dela, e depois os outros formatos com vídeo, dos que têm
+    mais vídeos com a marca da capa (os que entram na comparação) para os que têm menos.
+    """
+    contagem = Counter(v.get("formato") or "" for v in videos if v.get("marca"))
+    presentes = {v.get("formato") or "" for v in videos} - {"", FORMATO_DA_PROPAGANDA}
+    formatos = [FORMATO_DA_PROPAGANDA] + sorted(presentes, key=lambda f: (-contagem[f], f))
+    return [(formato, comparar(videos, grupo=lambda video, f=formato: (video.get("formato") or "") == f))
+            for formato in formatos]
 
 
 def _numero(texto):

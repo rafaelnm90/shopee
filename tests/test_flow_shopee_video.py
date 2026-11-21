@@ -2239,7 +2239,7 @@ def _escolha_da_propaganda(monkeypatch):
 
 def test_amostra_da_propaganda_de_tv_vai_so_ao_privado_com_o_locutor_conferido(celular, monkeypatch, capsys):
     # P268 1: a amostra de 8 s com cara de propaganda de TV vai só ao privado do Rafael: um Gerar só, sem o Estender,
-    # com a fala do locutor conferida e o tempo com fala; o vídeo de IA do dia só muda com o OK dele.
+    # com a fala do locutor conferida e o tempo com fala; desde a P269 1, a propaganda é também um formato do robô.
     pedidos = _escolha_da_propaganda(monkeypatch)
     _duracoes(monkeypatch, celular, estendida=8)
     monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
@@ -2253,7 +2253,7 @@ def test_amostra_da_propaganda_de_tv_vai_so_ao_privado_com_o_locutor_conferido(c
                    "Omni 1.2 Flash (24 créditos de IA)", f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
                    "Fala no vídeo: igual à pedida", "⏱️ Com fala: 6,5 s dos 8,0 s do vídeo",
                    "Paga R$ 6,50 por venda", "A luminária acende num quarto escuro.",
-                   "Os vídeos de IA do robô continuam como estão"):
+                   "um dos formatos que a IA escolhe nos vídeos de IA do robô (P269 1)"):
         assert trecho in legenda, trecho
     for fora in ("16 s", "Estender", "O vídeo de IA do dia sai normalmente"):
         assert fora not in legenda, fora
@@ -2990,6 +2990,44 @@ def test_a_ia_escolhe_a_duracao_e_o_maos_e_voz_so_no_video_de_ia_do_dia(monkeypa
     assert "duracao_pedida" not in escolhido and len(pedidos) == 1 and "depois, calada" in pedidos[0]
 
 
+RESPOSTA_DA_PROPAGANDA = json.dumps({"serve": True, "muda_na_ia": False, "motivo": "",
+                                     "prompt": "Premium TV commercial of the exact lamp.", "fala": FALA_DO_LOCUTOR,
+                                     "cena": "A luminária acende num quarto escuro."})
+
+
+def test_a_ia_escolhe_a_propaganda_de_tv_no_video_de_ia_do_dia_sempre_de_8_s(monkeypatch):
+    # Escolha do Rafael (21/11, P269 1): a propaganda de TV da amostra (P268 1) é mais um formato que a IA escolhe pelo
+    # produto no vídeo de IA do dia e no De IA ✨, sempre de 8 s, com o pedido da amostra e a fala do locutor.
+    do_dia = flow.pedido_do_formato("Luminária de Mesa", com_unboxing=True, com_maos_e_voz=True, com_duracao=True,
+                                    com_propaganda=True)
+    assert '"vendedor", "maos_e_voz", "unboxing" ou "propaganda_tv"' in do_dia
+    assert "um comercial de TV de 8 segundos" in do_dia and "locutor em off" in do_dia
+    assert "O unboxing e a comédia têm sempre 16 segundos. A propaganda de TV tem sempre 8 segundos." in do_dia
+    # Sem ela (as amostras), a IA não recebe a propaganda entre os formatos.
+    sem = flow.pedido_do_formato("Luminária de Mesa", com_unboxing=True, com_maos_e_voz=True, com_duracao=True)
+    assert "propaganda" not in sem
+    link = "https://s.shopee.com.br/abc"
+    pedidos = _ia_do_formato(monkeypatch, '{"formato": "propaganda_tv", "duracao": 16, "motivo": "bonito de se ver"}',
+                             RESPOSTA_DA_PROPAGANDA)
+    escolhido, serve = flow.pedido_para_o_anuncio(link, "Luminária de Mesa", _jpeg(), longo=True, com_unboxing=True,
+                                                  da_producao=True)
+    assert serve is True and '"propaganda_tv"' in pedidos[0] and "premium TV commercial" in pedidos[1]
+    assert escolhido["formato"] == escolhido["estilo"] == flow.ESTILO_DA_PROPAGANDA
+    assert escolhido["fala"] == FALA_DO_LOCUTOR and "continuacao" not in escolhido
+    # Mesmo com a IA dizendo 16, a propaganda tem 8 s: um Gerar só, sem o Estender.
+    assert (escolhido["duracao_pedida"], escolhido["motivo_da_duracao"]) == (8, "bonito de se ver")
+    # "Propaganda de TV", do jeito que a IA às vezes escreve, também vale.
+    _ia_do_formato(monkeypatch, '{"formato": "Propaganda de TV", "motivo": "cara de comercial"}',
+                   RESPOSTA_DA_PROPAGANDA)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Luminária de Mesa", _jpeg(), longo=True, da_producao=True)
+    assert (escolhido["formato"], escolhido["duracao_pedida"]) == (flow.ESTILO_DA_PROPAGANDA, 8)
+    # Nas amostras (sem da_producao), a propaganda não está entre os formatos, e a resposta dela fica no vendedor.
+    pedidos = _ia_do_formato(monkeypatch, '{"formato": "propaganda_tv", "motivo": "x"}', RESPOSTA_DE_16_S)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, com_unboxing=True)
+    assert "propaganda" not in pedidos[0] and "premium TV commercial" not in pedidos[1]
+    assert escolhido["formato"] == flow.ESTILO_DO_VENDEDOR and "duracao_pedida" not in escolhido
+
+
 def _escolhido_curto(**extra):
     """O pedido de 8 s que a escolha do robô dá desde a P262: sem a continuação, com a fala, o formato e a duração."""
     return dict(_escolhido(), estilo=flow.ESTILO_DO_VENDEDOR, prompt="A woman holds the exact tumbler and talks.",
@@ -3033,6 +3071,60 @@ def test_producao_de_8_s_gera_uma_vez_sem_estender_e_ouve_a_fala(celular, monkey
     assert "Estender)" not in legenda and celular.mandados == []
     saida = capsys.readouterr().out
     for privado in ("Copo", "tumbler", "Gelo"):
+        assert privado not in saida, privado
+
+
+# O locutor com mais de 1 s calado entre um plano e outro (P269 1): no vendedor, o corte tiraria esse pedaço.
+LOCUTOR_COM_PAUSA = FALA_DO_LOCUTOR_OUVIDA[:5] + [(round(inicio + 1.0, 1), round(fim + 1.0, 1), palavra)
+                                                  for inicio, fim, palavra in FALA_DO_LOCUTOR_OUVIDA[5:]]
+
+
+def _escolhido_da_propaganda(**extra):
+    """O pedido da propaganda de TV que a escolha do robô dá desde a P269 1: de 8 s, com a fala do locutor."""
+    return dict(_escolhido(), estilo=flow.ESTILO_DA_PROPAGANDA, prompt="Premium TV commercial of the exact tumbler.",
+                fala=FALA_DO_LOCUTOR, cena="O copo gira devagar num estúdio escuro.", formato=flow.ESTILO_DA_PROPAGANDA,
+                duracao_pedida=8, motivo_da_duracao="bonito de se ver", **extra)
+
+
+def test_producao_da_propaganda_de_tv_gera_uma_vez_pela_foto_e_fica_inteira(celular, monkeypatch, tmp_path, capsys):
+    # Escolha do Rafael (21/11, P269 1): a propaganda de TV que a IA escolheu é de 8 s, um Gerar só (24 créditos), pela
+    # foto do anúncio (a imagem do personagem é do vendedor e da comédia), e fica sempre inteira: a pausa entre os
+    # planos e o produto no fim, depois da última frase do locutor, são o comercial (decisão do Claude pela P262).
+    _aprovadas(tmp_path, "vovo")
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 8.0)
+    montagens = _corte_falso(monkeypatch)
+    estilos = flow.estilos_recentes()
+    atual = flow.comecar_producao("2026-11-22", _escolhido_da_propaganda(), 1)
+    assert atual["curta"] is True and "longa" not in atual and "continuacao" not in atual
+    assert (atual["formato"], atual["estilo"], atual["duracao_pedida"]) == (
+        flow.ESTILO_DA_PROPAGANDA, flow.ESTILO_DA_PROPAGANDA, 8)
+    assert atual["custo"] == 24 and flow.estilos_recentes() == estilos
+    # Mesmo com a foto de um personagem aprovada, a propaganda não pede a imagem dele.
+    assert not flow.pede_a_imagem(atual)
+    assert flow.producao_no_celular(celular, atual) is True
+    assert celular.geracoes == 1 and celular.extensoes == 0 and celular.toques_proibidos == []
+    assert celular.texto == "Premium TV commercial of the exact tumbler."
+    atual = flow.producao()
+    assert atual["estado"] == "baixado" and "imagem" not in atual
+    assert flow.formatos_recentes()[-1] == flow.ESTILO_DA_PROPAGANDA
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: LOCUTOR_COM_PAUSA)
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert pronto["fala_conferida"]["situacao"] == "igual"
+    assert pronto["silencio"] == {"decisao": "mantido", "motivo": flow.PROPAGANDA_INTEIRA, "antes": 8.0,
+                                  "depois": 8.0, "cortes": 0}
+    assert montagens == [] and "arquivo_inteiro" not in pronto
+    assert pronto["arquivo"].endswith("producao_2026-11-22.mp4")
+    # Sem ser a propaganda, a mesma fala teria o silêncio do meio cortado.
+    assert flow.decidir_o_silencio(pronto["arquivo"], LOCUTOR_COM_PAUSA)["decisao"] == "cortado" and montagens
+    legenda = flow.legenda_da_producao(pronto)
+    for trecho in ("Omni 1.2 Flash, 8 s (24 créditos de IA)", f"🎭 Estilo: {flow.ESTILOS[flow.ESTILO_DA_PROPAGANDA]}",
+                   "⏱️ 8 s, sem o Estender (a propaganda de TV tem sempre 8 s)", f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
+                   "✂️ Propaganda de TV: o vídeo fica inteiro, sem cortar o silêncio"):
+        assert trecho in legenda, trecho
+    assert "🗣️ Fala:" not in legenda and "👤" not in legenda and celular.mandados == []
+    saida = capsys.readouterr().out
+    for privado in ("Copo", "tumbler", "quarto"):
         assert privado not in saida, privado
 
 
