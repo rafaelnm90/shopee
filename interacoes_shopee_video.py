@@ -8,7 +8,10 @@ DECISOES.md, Shopee Vídeo.
 
 Aqui fica o que não toca no celular: a leitura das telas (a lista das Notificações, o
 painel de comentários e o player do feed), o texto da IA e as marcas do que já foi
-feito. Os toques ficam no robo_shopee_video, que chama estas funções; o checkup conta o
+feito. Também as curtidas de cada vídeo do Rafael, contadas nas linhas "curtiu seu vídeo."
+das Notificações, e a leitura da folha do compartilhar (Fixar ou Desfixar): o vídeo com 10
+curtidas ou mais em 24 h vai para os fixados do Perfil (escolha do Rafael de 20/11/2026, P263 1).
+Os toques ficam no robo_shopee_video, que chama estas funções; o checkup conta o
 que o robô anotou no registro de processos.
 
 As marcas (tabela shopee_video_interacoes) guardam só um resumo (SHA-1) do comentário
@@ -74,9 +77,26 @@ FEITOS_NO_FEED = ("comentado", "não confirmado", SO_CURTIDO)
 
 # O aviso de comentário nas Notificações: "Fulana comentou no seu vídeo: "Amei!"".
 COMENTOU = re.compile(r"^(?P<nome>.+?)\s+comentou no seu v[ií]deo\s*:?\s*(?P<texto>.*)$", re.S | re.I)
+# As curtidas dos vídeos nas Notificações (P263 1): a linha da curtida no vídeo (a no comentário é "Your
+# comment gets a like."), a largura mínima do bloco de toque da linha (de lado a lado da tela), o tamanho
+# mínimo da capa pequena (no Motorola, 105 px) e as horas escritas embaixo do aviso.
+CURTIU = re.compile(r"\bcurtiu seu v[ií]deo\b", re.I)
+LARGURA_DA_LINHA = 900
+TAMANHO_MINIMO_DA_CAPA = 60
+HORA_DE_HOJE = re.compile(r"^(?:hoje\s+)?(\d{1,2}):(\d{2})$")
+HORA_DE_ONTEM = re.compile(r"^ontem\s+(\d{1,2}):(\d{2})$")
+DIA_E_HORA = re.compile(r"^(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\s+(\d{1,2}):(\d{2})$")
+HA_POUCO = re.compile(r"^h[aá]\s+(\d+)\s*(min|minutos?|h|horas?)$")
+# As curtidas contam nas últimas HORAS_DAS_CURTIDAS horas e ficam guardadas DIAS_DAS_CURTIDAS dias.
+HORAS_DAS_CURTIDAS = 24
+DIAS_DAS_CURTIDAS = 3
+# Os botões da folha do compartilhar do próprio vídeo, ao lado do Copiar link (Motorola, 20/11/2026).
+FIXAR, DESFIXAR = "Fixar", "Desfixar"
 ASPAS = "\"“”'‘’"
 # A hora de cada linha das Notificações ("Hoje 10:15", "24-10 14:32").
 HORA_DA_LINHA = re.compile(r"^(?:\S+\s+)?\d{1,2}:\d{2}$")
+# A hora fica logo embaixo do aviso, alinhada com ele (no Motorola, uns 15 px abaixo).
+ESPACO_DA_HORA = 90
 # O coração de cada comentário do painel (desc "button comment like", na ponta direita da
 # linha) e o "Curtido pelo criador" que aparece embaixo do comentário curtido pelo Rafael.
 CORACAO_DO_COMENTARIO = "comment like"
@@ -225,22 +245,40 @@ def escolher_post_antigo(postados, agora=None):
 
 def linhas_das_notificacoes(xml, filtro):
     """
-    Os textos das linhas da lista (filtro Lives, Vídeos e ...), de cima para baixo: só o
-    aviso de cada linha, sem a hora. O que fica atrás da fileira de filtros (a lista rolada
-    por baixo dela) e a linha cortada pela barra de baixo ficam de fora.
+    As linhas da lista (filtro Lives, Vídeos e ...), de cima para baixo: o aviso de cada linha, com
+    a hora escrita embaixo dele ("hora"). O que fica atrás da fileira de filtros (a lista rolada por
+    baixo dela) e a linha cortada pela barra de baixo (o aviso, ou a hora dele) ficam de fora.
     """
     elementos = ps.elementos(xml)
-    chips = [el for el in elementos if ps._normal(el["texto"]).startswith(ps._normal(filtro))]
-    if not chips:
+    faixa = _faixa_da_lista(elementos, filtro)
+    if not faixa:
         return []
-    topo = max(el["caixa"][3] for el in chips)
-    barra = [el["caixa"][1] for el in elementos if el["id"] in ("sp_bottom_navigation_container", "shadow_view")]
-    fundo = min(barra) if barra else 10 ** 6
-    linhas = [el for el in elementos
-              if el["texto"].strip() and el["caixa"][1] >= topo and el["caixa"][3] <= fundo
-              and not HORA_DA_LINHA.match(el["texto"].strip())]
-    linhas.sort(key=lambda el: (el["caixa"][1], el["caixa"][0]))
-    return [{"texto": el["texto"], "ponto": ps._centro(el)} for el in linhas]
+    topo, fundo = faixa
+    na_lista = [el for el in elementos if el["texto"].strip() and el["caixa"][1] >= topo and el["caixa"][3] <= fundo]
+    horas = [el for el in na_lista if HORA_DA_LINHA.match(el["texto"].strip())]
+    linhas = []
+    for el in sorted((el for el in na_lista if not HORA_DA_LINHA.match(el["texto"].strip())),
+                     key=lambda el: (el["caixa"][1], el["caixa"][0])):
+        x1, _y1, _x2, y2 = el["caixa"]
+        hora = next((h["texto"].strip() for h in horas
+                     if abs(h["caixa"][0] - x1) <= 40 and y2 - 5 <= h["caixa"][1] <= y2 + ESPACO_DA_HORA), "")
+        if not hora and y2 > fundo - ESPACO_DA_HORA:
+            # A hora ficou embaixo da barra: a linha vem inteira na próxima rolada.
+            continue
+        linhas.append({"texto": el["texto"], "hora": hora, "ponto": ps._centro(el)})
+    return linhas
+
+
+def chave_da_linha(texto, hora, agora=None):
+    """
+    A marca de uma linha das Notificações com a hora dela (o topo da leitura e cada curtida): o mesmo aviso
+    em outra hora, como a mesma pessoa curtindo outro vídeo, é outra linha. Com a hora certa quando o app a
+    escreve (momento_da_hora: o "18:38" de hoje e o "Ontem 18:38" de amanhã dão a mesma chave); a de "há 5
+    min", que muda a cada leitura, e o que não diz a hora, como estão escritos.
+    """
+    escrita = " ".join((hora or "").split())
+    quando = None if HA_POUCO.match(escrita.casefold()) else momento_da_hora(escrita, agora)
+    return marca(texto, quando.strftime("%Y-%m-%d %H:%M") if quando else escrita)
 
 
 def comentario_da_notificacao(texto):
@@ -249,6 +287,213 @@ def comentario_da_notificacao(texto):
     if not achado:
         return None
     return achado["nome"].strip(), achado["texto"].strip().strip(ASPAS).strip()
+
+
+# --- As curtidas dos vídeos nas Notificações (P263 1) ---
+# Escolha do Rafael (20/11/2026, P263 1): o vídeo dele com 10 curtidas ou mais em 24 h vai para os
+# fixados do Perfil. Cada curtida é uma linha "Fulana curtiu seu vídeo." com a hora embaixo e a capa
+# pequena do vídeo à direita; quando quem curtiu não tem foto, a capa vai à esquerda e a direita fica
+# vazia (Motorola, 20/11/2026). As linhas do mesmo vídeo se juntam pela marca dessa capa
+# (visualizacoes_shopee_video.marca_da_miniatura). Aqui ficam só a marca da linha (SHA-1 do aviso e da
+# hora), a marca da capa e a hora da curtida, por DIAS_DAS_CURTIDAS dias: nunca o nome nem a imagem.
+
+def _nos_da_tela(xml):
+    """
+    Todos os nós da tela com caixa, até as imagens sem texto (que ps.elementos deixa de fora):
+    {"texto", "classe", "caixa", "clicavel"}.
+    """
+    import xml.etree.ElementTree as ET
+    try:
+        raiz = ET.fromstring(xml)
+    except ET.ParseError:
+        return []
+    nos = []
+    for no in raiz.iter("node"):
+        caixa = ps._limites(no)
+        if caixa and no.get("visible-to-user", "true") == "true" and no.get("package") != ps.PACOTE_SISTEMA:
+            nos.append({"texto": no.get("text", ""), "classe": no.get("class", "").rsplit(".", 1)[-1], "caixa": caixa,
+                        "clicavel": no.get("clickable") == "true"})
+    return nos
+
+
+def _faixa_da_lista(elementos, filtro):
+    """(topo, fundo) da lista das Notificações: abaixo dos filtros e acima da barra de baixo; None sem os filtros."""
+    chips = [el for el in elementos if ps._normal(el["texto"]).startswith(ps._normal(filtro))]
+    if not chips:
+        return None
+    topo = max(el["caixa"][3] for el in chips)
+    barra = [el["caixa"][1] for el in elementos if el["id"] in ("sp_bottom_navigation_container", "shadow_view")]
+    return topo, min(barra) if barra else 10 ** 6
+
+
+def curtidas_das_notificacoes(xml, filtro):
+    """
+    As linhas de curtida de vídeo ("... curtiu seu vídeo.") inteiras na tela, de cima para baixo:
+    [{"texto", "hora", "ponto", "miniatura"}]: o aviso, a hora como está escrita embaixo dele, o centro
+    do aviso (o toque abre o vídeo) e a caixa da capa pequena do vídeo (a imagem da direita; sem ela, a da
+    esquerda). A curtida no comentário ("Your comment gets a like.") e a linha cortada ficam de fora.
+    """
+    faixa = _faixa_da_lista(ps.elementos(xml), filtro)
+    if not faixa:
+        return []
+    topo, fundo = faixa
+    nos = _nos_da_tela(xml)
+    linhas = []
+    for aviso in nos:
+        if not CURTIU.search(" ".join(aviso["texto"].split())):
+            continue
+        x, y = ps._centro(aviso)
+        # A linha é o bloco de toque de lado a lado da tela em volta do aviso.
+        blocos = [no for no in nos if no["clicavel"] and no["caixa"][2] - no["caixa"][0] >= LARGURA_DA_LINHA
+                  and ps._dentro((x, y), no["caixa"])]
+        if not blocos:
+            continue
+        linha = min(blocos, key=lambda no: (no["caixa"][3] - no["caixa"][1]))["caixa"]
+        if linha[1] < topo or linha[3] > fundo:
+            continue
+        dentro = [no for no in nos if no is not aviso and ps._dentro(ps._centro(no), linha)]
+        hora = next((no["texto"].strip() for no in dentro
+                     if no["texto"].strip() and no["caixa"][1] >= aviso["caixa"][3] - 5), "")
+        imagens = [no for no in dentro if no["classe"] == "ImageView" and _quadrada(no["caixa"])]
+        largura = linha[2] - linha[0]
+        direita = [no for no in imagens if ps._centro(no)[0] > linha[0] + largura * 3 // 4]
+        esquerda = [no for no in imagens if ps._centro(no)[0] < linha[0] + largura // 4]
+        lado = direita or esquerda
+        if lado:
+            capa = max(lado, key=lambda no: (no["caixa"][2] - no["caixa"][0]) * (no["caixa"][3] - no["caixa"][1]))
+            linhas.append({"texto": aviso["texto"], "hora": hora, "ponto": (x, y), "miniatura": capa["caixa"]})
+    linhas.sort(key=lambda linha: linha["ponto"][1])
+    return linhas
+
+
+def _quadrada(caixa):
+    """A imagem tem o jeito da capa pequena da linha (quase quadrada e não minúscula), e não de um ícone?"""
+    largura, altura = caixa[2] - caixa[0], caixa[3] - caixa[1]
+    return min(largura, altura) >= TAMANHO_MINIMO_DA_CAPA and 0.6 <= largura / max(altura, 1) <= 1.6
+
+
+def momento_da_hora(hora, agora=None):
+    """
+    Quando foi a curtida, pela hora da linha: "18:38" ou "Hoje 18:38" (hoje), "Ontem 18:38", "20-11 18:38"
+    (dia-mês, como as datas do app) ou "há 5 min"/"há 2 h". None no que não diz a hora (só a data, outro jeito).
+    """
+    texto = " ".join((hora or "").split()).casefold()
+    base = _agora(agora)
+    achado = HORA_DE_HOJE.match(texto) or HORA_DE_ONTEM.match(texto)
+    if achado:
+        horas, minutos = int(achado[1]), int(achado[2])
+        if horas > 23 or minutos > 59:
+            return None
+        quando = base.replace(hour=horas, minute=minutos, second=0, microsecond=0)
+        if texto.startswith("ontem"):
+            quando -= timedelta(days=1)
+        return quando - timedelta(days=1) if quando > base + timedelta(minutes=5) else quando
+    achado = DIA_E_HORA.match(texto)
+    if achado:
+        dia, mes, ano, horas, minutos = (int(achado[i]) if achado[i] else None for i in range(1, 6))
+        try:
+            quando = base.replace(year=ano or base.year, month=mes, day=dia, hour=horas, minute=minutos,
+                                  second=0, microsecond=0)
+        except ValueError:
+            return None
+        return quando.replace(year=quando.year - 1) if not ano and quando > base + timedelta(days=1) else quando
+    achado = HA_POUCO.match(texto)
+    if achado:
+        unidade = timedelta(hours=1) if achado[2].startswith("h") else timedelta(minutes=1)
+        return base - int(achado[1]) * unidade
+    return None
+
+
+def _criar_tabela_das_curtidas(con):
+    con.execute("CREATE TABLE IF NOT EXISTS shopee_video_curtidas (marca TEXT PRIMARY KEY, video TEXT, momento TEXT, "
+                "lida_em TEXT)")
+
+
+def guardar_curtidas(curtidas, agora=None):
+    """
+    Guarda as curtidas lidas: [{"texto", "chave", "video", "momento"}], chave o que diz quando a curtida foi
+    (a hora certa, ou o que estava escrito) e momento o datetime dela. A mesma linha lida de novo não conta
+    duas vezes (a marca do aviso e da chave). As de mais de DIAS_DAS_CURTIDAS dias saem. Devolve quantas novas.
+    """
+    novas = 0
+    with db.conexao() as con:
+        _criar_tabela_das_curtidas(con)
+        for curtida in curtidas:
+            if not curtida.get("video") or not curtida.get("momento"):
+                continue
+            cursor = con.execute("INSERT OR IGNORE INTO shopee_video_curtidas (marca, video, momento, lida_em) "
+                                 "VALUES (?, ?, ?, ?)",
+                                 (marca("curtida", curtida["texto"], curtida["chave"]), curtida["video"],
+                                  curtida["momento"].strftime("%Y-%m-%d %H:%M:%S"), _momento(agora)))
+            novas += cursor.rowcount
+        corte = (_agora(agora) - timedelta(days=DIAS_DAS_CURTIDAS)).strftime("%Y-%m-%d %H:%M:%S")
+        con.execute("DELETE FROM shopee_video_curtidas WHERE momento < ?", (corte,))
+    return novas
+
+
+def videos_mais_curtidos(agora=None, horas=HORAS_DAS_CURTIDAS):
+    """
+    As curtidas das últimas `horas` horas juntadas por vídeo (marcas de capa parecidas, até
+    visualizacoes.MARCA_PARECIDA): [{"video", "curtidas"}], o mais curtido primeiro (no empate, o da curtida
+    mais nova); "video" é a marca da capa na curtida mais nova dele.
+    """
+    import visualizacoes_shopee_video as visualizacoes
+    desde = (_agora(agora) - timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
+    with db.conexao() as con:
+        _criar_tabela_das_curtidas(con)
+        linhas = con.execute("SELECT video, momento FROM shopee_video_curtidas WHERE momento >= ? "
+                             "ORDER BY momento DESC", (desde,)).fetchall()
+    grupos = []
+    for video, momento in linhas:
+        grupo = next((g for g in grupos if visualizacoes.diferenca(g["video"], video) <= visualizacoes.MARCA_PARECIDA),
+                     None)
+        if grupo:
+            grupo["curtidas"] += 1
+        else:
+            grupos.append({"video": video, "curtidas": 1, "ultima": momento})
+    grupos.sort(key=lambda g: (g["curtidas"], g["ultima"]), reverse=True)
+    return [{"video": g["video"], "curtidas": g["curtidas"]} for g in grupos]
+
+
+def curtidas_do_video(xml):
+    """As curtidas do vídeo aberto no player: o número no coração da coluna da direita (ou logo embaixo), ou None."""
+    elementos = ps.elementos(xml)
+    coracao = next((el for el in elementos if el["clicavel"] and ps._centro(el)[0] > 900
+                    and coracao_curtido(el["descricao"]) is not None), None)
+    if not coracao:
+        return None
+    x1, y1, x2, y2 = coracao["caixa"]
+    for el in elementos:
+        x, y = ps._centro(el)
+        if el["texto"].strip() and x1 - 30 <= x <= x2 + 30 and y1 <= y <= y2 + 60:
+            numero = contagem(el["texto"])
+            if numero is not None:
+                return numero
+    return None
+
+
+def texto_exato(xml, texto):
+    """
+    O centro do elemento com exatamente esse texto, ou None. Sem o "começa com" e o "contém" do ps.achar:
+    o toque no Fixar nunca cai no Desfixar.
+    """
+    alvo = ps._normal(texto)
+    el = next((el for el in ps.elementos(xml) if ps._normal(el["texto"]) == alvo), None)
+    return ps._centro(el) if el else None
+
+
+def estado_do_fixar(xml):
+    """Na folha do compartilhar do próprio vídeo: "desfixar" (está fixado), "fixar" (não está) ou None (sem os dois)."""
+    if texto_exato(xml, DESFIXAR):
+        return "desfixar"
+    if texto_exato(xml, FIXAR):
+        return "fixar"
+    return None
+
+
+def limite_de_fixados(xml):
+    """O app disse que não dá para fixar mais ("Você só pode fixar até 3 vídeos")?"""
+    return any("pode fixar" in ps._normal(el["texto"]) for el in ps.elementos(xml))
 
 
 # --- O painel de comentários ---

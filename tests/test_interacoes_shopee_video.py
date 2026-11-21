@@ -100,7 +100,8 @@ def test_linhas_das_notificacoes_sem_a_hora_e_sem_o_que_fica_atras_dos_filtros()
                _el(NOTIFICACAO, caixa=(160, 600, 1040, 660)), _el("Hoje 10:15", caixa=(160, 670, 400, 700)),
                _el("Ana curtiu seu vídeo.", caixa=(160, 800, 1040, 860)), _el("24-10 09:02", caixa=(160, 870, 400, 900)),
                _el("linha cortada pela barra", caixa=(160, 2230, 1040, 2290)), *BARRA)
-    assert [t["texto"] for t in it.linhas_das_notificacoes(xml, "Lives, Vídeos")] == [NOTIFICACAO, "Ana curtiu seu vídeo."]
+    assert [(t["texto"], t["hora"]) for t in it.linhas_das_notificacoes(xml, "Lives, Vídeos")] == [
+        (NOTIFICACAO, "Hoje 10:15"), ("Ana curtiu seu vídeo.", "24-10 09:02")]
 
 
 def test_painel_separa_comentarios_respostas_e_o_selo_criador():
@@ -456,12 +457,54 @@ def test_comentario_novo_e_respondido_embaixo_dele_e_nao_volta(avisos, ia):
     assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
     assert app.enviadas == ["Tem sim! Corre que esse vestido é sucesso"]
     assert ia == [("Amei esse vestido, tem tamanho 10?", "Vestido Infantil Gatinho Estampado")]
-    assert robo.ler_estado()["respostas_topo"] == it.marca(NOTIFICACAO)
+    # O topo novo é o aviso com a hora dele (o topo antigo, só com o aviso, ainda vale uma vez).
+    assert robo.ler_estado()["respostas_topo"] == it.chave_da_linha(NOTIFICACAO, "Hoje 10:15",
+                                                                    momento("2026-10-24 10:00"))
     # O mesmo comentário não é respondido de novo, mesmo com o topo perdido.
     robo.gravar_estado(respostas_topo="outro")
     assert robo.responder_comentarios(app, momento("2026-10-24 11:00")) == "respostas: nenhum comentário novo"
     assert len(app.enviadas) == 1
     assert robo.tentativas_desde("2026-10-24 00:00:00")[-1]["resultado"] == "respondido"
+
+
+class CelularComHoras(CelularDosComentarios):
+    """As Notificações com a hora embaixo de cada aviso: linhas = [(aviso, hora)], da mais nova para a mais velha."""
+
+    def __init__(self, linhas_com_horas, **kwargs):
+        super().__init__(linhas=[texto for texto, _hora in linhas_com_horas], **kwargs)
+        self.horas = [hora for _texto, hora in linhas_com_horas]
+
+    def dump_hierarchy(self):
+        if self.atual != "lista":
+            return super().dump_hierarchy()
+        nos, y = [_el("Notificações", caixa=(400, 160, 680, 220)), FILTRO], 600
+        for texto, hora in zip(self.linhas, self.horas):
+            nos += [_el(texto, caixa=(160, y, 1040, y + 60)), _el(hora, caixa=(160, y + 70, 400, y + 100))]
+            y += 190
+        return _xml(*(nos + BARRA))
+
+
+def test_a_mesma_pessoa_curtindo_outro_video_depois_da_leitura_nao_esconde_o_comentario_de_antes(avisos, ia):
+    # Na leitura das 10:05, o topo era a curtida da Ana das 10:00; depois a Maria comentou (10:30) e a Ana curtiu
+    # outro vídeo (11:00). Com o topo só pelo aviso, a leitura parava na curtida nova da Ana e pulava o comentário.
+    agora = momento("2026-10-24 12:00")
+    robo.gravar_estado(respostas_topo=it.chave_da_linha("Ana curtiu seu vídeo.", "10:00", agora))
+    app = CelularComHoras([("Ana curtiu seu vídeo.", "11:00"), (NOTIFICACAO, "10:30"),
+                           ("Ana curtiu seu vídeo.", "10:00")])
+    assert robo.responder_comentarios(app, agora) == "respostas: 1 respondido"
+    assert app.enviadas == ["Tem sim! Corre que esse vestido é sucesso"]
+    assert robo.ler_estado()["respostas_topo"] == it.chave_da_linha("Ana curtiu seu vídeo.", "11:00", agora)
+    # O topo de antes da hora (só o aviso) ainda vale na 1ª leitura depois da mudança.
+    lidas = [{"texto": "Ana curtiu seu vídeo.", "chave": it.chave_da_linha("Ana curtiu seu vídeo.", "11:00", agora)}]
+    assert robo.posicao_do_topo(lidas, it.marca("Ana curtiu seu vídeo.")) == 0
+
+
+def test_chave_da_linha_e_a_mesma_de_um_dia_para_o_outro():
+    hoje, amanha = momento("2026-10-24 21:00"), momento("2026-10-25 08:00")
+    ana = "Ana curtiu seu vídeo."
+    assert it.chave_da_linha(ana, "20:55", hoje) == it.chave_da_linha(ana, "Ontem 20:55", amanha) == it.chave_da_linha(
+        ana, "24-10 20:55", amanha)
+    assert it.chave_da_linha(ana, "20:55", hoje) != it.chave_da_linha(ana, "20:56", hoje)
 
 
 def test_painel_que_abre_sozinho_tambem_serve_e_o_aviso_de_penalidade_pede_a_saude(avisos, ia):
@@ -521,7 +564,8 @@ def test_resposta_que_nao_aparece_tenta_3_vezes_conferindo_antes_e_depois_desist
         assert robo.ler_estado()["respostas_topo"] == "velho"       # o topo só anda com tudo resolvido
     assert robo.responder_comentarios(app, momento("2026-10-24 12:00")) == "respostas: 1 desistiu"
     assert any("fica para você responder à mão" in a for a in avisos)
-    assert robo.ler_estado()["respostas_topo"] == it.marca(NOTIFICACAO)
+    assert robo.ler_estado()["respostas_topo"] == it.chave_da_linha(NOTIFICACAO, "Hoje 10:15",
+                                                                    momento("2026-10-24 12:00"))
 
 
 def test_responder_que_nao_abre_o_campo_da_resposta_para_sem_escrever(avisos, ia):
