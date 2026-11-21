@@ -88,12 +88,23 @@ def test_clone_que_falha_por_rede_volta_para_a_fila(bm, espiao, monkeypatch):
     item = item_da_fila(bm, "D")
     assert not item["processado"] and item["falhas_de_rede"] == 1 and item["horario_disparo"] > vencido
     assert os.path.exists("temp/d.mp4")
-    # Na terceira falha de rede, fica de lado como as outras falhas.
-    for _ in range(2):
+
+    def de_novo():
         dados = bm.ler_fila_clonagem()
         dados["fila"][0]["horario_disparo"] = vencido
         bm.salvar_fila_clonagem(dados)
         rodar(bm.processar_fila_espiao())
+
+    # 20/11, de madrugada: a rede até o Telegram ficou fora mais de meia hora, e 2 clones se
+    # perderam na 3ª falha. O clone espera a rede por até 1 h, de 10 em 10 min.
+    for _ in range(2):
+        de_novo()
+    item = item_da_fila(bm, "D")
+    assert not item["processado"] and item["falhas_de_rede"] == 3
+    assert (bm.MAX_FALHAS_DE_REDE_DO_CLONE - 1) * bm.ESPERA_DA_REDE_DO_CLONE_MIN >= 60
+    # Na última falha de rede, fica de lado como as outras falhas.
+    for _ in range(bm.MAX_FALHAS_DE_REDE_DO_CLONE - 3):
+        de_novo()
     assert item_da_fila(bm, "D")["processado"] is True
 
 

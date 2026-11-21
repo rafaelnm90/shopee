@@ -15377,9 +15377,10 @@ def ler_fila_clonagem():
 def salvar_fila_clonagem(dados):
     db.salvar_config("fila_clonagem", dados)
 
-# O clone que não sai por falha de rede volta para a fila; na terceira, fica de lado como as
-# outras falhas.
-MAX_FALHAS_DE_REDE_DO_CLONE = 3
+# O clone que não sai por falha de rede volta para a fila de 10 em 10 min, por até 1 h: a rede
+# do servidor até o Telegram às vezes fica fora mais de meia hora de madrugada. Na 7ª falha,
+# fica de lado como as outras falhas.
+MAX_FALHAS_DE_REDE_DO_CLONE = 7
 ESPERA_DA_REDE_DO_CLONE_MIN = 10
 
 
