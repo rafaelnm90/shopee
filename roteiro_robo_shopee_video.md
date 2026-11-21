@@ -99,6 +99,23 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   criador fica no "video caption user" e a legenda no "video caption …". Em 06/11/2026
   (19:31), com uma live tocando no Para você, a leitura da tela veio só com as barras do
   Android (nada do app), com a aba Para você na tela: o robô lê de novo (`_reler_sem_o_app`).
+- **Aba Lives (mapeada no Motorola em 21/11/2026, P266):** a live toca no próprio feed, uma por
+  vez (as views vêm do pacote `com.shopee.br.dfpluginshopee7`; o id sem o pacote é o mesmo).
+  Quem apresenta em `tv_anchor_name` (o nome) e `tv_audience_viewer_num`, com o `btn_follow`
+  (Seguir) ao lado; à esquerda, o cartão do produto com o **Compre Agora**
+  (`tv_show_product_buy_new`, proibido); as mensagens de quem assiste em `tv_message`
+  ("nome: texto"), a fixada em `rtv_pin` e o aviso "… acabou de comprar" com o **Ver**
+  (`highlight_btn_view`, nunca tocado). Embaixo: a sacolinha com o número de produtos
+  (`tv_product_num`, nunca tocada), o **Diga alguma coisa...** (`tv_send_message`), o mais
+  (`iv_more`), o compartilhar (`iv_share`) e o coração (`iv_like`). O toque no Diga alguma
+  coisa abre uma janela com o campo `et_input_message` (com o cursor) e o enviar
+  `confrim_btn` (assim mesmo), com o teclado; com a janela aberta, a leitura da tela traz só
+  ela. O compartilhar abre a folha "Compartilhe com amigos e família!" com o **Copiar link**
+  (e WhatsApp, Messenger, Twitter, Facebook, Feed, Copiar, SMS e Email). O rolar do meio da
+  tela cai na lista das mensagens e às vezes só rola as mensagens, deixando a mesma live: a
+  próxima live vem com o arrasto pelo meio do vídeo, acima delas (`ps.proxima_live`). Ainda
+  não visto: a tela logo depois do enviar (se a janela fecha sozinha) e a mensagem do robô
+  entre as da live.
 - **Rascunhos:** tabela `shopee_video_rascunhos` (estados preparando → rascunho →
   aprovado → postado, ou recusado → apagado; pulado quando o problema é do vídeo). O
   vídeo e o print ficam em `~/shopee_video/rascunhos` (ID.mp4 e ID.png). Na galeria do

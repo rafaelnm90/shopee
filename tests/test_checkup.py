@@ -1100,7 +1100,7 @@ def test_comentario_no_proprio_video_no_radar():
              seguidores={"lido_hoje": True, "dia": None, "semana": None})
     texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
     assert "1 post(s) sem o comentário depois de 3 tentativas" in texto
-    assert "0 de 1 post antigo comentado hoje" in texto
+    assert "0 de 1 post(s) antigo(s) comentado(s) hoje" in texto
 
 
 def test_leituras_das_notificacoes_contam_as_vezes_do_dia():
@@ -1434,3 +1434,37 @@ def test_celular_do_robo_fora_por_horas_vira_ponto_de_atencao():
     # Nunca pareado: nada.
     db.salvar_config(celular_robo.CHAVE, {})
     assert checkup.celular_fora(AGORA) is None
+
+
+def test_comentarios_pela_faixa_do_painel_no_checkup():
+    # Escolha do Rafael (P266): o número do dia de cada tipo sai da faixa do painel. Pela faixa, o feed conta só os
+    # comentários, e as curtidas sem comentário ficam no máximo no número do dia; as lives contam como o feed.
+    import registro_processos
+    import robo_shopee_video as robo
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, robo.interacoes.CHAVE_DOS_COMENTARIOS: {
+        "lives": [1, 1], "antigos": [2, 2], "feed": [2, 2]}})
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    for hora, resultado, origem in (("09:00", "comentado", "v1"), ("10:00", "só curtido", "v2"),
+                                    ("11:00", "só curtido", "v3"), ("12:00", "só curtido", "v4")):
+        registro_processos.registrar("shopee_video", "feed: comentar", resultado, ok=True, origem=origem,
+                                     agora=em(hora))
+    for hora, origem in (("13:00", "l1"), ("15:00", "l2")):
+        registro_processos.registrar("shopee_video", "live: comentar", "comentado", ok=True, origem=origem,
+                                     agora=em(hora))
+    r = checkup.interacoes_da_shopee_video(AGORA)
+    assert (r["lives_do_dia"], r["antigos_do_dia"], r["feed_do_dia"], r["feed_pela_faixa"]) == (1, 2, 2, True)
+    assert r["lives_hoje"] == 2 and r["lives_nao_confirmadas"] == 0
+    robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
+    r.update(respostas={}, duplicadas=0, rodou_hoje=True, leituras_hoje=1, leituras_esperadas=1,
+             seguidores={"lido_hoje": True, "dia": None, "semana": None}, antigo_possivel=False)
+    pontos = checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r)
+    assert "Feed da Shopee Vídeo: 3 curtidas sem comentário hoje (o máximo é o número do dia, 2)" in pontos
+    assert "Lives da Shopee Vídeo: 2 mensagens hoje (o número do dia é 1)" in pontos
+    assert not any("comentários hoje (o número do dia" in p for p in pontos)    # 1 comentário de 2: sem meta cobrada
+    assert checkup.classificado("shopee_video", "live: comentar")
+    assert checkup.classificado("shopee_video", "comentários por dia")
+    assert checkup._tipo_da_atividade("live: olhada") == "feed" and checkup._tipo_da_atividade(acao="live") == "feed"

@@ -41,10 +41,14 @@ que pode (P161 1):
 6. responde os comentários novos dos vídeos do Rafael, 3 vezes por dia, das 8h às 22h, com pelo
    menos 3 h entre uma leitura e outra (P70 e P161 1; Notificações → Lives, Vídeos e ...; o texto
    é da IA e cada resposta é conferida embaixo do comentário);
-7. comenta num post antigo dele, 1 vez por dia, das 8h às 22h (P148 2);
-8. curte um vídeo de outro criador no feed Live e Vídeo → Para você e, quando a IA tem algo
-   específico a dizer, comenta nele: até 5 por dia, um por rodada, espalhados pelo Horário do
-   Robô; o que falha tenta de novo na rodada seguinte (P151 1 e P152; interacoes_shopee_video.py).
+7. comenta num post antigo dele, 1 vez por dia (ou o número do dia da faixa do painel,
+   espalhado), das 8h às 22h (P148 2 e P266);
+8. manda uma mensagem numa live de outro criador (Live e Vídeo → Lives), pela faixa do
+   painel, espalhadas pelo Horário do Robô (P266; sem a faixa, as lives ficam de fora);
+9. curte um vídeo de outro criador no feed Live e Vídeo → Para você e, quando a IA tem algo
+   específico a dizer, comenta nele: até 5 por dia (ou, pela faixa do painel, o número do dia de
+   comentários), um por rodada, espalhados pelo Horário do Robô; o que falha tenta de novo na
+   rodada seguinte (P151 1, P152 e P266; interacoes_shopee_video.py).
 Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celular aberta no
 privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular desconectado:
 tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
@@ -1304,6 +1308,7 @@ NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apag
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
                    "responder": "Resposta a comentário", "feed": "Feed (Para você)",
                    "comentar_post": "Comentário no post", "post_antigo": "Comentário em post antigo",
+                   "live": "Mensagem em live",
                    "descurtir": "Limpeza dos favoritos (4h)", "video_ia": "Vídeo de IA do dia (Flow)"}
 # Como o resultado aparece para o Rafael no resumo das 22h e no Histórico (no banco fica o
 # resultado de sempre, que o checkup conta). Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
@@ -1646,7 +1651,8 @@ def o_que_fazer(config, agora=None):
     ("saude", None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
     ("video_ia", None) (o vídeo de IA do dia no Google Flow, P232 1: video_de_ia_pendente),
     ("rascunho", None), ("responder", None) (os comentários dos vídeos, 3 vezes por dia,
-    respostas_pendentes), ("feed", None) (um vídeo do feed, espalhados pelo dia, P152),
+    respostas_pendentes), ("live", None) (a mensagem numa live, pela faixa do painel, P266), ("feed", None)
+    (um vídeo do feed, espalhados pelo dia, P152),
     ("comentar_post", id) (o comentário de depois do post que volta, ou o link do post que não
     saiu e é buscado de novo, link_do_post_pendente), ("post_antigo", id) (o
     comentário do dia num post antigo) ou None. Sem hora marcada: cada uma sai na 1ª rodada em que
@@ -1712,6 +1718,9 @@ def o_que_fazer(config, agora=None):
     antigo = post_antigo_pendente(agora)
     if antigo:
         return "post_antigo", antigo["id"]
+    # A mensagem do dia numa live de outro criador (P266), espalhadas pelo Horário do Robô como o feed.
+    if live_pendente(agora):
+        return "live", None
     if feed_pendente(agora):
         return "feed", None
     return None
@@ -8445,39 +8454,53 @@ def contar_leitura(agora=None):
                                  ok=None, agora=agora)
 
 
+def _dia(agora=None):
+    return agora_br(agora).strftime("%Y-%m-%d")
+
+
+def comentarios_do_dia(tipo, agora=None, config=None):
+    """Quantos comentários do tipo (interacoes.LIVES, ANTIGOS ou FEED) o robô faz hoje (P266)."""
+    return interacoes.comentarios_do_dia(config or ler_config(), tipo, _dia(agora))
+
+
 def videos_do_feed_que_faltam(agora=None):
     """
-    Quantos dos vídeos do feed de hoje (o limite, VIDEOS_NO_FEED_POR_DIA) ainda faltam: o
-    comentado e o só curtido contam (P151 1).
+    Quantos dos vídeos do feed de hoje ainda faltam: pela faixa do painel, os comentários do número do dia (P266);
+    sem ela, até VIDEOS_NO_FEED_POR_DIA vídeos, o comentado e o só curtido contando (P151 1).
     """
-    inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
-    return max(0, interacoes.VIDEOS_NO_FEED_POR_DIA
-               - interacoes.quantos_desde("video_feed", interacoes.FEITOS_NO_FEED, inicio))
+    config = ler_config()
+    return max(0, comentarios_do_dia(interacoes.FEED, agora, config) - interacoes.feitos_no_feed_hoje(config, agora))
 
 
 def feed_pendente(agora=None):
     """
-    Falta algum vídeo do feed hoje (até VIDEOS_NO_FEED_POR_DIA, sem meta), e o último que deu
-    certo foi há intervalo_do_feed ou mais? Um por rodada, em qualquer hora do robô. O que falha
-    não conta nem mexe no feed_em: a rodada seguinte tenta de novo, até dar certo. Escolhas do Rafael (P151 1 e P152): DECISOES.md, Shopee Vídeo.
+    Falta algum vídeo do feed hoje (videos_do_feed_que_faltam), e o último que contou foi há intervalo_do_feed ou
+    mais? Um por rodada, em qualquer hora do robô. O que falha não conta nem mexe no feed_em: a rodada seguinte
+    tenta de novo, até dar certo. Escolhas do Rafael (P151 1, P152 e P266): DECISOES.md, Shopee Vídeo.
     """
     if not videos_do_feed_que_faltam(agora):
         return False
-    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config()))
+    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config(), agora))
 
 
-def intervalo_do_feed(config):
+def espaco_entre_comentarios(horas, quantos):
     """
-    O espaço entre dois vídeos do feed que deram certo: as horas do Horário do Robô divididas
-    pelos do dia, no passo das rodadas, menos a FOLGA_DO_FEED. No Dia Todo, com 5 por dia, 4h40;
-    das 8h às 22h, 2h40. Escolha do Rafael (P152): DECISOES.md. A hora das 4h conta: acabada a
-    limpeza, ela fica livre (P161 1).
+    O espaço entre dois comentários do dia que deram certo: as horas da parte do dia em que eles saem divididas
+    pelos do dia, no passo das rodadas, menos a FOLGA_DO_FEED. Escolha do Rafael (P152): DECISOES.md.
     """
-    inicio, fim = int(config["robo_inicio"]), int(config["robo_fim"])
-    horas = max(1, fim - inicio)
-    espaco = timedelta(hours=horas) / interacoes.VIDEOS_NO_FEED_POR_DIA
+    espaco = timedelta(hours=max(1, horas)) / max(1, quantos)
     passos = max(1, int(espaco / INTERVALO_DAS_RODADAS))
     return passos * INTERVALO_DAS_RODADAS - FOLGA_DO_FEED
+
+
+def intervalo_do_feed(config, agora=None):
+    """
+    O espaço entre dois vídeos do feed que contaram: o Horário do Robô dividido pelos do dia (espaco_entre_comentarios).
+    No Dia Todo, com 5 por dia, 4h40; das 8h às 22h, 2h40. A hora das 4h conta: acabada a limpeza, ela fica livre
+    (P161 1).
+    """
+    horas = int(config["robo_fim"]) - int(config["robo_inicio"])
+    return espaco_entre_comentarios(horas, comentarios_do_dia(interacoes.FEED, agora, config))
 
 
 def _ir_as_notificacoes(d):
@@ -9627,10 +9650,18 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
         interacoes.guardar(marca, "video_feed", "pulado", agora)
         registro_processos.registrar(REGISTRO, "feed: comentar", "pulado pela IA", ok=None, origem=marca)
         return "feed: a IA pulou o vídeo"
+    if texto == interacoes.CURTIR and curtidas_sem_comentario_acabaram(agora):
+        # Pela faixa do painel, a curtida sem comentário não conta nos do dia, e o robô procura outro vídeo para o
+        # comentário: elas ficam no máximo no número do dia, e a de depois disso não sai (P266).
+        interacoes.guardar(marca, "video_feed", "pulado", agora)
+        registro_processos.registrar(REGISTRO, "feed: comentar", "pulado sem curtir", MOTIVO_DAS_CURTIDAS_DO_DIA,
+                                     ok=None, origem=marca)
+        return "feed: vídeo sem nada para comentar, deixado sem curtir"
     _curtir_no_feed(d, video)
     if texto == interacoes.CURTIR:
-        # Sem nada específico para dizer, fica só a curtida: o vídeo conta nos do dia e não
-        # volta. Escolha do Rafael (P151 1): DECISOES.md, Shopee Vídeo.
+        # Sem nada específico para dizer, fica só a curtida, e o vídeo não volta. Sem a faixa do painel, ele conta
+        # nos do dia (P151 1); com ela, não, e a rodada seguinte procura outro para o comentário (P266).
+        # Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
         _feito_no_feed(marca, interacoes.SO_CURTIDO, agora)
         registro_processos.registrar(REGISTRO, "feed: comentar", interacoes.SO_CURTIDO,
                                      "a IA não viu nada específico para comentar", ok=True, origem=marca)
@@ -9639,8 +9670,8 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
     try:
         apareceu = _comentar_no_feed(d, video, texto)
     except Parada as e:
-        # A curtida já saiu: o vídeo conta nos do dia, como só curtido, para nunca passarem de
-        # VIDEOS_NO_FEED_POR_DIA curtidas por dia. A parada segue para o caso e o checkup.
+        # A curtida já saiu: o vídeo fica como só curtido (sem a faixa do painel, conta nos do dia, para nunca
+        # passarem de VIDEOS_NO_FEED_POR_DIA curtidas por dia). A parada segue para o caso e o checkup.
         _feito_no_feed(marca, interacoes.SO_CURTIDO, agora)
         registro_processos.registrar(REGISTRO, "feed: comentar", interacoes.SO_CURTIDO,
                                      f"o comentário parou: {e.motivo}", ok=False, origem=marca)
@@ -9672,12 +9703,162 @@ def _avisar_o_comentario_do_feed(d, video, texto, resultado, agora=None):
 
 def _feito_no_feed(marca, estado, agora=None):
     """
-    O vídeo do feed que conta nos do dia (FEITOS_NO_FEED): a marca, para não voltar, e o feed_em,
-    de onde se conta o espaço até o próximo. O que falha antes da curtida não passa por aqui, e a
-    rodada seguinte tenta de novo (P152).
+    O vídeo do feed feito: a marca, para não voltar, e, quando ele conta nos do dia (interacoes.que_contam_no_feed),
+    o feed_em, de onde se conta o espaço até o próximo. O que falha antes da curtida não passa por aqui, e a rodada
+    seguinte tenta de novo (P152); pela faixa do painel, o só curtido também não mexe no feed_em (P266).
     """
     interacoes.guardar(marca, "video_feed", estado, agora)
-    gravar_estado(feed_em=_momento(agora))
+    if estado in interacoes.que_contam_no_feed(ler_config()):
+        gravar_estado(feed_em=_momento(agora))
+
+
+MOTIVO_DAS_CURTIDAS_DO_DIA = "as curtidas sem comentário de hoje já chegaram ao número do dia"
+
+
+def curtidas_sem_comentario_acabaram(agora=None):
+    """
+    Pela faixa do painel (P266), as curtidas sem comentário de hoje já chegaram ao número de comentários do dia? Sem
+    a faixa, nunca: o só curtido conta nos do dia, como antes (P151 1).
+    """
+    config = ler_config()
+    if not interacoes.feed_pela_faixa(config):
+        return False
+    return interacoes.so_curtidos_hoje(agora) >= comentarios_do_dia(interacoes.FEED, agora, config)
+
+
+# --- As lives (P266) ---
+
+# A faixa de comentários por dia nas lives de outros criadores (Robô Automático 🤖 → Comentários 💬): cada dia sorteia
+# um número na faixa, e o robô comenta nesse tanto de lives, uma por rodada, espalhadas pelo Horário do Robô como o
+# feed (P152); o que falha tenta de novo na rodada seguinte. Sem a faixa no painel, as lives continuam puladas. Na
+# live, o robô só toca, pelo id, no Diga alguma coisa, no enviar e no compartilhar, e no Copiar link: nunca nos de
+# comprar nem nos de presente. Escolha do Rafael (21/11/2026, P266): DECISOES.md, Shopee Vídeo.
+PROCESSO_DA_LIVE = "live: comentar"
+PROCESSO_DA_LIVE_OLHADA = "live: olhada"
+# Quantas lives o robô passa numa rodada, no máximo, procurando uma para comentar.
+LIVES_OLHADAS = 4
+# A live leva uns segundos para mostrar quem apresenta e as mensagens (Motorola, 21/11/2026).
+ESPERA_DA_LIVE = 10
+MOTIVO_DA_LIVE_SEM_A_MENSAGEM = "a mensagem não apareceu na live"
+
+
+def lives_que_faltam(agora=None):
+    """Quantas lives ainda ganham a mensagem hoje (P266): as do dia menos as comentadas."""
+    return max(0, comentarios_do_dia(interacoes.LIVES, agora) - interacoes.lives_hoje(agora))
+
+
+def live_pendente(agora=None):
+    """
+    Falta alguma live hoje (lives_que_faltam), e a última comentada foi há o espaço do dia ou mais (o Horário do
+    Robô dividido pelas do dia, como o feed, P152)? O que falha não mexe no live_em: a rodada seguinte tenta de novo.
+    """
+    if not lives_que_faltam(agora):
+        return False
+    config = ler_config()
+    espaco = espaco_entre_comentarios(int(config["robo_fim"]) - int(config["robo_inicio"]),
+                                      comentarios_do_dia(interacoes.LIVES, agora, config))
+    return (ler_estado().get("live_em") or "") <= _momento(agora_br(agora) - espaco)
+
+
+def _live_propria(live):
+    """A live é do próprio Rafael? Pelo nome do perfil (o das respostas)."""
+    conta = ler_estado().get("conta_marca")
+    return bool(conta) and interacoes.marca(live["anfitriao"]) == conta
+
+
+def comentar_numa_live(d, agora=None):
+    """
+    Live e Vídeo → Lives: na live de outro criador ainda sem a mensagem do robô hoje, a IA escreve uma mensagem sobre
+    o que aparece na tela, e o robô a manda pelo Diga alguma coisa e confere que ela apareceu entre as mensagens.
+    Sem nada específico para dizer (a IA pula), passa para a live seguinte, até LIVES_OLHADAS. Uma live por rodada
+    (live_pendente). Cada live olhada fica no registro com o que o robô viu nela (um texto fixo).
+    """
+    ir_ao_inicio(d)
+    tocar(d, ABA_DO_FEED, 8)
+    tocar(d, interacoes.ABA_DAS_LIVES, ESPERA_DA_LIVE)
+    anteriores = ler_estado().get("live_textos") or []
+    vista = None
+    try:
+        for _ in range(LIVES_OLHADAS):
+            live, visto = interacoes.ler_a_live(tela(d))
+            if live:
+                marca = interacoes.marca_da_live(live["anfitriao"], agora)
+                antes = interacoes.resultado_de(marca, interacoes.TIPO_DA_LIVE)
+                if marca == vista:
+                    # O registro mostra se o arrasto não troca de live (o checkup conta).
+                    visto = "a mesma live depois do arrasto"
+                elif antes:
+                    visto = "já comentada hoje" if antes in interacoes.COMENTARIOS_QUE_CONTAM else "pulada antes hoje"
+                elif _live_propria(live):
+                    visto = "live do próprio perfil"
+                else:
+                    imagem = _tela_do_video(d)
+                    if not imagem:
+                        raise Parada("o print da live para a IA falhou")
+                    texto = asyncio.run(interacoes.gerar_mensagem_da_live(imagem, anteriores))
+                    if texto is None:
+                        raise Parada("a IA não escreveu a mensagem da live")
+                    if texto:
+                        registro_processos.registrar(REGISTRO, PROCESSO_DA_LIVE_OLHADA, "escolhida", ok=None)
+                        return _mandar_na_live(d, live, marca, texto, anteriores, agora)
+                    interacoes.guardar(marca, interacoes.TIPO_DA_LIVE, "pulado", agora)
+                    visto = "pulada pela IA"
+                vista = marca
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_LIVE_OLHADA, visto, ok=None)
+            ps.proxima_live(d)
+            pausa(ESPERA_DA_LIVE)
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_LIVE, "nenhuma live para comentar", ok=None)
+        return "live: nenhuma live para comentar"
+    except Parada as e:
+        # O caso guarda a tela de agora (o campo que não abriu, por exemplo), antes de sair.
+        _guardar_caso(d, "live", "parou", e.motivo, agora=agora)
+        e.caso_guardado = True
+        raise
+    finally:
+        _sair_sem_salvar(d)
+
+
+def _mandar_na_live(d, live, marca, texto, anteriores, agora=None):
+    """
+    Toca no Diga alguma coisa, escreve a mensagem no campo, confere o que ficou e toca no enviar; fechado o campo,
+    procura a mensagem entre as da live. A que não aparece fica como enviada sem confirmar (pode ter saído; a live
+    não ganha outra hoje) e o caso guarda a tela. A mensagem vai ao privado do Rafael com o link da live.
+    """
+    tocar(d, f"@{interacoes.ID_DO_DIGA_ALGUMA_COISA}", 3)
+    if not tem(tela(d), f"@{interacoes.ID_DO_CAMPO_DA_LIVE}"):
+        raise Parada("o campo de escrever da live não abriu")
+    ps.escrever(d, texto)
+    pausa(2)
+    campo = d(focused=True)
+    escrito = campo.get_text() if campo.exists else ""
+    if ps._normal(escrito) != ps._normal(texto):
+        raise Parada("o texto não ficou no campo da live")
+    tocar(d, f"@{interacoes.ID_DO_ENVIAR_DA_LIVE}", 3)
+    _fechar_teclado(d)
+    if tem(tela(d), f"@{interacoes.ID_DO_CAMPO_DA_LIVE}"):
+        # O campo da live que fica aberto sem o teclado fecha com mais um voltar.
+        d.press("back")
+        pausa(2)
+    apareceu = interacoes.mensagem_na_live(tela(d), texto)
+    resultado = "comentado" if apareceu else "não confirmado"
+    interacoes.guardar(marca, interacoes.TIPO_DA_LIVE, resultado, agora)
+    gravar_estado(live_em=_momento(agora), live_textos=(anteriores + [texto])[-10:])
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_LIVE, resultado,
+                                 "" if apareceu else "enviada sem aparecer nas mensagens", ok=apareceu, origem=marca)
+    if apareceu:
+        registrar_tentativa("live", "comentado", agora=agora)
+    else:
+        registrar_tentativa("live", "parou", MOTIVO_DA_LIVE_SEM_A_MENSAGEM, agora=agora)
+        _guardar_caso(d, "live", "parou", MOTIVO_DA_LIVE_SEM_A_MENSAGEM, agora=agora)
+    onde = f"na live de {live['anfitriao']} (outro criador), em Live e Vídeo → Lives"
+    aviso = _aviso_do_comentario(resultado, texto, ("", ""), onde)
+    try:
+        link, porque = link_do_video_aberto(d, "live", agora, na_live=True)
+    except Verificacao:
+        avisar(aviso + linha_do_link("", "verificação da Shopee na tela"))
+        raise
+    avisar(aviso + linha_do_link(link, porque))
+    return "live: mensagem enviada" + ("" if apareceu else " sem aparecer nas mensagens")
 
 
 # --- O comentário no próprio vídeo (P148 2) ---
@@ -9987,11 +10168,12 @@ def _dia_do_post(rascunho):
 PROCESSO_DO_LINK_COMENTADO = "link do vídeo comentado"
 
 
-def link_do_video_aberto(d, onde, agora=None):
+def link_do_video_aberto(d, onde, agora=None, na_live=False):
     """
-    O link do vídeo aberto no player, depois do comentário (onde: "feed" ou "resposta", para o registro): fecha o
-    teclado e o painel de comentários, toca no compartilhar e no Copiar link e lê o link copiado. (link, "") ou ("", o
-    porquê, num texto fixo). Nada aqui para a rodada (o comentário já saiu); a Verificação segue adiante.
+    O link do vídeo aberto no player, depois do comentário (onde: "feed", "resposta" ou "live", para o registro):
+    fecha o teclado e o painel de comentários, toca no compartilhar e no Copiar link e lê o link copiado. Na live
+    (na_live), o compartilhar é o da barra de baixo dela (iv_share, P266). (link, "") ou ("", o porquê, num texto
+    fixo). Nada aqui para a rodada (o comentário já saiu); a Verificação segue adiante.
     """
     def sem(porque):
         registro_processos.registrar(REGISTRO, PROCESSO_DO_LINK_COMENTADO, "sem o link", f"{onde}: {porque}",
@@ -10000,15 +10182,16 @@ def link_do_video_aberto(d, onde, agora=None):
 
     try:
         _fechar_teclado(d)
-        for _ in range(2):
+        for _ in range(0 if na_live else 2):
             if not interacoes.painel_aberto(tela(d)):
                 break
             d.press("back")
             pausa(2)
         xml = tela(d)
-        if interacoes.painel_aberto(xml):
+        if not na_live and interacoes.painel_aberto(xml):
             return sem("o painel de comentários não fechou")
-        compartilhar = interacoes.compartilhar_do_video(xml)
+        compartilhar = (ps.achar(xml, f"@{interacoes.ID_DO_COMPARTILHAR_DA_LIVE}") if na_live
+                        else interacoes.compartilhar_do_video(xml))
         if not compartilhar:
             return sem("sem o compartilhar no vídeo")
         if ps.proibido_no_ponto(xml, *compartilhar):
@@ -10161,19 +10344,26 @@ def _tentativas_do_antigo_hoje(momento):
 
 def post_antigo_pendente(agora=None):
     """
-    O post antigo que ganha o comentário do dia agora (P148 2), ou None: durante o dia (P161 1),
-    nenhum ainda hoje, menos de TENTATIVAS_DO_PROPRIO tentativas hoje, a última há
-    INTERVALO_DO_PROPRIO ou mais, e um post que pode ganhá-lo (interacoes.escolher_post_antigo).
+    O post antigo que ganha o comentário agora (P148 2), ou None: durante o dia (P161 1), menos comentários hoje que
+    os do dia (pela faixa do painel, P266; sem ela, 1), menos de TENTATIVAS_DO_PROPRIO falhas hoje, a última
+    tentativa há INTERVALO_DO_PROPRIO ou mais, o último comentário há o espaço do dia ou mais (as horas de
+    DURANTE_O_DIA divididas pelos do dia, como o feed, P152) e um post que pode ganhá-lo
+    (interacoes.escolher_post_antigo).
     """
     momento = agora_br(agora)
     if not durante_o_dia(momento):
         return None
-    if interacoes.antigos_hoje(momento) >= interacoes.POSTS_ANTIGOS_POR_DIA:
+    do_dia = comentarios_do_dia(interacoes.ANTIGOS, momento)
+    feitos = interacoes.antigos_hoje(momento)
+    if feitos >= do_dia:
         return None
-    if _tentativas_do_antigo_hoje(momento) >= interacoes.TENTATIVAS_DO_PROPRIO:
+    if _tentativas_do_antigo_hoje(momento) - feitos >= interacoes.TENTATIVAS_DO_PROPRIO:
         return None
     estado = ler_estado()
     if (estado.get("antigo_em") or "") > _momento(momento - interacoes.INTERVALO_DO_PROPRIO):
+        return None
+    espaco = espaco_entre_comentarios(DURANTE_O_DIA[1] - DURANTE_O_DIA[0], do_dia)
+    if feitos and (estado.get("antigo_feito_em") or "") > _momento(momento - espaco):
         return None
     return interacoes.escolher_post_antigo(listar("postado"), momento)
 
@@ -10196,6 +10386,9 @@ def comentar_post_antigo(d, rascunho, agora=None):
         e.caso_guardado = True
         raise
     interacoes.guardar(marca, interacoes.TIPO_DO_ANTIGO, resultado, agora)
+    if resultado in interacoes.COMENTADOS_NO_PROPRIO:
+        # De onde se conta o espaço até o próximo comentário do dia (post_antigo_pendente, P266).
+        gravar_estado(antigo_feito_em=_momento(agora))
     registro_processos.registrar(REGISTRO, PROCESSO_DO_ANTIGO, resultado, ok=resultado == "comentado", origem=marca,
                                  agora=agora)
     registrar_tentativa("post_antigo", resultado, agora=agora)
@@ -10212,8 +10405,8 @@ def comentar_post_antigo(d, rascunho, agora=None):
 # próxima folga do celular, sem esperar a vez dela, como o Preparar 1 Agora: mesmo pausado, fora do
 # horário ou com a conta suspensa (que não fecha nenhuma delas). Só o que ainda não saiu hoje até o
 # limite do dia: a limpeza e a Saúde do Vídeo (1 vez), as leituras das respostas
-# (LEITURAS_DAS_RESPOSTAS), o comentário no post antigo (POSTS_ANTIGOS_POR_DIA) e o feed
-# (VIDEOS_NO_FEED_POR_DIA). O pedido fica no estado (fazer_agora) até a rodada que o faz; o de
+# (LEITURAS_DAS_RESPOSTAS) e os comentários do dia no post antigo, na live e no feed (pela faixa do
+# painel, P266). O pedido fica no estado (fazer_agora) até a rodada que o faz; o de
 # outro dia sai sem fazer, e com o celular desconectado os pedidos saem com o aviso. Escolha do
 # Rafael (06/11, P162 1): DECISOES.md, Shopee Vídeo.
 ATIVIDADES_DO_FAZER_AGORA = {
@@ -10221,6 +10414,7 @@ ATIVIDADES_DO_FAZER_AGORA = {
     "saude": ("Saúde do Vídeo", "saude"),
     "respostas": ("Responder Comentários", "responder"),
     "post_antigo": ("Comentário no Post Antigo", "post_antigo"),
+    "live": ("Mensagem em Live", "live"),
     "feed": ("Feed", "feed"),
 }
 PROCESSO_DO_FAZER_AGORA = "fazer agora"
@@ -10236,9 +10430,12 @@ def feitas_hoje(atividade, agora=None):
     if atividade == "respostas":
         return min(leituras_de_hoje(momento), LEITURAS_DAS_RESPOSTAS), LEITURAS_DAS_RESPOSTAS
     if atividade == "post_antigo":
-        limite = interacoes.POSTS_ANTIGOS_POR_DIA
+        limite = comentarios_do_dia(interacoes.ANTIGOS, momento)
         return min(interacoes.antigos_hoje(momento), limite), limite
-    limite = interacoes.VIDEOS_NO_FEED_POR_DIA
+    if atividade == "live":
+        limite = comentarios_do_dia(interacoes.LIVES, momento)
+        return limite - lives_que_faltam(momento), limite
+    limite = comentarios_do_dia(interacoes.FEED, momento)
     return limite - videos_do_feed_que_faltam(momento), limite
 
 
@@ -10607,6 +10804,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None, de
             return f"{resultado}; {fixado}" if fixado else resultado
         if acao == "feed":
             return interagir_no_feed(d, agora)
+        if acao == "live":
+            return comentar_numa_live(d, agora)
         if acao in ("comentar_post", "post_antigo"):
             rascunho = pegar(ident)
             if acao == "comentar_post" and rascunho and not rascunho["link_post"] and rascunho["busca_do_link"]:

@@ -58,7 +58,8 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
         "Preparar 1 Agora ⚡",
         "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
         "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Fazer Agora ⏩", "Produtos a Mais 🛍️",
-        "Testar Caminho 🧭", "Celular do Robô 📱", "Vídeo de IA ✨", "Aprovação 👍", "Voltar à Shopee Vídeo 🔙"]
+        "Testar Caminho 🧭", "Celular do Robô 📱", "Vídeo de IA ✨", "Aprovação 👍", "Comentários 💬",
+        "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
     for trecho in ("Um cobre o outro", "Depuração por Wi-Fi", "Retomar Postagem ▶️", "Passo a Passo 📖"):
@@ -2187,7 +2188,12 @@ def test_fazer_agora_mostra_o_que_saiu_hoje_e_pede_o_que_falta(bm, Msg, Est, mon
     assert "<b>Responder Comentários</b>: ⏳ 1 de 3 hoje" in msg.saidas[-1]
     assert _textos(sv.teclado_fazer_agora()) == [
         "Limpeza dos Favoritos ⏳", "Saúde do Vídeo ✅", "Responder Comentários 1/3 ⏳", "Comentário no Post Antigo ⏳",
-        "Feed 0/5 ⏳", "Voltar ao Robô 🔙"]
+        "Mensagem em Live ⏸️", "Feed 0/5 ⏳", "Voltar ao Robô 🔙"]
+    # A live, sem a faixa do painel, está desligada (P266): a tecla diz, e o toque explica onde ligar.
+    assert "<b>Mensagem em Live</b>: ⏸️ 0 por dia em Comentários 💬" in msg.saidas[-1]
+    msg = Msg("Mensagem em Live ⏸️")
+    rodar(sv.pedir_atividade_agora(msg, est))
+    assert "0 por dia em Robô Automático 🤖 → Comentários 💬" in msg.saidas[-1] and sv.robo.pedidos_de_agora() == []
     # A que já saiu: avisa e não pede.
     msg = Msg("Saúde do Vídeo ✅")
     rodar(sv.pedir_atividade_agora(msg, est))
@@ -2511,3 +2517,67 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
         sv.texto_video_ia(sv.ler_config())
     sv.robo.flow.recomecar_producao(hoje, estado="sem produto", origem=sv.robo.ORIGEM_EM_ALTA)
     assert "hoje: nenhum produto da lista da Shopee serviu" in sv.texto_video_ia(sv.ler_config())
+
+
+def test_comentarios_por_dia_um_botao_com_a_faixa_de_cada_tipo(bm, Msg, Est):
+    # Escolha do Rafael (21/11, P266): um botão em que ele diz a faixa de comentários por dia das lives, dos vídeos
+    # antigos dele e dos vídeos de outros criadores; o robô comenta esse tanto. Sem faixa, o de antes.
+    sv, est = _painel(bm), Est()
+    assert "Comentários 💬" in _textos(sv.teclado_robo(sv.ler_config()))
+    assert "💬 <b>Comentários 💬</b>" in sv.texto_robo(sv.ler_config())
+    msg = Msg("Comentários 💬")
+    rodar(sv.comentarios_handler(msg, est))
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.comentarios.state
+    tela = msg.saidas[-1]
+    assert "<b>Lives de outros criadores</b>: nenhuma, como antes (o robô pula as lives)" in tela
+    assert "<b>Seus vídeos antigos (dos últimos 30 dias)</b>: 1 por dia, como antes (hoje: 0 de 1)" in tela
+    assert "<b>Vídeos de outros criadores (Para você)</b>: como antes, até 5 vídeos por dia" in tela
+    assert _textos(sv.teclado_comentarios()) == ["Lives 🔴", "Meus Vídeos Antigos 📼", "Vídeos de Outros 👥",
+                                                 "Voltar ao Robô 🔙"]
+    # A faixa das lives: o toque no tipo pede a faixa, o texto que não serve pede de novo, e o Aprovar grava.
+    msg = Msg("Lives 🔴")
+    rodar(sv.pedir_comentarios(msg, est))
+    assert "Quantos comentários por dia em <b>Lives de outros criadores</b>?" in msg.saidas[-1]
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.aguardando_comentarios.state
+    msg = Msg("muitos")
+    rodar(sv.receber_comentarios(msg, est))
+    assert "⚠️ Mande a faixa" in msg.saidas[-1]
+    msg = Msg("1-3")
+    rodar(sv.receber_comentarios(msg, est))
+    assert "Definir <b>1 a 3</b> comentário(s) por dia em <b>Lives de outros criadores</b>?" in msg.saidas[-1]
+    msg = Msg("Aprovar ✅")
+    rodar(sv.salvar_comentarios(msg, est))
+    assert "✅ Lives de outros criadores: <b>1 a 3</b> por dia." in msg.saidas[0]
+    assert sv.ler_config()[sv.interacoes.CHAVE_DOS_COMENTARIOS] == {"lives": [1, 3]}
+    assert "<b>Lives de outros criadores</b>: 1 a 3 por dia (hoje: 0 de " in msg.saidas[-1]
+    # O 0 desliga; o feed pela faixa diz o número de hoje e os feitos.
+    for botao, texto in (("Meus Vídeos Antigos 📼", "0"), ("Vídeos de Outros 👥", "4")):
+        rodar(sv.pedir_comentarios(Msg(botao), est))
+        rodar(sv.receber_comentarios(Msg(texto), est))
+        rodar(sv.salvar_comentarios(Msg("Aprovar ✅"), est))
+    tela = sv.texto_comentarios()
+    assert "<b>Seus vídeos antigos (dos últimos 30 dias)</b>: ⏸️ desligado (0 por dia)" in tela
+    assert "<b>Vídeos de outros criadores (Para você)</b>: 4 por dia (hoje: 0 de 4)" in tela
+    assert sv.ler_config()[sv.interacoes.CHAVE_DOS_COMENTARIOS] == {"lives": [1, 3], "antigos": [0, 0],
+                                                                     "feed": [4, 4]}
+    # O registro diz só o tipo mudado, nunca o número.
+    linhas = sv.registro_processos.sequencia("shopee_video", sv.PROCESSO_DOS_COMENTARIOS, "2000-01-01 00:00:00")
+    assert [(resultado, detalhe) for _m, _p, resultado, detalhe, _o in linhas] == [
+        ("faixa mudada no painel", "lives"), ("faixa mudada no painel", "antigos"), ("faixa mudada no painel", "feed")]
+
+
+def test_faixa_de_comentarios_aceita_numero_faixa_e_zero_ate_o_maximo(bm):
+    sv = _painel(bm)
+    assert sv.interpretar_comentarios("3") == (3, 3) and sv.interpretar_comentarios(" 2 - 4 ") == (2, 4)
+    assert sv.interpretar_comentarios("0") == (0, 0) and sv.interpretar_comentarios("0-2") == (0, 2)
+    for texto in ("4-2", "21", "1-21", "dois", "", None):
+        assert sv.interpretar_comentarios(texto) is None
+
+
+def test_cancelar_na_faixa_de_comentarios_volta_a_tela_dos_comentarios(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    rodar(sv.pedir_comentarios(Msg("Lives 🔴"), est))
+    msg = Msg("Cancelar ❌")
+    rodar(sv.voltar_depois_de_cancelar(msg, est, "ShopeeVideoFluxo:aguardando_comentarios"))
+    assert "Comentários por dia" in msg.saidas[-1]
+    assert sv.interacoes.CHAVE_DOS_COMENTARIOS not in sv.ler_config()

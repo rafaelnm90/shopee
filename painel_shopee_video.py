@@ -53,6 +53,7 @@ import celular_robo
 import db
 import edicao_video
 import exemplos
+import interacoes_shopee_video as interacoes
 import registro_processos
 import robo_shopee_video as robo
 from fuso import fuso_horario
@@ -436,6 +437,9 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_porta = State()
     aguardando_filtro_video_ia = State()
     aguardando_confirmacao_aprovacao = State()
+    comentarios = State()
+    aguardando_comentarios = State()
+    aguardando_confirmacao_comentarios = State()
 
 
 # --- Configuração ---
@@ -740,6 +744,20 @@ BOTAO_DESLIGAR_APROVACAO = "Desligar Aprovação ⏸️"
 BOTAO_DESLIGAR_E_APROVAR = "Aprovar Também os que Esperam ✅"
 BOTAO_DESLIGAR_SO_NOVOS = "Só os Rascunhos Novos ⏭️"
 BOTAO_CONFIRMAR_DESLIGAR = "Confirmar: Desligar Aprovação ✅"
+# Quantos comentários por dia o robô faz em cada tipo (P266): a faixa de cada um, sorteada a cada dia (sem faixa, o de
+# antes, interacoes.FAIXA_DE_ANTES; o 0 desliga). Escolha do Rafael (21/11/2026): DECISOES.md, Shopee Vídeo.
+BOTAO_COMENTARIOS = "Comentários 💬"
+BOTOES_DOS_COMENTARIOS = {"Lives 🔴": interacoes.LIVES, "Meus Vídeos Antigos 📼": interacoes.ANTIGOS,
+                          "Vídeos de Outros 👥": interacoes.FEED}
+NOMES_DOS_COMENTARIOS = {interacoes.LIVES: "Lives de outros criadores",
+                         interacoes.ANTIGOS: "Seus vídeos antigos (dos últimos 30 dias)",
+                         interacoes.FEED: "Vídeos de outros criadores (Para você)"}
+# Os exemplos de quem nunca mandou a faixa do tipo: (faixa, fixo); exemplos.py mostra o de agora ou o último mandado.
+EXEMPLOS_DOS_COMENTARIOS = {interacoes.LIVES: ("1-2", "1"), interacoes.ANTIGOS: ("1-3", "2"),
+                            interacoes.FEED: ("3-5", "4")}
+MARCA_DO_DESLIGADO = "⏸️"
+# A faixa mudada no painel fica no registro só com o tipo (o checkup é público).
+PROCESSO_DOS_COMENTARIOS = "comentários por dia"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -800,6 +818,7 @@ def teclado_robo(config):
         [KeyboardButton(text=BOTAO_FAZER_AGORA), KeyboardButton(text=BOTAO_PRODUTOS_A_MAIS)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text=BOTAO_VIDEO_IA), KeyboardButton(text=BOTAO_APROVACAO)],
+        [KeyboardButton(text=BOTAO_COMENTARIOS)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
 
@@ -1021,8 +1040,8 @@ def texto_robo(config, agora=None, celular=None):
         f"de onde você escolher: {BOTAO_PREPARAR_ALEATORIO}, {BOTAO_PREPARAR_DO_GRUPO} ou {BOTAO_PREPARAR_DE_IA}; se o "
         "vídeo do grupo tiver um problema próprio, ele passa sozinho ao próximo, até 3.\n"
         f"⏩ <b>{BOTAO_FAZER_AGORA}</b>: manda o robô fazer na próxima folga do celular a limpeza, a Saúde do Vídeo, as "
-        "respostas, o post antigo ou o feed, sem esperar a vez deles; o que já saiu hoje até o limite do dia ele não "
-        "repete.\n"
+        "respostas, o post antigo, a live ou o feed, sem esperar a vez deles; o que já saiu hoje até o limite do dia "
+        "ele não repete.\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"✂️ <b>{BOTAO_EDICAO}</b>: o vídeo original com o Editor 2 (a foto do produto no começo, a miniatura no "
@@ -1030,14 +1049,16 @@ def texto_robo(config, agora=None, celular=None):
         f"o que vai por cima dos vídeos em {BOTAO_ITENS}.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta, sem hora marcada: "
-        "cada coisa sai assim que o celular fica livre. Nele também se espalham os vídeos de outros criadores que ele curte (até 5 por dia, "
-        "comentando nos que têm algo para dizer).\n"
+        "cada coisa sai assim que o celular fica livre. Nele também se espalham os comentários nos vídeos e nas lives "
+        "de outros criadores.\n"
         f"🛍️ <b>{BOTAO_PRODUTOS_A_MAIS}</b>: nos vídeos de link de produto, o mesmo item de outras lojas nos "
         "espaços livres (até 6 produtos); ligar ou desligar.\n"
         f"✨ <b>{BOTAO_VIDEO_IA}</b>: 1 vídeo por dia feito por IA no Google Flow, com um produto da fonte; ele vira "
         "um dos rascunhos do dia, para você aprovar; ligar ou desligar.\n"
         f"👍 <b>{BOTAO_APROVACAO}</b>: ligar ou desligar a sua aprovação dos rascunhos; desligada, o robô posta "
         "sozinho cada rascunho novo.\n"
+        f"💬 <b>{BOTAO_COMENTARIOS}</b>: quantos comentários por dia ele faz nas lives, nos seus vídeos antigos e nos "
+        "vídeos de outros criadores (uma faixa para cada, sorteada a cada dia).\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
@@ -1369,6 +1390,8 @@ ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_parea
 ESTADOS_DO_VIDEO_IA = ("aguardando_filtro_video_ia",)
 # Da confirmação de desligar a aprovação (pedido de 18/11), o Cancelar ❌ volta à tela dela, sem mudar nada.
 ESTADOS_DA_APROVACAO = ("aguardando_confirmacao_aprovacao",)
+# Da faixa de comentários de um tipo (P266), o Cancelar ❌ volta à tela do Comentários 💬, sem mudar nada.
+ESTADOS_DOS_COMENTARIOS = ("comentarios", "aguardando_comentarios", "aguardando_confirmacao_comentarios")
 
 
 async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, estado_anterior, dados=None):
@@ -1387,6 +1410,8 @@ async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, e
         await mostrar_video_ia(message, state)
     elif nome in ESTADOS_DA_APROVACAO:
         await mostrar_aprovacao(message, state)
+    elif nome in ESTADOS_DOS_COMENTARIOS:
+        await mostrar_comentarios(message, state)
     else:
         await mostrar_painel(message, state)
 
@@ -2397,6 +2422,8 @@ def rotulo_da_atividade(atividade, agora=None):
     """A tecla da atividade no Fazer Agora: o nome e se já saiu hoje (✅) ou não (⏳), com a conta quando é mais de 1."""
     nome = robo.ATIVIDADES_DO_FAZER_AGORA[atividade][0]
     feitas, limite = robo.feitas_hoje(atividade, agora)
+    if not limite:
+        return f"{nome} {MARCA_DO_DESLIGADO}"
     marca = "✅" if feitas >= limite else "⏳"
     return f"{nome} {marca}" if limite == 1 else f"{nome} {feitas}/{limite} {marca}"
 
@@ -2419,7 +2446,9 @@ def texto_fazer_agora(agora=None):
               "pausado). O que já saiu hoje até o limite do dia ele não repete.", ""]
     for atividade, (nome, _acao) in robo.ATIVIDADES_DO_FAZER_AGORA.items():
         feitas, limite = robo.feitas_hoje(atividade, agora)
-        if limite == 1:
+        if not limite:
+            situacao = f"{MARCA_DO_DESLIGADO} 0 por dia em {BOTAO_COMENTARIOS}"
+        elif limite == 1:
             situacao = "✅ já saiu hoje" if feitas else "⏳ ainda não saiu hoje"
         else:
             situacao = f"{'✅' if feitas >= limite else '⏳'} {feitas} de {limite} hoje"
@@ -2440,6 +2469,107 @@ async def fazer_agora_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     await state.set_state(ShopeeVideoFluxo.fazer_agora)
     await message.answer(texto_fazer_agora(), parse_mode="HTML", reply_markup=teclado_fazer_agora())
+
+
+# --- Comentários por dia (P266) ---
+
+def _faixa_escrita(piso, topo):
+    """"2 a 4", "3" ou "0 (desligado)"."""
+    if not topo:
+        return f"0 ({MARCA_DO_DESLIGADO} desligado)"
+    return f"{piso} a {topo}" if topo > piso else f"{piso}"
+
+
+def linha_dos_comentarios(tipo, config, agora=None):
+    """A linha de um tipo na tela do Comentários 💬: a faixa (ou o de antes), o número de hoje e os feitos."""
+    nome = NOMES_DOS_COMENTARIOS[tipo]
+    do_dia = robo.comentarios_do_dia(tipo, agora, config)
+    feitos = {interacoes.LIVES: interacoes.lives_hoje, interacoes.ANTIGOS: interacoes.antigos_hoje}.get(
+        tipo, lambda momento: interacoes.feitos_no_feed_hoje(config, momento))(agora)
+    faixa = interacoes.faixa_do_painel(config, tipo)
+    if faixa is None and tipo == interacoes.LIVES:
+        return f"• <b>{nome}</b>: nenhuma, como antes (o robô pula as lives)"
+    if faixa is None and tipo == interacoes.FEED:
+        return (f"• <b>{nome}</b>: como antes, até {do_dia} vídeos por dia, contando os só curtidos "
+                f"(hoje: {feitos} feitos)")
+    jeito = "" if faixa else ", como antes"
+    piso, topo = faixa or interacoes.FAIXA_DE_ANTES[tipo]
+    if not topo:
+        return f"• <b>{nome}</b>: {MARCA_DO_DESLIGADO} desligado (0 por dia)"
+    return f"• <b>{nome}</b>: {_faixa_escrita(piso, topo)} por dia{jeito} (hoje: {feitos} de {do_dia})"
+
+
+def texto_comentarios(config=None, agora=None):
+    """A tela do Comentários 💬 (P266): os três tipos com a faixa e o que já saiu hoje, e o que cada botão faz."""
+    config = config or ler_config()
+    linhas = [f"💬 <b>{BOTAO_COMENTARIOS[:-2]} por dia</b>", "",
+              "Para cada tipo, você diz a faixa de comentários por dia. Cada dia o robô sorteia um número nela e faz "
+              "esses comentários, espalhados pelo dia, do mesmo jeito de hoje.", ""]
+    linhas += [linha_dos_comentarios(tipo, config, agora) for tipo in interacoes.TIPOS_DE_COMENTARIO]
+    linhas += ["",
+               "Toque no tipo para mudar. Mande a faixa (ex.: <code>2-4</code>) ou um número só (ex.: <code>3</code>); "
+               f"<code>0</code> desliga. Máximo de {interacoes.MAXIMO_DE_COMENTARIOS} por dia em cada um.", "",
+               "<i>Nas lives, ele manda uma mensagem curta sobre o que aparece na tela, nunca toca em comprar nem em "
+               "presente, e a mensagem chega aqui com o link da live. Nos vídeos de outros criadores, quando a IA não "
+               "vê nada específico para dizer, ele só curte e procura outro vídeo para o comentário; essas curtidas "
+               "sem comentário ficam no máximo no número do dia.</i>", "",
+               "<i>A regra 9 da Shopee Vídeo pune comentário automático feito para aumentar números: quanto mais "
+               "comentários por dia, maior o risco.</i>"]
+    return "\n".join(linhas)
+
+
+def teclado_comentarios():
+    botoes = [KeyboardButton(text=botao) for botao in BOTOES_DOS_COMENTARIOS]
+    return montar_teclado([botoes[:2], botoes[2:], [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
+
+
+async def mostrar_comentarios(message: types.Message, state: FSMContext):
+    await state.set_state(ShopeeVideoFluxo.comentarios)
+    await message.answer(texto_comentarios(), parse_mode="HTML", reply_markup=teclado_comentarios())
+
+
+@router.message(F.text == BOTAO_COMENTARIOS, StateFilter("*"))
+async def comentarios_handler(message: types.Message, state: FSMContext):
+    """Quantos comentários por dia em cada tipo (P266). Escolha do Rafael: DECISOES.md, Shopee Vídeo."""
+    if not _admin(message): return
+    await mostrar_comentarios(message, state)
+
+
+def exemplos_dos_comentarios(tipo, config=None):
+    """(exemplo da faixa, exemplo do número só) do tipo: o de agora, o último mandado ou o de começo."""
+    faixa = interacoes.faixa_de_comentarios(config or ler_config(), tipo)
+    padrao_faixa, padrao_fixo = EXEMPLOS_DOS_COMENTARIOS[tipo]
+    return exemplos.faixa_e_fixo(f"comentarios_{tipo}", faixa, padrao_faixa, padrao_fixo)
+
+
+@router.message(F.text.in_(list(BOTOES_DOS_COMENTARIOS)), StateFilter("*"))
+async def pedir_comentarios(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    tipo = BOTOES_DOS_COMENTARIOS[message.text]
+    faixa, fixo = exemplos_dos_comentarios(tipo)
+    agora = interacoes.faixa_do_painel(ler_config(), tipo)
+    hoje = (f"Hoje está em <b>{_faixa_escrita(agora[0], agora[1])}</b> por dia." if agora
+            else "Hoje está como antes, sem faixa.")
+    await message.answer(
+        f"💬 Quantos comentários por dia em <b>{NOMES_DOS_COMENTARIOS[tipo]}</b>?\n\n"
+        f"• a faixa, com um traço (ex.: <code>{faixa}</code>): cada dia sorteia um número nela;\n"
+        f"• um número só (ex.: <code>{fixo}</code>): sempre esse;\n"
+        f"• <code>0</code>: desliga.\n\n<i>{hoje} Máximo de {interacoes.MAXIMO_DE_COMENTARIOS} por dia.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.update_data(tipo_de_comentario=tipo)
+    await state.set_state(ShopeeVideoFluxo.aguardando_comentarios)
+
+
+def interpretar_comentarios(texto):
+    """"3" (um número só), "2-4" (faixa) ou "0" (desligado) → (piso, topo); None se não serve."""
+    casou = re.match(r"^(\d{1,2})(?:\s*-\s*(\d{1,2}))?$", (texto or "").strip())
+    if not casou:
+        return None
+    piso = int(casou.group(1))
+    topo = int(casou.group(2)) if casou.group(2) is not None else piso
+    if topo < piso or topo > interacoes.MAXIMO_DE_COMENTARIOS:
+        return None
+    return piso, topo
 
 
 @router.message(F.text == BOTAO_HISTORICO, StateFilter("*"))
@@ -3682,7 +3812,10 @@ async def pedir_atividade_agora(message: types.Message, state: FSMContext):
         return
     nome = robo.ATIVIDADES_DO_FAZER_AGORA[atividade][0]
     pedido, feitas, limite = robo.pedir_agora(atividade)
-    if not pedido:
+    if not pedido and not limite:
+        texto = (f"{MARCA_DO_DESLIGADO} <b>{nome}</b> está com 0 por dia em Robô Automático 🤖 → {BOTAO_COMENTARIOS}. "
+                 "Mude a faixa lá para o robô fazer.")
+    elif not pedido:
         conta = f" ({feitas} de {limite}, o limite do dia)" if limite > 1 else ""
         texto = f"✅ {nome} já saiu hoje{conta}. Não repito, para não passar do limite do dia."
     else:
@@ -3813,6 +3946,48 @@ async def salvar_recusa(message: types.Message, state: FSMContext):
     await mostrar_rascunho(message, state, depois_de=ident, depois_de_resolver=True, lista=LISTA_DOS_RASCUNHOS)
 
 
+@router.message(ShopeeVideoFluxo.aguardando_comentarios)
+async def receber_comentarios(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    tipo = (await state.get_data()).get("tipo_de_comentario")
+    if tipo not in interacoes.TIPOS_DE_COMENTARIO:
+        await mostrar_comentarios(message, state)
+        return
+    faixa = interpretar_comentarios(message.text)
+    if not faixa:
+        exemplo_faixa, exemplo_fixo = exemplos_dos_comentarios(tipo)
+        await message.answer(f"⚠️ Mande a faixa com um traço (ex.: <code>{exemplo_faixa}</code>), um número só (ex.: "
+                             f"<code>{exemplo_fixo}</code>) ou <code>0</code>, até "
+                             f"{interacoes.MAXIMO_DE_COMENTARIOS}.", parse_mode="HTML", reply_markup=teclado_cancelar)
+        return
+    await state.update_data(faixa_de_comentarios=list(faixa))
+    await message.answer(f"Definir <b>{_faixa_escrita(faixa[0], faixa[1])}</b> comentário(s) por dia em "
+                         f"<b>{NOMES_DOS_COMENTARIOS[tipo]}</b>?", parse_mode="HTML",
+                         reply_markup=teclado_aprovar_cancelar)
+    await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_comentarios)
+
+
+@router.message(ShopeeVideoFluxo.aguardando_confirmacao_comentarios, F.text == "Aprovar ✅")
+async def salvar_comentarios(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    dados = await state.get_data()
+    tipo, faixa = dados.get("tipo_de_comentario"), dados.get("faixa_de_comentarios")
+    if tipo not in interacoes.TIPOS_DE_COMENTARIO or not faixa:
+        await mostrar_comentarios(message, state)
+        return
+    piso, topo = faixa
+    db.atualizar_config(CHAVE_CONFIG, lambda config: config.update({interacoes.CHAVE_DOS_COMENTARIOS: {
+        **(config.get(interacoes.CHAVE_DOS_COMENTARIOS) or {}), tipo: [piso, topo]}}))
+    exemplos.lembrar_faixa(f"comentarios_{tipo}", piso, topo)
+    registro_processos.registrar("shopee_video", PROCESSO_DOS_COMENTARIOS, "faixa mudada no painel", tipo, ok=True)
+    logger.info(f"💬 [Shopee Vídeo] Comentários por dia mudados no painel ({tipo}).")
+    hoje = robo.comentarios_do_dia(tipo)
+    await message.answer(f"✅ {NOMES_DOS_COMENTARIOS[tipo]}: <b>{_faixa_escrita(piso, topo)}</b> por dia. "
+                         f"O sorteio de hoje deu <b>{hoje}</b>, e vale a partir da próxima rodada do robô.",
+                         parse_mode="HTML")
+    await mostrar_comentarios(message, state)
+
+
 @router.message(StateFilter(ShopeeVideoFluxo.aguardando_confirmacao_faixa,
                             ShopeeVideoFluxo.aguardando_confirmacao_janela,
                             ShopeeVideoFluxo.aguardando_confirmacao_pausa,
@@ -3820,7 +3995,8 @@ async def salvar_recusa(message: types.Message, state: FSMContext):
                             ShopeeVideoFluxo.aguardando_confirmacao_faixa_robo,
                             ShopeeVideoFluxo.aguardando_confirmacao_janela_robo,
                             ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo,
-                            ShopeeVideoFluxo.aguardando_confirmacao_recusa))
+                            ShopeeVideoFluxo.aguardando_confirmacao_recusa,
+                            ShopeeVideoFluxo.aguardando_confirmacao_comentarios))
 async def confirmar_com_os_botoes(message: types.Message, state: FSMContext):
     await message.answer("Toque em um dos botões para confirmar ou em Cancelar ❌.")
 

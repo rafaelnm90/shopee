@@ -11,6 +11,9 @@ painel de comentários e o player do feed), o texto da IA e as marcas do que já
 feito. Também as curtidas de cada vídeo do Rafael, contadas nas linhas "curtiu seu vídeo."
 das Notificações, e a leitura da folha do compartilhar (Fixar ou Desfixar): o vídeo com 10
 curtidas ou mais em 24 h vai para os fixados do Perfil (escolha do Rafael de 20/11/2026, P263 1).
+Também quantos comentários o robô faz por dia em cada tipo (nas lives de outros criadores, nos
+vídeos antigos do Rafael e nos vídeos de outros criadores), pela faixa que ele põe no painel, e a
+leitura da live e a mensagem da IA para ela (escolha do Rafael de 21/11/2026, P266).
 Os toques ficam no robo_shopee_video, que chama estas funções; o checkup conta o
 que o robô anotou no registro de processos.
 
@@ -20,6 +23,7 @@ responde o mesmo comentário duas vezes nem comenta o mesmo vídeo de novo.
 """
 import hashlib
 import logging
+import random
 import re
 from datetime import datetime, timedelta
 
@@ -239,6 +243,89 @@ def escolher_post_antigo(postados, agora=None):
     if nunca:
         return max(nunca, key=lambda post: post.get("postado_em") or "")
     return min(candidatos, key=lambda par: par[0])[1]
+
+
+# --- Quantos comentários por dia (P266) ---
+
+# O Rafael põe no painel (Robô Automático 🤖 → Comentários 💬) a faixa de comentários por dia de cada tipo: nas
+# lives de outros criadores, nos vídeos antigos dele e nos vídeos de outros criadores do feed. Cada dia sorteia um
+# número na faixa, e o robô faz esses comentários, espalhados pelo dia; o jeito de comentar continua o mesmo. Sem a
+# faixa no painel, vale o de antes (FAIXA_DE_ANTES): as lives puladas, 1 post antigo por dia e até 5 vídeos do feed,
+# com o só curtido contando (P151 1). Escolha do Rafael (21/11/2026, P266): DECISOES.md, Shopee Vídeo.
+LIVES, ANTIGOS, FEED = "lives", "antigos", "feed"
+TIPOS_DE_COMENTARIO = (LIVES, ANTIGOS, FEED)
+# A chave da config shopee_video com as faixas do painel: {"lives": [0, 2], "antigos": [1, 3], "feed": [3, 5]}.
+CHAVE_DOS_COMENTARIOS = "comentarios_por_dia"
+MAXIMO_DE_COMENTARIOS = 20
+FAIXA_DE_ANTES = {LIVES: (0, 0), ANTIGOS: (POSTS_ANTIGOS_POR_DIA, POSTS_ANTIGOS_POR_DIA),
+                  FEED: (VIDEOS_NO_FEED_POR_DIA, VIDEOS_NO_FEED_POR_DIA)}
+# Os comentários que contam no número do dia: o que apareceu e o enviado sem aparecer (pode ter saído).
+COMENTARIOS_QUE_CONTAM = ("comentado", "não confirmado")
+# As marcas das lives comentadas: a live (o nome de quem a apresenta) e o dia, para não comentar duas vezes no dia.
+TIPO_DA_LIVE = "live"
+
+
+def faixa_do_painel(config, tipo):
+    """(piso, topo) do tipo que o Rafael pôs no painel, ou None (sem a faixa: o de antes)."""
+    faixa = ((config or {}).get(CHAVE_DOS_COMENTARIOS) or {}).get(tipo)
+    try:
+        piso, topo = (int(n) for n in faixa)
+    except (TypeError, ValueError):
+        return None
+    return (piso, topo) if 0 <= piso <= topo <= MAXIMO_DE_COMENTARIOS else None
+
+
+def faixa_de_comentarios(config, tipo):
+    """(piso, topo) que vale para o tipo: a do painel ou, sem ela, a de antes."""
+    return faixa_do_painel(config, tipo) or FAIXA_DE_ANTES[tipo]
+
+
+def comentarios_do_dia(config, tipo, dia):
+    """
+    Quantos comentários do tipo o dia (AAAA-MM-DD) faz: um número sorteado na faixa, o mesmo o dia todo sem gravar
+    nada. A semente leva a faixa: mudar a faixa no painel sorteia de novo na hora.
+    """
+    piso, topo = faixa_de_comentarios(config, tipo)
+    if topo <= piso:
+        return piso
+    return random.Random(f"comentarios|{tipo}|{dia}|{piso}-{topo}").randint(piso, topo)
+
+
+def feed_pela_faixa(config):
+    """
+    O feed segue a faixa do painel? Nela, só os comentários contam no número do dia, e o só curtido não (P266).
+    Sem ela, o de antes: o só curtido conta nos vídeos do dia (P151 1).
+    """
+    return faixa_do_painel(config, FEED) is not None
+
+
+def que_contam_no_feed(config):
+    """Os resultados do vídeo do feed que contam no número do dia."""
+    return COMENTARIOS_QUE_CONTAM if feed_pela_faixa(config) else FEITOS_NO_FEED
+
+
+def _inicio_do_dia(agora=None):
+    return _agora(agora).strftime("%Y-%m-%d 00:00:00")
+
+
+def feitos_no_feed_hoje(config, agora=None):
+    """Os vídeos do feed de hoje que contam no número do dia (que_contam_no_feed)."""
+    return quantos_desde("video_feed", que_contam_no_feed(config), _inicio_do_dia(agora))
+
+
+def so_curtidos_hoje(agora=None):
+    """Os vídeos do feed só curtidos hoje, sem o comentário."""
+    return quantos_desde("video_feed", SO_CURTIDO, _inicio_do_dia(agora))
+
+
+def lives_hoje(agora=None):
+    """As lives comentadas hoje (o comentário que apareceu e o enviado sem aparecer)."""
+    return quantos_desde(TIPO_DA_LIVE, COMENTARIOS_QUE_CONTAM, _inicio_do_dia(agora))
+
+
+def marca_da_live(anfitriao, agora=None):
+    """A marca da live do dia: quem a apresenta e o dia (no outro dia, a mesma pessoa pode ganhar outro comentário)."""
+    return marca(anfitriao, _agora(agora).strftime("%Y-%m-%d"))
 
 
 # --- As Notificações ---
@@ -702,6 +789,44 @@ def teclado_aberto(xml):
 
 # --- O feed Live e Vídeo ---
 
+# A aba Lives de Live e Vídeo mostra uma live por vez, tocando no próprio feed (Motorola, 21/11/2026): quem
+# apresenta no alto (tv_anchor_name), as mensagens de quem assiste ("nome: texto", tv_message) e, embaixo, o "Diga
+# alguma coisa..." (tv_send_message), que abre o campo de escrever (et_input_message) com o enviar ao lado
+# (confrim_btn, assim mesmo no app). Os de comprar (o Compre Agora, a sacolinha dos produtos, o Ver de "acabou de
+# comprar") e os de presente nunca são tocados: na live, o robô só toca nesses pelo id. P266: DECISOES.md.
+ABA_DAS_LIVES = "Lives"
+ID_DE_QUEM_APRESENTA = "tv_anchor_name"
+ID_DO_DIGA_ALGUMA_COISA = "tv_send_message"
+ID_DO_CAMPO_DA_LIVE = "et_input_message"
+ID_DO_ENVIAR_DA_LIVE = "confrim_btn"
+ID_DA_MENSAGEM_DA_LIVE = "tv_message"
+# O compartilhar da barra de baixo da live abre a folha com o Copiar link (Motorola, 21/11/2026).
+ID_DO_COMPARTILHAR_DA_LIVE = "iv_share"
+
+
+def ler_a_live(xml):
+    """
+    (live, motivo): a live na tela, {"anfitriao": o nome de quem apresenta}, ou None e o motivo fixo de não ser uma
+    live para comentar (vai para o registro: o checkup mostra onde o robô se perdeu).
+    """
+    elementos = ps.elementos(xml)
+    if not eh_live(xml):
+        return None, "tela sem live"
+    nome = next((el["texto"].strip() for el in elementos
+                 if el["id"] == ID_DE_QUEM_APRESENTA and el["texto"].strip()), "")
+    if not nome:
+        return None, "live sem o nome de quem apresenta"
+    if not any(el["id"] == ID_DO_DIGA_ALGUMA_COISA for el in elementos):
+        return None, "live sem o Diga alguma coisa"
+    return {"anfitriao": nome}, ""
+
+
+def mensagem_na_live(xml, texto):
+    """O comentário do robô está entre as mensagens da live ("nome: texto")?"""
+    return any(el["id"] == ID_DA_MENSAGEM_DA_LIVE and ":" in el["texto"]
+               and parecidos(el["texto"].split(":", 1)[1], texto) for el in ps.elementos(xml))
+
+
 def eh_live(xml):
     """A tela do feed é uma live (ids live_..., espectadores, Diga alguma coisa)?"""
     return any(el["id"].startswith("live_") or el["id"] in ("tv_audience_viewer_num", "tv_send_message")
@@ -846,6 +971,15 @@ SOBRE_A_IMAGEM = """
 
 A imagem anexa é a tela do vídeo agora: comente o que aparece nela (o produto, o resultado, a ideia), junto com a legenda, sem falar dos botões nem dos textos do aplicativo. Se a imagem mostrar conteúdo adulto, político, ofensivo, de aposta ou de golpe, escreva só: PULAR"""
 
+# A mensagem numa live de outro criador (P266): o mesmo jeito do comentário do feed, sobre o que aparece na tela.
+PROMPT_DA_LIVE = """Você está assistindo, como um comprador animado, a uma live de vendas de outro criador na Shopee e vai mandar uma mensagem no chat da live.
+
+A imagem anexa é a tela da live agora: quem apresenta, o produto que aparece e as mensagens de quem assiste.
+Mensagens que você já mandou em outras lives (não repita nem escreva parecido): {anteriores}
+
+Escreva UMA mensagem curta, em português do Brasil, com no máximo {limite} caracteres: natural, positiva e sobre o que aparece na live (o produto, o que a pessoa mostra dele), como uma pessoa de verdade escreveria no chat. Sem link, sem nome de marca, sem o nome de ninguém, sem convite para o seu perfil, sem pedir nada (desconto, brinde, presente ou resposta), sem hashtags, no máximo 1 emoji e sem aspas. Não fale dos botões nem dos textos do aplicativo.
+Se a live tiver conteúdo adulto, político, ofensivo, de aposta ou de golpe, ou se não houver nada específico para dizer sobre o que ela mostra, escreva só: PULAR"""
+
 # O pedido do comentário continua o mesmo; só ganha a saída de só curtir (P151 1).
 SO_CURTIR = f"""
 
@@ -919,6 +1053,15 @@ async def gerar_comentario(legenda="", anteriores=(), imagem=None):
                                        limite=TAMANHO_DO_COMENTARIO) + (SOBRE_A_IMAGEM if imagem else "") + SO_CURTIR)
     return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")] if imagem else None,
                         curtir=True)
+
+
+async def gerar_mensagem_da_live(imagem, anteriores=()):
+    """
+    A mensagem numa live de outro criador (P266), pela tela da live (JPEG); "" quando a IA pula a live (conteúdo
+    que não serve ou nada específico para dizer) e None quando ela não respondeu.
+    """
+    prompt = PROMPT_DA_LIVE.format(anteriores="; ".join(anteriores) or "nenhuma", limite=TAMANHO_DO_COMENTARIO)
+    return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")])
 
 
 async def gerar_proprio(produto="", titulo="", anteriores=()):
