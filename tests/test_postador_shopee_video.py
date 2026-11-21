@@ -2663,3 +2663,49 @@ def test_explorar_so_toca_no_gerar_do_flow_sem_custo():
         assert aparelho.toques == []
     # Fora do Gerar, o toque segue normal na mesma tela.
     assert ps.fazer_passo(aparelho, "xy", "100,100") == (True, "tocado em (100,100)")
+
+
+# --- O nome e o cupom do produto na janela do Adicionar (P265 1) ---
+
+def _janela_do_produto(campo="", aviso="", com_teclado=False):
+    """A janela "Editar informações do produto", como a leitura do Motorola mostrou em 07/11 (sem os nomes)."""
+    def no(texto, caixa, classe="android.widget.TextView", pacote="com.shopee.br"):
+        x1, y1, x2, y2 = caixa
+        return (f'<node text="{texto}" class="{classe}" package="{pacote}" clickable="false" '
+                f'bounds="[{x1},{y1}][{x2},{y2}]"/>')
+    nos = [no("Editar informações do produto", (253, 1316, 828, 1369)),
+           no("Nome do produto", (32, 1837, 1049, 1879)),
+           no(campo, (58, 1924, 1049, 1971), "android.widget.EditText"),
+           no("Adicionar cupom", (32, 2164, 313, 2206)), no("Selecionar Cupom", (718, 2159, 1018, 2210)),
+           no("Feito", (494, 2289, 588, 2342))]
+    if aviso:
+        nos.append(no(aviso, (64, 1980, 600, 2010)))
+    if com_teclado:
+        # O teclado do celular tem o campo dele (a busca de emojis), que nunca é o do nome do produto.
+        nos.append(no("", (40, 1300, 1040, 1350), "android.widget.EditText", "com.google.android.inputmethod.latin"))
+    raiz = '<node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+    return f'<hierarchy>{raiz}{"".join(nos)}</node></hierarchy>'
+
+
+def test_janela_do_produto_mostra_o_campo_do_nome_e_o_selecionar_cupom():
+    lista = ps.elementos(_janela_do_produto(campo="Caneca Geek ☕", com_teclado=True))
+    campo = ps.campo_do_nome(lista)
+    assert campo["caixa"] == (58, 1924, 1049, 1971) and ps.mesmo_nome(campo["texto"], "caneca  geek")
+    assert not ps.mesmo_nome("", "") and ps.selecionar_cupom(lista)["texto"] == "Selecionar Cupom"
+    assert ps.janela_de_editar_aberta(lista) and not ps.na_lista_de_cupons(lista) and not ps.nome_curto_na_janela(lista)
+    curto = ps.elementos(_janela_do_produto(campo="Bdhsuh", aviso="4 caracteres a mais necessários"))
+    assert ps.nome_curto_na_janela(curto)
+
+
+def test_tela_dos_cupons_sem_cupom_e_o_criar_cupom_proibido():
+    vazia = ('<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+             '<node text="Adicionar Cupom" class="android.widget.TextView" package="com.shopee.br" '
+             'bounds="[100,150][450,210]"/>'
+             '<node text="Criar e adicionar cupom ao seu vídeo para obter mais visualizações e pedidos" '
+             'class="android.widget.TextView" package="com.shopee.br" bounds="[100,600][980,700]"/>'
+             '<node text="Adicionar Cupom" class="android.widget.TextView" package="com.shopee.br" clickable="true" '
+             'bounds="[40,2200][1040,2300]"/></node></hierarchy>')
+    lista = ps.elementos(vazia)
+    assert ps.na_lista_de_cupons(lista) and ps.sem_cupom_para_escolher(lista)
+    # O botão de baixo cria cupom: o robô nunca toca nele (nem o explorar).
+    assert ps.proibido_no_ponto(vazia, 540, 2250) and ps.eh_alvo_proibido("Adicionar Cupom")

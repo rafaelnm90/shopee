@@ -481,7 +481,8 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      pelo nome (o da API, pelo link), toca no Adicionar dele fora da bolinha e confere o
      nome na janela que abre; sem achar ou com outro produto, para e avisa no privado;
   4. abre a janela **Editar nome do produto** (`ReactTransparentActivity_`) → **Feito**
-     (~540,2315), sem mudar o nome;
+     (~540,2315), sem mudar o nome (desde 21/11/2026, o nome da IA no campo e a lista de
+     cupons olhada antes do Feito: P265 1, abaixo);
   5. de volta à tela final, o produto aparece com "Sem Cupom" e o botão "Adicionar Mais"
      (~888,731) → `print` (a tela no privado do Rafael) → `tocar:@tv_drafts_box`
      (Rascunhos, ~112,2308). **Postar** (`btn_post`, ~631,2303) só pelo passo `postar`,
@@ -548,7 +549,17 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
    entre os curtidos agora no topo o de nome parecido (80% das palavras), depois o nome
    igual mais embaixo e, em última chance, o 1º se a IA conferir a foto dele com o vídeo
    (escolha do Rafael, P18); a janela, a tela final e o postar conferem o nome da lista. Na
-   janela "Editar nome do produto", só **Feito**. O produto que já estava curtido de
+   janela, hoje "Editar informações do produto" (gravações do Rafael de 21/11/2026, P265 1):
+   o campo **Nome do produto** (o EditText dela) começa vazio, com o nome do anúncio em
+   cinza (vazio, vai esse), e aceita de 10 a 255 letras (com menos, "N caracteres a mais
+   necessários" embaixo); o robô toca nele, escreve o nome da IA, fecha o teclado pelo
+   voltar (só com o teclado na tela: sem ele, o voltar fecha a janela) e confere o campo.
+   Embaixo, "Adicionar cupom" e o **Selecionar Cupom**, que abre a tela **Adicionar
+   Cupom**: sem cupom (o de hoje para afiliados), ela só mostra "Criar e adicionar cupom ao
+   seu vídeo para obter mais visualizações e pedidos" e o botão **Adicionar Cupom**, que
+   cria cupom e nunca se toca; o voltar leva de volta à janela, com o nome escrito. Na
+   tela final, o cartão do produto mostra o nome escrito, com "Sem Cupom". Falta ver a
+   lista com um cupom (o robô guarda a tela num caso na 1ª vez). Depois, **Feito**. O produto que já estava curtido de
    outro dia fica mais embaixo: o curtir o descurte e curte de novo (pedido do Rafael,
    24/10/2026), e ele sobe ao 1º lugar. O anexar espera a lista carregar e rola até 8
    vezes, parando no fim da lista (para o toque de descurtir que não pegou); o registro

@@ -20,6 +20,15 @@ def tabela_de_configuracoes():
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
 
 
+@pytest.fixture(autouse=True)
+def sem_ia_de_texto(monkeypatch):
+    """Os testes rodam sem rede: o pedido de texto à IA (o nome dos produtos no vídeo, P265 1) volta sem resposta."""
+    async def sem_resposta(prompt, imagens=None):
+        return None
+
+    monkeypatch.setattr(asv.api_gemini, "gerar_texto_gemini", sem_resposta)
+
+
 def _as(hora, dia=5):
     h, m = map(int, hora.split(":"))
     return datetime(2026, 10, dia, h, m, tzinfo=fuso_horario)
@@ -883,3 +892,79 @@ def test_video_mandado_guarda_o_produto_e_o_postei_o_conta_como_postado():
     assert asv.marcar_postado(asv.chave_do_envio("v1"), agora)[0] == asv.MARCADO
     assert asv.marcar_postado(asv.chave_do_envio("v3"), agora)[0] == asv.MARCADO
     assert asv.itens_postados() == ["123"]
+
+
+# --- O nome de cada produto no vídeo (P265 1) ---
+
+def test_nomes_da_ia_passam_pela_regua():
+    # Vídeos do Rafael das 15:26 e 15:27 (21/11): o nome do cartão do produto, curto, sem marca (diretriz 7) e sem
+    # promoção (diretriz 14). O que não passa, ou repete o nome de outro, fica com o do anúncio.
+    nomes = ["Caneca Personagem X Presente Geek Nerd Colecionável", "Garrafa Térmica Marca Y 1L",
+             "Kit Panelas Antiaderente 5 Peças", "Fone Bluetooth Sem Fio", "Escova Secadora 3 em 1"]
+    resposta = "Aqui está: " + json.dumps([
+        {"n": 1, "nome": "Caneca Geek Colecionável para Presente ☕", "tirados": ["Personagem X"]},
+        {"n": 2, "nome": "Garrafa Térmica Marca Y que Mantém Gelado", "tirados": ["Marca Y"]},
+        {"n": 3, "nome": "Kit de Panelas com Frete Grátis 🍳", "tirados": []},
+        {"n": 4, "nome": "Fone 🎧", "tirados": []},
+        {"n": 5, "nome": "Caneca Geek Colecionável para Presente ☕", "tirados": []},
+        {"n": 9, "nome": "Produto que não está na lista", "tirados": []},
+    ], ensure_ascii=False)
+    assert asv.ler_os_nomes(resposta, nomes) == {nomes[0]: "Caneca Geek Colecionável para Presente ☕"}
+    assert asv.ler_os_nomes("sem a lista", nomes) == {} and asv.ler_os_nomes(None, nomes) == {}
+
+
+def test_nome_comprido_demais_fica_de_fora():
+    # O nome tem de caber no cartão do vídeo: até LETRAS_MAXIMAS_DO_NOME no contador da Shopee (o emoji vale 2).
+    assert asv.nome_valido("Garrafa Térmica que Mantém Gelado 🧊")
+    assert not asv.nome_valido("Garrafa Térmica de Inox Que Mantém Gelado o Dia Inteiro 🧊")
+    assert not asv.nome_valido("Garrafa Térmica #promo Gelada 🧊")
+
+
+def test_nomes_no_video_pede_uma_vez_so_para_a_lista(monkeypatch):
+    pedidos = []
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append(prompt)
+        return json.dumps([{"n": 1, "nome": "Caneca Geek Colecionável para Presente ☕", "tirados": []},
+                           {"n": 2, "nome": "Garrafa Térmica que Mantém Gelado 🧊", "tirados": []}],
+                          ensure_ascii=False)
+
+    monkeypatch.setattr(asv.api_gemini, "gerar_texto_gemini", gerar)
+    # O mesmo anúncio duas vezes e o nome vazio não vão ao pedido.
+    nomes = rodar(asv.nomes_no_video(["Caneca A", "Garrafa B", "Caneca A", ""]))
+    assert nomes == {"Caneca A": "Caneca Geek Colecionável para Presente ☕",
+                     "Garrafa B": "Garrafa Térmica que Mantém Gelado 🧊"}
+    assert len(pedidos) == 1 and "1. Caneca A\n2. Garrafa B" in pedidos[0]
+    assert "diretriz 7" in pedidos[0] and "diretriz 14" in pedidos[0] and "Fiel ao anúncio" in pedidos[0]
+
+
+def test_sem_resposta_da_ia_cada_produto_fica_com_o_do_anuncio():
+    assert rodar(asv.nomes_no_video(["Caneca A"])) == {} and rodar(asv.nomes_no_video([])) == {}
+
+
+def test_mensagem_traz_o_nome_de_cada_produto_para_colar():
+    # O assistente manda o nome junto, para o Rafael colar em Nome do produto, na janela do Adicionar (P265 1).
+    produtos = [{"nome": "Caneca A", "preco": 19.9, "comissao": 8.0},
+                {"nome": "Garrafa B", "preco": 29.9, "comissao": 5.0}]
+    texto = asv.montar_mensagem(TEXTOS, produtos, "https://s.shopee.com.br/abc",
+                                nomes={"Caneca A": "Caneca Geek & Presente ☕"})
+    assert "🏷️ <b>Nome no vídeo:</b>" in texto
+    assert "1. <code>Caneca Geek &amp; Presente ☕</code>\n2. fica o nome do anúncio" in texto
+    # No passo de postar: depois do título e antes do comentário.
+    assert texto.index("<code>Copo &lt;Térmico") < texto.index("Nome no vídeo") < texto.index("4️⃣")
+    um = asv.montar_mensagem(TEXTOS, produtos[:1], "https://s.shopee.com.br/abc",
+                             nomes={"Caneca A": "Caneca Geek de Presente ☕"})
+    assert "\n<code>Caneca Geek de Presente ☕</code>\n" in um
+    assert "Nome no vídeo" not in asv.montar_mensagem(TEXTOS, produtos, "https://s.shopee.com.br/abc")
+
+
+def test_envio_manda_o_nome_da_ia_para_colar(monkeypatch):
+    _preparar(monkeypatch, TEXTOS)
+
+    async def gerar(prompt, imagens=None):
+        return '[{"n": 1, "nome": "Garrafa Térmica que Mantém Gelado 🧊", "tirados": []}]'
+
+    monkeypatch.setattr(asv.api_gemini, "gerar_texto_gemini", gerar)
+    bot = Bot()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == "postagem mandada no seu privado"
+    assert "<code>Garrafa Térmica que Mantém Gelado 🧊</code>" in bot.mensagens[0][1]

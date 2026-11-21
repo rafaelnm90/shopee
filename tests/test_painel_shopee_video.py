@@ -1419,6 +1419,23 @@ def test_rascunho_mostra_o_link_de_cada_produto_a_mais(bm):
     assert "🔗 https://s.shopee.com.br/a" in sv.texto_rascunho(dict(rascunho, mais_produtos=None), 1, 1)
 
 
+def test_rascunho_mostra_o_nome_do_anuncio_embaixo_do_nome_da_ia(bm):
+    # P265 1: o produto com o nome da IA no cartão do vídeo mostra também o nome do anúncio, para o Rafael comparar
+    # antes de aprovar; o que ficou com o nome do anúncio não repete a linha.
+    sv = _painel(bm)
+    rascunho = {"criado_em": "2026-11-21 18:00:00", "titulo": "Garrafa", "link": "https://s.shopee.com.br/a",
+                "produtos": ["Garrafa Térmica que Mantém Gelado 🧊", "Garrafa B"], "motivo": "", "fonte": "viral",
+                "anuncios": ["Garrafa Térmica Marca X 1L Inox Original", "Garrafa B"], "conferencia": None,
+                "mais_produtos": [{"nome": "Garrafa B", "link": "https://s.shopee.com.br/b", "endereco": ""}]}
+    texto = sv.texto_rascunho(rascunho, 1, 1)
+    assert ("• Garrafa Térmica que Mantém Gelado 🧊\n" + sv.NOME_DO_ANUNCIO_NO_TEXTO
+            + "Garrafa Térmica Marca X 1L Inox Original\n🔗 https://s.shopee.com.br/a\n• Garrafa B\n"
+            "🔗 https://s.shopee.com.br/b\n") in texto
+    # O rascunho de antes, sem os anúncios, fica como era.
+    antes = sv.texto_rascunho(dict(rascunho, anuncios=[]), 1, 1)
+    assert sv.NOME_DO_ANUNCIO_NO_TEXTO not in antes
+
+
 def test_rascunho_de_ver_produtos_mostra_o_link_de_cada_produto(bm):
     # Pedido do Rafael (29/10, P83): no rascunho de Ver Produtos ele via os nomes e só o link do
     # vídeo original, e não dava para validar cada produto. Agora cada um vem com o link dele (o
