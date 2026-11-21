@@ -9717,8 +9717,8 @@ MOTIVO_DAS_CURTIDAS_DO_DIA = "as curtidas sem comentário de hoje já chegaram a
 
 def curtidas_sem_comentario_acabaram(agora=None):
     """
-    Pela faixa do painel (P266), as curtidas sem comentário de hoje já chegaram ao número de comentários do dia? Sem
-    a faixa, nunca: o só curtido conta nos do dia, como antes (P151 1).
+    Pela faixa do painel (P266), as curtidas sem comentário de hoje já chegaram ao número de comentários do dia
+    (P267 1)? Sem a faixa, nunca: o só curtido conta nos do dia, como antes (P151 1).
     """
     config = ler_config()
     if not interacoes.feed_pela_faixa(config):
