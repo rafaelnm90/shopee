@@ -1924,10 +1924,11 @@ FALA_DO_HIDRATANTE = [(0.37, 0.9, "Sua"), (0.9, 1.45, "pele"), (1.45, 2.27, "des
                       (11.45, 12.09, "Aproveite"), (12.09, 12.23, "e"), (12.23, 12.45, "compre"), (12.45, 12.69, "já.")]
 
 
-def test_pedido_de_16_s_com_a_fala_inteira_fala_o_tempo_todo_e_o_do_dia_continua_igual(monkeypatch):
+def test_pedido_de_16_s_com_a_fala_inteira_fala_o_tempo_todo_e_a_amostra_de_antes_continua_igual(monkeypatch):
     # Escolha do Rafael (19/11, P255 1): no vídeo de IA do hidratante, a moça falou 6,5 s dos 16 e ficou calada e
     # parada no resto, porque o pedido mandava terminar a fala antes dos 6 s e depois ficar calada. A amostra pede a
-    # fala do começo ao fim de cada parte; o vídeo de IA do dia continua com o pedido de antes até o OK dele.
+    # fala do começo ao fim de cada parte (desde a P262, o vídeo de IA do dia também); a amostra de 16 s de antes
+    # (P246 1) continua com o pedido dela.
     falando = flow.PEDIDO_DO_VENDEDOR_FALANDO.format(nome="Loção Hidratante", evitar="", bebida="")
     for trecho in (f"2 frases curtas com até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras",
                    "do 1º segundo até por volta dos 7 segundos", "sem ficar calada no meio",
@@ -2023,7 +2024,8 @@ def test_amostra_com_a_fala_inteira_manda_o_cortado_e_depois_o_original(celular,
     for trecho in ("Amostra nº 1 do vídeo de IA de 16 s com a fala do começo ao fim e o corte do parado (P255 1)",
                    "⏱️ Com fala: 6,9 s dos 16,0 s do vídeo",
                    "✂️ Parado cortado: de 16,0 s para 8,5 s (2 pedaço(s) parado(s) tirado(s)",
-                   "Gostando, me diga na conversa: o vídeo de IA do dia e o De IA ✨ passam a sair assim"):
+                   # Desde a P262, o vídeo de IA do dia de 16 s já fala do começo ao fim e tem o silêncio cortado.
+                   "o vídeo de IA de 16 s do dia já fala do começo ao fim e tem o silêncio cortado (P262)"):
         assert trecho in legenda, trecho
     assert "O vídeo de IA do dia sai normalmente" not in legenda
     assert comparar == "🎬 A amostra nº 1 sem o corte do parado (16,0 s), para comparar com a de cima"
@@ -2104,7 +2106,8 @@ def test_amostra_maos_e_voz_vai_so_ao_privado_com_o_tempo_com_fala(celular, monk
     assert caminho.endswith("amostra.mp4")
     for trecho in ("Amostra nº 1 do vídeo de IA de 16 s no formato mãos e voz (P261 1",
                    "⏱️ Com fala: 6,9 s dos 16,0 s do vídeo",
-                   "Gostando, me diga na conversa: o formato mãos e voz entra no vídeo de IA do dia"):
+                   # Desde a P262, o formato já está entre os do vídeo de IA do dia.
+                   "o formato mãos e voz já sai no vídeo de IA do dia e no De IA ✨"):
         assert trecho in legenda, trecho
     for fora in ("O vídeo de IA do dia sai normalmente", "Corte do parado", "Parado cortado"):
         assert fora not in legenda, fora
@@ -2543,7 +2546,9 @@ def test_producao_comeca_pela_imagem_do_personagem_e_o_video_sai_dela(celular, m
     assert conferencia == (flow.PEDIDO_DA_CONFERENCIA_DA_IMAGEM, 3)
     # O pedido do vídeo foi escrito pela imagem feita, com a foto do anúncio junto.
     assert pelo_video[1] == 2 and "o personagem Vovó" in pelo_video[0] and "Copo Térmico Inox" in pelo_video[0]
-    assert "a pessoa só segura o produto" in pelo_video[0] and "depois, calada" in pelo_video[0]
+    # Desde a P262, a pessoa fala do começo ao fim de cada parte, sem o "depois, calada" do silêncio no meio.
+    assert "a pessoa só segura o produto" in pelo_video[0] and "sem ficar calada no meio" in pelo_video[0]
+    assert "depois, calada" not in pelo_video[0]
     # A imagem saiu de graça, pela foto de referência, depois do saldo lido (os créditos do vídeo).
     assert celular.textos_das_imagens == [flow.PEDIDO_DA_IMAGEM_COM_O_PRODUTO.format(
         acao="holding the stainless steel tumbler at chest height", cena="in a cozy kitchen")]
@@ -2739,3 +2744,250 @@ def test_sem_foto_aprovada_o_video_sai_pela_foto_sem_tocar_na_imagem(celular, mo
     # Na comédia que ficou sem a imagem, a legenda diz que ela fica para outro vídeo (saiu o vendedor).
     assert flow.linha_do_personagem(dict(atual, formato=flow.ESTILO_DA_COMEDIA)).endswith(
         "como antes; a comédia fica para outro vídeo")
+
+
+# --- A duração e o silêncio decididos vídeo a vídeo (P262) ---
+
+RESPOSTA_DE_8_S = json.dumps({"serve": True, "muda_na_ia": False, "motivo": "", "fala": FALA_PEDIDA,
+                              "prompt": "She holds the exact tumbler and talks the whole time.",
+                              "cena": "Uma moça vende o copo na cozinha."})
+RESPOSTA_DE_16_S = json.dumps({"serve": True, "muda_na_ia": False, "motivo": "", "fala": FALA_PEDIDA,
+                               "prompt": "She holds the exact tumbler and talks.", "continuacao": CONTINUACAO,
+                               "cena": "Uma moça vende o copo na cozinha."})
+RESPOSTA_DO_UNBOXING = json.dumps({"serve": True, "muda_na_ia": False, "motivo": "", "prompt": "Hands open the box.",
+                                   "continuacao": "The hands lift the shoe.", "cena": "Mãos abrem a caixa."})
+
+
+def _ia_do_formato(monkeypatch, formato, pedido):
+    """As respostas da IA, na ordem: a escolha do formato (e da duração) e o pedido do vídeo. Os pedidos feitos."""
+    pedidos, respostas = [], [formato, pedido]
+
+    async def gerar(texto, imagens=None):
+        pedidos.append(texto)
+        return respostas.pop(0) if respostas else None
+
+    monkeypatch.setattr(flow.api_gemini, "gerar_texto_gemini", gerar)
+    return pedidos
+
+
+def test_a_ia_escolhe_a_duracao_e_o_maos_e_voz_so_no_video_de_ia_do_dia(monkeypatch):
+    # Decisão do Claude a pedido do Rafael (20/11, P262: "para cada vídeo o meu robô decidisse se iria manter, cortar
+    # ou fazer 8 seg"): no vídeo de IA do dia e no De IA ✨, a IA escolhe pelo produto o formato, agora também o mãos
+    # e voz (P261 1), e a duração: 8 s, que prendem mais, ou 16 s; na dúvida, 8 s.
+    do_dia = flow.pedido_do_formato("Copo Térmico Inox", com_unboxing=True, com_maos_e_voz=True, com_duracao=True)
+    assert flow.TRECHO_DA_DURACAO.strip() in do_dia and '"duracao": 8 ou 16, "motivo"' in do_dia
+    assert '"vendedor", "maos_e_voz" ou "unboxing"' in do_dia and "do vídeo de 16 segundos" not in do_dia
+    assert "na dúvida, 8 segundos" in do_dia and "O unboxing e a comédia têm sempre 16 segundos" in do_dia
+    # Fora dele (as amostras), o pedido do formato continua o de 16 s, sem a duração e sem o mãos e voz.
+    antes = flow.pedido_do_formato("Copo Térmico Inox", com_unboxing=True)
+    assert "do vídeo de 16 segundos feito por IA" in antes and "duracao" not in antes and "maos_e_voz" not in antes
+    assert '"vendedor" ou "unboxing"' in antes and flow.pedido_do_formato("Copo").count('"vendedor"') == 2
+    link = "https://s.shopee.com.br/abc"
+    # 8 s do vendedor: um pedido só, sem a continuação, com a pessoa falando do começo ao fim.
+    pedidos = _ia_do_formato(monkeypatch, '{"formato": "vendedor", "duracao": 8, "motivo": "se entende num olhar"}',
+                             RESPOSTA_DE_8_S)
+    escolhido, serve = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, com_unboxing=True,
+                                                  da_producao=True)
+    assert serve is True and "continuacao" not in escolhido and escolhido["fala"] == FALA_PEDIDA
+    assert escolhido["formato"] == escolhido["estilo"] == flow.ESTILO_DO_VENDEDOR
+    assert (escolhido["duracao_pedida"], escolhido["motivo_da_duracao"]) == (8, "se entende num olhar")
+    assert "um vídeo de 8 segundos" in pedidos[1] and "fala sem parar do começo ao fim, sem pausa" in pedidos[1]
+    assert '"continuacao"' not in pedidos[1] and "depois, calada" not in pedidos[1]
+    # 8 s do mãos e voz: só as mãos, com a voz do começo ao fim e a chamada do carrinho laranja.
+    pedidos = _ia_do_formato(monkeypatch, '{"formato": "maos e voz", "duracao": "8 segundos", "motivo": "uso simples"}',
+                             RESPOSTA_DE_8_S)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Umidificador de Ar", _jpeg(), longo=True, da_producao=True)
+    assert escolhido["formato"] == escolhido["estilo"] == flow.ESTILO_DAS_MAOS_E_VOZ
+    assert escolhido["duracao_pedida"] == 8
+    assert "só as mãos aparecem" in pedidos[1] and "clica no carrinho laranja" in pedidos[1]
+    assert "continuacao" not in escolhido and '"continuacao"' not in pedidos[1]
+    # 16 s do vendedor: as duas partes, com a fala do começo ao fim de cada uma, sem o silêncio do meio.
+    pedidos = _ia_do_formato(monkeypatch, '{"formato": "vendedor", "duracao": 16, "motivo": "mostrar em uso"}',
+                             RESPOSTA_DE_16_S)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Mop Giratório", _jpeg(), longo=True, da_producao=True)
+    assert escolhido["continuacao"] == CONTINUACAO and escolhido["duracao_pedida"] == 16
+    assert "sem ficar calada no meio" in pedidos[1] and "depois, calada" not in pedidos[1]
+    # O unboxing e a comédia têm sempre 16 s, mesmo com a IA dizendo 8.
+    pedidos = _ia_do_formato(monkeypatch, '{"formato": "unboxing", "duracao": 8, "motivo": "pela aparência"}',
+                             RESPOSTA_DO_UNBOXING)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Tênis Casual", _jpeg(), longo=True, com_unboxing=True,
+                                              da_producao=True)
+    assert (escolhido["formato"], escolhido["duracao_pedida"], escolhido["fala"]) == (flow.ESTILO_DO_UNBOXING, 16, "")
+    assert "É um unboxing" in pedidos[1]
+    _ia_do_formato(monkeypatch, '{"formato": "comedia", "duracao": 8, "motivo": "situação engraçada"}',
+                   RESPOSTA_DE_16_S)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, com_comedia=True,
+                                              da_producao=True)
+    assert escolhido["formato"] == flow.ESTILO_DA_COMEDIA and escolhido["duracao_pedida"] == 16
+    assert escolhido["continuacao"] == CONTINUACAO
+    # Sem a resposta num JSON, o vendedor de 8 s; o pedido de 8 s sem a fala não vale.
+    _ia_do_formato(monkeypatch, "não sei", RESPOSTA_DE_8_S)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, da_producao=True)
+    assert (escolhido["formato"], escolhido["duracao_pedida"], escolhido["motivo_da_duracao"]) == (
+        flow.ESTILO_DO_VENDEDOR, 8, "")
+    sem_fala = json.dumps(dict(json.loads(RESPOSTA_DE_8_S), fala=""))
+    _ia_do_formato(monkeypatch, '{"formato": "vendedor", "duracao": 8}', sem_fala)
+    assert flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True, da_producao=True) == (None, None)
+    # Nas amostras (sem da_producao), nada muda: o de 16 s de sempre, sem a duração escolhida.
+    pedidos = _ia_do_formato(monkeypatch, RESPOSTA_DE_16_S, None)
+    escolhido, _ = flow.pedido_para_o_anuncio(link, "Copo Térmico Inox", _jpeg(), longo=True)
+    assert "duracao_pedida" not in escolhido and len(pedidos) == 1 and "depois, calada" in pedidos[0]
+
+
+def _escolhido_curto(**extra):
+    """O pedido de 8 s que a escolha do robô dá desde a P262: sem a continuação, com a fala, o formato e a duração."""
+    return dict(_escolhido(), estilo=flow.ESTILO_DO_VENDEDOR, prompt="A woman holds the exact tumbler and talks.",
+                fala=FALA_PEDIDA, cena="Uma moça vende o copo na cozinha.", formato=flow.ESTILO_DO_VENDEDOR,
+                duracao_pedida=8, motivo_da_duracao="se entende num olhar", **extra)
+
+
+def test_producao_de_8_s_gera_uma_vez_sem_estender_e_ouve_a_fala(celular, monkeypatch, capsys):
+    # P262: o de 8 s que a IA escolheu é um Gerar só, sem o Estender (24 créditos), com a fala do começo ao fim.
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 8.0)
+    montagens = _corte_falso(monkeypatch)
+    estilos = flow.estilos_recentes()
+    # Com 30 créditos, os 16 s não sairiam; os 8 s, sim.
+    celular.saldo = 30
+    atual = flow.comecar_producao("2026-11-20", _escolhido_curto(), 1)
+    assert atual["curta"] is True and "longa" not in atual and "continuacao" not in atual
+    assert (atual["fala"], atual["formato"], atual["duracao_pedida"]) == (FALA_PEDIDA, flow.ESTILO_DO_VENDEDOR, 8)
+    assert atual["custo"] == 24 and flow.estilos_recentes() == estilos
+    # O vendedor de 8 s também começa pela imagem do personagem (P260 1); sem foto aprovada, sai pela foto do anúncio.
+    assert flow.pede_a_imagem(atual)
+    assert flow.producao_no_celular(celular, atual) is True
+    assert celular.geracoes == 1 and celular.extensoes == 0 and celular.toques_proibidos == []
+    assert celular.texto == "A woman holds the exact tumbler and talks."
+    atual = flow.producao()
+    assert atual["estado"] == "baixado" and atual["custo"] == 24 and atual["duracao"] == 8
+    assert atual["imagem"]["motivo"] == flow.SEM_FOTO_APROVADA and flow.itens_gerados() == ["456"]
+    # A fala vai até perto do fim: nada a cortar, e o vídeo fica inteiro.
+    ouvidas = _ouvir(monkeypatch, FALA_PEDIDA)
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert pronto["fala_conferida"]["situacao"] == "igual" and montagens == []
+    assert pronto["silencio"] == {"decisao": "mantido", "motivo": flow.SEM_SILENCIO, "antes": 8.0, "depois": 8.0,
+                                  "cortes": 0}
+    assert pronto["arquivo"].endswith("producao_2026-11-20.mp4") and "arquivo_inteiro" not in pronto
+    legenda = flow.legenda_da_producao(pronto)
+    for trecho in ("Omni 1.2 Flash, 8 s (24 créditos de IA)",
+                   "⏱️ 8 s, sem o Estender (a IA escolheu pelo produto: se entende num olhar)",
+                   f"🗣️ Fala: {FALA_PEDIDA}", f"👂 Fala no vídeo: igual à pedida ({len(ouvidas)} palavras ouvidas)",
+                   "✂️ Sem silêncio para cortar: o vídeo fica inteiro"):
+        assert trecho in legenda, trecho
+    assert "Estender)" not in legenda and celular.mandados == []
+    saida = capsys.readouterr().out
+    for privado in ("Copo", "tumbler", "Gelo"):
+        assert privado not in saida, privado
+
+
+def test_producao_de_8_s_pela_imagem_do_personagem_pede_o_video_curto(celular, monkeypatch, tmp_path):
+    # O vendedor de 8 s começa pela imagem do personagem com o produto, como o de 16 s (P260 1), e o pedido escrito
+    # pela imagem é o de 8 s, sem a continuação.
+    _aprovadas(tmp_path, "vovo")
+    curto = json.dumps({"prompt": "The grandma holds the tumbler and talks the whole time.", "fala": FALA_PELA_IMAGEM,
+                        "cena": "A vovó vende o copo na cozinha."})
+    pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, curto])
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 8.0)
+    celular.saldo = 30
+    atual = flow.comecar_producao("2026-11-20", _escolhido_curto(), 1)
+    assert flow.producao_no_celular(celular, atual) is True
+    pelo_video = pedidos[-1][0]
+    assert "num vídeo de 8 segundos" in pelo_video and "fala sem parar do começo ao fim" in pelo_video
+    assert '"continuacao"' not in pelo_video and "o personagem Vovó" in pelo_video
+    atual = flow.producao()
+    assert atual["personagem"] == "vovo" and atual["fala"] == FALA_PELA_IMAGEM and "continuacao" not in atual
+    assert celular.texto == "The grandma holds the tumbler and talks the whole time."
+    assert celular.geracoes == 1 and celular.extensoes == 0 and celular.fotos_das_imagens == [True]
+    assert atual["estado"] == "baixado" and atual["curta"] is True
+
+
+def test_decidir_o_silencio_corta_so_quando_vale_a_pena(monkeypatch, tmp_path):
+    # P262: com o vídeo pronto, o servidor corta o silêncio de mais de 1 s (o do hidratante de 19/11: 5,4 s calada no
+    # meio e 3,3 s no fim) ou mantém o vídeo inteiro, com o porquê.
+    montagens = _corte_falso(monkeypatch)
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 16.0)
+    arquivo = str(tmp_path / "producao_2026-11-20.mp4")
+    assert flow.decidir_o_silencio(arquivo, FALA_DO_HIDRATANTE) == {
+        "decisao": "cortado", "motivo": "", "antes": 16.0, "depois": 8.5, "cortes": 2,
+        "arquivo": str(tmp_path / "producao_2026-11-20_sem_o_parado.mp4")}
+    assert montagens == [[(0.0, 3.59, 1.0, 1.0), (8.37, 13.29, 1.0, flow.ZOOM_DO_CORTE)]]
+    mantido = {"decisao": "mantido", "antes": 16.0, "depois": 16.0, "cortes": 0}
+    # Falando do começo ao fim, sem o que cortar; sem ouvir a fala, também inteiro.
+    continua = [(0.5 * i + 0.2, 0.5 * i + 0.6, "palavra") for i in range(31)]
+    assert flow.decidir_o_silencio(arquivo, continua) == dict(mantido, motivo=flow.SEM_SILENCIO)
+    assert flow.decidir_o_silencio(arquivo, None) == dict(mantido, motivo=flow.SEM_OUVIR)
+    # Quase sem fala, o corte deixaria menos de 6 s: fica inteiro, para o Rafael decidir na aprovação.
+    assert flow.decidir_o_silencio(arquivo, [(0.4, 0.9, "Olha"), (1.0, 2.5, "isso!")]) == dict(
+        mantido, motivo=flow.SOBRARIA_POUCO)
+    assert len(montagens) == 1
+    # O ffmpeg falhando ou a duração que não se lê: inteiro.
+    monkeypatch.setattr(flow.videos, "com_cortes_e_ritmo", lambda *partes, **campos: "o ffmpeg falhou (código 1)")
+    assert flow.decidir_o_silencio(arquivo, FALA_DO_HIDRATANTE) == dict(mantido, motivo=flow.CORTE_FALHOU)
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: None)
+    assert flow.decidir_o_silencio(arquivo, FALA_DO_HIDRATANTE) == {
+        "decisao": "mantido", "antes": 0.0, "depois": 0.0, "cortes": 0, "motivo": flow.SEM_DURACAO}
+
+
+FALA_DO_HIDRATANTE_PEDIDA = ("Sua pele descasca e pinica muito? Hidratação profunda sem grudar nada. Aproveite e "
+                             "compre já.")
+
+
+def test_producao_de_16_s_com_silencio_vira_rascunho_do_video_cortado(celular, monkeypatch):
+    # P262: no de 16 s com o silêncio no meio, o rascunho sai do vídeo cortado; o inteiro fica ao lado até o vídeo de
+    # IA seguinte, que tira os dois.
+    _duracoes(monkeypatch, celular, estendida=16)
+    montagens = _corte_falso(monkeypatch)
+    flow.comecar_producao("2026-11-20", _escolhido_longo() | {
+        "fala": FALA_DO_HIDRATANTE_PEDIDA, "formato": flow.ESTILO_DO_VENDEDOR, "duracao_pedida": 16,
+        "motivo_da_duracao": "mostrar em uso"}, 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_HIDRATANTE)
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert pronto["arquivo"].endswith("producao_2026-11-20_sem_o_parado.mp4") and os.path.exists(pronto["arquivo"])
+    assert pronto["arquivo_inteiro"].endswith("producao_2026-11-20.mp4") and len(montagens) == 1
+    assert pronto["silencio"] == {"decisao": "cortado", "motivo": "", "antes": 16.0, "depois": 8.5, "cortes": 2}
+    assert pronto["fala_conferida"]["situacao"] == "igual"
+    legenda = flow.legenda_da_producao(pronto)
+    for trecho in ("⏱️ 16 s, com o Estender (a IA escolheu pelo produto: mostrar em uso)",
+                   "✂️ Silêncio cortado: de 16,0 s para 8,5 s (2 pedaço(s) parado(s) tirado(s), com um zoom leve "
+                   "depois de cada corte)"):
+        assert trecho in legenda, trecho
+    # O vídeo de IA seguinte tira do servidor os dois arquivos.
+    flow.comecar_producao("2026-11-21", _escolhido(), 1)
+    assert not os.path.exists(pronto["arquivo"]) and not os.path.exists(pronto["arquivo_inteiro"])
+
+
+def test_unboxing_sem_fala_nao_passa_pelo_corte_e_diz_os_16_s(celular, monkeypatch):
+    # O unboxing não tem fala (a música de fundo vai no lugar do som): sem o que ouvir, nada a decidir.
+    _duracoes(monkeypatch, celular, estendida=16)
+    montagens = _corte_falso(monkeypatch)
+    unboxing = dict(_do_formato(flow.ESTILO_DO_UNBOXING), estilo=flow.ESTILO_DO_UNBOXING, fala="", duracao_pedida=16,
+                    motivo_da_duracao="pela aparência")
+    flow.comecar_producao("2026-11-20", unboxing, 1)
+    assert flow.producao_no_celular(celular, flow.producao()) is True
+
+    def nao_ouve(caminho):
+        raise AssertionError("o unboxing não é ouvido")
+
+    monkeypatch.setattr(flow.videos, "palavras_faladas", nao_ouve)
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert "silencio" not in pronto and "fala_conferida" not in pronto and montagens == []
+    assert "⏱️ 16 s, com o Estender (o unboxing e a comédia têm sempre 16 s)" in flow.legenda_da_producao(pronto)
+
+
+def test_linhas_da_duracao_e_do_silencio():
+    # O andamento de antes da P262 e as amostras não têm a duração escolhida nem a decisão do silêncio.
+    assert flow.linha_da_duracao({}) == "" and flow.linha_do_silencio({}) == ""
+    assert flow.linha_da_duracao({"duracao_pedida": 8}) == "⏱️ 8 s, sem o Estender (a IA escolheu pelo produto)"
+    assert flow.linha_da_duracao({"duracao_pedida": 16, "formato": flow.ESTILO_DA_COMEDIA}) == (
+        "⏱️ 16 s, com o Estender (o unboxing e a comédia têm sempre 16 s)")
+    for motivo, linha in (
+            (flow.SEM_SILENCIO, "✂️ Sem silêncio para cortar: o vídeo fica inteiro"),
+            (flow.SEM_OUVIR, "✂️ Silêncio não conferido (não deu para ouvir a fala): o vídeo fica inteiro"),
+            (flow.SEM_DURACAO, "✂️ Silêncio não conferido (sem a duração do vídeo): o vídeo fica inteiro"),
+            (flow.SOBRARIA_POUCO, "✂️ Silêncio não cortado: sobrariam menos de 6,0 s de vídeo; ele fica inteiro, "
+                                  "para você decidir na aprovação"),
+            (flow.CORTE_FALHOU, "✂️ Silêncio não cortado (o corte não saiu): o vídeo fica inteiro")):
+        assert flow.linha_do_silencio({"silencio": {"decisao": "mantido", "motivo": motivo}}) == linha, motivo

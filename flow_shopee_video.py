@@ -45,6 +45,11 @@ quem usa o produto, sem rosto, a câmera sempre nele, e uma voz contando do come
 mais simples com o resultado à vista e a chamada "clica no carrinho laranja"), sem a cena da loja lotada do vídeo
 dele (PEDIDO_DAS_MAOS_E_VOZ); vai ao privado com o tempo com fala.
 
+Desde a P262 (20/11/2026), cada vídeo de IA do dia e do De IA ✨ tem a duração e o silêncio decididos vídeo a vídeo:
+a IA que escolhe o formato (agora também o mãos e voz) escolhe 8 s, um Gerar só com a fala do começo ao fim, ou 16 s
+(formato_do_video); o de 16 s do vendedor fala do começo ao fim de cada parte; e, com o vídeo pronto, o servidor corta
+o silêncio de mais de 1 s ou mantém o vídeo inteiro (decidir_o_silencio).
+
 Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo,
 amostra-16s-fala-inteira ou amostra-16s-maos-e-voz). O
 log do Actions é público: saem só estados, modelos e números; o produto e o pedido ficam no banco, e o
@@ -263,17 +268,30 @@ ESTILO_DO_UNBOXING = "unboxing"
 # quando um dos últimos gerados foi (formatos_recentes). Escolha do Rafael (P251 1): DECISOES.md, Shopee Vídeo.
 ESTILO_DA_COMEDIA = "comedia_16s"
 VIDEOS_POR_COMEDIA = 3
-# O formato mãos e voz (P261 1, 20/11/2026), por enquanto só na amostra (amostra --longa --maos-e-voz): como o vídeo
-# que o Rafael mandou ("foco mais no produto em si"), só as mãos de quem usa o produto, sem rosto, a câmera sempre
-# nele, e uma voz contando do começo ao fim. O vídeo de IA do dia e o De IA ✨ só ganham o formato com o OK dele à
-# amostra. Escolha do Rafael (P261 1): DECISOES.md, Shopee Vídeo.
+# O formato mãos e voz (P261 1, 20/11/2026), como o vídeo que o Rafael mandou ("foco mais no produto em si"): só as
+# mãos de quem usa o produto, sem rosto, a câmera sempre nele, e uma voz contando do começo ao fim. Primeiro numa
+# amostra (amostra --longa --maos-e-voz); com o "Está muito bom o vídeo" dele à amostra nº 7 e a P262 (20/11), entra
+# entre os formatos que a IA escolhe pelo produto no vídeo de IA do dia e no De IA ✨. Escolhas do Rafael (P261 1 e
+# P262): DECISOES.md, Shopee Vídeo.
 ESTILO_DAS_MAOS_E_VOZ = "maos_e_voz"
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
-           ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada (16 s)",
+           ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada",
            ESTILO_DO_UNBOXING: "unboxing: as mãos abrindo a caixa com o produto, sem rosto e sem fala (16 s)",
            ESTILO_DA_COMEDIA: "comédia: um personagem numa situação engraçada com o produto, e depois vendendo (16 s)",
-           ESTILO_DAS_MAOS_E_VOZ: "mãos e voz: só as mãos usando o produto, com uma voz contando (16 s)"}
+           ESTILO_DAS_MAOS_E_VOZ: "mãos e voz: só as mãos usando o produto, com uma voz contando"}
+# A duração do vídeo de IA, decidida vídeo a vídeo (P262, 20/11/2026: o Rafael viu que o silêncio no meio dos vídeos
+# de 16 s "tira o gancho do vídeo" e pediu: "eu gostaria q vc decidisse oq seria melhor, para cada vídeo o meu robô
+# decidisse se iria manter, cortar ou fazer 8 seg"). Antes do Gerar, a IA que escolhe o formato escolhe também 8 s
+# (um Gerar só, sem o Estender: o gancho, a vantagem e a chamada falados do começo ao fim) ou 16 s (o uso com o
+# resultado, mais de uma vantagem, o unboxing e a comédia, sempre de 16 s); na dúvida, 8 s, que prendem mais. Com o
+# vídeo pronto, o servidor ouve a fala e corta o silêncio de mais de PARADO_MAXIMO s (cortar_o_parado) ou mantém o
+# vídeo inteiro (decidir_o_silencio). Escolha do Rafael (P262): DECISOES.md, Shopee Vídeo.
+DURACAO_CURTA = 8
+DURACAO_LONGA = 16
+# O corte que deixaria o vídeo com menos que isto não sai: quase sem fala, o vídeo fica inteiro, e o Rafael decide na
+# aprovação.
+DURACAO_MINIMA_DO_CORTE = 6.0
 ESTILO_PADRAO = "demonstracao"
 # Quantos estilos dos últimos vídeos a IA recebe, para variar (o Rafael pediu vídeos variados, "para não
 # ficar um padrão, para ser mais orgânico", 15/11/2026).
@@ -342,15 +360,19 @@ _COMECO_DO_VENDEDOR = (
     '"...", "fala": "...", "cena": "..."}}\n'
     + REGRAS_DA_FOTO
 )
-# O fim do pedido de 16 s, igual nos dois jeitos da fala.
-_FIM_DO_VENDEDOR = (
-    "- fala: tudo o que a pessoa fala, em português, as duas partes juntas, como vai sair no vídeo.\n"
+# A cena e as regras da fala, iguais no pedido de 16 s e no de 8 s (P262).
+_REGRAS_DA_FALA = (
     "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
     "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
     "que a IA de vídeo embola), sem marca, sem preço e sem prometer o que o produto não faz. Nada de zombar do "
     "corpo, da aparência ou de um grupo de ninguém (as diretrizes punem humilhação e ódio), e nada perigoso, "
     "nojento ou com criança. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos."
 )
+# O fim do pedido de 16 s, igual nos dois jeitos da fala.
+_FIM_DO_VENDEDOR = ("- fala: tudo o que a pessoa fala, em português, as duas partes juntas, como vai sair no vídeo.\n"
+                    + _REGRAS_DA_FALA)
+# O fim do pedido de 8 s (P262), com a fala de uma parte só.
+_FIM_DO_CURTO = "- fala: tudo o que a pessoa fala, em português, como vai sair no vídeo.\n" + _REGRAS_DA_FALA
 # A 2ª parte do vendedor (o Estender), igual no pedido pela foto do anúncio e no pela imagem do personagem (P260 1).
 _CONTINUACAO_DO_VENDEDOR = (
     "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
@@ -370,15 +392,17 @@ PEDIDO_DO_VENDEDOR = _COMECO_DO_VENDEDOR + (
 # O pedido de 16 s com a fala do começo ao fim de cada parte (P255 1): o resto igual ao PEDIDO_DO_VENDEDOR (só segurar,
 # virar e apontar o produto, no mesmo lugar e enquadramento, com a câmera parada), sem o "depois, calada". Por enquanto
 # só na amostra (amostra --longa --fala-inteira).
-PEDIDO_DO_VENDEDOR_FALANDO = _COMECO_DO_VENDEDOR + (
-    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos: a pessoa olha para a câmera, segura o produto "
-    "da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
-    "trocado) e bem à vista, e fala do 1º segundo até por volta dos 7 segundos, sem ficar calada no meio, entre "
-    f"aspas, em português do Brasil, 2 frases curtas com até {PALAVRAS_DA_FALA_INTEIRA} palavras ao todo: o gancho "
-    "(uma dor que o produto resolve, uma pergunta ou uma surpresa) e uma vantagem que se vê no produto (por exemplo: "
-    "\"Orelha rasgada? Nunca mais! Esse aqui fica firme o dia inteiro.\"); enquanto fala, aproxima o produto da "
-    "câmera, vira devagar e aponta o detalhe. Escreva no pedido que ela fala sem parar até perto do fim, sem pausa "
-    "longa. Numa cena real do Brasil, com luz natural, fotorrealista, a câmera parada na altura do peito.\n"
+# A fala da 1ª parte do vendedor de 16 s falando do começo ao fim, igual no pedido pela foto do anúncio e no pela
+# imagem do personagem (P262).
+_FALA_DA_1A_PARTE = (
+    "fala do 1º segundo até por volta dos 7 segundos, sem ficar calada no meio, entre aspas, em português do Brasil, "
+    f"2 frases curtas com até {PALAVRAS_DA_FALA_INTEIRA} palavras ao todo: o gancho (uma dor que o produto resolve, "
+    "uma pergunta ou uma surpresa) e uma vantagem que se vê no produto (por exemplo: \"Orelha rasgada? Nunca mais! "
+    "Esse aqui fica firme o dia inteiro.\"); enquanto fala, aproxima o produto da câmera, vira devagar e aponta o "
+    "detalhe. Escreva no pedido que ela fala sem parar até perto do fim, sem pausa longa."
+)
+# A 2ª parte (o Estender) do vendedor de 16 s falando do começo ao fim, igual nos dois pedidos (P262).
+_CONTINUACAO_FALANDO = (
     "- continuacao: em inglês, até 90 palavras, os 8 segundos seguintes, continuando o mesmo plano sem corte, no "
     "mesmo lugar e enquadramento, com a mesma pessoa, a mesma roupa e o mesmo produto, idêntico: ela continua "
     "falando do 1º segundo até por volta dos 7 segundos, sem ficar calada no meio, entre aspas, em português do "
@@ -386,9 +410,47 @@ PEDIDO_DO_VENDEDOR_FALANDO = _COMECO_DO_VENDEDOR + (
     "produto e uma chamada curta para comprar (por exemplo: \"Nada gruda e limpa num instante. Garanta já o seu "
     "hoje!\"); enquanto fala, aponta e mostra de perto a vantagem, só virando o produto ou aproximando-o da câmera. "
     "Escreva no pedido que ela fala sem parar até perto do fim, sem pausa longa.\n"
-) + _FIM_DO_VENDEDOR
+)
+PEDIDO_DO_VENDEDOR_FALANDO = _COMECO_DO_VENDEDOR + (
+    "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos: a pessoa olha para a câmera, segura o produto "
+    "da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou "
+    f"trocado) e bem à vista, e {_FALA_DA_1A_PARTE} Numa cena real do Brasil, com luz natural, fotorrealista, a câmera "
+    "parada na altura do peito.\n"
+) + _CONTINUACAO_FALANDO + _FIM_DO_VENDEDOR
+# O pedido do vídeo de 8 s (P262): um Gerar só, sem o Estender, com a pessoa vendendo o produto e falando do 1º ao
+# último segundo (o gancho, a vantagem que se vê e a chamada), com os cuidados contra as alucinações da P248 1.
+_COMECO_DO_VENDEDOR_CURTO = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A imagem é a foto oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo "
+    "de 8 segundos, em pé (9:16) e com som, a partir dessa foto. Uma pessoa comum, brasileira, vende o produto "
+    "falando com quem assiste do 1º ao último segundo, sem pausa: o gancho, a vantagem que se vê e a chamada para "
+    "comprar. A IA de vídeo inventa coisas quando a cena pede demais; por isso, a pessoa só segura o produto, vira "
+    "devagar e aponta para ele, sem abrir, fechar, desmontar, encaixar, despejar, cozinhar, vestir ou trocar o "
+    "produto de mão, e ele aparece desde o 1º quadro do jeito que é usado (vestido, montado, no lugar), sem nada "
+    "mudar de estado; os 8 segundos ficam no mesmo lugar, com o mesmo fundo e o mesmo enquadramento e a câmera "
+    "parada, sem corte e sem aparecer comida, objeto ou pessoa nova (se o produto pede um lugar para ser mostrado, "
+    "como o fogão, a pia ou a cama, o vídeo já começa lá). Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "fala": "...", '
+    '"cena": "..."}}\n'
+    + REGRAS_DA_FOTO
+)
+# A fala do vídeo de 8 s do vendedor, igual no pedido pela foto do anúncio e no pela imagem do personagem (P260 1).
+_FALA_DO_CURTO = (
+    "fala do 1º segundo até perto do fim, sem ficar calada, entre aspas, em português do Brasil, 2 ou 3 frases "
+    f"curtas com até {PALAVRAS_DA_FALA_INTEIRA} palavras ao todo: o gancho (uma dor que o produto resolve, uma "
+    "pergunta ou uma surpresa), a vantagem que se vê no produto e uma chamada curta para comprar (por exemplo: "
+    "\"Orelha rasgada? Esse fica firme o dia todo. Garanta já o seu!\"); enquanto fala, aproxima o produto da "
+    "câmera, vira devagar e aponta o detalhe. Escreva no pedido que ela fala sem parar do começo ao fim, sem pausa."
+)
+PEDIDO_DO_VENDEDOR_CURTO = _COMECO_DO_VENDEDOR_CURTO + (
+    "- prompt: em inglês, até 90 palavras, os 8 segundos: a pessoa olha para a câmera, segura o produto da foto, "
+    "idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou trocado) e "
+    f"bem à vista, e {_FALA_DO_CURTO} Numa cena real do Brasil, com luz natural, fotorrealista, a câmera parada na "
+    "altura do peito.\n"
+) + _FIM_DO_CURTO
 # A escolha do formato do vídeo de 16 s pelo produto, só entre os que podem sair agora (pedido_do_formato): o
-# vendedor, o unboxing (P256 2) e a comédia (P251 1).
+# vendedor, o unboxing (P256 2) e a comédia (P251 1); no vídeo de IA do dia e no De IA ✨, também o mãos e voz e a
+# duração, 8 ou 16 s (P262).
 _FORMATO_DO_VENDEDOR = (
     "\"vendedor\" (uma pessoa comum segura o produto e fala dele com quem assiste, mostrando as vantagens de perto: "
     "bom para o produto que precisa de explicação, como utilidades, aparelhos e o que resolve um problema)")
@@ -401,12 +463,26 @@ _FORMATO_DA_COMEDIA = (
     "depois mostra o produto e vende: só quando o produto pede mesmo uma situação engraçada; na dúvida, o vendedor, "
     "que é o da maioria dos vídeos. A graça é da situação e da reação, nunca de zombar do corpo, da aparência ou de "
     "um grupo de ninguém)")
+_FORMATO_DAS_MAOS_E_VOZ = (
+    "\"maos_e_voz\" (só as mãos de quem usa o produto, sem rosto, a câmera sempre nele, e uma voz contando do começo "
+    "ao fim: bom para o produto que se mostra fazendo, com um gesto simples e o resultado logo à vista, como "
+    "luminárias, umidificadores, organizadores, utensílios e aparelhos pequenos)")
 PEDIDO_DO_FORMATO = (
     "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil. A imagem é a foto do anúncio do "
-    "produto \"{nome}\". Escolha o formato do vídeo de 16 segundos feito por IA que mais combina com este produto e "
-    "mais faz quem está rolando o feed parar e comprar: {opcoes}. Responda só com um JSON, sem nada antes ou depois:\n"
-    '{{"formato": {nomes}, "motivo": "o porquê, em poucas palavras"}}'
+    "produto \"{nome}\". Escolha o formato do vídeo {de_16_s}feito por IA que mais combina com este produto e mais "
+    "faz quem está rolando o feed parar e comprar: {opcoes}.{duracao} Responda só com um JSON, sem nada antes ou "
+    "depois:\n"
+    '{{"formato": {nomes}, {campo}"motivo": "o porquê, em poucas palavras"}}'
 )
+# A escolha da duração junto com a do formato (P262): no vídeo de IA do dia e no De IA ✨.
+TRECHO_DA_DURACAO = (
+    " Escolha também a duração: 8 segundos quando o produto se entende num olhar e o gancho, a vantagem e a chamada "
+    f"para comprar cabem em até {PALAVRAS_DA_FALA_INTEIRA} palavras faladas sem pausa (acessórios, beleza, roupa, "
+    "decoração, utilidades simples), ou 16 segundos quando ele precisa ser mostrado em uso, com o resultado à vista, "
+    "ou tem mais de uma vantagem que se vê (aparelhos, limpeza, cozinha, ferramentas). O vídeo curto prende mais e "
+    "não fica com silêncio no meio: na dúvida, 8 segundos. O unboxing e a comédia têm sempre 16 segundos."
+)
+CAMPO_DA_DURACAO = '"duracao": 8 ou 16, '
 # O pedido do unboxing de 16 s (P256 2), com os cuidados contra as alucinações da P248 1: o produto aparece inteiro
 # e do jeito que vem, nada muda de estado, as mãos só abrem a caixa, levantam e viram o produto, e os 16 s ficam no
 # mesmo lugar, sem corte. Sem fala: a música de fundo vai no lugar do som na nossa edição.
@@ -481,6 +557,41 @@ PEDIDO_DAS_MAOS_E_VOZ = (
     "sem prometer o que o produto não faz. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; "
     "nada perigoso, nojento ou com criança."
 )
+# O formato mãos e voz em 8 s (P262): um Gerar só, com um uso, o resultado logo à vista e a voz do 1º ao último
+# segundo (o gancho, a vantagem e a chamada).
+PEDIDO_DAS_MAOS_E_VOZ_CURTO = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A imagem é a foto oficial do anúncio do produto \"{nome}\". O Google Flow vai gerar um vídeo "
+    "de 8 segundos, em pé (9:16) e com som, a partir dessa foto. É uma demonstração filmada pelos olhos de quem usa "
+    "o produto (primeira pessoa): só as mãos aparecem, sem rosto, com a câmera na mão e sempre no produto, numa casa "
+    "simples e arrumada do Brasil, com a luz do dia; por cima, a voz de uma pessoa comum, brasileira e animada, "
+    "conta do 1º ao último segundo, como quem mostra uma descoberta para uma amiga (a narração de quem filma, sem "
+    "ninguém falando na tela). A IA de vídeo inventa coisas quando a cena pede demais; por isso, o produto aparece "
+    "inteiro, idêntico ao da foto, sem mudar de forma, cor ou tamanho; as mãos fazem um uso só, o mais simples do "
+    "produto, com um gesto curto (apertar, ligar, encher, passar, colocar no lugar), sem montar, desmontar, cortar, "
+    "cozinhar ou vestir, e o resultado aparece logo, de perto (por exemplo, a luz acesa, a fumacinha saindo, a "
+    "superfície limpa); os 8 segundos ficam no mesmo lugar, sem aparecer pessoa, objeto ou produto novo, com no "
+    "máximo um corte, para um plano mais de perto do mesmo produto. Responda só com um JSON, sem nada antes ou "
+    "depois:\n"
+    '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "fala": "...", '
+    '"cena": "..."}}\n'
+    + REGRAS_DA_FOTO +
+    "- prompt: em inglês, até 90 palavras, os 8 segundos, em primeira pessoa: as mãos mostram o produto da foto, "
+    "idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou trocado), "
+    "bem perto da câmera, e fazem o uso mais simples dele, com o resultado de perto; a voz fala do 1º segundo até "
+    "perto do fim, sem pausa, entre aspas, em português do Brasil, 2 ou 3 frases curtas com até "
+    f"{PALAVRAS_DA_FALA_INTEIRA} palavras ao todo: o gancho (uma surpresa, uma dor que o produto resolve ou uma "
+    "pergunta), a vantagem que se vê e a chamada \"clica no carrinho laranja\" (por exemplo: \"Gente, olha esse "
+    "umidificador! O quarto fica cheiroso na hora. Clica no carrinho laranja!\"). Escreva no pedido: Brazilian "
+    "Portuguese voice-over narration from the person filming, no one speaks on camera, no face, authentic handheld "
+    "smartphone footage, natural daylight, realistic home, no subtitles, no text.\n"
+    "- fala: tudo o que a voz fala, em português, como vai sair no vídeo.\n"
+    "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
+    "A fala é natural, com palavras simples do dia a dia (sem número, sigla, palavra estrangeira ou nome difícil, "
+    "que a IA de vídeo embola), sem marca, sem preço, sem dizer que todo mundo está comprando ou que vai acabar e "
+    "sem prometer o que o produto não faz. Sem texto na tela, sem legenda, sem logotipo novo e sem outros produtos; "
+    "nada perigoso, nojento ou com criança."
+)
 # Bebida alcoólica fica de lado enquanto as diretrizes a deixam em espera (P111): o vídeo nem é gerado, para não
 # gastar o crédito de um vídeo que o rascunho deixaria de lado.
 TRECHO_DA_BEBIDA = ", ou é bebida alcoólica (em espera nas diretrizes)"
@@ -548,13 +659,23 @@ def evitar_os_recentes(recentes):
             "se ele também combinar com este produto, para os vídeos não ficarem num padrão só.")
 
 
-def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False):
+def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False, curto=False):
     """
     {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
     veio num JSON ou disse que serve sem escrever o pedido. longo: a resposta do pedido de 16 s (P246 1), com a
     "continuacao" (o pedido do Estender, sem ela também None) e a "fala", no estilo do vendedor; unboxing: a do
-    unboxing de 16 s (P256 2), sem fala; maos_e_voz: a do formato mãos e voz (P261 1), com a fala da voz.
+    unboxing de 16 s (P256 2), sem fala; maos_e_voz: a do formato mãos e voz (P261 1), com a fala da voz. curto: a
+    do pedido de 8 s (P262), do vendedor ou do mãos e voz, com a "fala" (sem ela, None) e sem a continuação.
     """
+    if curto:
+        resposta = ler_resposta(texto)
+        if not resposta:
+            return None
+        achado = json.loads(re.search(r"\{.*\}", texto, re.S).group(0))
+        fala = " ".join(str(achado.get("fala") or "").split())[:400]
+        if resposta["serve"] and not fala:
+            return None
+        return dict(resposta, estilo=ESTILO_DAS_MAOS_E_VOZ if maos_e_voz else ESTILO_DO_VENDEDOR, fala=fala)
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
         return None
@@ -599,36 +720,58 @@ def jpeg_sem_metadados(dados):
         return None
 
 
-def pedido_do_formato(nome, com_unboxing=True, com_comedia=False):
-    """O pedido da escolha do formato do vídeo de 16 s, só com os formatos que podem sair agora (o vendedor sempre)."""
-    formatos = ([("vendedor", _FORMATO_DO_VENDEDOR)] + ([("unboxing", _FORMATO_DO_UNBOXING)] if com_unboxing else [])
+def pedido_do_formato(nome, com_unboxing=True, com_comedia=False, com_maos_e_voz=False, com_duracao=False):
+    """
+    O pedido da escolha do formato do vídeo de IA, só com os formatos que podem sair agora (o vendedor sempre);
+    com_duracao: a escolha da duração também, 8 ou 16 s (P262, TRECHO_DA_DURACAO).
+    """
+    formatos = ([("vendedor", _FORMATO_DO_VENDEDOR)]
+                + ([("maos_e_voz", _FORMATO_DAS_MAOS_E_VOZ)] if com_maos_e_voz else [])
+                + ([("unboxing", _FORMATO_DO_UNBOXING)] if com_unboxing else [])
                 + ([("comedia", _FORMATO_DA_COMEDIA)] if com_comedia else []))
 
     def juntar(partes):
-        return ", ".join(partes[:-1]) + " ou " + partes[-1]
+        return ", ".join(partes[:-1]) + " ou " + partes[-1] if len(partes) > 1 else partes[0]
     return PEDIDO_DO_FORMATO.format(nome=nome, opcoes=juntar([texto for _, texto in formatos]),
-                                    nomes=juntar([f'"{chave}"' for chave, _ in formatos]))
+                                    nomes=juntar([f'"{chave}"' for chave, _ in formatos]),
+                                    de_16_s="" if com_duracao else "de 16 segundos ",
+                                    duracao=TRECHO_DA_DURACAO if com_duracao else "",
+                                    campo=CAMPO_DA_DURACAO if com_duracao else "")
 
 
-def formato_do_video(nome, foto, com_unboxing=True, com_comedia=False):
+def formato_do_video(nome, foto, com_unboxing=True, com_comedia=False, com_maos_e_voz=False, com_duracao=False):
     """
-    O formato do vídeo de 16 s que a IA escolhe pela foto do anúncio (já em JPEG) e pelo nome, entre os que podem sair
-    agora: ESTILO_DO_UNBOXING (P256 2), ESTILO_DA_COMEDIA (P251 1) ou ESTILO_DO_VENDEDOR, que vale também quando ela
-    não responde num JSON ou responde um formato que não podia sair.
+    (o formato, a duração em segundos, o porquê da IA) do vídeo de IA que a IA escolhe pela foto do anúncio (já em
+    JPEG) e pelo nome, entre os formatos que podem sair agora: ESTILO_DO_UNBOXING (P256 2), ESTILO_DA_COMEDIA (P251 1),
+    ESTILO_DAS_MAOS_E_VOZ (P262) ou ESTILO_DO_VENDEDOR, que vale também quando ela não responde num JSON ou responde um
+    formato que não podia sair. com_duracao (P262): o vendedor e o mãos e voz saem com 8 s, a não ser que a IA diga 16
+    ("na dúvida, 8 segundos"); o unboxing e a comédia, e tudo sem com_duracao, com 16 s.
     """
-    texto = asyncio.run(api_gemini.gerar_texto_gemini(pedido_do_formato(nome, com_unboxing, com_comedia),
-                                                      imagens=[(foto, "image/jpeg")]))
+    texto = asyncio.run(api_gemini.gerar_texto_gemini(
+        pedido_do_formato(nome, com_unboxing, com_comedia, com_maos_e_voz, com_duracao),
+        imagens=[(foto, "image/jpeg")]))
     achado = re.search(r"\{.*\}", texto or "", re.S)
     try:
-        formato = json.loads(achado.group(0)).get("formato") if achado else ""
-    except (ValueError, AttributeError):
-        formato = ""
-    formato = unicodedata.normalize("NFKD", str(formato or "")).encode("ascii", "ignore").decode().strip().lower()
-    if com_unboxing and formato == ESTILO_DO_UNBOXING:
-        return ESTILO_DO_UNBOXING
-    if com_comedia and formato == "comedia":
-        return ESTILO_DA_COMEDIA
-    return ESTILO_DO_VENDEDOR
+        dados = json.loads(achado.group(0)) if achado else {}
+    except ValueError:
+        dados = {}
+    if not isinstance(dados, dict):
+        dados = {}
+    pedido = unicodedata.normalize("NFKD", str(dados.get("formato") or "")).encode("ascii", "ignore").decode()
+    pedido = pedido.strip().lower()
+    if com_unboxing and pedido == ESTILO_DO_UNBOXING:
+        formato = ESTILO_DO_UNBOXING
+    elif com_comedia and pedido == "comedia":
+        formato = ESTILO_DA_COMEDIA
+    elif com_maos_e_voz and pedido.replace(" ", "_") == ESTILO_DAS_MAOS_E_VOZ:
+        formato = ESTILO_DAS_MAOS_E_VOZ
+    else:
+        formato = ESTILO_DO_VENDEDOR
+    duracao = DURACAO_LONGA
+    if com_duracao and formato in (ESTILO_DO_VENDEDOR, ESTILO_DAS_MAOS_E_VOZ):
+        pedida = re.search(r"\d+", str(dados.get("duracao") or ""))
+        duracao = DURACAO_LONGA if pedida and int(pedida.group(0)) == DURACAO_LONGA else DURACAO_CURTA
+    return formato, duracao, " ".join(str(dados.get("motivo") or "").split())[:160]
 
 
 def ultimo_foi_unboxing():
@@ -637,7 +780,7 @@ def ultimo_foi_unboxing():
 
 
 def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False,
-                          com_comedia=False, maos_e_voz=False):
+                          com_comedia=False, maos_e_voz=False, da_producao=False):
     """
     O pedido do vídeo para o anúncio já em mãos (o link, o nome e os bytes da foto do anúncio): a foto sem os
     dados de câmera e o que a IA escreveu, num estilo diferente dos últimos vídeos quando combina (evitar, o
@@ -650,29 +793,36 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     escolhe pelo produto entre o vendedor, o unboxing (P256 2) e a comédia (P251 1) (formato_do_video); o do unboxing
     vem sem fala. Na comédia, o pedido daqui é o do vendedor, pela foto do anúncio: o da comédia sai da imagem do
     personagem com o produto (imagem_da_producao), e este fica para quando a imagem não vale. maos_e_voz (só no de
-    16 s): o pedido do formato mãos e voz (P261 1, por enquanto só a amostra), sem a escolha do formato.
+    16 s): o pedido do formato mãos e voz (P261 1, a amostra), sem a escolha do formato. da_producao (o vídeo de IA
+    do dia e o De IA ✨, P262): a IA escolhe também o mãos e voz e a duração; o de 8 s ("duracao_pedida" 8) vem sem
+    a continuação, com a fala do começo ao fim, e o de 16 s do vendedor, com a fala do começo ao fim de cada parte.
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
         return None, None
-    formato = ESTILO_DO_VENDEDOR
+    formato, duracao, motivo_da_duracao = ESTILO_DO_VENDEDOR, DURACAO_LONGA, ""
     if longo and maos_e_voz:
         formato = ESTILO_DAS_MAOS_E_VOZ
-    elif longo and not fala_inteira and (com_unboxing or com_comedia):
-        formato = formato_do_video(nome, foto, com_unboxing, com_comedia)
+    elif longo and not fala_inteira and (com_unboxing or com_comedia or da_producao):
+        formato, duracao, motivo_da_duracao = formato_do_video(nome, foto, com_unboxing, com_comedia,
+                                                               com_maos_e_voz=da_producao, com_duracao=da_producao)
+    curto = longo and duracao == DURACAO_CURTA
     unboxing = formato == ESTILO_DO_UNBOXING
     maos = formato == ESTILO_DAS_MAOS_E_VOZ
     if unboxing:
         pedido = PEDIDO_DO_UNBOXING
     elif maos:
-        pedido = PEDIDO_DAS_MAOS_E_VOZ
+        pedido = PEDIDO_DAS_MAOS_E_VOZ_CURTO if curto else PEDIDO_DAS_MAOS_E_VOZ
+    elif curto:
+        pedido = PEDIDO_DO_VENDEDOR_CURTO
     elif longo:
-        pedido = PEDIDO_DO_VENDEDOR_FALANDO if fala_inteira else PEDIDO_DO_VENDEDOR
+        # Na produção, o de 16 s fala do começo ao fim de cada parte, sem o "depois, calada" (P262).
+        pedido = PEDIDO_DO_VENDEDOR_FALANDO if fala_inteira or da_producao else PEDIDO_DO_VENDEDOR
     else:
         pedido = PEDIDO_DA_IA
     resposta = ler_resposta(asyncio.run(api_gemini.gerar_texto_gemini(
         pedido.format(nome=nome, evitar=evitar, bebida=TRECHO_DA_BEBIDA if assistente.BEBIDA_EM_ESPERA else ""),
-        imagens=[(foto, "image/jpeg")])), longo=longo, unboxing=unboxing, maos_e_voz=maos)
+        imagens=[(foto, "image/jpeg")])), longo=longo and not curto, unboxing=unboxing, maos_e_voz=maos, curto=curto)
     if not resposta:
         return None, None
     if not resposta["serve"]:
@@ -681,8 +831,12 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
         return None, MUDA_NA_IA
     escolhido = {"link": link, "nome": nome, "foto": foto, "estilo": resposta["estilo"], "prompt": resposta["prompt"],
                  "cena": resposta["cena"]}
-    if longo:
+    if curto:
+        escolhido.update(fala=resposta["fala"], formato=formato)
+    elif longo:
         escolhido.update(continuacao=resposta["continuacao"], fala=resposta["fala"], formato=formato)
+    if da_producao and longo:
+        escolhido.update(duracao_pedida=duracao, motivo_da_duracao=motivo_da_duracao)
     return escolhido, True
 
 
@@ -1902,11 +2056,13 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
     servidor. so_baixar=True: o vídeo já foi gerado e só falta baixar. Devolve True (o pedido pronto,
     com sem_gerar, ou o vídeo baixado) ou False (o vídeo não ficou pronto a tempo: a próxima vez
     baixa); Parada com o passo que parou. A foto sai da galeria no fim, dê certo ou não.
-    guardar_telas: a tela da espera do vídeo vai aos casos de minuto em minuto (esperar_o_video).
+    guardar_telas: a tela da espera do vídeo vai aos casos de minuto em minuto (esperar_o_video). A foto do Gerar é a
+    da imagem do personagem com o produto, quando ela valeu ("foto_do_video", P260 1, no de 8 s da P262), ou a do
+    anúncio.
     """
     nome_na_galeria = ""
     if not so_baixar:
-        nome_na_galeria = foto_na_galeria(d, pedido["foto"])
+        nome_na_galeria = foto_na_galeria(d, pedido.get("foto_do_video") or pedido["foto"])
         if not nome_na_galeria:
             raise Parada("celular: a foto do produto não apareceu na galeria; nada foi tocado no Flow")
     try:
@@ -1938,10 +2094,11 @@ def no_flow(d, pedido, modelo, custo, local, marcar, sem_gerar=False, so_baixar=
         remoto, resolucao = baixar(d)
         puxar(d, remoto, local)
         largura, altura = asyncio.run(videos.dimensoes(local, timeout=30))
-        marcar(estado="baixado", arquivo=local, resolucao=resolucao,
+        segundos = videos.duracao(local) or 0.0
+        marcar(estado="baixado", arquivo=local, resolucao=resolucao, duracao=round(segundos),
                tamanho=f"{largura}x{altura}" if largura and altura else "")
         print(f"Flow: vídeo baixado ({resolucao or 'sem a janela da resolução'}, "
-              f"{os.path.getsize(local) / 1e6:.1f} MB, {videos.duracao(local):.0f} s)")
+              f"{os.path.getsize(local) / 1e6:.1f} MB, {segundos:.0f} s)")
         return True
     finally:
         tirar_da_galeria(d, nome_na_galeria)
@@ -2236,8 +2393,9 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     vídeos do robô, "id", o produto, "item" e "valor", e de onde ele veio, "origem"), no estado "escolhido". A foto
     vai a um arquivo ao lado dos vídeos; o banco fica com o caminho. O pedido de 16 s (P247 1), com a "continuacao"
     do Estender, fica "longa", com a fala e o formato (o vendedor, o unboxing ou a comédia), fora da lista dos estilos
-    dos últimos vídeos, a das amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. do_botao: o
-    vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
+    dos últimos vídeos, a das amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. O de 8 s que a
+    IA escolheu pelo produto (P262) fica "curta", com a fala e o formato, também fora dela. do_botao: o vídeo pedido no
+    De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
     """
     recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar,
                        **({"do_botao": True} if do_botao else {}))
@@ -2247,6 +2405,8 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
         arquivo.write(escolhido["foto"])
     modelo, custo = MODELO_DA_PRODUCAO
     longa = bool(escolhido.get("continuacao"))
+    # O de 8 s escolhido pela IA (P262): um Gerar só, como o de antes da P247 1, mas com a fala e o formato.
+    curta = not longa and escolhido.get("duracao_pedida") == DURACAO_CURTA
     guardar_producao(id_video=escolhido["id"], link=escolhido["link"], nome=escolhido["nome"],
                      item=escolhido.get("item", ""), valor=escolhido.get("valor"), origem=escolhido.get("origem", ""),
                      foto=foto, estilo=escolhido["estilo"], prompt=escolhido["prompt"], cena=escolhido["cena"],
@@ -2256,8 +2416,13 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
                         if escolhido.get("nivel") else {}),
                      **({"longa": True, "continuacao": escolhido["continuacao"], "fala": escolhido.get("fala", "")}
                         if longa else {}),
-                     **({"formato": escolhido["formato"]} if longa and escolhido.get("formato") else {}))
-    if not longa:
+                     **({"curta": True, "fala": escolhido.get("fala", "")} if curta else {}),
+                     **({"formato": escolhido["formato"]} if (longa or curta) and escolhido.get("formato") else {}),
+                     # A duração que a IA escolheu e o porquê (P262), para o aviso e o rascunho.
+                     **({"duracao_pedida": escolhido["duracao_pedida"],
+                         "motivo_da_duracao": escolhido.get("motivo_da_duracao", "")}
+                        if escolhido.get("duracao_pedida") else {}))
+    if not longa and not curta:
         guardar(estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
     return producao()
 
@@ -2267,10 +2432,10 @@ def producao_no_celular(d, atual):
     O vídeo do dia no Flow, na rodada do robô (a trava e a tela já conferidas por ele). O de 16 s ("longa", P247
     1): o Gerar dos 8 s no MODELO_DA_PRODUCAO, o Estender e o Baixar, em etapas que a rodada seguinte retoma pelo
     estado (no_flow_longo); antes do Gerar do vendedor e da comédia, a imagem do personagem com o produto (P260 1,
-    imagem_da_producao): valendo, o vídeo sai dela; sem ela, pela foto do anúncio, como antes. O de 8 s (o andamento
-    de antes da P247 1): o Gerar e o Baixar, ou só o Baixar do que já foi gerado ("gerando"). True com o vídeo no
-    servidor ("baixado"), False quando ele não ficou pronto a tempo (a próxima rodada continua); Parada com o passo
-    que parou, com o caso guardado.
+    imagem_da_producao): valendo, o vídeo sai dela; sem ela, pela foto do anúncio, como antes. O de 8 s (o "curta"
+    que a IA escolheu, P262, com a imagem do personagem no vendedor, e o andamento de antes da P247 1): o Gerar e o
+    Baixar, ou só o Baixar do que já foi gerado ("gerando"). True com o vídeo no servidor ("baixado"), False quando
+    ele não ficou pronto a tempo (a próxima rodada continua); Parada com o passo que parou, com o caso guardado.
     """
     local = os.path.join(PASTA, f"producao_{atual['data']}.mp4")
     try:
@@ -2312,18 +2477,91 @@ def _marcar_a_producao(**campos):
 def conferir_a_producao():
     """
     A conferência da IA do vídeo do dia com a foto do anúncio (conferir_o_video): "pronto" ou, com outro
-    produto no vídeo, "descartado" (nunca vira rascunho). No pronto de 16 s, o servidor ouve também a fala e a compara
-    com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o vídeo; o aviso vai no
-    rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Devolve o estado novo.
+    produto no vídeo, "descartado" (nunca vira rascunho). No pronto com fala (o de 16 s e o de 8 s da P262), o servidor
+    ouve a fala e a compara com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o
+    vídeo; o aviso vai no rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Com as mesmas palavras
+    ouvidas, decide o silêncio (P262, decidir_o_silencio): cortado, o rascunho sai do vídeo sem ele ("arquivo"; o
+    inteiro fica em "arquivo_inteiro"). Devolve o estado novo.
     """
     atual = producao()
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
     estado = "descartado" if conferencia["mesmo"] is False else "pronto"
-    fala = {}
-    if estado == "pronto" and atual.get("longa") and atual.get("fala"):
-        fala = {"fala_conferida": conferir_a_fala(atual["arquivo"], atual["fala"])}
-    guardar_producao(estado=estado, conferencia=conferencia, conferido_em=agora(), **fala)
+    extra = {}
+    if estado == "pronto" and (atual.get("longa") or atual.get("curta")) and atual.get("fala"):
+        ouvidas = videos.palavras_faladas(atual["arquivo"])
+        extra["fala_conferida"] = conferir_a_fala(atual["arquivo"], atual["fala"], ouvidas)
+        silencio = decidir_o_silencio(atual["arquivo"], ouvidas)
+        extra["silencio"] = {chave: valor for chave, valor in silencio.items() if chave != "arquivo"}
+        if silencio.get("arquivo"):
+            extra.update(arquivo=silencio["arquivo"], arquivo_inteiro=atual["arquivo"])
+    guardar_producao(estado=estado, conferencia=conferencia, conferido_em=agora(), **extra)
     return estado
+
+
+# Os porquês fixos da decisão do silêncio (P262): vão ao registro e à legenda, sem nada do vídeo.
+SEM_SILENCIO = "sem silêncio de mais de 1 s"
+SEM_OUVIR = "não deu para ouvir a fala"
+SEM_DURACAO = "sem a duração do vídeo"
+SOBRARIA_POUCO = "sobraria pouco vídeo"
+CORTE_FALHOU = "o corte não saiu"
+
+
+def decidir_o_silencio(arquivo, palavras):
+    """
+    O que fazer com o silêncio do vídeo de IA pronto (P262), pelas palavras ouvidas (videos.palavras_faladas):
+    {"decisao": "cortado" ou "mantido", "motivo" (um dos porquês fixos; "" no cortado), "antes" e "depois" (as
+    durações), "cortes" e, no cortado, "arquivo" (o vídeo sem o silêncio, ao lado do inteiro)}. Mantido sem silêncio de
+    mais de PARADO_MAXIMO s, sem ouvir a fala ou ler a duração, quando o corte deixaria menos de
+    DURACAO_MINIMA_DO_CORTE s ou quando o ffmpeg falha.
+    """
+    antes = round(videos.duracao(arquivo) or 0.0, 1)
+    mantido = {"decisao": "mantido", "antes": antes, "depois": antes, "cortes": 0}
+    if palavras is None:
+        return dict(mantido, motivo=SEM_OUVIR)
+    if not antes:
+        return dict(mantido, motivo=SEM_DURACAO)
+    trechos = trechos_sem_o_parado(palavras, antes)
+    if not trechos:
+        return dict(mantido, motivo=SEM_SILENCIO)
+    if sum(fim - inicio for inicio, fim in trechos) < DURACAO_MINIMA_DO_CORTE:
+        return dict(mantido, motivo=SOBRARIA_POUCO)
+    corte = cortar_o_parado(arquivo, palavras)
+    if not corte["arquivo"]:
+        return dict(mantido, motivo=CORTE_FALHOU)
+    return {"decisao": "cortado", "motivo": "", "antes": corte["antes"], "depois": corte["depois"],
+            "cortes": corte["cortes"], "arquivo": corte["arquivo"]}
+
+
+def linha_da_duracao(atual):
+    """
+    A linha da duração do vídeo de IA no aviso e no rascunho (P262): 8 s sem o Estender ou 16 s, com o porquê que a IA
+    deu; "" no andamento sem a duração escolhida (o de antes da P262 e as amostras).
+    """
+    pedida = atual.get("duracao_pedida")
+    if not pedida:
+        return ""
+    porque = atual.get("motivo_da_duracao") or ""
+    if pedida == DURACAO_CURTA:
+        return f"⏱️ 8 s, sem o Estender (a IA escolheu pelo produto{': ' + porque if porque else ''})"
+    if atual.get("formato") in (ESTILO_DO_UNBOXING, ESTILO_DA_COMEDIA):
+        return "⏱️ 16 s, com o Estender (o unboxing e a comédia têm sempre 16 s)"
+    return f"⏱️ 16 s, com o Estender (a IA escolheu pelo produto{': ' + porque if porque else ''})"
+
+
+def linha_do_silencio(atual):
+    """A linha da decisão do silêncio (P262) no aviso e no rascunho; "" sem ela."""
+    silencio = atual.get("silencio") or {}
+    if silencio.get("decisao") == "cortado":
+        return (f"✂️ Silêncio cortado: de {_segundos(silencio['antes'])} para {_segundos(silencio['depois'])} "
+                f"({silencio['cortes']} pedaço(s) parado(s) tirado(s), com um zoom leve depois de cada corte)")
+    if silencio.get("decisao") == "mantido":
+        return {SEM_SILENCIO: "✂️ Sem silêncio para cortar: o vídeo fica inteiro",
+                SEM_OUVIR: "✂️ Silêncio não conferido (não deu para ouvir a fala): o vídeo fica inteiro",
+                SEM_DURACAO: "✂️ Silêncio não conferido (sem a duração do vídeo): o vídeo fica inteiro",
+                SOBRARIA_POUCO: (f"✂️ Silêncio não cortado: sobrariam menos de {_segundos(DURACAO_MINIMA_DO_CORTE)} "
+                                 "de vídeo; ele fica inteiro, para você decidir na aprovação"),
+                }.get(silencio.get("motivo"), "✂️ Silêncio não cortado (o corte não saiu): o vídeo fica inteiro")
+    return ""
 
 
 def video_pronto():
@@ -2339,7 +2577,8 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     As linhas do vídeo de IA no aviso e no texto do rascunho: o modelo, o custo, o estilo, a cena e a conferência do
     Flow (com_a_conferencia=False: sem ela, no aviso do vídeo que outra conferência descartou, P245 1). No de 16 s
     (P247 1), a duração, o custo das duas partes, a fala pedida e a fala que o servidor ouviu (P248 1), e o personagem
-    ou por que o vídeo saiu sem ele (P260 1, linha_do_personagem).
+    ou por que o vídeo saiu sem ele (P260 1, linha_do_personagem). Desde a P262, a duração que a IA escolheu (8 ou
+    16 s, linha_da_duracao) e o silêncio cortado ou mantido (linha_do_silencio).
     """
     conferencia = atual.get("conferencia") or {}
     if conferencia.get("mesmo") is True:
@@ -2354,6 +2593,9 @@ def legenda_da_producao(atual, com_a_conferencia=True):
               if atual.get("longa") and custo > CUSTO_DO_ESTENDER else "")
     linhas = [f"🤖 Feito por IA no Google Flow: {atual.get('modelo', '')}{duracao} ({custo} créditos de IA{partes})",
               f"🎭 Estilo: {ESTILOS.get(atual.get('estilo'), ESTILOS[ESTILO_PADRAO])}"]
+    # A duração que a IA escolheu pelo produto (P262).
+    if linha_da_duracao(atual):
+        linhas.append(linha_da_duracao(atual))
     if linha_do_personagem(atual):
         linhas.append(linha_do_personagem(atual))
     if atual.get("fala"):
@@ -2364,6 +2606,9 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     if atual.get("fala_conferida"):
         # A fala embolada ou cortada não descarta o vídeo: o Rafael decide na aprovação (P248 1).
         linhas.append(texto_da_fala(atual["fala_conferida"]))
+    # O silêncio cortado ou o vídeo mantido inteiro (P262).
+    if linha_do_silencio(atual):
+        linhas.append(linha_do_silencio(atual))
     if conferencia.get("defeitos"):
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     return "\n".join(linhas)
@@ -3068,14 +3313,33 @@ _COMECO_PELA_IMAGEM = (
     "nova. Responda só com um JSON, sem nada antes ou depois:\n"
     '{{"prompt": "...", "continuacao": "...", "fala": "...", "cena": "..."}}\n'
 )
+# O vendedor de 16 s pela imagem fala do começo ao fim de cada parte (P262): o "terminando antes dos 6 segundos;
+# depois, calada" deixava o silêncio no meio que o Rafael viu nos vídeos de IA.
 PEDIDO_DO_VENDEDOR_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
     "- prompt: em inglês, até 90 palavras, os 8 primeiros segundos, a partir da imagem: a pessoa da imagem olha para "
     "a câmera, com o produto como na imagem, idêntico ao da foto do anúncio (mesma forma, cor, material, tamanho, "
-    "quantidade e detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e diz logo no começo o gancho, entre "
-    f"aspas, em português do Brasil, até {PALAVRAS_POR_PARTE} palavras: uma dor que o produto resolve, uma pergunta "
-    "ou uma surpresa (por exemplo: \"Orelha rasgada? Nunca mais!\"), terminando antes dos 6 segundos; depois, calada, "
-    "vira o produto devagar para a câmera. Fotorrealista, com a luz da imagem e a câmera parada.\n"
-) + _CONTINUACAO_DO_VENDEDOR + _FIM_DO_VENDEDOR
+    f"quantidade e detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e {_FALA_DA_1A_PARTE} "
+    "Fotorrealista, com a luz da imagem e a câmera parada.\n"
+) + _CONTINUACAO_FALANDO + _FIM_DO_VENDEDOR
+# O vendedor de 8 s pela imagem (P262): um Gerar só, com a fala do começo ao fim.
+_COMECO_PELA_IMAGEM_CURTO = (
+    "Você é diretor de vídeos curtos de produto para a Shopee Vídeo, no Brasil, e escreve como os vídeos que mais "
+    "vendem no feed. A 1ª imagem é o primeiro quadro do vídeo: {quem}, já com o produto \"{nome}\". A 2ª é a foto "
+    "oficial do anúncio, para o produto ficar idêntico a ela. O Google Flow vai animar a 1ª imagem num vídeo de 8 "
+    "segundos, em pé (9:16) e com som. A IA de vídeo inventa coisas quando a cena pede demais; por isso, a pessoa só "
+    "segura o produto (ou fica com ele no corpo, se na imagem o veste ou usa), vira devagar e aponta para ele, sem "
+    "abrir, fechar, desmontar, encaixar, despejar, cozinhar, vestir, tirar ou trocar o produto de mão, e nada muda de "
+    "estado; os 8 segundos ficam no lugar da imagem, com o mesmo fundo, o mesmo enquadramento e a câmera parada, sem "
+    "corte, sem ir a outro lugar e sem aparecer comida, objeto ou pessoa nova. Responda só com um JSON, sem nada "
+    "antes ou depois:\n"
+    '{{"prompt": "...", "fala": "...", "cena": "..."}}\n'
+)
+PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO = _COMECO_PELA_IMAGEM_CURTO + (
+    "- prompt: em inglês, até 90 palavras, os 8 segundos, a partir da imagem: a pessoa da imagem olha para a câmera, "
+    "com o produto como na imagem, idêntico ao da foto do anúncio (mesma forma, cor, material, tamanho, quantidade e "
+    f"detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e {_FALA_DO_CURTO} Fotorrealista, com a luz da "
+    "imagem e a câmera parada.\n"
+) + _FIM_DO_CURTO
 # A comédia de 16 s (P251 1): na 1ª parte, a situação engraçada, com a graça vinda do jeito do personagem diante do
 # produto e da fala, só com movimentos pequenos; na 2ª, o mesmo personagem, convencido, mostrando o produto e vendendo.
 PEDIDO_DA_COMEDIA_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
@@ -3098,11 +3362,12 @@ PEDIDO_DA_COMEDIA_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
 
 def pede_a_imagem(atual):
     """
-    O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia, antes do
-    Gerar e sem a imagem tentada; o unboxing (sem rosto, P256 2) e o andamento sem o formato (de antes dela), não.
+    O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia e o de 8 s
+    do vendedor (P262), antes do Gerar e sem a imagem tentada; o unboxing e o mãos e voz (sem rosto) e o andamento sem
+    o formato (de antes dela), não.
     """
-    return bool(atual.get("longa") and atual.get("estado") == "escolhido" and not atual.get("imagem")
-                and atual.get("formato") in (ESTILO_DO_VENDEDOR, ESTILO_DA_COMEDIA))
+    return bool((atual.get("longa") or atual.get("curta")) and atual.get("estado") == "escolhido"
+                and not atual.get("imagem") and atual.get("formato") in (ESTILO_DO_VENDEDOR, ESTILO_DA_COMEDIA))
 
 
 def elenco_do_formato(formato, aprovadas=None):
@@ -3116,11 +3381,11 @@ def elenco_do_formato(formato, aprovadas=None):
     return [p for p in PERSONAGENS if p["chave"] in aprovadas and p["chave"] not in SO_NA_COMEDIA]
 
 
-def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False):
+def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False):
     """
     O pedido do vídeo de 16 s pela imagem do personagem com o produto (P260 1), com a foto do anúncio junto: {"estilo",
     "prompt", "continuacao", "fala", "cena"}, no vendedor ou na comédia (P251 1); None sem a resposta da IA ou sem uma
-    das partes (o prompt, a continuação ou a fala).
+    das partes (o prompt, a continuação ou a fala). curto: o de 8 s do vendedor (P262), sem a continuação.
     """
     p = personagem(chave) or {"nome": chave, "resumo": ""}
     descricao = GRACA_NA_COMEDIA.get(chave, p["resumo"]) if comedia else p["resumo"]
@@ -3134,7 +3399,8 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False):
         if not dados:
             return None
         imagens.append((dados, "image/jpeg"))
-    pedido = PEDIDO_DA_COMEDIA_PELA_IMAGEM if comedia else PEDIDO_DO_VENDEDOR_PELA_IMAGEM
+    pedido = (PEDIDO_DA_COMEDIA_PELA_IMAGEM if comedia else PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO if curto
+              else PEDIDO_DO_VENDEDOR_PELA_IMAGEM)
     try:
         texto = asyncio.run(api_gemini.gerar_texto_gemini(
             pedido.format(nome=nome, quem=f"o personagem {p['nome']} ({descricao})"), imagens=imagens))
@@ -3149,10 +3415,13 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False):
         return None
     partes = {campo: " ".join(str(resposta.get(campo) or "").split())
               for campo in ("prompt", "continuacao", "fala", "cena")}
-    if not (partes["prompt"] and partes["continuacao"] and partes["fala"]):
+    if not (partes["prompt"] and (curto or partes["continuacao"]) and partes["fala"]):
         return None
-    return {"estilo": ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR, "prompt": partes["prompt"][:1000],
-            "continuacao": partes["continuacao"][:1000], "fala": partes["fala"][:400], "cena": partes["cena"][:300]}
+    escrito = {"estilo": ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR, "prompt": partes["prompt"][:1000],
+               "fala": partes["fala"][:400], "cena": partes["cena"][:300]}
+    if not curto:
+        escrito["continuacao"] = partes["continuacao"][:1000]
+    return escrito
 
 
 def _sem_a_imagem(motivo, chave="", conferencia=None):
@@ -3168,11 +3437,12 @@ def _sem_a_imagem(motivo, chave="", conferencia=None):
 
 def imagem_da_producao(d, atual):
     """
-    A imagem do personagem com o produto antes do Gerar do vídeo de 16 s (P260 1), com a trava do celular na mão: a
-    escolha do personagem pela IA, a foto de referência na galeria, o saldo do Flow (SemCreditos sem os créditos do
-    vídeo: nem a imagem é feita), a imagem no modo Imagem, sem crédito, e a conferência da IA, refeita uma vez;
-    valendo, o pedido do vídeo pela imagem ("foto_do_video", "personagem" e o pedido novo no andamento). Sem ela, o
-    porquê fica no andamento e o vídeo sai pela foto do anúncio (a parada no Flow fica nos casos). Devolve o andamento.
+    A imagem do personagem com o produto antes do Gerar do vídeo (P260 1; o de 8 s também, P262), com a trava do
+    celular na mão: a escolha do personagem pela IA, a foto de referência na galeria, o saldo do Flow (SemCreditos sem
+    os créditos do vídeo: nem a imagem é feita), a imagem no modo Imagem, sem crédito, e a conferência da IA, refeita
+    uma vez; valendo, o pedido do vídeo pela imagem ("foto_do_video", "personagem" e o pedido novo no andamento). Sem
+    ela, o porquê fica no andamento e o vídeo sai pela foto do anúncio (a parada no Flow fica nos casos). Devolve o
+    andamento.
     """
     formato = atual.get("formato")
     aprovadas = fotos_aprovadas()
@@ -3207,8 +3477,9 @@ def imagem_da_producao(d, atual):
         return _sem_a_imagem("a foto de referência não apareceu na galeria do celular", chave)
     conferencia, feitas, vale = None, 0, False
     try:
-        # O saldo antes da imagem: sem os créditos do vídeo, nem ela é feita (o SemCreditos sobe ao robô).
-        if abrir_o_projeto(d, saldo_minimo=atual["custo"] + CUSTO_DO_ESTENDER):
+        # O saldo antes da imagem: sem os créditos do vídeo (o de 8 s da P262, sem o Estender), nem ela é feita (o
+        # SemCreditos sobe ao robô).
+        if abrir_o_projeto(d, saldo_minimo=atual["custo"] + (CUSTO_DO_ESTENDER if atual.get("longa") else 0)):
             print(f"Flow: o projeto {PROJETO_DO_ROBO} não estava na lista; criado com esse nome e aberto")
         while feitas < TENTATIVAS_DA_IMAGEM and not vale:
             feitas += 1
@@ -3226,7 +3497,8 @@ def imagem_da_producao(d, atual):
         tirar_da_galeria(d, nome_na_galeria)
     if not vale:
         return _sem_a_imagem(f"a IA não confirmou o produto e a pessoa em {feitas} imagens", chave, conferencia)
-    pedido = pedido_pela_imagem(atual.get("nome", ""), imagem, atual["foto"], chave, formato == ESTILO_DA_COMEDIA)
+    pedido = pedido_pela_imagem(atual.get("nome", ""), imagem, atual["foto"], chave, formato == ESTILO_DA_COMEDIA,
+                                curto=bool(atual.get("curta")))
     if not pedido:
         return _sem_a_imagem("a IA não escreveu o pedido do vídeo pela imagem", chave, conferencia)
     guardar_producao(foto_do_video=imagem, personagem=chave, **pedido,
@@ -3332,14 +3604,14 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     if atual.get("longa") and atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ:
-        # O formato só entra no vídeo de IA do dia com o OK do Rafael a esta amostra (P261 1).
-        linhas.append("Nada foi postado. Gostando, me diga na conversa: o formato mãos e voz entra no vídeo de IA do "
-                      "dia e no De IA ✨, escolhido pela IA quando combinar com o produto. Até lá, saem como hoje.")
+        # Desde a P262, o formato mãos e voz já está entre os do vídeo de IA do dia (P261 1): a amostra é só para ver.
+        linhas.append("Nada foi postado: o formato mãos e voz já sai no vídeo de IA do dia e no De IA ✨, escolhido "
+                      "pela IA quando combina com o produto, em 8 ou 16 s (P262).")
         linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     elif atual.get("fala_inteira"):
-        # O vídeo de IA do dia só muda com o OK do Rafael a esta amostra (P255 1).
-        linhas.append("Nada foi postado. Gostando, me diga na conversa: o vídeo de IA do dia e o De IA ✨ passam a "
-                      "sair assim. Até lá, saem como hoje.")
+        # Desde a P262, o vídeo de IA de 16 s do dia já fala do começo ao fim de cada parte (P255 1).
+        linhas.append("Nada foi postado: o vídeo de IA de 16 s do dia já fala do começo ao fim e tem o silêncio "
+                      "cortado (P262).")
         linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     elif atual.get("longa"):
         # Desde a P247 1, o formato de 16 s é o do vídeo de IA do dia: a amostra é só para ver.
