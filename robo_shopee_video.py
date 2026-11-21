@@ -1216,6 +1216,7 @@ LINHAS_DO_HISTORICO = 12
 PASSOS = (
     ("a API da Shopee negou a lista de produtos", "busca negada pela Shopee"),
     ("vídeo de IA:", "vídeo de IA no Flow"),
+    ("fixar no perfil:", "fixar no perfil"),
     ("a tela do celular está apagada", "tela do celular apagada"),
     ("a tela do celular não acendeu", "tela do celular apagada"),
     ("a tela de bloqueio está na frente", "tela de bloqueio"),
@@ -8290,26 +8291,45 @@ def _ir_as_notificacoes(d):
     tocar(d, FILTRO_DOS_VIDEOS, 5)
 
 
-def _ler_notificacoes(d, topo=None):
+def _ler_notificacoes(d, topo=None, curtidas=None, agora=None):
     """
-    As linhas das Notificações (filtro Lives, Vídeos e ...), de cima para baixo, rolando
-    até achar a linha do topo da vez anterior (ou até ROLADAS_NAS_RESPOSTAS). Sem topo
-    guardado, só a primeira tela.
+    As linhas das Notificações (filtro Lives, Vídeos e ...), de cima para baixo: [{"texto", "hora",
+    "chave"}], a chave a marca do aviso com a hora dele (interacoes.chave_da_linha: a mesma pessoa
+    curtindo outro vídeo mais tarde é outra linha, e o topo da vez anterior não se confunde com ela).
+    Rola até achar a linha do topo da vez anterior (ou até ROLADAS_NAS_RESPOSTAS); sem topo guardado,
+    só a primeira tela. Com a lista curtidas, junta nela as linhas de curtida de vídeo de cada tela,
+    com a marca da capa pequena (_juntar_curtidas, P263 1).
     """
     _ir_as_notificacoes(d)
-    linhas = []
+    lidas = []
     for vez in range(ROLADAS_NAS_RESPOSTAS + 1):
-        novas = [t["texto"] for t in interacoes.linhas_das_notificacoes(tela(d), FILTRO_DOS_VIDEOS)
-                 if t["texto"] not in linhas]
-        linhas += novas
-        if any(PENALIDADE in t.casefold() for t in novas):
+        xml = tela(d)
+        chaves, novas = {linha["chave"] for linha in lidas}, []
+        for linha in interacoes.linhas_das_notificacoes(xml, FILTRO_DOS_VIDEOS):
+            chave = interacoes.chave_da_linha(linha["texto"], linha["hora"], agora)
+            if chave not in chaves:
+                chaves.add(chave)
+                novas.append({"texto": linha["texto"], "hora": linha["hora"], "chave": chave})
+        lidas += novas
+        if curtidas is not None:
+            _juntar_curtidas(d, xml, curtidas, agora)
+        if any(PENALIDADE in linha["texto"].casefold() for linha in novas):
             # O aviso de penalidade faz o robô ler a Saúde do Vídeo (saude_pedida_pela_notificacao).
             gravar_estado(penalidade_vista_em=_momento())
-        if not topo or topo in map(interacoes.marca, linhas) or (vez and not novas):
+        if not topo or posicao_do_topo(lidas, topo) is not None or (vez and not novas):
             break
         ps.rolar(d)
         pausa(2)
-    return linhas
+    return lidas
+
+
+def posicao_do_topo(lidas, topo):
+    """
+    Onde está, nas linhas lidas, a do topo da leitura anterior: pela chave (o aviso com a hora) ou, no
+    topo guardado antes da hora entrar nele, pelo aviso só. None sem ela.
+    """
+    return next((i for i, linha in enumerate(lidas) if topo in (linha["chave"], interacoes.marca(linha["texto"]))),
+                None)
 
 
 def responder_comentarios(d, agora=None):
@@ -8322,20 +8342,25 @@ def responder_comentarios(d, agora=None):
     """
     estado = ler_estado()
     topo = estado.get("respostas_topo")
-    linhas = _ler_notificacoes(d, topo)
-    if not linhas:
+    curtidas = []
+    lidas = _ler_notificacoes(d, topo, curtidas, agora)
+    if not lidas:
         registro_processos.registrar(REGISTRO, "notificações (respostas)", "lista vazia", ok=None)
         return "respostas: nenhuma notificação"
+    linhas = [linha["texto"] for linha in lidas]
     if not topo:
         for texto in linhas:
             if interacoes.comentario_da_notificacao(texto):
                 interacoes.guardar(interacoes.marca(texto), "comentario", "anterior", agora)
-        gravar_estado(respostas_topo=interacoes.marca(linhas[0]))
+        gravar_estado(respostas_topo=lidas[0]["chave"])
         registro_processos.registrar(REGISTRO, "notificações (respostas)", "topo guardado", ok=True)
         return "respostas: guardei o topo das notificações (respondo os que chegarem daqui em diante)"
-    marcas = [interacoes.marca(t) for t in linhas]
-    if topo in marcas:
-        novas = linhas[:marcas.index(topo)]
+    posicao = posicao_do_topo(lidas, topo)
+    # As curtidas que chegaram desde a leitura anterior (acima do topo dela) entram na conta do vídeo que
+    # viraliza (P263 1); sem o topo achado, as lidas, e a chave de cada linha evita contar duas vezes.
+    _guardar_as_curtidas(curtidas, None if posicao is None else {linha["chave"] for linha in lidas[:posicao]}, agora)
+    if posicao is not None:
+        novas = linhas[:posicao]
         registro_processos.registrar(REGISTRO, "notificações (respostas)", "topo achado",
                                      f"{len(novas)} linha(s) nova(s)", ok=True)
     else:
@@ -8344,8 +8369,9 @@ def responder_comentarios(d, agora=None):
         novas = linhas
         registro_processos.registrar(REGISTRO, "notificações (respostas)", "topo não achado",
                                      f"{len(linhas)} linha(s) lida(s)", ok=None)
-    pendentes = [t for t in novas
-                 if interacoes.comentario_da_notificacao(t) and not interacoes.terminado(interacoes.marca(t))]
+    # O mesmo aviso em duas linhas (com horas diferentes) é respondido uma vez só.
+    pendentes = list(dict.fromkeys(t for t in novas if interacoes.comentario_da_notificacao(t)
+                                   and not interacoes.terminado(interacoes.marca(t))))
     contagem, sobrou = {}, False
     for i, texto in enumerate(reversed(pendentes)):
         if i >= RESPOSTAS_POR_RODADA:
@@ -8355,7 +8381,7 @@ def responder_comentarios(d, agora=None):
         contagem[resultado] = contagem.get(resultado, 0) + 1
         pausa(random.uniform(4, 12))
     if not any(not interacoes.terminado(interacoes.marca(t)) for t in pendentes):
-        gravar_estado(respostas_topo=marcas[0])
+        gravar_estado(respostas_topo=lidas[0]["chave"])
     gravar_estado(respostas_continuar=sobrou)
     if not pendentes:
         return "respostas: nenhum comentário novo"
@@ -8377,6 +8403,394 @@ def _abrir_notificacao(d, texto):
             ps.rolar(d)
             pausa(2)
     raise Parada("a notificação do comentário não está mais na lista")
+
+
+# --- O vídeo que viraliza nos fixados do Perfil (P263 1) ---
+# Escolha do Rafael (20/11/2026, P263 1): nas leituras das Notificações do dia (as das respostas, das 8h às 22h),
+# o vídeo dele com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas 24 h entra no lugar do fixado com menos
+# visualizações (o app deixa FIXADOS_NO_PERFIL: "Você só pode fixar até 3 vídeos"), e o aviso no privado traz os
+# 2 links. As curtidas de cada vídeo saem das linhas "curtiu seu vídeo." (interacoes); o vídeo abre pela linha da
+# curtida, e o Fixar e o Desfixar ficam na folha do compartilhar dele, ao lado do Copiar link e do Promover, que o
+# robô nunca toca (ps.TEXTOS_PROIBIDOS). Uma troca por leitura, conferida com a folha aberta de novo (o Fixar vira
+# Desfixar, e o contrário). O vídeo que o robô fixou, ou achou já fixado, sai da conta por ESPERA_DO_JA_VISTO: sem
+# isso, dois vídeos em alta trocariam de lugar a cada leitura. DECISOES.md, Shopee Vídeo.
+MINIMO_DE_CURTIDAS = 10
+FIXADOS_NO_PERFIL = 3
+ESPERA_DO_JA_VISTO = timedelta(hours=24)
+CANDIDATOS_POR_LEITURA = 3
+# O player do vídeo aberto pela curtida e a folha do compartilhar levam uns segundos para aparecer.
+ESPERA_DO_PLAYER, ESPERA_DA_FOLHA = 12, 9
+PROCESSO_DAS_CURTIDAS = "curtidas nas notificações"
+PROCESSO_DO_FIXAR = "fixar no perfil"
+MOTIVO_DO_FIXAR = "fixar no perfil: "
+SEM_O_LINK = "o link não saiu"
+
+
+def _juntar_curtidas(d, xml, curtidas, agora=None):
+    """
+    Junta em curtidas as linhas de curtida de vídeo da tela (xml) ainda não juntadas, com a marca da capa
+    pequena de cada uma, tirada do print: {"texto", "hora", "chave", "video"}, a chave a mesma das linhas
+    lidas (interacoes.chave_da_linha). A capa que não carregou fica sem a marca. Nada aqui segura as
+    respostas: o que falhar só fica fora da conta.
+    """
+    try:
+        juntadas = {curtida["chave"] for curtida in curtidas}
+        achadas = []
+        for linha in interacoes.curtidas_das_notificacoes(xml, FILTRO_DOS_VIDEOS):
+            chave = interacoes.chave_da_linha(linha["texto"], linha["hora"], agora)
+            if chave not in juntadas:
+                juntadas.add(chave)
+                achadas.append(dict(linha, chave=chave))
+        if not achadas:
+            return
+        marcas = []
+        for tentativa in range(TENTATIVAS_DA_MARCA):
+            if tentativa:
+                pausa(PAUSA_DA_MARCA)
+            imagem = d.screenshot()
+            marcas = [visualizacoes.marca_da_miniatura(imagem, linha["miniatura"]) for linha in achadas]
+            if all(marcas):
+                break
+        for linha, marca in zip(achadas, marcas):
+            curtidas.append({"texto": linha["texto"], "hora": linha["hora"], "chave": linha["chave"], "video": marca})
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Curtidas das Notificações fora da conta: {type(e).__name__}")
+
+
+def _guardar_as_curtidas(curtidas, novas, agora=None):
+    """
+    Guarda as curtidas que chegaram desde a leitura anterior (as de chave em novas, as linhas acima do topo
+    dela; None, sem o topo achado: todas). A hora de cada uma sai do que está escrito na linha
+    (interacoes.momento_da_hora); a que não diz a hora fica com a hora da leitura anterior das curtidas,
+    porque chegou depois dela (sem ela, fica de fora). O registro diz quantas entraram, quantas ficaram sem a
+    capa ou com a hora escrita de outro jeito e as curtidas do vídeo mais curtido em 24 h. Nada aqui segura
+    as respostas.
+    """
+    try:
+        momento = agora_br(agora)
+        anterior = ler_estado().get("curtidas_lidas_em") or ""
+        lidas, sem_capa, sem_hora = [], 0, 0
+        for curtida in curtidas:
+            if novas is not None and curtida["chave"] not in novas:
+                continue
+            if not curtida["video"]:
+                sem_capa += 1
+                continue
+            quando = interacoes.momento_da_hora(curtida["hora"], momento)
+            if not quando:
+                sem_hora += 1
+                if not anterior:
+                    continue
+                quando = datetime.strptime(anterior, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+            lidas.append({"texto": curtida["texto"], "chave": curtida["chave"], "video": curtida["video"],
+                          "momento": quando})
+        novas = interacoes.guardar_curtidas(lidas, momento)
+        gravar_estado(curtidas_lidas_em=_momento(momento))
+        mais = interacoes.videos_mais_curtidos(momento)
+        partes = [f"{novas} nova(s)", f"o vídeo mais curtido com {mais[0]['curtidas'] if mais else 0} em 24 h"]
+        if sem_capa:
+            partes.append(f"{sem_capa} sem a capa")
+        if sem_hora:
+            partes.append(f"{sem_hora} com a hora escrita de outro jeito")
+        registro_processos.registrar(REGISTRO, PROCESSO_DAS_CURTIDAS, "lidas", "; ".join(partes), ok=None,
+                                     agora=agora)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Curtidas das Notificações não guardadas: {type(e).__name__}")
+
+
+def _ja_vistos(agora=None):
+    """As marcas das capas fora da conta: os vídeos fixados pelo robô, ou achados fixados, há menos de um dia."""
+    limite = _momento(agora_br(agora) - ESPERA_DO_JA_VISTO)
+    return [v["video"] for v in ler_estado().get("fixar_vistos") or [] if (v.get("em") or "") >= limite]
+
+
+def _anotar_visto(video, agora=None):
+    """O vídeo (a marca da capa) sai da conta por ESPERA_DO_JA_VISTO; os vistos mais velhos saem do estado."""
+    limite = _momento(agora_br(agora) - ESPERA_DO_JA_VISTO)
+
+    def anotar(dados):
+        vistos = [v for v in dados.get("fixar_vistos") or [] if (v.get("em") or "") >= limite]
+        dados["fixar_vistos"] = vistos + [{"video": video, "em": _momento(agora)}]
+
+    db.atualizar_config(CHAVE_ESTADO, anotar)
+
+
+def fixar_o_que_viraliza(d, agora=None):
+    """
+    Depois das respostas de cada leitura das Notificações: o vídeo com MINIMO_DE_CURTIDAS curtidas ou mais nas
+    últimas 24 h que não está fixado entra no lugar do fixado com menos visualizações (_fixar_no_perfil), até
+    CANDIDATOS_POR_LEITURA vídeos olhados. Uma vez por leitura: a continuação dela (respostas_continuar) não
+    troca de novo. Devolve o que fez, para a rodada, ou "". O que para fica no registro, com o caso para o
+    checkup do Claude; a Verificação segue adiante, como nas respostas.
+    """
+    momento = agora_br(agora)
+    leitura = f"{momento:%Y-%m-%d}#{leituras_de_hoje(momento)}"
+    if ler_estado().get("fixar_leitura") == leitura:
+        return ""
+    gravar_estado(fixar_leitura=leitura)
+    vistos = _ja_vistos(momento)
+    mais_curtidos = interacoes.videos_mais_curtidos(momento)
+    candidatos = [v for v in mais_curtidos if v["curtidas"] >= MINIMO_DE_CURTIDAS and not any(
+        visualizacoes.diferenca(v["video"], visto) <= visualizacoes.MARCA_PARECIDA for visto in vistos)]
+    if not candidatos:
+        maior = mais_curtidos[0]["curtidas"] if mais_curtidos else 0
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "nenhum vídeo para fixar",
+                                     f"o mais curtido com {maior} em 24 h"
+                                     + (", já visto" if maior >= MINIMO_DE_CURTIDAS else ""), ok=None, agora=agora)
+        return ""
+    for candidato in candidatos[:CANDIDATOS_POR_LEITURA]:
+        try:
+            feito = _fixar_no_perfil(d, candidato, momento)
+        except Verificacao:
+            raise
+        except Parada as e:
+            porque = e.motivo.removeprefix(MOTIVO_DO_FIXAR)
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "parou", porque, ok=False, agora=agora)
+            if not e.caso_guardado:
+                _guardar_caso(d, "fixar", "parou", e.motivo, agora=agora)
+            _sair_sem_salvar(d)
+            return f"fixar no perfil: parou ({porque})"
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Fixar no Perfil não saiu: {type(e).__name__}")
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "erro", type(e).__name__, ok=False, agora=agora)
+            _sair_sem_salvar(d)
+            return f"fixar no perfil: erro ({type(e).__name__})"
+        if feito:
+            return feito
+    return "fixar no perfil: nenhum dos vídeos com as curtidas em alta ficou para fixar"
+
+
+def _fixar_no_perfil(d, candidato, agora):
+    """
+    O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: abre pela linha da curtida,
+    confere no coração que ele tem as curtidas e, na folha do compartilhar, que não está fixado; copia o link,
+    tira do Perfil o fixado de menos visualizações quando os FIXADOS_NO_PERFIL estão ocupados, abre o vídeo de
+    novo e o fixa, conferindo cada passo. Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado ou com
+    menos curtidas no coração), para olhar o seguinte. O fixar que para depois do desfixar avisa o Rafael.
+    """
+    xml = _abrir_pela_curtida(d, candidato["video"])
+    video = interacoes.video_do_feed(xml)
+    no_coracao = interacoes.curtidas_do_video(xml)
+    if no_coracao is None:
+        raise Parada(MOTIVO_DO_FIXAR + "sem o número de curtidas no coração do vídeo")
+    if no_coracao < MINIMO_DE_CURTIDAS:
+        # A conta juntou linhas de vídeos diferentes: o coração não confirma.
+        _anotar_visto(candidato["video"], agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "pulado", "o coração do vídeo com menos curtidas",
+                                     ok=None, agora=agora)
+        return ""
+    legenda = video["legenda"]
+    situacao = interacoes.estado_do_fixar(_abrir_a_folha(d))
+    if situacao == "desfixar":
+        _fechar_a_folha(d)
+        _anotar_visto(candidato["video"], agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "já fixado", ok=None, agora=agora)
+        return ""
+    if situacao != "fixar":
+        raise Parada(MOTIVO_DO_FIXAR + "sem o Fixar na folha do compartilhar")
+    link = _copiar_link_da_folha(d)
+    _fechar_a_folha(d)
+    fixados = _fixados_do_perfil(d)
+    saiu = _desfixar_o_de_menos_vistas(d, fixados, agora) if len(fixados) >= FIXADOS_NO_PERFIL else None
+    try:
+        _fixar_o_video(d, candidato["video"], legenda)
+    except Parada as e:
+        if saiu:
+            avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações, para "
+                   f"dar lugar ao que está viralizando ({candidato['curtidas']} curtidas nas últimas 24 h), mas não "
+                   f"consegui fixar o novo ({e.motivo.removeprefix(MOTIVO_DO_FIXAR)}). Tento de novo na próxima "
+                   f"leitura das Notificações.\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}"
+                   f"\n📌 O que ia entrar: {link or SEM_O_LINK}")
+        raise
+    _anotar_visto(candidato["video"], agora)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "trocado" if saiu else "fixado",
+                                 "no lugar do fixado de menos visualizações" if saiu
+                                 else f"com menos de {FIXADOS_NO_PERFIL} fixados no Perfil", ok=True, agora=agora)
+    aviso = (f"📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que está viralizando ({candidato['curtidas']} "
+             f"curtidas nas últimas 24 h, nas Notificações).\n\n📌 Fixado agora: {link or SEM_O_LINK}")
+    if saiu:
+        vistas = f"{saiu['vistas']:,}".replace(",", ".")
+        aviso += f"\n📤 Saiu dos fixados (o de menos visualizações, {vistas}): {saiu['link'] or SEM_O_LINK}"
+    else:
+        aviso += f"\n\nAinda havia lugar entre os {FIXADOS_NO_PERFIL} fixados: nenhum saiu."
+    avisar(aviso)
+    return "fixar no perfil: " + ("troquei o fixado de menos visualizações pelo vídeo que viraliza" if saiu
+                                  else "fixei o vídeo que viraliza")
+
+
+def _abrir_pela_curtida(d, video):
+    """
+    Abre o vídeo pela linha de curtida dele nas Notificações (a capa pequena de marca parecida com video), rolando a
+    lista até ROLADAS_NAS_RESPOSTAS vezes, e devolve a tela do player (_esperar_o_player). Parada sem a linha.
+    """
+    _ir_as_notificacoes(d)
+    for vez in range(ROLADAS_NAS_RESPOSTAS + 1):
+        xml = tela(d)
+        linhas = interacoes.curtidas_das_notificacoes(xml, FILTRO_DOS_VIDEOS)
+        if linhas:
+            imagem = d.screenshot()
+            for linha in linhas:
+                marca = visualizacoes.marca_da_miniatura(imagem, linha["miniatura"])
+                if marca and visualizacoes.diferenca(marca, video) <= visualizacoes.MARCA_PARECIDA:
+                    if ps.proibido_no_ponto(xml, *linha["ponto"]):
+                        raise Parada(ps.RECUSA)
+                    d.click(*linha["ponto"])
+                    pausa(4)
+                    return _esperar_o_player(d)
+        if vez < ROLADAS_NAS_RESPOSTAS:
+            ps.rolar(d)
+            pausa(2)
+    raise Parada(MOTIVO_DO_FIXAR + "a curtida do vídeo não está mais nas Notificações")
+
+
+def _esperar_o_player(d):
+    """
+    A tela do player do vídeo aberto, esperada por até ESPERA_DO_PLAYER s, com o painel de comentários
+    fechado (às vezes ele abre sozinho por cima do vídeo).
+    """
+    voltas = max(1, ESPERA_DO_PLAYER // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        if interacoes.painel_aberto(xml):
+            d.press("back")
+            pausa(2)
+            continue
+        if interacoes.video_do_feed(xml):
+            return xml
+        if volta < voltas:
+            pausa(3)
+    raise Parada(MOTIVO_DO_FIXAR + "o vídeo não abriu no player")
+
+
+def _abrir_a_folha(d):
+    """Abre a folha do compartilhar do vídeo do player (o painel de comentários fechado antes) e devolve a tela dela."""
+    xml = tela(d)
+    if interacoes.painel_aberto(xml):
+        d.press("back")
+        pausa(2)
+        xml = tela(d)
+    ponto = interacoes.compartilhar_do_video(xml)
+    if not ponto:
+        raise Parada(MOTIVO_DO_FIXAR + "sem o compartilhar no vídeo")
+    if ps.proibido_no_ponto(xml, *ponto):
+        raise Parada(ps.RECUSA)
+    d.click(*ponto)
+    pausa(3)
+    folha = esperar_na_tela(d, "Copiar link", ESPERA_DA_FOLHA)
+    if not folha:
+        raise Parada(MOTIVO_DO_FIXAR + "a folha do compartilhar não abriu")
+    return folha
+
+
+def _fechar_a_folha(d):
+    """Fecha a folha do compartilhar com o voltar, só se ela ainda está aberta: o voltar a mais sairia do vídeo."""
+    for _ in range(2):
+        if not interacoes.texto_exato(tela(d), "Copiar link"):
+            return
+        d.press("back")
+        pausa(2)
+
+
+def _tocar_exato(d, texto, espera=3):
+    """Toca no elemento de texto igual (interacoes.texto_exato: o Fixar nunca cai no Desfixar), nunca num proibido."""
+    xml = tela(d)
+    ponto = interacoes.texto_exato(xml, texto)
+    if not ponto:
+        raise Parada(f"{MOTIVO_DO_FIXAR}sem o {texto} na folha do compartilhar")
+    if ps.eh_alvo_proibido(texto) or ps.proibido_no_ponto(xml, *ponto):
+        raise Parada(ps.RECUSA)
+    d.click(*ponto)
+    pausa(espera)
+
+
+def _copiar_link_da_folha(d):
+    """
+    O link do vídeo pelo Copiar link da folha aberta, com a área de transferência limpa antes (um link
+    antigo nunca vai no aviso); "" sem ele.
+    """
+    try:
+        d.set_clipboard("")
+    except Exception:
+        return ""
+    _tocar_exato(d, "Copiar link")
+    return ps.link_copiado(d)
+
+
+def _fixados_do_perfil(d):
+    """Os vídeos com o selo Fixado na grade do Perfil (os primeiros dela): [{"caixa", "fixado", "vistas"}]."""
+    ir_ao_perfil(d)
+    for tentativa in range(TENTATIVAS_DA_MARCA):
+        if tentativa:
+            pausa(PAUSA_DA_MARCA)
+        quadros = quadros_da_grade(tela(d))
+        if quadros:
+            return [q for q in quadros if q["fixado"]]
+    raise Parada(MOTIVO_DO_FIXAR + "a grade do Perfil não carregou")
+
+
+def _desfixar_o_de_menos_vistas(d, fixados, agora):
+    """
+    Tira dos fixados o de menos visualizações (o número embaixo do quadro na grade): abre o vídeo, confere o
+    Desfixar na folha do compartilhar, copia o link, toca no Desfixar e confere com a folha aberta de novo (o
+    Fixar no lugar). Devolve {"link", "vistas"}.
+    """
+    com_numero = [q for q in fixados if q["vistas"] is not None]
+    if not com_numero:
+        raise Parada(MOTIVO_DO_FIXAR + "sem as visualizações dos fixados na grade")
+    alvo = min(com_numero, key=lambda q: q["vistas"])
+    xml, ponto = tela(d), ps._centro(alvo)
+    if ps.proibido_no_ponto(xml, *ponto):
+        raise Parada(ps.RECUSA)
+    d.click(*ponto)
+    pausa(6)
+    _esperar_o_player(d)
+    if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
+        raise Parada(MOTIVO_DO_FIXAR + "o vídeo do selo Fixado não mostrou o Desfixar")
+    link = _copiar_link_da_folha(d)
+    if not interacoes.texto_exato(tela(d), interacoes.DESFIXAR):
+        # O Copiar link fechou a folha.
+        _abrir_a_folha(d)
+    _tocar_exato(d, interacoes.DESFIXAR)
+    _fechar_a_folha(d)
+    if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "fixar":
+        raise Parada(MOTIVO_DO_FIXAR + "o Desfixar não ficou")
+    _fechar_a_folha(d)
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "desfixado", "o de menos visualizações", ok=True,
+                                 agora=agora)
+    return {"link": link, "vistas": alvo["vistas"]}
+
+
+def _mesmo_video(legenda, outra):
+    """
+    As duas legendas lidas no player são do mesmo vídeo? Pelo começo, sem o "... Veja mais" do corte (que pode cair
+    em lugares diferentes) e sem os espaços nem os caracteres invisíveis, como em legenda_do_post.
+    """
+    a, b = (ps._o_que_conta(re.split(r"\.\.\.|…|Veja mais", texto or "")[0]) for texto in (legenda, outra))
+    if a == b:
+        return True
+    curta, longa = sorted((a, b), key=len)
+    return len(curta) >= LETRAS_DA_LEGENDA and longa.startswith(curta)
+
+
+def _fixar_o_video(d, video, legenda):
+    """
+    Abre de novo o vídeo das curtidas pela linha dele (o mesmo vídeo: a legenda confere) e toca no Fixar da folha
+    do compartilhar; confere com a folha aberta de novo (o Desfixar no lugar). O aviso do limite de fixados
+    ("Você só pode fixar até 3 vídeos") para. Já fixado (pelo Rafael, no meio), fica como está.
+    """
+    xml = _abrir_pela_curtida(d, video)
+    if not _mesmo_video(legenda, interacoes.video_do_feed(xml)["legenda"]):
+        raise Parada(MOTIVO_DO_FIXAR + "outro vídeo abriu pela curtida")
+    if interacoes.estado_do_fixar(_abrir_a_folha(d)) == "desfixar":
+        _fechar_a_folha(d)
+        return
+    _tocar_exato(d, interacoes.FIXAR)
+    if interacoes.limite_de_fixados(tela(d)):
+        raise Parada(MOTIVO_DO_FIXAR + "o app disse que o limite de fixados acabou")
+    _fechar_a_folha(d)
+    if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
+        raise Parada(MOTIVO_DO_FIXAR + "o Fixar não ficou")
+    _fechar_a_folha(d)
 
 
 def _abrir_comentarios(d):
@@ -9728,7 +10142,10 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None, de
             if not ler_estado().get("respostas_continuar"):
                 contar_leitura(agora)
             gravar_estado(respostas_continuar=False)
-            return responder_comentarios(d, agora)
+            resultado = responder_comentarios(d, agora)
+            # Depois das respostas da leitura, o vídeo que viraliza vai para os fixados do Perfil (P263 1).
+            fixado = fixar_o_que_viraliza(d, agora)
+            return f"{resultado}; {fixado}" if fixado else resultado
         if acao == "feed":
             return interagir_no_feed(d, agora)
         if acao in ("comentar_post", "post_antigo"):

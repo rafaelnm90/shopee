@@ -9,6 +9,8 @@ marca (um dHash de 64 bits do miolo do quadro na tela: só o desenho da capa, nu
 casamento dos quadros da grade com os vídeos e a comparação dos vídeos com e sem a chamada, que o
 painel (Capa com Chamada 🏷️, no privado, com os números) e o checkup (só em %) mostram. Do mesmo jeito, o
 checkup compara a foto do começo de 1,5 s com a de 2 s de antes (escolha do Rafael de 13/11/2026, P221 1).
+A mesma marca, tirada da capa pequena de cada linha de curtida das Notificações (marca_da_miniatura), junta as
+curtidas do mesmo vídeo: o vídeo que começa a viralizar vai para os fixados do Perfil (P263 1).
 """
 import statistics
 from datetime import datetime
@@ -23,6 +25,9 @@ MARGEM_DA_MARCA = 3
 MARCA_PARECIDA = 10
 # Miolo quase de uma cor só (o desvio abaixo disto): a capa ainda não carregou.
 QUADRO_SEM_CAPA = 6
+# A capa pequena das linhas das Notificações (P263 1) tem os cantos arredondados: a marca pula esta
+# fração da beirada de cada lado.
+MARGEM_DA_MINIATURA = 0.12
 # As idades do vídeo (dias depois do post) em que os dois grupos são comparados, e a folga da
 # leitura: a leitura do dia mais perto da idade, até FOLGA_DA_IDADE_HORAS antes ou depois.
 IDADES_DA_COMPARACAO = (1, 3)
@@ -36,10 +41,26 @@ def marca_da_capa(imagem, caixa):
     print da tela (imagem do PIL). None quando o miolo é quase de uma cor só (a capa ainda não
     carregou) ou pequeno demais.
     """
-    from PIL import Image, ImageStat
     x1, y1, x2, y2 = caixa
     cima, baixo = MIOLO_DO_QUADRO
-    miolo = imagem.crop((x1, y1 + int((y2 - y1) * cima), x2, y1 + int((y2 - y1) * baixo))).convert("L")
+    return _marca_do_recorte(imagem.crop((x1, y1 + int((y2 - y1) * cima), x2, y1 + int((y2 - y1) * baixo))))
+
+
+def marca_da_miniatura(imagem, caixa):
+    """
+    A marca da capa pequena do vídeo numa linha das Notificações (o quadrado de cantos
+    arredondados, em caixa), sem a beirada do arredondado: as linhas de curtida do mesmo vídeo
+    ficam com marcas parecidas (P263 1). None quando a capa ainda não carregou.
+    """
+    x1, y1, x2, y2 = caixa
+    margem_x, margem_y = int((x2 - x1) * MARGEM_DA_MINIATURA), int((y2 - y1) * MARGEM_DA_MINIATURA)
+    return _marca_do_recorte(imagem.crop((x1 + margem_x, y1 + margem_y, x2 - margem_x, y2 - margem_y)))
+
+
+def _marca_do_recorte(recorte):
+    """O dHash de 64 bits do recorte (imagem do PIL), ou None quando ele é quase de uma cor só ou pequeno demais."""
+    from PIL import Image, ImageStat
+    miolo = recorte.convert("L")
     if min(miolo.size) < 9 or ImageStat.Stat(miolo).stddev[0] < QUADRO_SEM_CAPA:
         return None
     pontos = list(miolo.resize((9, 8), Image.BOX).tobytes())

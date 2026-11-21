@@ -554,10 +554,11 @@ AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a 
 # "comprar" ou "compre". "Postar vídeo" não entra: só abre a câmera. Também o "Compartilhe
 # para Ganhar" da página de afiliado do produto, a que abre da busca pela foto (vídeo do
 # Rafael de 28/10/2026), no lugar do Compre Agora: no compartilhar, o robô só toca no Copiar link (o do
-# post e o dos vídeos que ele comenta).
+# post e o dos vídeos que ele comenta) e no Fixar e no Desfixar do próprio vídeo (P263 1). E o Promover,
+# ao lado deles na folha do compartilhar do próprio vídeo, que pode cobrar (visto no Motorola em 20/11/2026).
 # Postar: DECISOES.md, Shopee Vídeo.
 TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho",
-                              "compartilhe para ganhar"})
+                              "compartilhe para ganhar", "promover"})
 COMECOS_PROIBIDOS = ("comprar", "compre")
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
 RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar (nem no Compartilhe para Ganhar)"
