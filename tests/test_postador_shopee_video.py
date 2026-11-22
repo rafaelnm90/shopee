@@ -1248,14 +1248,18 @@ def test_gravar_no_explorar_guarda_quadros_e_fala_para_o_claude_e_o_log_so_tem_n
     ok, texto = ps.fazer_passo(celular, "gravar", "")
     assert not ok and texto.startswith("a imagem saiu preta (")
     assert gravados[-1] == ("celular:5555", ps.cursos_robo.PADRAO_NO_EXPLORAR)
-    medidos.update(brilho=90, som=None)
+    # O som baixo com a fala reconhecida serve (o volume do celular é que está baixo); sem fala, é mudo.
+    medidos.update(brilho=90, som=-61.5)
+    assert ps.fazer_passo(celular, "gravar", "20")[0] is True
+    medidos.update(som=None)
+    monkeypatch.setattr(ps.cursos_robo, "para_o_claude", lambda arquivo, pasta: (4, None))
     ok, texto = ps.fazer_passo(celular, "gravar", "20")
     assert not ok and texto.startswith("o som saiu mudo (")
     # Fora do limite, sem número ou sem o endereço do celular: nada é gravado.
     for aparelho, argumento in ((celular, "0"), (celular, "999"), (celular, "vinte"),
                                 (types.SimpleNamespace(), "20")):
         assert ps.fazer_passo(aparelho, "gravar", argumento)[0] is False
-    assert len(gravados) == 3
+    assert len(gravados) == 4
     # A gravação que não sai para no motivo fixo do gravador.
     monkeypatch.setattr(ps.cursos_robo, "gravar", lambda alvo, segundos, destino: (False, "a gravação não saiu"))
     assert ps.fazer_passo(celular, "gravar", "20") == (False, "a gravação não saiu")

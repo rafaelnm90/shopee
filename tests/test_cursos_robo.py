@@ -138,6 +138,11 @@ def test_problema_da_gravacao_preta_ou_muda():
     assert cursos_robo.problema(dict(boa, brilho=None)) == "a imagem saiu preta"
     assert cursos_robo.problema(dict(boa, tem_som=False, som=None)) == "a gravação saiu sem o som"
     assert cursos_robo.problema(dict(boa, som=None)) == "o som saiu mudo"
+    # O som baixo com a fala reconhecida serve: o player deixou gravar (22/11, uma aula a -61,5 LUFS com 180
+    # palavras reconhecidas em 60 s); sem fala reconhecida, continua mudo.
+    baixo = dict(boa, som=-61.5)
+    assert cursos_robo.problema(baixo, palavras=180) == ""
+    assert cursos_robo.problema(baixo) == cursos_robo.problema(baixo, palavras=0) == "o som saiu mudo"
     assert cursos_robo.linha_dos_numeros(boa, 2, 30) == (
         "20 s, brilho 80, som -20.0 LUFS, 2 folha(s) de quadros, 30 palavra(s) na fala")
     assert cursos_robo.linha_dos_numeros(dict(boa, som=None, brilho=None)) == "20 s, sem quadros, som mudo"

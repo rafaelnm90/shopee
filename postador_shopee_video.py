@@ -2719,7 +2719,7 @@ def gravar_no_explorar(d, argumento):
         caso = casos_robo.guardar(d, "explorar", "gravacao", "gravação do explorar", passo="explorar")
         folhas, palavras = cursos_robo.para_o_claude(arquivo, caso) if caso else (None, None)
     linha = cursos_robo.linha_dos_numeros(medidos, folhas, palavras)
-    problema = cursos_robo.problema(medidos)
+    problema = cursos_robo.problema(medidos, palavras)
     if problema:
         return False, f"{problema} ({linha})"
     if not caso:
