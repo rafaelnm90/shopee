@@ -2327,6 +2327,29 @@ def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_a
     assert atual["estado"] == "enviado" and flow.producao() == {}
 
 
+def test_amostra_da_propaganda_com_personagem_pede_a_fala_curta_que_cabe_nos_8_s(celular, monkeypatch, tmp_path):
+    # Escolha do Rafael (21/11, P275 1): na amostra nº 9, a fala do locutor (14 palavras) ocupou 7,6 s dos 7,9 s e saiu
+    # embolada e cortada no fim. A próxima amostra com personagem pede até 10 palavras, com calma, até por volta dos
+    # 6 s, e o plano final fica com a trilha. A propaganda do robô, pela foto do anúncio, fica como está (P264 4).
+    _aprovadas(tmp_path, "vovo")
+    _escolha_da_propaganda(monkeypatch)
+    pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, PEDIDO_DA_PROPAGANDA_DA_VOVO])
+    _galeria(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=8)
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
+    assert flow.main(["amostra", "--tv", "--personagem"]) == 0
+    pela_imagem = pedidos[2][0]
+    assert flow.PALAVRAS_DO_LOCUTOR_CURTO == 10
+    for trecho in (f"2 frases curtas com até {flow.PALAVRAS_DO_LOCUTOR_CURTO} palavras ao todo",
+                   "até por volta dos 6 segundos", "a fala tem de caber inteira nos 8 segundos",
+                   "o plano final do produto fica só com a trilha", "the voice-over ends before the final hero shot"):
+        assert trecho in pela_imagem, trecho
+    assert f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras" not in pela_imagem
+    # A propaganda do robô, pela foto do anúncio, continua com a fala do mesmo tamanho.
+    assert f"com até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras ao todo" in flow.PEDIDO_DA_PROPAGANDA
+    assert "the voice-over ends before the final hero shot" not in flow.PEDIDO_DA_PROPAGANDA
+
+
 def test_amostra_da_propaganda_com_personagem_sem_a_imagem_nao_gera(celular, monkeypatch):
     # Sem a foto aprovada de um personagem, a amostra da P270 1 não serve para o teste: nada é gerado (a próxima
     # escolhe outro produto), e a propaganda pela foto do anúncio continua no --tv sozinho.

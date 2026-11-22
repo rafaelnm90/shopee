@@ -3506,6 +3506,12 @@ PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO = _COMECO_PELA_IMAGEM_CURTO + (
     f"detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e {_FALA_DO_CURTO} Fotorrealista, com a luz da "
     "imagem e a câmera parada.\n"
 ) + _FIM_DO_CURTO
+# A fala do locutor da propaganda com personagem (P275 1, 21/11/2026): com as 14 palavras da PEDIDO_DA_PROPAGANDA, a
+# fala da amostra nº 9 ocupou 7,6 s dos 7,9 s e saiu embolada e cortada no fim. Com até 10 palavras (o tanto que, no
+# vídeo de 16 s, terminava antes dos 6 s), o locutor fala com calma até por volta dos 6 s, e o plano final do produto
+# fica com a trilha. Só nesta amostra: a propaganda do robô, pela foto do anúncio, continua com a fala do mesmo
+# tamanho (P264 4). Escolha do Rafael (P275 1): DECISOES.md, Shopee Vídeo.
+PALAVRAS_DO_LOCUTOR_CURTO = 10
 # A propaganda de TV de 8 s pela imagem do personagem com o produto (P270 1, a amostra): o personagem é o ator do
 # comercial e usa o produto sem falar; o locutor fala em off, como na PEDIDO_DA_PROPAGANDA (P268 1).
 PEDIDO_DA_PROPAGANDA_PELA_IMAGEM = (
@@ -3526,14 +3532,15 @@ PEDIDO_DA_PROPAGANDA_PELA_IMAGEM = (
     '{{"prompt": "...", "fala": "...", "cena": "..."}}\n'
     "- prompt: em inglês, até 100 palavras, o comercial de 8 segundos a partir da imagem, com os planos em ordem e o "
     "que se vê em cada um: a pessoa da imagem e o produto, idêntico ao da foto do anúncio (mesma forma, cor, "
-    "material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou trocado) e bem à vista; o locutor fala do "
-    "1º segundo até perto do fim, sem pausa longa, entre aspas, em português do Brasil, 2 ou 3 frases curtas com até "
-    f"{PALAVRAS_DA_FALA_INTEIRA} palavras ao todo, uma por plano: o gancho (uma promessa ou uma pergunta), a vantagem "
-    "que se vê no produto e o slogan com a chamada para comprar. Escreva no pedido: premium TV commercial, shot on a "
-    "cinema camera, photorealistic, real textures, no CGI look, cinematic lighting, shallow depth of field, smooth "
-    "camera moves, clean cuts, the person from the first frame acts without speaking, final hero shot of the product, "
-    "professional Brazilian Portuguese voice-over announcer, no one speaks on camera, subtle commercial music under "
-    "the voice, no subtitles, no text, no logo.\n"
+    "material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou trocado) e bem à vista; o locutor fala com "
+    "calma, sem pressa, do 1º segundo até por volta dos 6 segundos, sem pausa longa, entre aspas, em português do "
+    f"Brasil, 2 frases curtas com até {PALAVRAS_DO_LOCUTOR_CURTO} palavras ao todo (a fala tem de caber inteira nos 8 "
+    "segundos): a vantagem que se vê no produto e o slogan com a chamada para comprar; o plano final do produto fica "
+    "só com a trilha. Escreva no pedido: premium TV commercial, shot on a cinema camera, photorealistic, real "
+    "textures, no CGI look, cinematic lighting, shallow depth of field, smooth camera moves, clean cuts, the person "
+    "from the first frame acts without speaking, final hero shot of the product, professional Brazilian Portuguese "
+    "voice-over announcer speaking calmly, the voice-over ends before the final hero shot, no one speaks on camera, "
+    "subtle commercial music under the voice, no subtitles, no text, no logo.\n"
     "- fala: tudo o que o locutor fala, em português, como vai sair no vídeo.\n"
     "- cena: uma frase em português que descreve os planos do comercial, para o Rafael.\n"
     + _FALA_SEM_EMBOLAR +
