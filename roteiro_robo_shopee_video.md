@@ -586,7 +586,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
    Embaixo, "Adicionar cupom" e o **Selecionar Cupom**, que abre a tela **Adicionar
    Cupom**: sem cupom (o de hoje para afiliados), ela só mostra "Criar e adicionar cupom ao
    seu vídeo para obter mais visualizações e pedidos" e o botão **Adicionar Cupom**, que
-   cria cupom e nunca se toca; o voltar leva de volta à janela, com o nome escrito. Na
+   cria cupom e nunca se toca; o voltar leva de volta à janela, com o nome escrito. A lista
+   que não carrega mostra no meio "Erro de Carregamento", "Por favor, tente novamente mais
+   tarde." e o botão Atualizar (22/11 às 11:25): o robô volta sem cupom, sem tocar nele. Na
    tela final, o cartão do produto mostra o nome escrito, com "Sem Cupom". Falta ver a
    lista com um cupom (o robô guarda a tela num caso na 1ª vez). Depois, **Feito**. O produto que já estava curtido de
    outro dia fica mais embaixo: o curtir o descurte e curte de novo (pedido do Rafael,
