@@ -40,6 +40,7 @@ NOMES_DOS_CANAIS = {
     "busca": "Buscador do Grupo Público",
     "shopeevideo": "Shopee Vídeo (link aberto no celular do robô)",
     "canalafiliados": "Canal Afiliados (vídeos do robô da Shopee Vídeo)",
+    "grupoamigos": "Grupo dos Amigos (links abertos pelos amigos)",
     "geral": "Links de antes das etiquetas",
     "": "Sem etiqueta (Shopee Vídeo e compras fora dos links dos robôs)",
 }
