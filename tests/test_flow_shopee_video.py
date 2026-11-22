@@ -2239,7 +2239,7 @@ def _escolha_da_propaganda(monkeypatch):
 
 def test_amostra_da_propaganda_de_tv_vai_so_ao_privado_com_o_locutor_conferido(celular, monkeypatch, capsys):
     # P268 1: a amostra de 8 s com cara de propaganda de TV vai só ao privado do Rafael: um Gerar só, sem o Estender,
-    # com a fala do locutor conferida e o tempo com fala; desde a P269 1, a propaganda é também um formato do robô.
+    # com a fala do locutor conferida e o tempo com fala; desde a P269 3, a propaganda é o formato do robô.
     pedidos = _escolha_da_propaganda(monkeypatch)
     _duracoes(monkeypatch, celular, estendida=8)
     monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
@@ -2253,7 +2253,7 @@ def test_amostra_da_propaganda_de_tv_vai_so_ao_privado_com_o_locutor_conferido(c
                    "Omni 1.2 Flash (24 créditos de IA)", f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
                    "Fala no vídeo: igual à pedida", "⏱️ Com fala: 6,5 s dos 8,0 s do vídeo",
                    "Paga R$ 6,50 por venda", "A luminária acende num quarto escuro.",
-                   "um dos formatos que a IA escolhe nos vídeos de IA do robô (P269 1)"):
+                   "que é, desde a P269 3, o formato de todo vídeo de IA do robô"):
         assert trecho in legenda, trecho
     for fora in ("16 s", "Estender", "O vídeo de IA do dia sai normalmente"):
         assert fora not in legenda, fora

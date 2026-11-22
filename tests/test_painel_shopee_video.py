@@ -1482,7 +1482,8 @@ def test_preparar_1_agora_pergunta_de_onde_vem_o_video_e_roda_o_robo_com_ela(bm,
     # Escolha do Rafael (P243, "até 5 por dia"): 5 contando o do robô. Com os 48 créditos do vídeo de 16 s (P247 1),
     # só o 1º do dia cabe nos grátis.
     assert "Vídeos de IA hoje: <b>0</b> de 5" in tela
-    assert "O 1º do dia cabe nos 50 créditos grátis; cada um dos outros gasta até 48 créditos do plano." in tela
+    # Desde a P269 3, cada vídeo de IA é a propaganda de TV de 8 s (24 créditos): os 2 primeiros cabem nos grátis.
+    assert "Os 2 primeiros do dia cabem nos 50 créditos grátis; os outros gastam 24 créditos do plano cada." in tela
     for botao, de, texto in (("Aleatório 🎲", "aleatorio", "o robô sorteia entre um vídeo do grupo e um de IA"),
                              ("Do Grupo 📥", "fonte", "Preparando 1 rascunho agora no Motorola, com o próximo vídeo "
                                                      "do grupo"),
@@ -2468,28 +2469,31 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     rodar(sv.video_ia_handler(msg, est))
     for trecho in ("Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz", sv.limite_dos_videos_de_ia()):
         assert trecho in msg.saidas[-1]
-    # Escolha do Rafael (17/11, P247 1): uma pessoa vendendo o produto, e o rascunho avisa a fala embolada ou cortada
-    # (P248 1). Desde a P262, a IA escolhe 8 ou 16 s, e o silêncio é cortado ou o vídeo fica inteiro.
-    for trecho in ("um vídeo feito por IA, de 8 ou 16 s", "uma pessoa vendendo o produto do começo ao fim",
-                   "No Omni 1.2 Flash, o de 8 s é um Gerar só (24 créditos) e o de 16 s, os 8 s gerados e mais 8 s do "
-                   "Estender (48 créditos)", "o rascunho avisa se ela saiu embolada ou cortada",
-                   "só as mãos usando o produto com uma voz contando", "O silêncio de mais de 1 s é cortado"):
+    # Escolha do Rafael (21/11, P269 3): todo vídeo de IA é a propaganda de TV de 8 s, um Gerar só, pela foto do
+    # anúncio e inteira; o rascunho avisa a fala do locutor embolada ou cortada (P248 1).
+    for trecho in ("um vídeo de 8 s feito por IA com cara de propaganda de TV: o produto em 2 ou 3 planos de cinema",
+                   "um locutor em off, sem ninguém falando para a câmera, feito pela foto do anúncio",
+                   "É um Gerar só no Omni 1.2 Flash (24 créditos, dentro dos 50 grátis do dia)",
+                   "escreve o pedido e a fala do locutor", "o rascunho avisa se ela saiu embolada ou cortada",
+                   "A propaganda fica sempre inteira, sem cortar o silêncio"):
         assert trecho in msg.saidas[-1], trecho
-    assert "vídeo de 16 s feito por IA" not in msg.saidas[-1] and "estilo que varia" not in msg.saidas[-1]
-    # Escolha do Rafael (21/11, P269 1): a propaganda de TV é mais um formato, sempre de 8 s e inteira.
-    for trecho in ("ou a propaganda de TV (8 s com cara de comercial: o produto em planos de cinema e um locutor em "
-                   "off)", "a propaganda de TV fica sempre inteira"):
-        assert trecho in msg.saidas[-1], trecho
-    # Escolhas do Rafael (19/11, P256 2 e P260 1, com a P251 1): o unboxing e a comédia, e o vídeo começa pela imagem
-    # de um dos personagens aprovados com o produto, sem crédito.
-    for trecho in ("o unboxing (só as mãos abrindo a caixa, nunca dois seguidos)", "no máximo 1 a cada 3",
-                   "um dos personagens que você aprovou", "feita no modo Imagem do Flow, sem crédito",
-                   "sem ela, sai pela foto do anúncio"):
-        assert trecho in msg.saidas[-1], trecho
-    # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243).
+    for fora in ("16 s", "unboxing", "comédia", "personagens", "estilo que varia"):
+        assert fora not in msg.saidas[-1], fora
+    # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243), com o custo da propaganda.
     assert sv.limite_dos_videos_de_ia() == (
         "No máximo 5 vídeos de IA por dia, contando o do robô e os que você pede em Preparar 1 Agora ⚡ → De IA ✨ "
-        "(48 créditos cada; passando dos 50 grátis do dia, os outros saem do plano)")
+        "(24 créditos cada; passando dos 50 grátis do dia, os outros saem do plano)")
+    # Sem a P269 3 (a escolha do formato de antes, que continua no código), a tela explica os formatos e as durações.
+    monkeypatch.setattr(sv.robo.flow, "SO_A_PROPAGANDA_NA_PRODUCAO", False)
+    formatos = sv.texto_video_ia(sv.ler_config())
+    for trecho in ("um vídeo feito por IA, de 8 ou 16 s", "uma pessoa vendendo o produto do começo ao fim",
+                   "No Omni 1.2 Flash, o de 8 s é um Gerar só (24 créditos) e o de 16 s, os 8 s gerados e mais 8 s do "
+                   "Estender (48 créditos)", "só as mãos usando o produto com uma voz contando",
+                   "o unboxing (só as mãos abrindo a caixa, nunca dois seguidos)", "no máximo 1 a cada 3",
+                   "ou a propaganda de TV (8 s com cara de comercial", "um dos personagens que você aprovou",
+                   "O silêncio de mais de 1 s é cortado", "(48 créditos cada; passando dos 50 grátis do dia"):
+        assert trecho in formatos, trecho
+    monkeypatch.setattr(sv.robo.flow, "SO_A_PROPAGANDA_NA_PRODUCAO", True)
     # Escolha do Rafael (15/11, P234 1): o produto vem da API de afiliado da Shopee, sem depender da fonte.
     for trecho in ("sem depender dos vídeos da fonte", "ficam os de nota 4,5 ou mais, que pagam pelo menos R$ 2,00 por "
                    "venda e que você ainda não postou", "o que paga mais por venda",

@@ -52,9 +52,10 @@ fala do locutor conferida e o tempo com fala.
 Desde a P262 (20/11/2026), cada vídeo de IA do dia e do De IA ✨ tem a duração e o silêncio decididos vídeo a vídeo:
 a IA que escolhe o formato (agora também o mãos e voz) escolhe 8 s, um Gerar só com a fala do começo ao fim, ou 16 s
 (formato_do_video); o de 16 s do vendedor fala do começo ao fim de cada parte; e, com o vídeo pronto, o servidor corta
-o silêncio de mais de 1 s ou mantém o vídeo inteiro (decidir_o_silencio). Desde a P269 1 (21/11/2026), a propaganda de
-TV da amostra é mais um formato que a IA escolhe pelo produto, sempre de 8 s, pela foto do anúncio e inteira, sem o
-corte do silêncio; o checkup compara as visualizações dela com as dos outros formatos.
+o silêncio de mais de 1 s ou mantém o vídeo inteiro (decidir_o_silencio). Desde a P269 3 (21/11/2026), todo vídeo de
+IA do dia e do De IA ✨ é a propaganda de TV da amostra, de 8 s, pela foto do anúncio e inteira, sem o corte do
+silêncio (SO_A_PROPAGANDA_NA_PRODUCAO); os outros formatos ficam só nas amostras, e o checkup compara as visualizações
+da propaganda com as dos vídeos de IA dos formatos de antes.
 
 Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo,
 amostra-16s-fala-inteira, amostra-16s-maos-e-voz ou amostra-tv). O
@@ -181,6 +182,15 @@ DURACAO_DO_ESTENDER = "Estender 8s"
 CUSTO_DO_ESTENDER = 24
 # O vídeo de IA da produção inteiro, os 8 s gerados e o Estender (P247 1).
 CUSTO_DA_PRODUCAO = MODELO_DA_PRODUCAO[1] + CUSTO_DO_ESTENDER
+
+
+def custo_do_video_de_ia():
+    """
+    Os créditos que o vídeo de IA da produção pede agora: os da propaganda de TV de 8 s, um Gerar só (P269 3), ou, com
+    a escolha do formato (sem SO_A_PROPAGANDA_NA_PRODUCAO), os do de 16 s, o maior (P262). O robô confere o saldo do
+    Flow por ele antes de escolher o produto, e o painel mostra o custo por ele.
+    """
+    return MODELO_DA_PRODUCAO[1] if SO_A_PROPAGANDA_NA_PRODUCAO else CUSTO_DA_PRODUCAO
 ESPERA_DO_PAINEL = 20
 # O Flow guarda a versão estendida no mesmo quadro do vídeo ("…, 2 itens"; aberto, "2 de 2", visto no celular do
 # Rafael em 15/11). A versão baixada com DURACAO_ESTENDIDA s ou mais já tem os 16 s; a mais curta é só a continuação,
@@ -285,10 +295,15 @@ ESTILO_DAS_MAOS_E_VOZ = "maos_e_voz"
 # (...) desses streams de filmes", "não com cara de IA, de Shopee (...) mas sim cara de propaganda de TV. Curta, de 8
 # segundos". O produto em 2 ou 3 planos de comercial, com luz de estúdio e a câmera se movendo devagar (a revelação
 # dele, o uso num lugar bonito e, no fim, ele sozinho no centro), e um locutor em off; ninguém fala para a câmera.
-# Primeiro numa amostra de 8 s, só no privado dele (amostra --tv); depois dela, mais um formato que a IA escolhe pelo
-# produto no vídeo de IA do dia e no De IA ✨ (P269 1), e o checkup compara as visualizações dos formatos. Escolhas do
-# Rafael (P268 1 e P269 1): DECISOES.md, Shopee Vídeo.
+# Primeiro numa amostra de 8 s, só no privado dele (amostra --tv); depois dela, o formato de todo vídeo de IA do dia e
+# do De IA ✨ (P269 3), e o checkup compara as visualizações dela com as dos formatos de antes. Escolhas do Rafael
+# (P268 1 e P269 3): DECISOES.md, Shopee Vídeo.
 ESTILO_DA_PROPAGANDA = "propaganda_tv"
+# Todo vídeo de IA da produção é a propaganda de TV de 8 s (P269 3): o vendedor, o mãos e voz, o unboxing e a comédia
+# saem dela e ficam só nas amostras. Com False, volta a escolha do formato pela IA (P262), com a propaganda entre os
+# formatos (a P269 1, que ele respondeu primeiro e trocou pela 3 sete minutos depois). Escolha do Rafael (P269 3):
+# DECISOES.md, Shopee Vídeo.
+SO_A_PROPAGANDA_NA_PRODUCAO = True
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
            ESTILO_DO_VENDEDOR: "pessoa vendendo o produto, do gancho à chamada",
@@ -482,7 +497,8 @@ PEDIDO_DO_VENDEDOR_CURTO = _COMECO_DO_VENDEDOR_CURTO + (
 ) + _FIM_DO_CURTO
 # A escolha do formato do vídeo de 16 s pelo produto, só entre os que podem sair agora (pedido_do_formato): o
 # vendedor, o unboxing (P256 2) e a comédia (P251 1); no vídeo de IA do dia e no De IA ✨, também o mãos e voz e a
-# duração, 8 ou 16 s (P262), e a propaganda de TV, sempre de 8 s (P269 1).
+# duração, 8 ou 16 s (P262), e a propaganda de TV, sempre de 8 s (P269 1). Com SO_A_PROPAGANDA_NA_PRODUCAO (P269 3), a
+# produção não passa por esta escolha: o vídeo é sempre a propaganda.
 _FORMATO_DO_VENDEDOR = (
     "\"vendedor\" (uma pessoa comum segura o produto e fala dele com quem assiste, mostrando as vantagens de perto: "
     "bom para o produto que precisa de explicação, como utilidades, aparelhos e o que resolve um problema)")
@@ -898,8 +914,9 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
     16 s): o pedido do formato mãos e voz (P261 1, a amostra), sem a escolha do formato. da_producao (o vídeo de IA
     do dia e o De IA ✨, P262): a IA escolhe também o mãos e voz, a propaganda de TV (P269 1) e a duração; o de 8 s
     ("duracao_pedida" 8) vem sem a continuação, com a fala do começo ao fim, e o de 16 s do vendedor, com a fala do
-    começo ao fim de cada parte. propaganda: o pedido de 8 s com cara de propaganda de TV (P268 1, a amostra), com a
-    fala do locutor, sem a escolha do formato; o mesmo pedido vale quando a IA escolhe a propaganda na produção.
+    começo ao fim de cada parte. propaganda: o pedido de 8 s com cara de propaganda de TV, com a fala do locutor, sem a
+    escolha do formato: o da amostra (P268 1) e, desde a P269 3, o de todo vídeo de IA da produção, que o robô pede
+    junto com da_producao (SO_A_PROPAGANDA_NA_PRODUCAO).
     """
     foto = jpeg_sem_metadados(foto) if foto and nome else None
     if not foto:
@@ -913,8 +930,8 @@ def pedido_para_o_anuncio(link, nome, foto, evitar="", longo=False, fala_inteira
         formato, duracao, motivo_da_duracao = formato_do_video(nome, foto, com_unboxing, com_comedia,
                                                                com_maos_e_voz=da_producao, com_duracao=da_producao,
                                                                com_propaganda=da_producao)
-    # A propaganda de TV (a amostra da P268 1 ou a escolhida pela IA na produção, P269 1) é de 8 s, como o de 8 s da
-    # P262: um Gerar só, com a fala do locutor e sem a continuação.
+    # A propaganda de TV (a amostra da P268 1 e, desde a P269 3, todo vídeo de IA da produção) é de 8 s, como o de 8 s
+    # da P262: um Gerar só, com a fala do locutor e sem a continuação.
     propaganda = formato == ESTILO_DA_PROPAGANDA
     curto = propaganda or (longo and duracao == DURACAO_CURTA)
     unboxing = formato == ESTILO_DO_UNBOXING
@@ -2507,7 +2524,7 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
     vai a um arquivo ao lado dos vídeos; o banco fica com o caminho. O pedido de 16 s (P247 1), com a "continuacao"
     do Estender, fica "longa", com a fala e o formato (o vendedor, o unboxing ou a comédia), fora da lista dos estilos
     dos últimos vídeos, a das amostras de 8 s (estilos_recentes), onde entra o estilo do pedido de 8 s. O de 8 s que a
-    IA escolheu pelo produto (P262) fica "curta", com a fala e o formato, também fora dela; a propaganda de TV (P269 1)
+    IA escolheu pelo produto (P262) fica "curta", com a fala e o formato, também fora dela; a propaganda de TV (P269 3)
     também. do_botao: o vídeo pedido no De IA ✨ do Preparar 1 Agora ⚡ (P243). Devolve o andamento novo.
     """
     recomecar_producao(dia, estado="escolhido", tentativas_de_gerar=tentativas_de_gerar,
@@ -2594,7 +2611,7 @@ def conferir_a_producao():
     ouve a fala e a compara com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o
     vídeo; o aviso vai no rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Com as mesmas palavras
     ouvidas, decide o silêncio (P262, decidir_o_silencio): cortado, o rascunho sai do vídeo sem ele ("arquivo"; o
-    inteiro fica em "arquivo_inteiro"); a propaganda de TV (P269 1) fica sempre inteira. Devolve o estado novo.
+    inteiro fica em "arquivo_inteiro"); a propaganda de TV (P269 3) fica sempre inteira. Devolve o estado novo.
     """
     atual = producao()
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
@@ -2618,7 +2635,7 @@ SEM_OUVIR = "não deu para ouvir a fala"
 SEM_DURACAO = "sem a duração do vídeo"
 SOBRARIA_POUCO = "sobraria pouco vídeo"
 CORTE_FALHOU = "o corte não saiu"
-# A propaganda de TV (P269 1) fica sempre inteira, como o Flow a gerou: os planos de cinema e o produto sozinho no fim,
+# A propaganda de TV (P269 3) fica sempre inteira, como o Flow a gerou: os planos de cinema e o produto sozinho no fim,
 # depois da última frase do locutor, são o comercial; o corte do silêncio tiraria o fim e poria o pulo com o zoom no
 # meio dos planos (decisão do Claude pela P262, que deixou a ele o que fazer com o silêncio de cada vídeo).
 PROPAGANDA_INTEIRA = "a propaganda de TV fica inteira"
@@ -2630,7 +2647,7 @@ def decidir_o_silencio(arquivo, palavras, propaganda=False):
     {"decisao": "cortado" ou "mantido", "motivo" (um dos porquês fixos; "" no cortado), "antes" e "depois" (as
     durações), "cortes" e, no cortado, "arquivo" (o vídeo sem o silêncio, ao lado do inteiro)}. Mantido sem silêncio de
     mais de PARADO_MAXIMO s, sem ouvir a fala ou ler a duração, quando o corte deixaria menos de
-    DURACAO_MINIMA_DO_CORTE s ou quando o ffmpeg falha. propaganda: a propaganda de TV (P269 1), sempre mantida
+    DURACAO_MINIMA_DO_CORTE s ou quando o ffmpeg falha. propaganda: a propaganda de TV (P269 3), sempre mantida
     (PROPAGANDA_INTEIRA).
     """
     antes = round(videos.duracao(arquivo) or 0.0, 1)
@@ -2724,7 +2741,7 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     if linha_do_personagem(atual):
         linhas.append(linha_do_personagem(atual))
     if atual.get("fala"):
-        # Na propaganda de TV (P269 1), a fala é a do locutor, em off.
+        # Na propaganda de TV (P269 3), a fala é a do locutor, em off.
         rotulo = "🎙️ Locutor" if atual.get("formato") == ESTILO_DA_PROPAGANDA else "🗣️ Fala"
         linhas.append(f"{rotulo}: {atual['fala']}")
     linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
@@ -3491,7 +3508,7 @@ def pede_a_imagem(atual):
     """
     O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia e o de 8 s
     do vendedor (P262), antes do Gerar e sem a imagem tentada; o unboxing e o mãos e voz (sem rosto), a propaganda de
-    TV (P269 1, pela foto do anúncio, sem ninguém falando para a câmera) e o andamento sem o formato (de antes dela),
+    TV (P269 3, pela foto do anúncio, sem ninguém falando para a câmera) e o andamento sem o formato (de antes dela),
     não.
     """
     return bool((atual.get("longa") or atual.get("curta")) and atual.get("estado") == "escolhido"
@@ -3744,10 +3761,10 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
     if conferencia["defeitos"]:
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     if propaganda:
-        # A amostra da propaganda de TV (P268 1) é só para ver; desde a P269 1, a propaganda é também um dos formatos
-        # que a IA escolhe nos vídeos de IA do robô.
-        linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV, que é também um dos formatos "
-                      "que a IA escolhe nos vídeos de IA do robô (P269 1).")
+        # A amostra da propaganda de TV (P268 1) é só para ver; desde a P269 3, a propaganda é o formato de todo
+        # vídeo de IA do robô.
+        linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV, que é, desde a P269 3, o "
+                      "formato de todo vídeo de IA do robô.")
         linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     elif atual.get("longa") and atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ:
         # Desde a P262, o formato mãos e voz já está entre os do vídeo de IA do dia (P261 1): a amostra é só para ver.

@@ -3385,12 +3385,13 @@ def preparar_o_de_ia(d, config, agora=None, comeco=None):
 # de loja, os produtos a mais, as conferências de sempre e o Rótulo de IA ligado; o Rafael aprova em Rascunhos do
 # Robô 📝. Desde a P247 1, o vídeo é o de 16 s com uma pessoa vendendo o produto (os 8 s gerados e mais 8 s do
 # Estender), e a fala que o servidor ouve vai no rascunho (P248 1). Desde a P260 1, o vídeo começa pela imagem de um
-# personagem com o produto (flow.imagem_da_producao; sem ela, sai pela foto do anúncio, como antes), e o formato pode
-# ser também a comédia (P251 1), o unboxing (P256 2), o mãos e voz (P262) ou a propaganda de TV de 8 s (P269 1). O
-# do robô é 1 por dia (48 créditos, dentro dos 50 grátis do dia); os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no
-# limite do dia (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos, chaves e números.
+# personagem com o produto (flow.imagem_da_producao; sem ela, sai pela foto do anúncio, como antes), e o formato podia
+# ser também a comédia (P251 1), o unboxing (P256 2) e o mãos e voz (P262). Desde a P269 3, todo vídeo de IA do robô é
+# a propaganda de TV de 8 s, pela foto do anúncio (flow.SO_A_PROPAGANDA_NA_PRODUCAO: 24 créditos, dentro dos 50
+# grátis do dia). O do robô é 1 por dia; os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no limite do dia
+# (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos, chaves e números.
 # Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1; 19/11/2026, P260 1;
-# 21/11/2026, P269 1): DECISOES.md, Shopee Vídeo.
+# 21/11/2026, P269 3): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 # Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
@@ -3483,7 +3484,7 @@ def creditos_podem_ter_voltado(atual, agora=None):
 def texto_sem_creditos(atual):
     """O porquê do vídeo de IA parado sem créditos, com os números da última leitura do saldo."""
     return (f"sem créditos do Google Flow ({atual.get('saldo', 0)} na conta; o vídeo pede "
-            f"{atual.get('preciso', flow.CUSTO_DA_PRODUCAO)}). Os vídeos de IA voltam quando o crédito voltar "
+            f"{atual.get('preciso', flow.custo_do_video_de_ia())}). Os vídeos de IA voltam quando o crédito voltar "
             f"(os {flow.CREDITOS_GRATIS_DO_DIA} do dia ou os do mês); até lá, os rascunhos saem dos vídeos dos grupos")
 
 
@@ -3689,11 +3690,12 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
     diferente dos últimos vídeos (as amostras de 8 s). fala_inteira: o de 16 s com a fala do começo ao fim de cada
-    parte (P255 1), na amostra. No vídeo da produção, a IA escolhe pelo produto entre o vendedor, o mãos e voz (P262),
-    o unboxing (P256 2), a comédia (P251 1, com os personagens da P260 1) e a propaganda de TV, sempre de 8 s (P269 1),
-    e a duração, 8 ou 16 s (P262): nunca dois unboxing seguidos, e no máximo 1 comédia a cada 3 vídeos de IA
-    (flow.comedia_pode). maos_e_voz: o de 16 s no
-    formato mãos e voz (P261 1), a amostra. propaganda: o de 8 s com cara de propaganda de TV (P268 1), a amostra.
+    parte (P255 1), na amostra. No vídeo da produção, desde a P269 3, o pedido é sempre o da propaganda de TV de 8 s
+    (flow.SO_A_PROPAGANDA_NA_PRODUCAO); sem ela, a IA escolhe pelo produto entre o vendedor, o mãos e voz (P262), o
+    unboxing (P256 2), a comédia (P251 1, com os personagens da P260 1) e a propaganda (P269 1), e a duração, 8 ou
+    16 s (P262): nunca dois unboxing seguidos, e no máximo 1 comédia a cada 3 vídeos de IA (flow.comedia_pode).
+    maos_e_voz: o de 16 s no formato mãos e voz (P261 1), a amostra. propaganda: o de 8 s com cara de propaganda de
+    TV (P268 1), a amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
@@ -3709,8 +3711,10 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     # O unboxing (P256 2) é mais um formato, nunca o único: fora das amostras e do vídeo logo depois de um unboxing. A
     # comédia (P251 1), no máximo 1 a cada 3 vídeos de IA e só com a foto aprovada de um personagem dela.
     da_producao = longo and not amostra and not fala_inteira
-    com_unboxing = da_producao and not flow.ultimo_foi_unboxing()
-    com_comedia = da_producao and flow.comedia_pode()
+    # Desde a P269 3, todo vídeo de IA da produção é a propaganda de TV de 8 s: sem a escolha do formato.
+    so_a_propaganda = da_producao and flow.SO_A_PROPAGANDA_NA_PRODUCAO
+    com_unboxing = da_producao and not so_a_propaganda and not flow.ultimo_foi_unboxing()
+    com_comedia = da_producao and not so_a_propaganda and flow.comedia_pode()
     olhadas = recusadas = mudam = sem_link = seguidos = 0
     for posicao, bom in enumerate(bons, 1):
         if olhadas >= FOTOS_PARA_A_IA or seguidos >= SEM_LINK_CURTO_SEGUIDOS:
@@ -3728,7 +3732,7 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
                                                    longo=longo, fala_inteira=fala_inteira, com_unboxing=com_unboxing,
                                                    com_comedia=com_comedia, maos_e_voz=maos_e_voz,
                                                    da_producao=da_producao,
-                                                   **({"propaganda": True} if propaganda else {}))
+                                                   **({"propaganda": True} if propaganda or so_a_propaganda else {}))
         if pedido:
             # Na comédia, o pedido daqui é o do vendedor (para quando a imagem do personagem não vale): o formato à
             # parte. A duração que a IA escolheu (P262) vai junto.
@@ -3798,8 +3802,9 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
                 saldo = flow.saldo_da_conta(d)
             except flow.Parada as e:
                 return _video_de_ia_parou(str(e), agora)
-            if saldo < flow.CUSTO_DA_PRODUCAO:
-                return _video_de_ia_sem_creditos(flow.SemCreditos(saldo, flow.CUSTO_DA_PRODUCAO), agora)
+            # O saldo que paga o vídeo de agora (a propaganda de TV de 8 s, P269 3).
+            if saldo < flow.custo_do_video_de_ia():
+                return _video_de_ia_sem_creditos(flow.SemCreditos(saldo, flow.custo_do_video_de_ia()), agora)
             registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "créditos de volta",
                                          f"{saldo} na conta", ok=True, agora=agora)
             _avisar_os_creditos(AVISO_DOS_CREDITOS_DE_VOLTA.format(saldo=saldo), "voltaram", agora)
