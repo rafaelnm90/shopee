@@ -11,6 +11,9 @@ copiar e senha escondida):
 - Cópia do backup (a que o bot manda todo dia no privado): onde o Rafael guardou a
   senha dela (o link do arquivo ou o lugar), nunca a senha. A legenda de cada cópia
   mostra o mesmo lugar, para achá-la mesmo com o servidor fora do ar.
+- Curso que o robô grava (P288 3): o link, o login e a senha do curso, que o Rafael
+  manda ao Claude na conversa (pedido dele, 22/11) e o Claude guarda por aqui; o robô
+  usa para entrar no curso no Chrome do celular quando precisar.
 Os dados são do Rafael e vêm pelo próprio bot (botões Editar) ou, cifrados com a
 chave do servidor, pelo Claude (avisar.yml, acao=acesso: `guardar`), na chave
 "acessos_servidor" das configurações: o repositório é público, então nada disso
@@ -49,9 +52,12 @@ LIMITE_DO_ONDE = 500
 # A senha da cópia (uma chave Fernet: 43 letras e um "=") não fica aqui: só onde ela está.
 PARECE_A_SENHA = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}=")
 # O que cada serviço guarda: os campos dos botões Editar, os únicos que o guardar aceita.
-CAMPOS = {"tailscale": ("email",), "oracle": ("conta", "email", "senha"), "backup": ("onde",)}
+CAMPOS = {"tailscale": ("email",), "oracle": ("conta", "email", "senha"), "backup": ("onde",),
+          "curso": ("link", "email", "senha")}
 NOMES = {"tailscale": "a conta do Tailscale", "oracle": "o acesso da Oracle",
-         "backup": "onde está a senha da cópia do backup"}
+         "backup": "onde está a senha da cópia do backup", "curso": "o acesso do curso que o robô grava"}
+# O curso ainda não tem botão Editar: o Rafael manda o acesso ao Claude, que guarda pelo guardar.
+SEM_O_CURSO = "<i>não cadastrado (mande ao Claude na conversa)</i>"
 # Tratado no bot_mestre, junto do botão Opções do Servidor ⚙️, dono daquele teclado.
 VOLTAR = "Voltar às Opções do Servidor 🔙"
 
@@ -137,6 +143,11 @@ def texto_painel(acessos):
                     else "<i>não cadastrada (toque em Editar Oracle ✏️)</i>")
     onde = (acessos["backup"].get("onde") or "").strip()
     onde_backup = texto_do_onde(onde) if onde else f"<i>não cadastrado (toque em {EDITAR_BACKUP})</i>"
+    curso = acessos["curso"]
+    link_do_curso = texto_do_onde(curso["link"]) if curso.get("link") else SEM_O_CURSO
+    login_do_curso = f"<code>{html.escape(curso['email'])}</code>" if curso.get("email") else SEM_O_CURSO
+    senha_do_curso = (f"<tg-spoiler>{html.escape(curso['senha'])}</tg-spoiler>" if curso.get("senha")
+                      else SEM_O_CURSO.replace("cadastrado", "cadastrada"))
     return (
         "🔐 <b>Acessos do Servidor (Privado)</b>\n\n"
         "🌐 <b>Tailscale (rede privada do celular):</b>\n"
@@ -151,6 +162,10 @@ def texto_painel(acessos):
         f"🔑 <b>Senha:</b> {senha_oracle}\n\n"
         "💾 <b>Cópia do backup (a que chega aqui todo dia):</b>\n"
         f"🔑 <b>Onde está a senha:</b> {onde_backup}\n\n"
+        "🎓 <b>Curso que o robô grava (aulas para o Claude estudar):</b>\n"
+        f"🔗 <b>Link:</b> {link_do_curso}\n"
+        f"👤 <b>Login:</b> {login_do_curso}\n"
+        f"🔑 <b>Senha:</b> {senha_do_curso}\n\n"
         "<i>(Toque na senha para revelá-la ou nos logins para copiar)</i>"
     )
 
@@ -341,6 +356,10 @@ def guardar_cifrado(texto_cifrado, valor_chave):
         if servico == "backup" and (len(campos["onde"].strip()) > LIMITE_DO_ONDE
                                     or PARECE_A_SENHA.search(campos["onde"])):
             raise Recusado("o lugar da senha do backup não vale")
+        if servico == "curso" and "link" in campos and not re.fullmatch(r"https://\S+", campos["link"].strip()):
+            raise Recusado("o link do curso não vale")
+        if servico == "curso" and "email" in campos and not parece_email(campos["email"]):
+            raise Recusado("o login do curso não vale")
     for servico, campos in dados.items():
         salvar_servico(servico, {campo: valor.strip() for campo, valor in campos.items()})
     return list(dados)

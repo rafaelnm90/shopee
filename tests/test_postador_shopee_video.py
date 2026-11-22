@@ -1159,7 +1159,7 @@ def test_curtir_acha_o_nome_com_o_selo_antes(monkeypatch):
     assert aparelho.toques == [(525, 1217), (1028, 1233)]
 
 
-def test_abrir_abre_a_shopee_ou_o_flow_e_nada_mais():
+def test_abrir_abre_a_shopee_o_flow_ou_o_chrome_e_nada_mais():
     class Celular:
         abertos = []
 
@@ -1168,9 +1168,58 @@ def test_abrir_abre_a_shopee_ou_o_flow_e_nada_mais():
 
     assert ps.fazer_passo(Celular(), "abrir", "") == (True, "app aberto")
     assert ps.fazer_passo(Celular(), "abrir", "Flow") == (True, "app aberto")
-    assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk"]
+    # O Chrome, onde o celular toca as aulas do curso que o robô grava (P288 3).
+    assert ps.fazer_passo(Celular(), "abrir", "chrome") == (True, "app aberto")
+    assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk", "com.android.chrome"]
     assert ps.fazer_passo(Celular(), "abrir", "com.android.settings")[0] is False
-    assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk"]
+    assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk", "com.android.chrome"]
+
+
+def test_gravar_no_explorar_guarda_quadros_e_fala_para_o_claude_e_o_log_so_tem_numeros(monkeypatch, tmp_path):
+    # P288 3: o servidor grava a tela e o som do celular; a fala e os quadros vão cifrados no caso,
+    # e o log diz só os números. Preta ou muda, o player não deixa gravar e o passo falha.
+    import types
+    pasta_do_caso = tmp_path / "caso"
+    pasta_do_caso.mkdir()
+    gravados, guardados = [], []
+
+    def gravar(alvo, segundos, destino):
+        gravados.append((alvo, segundos))
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"gravacao")
+        return True, "gravado"
+
+    def guardar(d, acao, resultado, motivo, passo=""):
+        guardados.append((acao, resultado, motivo, passo))
+        return str(pasta_do_caso)
+
+    medidos = {"segundos": 20, "tem_som": True, "som": -18.0, "brilho": 90}
+    monkeypatch.setattr(ps.cursos_robo, "gravar", gravar)
+    monkeypatch.setattr(ps.cursos_robo, "numeros", lambda arquivo: dict(medidos))
+    monkeypatch.setattr(ps.cursos_robo, "para_o_claude", lambda arquivo, pasta: (4, 37))
+    monkeypatch.setattr(ps.casos_robo, "guardar", guardar)
+    celular = types.SimpleNamespace(serial="celular:5555")
+    assert ps.separar_passos("abrir:chrome; gravar:20") == [("abrir", "chrome"), ("gravar", "20")]
+    assert ps.fazer_passo(celular, "gravar", "20") == (
+        True, "gravado e guardado para o Claude, casos_robo.yml exportar (20 s, brilho 90, som -18.0 LUFS, "
+              "4 folha(s) de quadros, 37 palavra(s) na fala)")
+    assert gravados == [("celular:5555", 20)]
+    assert guardados == [("explorar", "gravacao", "gravação do explorar", "explorar")]
+    medidos["brilho"] = 2
+    ok, texto = ps.fazer_passo(celular, "gravar", "")
+    assert not ok and texto.startswith("a imagem saiu preta (")
+    assert gravados[-1] == ("celular:5555", ps.cursos_robo.PADRAO_NO_EXPLORAR)
+    medidos.update(brilho=90, som=None)
+    ok, texto = ps.fazer_passo(celular, "gravar", "20")
+    assert not ok and texto.startswith("o som saiu mudo (")
+    # Fora do limite, sem número ou sem o endereço do celular: nada é gravado.
+    for aparelho, argumento in ((celular, "0"), (celular, "999"), (celular, "vinte"),
+                                (types.SimpleNamespace(), "20")):
+        assert ps.fazer_passo(aparelho, "gravar", argumento)[0] is False
+    assert len(gravados) == 3
+    # A gravação que não sai para no motivo fixo do gravador.
+    monkeypatch.setattr(ps.cursos_robo, "gravar", lambda alvo, segundos, destino: (False, "a gravação não saiu"))
+    assert ps.fazer_passo(celular, "gravar", "20") == (False, "a gravação não saiu")
 
 
 def test_copiado_diz_so_se_e_link_da_shopee_e_o_tamanho():
