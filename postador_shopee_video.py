@@ -2929,6 +2929,9 @@ def explorar(texto, d=None, celular=False):
     logging.disable(logging.CRITICAL)
     try:
         if celular and d is None:
+            # A gravação do curso de madrugada solta o celular, como para o robô.
+            if cursos_robo.gravando():
+                cursos_robo.liberar_para_o_robo("explorar")
             tentativas = ESPERA_DO_CELULAR // PAUSA_DA_ESPERA + 1
             for tentativa in range(tentativas):
                 with celular_robo.trava() as livre:

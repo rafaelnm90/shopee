@@ -95,6 +95,7 @@ import assistente_shopee_video as assistente
 import avisar_rafael
 import casos_robo
 import celular_robo
+import cursos_robo
 import db
 import edicao_video
 import flow_shopee_video as flow
@@ -10933,6 +10934,10 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
             celular_robo.anotar_prazo(agora=agora)
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] Prazo do pareamento não lido: {type(e).__name__}")
+    # A gravação do curso de madrugada solta o celular para o robô na hora: o robô da Shopee Vídeo nunca para
+    # por causa do curso (pedido do Rafael, 22/11/2026: DECISOES.md, Trabalho com o Claude).
+    if cursos_robo.gravando():
+        cursos_robo.liberar_para_o_robo("robô")
     with celular_robo.trava() as livre:
         if not livre:
             if not na_hora:
@@ -10985,6 +10990,11 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
             registro_processos.registrar(REGISTRO, PROCESSO_DO_BOTAO, "pedido", ok=None, agora=agora)
         # O celular anota as últimas ações, que o caso da falha guarda (casos_robo).
         d = casos_robo.com_historico(d or ps.conectar(celular=True))
+        # O volume de mídia que a gravação do curso subiu e não devolveu (ela caiu no meio) volta ao de antes.
+        try:
+            cursos_robo.devolver_o_volume(d)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Volume do celular não devolvido: {type(e).__name__}")
         try:
             resultado = _agir(d, acao, ident, preparar, config, agora,
                               pedido=(saude or pedido_de_post or pedida == "saude") and na_hora, comeco=comeco, de=de)

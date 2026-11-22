@@ -165,6 +165,18 @@ def test_explorar_no_celular_espera_o_robo_soltar_o_celular(monkeypatch, capsys)
     assert sum(pausas) == ps.ESPERA_DO_CELULAR and "nada foi tocado" in capsys.readouterr().out
 
 
+def test_explorar_no_celular_pede_o_celular_a_aula_do_curso(monkeypatch):
+    # A gravação do curso de madrugada solta o celular para o explorar, como para o robô (22/11/2026).
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    liberados, feitos = [], []
+    monkeypatch.setattr(ps.cursos_robo, "liberar_para_o_robo",
+                        lambda quem="robô", **_: liberados.append(quem) or True)
+    monkeypatch.setattr(ps, "_explorar", lambda texto, d, celular: feitos.append(texto) or True)
+    assert ps.explorar("tela", celular=True) is True and liberados == []
+    ps.cursos_robo.anotar_o_sinal()
+    assert ps.explorar("tela", celular=True) is True and liberados == ["explorar"] and feitos == ["tela", "tela"]
+
+
 def test_explorar_toca_e_descreve_cada_tela(capsys):
     aparelho = Aparelho()
     assert ps.explorar("abrir; tocar:Postar vídeo; voltar", aparelho)

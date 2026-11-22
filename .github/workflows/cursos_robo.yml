@@ -1,0 +1,102 @@
+name: Aulas do curso (gravadas pelo celular do robô, cifradas)
+
+# As aulas do curso que o celular do robô grava de madrugada (cursos_robo.py, P288 3 e
+# P289 1 a P293 1): de cada aula, só a fala em texto e as folhas de quadros, para o Claude
+# estudar. Só roda à mão. Ações:
+#   exportar  leva as aulas mais velhas, cifradas pelo servidor, ao ramo aulas-curso (um
+#             commit só, trocado a cada exportação), num pacote de até 40 MB;
+#   apagar    depois de lido: apaga do servidor as aulas que foram no pacote, e o ramo.
+# Pedido do Rafael: o servidor não pode lotar, e nada do curso fica acumulado.
+#
+# O repositório e os logs do Actions são públicos: o arquivo só abre com a chave do
+# servidor, e aqui não sai nada do conteúdo, só quantas aulas.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer"
+        type: choice
+        options: [exportar, apagar]
+        default: exportar
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aulas-curso
+
+jobs:
+  aulas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Aulas do curso
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USUARIO: ${{ secrets.ORACLE_USER }}
+          CHAVE_SSH: ${{ secrets.ORACLE_SSH_KEY }}
+          TOKEN: ${{ github.token }}
+          REPOSITORIO: ${{ github.repository }}
+          ACAO: ${{ inputs.acao }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CHAVE_SSH" > ~/.ssh/servidor
+          chmod 600 ~/.ssh/servidor
+          servidor() {
+            ssh -i ~/.ssh/servidor -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR "$USUARIO@$HOST" "cd ~/shopee && venv/bin/python3 cursos_robo.py aulas $1"
+          }
+
+          git init -q ramo
+          cd ramo
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPOSITORIO}.git"
+
+          if [ "$ACAO" = "apagar" ]; then
+            # Só as aulas que foram no pacote (até a mais nova dele, gravada no ramo): as que
+            # chegaram depois, que o Claude ainda não leu, ficam para a próxima exportação.
+            if git ls-remote --exit-code --heads origin aulas-curso >/dev/null 2>&1; then
+              git fetch -q --depth 1 origin aulas-curso
+              ULTIMA=$(git show FETCH_HEAD:ultima_aula.txt 2>/dev/null | tr -dc '0-9ac-' || true)
+              if [ -n "$ULTIMA" ]; then
+                servidor "apagar $ULTIMA"
+              fi
+              git push -q origin --delete aulas-curso
+              echo "✅ Ramo aulas-curso apagado."
+            else
+              echo "Ramo aulas-curso: já não existia (nada exportado, nada apagado no servidor)."
+            fi
+            exit 0
+          fi
+
+          QUANTAS=$(servidor contar | tr -dc '0-9')
+          echo "Aulas guardadas no servidor: ${QUANTAS:-?}"
+          if [ "${QUANTAS:-0}" = "0" ]; then
+            echo "Nada para exportar."
+            exit 0
+          fi
+          # A mais nova do pacote antes de montá-lo: o pacote vai só até ela, e o apagar
+          # tira do servidor só até ela.
+          ULTIMA=$(servidor ultima | tr -dc '0-9ac-')
+          servidor "cifrado $ULTIMA" > ../novo
+          if ! grep -q '^gAAAAA' ../novo; then
+            echo "❌ O servidor não devolveu as aulas cifradas."
+            exit 1
+          fi
+          git checkout -q --orphan aulas-curso
+          mv ../novo aulas.zip.cifrado
+          printf '%s\n' "$ULTIMA" > ultima_aula.txt
+          cat > README.md <<'FIM'
+          # Aulas do curso gravadas pelo celular do robô (cifradas)
+
+          Este ramo guarda o `aulas.zip.cifrado`, montado pelo servidor dos robôs
+          (`cursos_robo.py`) e gravado pelo workflow `cursos_robo.yml`, e o nome da aula mais
+          nova do pacote (`ultima_aula.txt`). Sem a chave do servidor, o arquivo não abre.
+          Depois de lido, o workflow apaga o ramo e, no servidor, as aulas até esse nome.
+          FIM
+          git add README.md aulas.zip.cifrado ultima_aula.txt
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898173+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Aulas do curso (cifradas)"
+          git push -q -f origin aulas-curso
+          echo "✅ Aulas cifradas no ramo aulas-curso (até ${ULTIMA})."

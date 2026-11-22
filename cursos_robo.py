@@ -15,6 +15,8 @@ android.yml (instalar-gravador, que roda o `instalar` daqui).
 Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
 """
 import hashlib
+import io
+import json
 import math
 import os
 import re
@@ -26,6 +28,7 @@ import tempfile
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timedelta
 
 from PIL import Image, ImageStat
@@ -247,12 +250,13 @@ def problema(medidos, palavras=None):
     return ""
 
 
-def para_o_claude(arquivo, pasta):
+def para_o_claude(arquivo, pasta, quadros=QUADROS_PARA_O_CLAUDE):
     """
-    Grava na pasta (a de um caso, que vai cifrado ao Claude) as folhas de quadros e a fala (fala.txt, com
-    o segundo de cada trecho). Devolve (folhas, palavras); palavras é None quando não deu para ouvir.
+    Grava na pasta (a de um caso ou de uma aula, que vai cifrada ao Claude) as folhas de até `quadros`
+    quadros e a fala (fala.txt, com o segundo de cada trecho). Devolve (folhas, palavras); palavras é None
+    quando não deu para ouvir.
     """
-    folhas = videos.folhas_de_quadros(arquivo, pasta, QUADROS_PARA_O_CLAUDE)
+    folhas = videos.folhas_de_quadros(arquivo, pasta, quadros)
     trechos = videos.fala_em_trechos(arquivo)
     if trechos is None:
         return folhas, None
@@ -630,6 +634,187 @@ class GravacaoEmFundo:
         return True, "gravado"
 
 
+# O fim da aula, pela sessão de mídia do Chrome: o vídeo que tocava e ficou parado (pausado, parado ou
+# sem sessão) por PARADO_NO_FIM s, carregando por CARREGANDO_DEMAIS s, ou que voltou mais que
+# VOLTA_DE_OUTRO s (o site começou outro vídeo, a aula seguinte, sozinho).
+PARADO_NO_FIM = 15
+CARREGANDO_DEMAIS = 120
+VOLTA_DE_OUTRO = 30
+
+
+class OlhoNaAula:
+    """O que a gravação vê do vídeo da aula, olhada a olhada: quanto já tocou e se ele acabou."""
+
+    def __init__(self):
+        self.tocou, self.maior, self.parado_desde = False, 0, None
+
+    def olhar(self, midia, segundos):
+        """
+        Com o estado do vídeo (midia_do_chrome) e o relógio em segundos: None enquanto a aula segue, ou o
+        motivo fixo do fim ("o vídeo parou", "carregando demais", "outro vídeo começou").
+        """
+        if midia and midia["estado"] == "tocando":
+            if self.tocou and midia["posicao"] + VOLTA_DE_OUTRO < self.maior:
+                return "outro vídeo começou"
+            self.tocou, self.parado_desde = True, None
+            self.maior = max(self.maior, midia["posicao"])
+            return None
+        if not self.tocou:
+            return None
+        if self.parado_desde is None:
+            self.parado_desde = segundos
+        carregando = bool(midia) and midia["estado"] == "carregando"
+        if segundos - self.parado_desde >= (CARREGANDO_DEMAIS if carregando else PARADO_NO_FIM):
+            return "carregando demais" if carregando else "o vídeo parou"
+        return None
+
+    def de_novo(self):
+        """Depois de mandar tocar de novo o vídeo que parou: a espera do parado recomeça."""
+        self.parado_desde = None
+
+
+# As aulas gravadas ficam no servidor só como a fala e as folhas de quadros (o vídeo sai logo depois),
+# até o Claude ler: o cursos_robo.yml leva as mais velhas, cifradas, num pacote de até TAMANHO_DO_PACOTE
+# (o GitHub não aceita arquivo de mais de 100 MB), e o apagar tira do servidor as que foram no pacote.
+# Nas aulas, um quadro a cada QUADROS_A_CADA s, entre o mínimo dos casos e QUADROS_DA_AULA.
+PASTA_DAS_AULAS = os.path.expanduser("~/shopee_video/aulas")
+NOME_DA_AULA = re.compile(r"\d{8}-\d{6}-c\d{2}-a\d{3}")
+TAMANHO_DO_PACOTE = 40 * 1024 * 1024
+QUADROS_A_CADA = 20
+QUADROS_DA_AULA = 120
+
+
+def quadros_da_aula(segundos):
+    """Quantos quadros da aula vão ao Claude: um a cada QUADROS_A_CADA s, de 40 a QUADROS_DA_AULA."""
+    return min(QUADROS_DA_AULA, max(QUADROS_PARA_O_CLAUDE, int(segundos or 0) // QUADROS_A_CADA))
+
+
+def aulas_guardadas():
+    """Os nomes das pastas das aulas guardadas, das mais velhas às mais novas."""
+    if not os.path.isdir(PASTA_DAS_AULAS):
+        return []
+    return sorted(nome for nome in os.listdir(PASTA_DAS_AULAS)
+                  if NOME_DA_AULA.fullmatch(nome) and os.path.isdir(os.path.join(PASTA_DAS_AULAS, nome)))
+
+
+def guardar_a_aula(arquivo, curso, aula, fim, agora=None):
+    """
+    A aula gravada vira, na pasta das aulas, a fala (fala.txt) e as folhas de quadros, com o aula.json só de
+    números (o curso e a aula pela posição, nunca o nome); o vídeo sai logo depois (P290 1: o disco não
+    enche). Devolve (pasta, aula.json).
+    """
+    medidos = numeros(arquivo)
+    momento = _agora(agora)
+    os.makedirs(PASTA_DAS_AULAS, exist_ok=True)
+    pasta = os.path.join(PASTA_DAS_AULAS, f"{momento:%Y%m%d-%H%M%S}-c{int(curso):02d}-a{int(aula):03d}")
+    os.makedirs(pasta, exist_ok=True)
+    folhas, palavras = para_o_claude(arquivo, pasta, quadros_da_aula(medidos.get("segundos")))
+    info = {"curso": int(curso), "aula": int(aula), "gravada_em": _texto(momento), "fim": fim,
+            "segundos": medidos.get("segundos"), "som": medidos.get("som"), "brilho": medidos.get("brilho"),
+            "folhas": folhas, "palavras": palavras, "problema": problema(medidos, palavras)}
+    with open(os.path.join(pasta, "aula.json"), "w", encoding="utf-8") as saida:
+        json.dump(info, saida, ensure_ascii=False, indent=1)
+    if os.path.exists(arquivo):
+        os.remove(arquivo)
+    return pasta, info
+
+
+def _tamanho(pasta):
+    return sum(os.path.getsize(os.path.join(raiz, nome)) for raiz, _, nomes in os.walk(pasta) for nome in nomes)
+
+
+def aulas_do_pacote(ate=None):
+    """As aulas do próximo pacote para o Claude: das mais velhas, até TAMANHO_DO_PACOTE (ao menos uma) e `ate`."""
+    escolhidas, tamanho = [], 0
+    for nome in aulas_guardadas():
+        if ate and nome > ate:
+            break
+        do_nome = _tamanho(os.path.join(PASTA_DAS_AULAS, nome))
+        if escolhidas and tamanho + do_nome > TAMANHO_DO_PACOTE:
+            break
+        escolhidas.append(nome)
+        tamanho += do_nome
+    return escolhidas
+
+
+def pacote_das_aulas(ate=None):
+    """O zip das aulas do próximo pacote, em bytes."""
+    memoria = io.BytesIO()
+    with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as arquivo_zip:
+        for nome in aulas_do_pacote(ate):
+            for raiz, _, arquivos in os.walk(os.path.join(PASTA_DAS_AULAS, nome)):
+                for arquivo in arquivos:
+                    caminho = os.path.join(raiz, arquivo)
+                    arquivo_zip.write(caminho, os.path.relpath(caminho, PASTA_DAS_AULAS))
+    return memoria.getvalue()
+
+
+def cifrado_das_aulas(ate=None):
+    """O pacote das aulas cifrado com a chave do servidor (a do registro_privado)."""
+    from cryptography.fernet import Fernet
+    import registro_privado   # aqui dentro: só a exportação precisa da chave
+    return Fernet(registro_privado.chave()).encrypt(pacote_das_aulas(ate)).decode("ascii")
+
+
+def apagar_aulas(ate):
+    """Tira do servidor as aulas até `ate` (a mais nova do pacote exportado). Devolve quantas saíram."""
+    saem = [nome for nome in aulas_guardadas() if nome <= ate]
+    for nome in saem:
+        shutil.rmtree(os.path.join(PASTA_DAS_AULAS, nome), ignore_errors=True)
+    return len(saem)
+
+
+def abrir_aulas(texto_cifrado, valor_chave, destino):
+    """Abre o pacote do ramo numa pasta (no scratchpad do Claude, nunca no repositório). Devolve as aulas."""
+    from cryptography.fernet import Fernet
+    dados = Fernet(valor_chave.strip().encode("ascii")).decrypt(texto_cifrado.strip().encode("ascii"))
+    with zipfile.ZipFile(io.BytesIO(dados)) as arquivo_zip:
+        arquivo_zip.extractall(destino)
+    return sorted(nome for nome in os.listdir(destino) if os.path.isdir(os.path.join(destino, nome)))
+
+
+def _ler_aulas(caminho, destino):
+    """Abre no scratchpad do Claude o pacote baixado do ramo aulas-curso, com a chave do ambiente dele."""
+    import registro_privado
+    from cryptography.fernet import InvalidToken
+    valor = os.environ.get(registro_privado.VARIAVEL_CHAVE, "")
+    if not valor:
+        print(f"Falta a variável {registro_privado.VARIAVEL_CHAVE} no ambiente do Claude.")
+        return 1
+    with open(caminho, encoding="ascii") as arquivo:
+        texto_cifrado = arquivo.read()
+    try:
+        nomes = abrir_aulas(texto_cifrado, valor, destino)
+    except (InvalidToken, ValueError):
+        print("A chave do ambiente não abre este arquivo: o servidor pode ter gerado outra (o bot manda a nova).")
+        return 1
+    print(f"{len(nomes)} aula(s) em {destino}:")
+    for nome in nomes:
+        print(f"   {nome}")
+    return 0
+
+
+def _aulas(argumentos):
+    """O que o cursos_robo.yml pede das aulas guardadas (só contagens e nomes de pasta no log)."""
+    if argumentos == ["contar"]:
+        print(len(aulas_guardadas()))
+        return 0
+    if argumentos == ["ultima"]:
+        lista = aulas_do_pacote()
+        print(lista[-1] if lista else "")
+        return 0
+    if argumentos[:1] == ["cifrado"] and len(argumentos) <= 2:
+        print(cifrado_das_aulas(argumentos[1] if len(argumentos) == 2 else None))
+        return 0
+    if argumentos[:1] == ["apagar"] and len(argumentos) == 2 and NOME_DA_AULA.fullmatch(argumentos[1]):
+        print(f"{apagar_aulas(argumentos[1])} aula(s) apagada(s) do servidor.")
+        return 0
+    if argumentos[:1] == ["ler"] and len(argumentos) == 3:
+        return _ler_aulas(argumentos[1], argumentos[2])
+    print("uso: cursos_robo.py aulas contar | ultima | cifrado [ATE] | apagar ATE | ler ARQUIVO PASTA")
+    return 2
+
+
 def main(argumentos):
     if argumentos == ["instalar"]:
         return 0 if instalar() else 1
@@ -637,7 +822,9 @@ def main(argumentos):
         versao = versao_instalada()
         print(f"gravador: {'scrcpy ' + versao if versao else 'não instalado'}")
         return 0
-    print("uso: cursos_robo.py instalar | estado")
+    if argumentos[:1] == ["aulas"]:
+        return _aulas(argumentos[1:])
+    print("uso: cursos_robo.py instalar | estado | aulas ...")
     return 2
 
 
