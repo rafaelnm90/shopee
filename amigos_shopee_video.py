@@ -8,21 +8,24 @@ o Rafael recebe o nome no privado, com o Liberar ✅. Nenhum vídeo vai a duas p
 recebeu não volta para ele (assistente_shopee_video.preparar_para_o_amigo). O robô e o assistente do Rafael não mudam.
 
 O bot_mestre inclui o router, chama configurar_dependencias e passa o /amigos (comando_amigos) antes do tratamento
-das mensagens soltas nos grupos, que fica com todas elas. O painel_shopee_video mostra o botão Grupo dos Amigos 👥.
-Escolhas do Rafael (21 e 22/11/2026, P271 2 a P277 1): DECISOES.md, Shopee Vídeo.
+das mensagens soltas nos grupos, que fica com todas elas. O painel_shopee_video mostra o botão Grupo dos Amigos 👥;
+nele, o Liberar Amigos ✅ mostra o nome de cada um que tocou e ainda não foi liberado. Depois do 1º /amigos, o comando
+fica no menu do grupo, visível só para o Rafael.
+Escolhas do Rafael (21 e 22/11/2026, P271 2 a P279 1): DECISOES.md, Shopee Vídeo.
 """
 import asyncio
 import html
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import F, Router, types
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton
+from aiogram.types import (BotCommand, BotCommandScopeChatMember, InlineKeyboardButton, InlineKeyboardMarkup,
+                           KeyboardButton)
 
 import assistente_shopee_video as assistente
 import db
@@ -47,6 +50,10 @@ BOTAO_LIGAR = "Ligar o Grupo ▶️"
 BOTAO_DESLIGAR = "Desligar o Grupo ⏸️"
 BOTAO_TIRAR = "Tirar Amigo ➖"
 BOTAO_LIBERAR = "Liberar ✅"
+# O botão do painel leva, entre parênteses, quantos esperam a liberação (P279 1).
+BOTAO_LIBERAR_AMIGOS = "Liberar Amigos ✅"
+BOTAO_VOLTAR_AMIGOS = "Voltar ao Grupo dos Amigos 🔙"
+DESCRICAO_DO_COMANDO = "Pôr o botão Quero um vídeo 🎬 no grupo"
 PROCESSO_DO_PEDIDO = "grupo dos amigos: pedido"
 PROCESSO_DO_PAINEL = "grupo dos amigos: painel"
 # Quem toca sem estar liberado: o aviso no privado do Rafael sai no máximo uma vez neste tempo, por pessoa (os toques
@@ -65,6 +72,7 @@ NAO_SAIU = "😕 {mencao}, não consegui preparar o seu vídeo agora. Toque de n
 class AmigosFluxo(StatesGroup):
     menu = State()
     tirando = State()
+    liberando = State()
 
 
 def configurar_dependencias(bot, scheduler, admin_id):
@@ -73,6 +81,9 @@ def configurar_dependencias(bot, scheduler, admin_id):
     # A fila fica no banco: depois de um reinício (deploy), o pedido que esperava é atendido na volta seguinte.
     scheduler.add_job(atender_a_fila, "interval", minutes=1, id="shopee_video_amigos",
                       replace_existing=True, max_instances=1, coalesce=True)
+    # O /amigos no menu do grupo que já existia antes dele ir para o menu, sem esperar outro /amigos.
+    scheduler.add_job(conferir_o_comando_no_menu, "date", id="shopee_video_amigos_menu", replace_existing=True,
+                      run_date=datetime.now(fuso_horario) + timedelta(seconds=30), misfire_grace_time=None)
 
 
 # --- A trava do bot_mestre ---
@@ -95,7 +106,7 @@ def via_verde(texto, clique, do_admin):
 # grupo e titulo: o grupo do /amigos; ligado: o grupo atende os pedidos; botao: a mensagem fixada com o botão;
 # liberados: {id do Telegram: {"nome"}} de quem pode pedir; fila: os pedidos, o mais velho primeiro; avisados:
 # {id: {"quando", "nome"}} do último aviso no privado do Rafael de quem tocou sem estar liberado (o Liberar ✅ pega o
-# nome dali).
+# nome dali; quem está ali espera no Liberar Amigos ✅ do painel até ser liberado).
 
 def _padrao():
     return {"grupo": None, "titulo": "", "ligado": False, "botao": None, "liberados": {}, "fila": [], "avisados": {}}
@@ -131,6 +142,12 @@ def liberar(ident):
             dados["liberados"][chave] = {"nome": aviso.get("nome") or chave}
         return novo, dados["liberados"][chave]["nome"]
     return _alterar(alterar) or (False, str(ident))
+
+
+def pendentes(config):
+    """Quem tocou em Quero um vídeo 🎬 e ainda não foi liberado: {id: nome}, na ordem do 1º toque."""
+    return {ident: dados.get("nome") or ident for ident, dados in config["avisados"].items()
+            if ident not in config["liberados"]}
 
 
 def tirar(ident):
@@ -195,6 +212,36 @@ def botao_liberar(ident):
                                                                        callback_data=f"{CALLBACK_LIBERAR}{ident}")]])
 
 
+def _menu_do_rafael(grupo):
+    """O menu de comandos do bot (o / do campo de escrever) só do Rafael, só nesse grupo: os outros não veem."""
+    return BotCommandScopeChatMember(chat_id=grupo, user_id=ADMIN_ID)
+
+
+async def por_o_comando_no_menu(grupo, grupo_de_antes=None):
+    """
+    O /amigos no menu do grupo, visível só para o Rafael (P279 1); o do grupo de antes, quando o /amigos foi mandado
+    em outro grupo, sai. O bot só sabe qual é o grupo depois do 1º /amigos. Devolve se o menu ficou certo.
+    """
+    try:
+        if grupo_de_antes and grupo_de_antes != grupo:
+            await bot_instance.delete_my_commands(scope=_menu_do_rafael(grupo_de_antes))
+        await bot_instance.set_my_commands([BotCommand(command=COMANDO.lstrip("/"), description=DESCRICAO_DO_COMANDO)],
+                                           scope=_menu_do_rafael(grupo))
+    except Exception as e:
+        logger.warning(f"⚠️ [Grupo dos Amigos] O /amigos não foi para o menu do grupo: {type(e).__name__}")
+        registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "comando no menu", "não foi", ok=False)
+        return False
+    registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "comando no menu", "posto", ok=True)
+    return True
+
+
+async def conferir_o_comando_no_menu():
+    """Na subida do bot: o grupo guardado tem o /amigos no menu do Rafael."""
+    grupo = ler()["grupo"]
+    if grupo:
+        await por_o_comando_no_menu(grupo)
+
+
 async def comando_amigos(message: types.Message):
     """
     O /amigos do Rafael num grupo: guarda o grupo, liga o grupo dos amigos e fixa a mensagem com o botão (mandado de
@@ -230,10 +277,13 @@ async def comando_amigos(message: types.Message):
         fixado = False
     registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "botão no grupo",
                                  "fixado" if fixado else "sem fixar", ok=fixado)
+    no_menu = await por_o_comando_no_menu(grupo, antes["grupo"])
     aviso = ("✅ <b>Grupo dos Amigos ligado neste grupo.</b> O botão está fixado; quando um amigo tocar nele, chega "
-             f"aqui o nome dele com o {BOTAO_LIBERAR}." if fixado else
-             "⚠️ <b>Grupo dos Amigos ligado neste grupo, mas o botão não foi fixado.</b> Nas configurações do grupo, "
-             "dê ao bot a permissão de fixar mensagens e mande /amigos lá de novo.")
+             f"aqui o nome dele com o {BOTAO_LIBERAR}, e ele espera em {BOTAO_LIBERAR_AMIGOS}, no painel." if fixado
+             else "⚠️ <b>Grupo dos Amigos ligado neste grupo, mas o botão não foi fixado.</b> Nas configurações do "
+                  "grupo, dê ao bot a permissão de fixar mensagens e mande /amigos lá de novo.")
+    if no_menu:
+        aviso += "\n📋 O /amigos ficou no menu do grupo (o / ao lado de onde se escreve), visível só para você."
     try:
         await bot_instance.send_message(ADMIN_ID, aviso, parse_mode="HTML")
     except Exception as e:
@@ -390,22 +440,32 @@ def texto_do_painel(config, agora=None):
         f"💬 Grupo: {grupo}\n"
         f"⏳ Pedidos na fila: <b>{len(config['fila'])}</b>\n"
         f"📤 Vídeos mandados no grupo: hoje <b>{hoje}</b>, no total <b>{total}</b>\n"
+        f"🙋 Esperando a liberação: <b>{len(pendentes(config))}</b>\n"
         f"✅ Liberados ({len(nomes)}):\n{liberados}\n\n"
         "<b>O que cada botão faz</b>\n"
         f"▶️ <b>{BOTAO_LIGAR}</b> / ⏸️ <b>{BOTAO_DESLIGAR}</b>: volta a atender ou pausa os pedidos do grupo.\n"
+        f"✅ <b>{BOTAO_LIBERAR_AMIGOS}</b>: um botão com o nome de cada um que tocou em {BOTAO_QUERO} e ainda não "
+        "foi liberado; o toque no nome libera, e ele sai da lista. O aviso de cada um no privado, com o "
+        f"{BOTAO_LIBERAR}, continua.\n"
         f"➖ <b>{BOTAO_TIRAR}</b>: escolha quem não pode mais pedir (os pedidos dele na fila saem).\n"
         f"🔙 <b>{painel.BOTAO_VOLTAR}</b>: volta à tela da Shopee Vídeo.\n\n"
-        f"Para liberar alguém: quando ele tocar no botão do grupo, chega aqui o nome dele com o {BOTAO_LIBERAR}.\n"
         "Para pôr o botão no grupo: mande /amigos lá (o bot precisa ser administrador, com a permissão de fixar "
-        "mensagens)."
+        "mensagens). Depois do 1º, o /amigos fica no menu do grupo (o / ao lado de onde se escreve), visível só para "
+        "você."
     )
+
+
+def rotulo_liberar(config):
+    """O botão do painel, com quantos esperam a liberação."""
+    esperando = len(pendentes(config))
+    return f"{BOTAO_LIBERAR_AMIGOS} ({esperando})" if esperando else BOTAO_LIBERAR_AMIGOS
 
 
 def teclado_do_painel(config):
     liga = BOTAO_DESLIGAR if config["ligado"] else BOTAO_LIGAR
     return montar_teclado([
-        [KeyboardButton(text=liga), KeyboardButton(text=BOTAO_TIRAR)],
-        [KeyboardButton(text=painel.BOTAO_VOLTAR)],
+        [KeyboardButton(text=liga), KeyboardButton(text=rotulo_liberar(config))],
+        [KeyboardButton(text=BOTAO_TIRAR), KeyboardButton(text=painel.BOTAO_VOLTAR)],
     ])
 
 
@@ -475,4 +535,57 @@ async def tirar_amigo(message: types.Message, state: FSMContext):
     registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "tirado", ok=True)
     await message.answer(f"➖ {html.escape(nome)} não pode mais pedir vídeos (os pedidos dele na fila saíram).",
                          parse_mode="HTML")
+    await mostrar_painel(message, state)
+
+
+# --- Liberar Amigos ✅ (P279 1) ---
+
+def _botoes_dos_pendentes(config):
+    """{texto do botão: id} de quem espera a liberação, numerados (dois nomes iguais ficam em botões diferentes)."""
+    return {f"{n}. {nome}"[:60]: ident for n, (ident, nome) in enumerate(pendentes(config).items(), 1)}
+
+
+def teclado_liberar(config):
+    linhas = [[KeyboardButton(text=texto)] for texto in _botoes_dos_pendentes(config)]
+    return montar_teclado(linhas + [[KeyboardButton(text=BOTAO_VOLTAR_AMIGOS)]])
+
+
+@router.message(F.text.startswith(BOTAO_LIBERAR_AMIGOS), StateFilter("*"))
+async def pedir_quem_liberar(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    config = ler()
+    if not pendentes(config):
+        await message.answer(f"Ninguém esperando a liberação agora. Quando alguém tocar em {BOTAO_QUERO} sem estar "
+                             "liberado, o nome aparece aqui.")
+        await mostrar_painel(message, state)
+        return
+    await state.set_state(AmigosFluxo.liberando)
+    await message.answer("✅ Quem pode pedir vídeos? Toque no nome: ele é liberado e sai da lista.",
+                         reply_markup=teclado_liberar(config))
+
+
+@router.message(F.text == BOTAO_VOLTAR_AMIGOS, StateFilter("*"))
+async def voltar_ao_grupo_dos_amigos(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_painel(message, state)
+
+
+@router.message(AmigosFluxo.liberando)
+async def liberar_da_lista(message: types.Message, state: FSMContext):
+    """O toque num nome do Liberar Amigos ✅: libera, e a lista volta sem ele (vazia, volta ao painel)."""
+    if not _admin(message): return
+    config = ler()
+    ident = _botoes_dos_pendentes(config).get(message.text or "")
+    if ident is None:
+        await message.answer(f"Toque num dos nomes ou em {BOTAO_VOLTAR_AMIGOS}.", reply_markup=teclado_liberar(config))
+        return
+    novo, nome = liberar(ident)
+    registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "liberado" if novo else "já liberado",
+                                 "pelo painel", ok=True)
+    await message.answer(f"✅ <b>Liberado:</b> {html.escape(nome)} já pode pedir vídeos no grupo.", parse_mode="HTML")
+    config = ler()
+    if pendentes(config):
+        await message.answer("Quem mais? Toque no nome.", reply_markup=teclado_liberar(config))
+        return
+    await message.answer("Ninguém mais esperando a liberação.")
     await mostrar_painel(message, state)
