@@ -1082,6 +1082,108 @@ def test_link_que_vai_ao_grupo_dos_amigos_e_o_do_rafael_com_a_etiqueta_do_grupo(
     assert no_grupo["chat"] == -1001 and "🔗 https://s.shopee.com.br/rafa-grupoamigos/def\n" in no_grupo["conteudo"]
 
 
+# --- Os links a mais (P283 1) ---
+
+MAIS_DOIS = [{"nome": "Garrafa Loja B", "preco": 21.0, "comissao": 12.0, "endereco": "https://shopee.com.br/product/2/22",
+              "item": "22"},
+             {"nome": "Garrafa Loja C", "preco": 20.0, "comissao": 10.0, "endereco": "https://shopee.com.br/product/3/33",
+              "item": "33"}]
+
+
+def test_links_a_mais_vao_depois_do_produto_do_video_no_privado_e_no_grupo(monkeypatch):
+    # P283 1: até 6 links, o do vídeo e o mesmo produto em outras lojas, para o Rafael e os amigos; cada link a mais
+    # com o link curto na etiqueta de quem abre (o do Rafael no privado, o do grupo no grupo).
+    _preparar_do_amigo(monkeypatch)
+    pedidos = []
+
+    async def links(video, produtos, do_rafael=True):
+        pedidos.append(do_rafael)
+        return [dict(p) for p in MAIS_DOIS]
+
+    async def converter(link, etiqueta, avisar_falha=True):
+        return f"https://s.shopee.com.br/{etiqueta}-{link.rsplit('/', 1)[-1]}"
+
+    monkeypatch.setattr(asv, "links_a_mais", links)
+    monkeypatch.setattr(asv.api_shopee, "converter_link_shopee", converter)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:00"))) == asv.MANDADO_AO_AMIGO
+    passos = bot.envios[-1]["conteudo"]
+    assert ("1. Garrafa: R$ 19,90, comissão 8%\n🔗 https://s.shopee.com.br/grupoamigos-abc\n"
+            "2. Garrafa Loja B: R$ 21,00, comissão 12%\n🔗 https://s.shopee.com.br/grupoamigos-22\n"
+            "3. Garrafa Loja C: R$ 20,00, comissão 10%\n🔗 https://s.shopee.com.br/grupoamigos-33\n") in passos
+    assert "Abra cada link" in passos and "os produtos, na ordem da lista" in passos
+    bot = Bot()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:05"))) == asv.MANDADO_NO_PRIVADO
+    privado = bot.mensagens[0][1]
+    assert "🔗 https://s.shopee.com.br/def\n2. Garrafa Loja B" in privado
+    assert "https://s.shopee.com.br/shopeevideo-22" in privado and "grupoamigos" not in privado
+    # Os do amigo não seguem os produtos a mais do robô (a conta é dele); os do Rafael, sim.
+    assert pedidos == [False, True]
+
+
+def test_sem_links_a_mais_a_mensagem_fica_como_antes(monkeypatch):
+    _preparar(monkeypatch, TEXTOS)
+
+    async def nenhum(video, produtos, do_rafael=True):
+        return []
+
+    monkeypatch.setattr(asv, "links_a_mais", nenhum)
+    bot = Bot()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == asv.MANDADO_NO_PRIVADO
+    assert "2️⃣ <b>Favorite o produto</b> ❤️\nGarrafa: R$ 19,90" in bot.mensagens[0][1]
+
+
+def _oferta(nome, preco, comissao, item):
+    return {"productName": nome, "priceMin": str(preco), "commissionRate": str(comissao / 100),
+            "productLink": f"https://shopee.com.br/product/9/{item}", "itemId": item, "imageUrl": f"foto-{item}"}
+
+
+def test_links_a_mais_buscam_o_mesmo_produto_e_a_ia_confere_pela_foto(monkeypatch):
+    # A busca da API pelo nome; ficam os de nome parecido, até 20% mais caros, do que paga mais por venda para o que
+    # paga menos; a IA confirma pela foto, e o de outra cor fica de fora (P142 1). No máximo 5 além do do vídeo.
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+    original = {"nome": "Garrafa Térmica Inox 500ml Azul", "preco": 50.0, "comissao": 10.0, "imagem": "foto-1",
+                "item": "1"}
+    ofertas = [_oferta("Garrafa Térmica Inox 500ml Azul Loja A", 55.0, 20.0, "2"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja B", 52.0, 30.0, "3"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Cara", 70.0, 30.0, "4"),
+               _oferta("Cadeira de Escritório Giratória", 50.0, 30.0, "5"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Rosa", 51.0, 25.0, "6"),
+               _oferta("Garrafa Térmica Inox 500ml Azul", 50.0, 10.0, "1")]
+    conferidos = []
+
+    async def buscar(termo, limite=10, sort_type=2, **kw):
+        return ofertas
+
+    def conferir(video, nome, anuncios, capa=None, precos=(), preco_do_post=None, outra_cor=None, **kw):
+        conferidos.append([n for n, _f in anuncios])
+        # Confirma os três de nome e preço parecidos; o rosa é o mesmo modelo em outra cor.
+        rosa = [n for n, _f in anuncios].index("Garrafa Térmica Inox 500ml Azul Rosa")
+        outra_cor.add(rosa)
+        return list(range(len(anuncios))), ""
+
+    monkeypatch.setattr(robo, "foto_do_anuncio", lambda endereco: b"foto" if endereco else None)
+    monkeypatch.setattr(robo, "sem_os_a_mais", lambda: None)
+    monkeypatch.setattr(asv.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(ps, "ia_confere_iguais", conferir)
+    mais = rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original]))
+    # O mais caro (40% acima), o de outro nome e o próprio produto do vídeo nem vão à IA.
+    assert conferidos == [["Garrafa Térmica Inox 500ml Azul Loja B", "Garrafa Térmica Inox 500ml Azul Rosa",
+                           "Garrafa Térmica Inox 500ml Azul Loja A"]]
+    assert [m["item"] for m in mais] == ["3", "2"]
+    assert mais[0] == {"nome": "Garrafa Térmica Inox 500ml Azul Loja B", "preco": 52.0, "comissao": 30.0,
+                       "endereco": "https://shopee.com.br/product/9/3", "item": "3"}
+    # Nos vídeos do Rafael, sem os produtos a mais do robô (desligados ou pelos pontos), nenhum; os do amigo seguem.
+    monkeypatch.setattr(robo, "sem_os_a_mais", lambda: ("nenhum - desligados", ""))
+    assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original])) == []
+    assert len(rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original], do_rafael=False))) == 2
+    # Sem o preço do produto do link ou no vídeo de link de vídeo (sem produto), nenhum, sem buscar.
+    assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [{**original, "preco": 0}], do_rafael=False)) == []
+    assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [], do_rafael=False)) == []
+    assert len(conferidos) == 2
+
+
 def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):
     # P271 2: o produto só não repete para a mesma pessoa. O vídeo dele fica na fonte, sem ser anotado, e vai o
     # próximo; outro amigo (e o Rafael) ainda pode receber esse produto.

@@ -507,6 +507,87 @@ def ordenar_produtos(produtos):
     return sorted(produtos, key=lambda p: (p["preco"], -p["comissao"]))
 
 
+# --- Os links a mais (P283 1) ---
+# O mesmo produto do vídeo em outras lojas, como os produtos a mais do robô (P59), sem o celular: a busca da API pelo
+# nome (a de maior comissão, como a troca da P33), os de nome parecido e até MAIS_CARO_NA_TROCA% mais caros, do que
+# paga mais por venda para o que paga menos, e a IA confere pela foto quais são o mesmo item, da mesma cor (P142 1).
+# Até LINKS_DO_VIDEO links com o do vídeo: o teto, não a meta. No vídeo de link de vídeo (Ver Produtos), nenhum. Nos
+# vídeos do Rafael, os links a mais seguem os produtos a mais do robô (desligados no painel ou com os pontos que deixam
+# só o produto do vídeo, P145, nenhum); os amigos postam na conta deles. Escolha do Rafael (22/11, P283 1):
+# DECISOES.md, Shopee Vídeo.
+LINKS_DO_VIDEO = 6
+PROCESSO_DOS_LINKS = "assistente: links a mais"
+
+
+async def links_a_mais(video, produtos, do_rafael=True):
+    """
+    Até LINKS_DO_VIDEO - 1 anúncios do mesmo produto do vídeo em outras lojas, conferidos pela IA pela foto, do que
+    paga mais por venda para o que paga menos: [{nome, preco, comissao, endereco, item}]. Nenhum sem o produto do
+    link ou o preço dele, sem a foto do anúncio, sem nenhum de nome e preço parecidos, sem a confirmação da IA e, nos
+    vídeos do Rafael (do_rafael), com os produtos a mais do robô fora. Um erro aqui nunca derruba o envio.
+    """
+    if not produtos or not produtos[0].get("preco"):
+        return []
+    # O robô importa este módulo: os imports ficam aqui dentro.
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+
+    def anotar(resultado, detalhe=""):
+        registro_processos.registrar("shopee_video", PROCESSO_DOS_LINKS, resultado, detalhe, ok=None)
+
+    try:
+        motivo = robo.sem_os_a_mais() if do_rafael else None
+        if motivo:
+            anotar(*motivo)
+            return []
+        original = produtos[0]
+        capa = await asyncio.to_thread(robo.foto_do_anuncio, original.get("imagem"))
+        if not capa:
+            anotar("nenhum - sem a foto do anúncio")
+            return []
+        ofertas = await api_shopee.buscar_ofertas_shopee(robo.termo_da_busca(original["nome"]),
+                                                         limite=robo.OFERTAS_NA_BUSCA, sort_type=5)
+        parecidas = [(None, oferta) for oferta in ofertas
+                     if ps.parecido_entre([oferta.get("productName") or ""], original["nome"])[0]
+                     >= robo.PARECIDO_NA_BUSCA]
+        fotos = []
+        for candidato in robo.candidatos_da_foto(original, original.get("item"), parecidas)[
+                :robo.CANDIDATOS_DOS_ESPACOS]:
+            foto = await asyncio.to_thread(robo.foto_do_anuncio, candidato["imagem"])
+            if foto:
+                fotos.append((candidato, foto))
+        contagem = f"{len(ofertas)} na busca, {len(parecidas)} de nome parecido, {len(fotos)} na IA"
+        if not fotos:
+            anotar("nenhum - nenhum de nome e preço parecidos", contagem)
+            return []
+        de_outra_cor = set()
+        posicoes, _ = await asyncio.to_thread(ps.ia_confere_iguais, video, original["nome"],
+                                              [(c["nome"], f) for c, f in fotos], capa=capa,
+                                              precos=[c["preco"] for c, _f in fotos],
+                                              preco_do_post=original["preco"], outra_cor=de_outra_cor)
+        mais = [{chave: fotos[i][0][chave] for chave in ("nome", "preco", "comissao", "endereco", "item")}
+                for i in posicoes if robo.OUTRA_COR_NOS_PRODUTOS or i not in de_outra_cor][:LINKS_DO_VIDEO - 1]
+        anotar(f"{len(mais)} a mais" if mais else "nenhum - a IA não confirmou nenhum", contagem)
+        return mais
+    except Exception as e:
+        anotar("erro", type(e).__name__)
+        logger.warning(f"⚠️ [Shopee Vídeo] Os links a mais não saíram: {type(e).__name__}")
+        return []
+
+
+async def com_os_links(mais, etiqueta):
+    """
+    Os links a mais com o link curto, o que o app abre, na etiqueta de quem vai abrir; o que fica sem o link curto
+    sai da lista.
+    """
+    com_link = []
+    for produto in mais:
+        link = await api_shopee.converter_link_shopee(produto["endereco"], etiqueta, avisar_falha=False)
+        if link and link != produto["endereco"]:
+            com_link.append({**produto, "link": link})
+    return com_link
+
+
 # --- Texto da IA ---
 
 # As mesmas regras das diretrizes em palavras leves. O filtro do Google recusa o pedido
@@ -834,21 +915,29 @@ def _passo_do_nome(produtos, nomes):
             f"(toque para copiar) e depois em Feito.\n{lista}\n")
 
 
-def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=None, amigo=""):
+def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=None, amigo="", mais=()):
     """
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
     copiar com um toque: salvar o vídeo, favoritar o produto, postar, comentar e tocar em
     Postei ✅ (o botão da mensagem; com cobrindo=True, o robô está sem o celular, e o passo diz
     que o vídeo conta no plano do dia dele, P156 1). nomes ({nome do anúncio: nome da IA}): o nome de
     cada produto no vídeo, para copiar no Adicionar (P265 1). amigo (a menção, em HTML): a mensagem vai ao
-    grupo dos amigos, chamando o amigo, sem o Postei ✅, que é do plano do Rafael (P277 1).
+    grupo dos amigos, chamando o amigo, sem o Postei ✅, que é do plano do Rafael (P277 1). mais ([{nome, preco,
+    comissao, link}]): o mesmo produto em outras lojas, depois do produto do vídeo, cada um com o seu link (P283 1).
     Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
     Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo que vai não
     tem som: o editado já leva a música de fundo, P55), o passo de postar lembra de pôr uma
     música da Shopee (P48).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    if len(produtos) == 1:
+    mais = list(mais or ())
+    if len(produtos) == 1 and mais:
+        linhas = [f"{i}. {_linha_do_produto(p)}\n🔗 {html.escape(l)}"
+                  for i, (p, l) in enumerate([(produtos[0], link)] + [(p, p["link"]) for p in mais], 1)]
+        favoritar = ("2️⃣ <b>Favorite os produtos</b> ❤️ (o do vídeo e o mesmo produto em outras lojas)\n"
+                     + "\n".join(linhas) + "\nAbra cada link, toque no coração e volte aqui.")
+        adicionar = "Adicionar Produto → Minhas Curtidas → os produtos, na ordem da lista → Postar."
+    elif len(produtos) == 1:
         favoritar = (f"2️⃣ <b>Favorite o produto</b> ❤️\n{_linha_do_produto(produtos[0])}\n"
                      f"🔗 {html.escape(link)}\nAbra, toque no coração e volte aqui.")
         adicionar = "Adicionar Produto → Minhas Curtidas → o produto → Postar."
@@ -888,7 +977,7 @@ def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=No
         f"📝 <b>Título</b> ({tamanho} caracteres{curto}; toque para copiar):\n"
         f"<code>{html.escape(textos['titulo'])}</code>\n"
         f"{adicionar}\n"
-        f"{_passo_do_nome(produtos, nomes or {})}\n"
+        f"{_passo_do_nome(produtos + mais, nomes or {})}\n"
         "4️⃣ <b>Depois de postar, comente</b> no vídeo (toque para copiar):\n"
         f"<code>{html.escape(textos['comentario'])}</code>"
         f"{postei}"
@@ -1076,28 +1165,34 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     # O vídeo que vai sem som ganha uma música da Shopee na hora de postar (escolha do Rafael,
     # P48). O editado já leva a música de fundo (P55); só o que vai sem a edição chega mudo.
     mudo = await asyncio.to_thread(videos.mudo, arquivo)
+    # O mesmo produto em outras lojas, até LINKS_DO_VIDEO links com o do vídeo (P283 1).
+    mais = await links_a_mais(video, produtos, do_rafael=not amigo)
     # O nome de cada produto no vídeo, para o Rafael colar no Adicionar (P265 1).
-    nomes = await nomes_no_video([p["nome"] for p in produtos]) if produtos else {}
+    nomes = await nomes_no_video([p["nome"] for p in produtos + mais]) if produtos else {}
     if amigo:
         do_grupo = await link_para_o_grupo(link)
+        mais_do_grupo = await com_os_links(mais, api_shopee.ETIQUETA_GRUPO_DOS_AMIGOS)
         if _ja_mandado(video["id"]):
             # O robô roda em outro processo e pode pegar o vídeo no meio do preparo: ele não vai a duas pessoas.
             return JA_COM_OUTRO
         await _mandar_ao_amigo(bot, amigo, arquivo, montar_mensagem(textos, produtos, do_grupo, mudo, nomes=nomes,
-                                                                    amigo=amigo["mencao"]))
+                                                                    amigo=amigo["mencao"], mais=mais_do_grupo))
         registrar(video["id"], "enviado", "", agora, item=item, amigo=dono)
         return MANDADO_AO_AMIGO
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
-    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo, nomes), parse_mode="HTML",
-                           disable_web_page_preview=True, reply_markup=botao_postei(video["id"]))
+    passos = montar_mensagem(textos, produtos, link, mudo, cobrindo, nomes,
+                             mais=await com_os_links(mais, api_shopee.ETIQUETA_SHOPEE_VIDEO))
+    await bot.send_message(admin_id, passos, parse_mode="HTML", disable_web_page_preview=True,
+                           reply_markup=botao_postei(video["id"]))
     registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo, item=item)
     if no_grupo:
         # O pedido do Rafael no grupo dos amigos: o mesmo vídeo vai ao grupo, em resposta ao pedido, com os passos sem
         # o Postei ✅, que fica no privado (P281 1).
         try:
             passos = montar_mensagem(textos, produtos, await link_para_o_grupo(link), mudo, nomes=nomes,
-                                     amigo=no_grupo["mencao"])
+                                     amigo=no_grupo["mencao"],
+                                     mais=await com_os_links(mais, api_shopee.ETIQUETA_GRUPO_DOS_AMIGOS))
             await _mandar_ao_amigo(bot, no_grupo, arquivo, passos)
         except Exception as e:
             logger.warning(f"⚠️ [Grupo dos Amigos] O vídeo do Rafael não saiu no grupo: {type(e).__name__}")
