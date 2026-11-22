@@ -9494,7 +9494,7 @@ def _lista_da_api(monkeypatch, ofertas, recusadas=(), sem_resposta=(), sem_link=
         return link if item in sem_link else f"https://s.shopee.com.br/curto{item}"
 
     def pedido(link, nome, foto, evitar="", longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False,
-               maos_e_voz=False, da_producao=False):
+               maos_e_voz=False, da_producao=False, propaganda=False):
         item = link.split("curto")[-1]
         foram.append(item)
         assert nome == f"Produto {item}" and foto == f"foto {item}".encode()
@@ -9603,6 +9603,8 @@ def test_escolha_da_amostra_de_16_s_pede_o_roteiro_de_vendedor(monkeypatch):
     # P246 1: a amostra do vídeo de 16 s escolhe o produto como a do vídeo do dia, e a IA escreve o pedido de 16 s
     # (com a continuação do Estender). Desde a P247 1 (17/11), a escolha do vídeo do dia também pede o de 16 s; o de
     # 8 s fica só para as amostras de 8 s.
+    # Sem a P269 3 (flow.SO_A_PROPAGANDA_NA_PRODUCAO False), a escolha do formato de antes, que continua no código.
+    monkeypatch.setattr(robo.flow, "SO_A_PROPAGANDA_NA_PRODUCAO", False)
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, longos, falas, unboxings = robo.flow.pedido_para_o_anuncio, [], [], []
 
@@ -9636,6 +9638,8 @@ def test_video_de_ia_oferece_a_comedia_so_quando_ela_pode(monkeypatch):
     # Escolha do Rafael (P251 1, com os personagens da P260 1): a comédia entra no vídeo de IA da produção, no máximo
     # 1 a cada 3 (flow.comedia_pode); as amostras ficam como estão. O registro diz o formato à parte do estilo do
     # pedido (na comédia, o pedido pela foto do anúncio é o do vendedor, para quando a imagem não vale).
+    # Sem a P269 3 (flow.SO_A_PROPAGANDA_NA_PRODUCAO False), a escolha do formato de antes, que continua no código.
+    monkeypatch.setattr(robo.flow, "SO_A_PROPAGANDA_NA_PRODUCAO", False)
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, comedias = robo.flow.pedido_para_o_anuncio, []
 
@@ -9660,6 +9664,8 @@ def test_video_de_ia_oferece_a_comedia_so_quando_ela_pode(monkeypatch):
 def test_amostra_maos_e_voz_pede_o_formato_novo_e_o_video_do_dia_continua_igual(monkeypatch):
     # Escolha do Rafael (20/11, P261 1): o formato mãos e voz vai primeiro numa amostra, só no privado dele; o vídeo de
     # IA do dia continua com a escolha de antes (o vendedor, o unboxing ou a comédia) até o OK dele.
+    # Sem a P269 3 (flow.SO_A_PROPAGANDA_NA_PRODUCAO False), a escolha do formato de antes, que continua no código.
+    monkeypatch.setattr(robo.flow, "SO_A_PROPAGANDA_NA_PRODUCAO", False)
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, maos, unboxings = robo.flow.pedido_para_o_anuncio, [], []
 
@@ -9677,23 +9683,32 @@ def test_amostra_maos_e_voz_pede_o_formato_novo_e_o_video_do_dia_continua_igual(
     assert maos == [True, False] and unboxings == [False, True]
 
 
-def test_amostra_da_propaganda_de_tv_pede_o_pedido_dela_e_o_video_do_dia_deixa_a_ia_escolher(monkeypatch):
-    # Escolha do Rafael (21/11, P268 1): a amostra de 8 s pede direto o pedido da propaganda de TV; no vídeo de IA do
-    # dia, desde a P269 1, a propaganda é mais um formato que a IA escolhe pelo produto (da_producao).
+def test_todo_video_de_ia_do_dia_pede_a_propaganda_de_tv_sem_a_escolha_do_formato(monkeypatch):
+    # Escolha do Rafael (21/11, P269 3, trocada da 1 sete minutos depois): todo vídeo de IA do dia e do De IA ✨ é a
+    # propaganda de TV de 8 s da amostra (P268 1); o vendedor, o mãos e voz, o unboxing e a comédia saem da produção.
     _lista_da_api(monkeypatch, [_oferta_da_lista("13", comissao=0.08)])
     pedido, propagandas = robo.flow.pedido_para_o_anuncio, []
 
     def anotar(*argumentos, longo=False, fala_inteira=False, com_unboxing=False, com_comedia=False, maos_e_voz=False,
                da_producao=False, propaganda=False):
-        propagandas.append((propaganda, longo, da_producao))
+        propagandas.append((propaganda, longo, da_producao, com_unboxing, com_comedia))
         return pedido(*argumentos, longo=longo)
 
     monkeypatch.setattr(robo.flow, "pedido_para_o_anuncio", anotar)
+    monkeypatch.setattr(robo.flow, "comedia_pode", lambda: True)
     escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:05"), amostra=True,
                                                                     longo=False, propaganda=True)
     assert escolhido["item"] == "13"
     robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:10"))
-    assert propagandas == [(True, False, False), (False, True, True)]
+    # A amostra e o vídeo do dia pedem a propaganda, sem o unboxing e sem a comédia na escolha.
+    assert propagandas == [(True, False, False, False, False), (True, True, True, False, False)]
+    # Sem a P269 3 (SO_A_PROPAGANDA_NA_PRODUCAO False), volta a escolha do formato pela IA (P262 e P269 1).
+    monkeypatch.setattr(robo.flow, "SO_A_PROPAGANDA_NA_PRODUCAO", False)
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:15"))
+    assert propagandas[-1] == (False, True, True, True, True)
+    # As outras amostras continuam como estão.
+    robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:20"), amostra=True, longo=True, maos_e_voz=True)
+    assert propagandas[-1] == (False, True, False, False, False)
 
 
 def test_video_de_ia_anota_a_imagem_do_personagem_e_o_rascunho_leva_o_personagem(monkeypatch, avisos, tmp_path):

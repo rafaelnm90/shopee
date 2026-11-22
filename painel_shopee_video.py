@@ -1703,8 +1703,12 @@ def linha_do_video_de_ia_de_hoje(agora=None):
 
 
 def limite_dos_videos_de_ia():
-    """A regra dos vídeos de IA por dia, na tela do Vídeo de IA ✨ (VIDEOS_DE_IA_POR_DIA; P232 1, P243 e P247 1)."""
-    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.CUSTO_DA_PRODUCAO, robo.flow.CREDITOS_GRATIS_DO_DIA
+    """
+    A regra dos vídeos de IA por dia, na tela do Vídeo de IA ✨ (VIDEOS_DE_IA_POR_DIA; P232 1, P243 e P247 1), com o
+    custo do vídeo de agora (a propaganda de TV de 8 s, P269 3).
+    """
+    limite, custo = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.custo_do_video_de_ia()
+    gratis = robo.flow.CREDITOS_GRATIS_DO_DIA
     pedido = f"{BOTAO_PREPARAR} → {BOTAO_PREPARAR_DE_IA}"
     if limite is None:
         return (f"Além do vídeo do robô, cada {pedido} faz mais um ({custo} créditos cada; passando dos {gratis} "
@@ -1720,35 +1724,47 @@ def limite_dos_videos_de_ia():
 def texto_video_ia(config, agora=None):
     """
     A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1; 18/11, P252 1; 19/11, P256 2 e
-    P260 1; 20/11, P262; 21/11, P269 1): DECISOES.md, Shopee Vídeo.
+    P260 1; 20/11, P262; 21/11, P269 3): DECISOES.md, Shopee Vídeo.
     """
     (modelo, custo_curto), custo = robo.flow.MODELO_DA_PRODUCAO, robo.flow.CUSTO_DA_PRODUCAO
+    gratis = robo.flow.CREDITOS_GRATIS_DO_DIA
+    if robo.flow.SO_A_PROPAGANDA_NA_PRODUCAO:
+        # Escolha do Rafael (21/11, P269 3): todo vídeo de IA é a propaganda de TV de 8 s.
+        formato = (
+            "um vídeo de 8 s feito por IA com cara de propaganda de TV: o produto em 2 ou 3 planos de cinema, com luz "
+            "de estúdio, e um locutor em off, sem ninguém falando para a câmera, feito pela foto do anúncio. É um "
+            f"Gerar só no {modelo} ({custo_curto} créditos, dentro dos {gratis} grátis do dia).")
+        roteiro = "escreve o pedido e a fala do locutor"
+        silencio = "A propaganda fica sempre inteira, sem cortar o silêncio."
+    else:
+        formato = (
+            "um vídeo feito por IA, de 8 ou 16 s: a IA escolhe pelo produto o formato e a duração (na dúvida, 8 s, que "
+            "prendem mais). Pode ser uma pessoa vendendo o produto do começo ao fim (o gancho, as vantagens de perto e "
+            "a chamada), só as mãos usando o produto com uma voz contando, o unboxing (só as mãos abrindo a caixa, "
+            "nunca dois seguidos), a comédia (o personagem numa situação engraçada com o produto e depois vendendo, no "
+            "máximo 1 a cada 3) ou a propaganda de TV (8 s com cara de comercial: o produto em planos de cinema e um "
+            "locutor em off). Quem vende ou faz a comédia é um dos personagens que você aprovou: o vídeo começa por "
+            "uma imagem dele com o produto, feita no modo Imagem do Flow, sem crédito, e conferida pela IA; sem ela, "
+            f"sai pela foto do anúncio. No {modelo}, o de 8 s é um Gerar só ({custo_curto} créditos) e o de 16 s, os "
+            f"8 s gerados e mais 8 s do Estender ({custo} créditos), dentro dos {gratis} grátis do dia.")
+        roteiro = "escreve o pedido e a fala (a pessoa só segura, vira e aponta o produto, no mesmo lugar)"
+        silencio = ("O silêncio de mais de 1 s é cortado, ou o vídeo fica inteiro, com o porquê no rascunho (a "
+                    "propaganda de TV fica sempre inteira).")
     ligado = robo.video_de_ia_ligado(config)
     minimo = robo.assistente._reais(robo.MINIMO_POR_VENDA)
     segundo_nivel = robo.texto_dos_filtros(robo.filtros_do_video_de_ia(config))
     nota = f"{robo.NOTA_MINIMA_DO_VIDEO_DE_IA:.1f}".replace(".", ",")
     return (
         "✨ <b>Vídeo de IA</b>\n"
-        "Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) um vídeo feito por IA, de 8 ou "
-        "16 s: a IA escolhe pelo produto o formato e a duração (na dúvida, 8 s, que prendem mais). Pode ser uma pessoa "
-        "vendendo o produto do começo ao fim (o gancho, as vantagens de perto e a chamada), só as mãos usando o "
-        "produto com uma voz contando, o unboxing (só as mãos abrindo a caixa, nunca dois seguidos), a comédia (o "
-        "personagem numa situação engraçada com o produto e depois vendendo, no máximo 1 a cada 3) ou a propaganda de "
-        "TV (8 s com cara de comercial: o produto em planos de cinema e um locutor em off). Quem vende ou faz a "
-        "comédia é um dos personagens que você aprovou: o vídeo começa por uma imagem dele com o produto, feita no "
-        "modo Imagem do Flow, sem crédito, e conferida pela IA; sem ela, sai pela foto do anúncio. No "
-        f"{modelo}, o de 8 s é um Gerar só ({custo_curto} créditos) e o de 16 s, os 8 s gerados e mais 8 s do Estender "
-        f"({custo} créditos), dentro dos {robo.flow.CREDITOS_GRATIS_DO_DIA} grátis do dia. O produto vem "
+        f"Uma vez por dia, o robô faz no Google Flow (no Motorola, com a sua conta Pro) {formato} O produto vem "
         "da própria Shopee, sem depender dos "
         "vídeos da fonte, em 2 níveis. No 1º, entre os produtos em alta (sem essa lista, os mais vendidos dos nichos "
         f"dos seus Achadinhos), ficam os de nota {nota} ou mais, que pagam pelo menos {minimo} por venda e que você "
         f"ainda não postou. No 2º, desses, vêm primeiro os que {segundo_nivel} (os que poucos afiliados "
         "divulgam), e o robô pega o que paga mais por venda entre eles; se nenhum deles servir, vale o 1º nível: o "
-        "que paga mais por venda. A IA olha a foto do anúncio antes (se não servir, vai para "
-        "o próximo), escreve o pedido e a fala (a pessoa só segura, vira e aponta o produto, no mesmo lugar) e "
+        f"que paga mais por venda. A IA olha a foto do anúncio antes (se não servir, vai para o próximo), {roteiro} e "
         "confere o vídeo pronto com a foto; o servidor ouve a fala, e o rascunho avisa se ela saiu embolada ou "
-        "cortada. O silêncio de mais de 1 s é cortado, ou o vídeo fica inteiro, com o porquê no rascunho (a "
-        "propaganda de TV fica sempre inteira). Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
+        f"cortada. {silencio} Ele vira um dos rascunhos do dia, no lugar de um da fonte, com "
         f"a nossa edição, os produtos e o Rótulo de IA ligado, e chega em {BOTAO_RASCUNHOS} para você aprovar (com a "
         f"{BOTAO_APROVACAO} desligada, vai ao ar sozinho). Se a IA "
         f"vir outro produto no vídeo, ele não vira rascunho. {limite_dos_videos_de_ia()}, e o produto que já ganhou "
@@ -2384,8 +2400,12 @@ def texto_preparar(agora=None):
 
 
 def creditos_do_de_ia():
-    """Na tela do Preparar 1 Agora ⚡, quantos vídeos de IA do dia cabem nos créditos grátis, quando o limite passa."""
-    limite, custo, gratis = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.CUSTO_DA_PRODUCAO, robo.flow.CREDITOS_GRATIS_DO_DIA
+    """
+    Na tela do Preparar 1 Agora ⚡, quantos vídeos de IA do dia cabem nos créditos grátis, quando o limite passa, pelo
+    custo do vídeo de agora (a propaganda de TV de 8 s, P269 3).
+    """
+    limite, custo = robo.VIDEOS_DE_IA_POR_DIA, robo.flow.custo_do_video_de_ia()
+    gratis = robo.flow.CREDITOS_GRATIS_DO_DIA
     if limite is not None and limite * custo <= gratis:
         return ""
     cabem = gratis // custo
