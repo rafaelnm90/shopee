@@ -55,7 +55,10 @@ a IA que escolhe o formato (agora também o mãos e voz) escolhe 8 s, um Gerar s
 o silêncio de mais de 1 s ou mantém o vídeo inteiro (decidir_o_silencio). Desde a P269 3 (21/11/2026), todo vídeo de
 IA do dia e do De IA ✨ é a propaganda de TV da amostra, de 8 s, pela foto do anúncio e inteira, sem o corte do
 silêncio (SO_A_PROPAGANDA_NA_PRODUCAO); os outros formatos ficam só nas amostras, e o checkup compara as visualizações
-da propaganda com as dos vídeos de IA dos formatos de antes.
+da propaganda com as dos vídeos de IA dos formatos de antes. A amostra da propaganda com um dos personagens (P270 1,
+21/11/2026; --tv --personagem), o teste que o Rafael pediu antes do robô: a IA escolhe o personagem pelo produto, o
+modo Imagem faz a imagem dele com o produto no quadro de um comercial (imagem_da_amostra), e o comercial sai dela,
+com o personagem usando o produto sem falar e o locutor em off (PEDIDO_DA_PROPAGANDA_PELA_IMAGEM).
 
 Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo,
 amostra-16s-fala-inteira, amostra-16s-maos-e-voz ou amostra-tv). O
@@ -70,6 +73,7 @@ vídeo, no privado.
     python3 flow_shopee_video.py amostra --longa --fala-inteira  # a de 16 s falando o tempo todo, sem o parado (P255 1)
     python3 flow_shopee_video.py amostra --longa --maos-e-voz  # a de 16 s só com as mãos e a voz contando (P261 1)
     python3 flow_shopee_video.py amostra --tv       # a de 8 s com cara de propaganda de TV, com o locutor (P268 1)
+    python3 flow_shopee_video.py amostra --tv --personagem  # a propaganda com um dos personagens (P270 1)
     python3 flow_shopee_video.py personagens          # as fotos dos personagens que faltam (P250 1 e P258 1)
     python3 flow_shopee_video.py personagens vovo     # a foto da Vovó de novo (outra)
     python3 flow_shopee_video.py aprovar-personagens  # o OK do Rafael às fotos mandadas (P259 1); com chaves, só essas
@@ -3171,6 +3175,11 @@ TRECHO_DA_COMEDIA = (
     "É um vídeo de comédia: a ação é o começo de uma situação engraçada, com o jeito do personagem diante do produto "
     "(por exemplo, olhando-o de lado, com cara de desconfiada), sempre com o produto inteiro e virado para a câmera; "
     "a graça é da situação, nunca do corpo, da aparência ou de um grupo. ")
+# A propaganda de TV com um dos personagens (P270 1, a amostra): ele usa o produto como num comercial, sem falar.
+TRECHO_DA_PROPAGANDA_NO_PERSONAGEM = (
+    "É um comercial de TV: a ação é o personagem usando o produto como num comercial, com um gesto simples e um "
+    "sorriso, sempre com o produto inteiro e bem à vista; a cena é um lugar bonito e caprichado, com cara de "
+    "comercial. ")
 PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO = (
     "Você monta a primeira cena de um vídeo de venda da Shopee Vídeo: um dos personagens fixos com o produto da foto "
     "({nome}). Os personagens:\n{personagens}\n"
@@ -3188,6 +3197,17 @@ PEDIDO_DA_IMAGEM_COM_O_PRODUTO = (
     "soft light. The product must look exactly like on the right side: same shape, colors, materials, logos, text "
     "and proportions, whole and clearly visible. Only this one person and this one product, nobody else. No "
     "collage, no split screen, no white background, no text, no captions and no watermark."
+)
+# A imagem do personagem com o produto na propaganda de TV (P270 1): o quadro de um comercial, e não de um vídeo de
+# celular.
+PEDIDO_DA_IMAGEM_DA_PROPAGANDA = (
+    "The reference image has two parts: the person on the left and the product on the right. Create one new "
+    "photorealistic vertical image, like a frame of a premium TV commercial shot on a cinema camera: the same person "
+    "from the left side (same face, hair, skin tone and body; same clothes unless the product is something to wear) "
+    "{acao}, {cena}, cinematic lighting, rich colors, shallow depth of field. The product must look exactly like on "
+    "the right side: same shape, colors, materials, logos, text and proportions, whole and clearly visible. Only this "
+    "one person and this one product, nobody else. No collage, no split screen, no white background, no text, no "
+    "captions and no watermark."
 )
 PEDIDO_DA_CONFERENCIA_DA_IMAGEM = (
     "A 1ª imagem foi feita por IA para a primeira cena de um vídeo de venda. A 2ª é a foto do anúncio do produto e a "
@@ -3231,10 +3251,12 @@ def escolher_o_personagem(nome, foto, personagens, formato=None):
     A escolha da IA para a imagem do personagem com o produto: {"personagem" (a chave, entre os personagens dados),
     "acao", "cena"}; None sem resposta ou com uma chave de fora. formato: None na imagem de teste (P253 1);
     ESTILO_DO_VENDEDOR ou ESTILO_DA_COMEDIA no vídeo de IA da produção (P260 1), com cada personagem da comédia
-    descrito pela graça dele (GRACA_NA_COMEDIA).
+    descrito pela graça dele (GRACA_NA_COMEDIA); ESTILO_DA_PROPAGANDA na amostra da propaganda com um personagem
+    (P270 1), com a ação e a cena de um comercial.
     """
     comedia = formato == ESTILO_DA_COMEDIA
-    trecho = TRECHO_DA_COMEDIA if comedia else TRECHO_DA_IMAGEM_DE_TESTE if formato is None else ""
+    trecho = (TRECHO_DA_COMEDIA if comedia else TRECHO_DA_PROPAGANDA_NO_PERSONAGEM if formato == ESTILO_DA_PROPAGANDA
+              else TRECHO_DA_IMAGEM_DE_TESTE if formato is None else "")
     lista = "\n".join(f"- {p['chave']}: {p['nome']} "
                       f"({GRACA_NA_COMEDIA.get(p['chave'], p['resumo']) if comedia else p['resumo']})"
                       for p in personagens)
@@ -3484,6 +3506,40 @@ PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO = _COMECO_PELA_IMAGEM_CURTO + (
     f"detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e {_FALA_DO_CURTO} Fotorrealista, com a luz da "
     "imagem e a câmera parada.\n"
 ) + _FIM_DO_CURTO
+# A propaganda de TV de 8 s pela imagem do personagem com o produto (P270 1, a amostra): o personagem é o ator do
+# comercial e usa o produto sem falar; o locutor fala em off, como na PEDIDO_DA_PROPAGANDA (P268 1).
+PEDIDO_DA_PROPAGANDA_PELA_IMAGEM = (
+    "Você é diretor de comerciais de TV e de streaming, no Brasil. A 1ª imagem é o primeiro quadro do comercial: "
+    "{quem}, já com o produto \"{nome}\". A 2ª é a foto oficial do anúncio, para o produto ficar idêntico a ela. O "
+    "Google Flow vai animar a 1ª imagem num vídeo de 8 segundos, em pé (9:16) e com som, com cara de propaganda de TV "
+    "de verdade, feita por uma produtora, e não de vídeo caseiro, de vídeo de loja ou de vídeo feito por IA: 2 ou 3 "
+    "planos de cinema ligados por cortes limpos, com luz de comercial, cores ricas, fundo desfocado e a câmera se "
+    "movendo devagar (aproximação lenta, giro em volta ou travelling). A pessoa da imagem é a atriz ou o ator do "
+    "comercial: usa o produto num gesto só, o mais simples (segurar, apoiar, passar, usar como na imagem), sorri e "
+    "pode olhar para o produto ou para a câmera, mas não fala; no fim, o produto sozinho no centro do quadro, como o "
+    "plano final de um comercial. Por cima, um locutor profissional, brasileiro, com voz firme e calorosa, fala em off "
+    "(ninguém fala na tela), com uma trilha suave de comercial por baixo. A IA de vídeo inventa coisas quando a cena "
+    "pede demais; por isso, a mesma pessoa da imagem em todos os planos (mesmo rosto, cabelo, tom de pele e roupa), o "
+    "produto idêntico ao da foto em todos os planos, sem mudar de forma, cor, tamanho ou estado, sem abrir, montar, "
+    "desmontar, encaixar, despejar ou trocar peça, e não aparece outra pessoa, outro produto nem objeto que se "
+    "confunda com ele. Responda só com um JSON, sem nada antes ou depois:\n"
+    '{{"prompt": "...", "fala": "...", "cena": "..."}}\n'
+    "- prompt: em inglês, até 100 palavras, o comercial de 8 segundos a partir da imagem, com os planos em ordem e o "
+    "que se vê em cada um: a pessoa da imagem e o produto, idêntico ao da foto do anúncio (mesma forma, cor, "
+    "material, tamanho, quantidade e detalhes; nada acrescentado, tirado ou trocado) e bem à vista; o locutor fala do "
+    "1º segundo até perto do fim, sem pausa longa, entre aspas, em português do Brasil, 2 ou 3 frases curtas com até "
+    f"{PALAVRAS_DA_FALA_INTEIRA} palavras ao todo, uma por plano: o gancho (uma promessa ou uma pergunta), a vantagem "
+    "que se vê no produto e o slogan com a chamada para comprar. Escreva no pedido: premium TV commercial, shot on a "
+    "cinema camera, photorealistic, real textures, no CGI look, cinematic lighting, shallow depth of field, smooth "
+    "camera moves, clean cuts, the person from the first frame acts without speaking, final hero shot of the product, "
+    "professional Brazilian Portuguese voice-over announcer, no one speaks on camera, subtle commercial music under "
+    "the voice, no subtitles, no text, no logo.\n"
+    "- fala: tudo o que o locutor fala, em português, como vai sair no vídeo.\n"
+    "- cena: uma frase em português que descreve os planos do comercial, para o Rafael.\n"
+    + _FALA_SEM_EMBOLAR +
+    " A fala vai sem marca, sem preço, sem dizer que vai acabar e sem prometer o que o produto não faz. Sem texto na "
+    "tela, sem legenda, sem logotipo novo e sem outros produtos; nada perigoso, nojento ou com criança."
+)
 # A comédia de 16 s (P251 1): na 1ª parte, a situação engraçada, com a graça vinda do jeito do personagem diante do
 # produto e da fala, só com movimentos pequenos; na 2ª, o mesmo personagem, convencido, mostrando o produto e vendendo.
 PEDIDO_DA_COMEDIA_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
@@ -3526,12 +3582,14 @@ def elenco_do_formato(formato, aprovadas=None):
     return [p for p in PERSONAGENS if p["chave"] in aprovadas and p["chave"] not in SO_NA_COMEDIA]
 
 
-def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False):
+def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False, propaganda=False):
     """
     O pedido do vídeo de 16 s pela imagem do personagem com o produto (P260 1), com a foto do anúncio junto: {"estilo",
     "prompt", "continuacao", "fala", "cena"}, no vendedor ou na comédia (P251 1); None sem a resposta da IA ou sem uma
     das partes (o prompt, a continuação ou a fala). curto: o de 8 s do vendedor (P262), sem a continuação.
+    propaganda: a propaganda de TV de 8 s com o personagem sem falar e o locutor em off (P270 1), sem a continuação.
     """
+    curto = curto or propaganda
     p = personagem(chave) or {"nome": chave, "resumo": ""}
     descricao = GRACA_NA_COMEDIA.get(chave, p["resumo"]) if comedia else p["resumo"]
     imagens = []
@@ -3544,8 +3602,8 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False):
         if not dados:
             return None
         imagens.append((dados, "image/jpeg"))
-    pedido = (PEDIDO_DA_COMEDIA_PELA_IMAGEM if comedia else PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO if curto
-              else PEDIDO_DO_VENDEDOR_PELA_IMAGEM)
+    pedido = (PEDIDO_DA_PROPAGANDA_PELA_IMAGEM if propaganda else PEDIDO_DA_COMEDIA_PELA_IMAGEM if comedia
+              else PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO if curto else PEDIDO_DO_VENDEDOR_PELA_IMAGEM)
     try:
         texto = asyncio.run(api_gemini.gerar_texto_gemini(
             pedido.format(nome=nome, quem=f"o personagem {p['nome']} ({descricao})"), imagens=imagens))
@@ -3562,22 +3620,24 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False):
               for campo in ("prompt", "continuacao", "fala", "cena")}
     if not (partes["prompt"] and (curto or partes["continuacao"]) and partes["fala"]):
         return None
-    escrito = {"estilo": ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR, "prompt": com_a_diccao(partes["prompt"]),
+    estilo = ESTILO_DA_PROPAGANDA if propaganda else ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR
+    escrito = {"estilo": estilo, "prompt": com_a_diccao(partes["prompt"]),
                "fala": partes["fala"][:400], "cena": partes["cena"][:300]}
     if not curto:
         escrito["continuacao"] = com_a_diccao(partes["continuacao"])
     return escrito
 
 
-def _sem_a_imagem(motivo, chave="", conferencia=None):
+def _sem_a_imagem(motivo, chave="", conferencia=None, guardar_no=None, ler=None, quem="Vídeo de IA"):
     """
     A imagem do personagem não vale desta vez: o vídeo sai pela foto do anúncio, como antes (P253 1), com o porquê no
-    andamento (no log, só o texto fixo do código). Devolve o andamento.
+    andamento (no log, só o texto fixo do código). guardar_no e ler: onde fica o andamento (o do vídeo do dia; na
+    amostra, o dela). Devolve o andamento.
     """
-    guardar_producao(imagem={"estado": "sem", "motivo": motivo, "personagem": chave, "em": agora(),
-                             **({"conferencia": conferencia} if conferencia else {})})
-    print(f"Vídeo de IA: sem a imagem do personagem ({motivo}); o vídeo sai pela foto do anúncio")
-    return producao()
+    (guardar_no or guardar_producao)(imagem={"estado": "sem", "motivo": motivo, "personagem": chave, "em": agora(),
+                                             **({"conferencia": conferencia} if conferencia else {})})
+    print(f"{quem}: sem a imagem do personagem ({motivo}); o vídeo sai pela foto do anúncio")
+    return (ler or producao)()
 
 
 def imagem_da_producao(d, atual):
@@ -3589,11 +3649,32 @@ def imagem_da_producao(d, atual):
     ela, o porquê fica no andamento e o vídeo sai pela foto do anúncio (a parada no Flow fica nos casos). Devolve o
     andamento.
     """
+    return _imagem_do_personagem(d, atual, guardar_producao, producao, f"producao_{atual['data']}", "Vídeo de IA")
+
+
+def imagem_da_amostra(d, atual):
+    """
+    A imagem do personagem com o produto da amostra da propaganda de TV com um personagem (P270 1), como a do vídeo
+    do dia (imagem_da_producao), com o andamento na amostra. Devolve a amostra.
+    """
+    return _imagem_do_personagem(d, atual, marcar_amostra, amostra_guardada, "amostra", "Amostra")
+
+
+def _imagem_do_personagem(d, atual, guardar_no, ler, prefixo, quem):
+    """
+    O caminho da imagem do personagem com o produto, igual no vídeo do dia e na amostra (imagem_da_producao e
+    imagem_da_amostra): guardar_no e ler são o andamento de cada um, prefixo o começo dos arquivos e quem o rótulo do
+    log. Na propaganda de TV (P270 1), a imagem é o quadro de um comercial, e o pedido pela imagem, o da propaganda.
+    """
     formato = atual.get("formato")
+    propaganda = formato == ESTILO_DA_PROPAGANDA
+
+    def sem(motivo, chave="", conferencia=None):
+        return _sem_a_imagem(motivo, chave, conferencia, guardar_no, ler, quem)
     aprovadas = fotos_aprovadas()
     elenco = elenco_do_formato(formato, aprovadas)
     if not elenco:
-        return _sem_a_imagem(SEM_FOTO_APROVADA)
+        return sem(SEM_FOTO_APROVADA)
     try:
         with open(atual["foto"], "rb") as arquivo:
             foto = jpeg_sem_metadados(arquivo.read())
@@ -3601,7 +3682,7 @@ def imagem_da_producao(d, atual):
         foto = None
     escolha = escolher_o_personagem(atual.get("nome", ""), foto, elenco, formato) if foto else None
     if not escolha:
-        return _sem_a_imagem("a IA não escolheu o personagem")
+        return sem("a IA não escolheu o personagem")
     chave = escolha["personagem"]
     try:
         with open(aprovadas[chave], "rb") as arquivo:
@@ -3609,17 +3690,18 @@ def imagem_da_producao(d, atual):
     except OSError:
         referencia = None
     if not referencia:
-        return _sem_a_imagem("a foto de referência não saiu", chave)
+        return sem("a foto de referência não saiu", chave)
     os.makedirs(PASTA, exist_ok=True)
-    caminho = os.path.join(PASTA, f"producao_{atual['data']}_referencia.jpg")
+    caminho = os.path.join(PASTA, f"{prefixo}_referencia.jpg")
     with open(caminho, "wb") as arquivo:
         arquivo.write(referencia)
-    imagem = os.path.join(PASTA, f"producao_{atual['data']}_imagem.jpg")
-    prompt = PEDIDO_DA_IMAGEM_COM_O_PRODUTO.format(acao=escolha["acao"], cena=escolha["cena"])
-    print(f"Vídeo de IA: personagem {chave}; a imagem com o produto antes do vídeo")
+    imagem = os.path.join(PASTA, f"{prefixo}_imagem.jpg")
+    prompt = (PEDIDO_DA_IMAGEM_DA_PROPAGANDA if propaganda else PEDIDO_DA_IMAGEM_COM_O_PRODUTO).format(
+        acao=escolha["acao"], cena=escolha["cena"])
+    print(f"{quem}: personagem {chave}; a imagem com o produto antes do vídeo")
     nome_na_galeria = foto_na_galeria(d, caminho, "_referencia")
     if not nome_na_galeria:
-        return _sem_a_imagem("a foto de referência não apareceu na galeria do celular", chave)
+        return sem("a foto de referência não apareceu na galeria do celular", chave)
     conferencia, feitas, vale = None, 0, False
     try:
         # O saldo antes da imagem: sem os créditos do vídeo (o de 8 s da P262, sem o Estender), nem ela é feita (o
@@ -3631,26 +3713,26 @@ def imagem_da_producao(d, atual):
             gerar_a_imagem(d, prompt, imagem, com_foto=True)
             conferencia = conferir_a_imagem(imagem, atual["foto"], aprovadas[chave])
             vale = conferencia["mesmo"] is True and conferencia["pessoa"] is True
-            print(f"Vídeo de IA: imagem {feitas} feita; a IA conferiu: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}"
+            print(f"{quem}: imagem {feitas} feita; a IA conferiu: {ROTULOS_DA_CONFERENCIA[conferencia['mesmo']]}"
                   f"; {ROTULOS_DA_PESSOA[conferencia['pessoa']]}")
     except SemCreditos:
         raise
     except Parada as e:
         casos_robo.guardar(d, "video de IA", "parou", f"imagem do personagem: {e}", passo="flow imagem")
-        return _sem_a_imagem(f"o Flow parou na imagem: {e}", chave, conferencia)
+        return sem(f"o Flow parou na imagem: {e}", chave, conferencia)
     finally:
         tirar_da_galeria(d, nome_na_galeria)
     if not vale:
-        return _sem_a_imagem(f"a IA não confirmou o produto e a pessoa em {feitas} imagens", chave, conferencia)
+        return sem(f"a IA não confirmou o produto e a pessoa em {feitas} imagens", chave, conferencia)
     pedido = pedido_pela_imagem(atual.get("nome", ""), imagem, atual["foto"], chave, formato == ESTILO_DA_COMEDIA,
-                                curto=bool(atual.get("curta")))
+                                curto=bool(atual.get("curta")), propaganda=propaganda)
     if not pedido:
-        return _sem_a_imagem("a IA não escreveu o pedido do vídeo pela imagem", chave, conferencia)
-    guardar_producao(foto_do_video=imagem, personagem=chave, **pedido,
-                     imagem={"estado": "feita", "personagem": chave, "tentativas": feitas, "conferencia": conferencia,
-                             "em": agora()})
-    print(f"Vídeo de IA: a imagem vale ({feitas} imagem(ns)); o vídeo sai dela")
-    return producao()
+        return sem("a IA não escreveu o pedido do vídeo pela imagem", chave, conferencia)
+    guardar_no(foto_do_video=imagem, personagem=chave, **pedido,
+               imagem={"estado": "feita", "personagem": chave, "tentativas": feitas, "conferencia": conferencia,
+                       "em": agora()})
+    print(f"{quem}: a imagem vale ({feitas} imagem(ns)); o vídeo sai dela")
+    return ler()
 
 
 def linha_do_personagem(atual):
@@ -3713,12 +3795,14 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
             f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
     propaganda = atual.get("formato") == ESTILO_DA_PROPAGANDA
     if propaganda:
+        com_personagem = atual.get("com_personagem")
         linhas = [f"🎬 Amostra nº {atual.get('numero', 1)} do vídeo de IA de 8 s com cara de propaganda de TV "
-                  "(P268 1)",
+                  + ("com um dos seus personagens (P270 1)" if com_personagem else "(P268 1)"),
                   f"🤖 Modelo: {atual.get('modelo', '')} ({custo} créditos de IA)",
-                  f"📦 Produto: {atual.get('nome', '')}", paga,
-                  f"🎙️ Locutor: {atual.get('fala', '')}",
-                  f"🔎 A IA conferiu: {conferido}"]
+                  f"📦 Produto: {atual.get('nome', '')}", paga]
+        if linha_do_personagem(atual):
+            linhas.append(linha_do_personagem(atual))
+        linhas += [f"🎙️ Locutor: {atual.get('fala', '')}", f"🔎 A IA conferiu: {conferido}"]
         if fala_ouvida:
             linhas.append(texto_da_fala(fala_ouvida))
         if com_fala is not None:
@@ -3762,9 +3846,14 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     if propaganda:
         # A amostra da propaganda de TV (P268 1) é só para ver; desde a P269 3, a propaganda é o formato de todo
-        # vídeo de IA do robô.
-        linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV, que é, desde a P269 3, o "
-                      "formato de todo vídeo de IA do robô.")
+        # vídeo de IA do robô; a com o personagem (P270 1) só vai ao robô com o OK do Rafael.
+        if com_personagem:
+            linhas.append("Nada foi postado: é só para você ver a propaganda com um dos seus personagens. No robô, a "
+                          "propaganda continua pela foto do anúncio até o seu OK; com ele, a IA decide pelo produto se "
+                          "mostra um personagem usando o produto ou só o produto (P270 1).")
+        else:
+            linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV, que é, desde a P269 3, "
+                          "o formato de todo vídeo de IA do robô.")
         linhas.append(f"🎥 Cena: {atual.get('cena', '')}")
     elif atual.get("longa") and atual.get("formato") == ESTILO_DAS_MAOS_E_VOZ:
         # Desde a P262, o formato mãos e voz já está entre os do vídeo de IA do dia (P261 1): a amostra é só para ver.
@@ -3883,7 +3972,8 @@ def _pedido_do_mesmo_produto(anterior, longa, fala_inteira=False, maos_e_voz=Fal
     return dict(escolhido, item=anterior["item"], valor=anterior.get("valor"), origem=anterior.get("origem"))
 
 
-def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_e_voz=False, tv=False):
+def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_e_voz=False, tv=False,
+            personagem=False):
     """
     A próxima amostra do vídeo de IA (P236 1): escolhe o produto como a produção, gera no MODELO_DA_PRODUCAO, baixa
     e manda no privado do Rafael. A que já foi gerada só é baixada e mandada (nunca dois Gerar para a mesma amostra).
@@ -3892,11 +3982,14 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_
     anterior e um pedido novo da IA (P248 1). fala_inteira (só com longa): a de 16 s com a fala do começo ao fim de
     cada parte e o corte do parado (P255 1). maos_e_voz (só com longa, sem fala_inteira): a de 16 s no formato mãos e
     voz (P261 1). tv (sem longa e sem mesmo): a de 8 s com cara de propaganda de TV, com o locutor em off (P268 1).
-    0 deu certo, 1 parou. Só rótulos fixos e números no log.
+    personagem (só com tv): a propaganda começa pela imagem de um dos personagens com o produto, e ele é o ator do
+    comercial, sem falar (P270 1); sem a imagem, nada é gerado. 0 deu certo, 1 parou. Só rótulos fixos e números no
+    log.
     """
     fala_inteira = fala_inteira and longa
     maos_e_voz = maos_e_voz and longa and not fala_inteira
     tv = tv and not (longa or mesmo)
+    personagem = personagem and tv
     atual = amostra_guardada()
     if atual.get("estado") == "baixado" and os.path.exists(atual.get("arquivo") or ""):
         print(f"Amostra nº {atual.get('numero', 1)}: já baixada; falta mandar")
@@ -3950,8 +4043,10 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_
                 atual.update(formato=ESTILO_DAS_MAOS_E_VOZ)
             guardar(amostra=atual)
         elif tv:
-            # A propaganda de TV (P268 1) tem um jeito só, como a de 16 s, e fica fora da variação dos estilos.
-            atual.update(formato=ESTILO_DA_PROPAGANDA, fala=escolhido.get("fala", ""))
+            # A propaganda de TV (P268 1) tem um jeito só, como a de 16 s, e fica fora da variação dos estilos; com o
+            # personagem (P270 1), o pedido de agora fica para quando a imagem dele não vale.
+            atual.update(formato=ESTILO_DA_PROPAGANDA, fala=escolhido.get("fala", ""),
+                         **({"com_personagem": True} if personagem else {}))
             guardar(amostra=atual)
         else:
             guardar(amostra=atual, estilos=(estilos_recentes() + [escolhido["estilo"]])[-ESTILOS_LEMBRADOS:])
@@ -3962,7 +4057,8 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_
               + (f" e a continuação com {len(atual['continuacao'].split())}" if longa else "")
               + ("; com a fala do começo ao fim (P255 1)" if fala_inteira else "")
               + ("; no formato mãos e voz (P261 1)" if maos_e_voz else "")
-              + ("; com cara de propaganda de TV (P268 1)" if tv else ""))
+              + ("; com cara de propaganda de TV (P268 1)" if tv else "")
+              + ("; com um personagem (P270 1)" if personagem else ""))
     if not celular_robo.conectado():
         print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
         return 1
@@ -3996,6 +4092,13 @@ def _amostra_no_celular(atual, sem_gerar, so_baixar):
         return 1
     d = ps.conectar(celular=True)
     try:
+        if atual.get("com_personagem") and not (sem_gerar or so_baixar or atual.get("foto_do_video")):
+            atual = imagem_da_amostra(d, atual)
+            if not atual.get("foto_do_video"):
+                # A amostra é para ver a propaganda com um personagem (P270 1): sem a imagem dele, nada é gerado, e a
+                # próxima amostra escolhe outro produto.
+                print("Amostra: sem a imagem do personagem; nada foi gerado")
+                return 1
         if atual.get("longa"):
             feito = no_flow_longo(d, atual, atual["modelo"], atual["custo"], os.path.join(PASTA, "amostra.mp4"),
                                   marcar_amostra, sem_gerar=sem_gerar)
@@ -4104,11 +4207,12 @@ def main(argumentos):
     # O formato mãos e voz (P261 1) é só da amostra de 16 s e tem a voz dele: nem sem o --longa, nem com a fala inteira.
     # A propaganda de TV (P268 1) é a de 8 s, com o locutor dela: sozinha, só com o --sem-gerar.
     sem_jeito = (("--maos-e-voz" in opcoes and ("--longa" not in opcoes or "--fala-inteira" in opcoes))
-                 or ("--tv" in opcoes and not opcoes <= {"--tv", "--sem-gerar"}))
+                 or ("--tv" in opcoes and not opcoes <= {"--tv", "--sem-gerar", "--personagem"})
+                 or ("--personagem" in opcoes and "--tv" not in opcoes))
     if argumentos and not sem_jeito and ((argumentos[0] == "teste" and opcoes <= {"--sem-gerar"})
                                          or (argumentos[0] == "amostra"
                                              and opcoes <= {"--sem-gerar", "--longa", "--mesmo", "--fala-inteira",
-                                                            "--maos-e-voz", "--tv"})):
+                                                            "--maos-e-voz", "--tv", "--personagem"})):
         # Os módulos logam nomes e links; aqui o log é público, e o resultado sai pelos prints.
         logging.disable(logging.CRITICAL)
         try:
@@ -4116,7 +4220,7 @@ def main(argumentos):
                 return teste(sem_gerar="--sem-gerar" in opcoes)
             return amostra(sem_gerar="--sem-gerar" in opcoes, longa="--longa" in opcoes, mesmo="--mesmo" in opcoes,
                            fala_inteira="--fala-inteira" in opcoes, maos_e_voz="--maos-e-voz" in opcoes,
-                           tv="--tv" in opcoes)
+                           tv="--tv" in opcoes, personagem="--personagem" in opcoes)
         except Exception as e:
             # Só o tipo: a mensagem de um erro inesperado pode trazer o nome do arquivo do vídeo.
             print(f"Flow: erro inesperado ({type(e).__name__})")
