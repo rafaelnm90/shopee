@@ -508,12 +508,14 @@ def ordenar_produtos(produtos):
 
 
 # --- Os links a mais (P283 1) ---
-# O mesmo produto do vídeo em outras lojas, como os produtos a mais do robô (P59), sem o celular: a busca da API pelo
-# nome (a de maior comissão, como a troca da P33), os de nome parecido e até MAIS_CARO_NA_TROCA% mais caros, do que
-# paga mais por venda para o que paga menos, e a IA confere pela foto quais são o mesmo item, da mesma cor (P142 1).
+# O mesmo produto do vídeo em outras lojas, como os produtos a mais do robô (P59), sem o celular: as buscas da API pelo
+# nome (por maior comissão e por mais vendidos, como a troca da P33), os de nome parecido e de preço que pode caber
+# na faixa do mais barato (P284 1), e a IA confere pela foto quais são o mesmo item, da mesma cor (P142 1). Dos
+# confirmados, só os que custam no máximo MAIS_CARO_QUE_O_MAIS_BARATO% a mais que o mais barato deles e do produto do
+# vídeo, do que paga mais por venda para o que paga menos; o do vídeo vai sempre, em 1º.
 # Até LINKS_DO_VIDEO links com o do vídeo: o teto, não a meta. No vídeo de link de vídeo (Ver Produtos), nenhum. Nos
 # vídeos do Rafael, os links a mais seguem os produtos a mais do robô (desligados no painel ou com os pontos que deixam
-# só o produto do vídeo, P145, nenhum); os amigos postam na conta deles. Escolha do Rafael (22/11, P283 1):
+# só o produto do vídeo, P145, nenhum); os amigos postam na conta deles. Escolhas do Rafael (22/11, P283 1 e P284 1):
 # DECISOES.md, Shopee Vídeo.
 LINKS_DO_VIDEO = 6
 PROCESSO_DOS_LINKS = "assistente: links a mais"
@@ -545,14 +547,20 @@ async def links_a_mais(video, produtos, do_rafael=True):
         if not capa:
             anotar("nenhum - sem a foto do anúncio")
             return []
-        ofertas = await api_shopee.buscar_ofertas_shopee(robo.termo_da_busca(original["nome"]),
-                                                         limite=robo.OFERTAS_NA_BUSCA, sort_type=5)
+        ofertas = []
+        for ordem in robo.ORDENS_DA_TROCA:
+            ofertas.extend(await api_shopee.buscar_ofertas_shopee(robo.termo_da_busca(original["nome"]),
+                                                                  limite=robo.OFERTAS_NA_BUSCA, sort_type=ordem))
         parecidas = [(None, oferta) for oferta in ofertas
                      if ps.parecido_entre([oferta.get("productName") or ""], original["nome"])[0]
                      >= robo.PARECIDO_NA_BUSCA]
+        candidatos = robo.candidatos_da_foto(original, original.get("item"), parecidas)
+        # Os mais baratos que o do vídeo também vão à IA: são eles que dão o começo da faixa (P284 1).
+        baratos = sorted((c for c in candidatos if c["preco"] < original["preco"]),
+                         key=lambda c: c["preco"])[:robo.MAIS_BARATOS_NA_IA]
         fotos = []
-        for candidato in robo.candidatos_da_foto(original, original.get("item"), parecidas)[
-                :robo.CANDIDATOS_DOS_ESPACOS]:
+        for candidato in baratos + [c for c in candidatos if c not in baratos][
+                :robo.CANDIDATOS_DOS_ESPACOS - len(baratos)]:
             foto = await asyncio.to_thread(robo.foto_do_anuncio, candidato["imagem"])
             if foto:
                 fotos.append((candidato, foto))
@@ -565,9 +573,15 @@ async def links_a_mais(video, produtos, do_rafael=True):
                                               [(c["nome"], f) for c, f in fotos], capa=capa,
                                               precos=[c["preco"] for c, _f in fotos],
                                               preco_do_post=original["preco"], outra_cor=de_outra_cor)
-        mais = [{chave: fotos[i][0][chave] for chave in ("nome", "preco", "comissao", "endereco", "item")}
-                for i in posicoes if robo.OUTRA_COR_NOS_PRODUTOS or i not in de_outra_cor][:LINKS_DO_VIDEO - 1]
-        anotar(f"{len(mais)} a mais" if mais else "nenhum - a IA não confirmou nenhum", contagem)
+        chaves = ("nome", "preco", "comissao", "endereco", "valor", "item")
+        confirmados = [{chave: fotos[i][0][chave] for chave in chaves}
+                       for i in posicoes if robo.OUTRA_COR_NOS_PRODUTOS or i not in de_outra_cor]
+        da_faixa = sorted(robo.na_faixa([original["preco"]], confirmados), key=lambda p: -p["valor"])
+        mais = [{chave: p[chave] for chave in ("nome", "preco", "comissao", "endereco", "item")}
+                for p in da_faixa][:LINKS_DO_VIDEO - 1]
+        contagem += f", {len(confirmados)} confirmados, {len(confirmados) - len(da_faixa)} fora da faixa do mais barato"
+        anotar(f"{len(mais)} a mais" if mais else "nenhum - fora da faixa do mais barato" if confirmados
+               else "nenhum - a IA não confirmou nenhum", contagem)
         return mais
     except Exception as e:
         anotar("erro", type(e).__name__)

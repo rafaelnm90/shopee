@@ -87,8 +87,9 @@ def test_tentativas_que_nao_deram_certo_com_a_hora_o_passo_e_so_a_forma_do_motiv
 
 
 def test_comissao_mostra_so_numeros(monkeypatch):
-    # P33 e P58: a investigação diz se a busca acha o mesmo produto pagando mais por venda,
-    # sem nome, link nem valor em reais (o log é público).
+    # P33 e P58: a investigação diz se a busca acha o mesmo produto pagando mais por venda e,
+    # pela faixa do mais barato (P284 1), quantos parecidos custam menos, sem nome, link nem valor
+    # em reais (o log é público).
     precos = {"preco": 10.0}
 
     async def produtos_do_link(link):
@@ -100,13 +101,14 @@ def test_comissao_mostra_so_numeros(monkeypatch):
                  "productLink": "https://shopee.com.br/product/1/2", "sales": 3},
                 {"productName": "Garrafa de Vidro", "commissionRate": "0.2", "priceMin": "10.0",
                  "productLink": "https://shopee.com.br/product/1/3"},
-                {"productName": "Copo Térmico Inox 500ml", "priceMin": "10.0", "productLink": "https://shopee.com.br/product/1/4"}]
+                {"productName": "Copo Térmico Inox 500ml", "priceMin": "8.0",
+                 "productLink": "https://shopee.com.br/product/1/4"}]
 
     monkeypatch.setattr(ir.assistente, "produtos_do_link", produtos_do_link)
     monkeypatch.setattr(ir.api_shopee, "buscar_ofertas_shopee", buscar)
     texto, achou = rodar(ir.comissao(LINK))
-    assert achou and texto == ("comissão: 3 na busca (1 sem a taxa), 1 parecido(s) pagando mais por venda "
-                               "(o melhor: +70% por venda)")
+    assert achou and texto == ("comissão: 3 na busca (1 sem a taxa), 1 parecido(s) mais barato(s), 1 parecido(s) "
+                               "pagando mais por venda (o melhor: +70% por venda)")
     assert "Copo" not in texto and "shopee.com" not in texto and "R$" not in texto
     # Sem o preço do produto do link, não há com o que comparar.
     precos["preco"] = 0.0

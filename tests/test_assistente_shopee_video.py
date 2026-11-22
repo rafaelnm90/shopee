@@ -1139,7 +1139,7 @@ def _oferta(nome, preco, comissao, item):
 
 
 def test_links_a_mais_buscam_o_mesmo_produto_e_a_ia_confere_pela_foto(monkeypatch):
-    # A busca da API pelo nome; ficam os de nome parecido, até 20% mais caros, do que paga mais por venda para o que
+    # A busca da API pelo nome; ficam os de nome parecido, até 25% mais caros, do que paga mais por venda para o que
     # paga menos; a IA confirma pela foto, e o de outra cor fica de fora (P142 1). No máximo 5 além do do vídeo.
     import postador_shopee_video as ps
     import robo_shopee_video as robo
@@ -1182,6 +1182,40 @@ def test_links_a_mais_buscam_o_mesmo_produto_e_a_ia_confere_pela_foto(monkeypatc
     assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [{**original, "preco": 0}], do_rafael=False)) == []
     assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [], do_rafael=False)) == []
     assert len(conferidos) == 2
+
+
+def test_links_a_mais_so_com_os_da_faixa_do_mais_barato(monkeypatch):
+    # Escolha do Rafael (22/11, P284 1): a busca também pelos mais vendidos, os mais baratos que o do vídeo vão
+    # à IA primeiro, e dos confirmados só ficam os até 25% acima do mais barato: a garrafa de R$ 30 deixa de fora
+    # as de R$ 52 e R$ 55. O do vídeo vai sempre, em 1º, fora da lista dos a mais.
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+    original = {"nome": "Garrafa Térmica Inox 500ml Azul", "preco": 50.0, "comissao": 10.0, "imagem": "foto-1",
+                "item": "1"}
+    ofertas = [_oferta("Garrafa Térmica Inox 500ml Azul Loja A", 55.0, 20.0, "2"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja B", 52.0, 30.0, "3"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Barata", 30.0, 10.0, "7")]
+    ordens, conferidos = [], []
+
+    async def buscar(termo, limite=10, sort_type=2, **kw):
+        ordens.append(sort_type)
+        return ofertas
+
+    def conferir(video, nome, anuncios, **kw):
+        conferidos.append([n for n, _f in anuncios])
+        return list(range(len(anuncios))), ""
+
+    monkeypatch.setattr(robo, "foto_do_anuncio", lambda endereco: b"foto" if endereco else None)
+    monkeypatch.setattr(robo, "sem_os_a_mais", lambda: None)
+    monkeypatch.setattr(asv.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(ps, "ia_confere_iguais", conferir)
+    mais = rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original]))
+    assert ordens == [5, 2]
+    assert conferidos == [["Garrafa Térmica Inox 500ml Azul Barata", "Garrafa Térmica Inox 500ml Azul Loja B",
+                           "Garrafa Térmica Inox 500ml Azul Loja A"]]
+    assert [m["item"] for m in mais] == ["7"]
+    registro = asv.registro_processos.sequencia("shopee_video", asv.PROCESSO_DOS_LINKS, "2000-01-01 00:00:00")
+    assert registro[-1][2] == "1 a mais" and "3 confirmados, 2 fora da faixa do mais barato" in registro[-1][3]
 
 
 def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):
