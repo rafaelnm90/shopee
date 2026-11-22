@@ -15,19 +15,24 @@ android.yml (instalar-gravador, que roda o `instalar` daqui).
 Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
 """
 import hashlib
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 
 from PIL import Image, ImageStat
 
+import db
 import videos
+from fuso import fuso_horario
 
 # O scrcpy numa versão fixa, compilado no servidor: o do apt do Ubuntu é antigo e não grava o som.
 # A parte que vai ao celular vem pronta da página da versão, conferida pelo SHA-256 que a própria
@@ -297,11 +302,12 @@ def mudar_o_volume(d, indice):
     return volume_de_midia(d)
 
 
-def estado_da_midia(texto, pacote=PACOTE_DO_CHROME):
+def estado_da_midia(texto, agora_ms=None, pacote=PACOTE_DO_CHROME):
     """
-    Na saída do dumpsys media_session, a sessão de mídia do Chrome: {"estado", "posicao"} (a posição em
-    segundos, a da última vez que o Chrome a anotou); com mais de uma, a que está tocando. None sem
-    sessão do Chrome. Só o estado e o tempo: o título da aula, que a sessão também tem, nunca sai daqui.
+    Na saída do dumpsys media_session, a sessão de mídia do Chrome: {"estado", "posicao"}; com mais de uma, a
+    que está tocando. None sem sessão do Chrome. A posição, em segundos, é a que o Chrome anotou e, com o
+    vídeo tocando e o relógio do celular (agora_ms, o tempo desde que ele ligou, o mesmo da sessão), a de
+    agora. Só o estado e o tempo: o título da aula, que a sessão também tem, nunca sai daqui.
     """
     sessoes = []
     for linha in (texto or "").splitlines():
@@ -311,17 +317,31 @@ def estado_da_midia(texto, pacote=PACOTE_DO_CHROME):
             continue
         achado = re.search(r"state=PlaybackState \{state=(?:[A-Za-z_]+\()?(\d+)\)?, position=(-?\d+)", linha)
         if achado and sessoes and "codigo" not in sessoes[-1]:
-            sessoes[-1].update(codigo=int(achado.group(1)), posicao=max(0, int(achado.group(2))) // 1000)
+            velocidade = re.search(r"speed=(-?[\d.]+)", linha)
+            atualizado = re.search(r"updated=(\d+)", linha)
+            sessoes[-1].update(codigo=int(achado.group(1)), posicao=max(0, int(achado.group(2))),
+                               velocidade=float(velocidade.group(1)) if velocidade else 0.0,
+                               atualizado=int(atualizado.group(1)) if atualizado else 0)
     do_pacote = [s for s in sessoes if s["pacote"] == pacote and "codigo" in s]
     if not do_pacote:
         return None
     escolhida = next((s for s in do_pacote if s["codigo"] == TOCANDO), do_pacote[0])
-    return {"estado": ESTADOS_DA_MIDIA.get(escolhida["codigo"], "outro"), "posicao": escolhida["posicao"]}
+    posicao = escolhida["posicao"]
+    if agora_ms and escolhida["codigo"] == TOCANDO and 0 < escolhida["atualizado"] < agora_ms:
+        posicao += (agora_ms - escolhida["atualizado"]) * max(0.0, escolhida["velocidade"])
+    return {"estado": ESTADOS_DA_MIDIA.get(escolhida["codigo"], "outro"), "posicao": int(posicao) // 1000}
+
+
+def relogio_do_celular(d):
+    """O tempo desde que o celular ligou, em ms (o relógio que a sessão de mídia usa); None sem ele."""
+    achado = re.match(r"\s*(\d+(?:\.\d+)?)\s", _saida(d, ["cat", "/proc/uptime"]))
+    return int(float(achado.group(1)) * 1000) if achado else None
 
 
 def midia_do_chrome(d):
     """O estado do vídeo no Chrome do celular agora (estado_da_midia); None sem vídeo nele."""
-    return estado_da_midia(_saida(d, ["dumpsys", "media_session"]))
+    texto = _saida(d, ["dumpsys", "media_session"])
+    return estado_da_midia(texto, relogio_do_celular(d)) if texto else None
 
 
 def volume_no_explorar(d, argumento):
@@ -449,6 +469,165 @@ def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
             d.click(*ponto)
             saiu, tela = _saiu_do_login(d, pausa)
     return (True, "login feito") if saiu else (False, "o login não passou (a página de login continua)")
+
+
+# --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026) ---
+# Depois do Horário do Robô, de madrugada, as aulas são gravadas uma a uma até um pouco antes da limpeza
+# das 4h (P289 1), na velocidade normal (P292 1), com o volume de mídia no meio só durante a aula (P291 1)
+# e só com o disco do servidor abaixo de 70% (P290 1). O robô da Shopee Vídeo tem a preferência (pedido do
+# Rafael, 22/11): com o Horário do Robô o dia todo não há madrugada, e o robô que precisa do celular (um
+# botão do painel, a limpeza das 4h) pede, e a aula para e solta o celular em segundos.
+FIM_DA_NOITE = (3, 45)
+LIMITE_DO_DISCO = 70
+VOLUME_NA_AULA = 0.5
+CHAVE_DA_NOITE = "curso_gravacao"
+# A gravação renova o sinal a cada olhada; sem ele há mais que isto, ela não está com o celular.
+SINAL_VALE = 120
+# Quanto o robô espera a gravação soltar o celular, olhando a cada PASSO_DA_ESPERA_DO_ROBO.
+ESPERA_PELO_CELULAR = 120
+PASSO_DA_ESPERA_DO_ROBO = 3
+
+
+def _agora(agora=None):
+    return agora or datetime.now(fuso_horario)
+
+
+def _texto(momento):
+    return momento.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def na_madrugada(config, agora=None):
+    """
+    Agora é a madrugada da gravação: fora do Horário do Robô (config, a do painel) e antes do FIM_DA_NOITE
+    (P289 1)? Com o Horário do Robô o dia todo, nunca.
+    """
+    momento = _agora(agora)
+    inicio, fim = int(config.get("robo_inicio", 8)), int(config.get("robo_fim", 22))
+    if inicio <= 0 and fim >= 24:
+        return False
+    minutos = momento.hour * 60 + momento.minute
+    if minutos >= fim * 60:
+        return True
+    return minutos < min(inicio * 60, FIM_DA_NOITE[0] * 60 + FIM_DA_NOITE[1])
+
+
+def disco_usado(caminho=None):
+    """O quanto do disco do servidor está em uso, em %, como o df mostra (arredondado para cima)."""
+    uso = shutil.disk_usage(caminho or os.path.expanduser("~"))
+    return math.ceil(uso.used * 100 / max(1, uso.used + uso.free))
+
+
+def estado_da_noite():
+    """O que a gravação da madrugada anotou no banco (o sinal, o pedido do robô, o volume de antes)."""
+    return db.ler_config(CHAVE_DA_NOITE, {}) or {}
+
+
+def _anotar(**campos):
+    db.atualizar_config(CHAVE_DA_NOITE, lambda estado: estado.update(campos))
+
+
+def anotar_o_sinal(agora=None):
+    """A gravação está com o celular: o sinal dela, renovado a cada olhada, diz isso ao robô."""
+    _anotar(sinal_em=_texto(_agora(agora)))
+
+
+def soltar_o_sinal():
+    _anotar(sinal_em="")
+
+
+def gravando(agora=None):
+    """A gravação da madrugada está com o celular agora (o sinal dela tem menos de SINAL_VALE s)?"""
+    sinal = estado_da_noite().get("sinal_em") or ""
+    return bool(sinal) and sinal >= _texto(_agora(agora) - timedelta(seconds=SINAL_VALE))
+
+
+def pedir_o_celular(quem, agora=None):
+    """O robô (ou o explorar) precisa do celular: a gravação para a aula e solta o celular na hora."""
+    _anotar(pedido_em=_texto(_agora(agora)), pedido_por=quem)
+
+
+def pediram_o_celular(desde):
+    """Alguém pediu o celular depois desse momento (o começo da aula, em texto)?"""
+    return (estado_da_noite().get("pedido_em") or "") >= desde
+
+
+def liberar_para_o_robo(quem="robô", espera=ESPERA_PELO_CELULAR, pausa=time.sleep, ocupado=None):
+    """
+    Com a gravação da madrugada no celular, pede o celular a ela e espera ela soltar (até espera s). True
+    com o celular livre ou sem gravação nenhuma; False se ela não soltou a tempo.
+    """
+    if ocupado is None:
+        import celular_robo   # aqui dentro: o celular_robo traz o adb, que o explorar já carrega
+        ocupado = celular_robo.ocupado
+    if not gravando():
+        return True
+    pedir_o_celular(quem)
+    for _ in range(max(1, espera // PASSO_DA_ESPERA_DO_ROBO)):
+        if not ocupado():
+            return True
+        pausa(PASSO_DA_ESPERA_DO_ROBO)
+    return not ocupado()
+
+
+def subir_o_volume(d):
+    """
+    O volume de mídia no meio para a aula (P291 1), guardando o de antes no banco: ele volta no fim da aula
+    ou, se a gravação cair no meio, na próxima vez que o robô usar o celular (devolver_o_volume). Já acima
+    do meio, fica como está. (atual, máximo) depois, ou None sem o volume.
+    """
+    antes = volume_de_midia(d)
+    if not antes:
+        return None
+    _anotar(volume_antes=antes[0])
+    alvo = round(antes[1] * VOLUME_NA_AULA)
+    return antes if antes[0] >= alvo else mudar_o_volume(d, alvo)
+
+
+def devolver_o_volume(d):
+    """O volume de mídia de antes da aula, de volta; sem um guardado, nada. True se voltou."""
+    antes = estado_da_noite().get("volume_antes")
+    if antes is None:
+        return False
+    depois = mudar_o_volume(d, antes)
+    if not depois or depois[0] != antes:
+        return False
+    _anotar(volume_antes=None)
+    return True
+
+
+class GravacaoEmFundo:
+    """
+    O scrcpy gravando enquanto a aula toca, sem janela e sem tocar no celular (comando_do_gravador). Para com
+    o Ctrl+C dele, que fecha o arquivo direito; a saída dele, que traz o endereço do celular, vira só o
+    motivo fixo da falha.
+    """
+
+    def __init__(self, alvo, destino, segundos, abrir=subprocess.Popen):
+        ambiente = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
+        self.destino = destino
+        self._saida = open(destino + ".saida", "w+", encoding="utf-8", errors="replace")
+        self.processo = abrir(comando_do_gravador(alvo, segundos, destino), stdout=subprocess.DEVNULL,
+                              stderr=self._saida, env=ambiente)
+
+    def rodando(self):
+        return self.processo.poll() is None
+
+    def parar(self, espera=30):
+        """Para a gravação e fecha o arquivo. (ok, motivo fixo)."""
+        if self.rodando():
+            self.processo.send_signal(signal.SIGINT)
+            try:
+                self.processo.wait(timeout=espera)
+            except subprocess.TimeoutExpired:
+                self.processo.kill()
+                self.processo.wait(timeout=10)
+        self._saida.seek(0)
+        saida = self._saida.read()
+        self._saida.close()
+        os.remove(self._saida.name)
+        if not os.path.exists(self.destino) or os.path.getsize(self.destino) == 0:
+            return False, motivo_da_falha(saida)
+        return True, "gravado"
 
 
 def main(argumentos):

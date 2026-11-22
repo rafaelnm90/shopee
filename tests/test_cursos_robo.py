@@ -405,6 +405,23 @@ def test_estado_do_video_no_chrome_sem_o_titulo_da_aula():
     assert cursos_robo.estado_da_midia(so_pausada) == {"estado": "pausado", "posicao": 5}
     assert cursos_robo.estado_da_midia(DUMP_DA_MIDIA.replace("com.android.chrome", "com.outro.app")) is None
     assert cursos_robo.estado_da_midia("") is None
+    # Tocando, a posição anotada anda com o relógio do celular (20 s depois da anotação, 20 s a mais);
+    # pausado, ela fica onde parou.
+    assert cursos_robo.estado_da_midia(DUMP_DA_MIDIA, agora_ms=3 + 20000) == {"estado": "tocando", "posicao": 60}
+    assert cursos_robo.estado_da_midia(so_pausada, agora_ms=3 + 20000) == {"estado": "pausado", "posicao": 5}
+
+
+def test_relogio_do_celular_pelo_uptime():
+    class Celular:
+        def __init__(self, saida):
+            self.saida = saida
+
+        def shell(self, partes):
+            import types
+            return types.SimpleNamespace(output=self.saida if partes == ["cat", "/proc/uptime"] else "")
+
+    assert cursos_robo.relogio_do_celular(Celular("12345.67 45678.90\n")) == 12345670
+    assert cursos_robo.relogio_do_celular(Celular("")) is None
 
 
 def test_midia_no_explorar_pausa_e_toca_pela_tecla_de_midia():
@@ -419,3 +436,121 @@ def test_midia_no_explorar_pausa_e_toca_pela_tecla_de_midia():
     assert cursos_robo.midia_no_explorar(celular, "pular", pausa=lambda s: None) == (
         False, "midia lê o vídeo do Chrome (midia), pausa (midia:pausar) ou toca (midia:tocar)")
     assert cursos_robo.midia_no_explorar(CelularDoVolume(), "", pausa=lambda s: None) == (True, "sem vídeo no Chrome")
+
+
+def _br(texto):
+    from datetime import datetime
+    from fuso import fuso_horario
+    return datetime.strptime(texto, "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+
+def test_madrugada_e_fora_do_horario_do_robo_e_antes_das_3h45():
+    # P289 1: grava de madrugada, fora do Horário do Robô, parando antes da limpeza das 4h.
+    horario = {"robo_inicio": 8, "robo_fim": 22}
+    for hora, vale in (("21:59", False), ("22:00", True), ("23:30", True), ("00:30", True), ("03:44", True),
+                       ("03:45", False), ("04:00", False), ("07:59", False), ("12:00", False)):
+        assert cursos_robo.na_madrugada(horario, _br(f"2026-11-23 {hora}")) is vale, hora
+    # O robô tem a preferência: com o Horário do Robô o dia todo, não há madrugada.
+    assert not cursos_robo.na_madrugada({"robo_inicio": 0, "robo_fim": 24}, _br("2026-11-23 02:00"))
+    # O Horário do Robô que começa antes das 3h45 encurta a madrugada.
+    assert cursos_robo.na_madrugada({"robo_inicio": 2, "robo_fim": 22}, _br("2026-11-23 01:00"))
+    assert not cursos_robo.na_madrugada({"robo_inicio": 2, "robo_fim": 22}, _br("2026-11-23 02:30"))
+
+
+def test_disco_usado_como_o_df_mostra(monkeypatch):
+    import collections
+    Uso = collections.namedtuple("Uso", "total used free")
+    monkeypatch.setattr(cursos_robo.shutil, "disk_usage", lambda caminho: Uso(100, 69.2, 30.8))
+    assert cursos_robo.disco_usado() == 70
+    monkeypatch.setattr(cursos_robo.shutil, "disk_usage", lambda caminho: Uso(100, 68, 32))
+    assert cursos_robo.disco_usado() == 68
+
+
+def test_sinal_da_gravacao_e_pedido_do_celular_pelo_robo(bm):
+    inicio = _br("2026-11-23 23:00")
+    assert not cursos_robo.gravando(inicio)
+    cursos_robo.anotar_o_sinal(inicio)
+    assert cursos_robo.gravando(_br("2026-11-23 23:01"))
+    assert not cursos_robo.gravando(_br("2026-11-23 23:03"))
+    cursos_robo.soltar_o_sinal()
+    assert not cursos_robo.gravando(inicio)
+    cursos_robo.pedir_o_celular("robô", _br("2026-11-23 23:10"))
+    assert cursos_robo.pediram_o_celular("2026-11-23 23:00:00")
+    assert not cursos_robo.pediram_o_celular("2026-11-23 23:11:00")
+
+
+def test_robo_pede_o_celular_e_a_gravacao_solta_em_segundos(bm):
+    # O robô da Shopee Vídeo nunca para por causa do curso (pedido do Rafael, 22/11).
+    pausas = []
+    assert cursos_robo.liberar_para_o_robo(pausa=pausas.append, ocupado=lambda: True)
+    assert pausas == [] and "pedido_em" not in cursos_robo.estado_da_noite()
+    cursos_robo.anotar_o_sinal()
+    respostas = iter([True, True, False])
+    assert cursos_robo.liberar_para_o_robo(pausa=pausas.append, ocupado=lambda: next(respostas))
+    assert len(pausas) == 2 and cursos_robo.estado_da_noite()["pedido_por"] == "robô"
+    # A gravação que não solta a tempo: o robô fica sabendo.
+    assert not cursos_robo.liberar_para_o_robo(espera=6, pausa=lambda s: None, ocupado=lambda: True)
+
+
+def test_volume_da_aula_sobe_ao_meio_e_volta_ao_de_antes(bm):
+    celular = CelularDoVolume(volume=2)
+    assert cursos_robo.subir_o_volume(celular) == (8, 15)
+    assert cursos_robo.estado_da_noite()["volume_antes"] == 2
+    assert cursos_robo.devolver_o_volume(celular) and celular.volume == 2
+    assert cursos_robo.estado_da_noite()["volume_antes"] is None
+    assert not cursos_robo.devolver_o_volume(celular)
+    # Já acima do meio, fica como está.
+    alto = CelularDoVolume(volume=12)
+    assert cursos_robo.subir_o_volume(alto) == (12, 15)
+    assert not any("--set" in partes for partes in alto.comandos)
+    # Sem resposta do Android, nada é guardado nem mudado.
+    cursos_robo._anotar(volume_antes=None)
+    assert cursos_robo.subir_o_volume(CelularDoVolume(responde=False)) is None
+    assert cursos_robo.estado_da_noite()["volume_antes"] is None
+
+
+class ProcessoDoGravador:
+    """O scrcpy de mentira: grava (ou não) o arquivo quando recebe o Ctrl+C."""
+
+    def __init__(self, comando, grava=True, erro="", **opcoes):
+        import signal
+        self.comando, self.grava, self.erro, self.sinais, self.vivo = comando, grava, erro, [], True
+        self.destino = next(parte.split("=", 1)[1] for parte in comando if parte.startswith("--record="))
+        self.saida = opcoes["stderr"]
+        self.SIGINT = signal.SIGINT
+
+    def poll(self):
+        return None if self.vivo else 0
+
+    def send_signal(self, sinal):
+        self.sinais.append(sinal)
+        if self.grava:
+            with open(self.destino, "wb") as arquivo:
+                arquivo.write(b"aula")
+        self.saida.write(self.erro)
+        self.vivo = False
+
+    def wait(self, timeout=None):
+        return 0
+
+
+def test_gravacao_em_fundo_para_com_o_ctrl_c_e_fecha_o_arquivo(tmp_path):
+    import signal
+    criados = []
+
+    def abrir(comando, **opcoes):
+        criados.append(ProcessoDoGravador(comando, **opcoes))
+        return criados[-1]
+
+    destino = str(tmp_path / "aula.mkv")
+    gravacao = cursos_robo.GravacaoEmFundo("celular:5555", destino, 3600, abrir=abrir)
+    assert gravacao.rodando()
+    assert "--no-control" in criados[0].comando and "--time-limit=3600" in criados[0].comando
+    assert gravacao.parar() == (True, "gravado")
+    assert criados[0].sinais == [signal.SIGINT] and not os.path.exists(destino + ".saida")
+
+    def sem_celular(comando, **opcoes):
+        return ProcessoDoGravador(comando, grava=False, erro="ERROR: Could not find any ADB device", **opcoes)
+
+    outra = cursos_robo.GravacaoEmFundo("celular:5555", str(tmp_path / "outra.mkv"), 60, abrir=sem_celular)
+    assert outra.parar() == (False, "o celular não respondeu ao gravador")
