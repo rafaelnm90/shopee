@@ -84,6 +84,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from collections import namedtuple
 from datetime import datetime, timedelta
 
@@ -6150,8 +6151,9 @@ def _anexar_um(d, video, nome, anexados, no_topo, limpa, a_mais, criador="", nov
     if cupons:
         _olhar_os_cupons(d, video)
     novo = (novos or {}).get(criador if voltou else nome, "")
-    if novo and _trocar_o_nome(d, novo, anexados[-1]):
-        anexados[-1] = novo
+    ficou = _trocar_o_nome(d, novo, anexados[-1]) if novo else ""
+    if ficou:
+        anexados[-1] = ficou
     # A tela de logo depois do Feito vai para o caso e, em rótulos fixos, para o registro do produto
     # que não ficou; a espera de depois do Feito continua a mesma.
     tocar(d, "Feito", ESPERA_LOGO_DEPOIS_DO_FEITO)
@@ -6183,6 +6185,78 @@ MOTIVO_DA_JANELA_DOS_CUPONS = "a janela do produto não voltou depois da lista d
 MOTIVO_DO_CAMPO_DO_NOME = "o campo do nome do produto não voltou ao vazio depois do nome da IA que não ficou"
 # A 1ª lista de cupons que não vem vazia: quando a tela foi guardada para o Claude ({"guardada_em"}).
 CHAVE_DOS_CUPONS = "shopee_video_cupons"
+# O app aceita só alguns emojis no nome do produto (22/11: 🪑 e 🪞 passaram; ✨, 🌙 e as carinhas, não, com o aviso
+# "Emoji não permitido"). O nome da IA com o emoji recusado vai com outro, sorteado entre os de reserva que o app ainda
+# não recusou, e, recusado também, sem emoji; o rascunho nunca para por isso. O que o app aceita ou recusa fica anotado
+# (CHAVE_DOS_EMOJIS, só os emojis, sem o nome), e o recusado não é tentado de novo. Escolha do Rafael (22/11, P280 2,
+# "pode colocar algum outro q de certo ou pelo menos aleatórizar entre os emojis"): DECISOES.md, Shopee Vídeo.
+CHAVE_DOS_EMOJIS = "shopee_video_emojis_do_nome"
+EMOJIS_DE_RESERVA = ("🫶", "🪄", "🫧", "🪩")
+EMOJIS_ANOTADOS = 100
+
+
+def _do_emoji(c):
+    """O caractere faz parte de um emoji: o símbolo, o tom de pele, o junta-emoji (ZWJ) e o seletor de emoji."""
+    return ord(c) in (0x200D, 0xFE0F, 0x20E3) or (unicodedata.category(c) in ("So", "Sk") and ord(c) >= 0x2190)
+
+
+def separar_o_emoji(nome):
+    """
+    (o nome sem emoji, o emoji do fim ou ""): o nome da IA termina com um emoji (assistente.PROMPT_DOS_NOMES); um emoji
+    no meio também sai do nome.
+    """
+    texto = (nome or "").rstrip()
+    fim = len(texto)
+    while fim and (_do_emoji(texto[fim - 1]) or texto[fim - 1] == " " and fim < len(texto)):
+        fim -= 1
+    base = " ".join("".join(c for c in texto[:fim] if not _do_emoji(c)).split())
+    return base, "".join(c for c in texto[fim:] if c != " ")
+
+
+def emojis_do_nome():
+    """{"aceitos": [...], "recusados": [...]}: os emojis que o app já aceitou ou recusou no nome do produto."""
+    dados = db.ler_config(CHAVE_DOS_EMOJIS, {}) or {}
+    return {"aceitos": list(dados.get("aceitos") or []), "recusados": list(dados.get("recusados") or [])}
+
+
+def anotar_o_emoji(emoji, aceito):
+    """O emoji que o app aceitou ou recusou no nome do produto (o último resultado vale; os EMOJIS_ANOTADOS últimos)."""
+    if not emoji:
+        return
+
+    def alterar(dados):
+        aceitos, recusados = list(dados.get("aceitos") or []), list(dados.get("recusados") or [])
+        destino, outra = (aceitos, recusados) if aceito else (recusados, aceitos)
+        if emoji in outra:
+            outra.remove(emoji)
+        if emoji not in destino:
+            destino.append(emoji)
+        dados.update(aceitos=aceitos[-EMOJIS_ANOTADOS:], recusados=recusados[-EMOJIS_ANOTADOS:])
+    db.atualizar_config(CHAVE_DOS_EMOJIS, alterar, {})
+
+
+def outro_emoji(evitar, sorteio=random.choice):
+    """Um emoji de reserva fora de evitar (os recusados e o que acabou de ser recusado), sorteado; "" sem nenhum."""
+    livres = [emoji for emoji in EMOJIS_DE_RESERVA if emoji not in evitar]
+    return sorteio(livres) if livres else ""
+
+
+def nomes_para_tentar(novo):
+    """
+    [(nome, emoji)] na ordem de tentar (P280 2): o da IA com o emoji dela (se o app ainda não o recusou), o mesmo nome
+    com um emoji de reserva sorteado e o nome sem emoji. O nome sem emoji vai só uma vez.
+    """
+    base, emoji = separar_o_emoji(novo)
+    if not emoji:
+        return [(novo, "")]
+    recusados = set(emojis_do_nome()["recusados"])
+    tentativas = [] if emoji in recusados else [(novo, emoji)]
+    reserva = outro_emoji(recusados | {emoji})
+    if reserva and base:
+        tentativas.append((f"{base} {reserva}", reserva))
+    if base:
+        tentativas.append((base, ""))
+    return tentativas
 
 
 def _escrever_no_campo(d, campo, texto):
@@ -6197,28 +6271,38 @@ def _escrever_no_campo(d, campo, texto):
 def _trocar_o_nome(d, novo, anuncio=""):
     """
     Escreve o nome da IA no campo Nome do produto da janela do Adicionar e confere: a janela aberta, o campo com o nome
-    e sem os avisos do app (o de nome curto e o de emoji, que não deixam o Feito fechar a janela). True quando ficou.
+    e sem os avisos do app (o de nome curto e o de emoji, que não deixam o Feito fechar a janela). Com o aviso de
+    emoji, tenta o nome com outro emoji e, depois, sem emoji (nomes_para_tentar, P280 2). Devolve o nome que ficou.
     Senão, apaga o que escreveu (o campo vazio leva o nome do anúncio, como antes; anuncio: o nome da lista, que o campo
-    vazio pode mostrar em cinza) e False. A janela que fecha no meio, ou o campo que não volta ao vazio, para o
+    vazio pode mostrar em cinza) e devolve "". A janela que fecha no meio, ou o campo que não volta ao vazio, para o
     rascunho. O registro diz o que houve, em rótulos fixos e números (o nome não vai: o registro é público).
     """
     campo = ps.campo_do_nome(ps.elementos(tela(d)))
     if not campo:
         registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "ficou o do anúncio", "a janela sem o campo do nome",
                                      ok=False)
-        return False
-    _escrever_no_campo(d, campo, novo)
-    lista = ps.elementos(tela(d))
-    if not ps.janela_de_editar_aberta(lista):
-        raise Parada(MOTIVO_DA_JANELA_DO_NOME)
-    campo = ps.campo_do_nome(lista)
-    curto, emoji = ps.nome_curto_na_janela(lista), ps.emoji_no_nome_na_janela(lista)
-    if campo and ps.mesmo_nome(campo["texto"], novo) and not curto and not emoji:
-        registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "nome da IA no produto",
-                                     f"{assistente.tamanho_no_app(novo)} letras", ok=True)
-        return True
-    como = ("com o aviso de nome curto" if curto else "com o aviso de emoji" if emoji else "sem o campo" if not campo
-            else "o campo com outro texto" if campo["texto"] else "o campo vazio")
+        return ""
+    emoji_da_ia = separar_o_emoji(novo)[1]
+    como = "o campo vazio"
+    for nome, emoji in nomes_para_tentar(novo):
+        _escrever_no_campo(d, campo, nome)
+        lista = ps.elementos(tela(d))
+        if not ps.janela_de_editar_aberta(lista):
+            raise Parada(MOTIVO_DA_JANELA_DO_NOME)
+        campo = ps.campo_do_nome(lista)
+        curto, recusado = ps.nome_curto_na_janela(lista), ps.emoji_no_nome_na_janela(lista)
+        if campo and ps.mesmo_nome(campo["texto"], nome) and not curto and not recusado:
+            anotar_o_emoji(emoji, True)
+            jeito = "" if emoji == emoji_da_ia else "; com outro emoji" if emoji else "; sem emoji"
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "nome da IA no produto",
+                                         f"{assistente.tamanho_no_app(nome)} letras{jeito}", ok=True)
+            return nome
+        como = ("com o aviso de nome curto" if curto else "com o aviso de emoji" if recusado else "sem o campo"
+                if not campo else "o campo com outro texto" if campo["texto"] else "o campo vazio")
+        if not (recusado and campo and not curto):
+            break
+        # O emoji recusado fica anotado e não volta; vai o próximo nome (com outro emoji ou sem emoji).
+        anotar_o_emoji(emoji, False)
     if campo:
         _escrever_no_campo(d, campo, "")
         lista = ps.elementos(tela(d))
@@ -6229,7 +6313,7 @@ def _trocar_o_nome(d, novo, anuncio=""):
             raise Parada(MOTIVO_DO_CAMPO_DO_NOME)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "ficou o do anúncio", f"o nome da IA não ficou: {como}",
                                  ok=False)
-    return False
+    return ""
 
 
 def _olhar_os_cupons(d, video):

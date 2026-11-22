@@ -578,8 +578,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
    janela, hoje "Editar informações do produto" (gravações do Rafael de 21/11/2026, P265 1):
    o campo **Nome do produto** (o EditText dela) começa vazio, com o nome do anúncio em
    cinza (vazio, vai esse), e aceita de 10 a 255 letras (com menos, "N caracteres a mais
-   necessários" embaixo), sem emoji (com um, "Emoji não permitido" no mesmo lugar, e o Feito
-   não fecha a janela: os rascunhos de 22/11 às 10:05 e às 10:25); o robô toca nele, escreve o nome da IA, fecha o teclado pelo
+   necessários" embaixo), e só alguns emojis (🪑 e 🪞 passaram; com ✨, 🌙 ou as carinhas, "Emoji
+   não permitido" no mesmo lugar, e o Feito não fecha a janela: os rascunhos de 22/11 às 10:05 e às
+   10:25; com o aviso, o robô tenta outro emoji e, depois, sem emoji, P280 2); o robô toca nele,
+   escreve o nome da IA, fecha o teclado pelo
    voltar (só com o teclado na tela: sem ele, o voltar fecha a janela) e confere o campo.
    Embaixo, "Adicionar cupom" e o **Selecionar Cupom**, que abre a tela **Adicionar
    Cupom**: sem cupom (o de hoje para afiliados), ela só mostra "Criar e adicionar cupom ao
