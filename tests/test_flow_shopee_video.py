@@ -2287,6 +2287,58 @@ def test_amostra_da_propaganda_de_tv_so_sozinha_ou_sem_gerar(celular, monkeypatc
     assert "Flow: sem gerar" in capsys.readouterr().out
 
 
+PEDIDO_DA_PROPAGANDA_DA_VOVO = json.dumps({"prompt": "Premium TV commercial: the grandma from the first frame uses the "
+                                                     "lamp without speaking.", "fala": FALA_DO_LOCUTOR,
+                                           "cena": "A vovó acende a luminária na sala, sem falar."})
+
+
+def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_ao_privado(celular, monkeypatch,
+                                                                                            tmp_path):
+    # Escolha do Rafael (21/11, P270 1: "vamos testar qm sabe fica legal, mas eu tenho q experimentar primeiro"): a
+    # propaganda de TV de 8 s começa pela imagem de um dos personagens com o produto, no quadro de um comercial, e ele
+    # usa o produto sem falar, com o locutor em off. Só no privado; o vídeo do dia continua pela foto do anúncio.
+    _aprovadas(tmp_path, "vovo")
+    escolhas = _escolha_da_propaganda(monkeypatch)
+    pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, PEDIDO_DA_PROPAGANDA_DA_VOVO])
+    galeria = _galeria(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=8)
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
+    assert flow.main(["amostra", "--tv", "--personagem"]) == 0
+    assert escolhas == [([], True, False, True)]
+    # A escolha do personagem pede a ação e a cena de um comercial; o pedido do vídeo é o da propaganda pela imagem.
+    assert flow.TRECHO_DA_PROPAGANDA_NO_PERSONAGEM in pedidos[0][0]
+    pela_imagem = pedidos[2][0]
+    for trecho in ("A pessoa da imagem é a atriz ou o ator do comercial", "mas não fala", "o personagem Vovó",
+                   "the person from the first frame acts without speaking", "no one speaks on camera"):
+        assert trecho in pela_imagem, trecho
+    assert celular.fotos_das_imagens == [True] and celular.geracoes == 1 and celular.extensoes == 0
+    assert celular.texto == flow.com_a_diccao("Premium TV commercial: the grandma from the first frame uses the lamp "
+                                              "without speaking.")
+    # O vídeo sai da imagem do personagem, e não da foto do anúncio.
+    assert galeria[0].endswith("amostra_referencia.jpg") and galeria[-1].endswith("amostra_imagem.jpg")
+    (caminho, legenda), = celular.mandados
+    for trecho in ("com cara de propaganda de TV com um dos seus personagens (P270 1)", "👤 Personagem: Vovó",
+                   f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
+                   "No robô, a propaganda continua pela foto do anúncio até o seu OK"):
+        assert trecho in legenda, trecho
+    atual = flow.amostra_guardada()
+    assert (atual["personagem"], atual["imagem"]["estado"], atual["estilo"]) == (
+        "vovo", "feita", flow.ESTILO_DA_PROPAGANDA)
+    assert atual["estado"] == "enviado" and flow.producao() == {}
+
+
+def test_amostra_da_propaganda_com_personagem_sem_a_imagem_nao_gera(celular, monkeypatch):
+    # Sem a foto aprovada de um personagem, a amostra da P270 1 não serve para o teste: nada é gerado (a próxima
+    # escolhe outro produto), e a propaganda pela foto do anúncio continua no --tv sozinho.
+    _escolha_da_propaganda(monkeypatch)
+    assert flow.main(["amostra", "--tv", "--personagem"]) == 1
+    assert celular.geracoes == 0 and celular.mandados == []
+    assert flow.amostra_guardada()["imagem"]["motivo"] == flow.SEM_FOTO_APROVADA
+    # O --personagem só vale com o --tv.
+    assert flow.main(["amostra", "--personagem"]) == 2
+    assert flow.main(["amostra", "--longa", "--personagem"]) == 2
+
+
 # --- O unboxing como mais um formato do vídeo de IA de 16 s (P256 2) ---
 
 PEDIDO_DO_VENDEDOR_JSON = ('{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "She holds the sandal.", '
