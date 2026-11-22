@@ -4,18 +4,21 @@ na Shopee Vídeo deles, como os do modo assistente (um vídeo da Fonte dos Víde
 assistente, com o título, os produtos e o comentário). O Rafael manda /amigos no grupo, e o bot fixa a mensagem com o
 botão Quero um vídeo 🎬. Cada toque é um pedido, numa fila, atendido um de cada vez, na ordem; o vídeo vai no grupo, em
 resposta à mensagem do pedido. Só pede quem o Rafael liberou: quem toca sem estar liberado recebe o aviso no grupo, e
-o Rafael recebe o nome no privado, com o Liberar ✅. Nenhum vídeo vai a duas pessoas, e o produto que o amigo já
+o Rafael recebe o nome no privado, com o Liberar ✅. O Rafael sempre pode pedir: o vídeo dele é preparado como o
+Enviar 1 Agora 📤 e vai ao privado, com o Postei ✅, e ao grupo (P281 1). A mensagem do pedido diz em quanto tempo o
+vídeo fica pronto (minutos_estimados). Nenhum vídeo vai a duas pessoas, e o produto que o amigo já
 recebeu não volta para ele (assistente_shopee_video.preparar_para_o_amigo). O robô e o assistente do Rafael não mudam.
 
 O bot_mestre inclui o router, chama configurar_dependencias e passa o /amigos (comando_amigos) antes do tratamento
 das mensagens soltas nos grupos, que fica com todas elas. O painel_shopee_video mostra o botão Grupo dos Amigos 👥;
 nele, o Liberar Amigos ✅ mostra o nome de cada um que tocou e ainda não foi liberado. Depois do 1º /amigos, o comando
 fica no menu do grupo, visível só para o Rafael.
-Escolhas do Rafael (21 e 22/11/2026, P271 2 a P279 1): DECISOES.md, Shopee Vídeo.
+Escolhas do Rafael (21 e 22/11/2026, P271 2 a P281 1): DECISOES.md, Shopee Vídeo.
 """
 import asyncio
 import html
 import logging
+import math
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -59,6 +62,10 @@ PROCESSO_DO_PAINEL = "grupo dos amigos: painel"
 # Quem toca sem estar liberado: o aviso no privado do Rafael sai no máximo uma vez neste tempo, por pessoa (os toques
 # seguintes só respondem no próprio botão).
 ESPERA_DO_AVISO = 6 * 3600
+# A estimativa da mensagem do pedido (pedido do Rafael, 22/11): a mediana do preparo dos últimos PREPAROS_GUARDADOS
+# pedidos feitos, vezes a posição na fila; sem nenhum feito ainda, PREPARO_PADRAO segundos por pedido.
+PREPARO_PADRAO = 180
+PREPAROS_GUARDADOS = 10
 
 TEXTO_DO_BOTAO = (
     "🎬 <b>Vídeos para a Shopee Vídeo</b>\n"
@@ -106,10 +113,12 @@ def via_verde(texto, clique, do_admin):
 # grupo e titulo: o grupo do /amigos; ligado: o grupo atende os pedidos; botao: a mensagem fixada com o botão;
 # liberados: {id do Telegram: {"nome"}} de quem pode pedir; fila: os pedidos, o mais velho primeiro; avisados:
 # {id: {"quando", "nome"}} do último aviso no privado do Rafael de quem tocou sem estar liberado (o Liberar ✅ pega o
-# nome dali; quem está ali espera no Liberar Amigos ✅ do painel até ser liberado).
+# nome dali; quem está ali espera no Liberar Amigos ✅ do painel até ser liberado); preparos: os segundos de preparo
+# dos últimos pedidos feitos, para a estimativa (minutos_estimados).
 
 def _padrao():
-    return {"grupo": None, "titulo": "", "ligado": False, "botao": None, "liberados": {}, "fila": [], "avisados": {}}
+    return {"grupo": None, "titulo": "", "ligado": False, "botao": None, "liberados": {}, "fila": [], "avisados": {},
+            "preparos": []}
 
 
 def ler():
@@ -198,6 +207,27 @@ def avisar_agora(ident, nome, agora=None):
         dados["avisados"][str(ident)] = {"quando": momento, "nome": nome}
         return True
     return bool(_alterar(alterar))
+
+
+def do_rafael(ident):
+    """O pedido é do Rafael: ele sempre pode pedir, sem se liberar (P281 1)."""
+    return ADMIN_ID is not None and str(ident) == str(ADMIN_ID)
+
+
+def anotar_preparo(segundos):
+    """Os segundos de preparo de um pedido feito, para a estimativa dos próximos (os últimos PREPAROS_GUARDADOS)."""
+    def alterar(dados):
+        dados["preparos"] = (list(dados.get("preparos") or []) + [round(segundos)])[-PREPAROS_GUARDADOS:]
+    _alterar(alterar)
+
+
+def minutos_estimados(config, posicao):
+    """
+    Em quantos minutos fica pronto o pedido nesta posição da fila (1: o primeiro): a mediana do preparo dos últimos
+    pedidos feitos, vezes a posição, arredondada para cima.
+    """
+    preparos = sorted(config.get("preparos") or []) or [PREPARO_PADRAO]
+    return max(1, math.ceil(preparos[len(preparos) // 2] * max(1, posicao) / 60))
 
 
 # --- O botão no grupo ---
@@ -301,7 +331,7 @@ async def quero_um_video(callback: types.CallbackQuery):
         await callback.answer("Os pedidos estão pausados agora. Tente mais tarde.", show_alert=True)
         return
     grupo, mencao, nome = config["grupo"], mencao_do_usuario(usuario), nome_do_usuario(usuario)
-    if str(usuario.id) not in config["liberados"]:
+    if not do_rafael(usuario.id) and str(usuario.id) not in config["liberados"]:
         if not avisar_agora(usuario.id, nome):
             await callback.answer("Você ainda não foi liberado para pedir vídeos. O administrador já foi avisado.",
                                   show_alert=True)
@@ -323,9 +353,10 @@ async def quero_um_video(callback: types.CallbackQuery):
     await callback.answer()
     registro_processos.registrar("shopee_video", PROCESSO_DO_PEDIDO, "na fila", ok=True)
     try:
+        minutos = minutos_estimados(ler(), posicao)
         enviada = await bot_instance.send_message(grupo, f"⏳ {mencao}, estou preparando o seu vídeo ({posicao}º da "
-                                                         "fila). Ele chega aqui, em resposta a esta mensagem.",
-                                                  parse_mode="HTML")
+                                                         f"fila). Fica pronto em cerca de {minutos} min. Ele chega "
+                                                         "aqui, em resposta a esta mensagem.", parse_mode="HTML")
         anotar_mensagem_do_pedido(chave, enviada.message_id)
     except Exception as e:
         logger.warning(f"⚠️ [Grupo dos Amigos] O aviso do pedido não saiu: {type(e).__name__}")
@@ -380,7 +411,7 @@ async def atender_a_fila():
                 return
             pedido = config["fila"][0]
             try:
-                if str(pedido["id"]) in config["liberados"]:
+                if str(pedido["id"]) in config["liberados"] or do_rafael(pedido["id"]):
                     await _atender(config, pedido)
             except Exception as e:
                 logger.error(f"❌ [Grupo dos Amigos] Erro ao atender o pedido: {type(e).__name__}")
@@ -390,21 +421,31 @@ async def atender_a_fila():
 async def _atender(config, pedido):
     """
     Prepara e manda o vídeo do pedido. Um envio de cada vez com o assistente do Rafael (o mesmo cadeado do painel):
-    os dois pegariam o mesmo vídeo da fonte.
+    os dois pegariam o mesmo vídeo da fonte. O pedido do Rafael é como o Enviar 1 Agora 📤 (as regras do assistente
+    dele): o vídeo vai ao privado, com o Postei ✅, e o mesmo vídeo ao grupo, em resposta ao pedido (P281 1).
     """
     amigo = {"id": pedido["id"], "mencao": pedido["mencao"], "grupo": config["grupo"],
              "responder_a": pedido.get("mensagem")}
+    comeco = time.monotonic()
     async with painel._envio:
         try:
-            resultado = await assistente.preparar_para_o_amigo(bot_instance, ADMIN_ID, amigo,
-                                                               fonte=painel.ler_config()["fonte"])
+            config_do_painel = painel.ler_config()
+            if do_rafael(pedido["id"]):
+                resultado = await assistente.preparar_e_enviar(bot_instance, ADMIN_ID, fonte=config_do_painel["fonte"],
+                                                               cobrindo=painel.cobrindo_o_robo(config_do_painel),
+                                                               no_grupo=amigo)
+            else:
+                resultado = await assistente.preparar_para_o_amigo(bot_instance, ADMIN_ID, amigo,
+                                                                   fonte=config_do_painel["fonte"])
         except Exception as e:
             logger.error(f"❌ [Grupo dos Amigos] Erro ao preparar o vídeo: {type(e).__name__}")
             resultado = ""
-    if resultado == assistente.MANDADO_AO_AMIGO:
+    if resultado in (assistente.MANDADO_AO_AMIGO, assistente.MANDADO_NO_PRIVADO):
+        anotar_preparo(time.monotonic() - comeco)
         logger.info("👥 [Grupo dos Amigos] Vídeo mandado no grupo.")
         return
-    texto = SEM_VIDEO if resultado == assistente.SEM_VIDEO_PARA_O_AMIGO else NAO_SAIU
+    sem_video = resultado == assistente.SEM_VIDEO_PARA_O_AMIGO or resultado.startswith(assistente.SEM_VIDEO_NO_ENVIO)
+    texto = SEM_VIDEO if sem_video else NAO_SAIU
     try:
         await bot_instance.send_message(config["grupo"], texto.format(mencao=pedido["mencao"]), parse_mode="HTML",
                                         reply_parameters=assistente._em_resposta_a(pedido.get("mensagem")))
@@ -435,7 +476,9 @@ def texto_do_painel(config, agora=None):
         f"Os amigos que você libera pedem, no grupo, um vídeo pronto para postar na Shopee Vídeo deles: cada toque em "
         f"{BOTAO_QUERO} é um pedido, e eu faço um de cada vez, na ordem, com um vídeo da sua Fonte dos Vídeos, editado "
         "como os do assistente. Nenhum vídeo vai a duas pessoas (nem a você), e o produto que um amigo já recebeu não "
-        "volta para ele. O seu robô e o assistente continuam como estão.\n\n"
+        "volta para ele. O seu robô e o assistente continuam como estão. Você também pode pedir pelo botão, sem se "
+        "liberar: o seu vídeo é preparado como o Enviar 1 Agora 📤 e vai ao seu privado, com o Postei ✅, e ao "
+        "grupo. A mensagem de cada pedido diz em quanto tempo o vídeo fica pronto.\n\n"
         f"Status: {status}\n"
         f"💬 Grupo: {grupo}\n"
         f"⏳ Pedidos na fila: <b>{len(config['fila'])}</b>\n"

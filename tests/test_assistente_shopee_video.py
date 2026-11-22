@@ -1034,6 +1034,30 @@ def test_amigo_recebe_no_grupo_em_resposta_ao_pedido_e_o_video_nao_vai_a_mais_ni
     assert "5️⃣ <b>Postou?</b>" in asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/abc")
 
 
+def test_pedido_do_rafael_no_grupo_vai_ao_privado_com_o_postei_e_ao_grupo(monkeypatch):
+    # P281 1: o vídeo que o Rafael pede pelo botão do grupo é preparado como o Enviar 1 Agora e vai ao privado, com o
+    # Postei ✅, e o mesmo vídeo ao grupo, em resposta ao pedido, com os passos sem o Postei ✅. Fica anotado como dele
+    # (sem amigo): o produto conta para não repetir para ele (P166 1).
+    _preparar_do_amigo(monkeypatch)
+    bot = BotDoGrupo()
+    rafael = {"id": 42, "mencao": "@rafa_teste", "grupo": -1001, "responder_a": 77}
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"), no_grupo=rafael)) == asv.MANDADO_NO_PRIVADO
+    video, passos, no_grupo, passos_no_grupo = bot.envios
+    assert (video["tipo"], video["chat"], passos["chat"]) == ("video", 42, 42)
+    assert passos["botoes"] is not None and "5️⃣ <b>Postou?</b>" in passos["conteudo"]
+    assert (no_grupo["tipo"], no_grupo["chat"], no_grupo["responde_a"]) == ("video", -1001, 77)
+    assert "@rafa_teste" in no_grupo["conteudo"]
+    assert passos_no_grupo["responde_a"] == no_grupo["id"] and passos_no_grupo["botoes"] is None
+    assert passos_no_grupo["conteudo"].startswith("🎬 @rafa_teste, a sua postagem") and \
+        "Postei" not in passos_no_grupo["conteudo"]
+    assert consultar("SELECT status, item, amigo FROM shopee_video_enviados WHERE id_unico = 'novo'") == (
+        "enviado", "11", "")
+    # Pelo privado (o Enviar 1 Agora), só no privado.
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:05"))) == asv.MANDADO_NO_PRIVADO
+    assert {envio["chat"] for envio in bot.envios} == {42}
+
+
 def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):
     # P271 2: o produto só não repete para a mesma pessoa. O vídeo dele fica na fonte, sem ser anotado, e vai o
     # próximo; outro amigo (e o Rafael) ainda pode receber esse produto.
