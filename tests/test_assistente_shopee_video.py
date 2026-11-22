@@ -3,6 +3,7 @@ import json
 import os
 import re
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -968,3 +969,129 @@ def test_envio_manda_o_nome_da_ia_para_colar(monkeypatch):
     bot = Bot()
     assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == "postagem mandada no seu privado"
     assert "<code>Garrafa Térmica que Mantém Gelado 🧊</code>" in bot.mensagens[0][1]
+
+
+# --- Grupo dos amigos (P271 2 a P277 1) ---
+
+class BotDoGrupo:
+    """O bot falso do grupo dos amigos: guarda cada envio com o destino e a mensagem a que responde."""
+
+    def __init__(self):
+        self.envios, self.proximo = [], 100
+
+    def _guardar(self, tipo, chat_id, conteudo, kw):
+        self.proximo += 1
+        resposta = kw.get("reply_parameters")
+        self.envios.append({"tipo": tipo, "chat": chat_id, "conteudo": conteudo, "id": self.proximo,
+                            "responde_a": getattr(resposta, "message_id", None), "botoes": kw.get("reply_markup")})
+        return SimpleNamespace(message_id=self.proximo)
+
+    async def send_message(self, chat_id, text, **kw):
+        return self._guardar("mensagem", chat_id, text, kw)
+
+    async def send_video(self, chat_id, video, **kw):
+        return self._guardar("video", chat_id, kw.get("caption", ""), kw)
+
+
+AMIGO = {"id": 7, "mencao": "@ana_teste", "grupo": -1001, "responder_a": 55}
+LEGENDA_2 = LEGENDA.replace("https://s.shopee.com.br/abc", "https://s.shopee.com.br/def")
+
+
+def _preparar_do_amigo(monkeypatch, textos=TEXTOS):
+    """Dois vídeos na fonte, cada um com um produto (o do link abc é o 11, o do def é o 22)."""
+    async def gerar(arquivo, nome="", leves=False):
+        return textos
+
+    async def produtos(link):
+        item = "11" if link.endswith("abc") else "22"
+        return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "item": item}], link
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"),
+          ("velho", LEGENDA_2, "archive/velho.mp4", "2026-10-01 10:00"))
+
+
+def test_amigo_recebe_no_grupo_em_resposta_ao_pedido_e_o_video_nao_vai_a_mais_ninguem(monkeypatch):
+    # Decisão do Rafael (P272 2 e P277 1): o vídeo vai no grupo, em resposta à mensagem do pedido, com os passos em
+    # resposta ao vídeo e sem o Postei ✅, que é do plano dele; cada vídeo vai a uma pessoa só (P271 2).
+    _preparar_do_amigo(monkeypatch)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:00"))) == asv.MANDADO_AO_AMIGO
+    video, passos = bot.envios
+    assert video["tipo"] == "video" and video["chat"] == -1001 and video["responde_a"] == 55
+    assert "@ana_teste" in video["conteudo"]
+    assert passos["chat"] == -1001 and passos["responde_a"] == video["id"] and passos["botoes"] is None
+    assert passos["conteudo"].startswith("🎬 @ana_teste, a sua postagem para a Shopee Vídeo está pronta")
+    assert "4️⃣" in passos["conteudo"] and "5️⃣" not in passos["conteudo"] and "Postei" not in passos["conteudo"]
+    assert consultar("SELECT status, item, amigo FROM shopee_video_enviados WHERE id_unico = 'novo'") == (
+        "enviado", "11", "7")
+    # O vídeo não volta para ninguém (nem para o Rafael), e o do amigo não conta no plano do dia do assistente.
+    assert asv.proximo_video()["id"] == "velho" and asv.enviados_hoje(_as("15:00")) == 0
+    assert asv.enviados_aos_amigos(_as("15:00")) == (1, 1) and asv.itens_do_amigo(7) == {"11"}
+    assert asv.itens_postados() == []
+    # A mensagem do Rafael continua com o Postei ✅.
+    assert "5️⃣ <b>Postou?</b>" in asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/abc")
+
+
+def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):
+    # P271 2: o produto só não repete para a mesma pessoa. O vídeo dele fica na fonte, sem ser anotado, e vai o
+    # próximo; outro amigo (e o Rafael) ainda pode receber esse produto.
+    _preparar_do_amigo(monkeypatch)
+    asv.registrar("antigo", "enviado", "", _as("09:00"), item="11", amigo="7")
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:00"))) == asv.MANDADO_AO_AMIGO
+    assert consultar("SELECT amigo FROM shopee_video_enviados WHERE id_unico = 'velho'") == ("7",)
+    assert consultar("SELECT 1 FROM shopee_video_enviados WHERE id_unico = 'novo'") is None
+    assert asv.proximo_video()["id"] == "novo"
+    outro = {**AMIGO, "id": 8, "mencao": "@outro"}
+    assert rodar(asv.preparar_para_o_amigo(BotDoGrupo(), 42, outro, _as("14:10"))) == asv.MANDADO_AO_AMIGO
+    assert consultar("SELECT amigo FROM shopee_video_enviados WHERE id_unico = 'novo'") == ("8",)
+
+
+def test_amigo_sem_video_na_fonte_e_com_a_ia_sem_resposta(monkeypatch):
+    _preparar_do_amigo(monkeypatch, textos=None)
+    bot = BotDoGrupo()
+    # A IA sem o texto: o pedido para no 1º vídeo (cada um que passasse sairia da fonte).
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO)) == asv.SEM_TEXTO_DA_IA
+    assert bot.envios == [] and asv.proximo_video()["id"] == "velho"
+    asv.registrar("velho", "enviado", "", item="22", amigo="9")
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO)) == asv.SEM_VIDEO_PARA_O_AMIGO
+
+
+def test_violacao_no_video_do_amigo_avisa_o_rafael_e_vai_o_proximo(monkeypatch):
+    _preparar_do_amigo(monkeypatch)
+    chamadas = []
+
+    async def gerar(arquivo, nome="", leves=False):
+        chamadas.append(os.path.basename(arquivo))
+        return {**TEXTOS, "violacao": True, "motivo": "marca"} if len(chamadas) == 1 else TEXTOS
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO)) == asv.MANDADO_AO_AMIGO
+    # (a IA é chamada mais de uma vez quando o título vem curto)
+    assert list(dict.fromkeys(chamadas)) == ["novo.mp4", "velho.mp4"]
+    aviso = bot.envios[0]
+    assert aviso["chat"] == 42 and "violação" in aviso["conteudo"]
+    assert [e["chat"] for e in bot.envios[1:]] == [-1001, -1001]
+
+
+def test_video_que_o_robo_pega_no_meio_do_preparo_nao_vai_ao_amigo(monkeypatch):
+    # O robô roda em outro processo: o vídeo que ele pegou enquanto o do amigo era preparado fica com ele, e vai o
+    # próximo (P271 2: um vídeo, uma pessoa só).
+    _preparar_do_amigo(monkeypatch)
+    vistos = []
+
+    async def gerar(arquivo, nome="", leves=False):
+        if not vistos:
+            asv.registrar("novo", "robo", "rascunho do robô")
+        vistos.append(os.path.basename(arquivo))
+        return TEXTOS
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO)) == asv.MANDADO_AO_AMIGO
+    assert consultar("SELECT status FROM shopee_video_enviados WHERE id_unico = 'novo'") == ("robo",)
+    assert consultar("SELECT amigo FROM shopee_video_enviados WHERE id_unico = 'velho'") == ("7",)
+    assert [e["chat"] for e in bot.envios] == [-1001, -1001]

@@ -109,6 +109,8 @@ SEM_PRODUTO_NO_LINK = "vídeo de lado: o link não diz o produto (link de vídeo
 # daqui marcados com Postei ✅). Fica de lado, sem gastar a edição nem a IA, e vai o próximo da
 # fonte. Escolha do Rafael (06/11, P167 1): DECISOES.md, Shopee Vídeo.
 JA_POSTADO = "vídeo de lado: o produto já foi postado (pelo robô ou marcado com Postei ✅)"
+SEM_TEXTO_DA_IA = "a IA não gerou o texto; o vídeo foi pulado"
+VIOLACAO = "vídeo pulado por possível violação das diretrizes"
 
 PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee. Analise \
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
@@ -227,8 +229,9 @@ def decidir_envio(config, agora=None):
 # As colunas que vieram depois entram na tabela que já existe no servidor. cobrindo: "1" no vídeo
 # mandado enquanto o robô estava pausado sozinho, sem o celular (o assistente cobrindo o robô);
 # postado_em: quando o Rafael tocou em Postei ✅ nele (P156 1). item: o número (itemId) do produto do
-# vídeo mandado: o robô não repete o produto que o Rafael postou (P166 1).
-COLUNAS_NOVAS = ("cobrindo", "postado_em", "item")
+# vídeo mandado: o robô não repete o produto que o Rafael postou (P166 1). amigo: o id do Telegram do amigo que
+# recebeu o vídeo no grupo dos amigos (P271 2): o produto não volta para ele (amigos_shopee_video).
+COLUNAS_NOVAS = ("cobrindo", "postado_em", "item", "amigo")
 
 
 def _criar_tabela(con):
@@ -311,11 +314,12 @@ def candidatos_nao_usados(fonte):
             if candidato[0] not in usados]
 
 
-def proximo_video(fonte=FONTE_PADRAO):
+def proximo_video(fonte=FONTE_PADRAO, pular=()):
     """
     {"id", "arquivo", "link", "nome"} do vídeo mais novo da fonte que ainda tem o
     arquivo e o link e não foi mandado, fora o arquivo que o robô já levou ao Canal
-    Afiliados (o loop); None se não há nenhum.
+    Afiliados (o loop); None se não há nenhum. pular: os ids que quem chama já olhou e deixou
+    para outra pessoa (o produto que o amigo já recebeu, amigos_shopee_video).
     """
     try:
         candidatos = _candidatos(fonte if fonte in FONTES else FONTE_PADRAO)
@@ -326,19 +330,29 @@ def proximo_video(fonte=FONTE_PADRAO):
         logger.warning(f"⚠️ [Shopee Vídeo] Não deu para ler a fila ({fonte}): {type(e).__name__}")
         return None
     for id_unico, arquivo, link, legenda in candidatos:
-        if (id_unico in mandados or not arquivo or not link or not os.path.exists(arquivo)
+        if (id_unico in mandados or id_unico in pular or not arquivo or not link or not os.path.exists(arquivo)
                 or arquivo.lower().endswith(EXTENSOES_DE_IMAGEM) or pedidos_do_canal.ja_foi_ao_canal(arquivo)):
             continue
         return {"id": id_unico, "arquivo": arquivo, "link": link, "nome": legendas.nome_da_legenda(legenda)}
     return None
 
 
-def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item=""):
+def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item="", amigo=""):
     momento = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
     with db.conexao() as con:
         _criar_tabela(con)
         con.execute("INSERT OR REPLACE INTO shopee_video_enviados (id_unico, enviado_em, status, motivo, cobrindo, "
-                    "item) VALUES (?, ?, ?, ?, ?, ?)", (id_unico, momento, status, motivo, "1" if cobrindo else "", item))
+                    "item, amigo) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (id_unico, momento, status, motivo, "1" if cobrindo else "", item, str(amigo or "")))
+
+
+def itens_do_amigo(amigo):
+    """Os números (itemId) dos produtos dos vídeos que o amigo já recebeu no grupo dos amigos (P271 2)."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return {linha[0] for linha in con.execute(
+            "SELECT item FROM shopee_video_enviados WHERE status = 'enviado' AND amigo = ? "
+            "AND COALESCE(item, '') != ''", (str(amigo),))}
 
 
 def produtos_ja_postados():
@@ -424,10 +438,21 @@ def sem_postei_cobrindo_o_robo(dia):
 
 
 def enviados_hoje(agora=None):
+    """Os vídeos que o assistente mandou hoje no privado (os do grupo dos amigos não contam no plano do dia)."""
     with db.conexao() as con:
         _criar_tabela(con)
         return con.execute("SELECT COUNT(*) FROM shopee_video_enviados WHERE status = 'enviado' "
-                           "AND enviado_em LIKE ?", (hoje(agora) + "%",)).fetchone()[0]
+                           "AND enviado_em LIKE ? AND COALESCE(amigo, '') = ''", (hoje(agora) + "%",)).fetchone()[0]
+
+
+def enviados_aos_amigos(agora=None):
+    """(hoje, no total): os vídeos mandados no grupo dos amigos (amigos_shopee_video), para o painel dele."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        hoje_, total = con.execute(
+            "SELECT COALESCE(SUM(enviado_em LIKE ?), 0), COUNT(*) FROM shopee_video_enviados WHERE status = 'enviado' "
+            "AND COALESCE(amigo, '') != ''", (hoje(agora) + "%",)).fetchone()
+    return int(hoje_), int(total)
 
 
 # --- Produtos ---
@@ -809,13 +834,14 @@ def _passo_do_nome(produtos, nomes):
             f"(toque para copiar) e depois em Feito.\n{lista}\n")
 
 
-def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=None):
+def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=None, amigo=""):
     """
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
     copiar com um toque: salvar o vídeo, favoritar o produto, postar, comentar e tocar em
     Postei ✅ (o botão da mensagem; com cobrindo=True, o robô está sem o celular, e o passo diz
     que o vídeo conta no plano do dia dele, P156 1). nomes ({nome do anúncio: nome da IA}): o nome de
-    cada produto no vídeo, para copiar no Adicionar (P265 1).
+    cada produto no vídeo, para copiar no Adicionar (P265 1). amigo (a menção, em HTML): a mensagem vai ao
+    grupo dos amigos, chamando o amigo, sem o Postei ✅, que é do plano do Rafael (P277 1).
     Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
     Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo que vai não
     tem som: o editado já leva a música de fundo, P55), o passo de postar lembra de pôr uma
@@ -846,9 +872,13 @@ def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=No
               if textos.get("bebida_alcoolica") else "")
     musica = ("🔇 <b>Vídeo sem som:</b> na tela de edição, a que vem depois do Próximo, toque em Adicionar "
               "Música, escolha uma música da Shopee e toque em Próximo.\n" if mudo else "")
+    postei = ("" if amigo else f"\n\n5️⃣ <b>Postou?</b> Toque em <b>{BOTAO_POSTEI}</b> aqui embaixo."
+              + (" O robô está sem o celular, e este vídeo conta no plano de hoje dele: na volta, ele prepara só o "
+                 "que falta para fechar o dia." if cobrindo else ""))
     return (
-        "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n"
-        "Siga na ordem: abrir o link no meio da postagem faz a Shopee perder o que você já fez.\n\n"
+        (f"🎬 {amigo}, a sua postagem para a Shopee Vídeo está pronta\n" if amigo
+         else "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n")
+        + "Siga na ordem: abrir o link no meio da postagem faz a Shopee perder o que você já fez.\n\n"
         "1️⃣ <b>Salve o vídeo</b> acima na galeria.\n\n"
         f"{favoritar}\n\n"
         "3️⃣ <b>Poste:</b> Shopee → Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → "
@@ -860,10 +890,8 @@ def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=No
         f"{adicionar}\n"
         f"{_passo_do_nome(produtos, nomes or {})}\n"
         "4️⃣ <b>Depois de postar, comente</b> no vídeo (toque para copiar):\n"
-        f"<code>{html.escape(textos['comentario'])}</code>\n\n"
-        f"5️⃣ <b>Postou?</b> Toque em <b>{BOTAO_POSTEI}</b> aqui embaixo."
-        + (" O robô está sem o celular, e este vídeo conta no plano de hoje dele: na volta, ele prepara só o "
-           "que falta para fechar o dia." if cobrindo else "")
+        f"<code>{html.escape(textos['comentario'])}</code>"
+        f"{postei}"
     )
 
 
@@ -899,6 +927,56 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobri
             "ainda não foi ao ar); tento de novo no próximo horário")
 
 
+# O grupo dos amigos (amigos_shopee_video.py): cada vídeo vai a uma pessoa só, no grupo, em resposta ao pedido dela,
+# e fica no mesmo registro dos vídeos mandados (nem o assistente nem o robô o pegam de novo). O produto que o amigo já
+# recebeu não volta para ele: o vídeo fica na fonte para os outros, e o produto pode ir a outra pessoa (P271 2).
+# Escolhas do Rafael (21 e 22/11, P271 2 a P277 1): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_AMIGO = "grupo dos amigos: envio"
+JA_RECEBIDO = "vídeo deixado para os outros: o amigo já recebeu este produto"
+MANDADO_AO_AMIGO = "vídeo mandado no grupo dos amigos"
+SEM_VIDEO_PARA_O_AMIGO = "sem vídeo na fonte para o amigo"
+JA_COM_OUTRO = "vídeo de lado: o robô pegou este vídeo enquanto ele era preparado"
+NENHUM_PARA_O_AMIGO = "nenhum dos próximos vídeos deu para mandar ao amigo"
+# Os vídeos de produto que o amigo já recebeu que um pedido passa, antes de desistir: não gastam a IA nem a edição.
+JA_RECEBIDOS_POR_PEDIDO = 30
+# O que fica de lado pelo próprio vídeo: o próximo vai no lugar, no mesmo pedido. A IA sem resposta para o pedido
+# (o próximo vídeo também ficaria sem o texto, e cada um que passa sai da fonte).
+DE_LADO = (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, VIOLACAO, JA_COM_OUTRO)
+
+
+async def preparar_para_o_amigo(bot, admin_id, amigo, agora=None, fonte=FONTE_PADRAO):
+    """
+    Prepara o próximo vídeo da fonte para um amigo do grupo dos amigos e manda no grupo, como no privado do Rafael,
+    sem o Postei ✅ (amigo: {"id", "mencao", "grupo", "responder_a"}: o id do Telegram, a menção em HTML, o grupo e a
+    mensagem a que o vídeo responde). O vídeo recusado pelo Google e a violação continuam avisados no privado do
+    Rafael (admin_id). Devolve a frase do que aconteceu.
+    """
+    pular, tentativas = set(), 0
+    while tentativas < VIDEOS_POR_ENVIO and len(pular) < JA_RECEBIDOS_POR_PEDIDO:
+        video = proximo_video(fonte, pular)
+        if not video:
+            registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, SEM_VIDEO_PARA_O_AMIGO, ok=False)
+            return SEM_VIDEO_PARA_O_AMIGO
+        try:
+            with tempfile.TemporaryDirectory() as pasta:
+                resultado = await _preparar_e_enviar(bot, admin_id, video, agora, fonte, pasta, amigo=amigo)
+        except Exception as e:
+            registrar(video["id"], "erro", type(e).__name__, agora, amigo=amigo["id"])
+            registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, "erro", type(e).__name__, ok=False)
+            raise
+        if resultado == JA_RECEBIDO:
+            pular.add(video["id"])
+            continue
+        tentativas += 1
+        registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, resultado,
+                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA)
+                                     else resultado == MANDADO_AO_AMIGO)
+        if resultado not in DE_LADO:
+            return resultado
+    registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, NENHUM_PARA_O_AMIGO, ok=False)
+    return NENHUM_PARA_O_AMIGO
+
+
 def _editar(video, produtos, destino, avisos=False):
     """
     O vídeo editado em destino, com o Editor 2 (ou o Editor 1, se ele não sai) e a foto do
@@ -928,26 +1006,36 @@ def _edicao_ligada(fonte):
     return edicao_video.vale_para(fonte)
 
 
-async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None, cobrindo=False):
+async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None, cobrindo=False, amigo=None):
+    """
+    Prepara o vídeo e manda no privado do Rafael (admin_id) ou, com amigo (preparar_para_o_amigo), no grupo dos
+    amigos. Devolve a frase fixa do que aconteceu.
+    """
     from aiogram.types import FSInputFile
 
+    # O amigo de cada vídeo anotado no registro dos mandados (o "" é o Rafael).
+    dono = str(amigo["id"]) if amigo else ""
     # Com a edição ligada, o vídeo que não sai editado fica de lado antes de gastar a IA.
     produtos, link = await produtos_do_link(video["link"])
-    # O produto já postado fica de lado antes da edição e da IA (P167 1).
     item = str(produtos[0].get("item") or "") if produtos else ""
-    if item and item in produtos_ja_postados():
+    if amigo:
+        # O produto que o amigo já recebeu fica para os outros: o vídeo não é anotado e continua na fonte (P271 2).
+        if item and item in itens_do_amigo(dono):
+            return JA_RECEBIDO
+    elif item and item in produtos_ja_postados():
+        # O produto já postado fica de lado antes da edição e da IA (P167 1).
         registrar(video["id"], "ja_postado", JA_POSTADO, agora, item=item)
         _anotar_onde_ja_foi(item)
         return JA_POSTADO
     arquivo = video["arquivo"]
     if pasta and _edicao_ligada(fonte):
         if not produtos:
-            registrar(video["id"], "sem_edicao", SEM_PRODUTO_NO_LINK, agora)
+            registrar(video["id"], "sem_edicao", SEM_PRODUTO_NO_LINK, agora, amigo=dono)
             return SEM_PRODUTO_NO_LINK
         arquivo = os.path.join(pasta, os.path.basename(video["arquivo"]))
         motivo = await asyncio.to_thread(_editar, video, produtos, arquivo)
         if motivo:
-            registrar(video["id"], "sem_edicao", motivo, agora)
+            registrar(video["id"], "sem_edicao", motivo, agora, amigo=dono)
             return SEM_EDICAO
     textos = await textos_do_video(video["arquivo"], video["nome"])
     if ULTIMA_RECUSA:
@@ -955,17 +1043,17 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         await bot.send_video(admin_id, video=FSInputFile(video["arquivo"]), supports_streaming=True,
                              caption=texto_da_recusa(ULTIMA_RECUSA, video["nome"])[:1000])
     if not textos or not textos["titulo"]:
-        registrar(video["id"], "erro", "a IA não respondeu", agora)
-        return "a IA não gerou o texto; o vídeo foi pulado"
+        registrar(video["id"], "erro", "a IA não respondeu", agora, amigo=dono)
+        return SEM_TEXTO_DA_IA
     if textos["violacao"]:
-        registrar(video["id"], "violacao", textos["motivo"], agora)
+        registrar(video["id"], "violacao", textos["motivo"], agora, amigo=dono)
         await bot.send_message(admin_id, "⚠️ <b>Shopee Vídeo:</b> pulei um vídeo. A IA viu "
                                f"possível violação das diretrizes: {html.escape(textos['motivo'] or 'sem motivo')}",
                                parse_mode="HTML")
-        return "vídeo pulado por possível violação das diretrizes"
+        return VIOLACAO
     # Bebida alcoólica em espera (P111): fica de lado, e vai o próximo vídeo.
     if bebida_em_espera(textos):
-        registrar(video["id"], "bebida_em_espera", MOTIVO_BEBIDA_EM_ESPERA, agora)
+        registrar(video["id"], "bebida_em_espera", MOTIVO_BEBIDA_EM_ESPERA, agora, amigo=dono)
         return SEM_BEBIDA
     # Bebida alcoólica vai com os avisos da Shopee na capa: o vídeo editado é refeito com
     # eles; sem a edição, fica de lado. Escolha do Rafael (P43): DECISOES.md, Shopee Vídeo.
@@ -974,17 +1062,51 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         if pasta and _edicao_ligada(fonte):
             motivo = await asyncio.to_thread(_editar, video, produtos, arquivo, True)
         if motivo:
-            registrar(video["id"], "sem_edicao", motivo, agora)
+            registrar(video["id"], "sem_edicao", motivo, agora, amigo=dono)
             return SEM_AVISOS
     # O vídeo que vai sem som ganha uma música da Shopee na hora de postar (escolha do Rafael,
     # P48). O editado já leva a música de fundo (P55); só o que vai sem a edição chega mudo.
     mudo = await asyncio.to_thread(videos.mudo, arquivo)
     # O nome de cada produto no vídeo, para o Rafael colar no Adicionar (P265 1).
     nomes = await nomes_no_video([p["nome"] for p in produtos]) if produtos else {}
+    if amigo:
+        if _ja_mandado(video["id"]):
+            # O robô roda em outro processo e pode pegar o vídeo no meio do preparo: ele não vai a duas pessoas.
+            return JA_COM_OUTRO
+        await _mandar_ao_amigo(bot, amigo, arquivo, montar_mensagem(textos, produtos, link, mudo, nomes=nomes,
+                                                                    amigo=amigo["mencao"]))
+        registrar(video["id"], "enviado", "", agora, item=item, amigo=dono)
+        return MANDADO_AO_AMIGO
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo, nomes), parse_mode="HTML",
                            disable_web_page_preview=True, reply_markup=botao_postei(video["id"]))
-    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo,
-              item=str(produtos[0].get("item") or "") if produtos else "")
+    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo, item=item)
     return "postagem mandada no seu privado"
+
+
+def _ja_mandado(id_unico):
+    """Se o vídeo já está no registro dos mandados (de outra pessoa ou do robô)."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return con.execute("SELECT 1 FROM shopee_video_enviados WHERE id_unico = ?", (id_unico,)).fetchone() is not None
+
+
+def _em_resposta_a(mensagem_id):
+    """A resposta a uma mensagem do grupo que vai mesmo se a mensagem tiver sido apagada."""
+    from aiogram.types import ReplyParameters
+    return ReplyParameters(message_id=mensagem_id, allow_sending_without_reply=True) if mensagem_id else None
+
+
+async def _mandar_ao_amigo(bot, amigo, arquivo, passos):
+    """
+    O vídeo no grupo dos amigos, em resposta à mensagem do pedido (P272 2), e os passos em resposta ao vídeo: com
+    outros pedidos na fila, cada um fica junto do seu.
+    """
+    from aiogram.types import FSInputFile
+    enviado = await bot.send_video(amigo["grupo"], video=FSInputFile(arquivo), supports_streaming=True,
+                                   caption=f"🎬 {amigo['mencao']}, o seu vídeo para a Shopee Vídeo. Os passos vêm em "
+                                           "resposta a ele, logo abaixo.", parse_mode="HTML",
+                                   reply_parameters=_em_resposta_a(amigo.get("responder_a")))
+    await bot.send_message(amigo["grupo"], passos, parse_mode="HTML", disable_web_page_preview=True,
+                           reply_parameters=_em_resposta_a(getattr(enviado, "message_id", None)))

@@ -64,6 +64,7 @@ import db
 import painel_espelhos
 import painel_notas
 import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
+import amigos_shopee_video  # o grupo dos amigos: os vídeos que os amigos liberados pedem no grupo (Shopee Vídeo)
 import robo_shopee_video  # a suspensão da conta de Shopee Vídeo, que pausa o Canal Afiliados sozinho
 import painel_acessos  # Acessos do Servidor: Tailscale, Oracle e a senha do backup (Opções do Servidor)
 import painel_admins  # Administradores dos grupos e canais (Opções do Servidor)
@@ -84,7 +85,8 @@ import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgaca
 import exemplos  # os exemplos das perguntas dos painéis, com o que está valendo agora
 import pedidos_do_canal  # os vídeos do robô da Shopee Vídeo que vão ao Canal Afiliados
 import tendencia_shopee_video  # a medição da P135: os sinais de tendência dos vídeos da fonte do robô
-from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
+from utils import (registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo,
+                   mencao_do_usuario)
 
 logger = configurar_logs(__name__)
 
@@ -550,6 +552,9 @@ logger.info("✅ Módulo de Notas montado com segurança.")
 
 dp.include_router(painel_shopee_video.router)
 painel_shopee_video.configurar_dependencias(bot, scheduler, ADMIN_ID)
+
+dp.include_router(amigos_shopee_video.router)
+amigos_shopee_video.configurar_dependencias(bot, scheduler, ADMIN_ID)
 
 dp.include_router(painel_acessos.router)
 painel_acessos.configurar_dependencias(bot, ADMIN_ID)
@@ -10338,6 +10343,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await painel_shopee_video.voltar_depois_de_cancelar(message, state, estado_atual, data)
         return
 
+    # Grupo dos Amigos: o Tirar Amigo cancelado volta à tela dele, sem tirar ninguém.
+    if estado_atual and estado_atual.startswith("AmigosFluxo:"):
+        await message.answer("Ação cancelada. Nada foi alterado.")
+        await amigos_shopee_video.mostrar_painel(message, state)
+        return
+
     # Acessos do Servidor: edição cancelada volta ao painel, sem gravar nada.
     if estado_atual and estado_atual.startswith("AcessosFluxo:"):
         await message.answer("Ação cancelada. Nada foi alterado.")
@@ -16891,6 +16902,13 @@ async def publicar_painel_busca(message: types.Message):
         await message.answer("⚠️ Não consegui publicar o painel do buscador. Veja o log.")
 
 
+# O /amigos fica antes do interceptar_envio_livre, que fica com toda mensagem solta nos grupos.
+@dp.message(Command("amigos"), F.chat.type.in_(["supergroup", "group"]), StateFilter("*"))
+async def comando_grupo_dos_amigos(message: types.Message):
+    """O /amigos do Rafael no grupo dos amigos: guarda o grupo e fixa o botão Quero um vídeo 🎬 (P277 1)."""
+    await amigos_shopee_video.comando_amigos(message)
+
+
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
 async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     """
@@ -17005,11 +17023,8 @@ def extrair_link_wizard(texto, padrao):
 
 # --- Painel de submissão: texto e teclado ---
 def montar_mencao_usuario(user):
-    """Menção clicável: usa o @ quando existe, senão um link pelo ID."""
-    if getattr(user, "username", None):
-        return f"@{user.username}"
-    nome = getattr(user, "first_name", None) or "Membro"
-    return f"<a href='tg://user?id={user.id}'>{html_escape(nome)}</a>"
+    """Menção clicável: usa o @ quando existe, senão um link pelo ID (a mesma do grupo dos amigos)."""
+    return mencao_do_usuario(user)
 
 def montar_texto_painel(data):
     """Monta o texto do painel a partir do que já foi enviado."""
