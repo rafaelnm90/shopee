@@ -2055,12 +2055,52 @@ def marco_cruzado(atual, anterior):
     cruzados = [m for m in marcos if anterior < m <= atual]
     return max(cruzados) if cruzados else None
 
+# A foto do dia sai às 23:50 (main). A do dia que ficou sem ela, porque o bot estava fora do ar nessa hora (o
+# deploy de 21/11 reiniciou o bot às 23:49), sai na subida seguinte (tirar_a_foto_que_faltou).
+HORA_DAS_METRICAS = (23, 50)
+
+
+def ultima_metrica_antes(chave, dia):
+    """O último valor da métrica antes do dia (AAAA-MM-DD), mesmo com um dia sem a foto no meio; None sem nenhum."""
+    try:
+        with db.conexao() as conexao:
+            r = conexao.execute("SELECT valor FROM historico_metricas WHERE chave = ? AND data < ? "
+                                "ORDER BY data DESC LIMIT 1", (chave, dia)).fetchone()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
+def dia_sem_a_foto(agora=None):
+    """
+    O dia (AAAA-MM-DD) que devia ter a foto das métricas e não tem: hoje, depois da HORA_DAS_METRICAS, ou ontem,
+    antes dela. None quando ele tem a foto.
+    """
+    agora = agora or datetime.now(fuso_horario)
+    hora = agora.replace(hour=HORA_DAS_METRICAS[0], minute=HORA_DAS_METRICAS[1], second=0, microsecond=0)
+    dia = (agora if agora >= hora else agora - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        with db.conexao() as conexao:
+            tem = conexao.execute("SELECT 1 FROM historico_metricas WHERE data = ? LIMIT 1", (dia,)).fetchone()
+    except Exception:
+        return None
+    return None if tem else dia
+
+
+async def tirar_a_foto_que_faltou():
+    """Na subida do bot: o dia que ficou sem a foto das métricas a ganha agora, com a data dele."""
+    dia = dia_sem_a_foto()
+    if dia:
+        logger.info(f"📊 [Métricas] O dia {dia} ficou sem a foto (o bot estava fora do ar às 23:50): tiro agora.")
+        await coletar_metricas_diarias(dia)
+
+
 @registro_processos.anotar("bot_mestre", "métricas do dia")
-async def coletar_metricas_diarias():
-    """Roda às 23:50 e fotografa o dia de cada canal."""
+async def coletar_metricas_diarias(dia=None):
+    """Roda às 23:50 e fotografa o dia de cada canal (dia: o AAAA-MM-DD da foto que faltou; sem ele, hoje)."""
     try:
         agora = datetime.now(fuso_horario)
-        hoje_str = agora.strftime("%Y-%m-%d")
+        hoje_str = dia or agora.strftime("%Y-%m-%d")
 
         config_sub = ler_submissao_config()
         grupo_publico = config_sub.get("grupo_id")
@@ -2108,7 +2148,8 @@ async def coletar_metricas_diarias():
         # Grava o dia e atualiza o acervo acumulado
         for nome, qtd in posts.items():
             salvar_metrica(hoje_str, f"posts_dia_{nome}", qtd)
-            acumulado_ontem = ler_metrica(f"posts_total_{nome}", 1) or 0
+            # O total do último dia com a foto: um dia sem ela no meio não zera o acervo.
+            acumulado_ontem = ultima_metrica_antes(f"posts_total_{nome}", hoje_str) or 0
             salvar_metrica(hoje_str, f"posts_total_{nome}", acumulado_ontem + qtd)
 
         # Downloader: total acumulado e quantos afiliados já usaram. A tabela
@@ -18302,7 +18343,10 @@ async def main():
                       timezone=FUSO_STR, id='fechamento_dia_parceiros', replace_existing=True)
 
     # Métricas do dia (prova social das rotinas)
-    scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
+    scheduler.add_job(coletar_metricas_diarias, 'cron', hour=HORA_DAS_METRICAS[0], minute=HORA_DAS_METRICAS[1],
+                      timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
+    scheduler.add_job(tirar_a_foto_que_faltou, 'date', run_date=datetime.now(fuso_horario) + timedelta(minutes=1),
+                      id='metricas_que_faltaram', replace_existing=True, misfire_grace_time=None)
     
     # Aviso diário da Pausa Programada (09:00)
     scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=FUSO_STR)
