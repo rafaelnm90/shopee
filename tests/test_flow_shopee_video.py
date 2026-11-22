@@ -109,6 +109,9 @@ class Flow:
         self.fotos_das_imagens, self.foto_nao_entra = [], False
         self.imagem_pronta = self.imagem_baixada = self.imagem_nao_baixa = self.imagem_falha = False
         self.imagens_feitas = 0
+        # Como no app (a amostra nº 10, 21/11): o Flow dá o mesmo nome às imagens do mesmo pedido, e a de antes continua
+        # no projeto, abaixo da nova.
+        self.nome_fixo_das_imagens = False
         self.original_da_imagem = True
         # O vídeo gerado depois de uma imagem (P260 1) fica no 1º lugar da grade, e a imagem passa ao 2º, como no app.
         self.video_depois_da_imagem = False
@@ -250,9 +253,11 @@ class Flow:
             if self.imagem_leituras > 0:
                 nos.append(((0, 466, 537, 1422), _no((0, 466, 537, 1422), desc="1%\nGerando…", clicavel=False), ""))
             elif self.imagem_pronta:
-                nome = f"Retrato {self.imagens_feitas}, 1 item"
+                nome = "Retrato, 1 item" if self.nome_fixo_das_imagens else f"Retrato {self.imagens_feitas}, 1 item"
                 caixa = (543, 466, 1080, 1004) if self.video_depois_da_imagem else (0, 466, 537, 1422)
                 nos.append((caixa, _no(caixa, desc=nome), "imagem"))
+                if self.nome_fixo_das_imagens and self.imagens_feitas > 1:
+                    nos.append(((543, 1009, 1080, 1547), _no((543, 1009, 1080, 1547), desc=nome), ""))
             if self.video_de_antes:
                 nos.append(((0, 1427, 537, 1964), _no((0, 1427, 537, 1964), desc="Copo de antes, 1 item"), "antes"))
             if not self.filtro:
@@ -2350,13 +2355,34 @@ def test_amostra_da_propaganda_com_personagem_pede_a_fala_curta_que_cabe_nos_8_s
     assert "the voice-over ends before the final hero shot" not in flow.PEDIDO_DA_PROPAGANDA
 
 
-def test_amostra_da_propaganda_com_personagem_sem_a_imagem_nao_gera(celular, monkeypatch):
+def test_imagem_refeita_com_o_mesmo_nome_da_de_antes_vale(celular, monkeypatch, tmp_path, capsys):
+    # A amostra nº 10 (21/11): a 1ª imagem saiu com outro produto, e a 2ª, do mesmo pedido, ficou no alto do projeto
+    # com o mesmo nome da 1ª; o robô, que olhava só o 1º quadro, a tomou pela de antes e parou sem gerar o vídeo. A
+    # lista dos quadros do alto muda com a imagem nova, mesmo de nome igual.
+    _aprovadas(tmp_path, "vovo")
+    _escolha_da_propaganda(monkeypatch)
+    _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, '{"mesmo_produto": false, "mesma_pessoa": true}', IMAGEM_CONFIRMADA,
+                                PEDIDO_DA_PROPAGANDA_DA_VOVO])
+    _galeria(monkeypatch)
+    _duracoes(monkeypatch, celular, estendida=8)
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
+    celular.nome_fixo_das_imagens = True
+    assert flow.main(["amostra", "--tv", "--personagem"]) == 0
+    assert len(celular.textos_das_imagens) == 2 and celular.geracoes == 1 and len(celular.mandados) == 1
+    atual = flow.amostra_guardada()
+    assert atual["imagem"]["estado"] == "feita" and atual["imagem"]["tentativas"] == 2
+    assert flow.IMAGEM_NAO_FEITA not in capsys.readouterr().out
+
+
+def test_amostra_da_propaganda_com_personagem_sem_a_imagem_nao_gera(celular, monkeypatch, capsys):
     # Sem a foto aprovada de um personagem, a amostra da P270 1 não serve para o teste: nada é gerado (a próxima
     # escolhe outro produto), e a propaganda pela foto do anúncio continua no --tv sozinho.
     _escolha_da_propaganda(monkeypatch)
     assert flow.main(["amostra", "--tv", "--personagem"]) == 1
     assert celular.geracoes == 0 and celular.mandados == []
     assert flow.amostra_guardada()["imagem"]["motivo"] == flow.SEM_FOTO_APROVADA
+    # Sem a imagem, a amostra não faz o vídeo: o log não diz que ele sai pela foto do anúncio.
+    assert "o vídeo sai pela foto do anúncio" not in capsys.readouterr().out
     # O --personagem só vale com o --tv.
     assert flow.main(["amostra", "--personagem"]) == 2
     assert flow.main(["amostra", "--longa", "--personagem"]) == 2
@@ -2545,8 +2571,7 @@ def test_imagem_que_o_flow_nao_faz_nao_vira_a_foto_de_antes(celular):
     celular.imagem_falha = True
     assert flow.main(["personagens", "faz_tudo"]) == 1
     assert len(celular.fotos) == 1 and celular.puxados == [IMAGEM_BAIXADA] and "faz_tudo" not in flow.fotos_guardadas()
-    assert ("parou", "baixar a imagem: o mais novo do projeto ainda é o de antes do Gerar; a imagem não foi feita") \
-        in celular.guardados
+    assert ("parou", flow.IMAGEM_NAO_FEITA) in celular.guardados
 
 
 def test_janela_da_imagem_com_outro_tamanho_marcado_baixa_o_original(celular):
@@ -2855,7 +2880,7 @@ def test_imagem_parada_no_flow_guarda_o_caso_e_o_video_sai_pela_foto(celular, mo
     celular.imagem_falha = True
     flow.comecar_producao("2026-11-19", _do_formato(), 1)
     assert flow.producao_no_celular(celular, flow.producao()) is True
-    parada = "baixar a imagem: o mais novo do projeto ainda é o de antes do Gerar; a imagem não foi feita"
+    parada = flow.IMAGEM_NAO_FEITA
     assert ("parou", f"imagem do personagem: {parada}") in celular.guardados
     atual = flow.producao()
     assert atual["imagem"]["estado"] == "sem" and atual["imagem"]["motivo"] == f"o Flow parou na imagem: {parada}"
