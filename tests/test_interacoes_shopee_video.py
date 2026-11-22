@@ -1013,6 +1013,42 @@ def test_feed_escreve_direto_quando_o_painel_ja_abre_escrevendo(avisos, ia_do_fe
     assert "input add a comment" not in app.toques
 
 
+class CelularDoFeedQueCortaOTexto(CelularDoFeed):
+    """O campo de comentar que guarda só a 1ª letra nas primeiras escritas (Motorola, 22/11/2026, 16:39)."""
+
+    def __init__(self, cortes, **k):
+        super().__init__(**k)
+        self.cortes, self.escritas = cortes, 0
+
+    def __call__(self, **seletor):
+        app = self
+
+        class CampoQueCorta(Campo):
+            def set_text(self, texto):
+                app.escritas += 1
+                app.escrito = texto[:1] if app.escritas <= app.cortes else texto
+
+        return CampoQueCorta(self)
+
+
+def test_comentario_que_fica_pela_metade_no_campo_e_escrito_de_novo_uma_vez(avisos, ia_do_feed):
+    # Em 22/11 às 16:39, o campo de comentar do feed ficou só com a 1ª letra, e o comentário parou. O robô
+    # escreve de novo uma vez; o registro diz que só a 2ª deu certo, com as letras da 1ª (só números).
+    app = CelularDoFeedQueCortaOTexto(1, videos=[("Loja da Bia", "Mini saia linda")])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {0: ["Que achado! 0"]} and app.escritas == 2
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_ENVIO, "")
+    assert [(r, d) for _m, _p, r, d, _o in linhas] == [("texto escrito na 2ª vez", "1 de 13 letras na 1ª")]
+
+
+def test_comentario_que_nao_fica_inteiro_nem_na_2a_escrita_para_sem_enviar(avisos, ia_do_feed):
+    # Sem o texto inteiro no campo depois das 2 escritas, nada é enviado; o motivo diz quantas letras ficaram.
+    app = CelularDoFeedQueCortaOTexto(2, videos=[("Loja da Bia", "Mini saia linda")])
+    with pytest.raises(robo.Parada, match=r"não ficou no campo de escrever \(1 de 13 letras\)"):
+        robo.interagir_no_feed(app, momento("2026-10-24 10:00"))
+    assert not app.comentarios and app.escritas == 2
+
+
 def test_feed_que_para_guarda_o_caso_com_a_tela_da_hora(monkeypatch, avisos, ia_do_feed):
     # O caso tem de mostrar a tela em que parou (o painel), e não a de depois de sair dela.
     class PainelQueNaoAbre(CelularDoFeed):
@@ -1798,6 +1834,29 @@ def test_live_sem_a_mensagem_na_tela_fica_como_nao_confirmada_e_guarda_o_caso(mo
     assert casos == [("live", robo.MOTIVO_DA_LIVE_SEM_A_MENSAGEM)]
     assert it.lives_hoje(agora) == 1                                     # pode ter saído: conta e não repete
     assert "(enviado, mas não apareceu na lista)" in avisos[0]
+
+
+def test_mensagem_da_live_que_fica_pela_metade_no_campo_e_escrita_de_novo_uma_vez(avisos, ia_da_live):
+    # Como no campo de comentar do feed (22/11/2026, 16:39): o texto que fica só com a 1ª letra é escrito de novo.
+    class LiveQueCortaOTexto(CelularDasLives):
+        escritas = 0
+
+        def __call__(self, **seletor):
+            app = self
+
+            class CampoQueCorta(Campo):
+                def set_text(self, texto):
+                    app.escritas += 1
+                    app.escrito = texto[:1] if app.escritas == 1 else texto
+
+            return CampoQueCorta(self)
+
+    _com_faixas(lives=(1, 1))
+    app = LiveQueCortaOTexto(lives=("Ana Achados",))
+    assert robo.comentar_numa_live(app, momento("2026-11-21 10:00")) == "live: mensagem enviada"
+    assert app.mensagens == {0: ["Loja Rafa: Que lindo esse kit! 0"]} and app.escritas == 2
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_LIVE, "", "texto escrito na 2ª vez")
+    assert [d for _m, _p, _r, d, _o in linhas] == ["1 de 21 letras na 1ª"]
 
 
 def test_live_no_registro_so_com_textos_fixos_e_a_marca(avisos, ia_da_live):
