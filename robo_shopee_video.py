@@ -6183,7 +6183,8 @@ ESPERA_DOS_CUPONS = 8
 MOTIVO_DA_JANELA_DO_NOME = "a janela do produto fechou enquanto o robô escrevia o nome da IA"
 MOTIVO_DA_JANELA_DOS_CUPONS = "a janela do produto não voltou depois da lista de cupons"
 MOTIVO_DO_CAMPO_DO_NOME = "o campo do nome do produto não voltou ao vazio depois do nome da IA que não ficou"
-# A 1ª lista de cupons que não vem vazia: quando a tela foi guardada para o Claude ({"guardada_em"}).
+# A 1ª lista de cupons que não vem vazia: quando a tela foi guardada para o Claude ({"lista_guardada_em"}). O
+# "guardada_em" que o banco tiver é da tela do Erro de Carregamento (22/11, 11:25), que não é a lista, e não conta.
 CHAVE_DOS_CUPONS = "shopee_video_cupons"
 # O app aceita só alguns emojis no nome do produto (22/11: 🪑 e 🪞 passaram; ✨, 🌙 e as carinhas, não, com o aviso
 # "Emoji não permitido"). O nome da IA com o emoji recusado vai com outro, sorteado entre os de reserva que o app ainda
@@ -6319,9 +6320,10 @@ def _trocar_o_nome(d, novo, anuncio=""):
 def _olhar_os_cupons(d, video):
     """
     Abre a lista de cupons pelo Selecionar Cupom da janela do produto e volta a ela pelo voltar (P265 1). Vazia (o de
-    hoje para afiliados), segue sem cupom. A que não vem vazia: a tela fica guardada para o Claude ensinar o toque de
-    escolher (_guardar_a_lista_de_cupons) e segue sem cupom; nenhum toque nela. Nunca toca no Adicionar Cupom (cria
-    cupom: ps.TEXTOS_PROIBIDOS). Sem a janela do produto de volta, para o rascunho.
+    hoje para afiliados), segue sem cupom. A tela do Erro de Carregamento (a lista que o app não carregou) não é a
+    lista: segue sem cupom, sem tocar no Atualizar. A que não vem vazia: a tela fica guardada para o Claude ensinar o
+    toque de escolher (_guardar_a_lista_de_cupons) e segue sem cupom; nenhum toque nela. Nunca toca no Adicionar
+    Cupom (cria cupom: ps.TEXTOS_PROIBIDOS). Sem a janela do produto de volta, para o rascunho.
     """
     xml = tela(d)
     botao = ps.selecionar_cupom(ps.elementos(xml))
@@ -6333,11 +6335,12 @@ def _olhar_os_cupons(d, video):
         registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "toque recusado", ps.RECUSA[:80], ok=False)
         return
     d.click(x, y)
-    lista = []
+    lista, sem_carregar = [], False
     for _ in range(ESPERA_DOS_CUPONS // 2):
         pausa(2)
-        lista = ps.elementos(tela(d))
-        if ps.na_lista_de_cupons(lista) and ps.sem_cupom_para_escolher(lista):
+        xml = tela(d)
+        lista, sem_carregar = ps.elementos(xml), ps.com_erro_de_carregamento(xml)
+        if ps.na_lista_de_cupons(lista) and (ps.sem_cupom_para_escolher(lista) or sem_carregar):
             break
     if not ps.na_lista_de_cupons(lista):
         if ps.janela_de_editar_aberta(lista):
@@ -6346,6 +6349,9 @@ def _olhar_os_cupons(d, video):
         raise Parada(MOTIVO_DA_JANELA_DOS_CUPONS)
     if ps.sem_cupom_para_escolher(lista):
         registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "lista sem cupom", ok=None)
+    elif sem_carregar:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "a lista não carregou",
+                                     "o Erro de Carregamento do app; segue sem cupom", ok=None)
     else:
         registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM, "lista sem o aviso de vazia",
                                      "pode ter cupom; segue sem", ok=None)
@@ -6361,11 +6367,11 @@ def _guardar_a_lista_de_cupons(d, video):
     A 1ª lista de cupons que não vem vazia: o caso com a tela, para o Claude ensinar o robô a escolher o cupom, e o
     aviso ao Rafael. Uma vez só (CHAVE_DOS_CUPONS): depois, só o registro.
     """
-    if (db.ler_config(CHAVE_DOS_CUPONS, {}) or {}).get("guardada_em"):
+    if (db.ler_config(CHAVE_DOS_CUPONS, {}) or {}).get("lista_guardada_em"):
         return
     casos_robo.guardar(d, "cupom", "lista de cupons", "a lista de cupons não veio vazia: a tela fica para o Claude "
                        "ensinar o robô a escolher o cupom", passo=PROCESSO_DO_CUPOM, video=video)
-    db.salvar_config(CHAVE_DOS_CUPONS, {"guardada_em": _momento()})
+    db.salvar_config(CHAVE_DOS_CUPONS, {"lista_guardada_em": _momento()})
     avisar("🎟️ Robô da Shopee Vídeo: a lista de cupons do produto não veio vazia, como costuma vir para afiliados. "
            "Guardei a tela para o Claude ensinar o robô a escolher o cupom; até lá, os rascunhos seguem sem cupom.")
 

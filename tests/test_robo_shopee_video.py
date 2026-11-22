@@ -10694,25 +10694,33 @@ class JanelaDoProduto:
     """
     A janela "Editar informações do produto" do Adicionar, como o Rafael gravou em 21/11: o campo Nome do produto,
     o aviso de nome curto (menos de 10 letras), o de emoji (recusa_emoji: o nome com emoji, como nos rascunhos de
-    22/11 às 10:05 e às 10:25), o Selecionar Cupom, que abre a tela dos cupons, e o Feito. O voltar fecha o teclado,
-    sai da tela dos cupons ou, sem nenhum dos dois, fecha a janela.
+    22/11 às 10:05 e às 10:25), o Selecionar Cupom, que abre a tela dos cupons (cupom_com_erro: a tela do Erro de
+    Carregamento, como no rascunho de 22/11 às 11:25), e o Feito. O voltar fecha o teclado, sai da tela dos cupons
+    ou, sem nenhum dos dois, fecha a janela.
     """
     CAMPO = (58, 1924, 1049, 1971)
     SELECIONAR = (718, 2159, 1049, 2210)
     CRIAR_CUPOM = (40, 2200, 1040, 2300)
 
-    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False, recusa_emoji=False, aceitos=()):
+    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False, recusa_emoji=False, aceitos=(),
+                 cupom_com_erro=False):
         self.tela, self.campo, self.teclado, self.foco = "janela", "", False, False
         self.escreve, self.cupom_vazio, self.voltar_fecha = escreve, cupom_vazio, voltar_fecha
+        self.cupom_com_erro = cupom_com_erro
         # recusa_emoji: o app recusa os emojis, menos os de aceitos (em 22/11, 🪑 e 🪞 passaram e ✨ não).
         self.recusa_emoji, self.aceitos = recusa_emoji, set(aceitos)
         self.toques, self.teclas, self.escritos = [], [], []
 
     def dump_hierarchy(self):
         if self.tela == "cupons":
-            nos = [_no_da_janela("Adicionar Cupom", (100, 150, 450, 210)),
-                   _no_da_janela("Criar e adicionar cupom ao seu vídeo para obter mais visualizações e pedidos"
-                                 if self.cupom_vazio else "Cupom de desconto da loja", (100, 600, 980, 700)),
+            if self.cupom_com_erro:
+                meio = [_no_da_janela("Erro de Carregamento", (330, 1050, 750, 1110)),
+                        _no_da_janela("Por favor, tente novamente mais tarde.", (220, 1120, 860, 1170)),
+                        _no_da_janela("Atualizar", (310, 1220, 770, 1310), clicavel=True)]
+            else:
+                meio = [_no_da_janela("Criar e adicionar cupom ao seu vídeo para obter mais visualizações e pedidos"
+                                      if self.cupom_vazio else "Cupom de desconto da loja", (100, 600, 980, 700))]
+            nos = [_no_da_janela("Adicionar Cupom", (100, 150, 450, 210)), *meio,
                    _no_da_janela("Adicionar Cupom", self.CRIAR_CUPOM, clicavel=True)]
         elif self.tela == "janela":
             nos = [_no_da_janela("Editar informações do produto", (253, 1316, 828, 1369)),
@@ -10881,6 +10889,23 @@ def test_lista_com_cupom_guarda_a_tela_uma_vez(monkeypatch, avisos):
         assert janela.tela == "janela" and len(janela.toques) == 1
     assert guardados == ["cupom"] and len(avisos) == 1 and "cupom" in avisos[0]
     assert [r[0] for r in _registro_do_cupom()] == ["lista sem o aviso de vazia"] * 2
+
+
+def test_lista_de_cupons_que_nao_carrega_segue_sem_cupom_sem_guardar_a_tela(monkeypatch, avisos):
+    # Rascunho de 22/11 às 11:25: a tela dos cupons veio com o Erro de Carregamento, e o robô a tomou pela lista com
+    # cupom (guardou a tela e avisou o Rafael). Ela não é a lista: o robô anota que a lista não carregou e volta sem
+    # cupom, sem tocar no Atualizar, sem guardar a tela e sem aviso. O guardada_em dela não segura a lista com cupom
+    # de verdade, que ainda vai para o Claude, uma vez.
+    guardados = []
+    monkeypatch.setattr(robo.casos_robo, "guardar", lambda d, acao, resultado, motivo, **k: guardados.append(acao))
+    robo.db.salvar_config(robo.CHAVE_DOS_CUPONS, {"guardada_em": "2026-11-22 11:25:33"})
+    janela = JanelaDoProduto(cupom_com_erro=True)
+    OLHAR_OS_CUPONS(janela, {"link": LINK})
+    assert janela.tela == "janela" and janela.teclas == ["back"] and len(janela.toques) == 1
+    assert _registro_do_cupom() == [("a lista não carregou", "o Erro de Carregamento do app; segue sem cupom")]
+    assert guardados == [] and avisos == []
+    OLHAR_OS_CUPONS(JanelaDoProduto(cupom_vazio=False), {"link": LINK})
+    assert guardados == ["cupom"] and len(avisos) == 1
 
 
 def test_adicionar_cupom_nunca_e_tocado():

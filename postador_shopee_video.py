@@ -1265,7 +1265,7 @@ def reabrir_a_lista(d, espera):
 
 
 def com_erro_de_carregamento(xml):
-    """A tela mostra o "Erro de Carregamento" do app (a lista do Adicionar Produto que não carregou)?"""
+    """A tela mostra o "Erro de Carregamento" do app (a lista do Adicionar Produto ou a dos cupons que não carregou)?"""
     return any(_normal(el["texto"]) == _normal(ERRO_DE_CARREGAMENTO) for el in elementos(xml))
 
 
