@@ -63,8 +63,12 @@ LARGURA_DO_BRILHO = 160
 
 # O curso abre no Chrome do celular, pelo link guardado no Acessos do Servidor 🔐, e o robô faz o login
 # com o e-mail e a senha que o Rafael mandou ao Claude (pedido dele, 22/11). Nada disso vai ao log.
+# O link abre sempre na mesma aba do Chrome (a marca do robô no pedido), sem juntar abas a cada vez.
 PACOTE_DO_CHROME = "com.android.chrome"
-ESPERA_DO_LOGIN = 6
+ABA_DO_ROBO = "cursos_robo"
+# O site leva alguns segundos para entrar: a página de login é conferida de 2 em 2 s, até 20 s.
+ESPERA_DO_LOGIN = 20
+PASSO_DA_ESPERA = 2
 
 # O que o scrcpy escreve no erro vira um motivo fixo: a saída dele traz o endereço do celular.
 MOTIVOS_DO_GRAVADOR = (
@@ -267,7 +271,8 @@ def abrir_o_curso(d):
     link = acesso_do_curso().get("link")
     if not link:
         return False, "sem o link do curso no Acessos do Servidor"
-    d.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", link, "-p", PACOTE_DO_CHROME])
+    d.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", link, "-p", PACOTE_DO_CHROME,
+             "--es", "com.android.browser.application_id", ABA_DO_ROBO])
     return True, "curso aberto no Chrome"
 
 
@@ -291,33 +296,59 @@ def campos_do_login(xml):
     return (email, senha) if email and senha else None
 
 
+def campo_em_foco(xml):
+    """Se o campo com o cursor é o de senha (True) ou outro (False); None sem campo com o cursor."""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return None
+    for no in raiz.iter("node"):
+        if no.get("class", "").endswith("EditText") and no.get("focused") == "true":
+            return no.get("password") == "true"
+    return None
+
+
+def _saiu_do_login(d, pausa):
+    """Espera o site entrar, conferindo a página de 2 em 2 s. (saiu, a última tela lida)."""
+    tela = ""
+    for _ in range(ESPERA_DO_LOGIN // PASSO_DA_ESPERA):
+        pausa(PASSO_DA_ESPERA)
+        tela = d.dump_hierarchy()
+        if not campos_do_login(tela):
+            return True, tela
+    return False, tela
+
+
 def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
     """
     Na página de login do curso, escreve o e-mail e a senha guardados e entra (o Enter do teclado e,
     se a página continuar, o botão Entrar). escrever e achar são os do explorar. (ok, o que dizer no log).
+    O teclado aberto sobe a página: o lugar de cada campo é lido de novo antes do toque, e cada texto só
+    vai ao campo dele, conferido pelo cursor (a senha nunca num campo que não é o de senha).
     """
     acesso = acesso_do_curso()
     if not acesso.get("email") or not acesso.get("senha"):
         return False, "sem o login do curso no Acessos do Servidor"
-    campos = campos_do_login(d.dump_hierarchy())
-    if not campos:
+    if not campos_do_login(d.dump_hierarchy()):
         return False, "a tela não é a de login do curso"
-    for (x, y), valor in zip(campos, (acesso["email"], acesso["senha"])):
-        d.click(x, y)
+    for indice, valor in enumerate((acesso["email"], acesso["senha"])):
+        campos = campos_do_login(d.dump_hierarchy())
+        if not campos:
+            return False, "a página de login mudou no meio"
+        d.click(*campos[indice])
         pausa(1)
+        foco = campo_em_foco(d.dump_hierarchy())
+        if foco is None or foco != (indice == 1):
+            return False, "o cursor não ficou no campo certo do login"
         escrever(d, valor)
     d.press("enter")
-    pausa(ESPERA_DO_LOGIN)
-    tela = d.dump_hierarchy()
-    if campos_do_login(tela):
+    saiu, tela = _saiu_do_login(d, pausa)
+    if not saiu:
         ponto = achar(tela, "Entrar")
         if ponto:
             d.click(*ponto)
-            pausa(ESPERA_DO_LOGIN)
-            tela = d.dump_hierarchy()
-    if campos_do_login(tela):
-        return False, "o login não passou (a página de login continua)"
-    return True, "login feito"
+            saiu, tela = _saiu_do_login(d, pausa)
+    return (True, "login feito") if saiu else (False, "o login não passou (a página de login continua)")
 
 
 def main(argumentos):

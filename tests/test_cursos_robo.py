@@ -220,8 +220,10 @@ def test_abrir_o_curso_pelo_link_guardado_sem_o_link_no_log(bm):
     _guardar_o_acesso(link="https://curso.exemplo.com/m/courses")
     ok, texto = cursos_robo.abrir_o_curso(celular)
     assert (ok, texto) == (True, "curso aberto no Chrome")
+    # Sempre na mesma aba do Chrome (a marca do robô no pedido), sem juntar uma aba nova a cada vez.
     assert celular.comandos == [["am", "start", "-a", "android.intent.action.VIEW", "-d",
-                                 "https://curso.exemplo.com/m/courses", "-p", "com.android.chrome"]]
+                                 "https://curso.exemplo.com/m/courses", "-p", "com.android.chrome",
+                                 "--es", "com.android.browser.application_id", "cursos_robo"]]
 
 
 def test_campos_do_login_so_na_pagina_de_login():
@@ -230,28 +232,96 @@ def test_campos_do_login_so_na_pagina_de_login():
     assert cursos_robo.campos_do_login("<quebrado") is None
 
 
+EMAIL_DO_TESTE = "aluno@exemplo.com"
+SENHA_DO_TESTE = "senha do curso"
+
+
+class PaginaDeLogin:
+    """
+    O Chrome de mentira na página de login, como no Motorola em 22/11: o teclado aberto sobe a página
+    560 px, o toque fora dos campos (numa tecla) deixa o cursor onde estava, e o Enter só entra com o
+    e-mail no campo de e-mail e a senha no de senha.
+    """
+
+    def __init__(self, entra_pelo_enter=True, senha_sem_cursor=False):
+        self.foco, self.teclado, self.entrou = None, False, False
+        self.campos = {"email": "", "senha": ""}
+        self.toques, self.teclas = [], []
+        self.entra_pelo_enter, self.senha_sem_cursor = entra_pelo_enter, senha_sem_cursor
+
+    def _caixas(self):
+        sobe = 560 if self.teclado else 0
+        return {"email": (42, 1369 - sobe, 1039, 1492 - sobe), "senha": (42, 1542 - sobe, 900, 1666 - sobe)}
+
+    def dump_hierarchy(self):
+        if self.entrou:
+            return TELA_DO_CURSO
+        nos = "".join(
+            f'<node class="android.widget.EditText" text="" password="{str(nome == "senha").lower()}" '
+            f'focused="{str(self.foco == nome).lower()}" bounds="[{x1},{y1}][{x2},{y2}]" />'
+            for nome, (x1, y1, x2, y2) in self._caixas().items())
+        return (f'<hierarchy>{nos}<node class="android.widget.Button" text="Entrar" '
+                'bounds="[42,1800][1039,1900]" /></hierarchy>')
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+        for nome, (x1, y1, x2, y2) in self._caixas().items():
+            if x1 <= x <= x2 and y1 <= y <= y2 and not (nome == "senha" and self.senha_sem_cursor):
+                self.foco, self.teclado = nome, True
+
+    def escrever(self, texto):
+        if self.foco:
+            self.campos[self.foco] = texto
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+        certo = self.campos == {"email": EMAIL_DO_TESTE, "senha": SENHA_DO_TESTE}
+        self.entrou = tecla == "enter" and certo and self.entra_pelo_enter
+
+
 def test_entrar_no_curso_escreve_o_login_guardado_e_confere_que_passou(bm):
-    escritos = []
-    escrever = lambda d, texto: escritos.append(texto)
-    achar = lambda tela, alvo: (540, 1050) if alvo == "Entrar" and "Entrar" in tela else None
+    escrever = lambda d, texto: d.escrever(texto)
+    achar = lambda tela, alvo: (540, 1850) if alvo == "Entrar" and "Entrar" in tela else None
     sem_pausa = lambda segundos: None
     # Sem o e-mail e a senha guardados, nada é tocado.
     celular = Chrome(TELA_DO_LOGIN)
     assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
         False, "sem o login do curso no Acessos do Servidor")
-    assert celular.toques == [] and escritos == []
-    _guardar_o_acesso(link="https://curso.exemplo.com", email="aluno@exemplo.com", senha="senha do curso")
+    assert celular.toques == []
+    _guardar_o_acesso(link="https://curso.exemplo.com", email=EMAIL_DO_TESTE, senha=SENHA_DO_TESTE)
     # Fora da página de login, também não.
     celular = Chrome(TELA_DO_CURSO)
     assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
         False, "a tela não é a de login do curso")
-    # Na página de login: o e-mail no 1º campo, a senha no de senha e o Enter do teclado.
-    celular = Chrome(TELA_DO_LOGIN, TELA_DO_CURSO)
+    assert celular.toques == []
+    # Na página de login: o teclado do e-mail sobe a página, e a senha é tocada no lugar novo do campo
+    # (no de antes, o toque caía no teclado e a senha ia para o campo do e-mail).
+    celular = PaginaDeLogin()
     assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (True, "login feito")
-    assert celular.toques == [(540, 750), (540, 890)] and celular.teclas == ["enter"]
-    assert escritos == ["aluno@exemplo.com", "senha do curso"]
-    # O Enter não passou: toca no Entrar; continuando no login, diz que não passou.
-    celular = Chrome(TELA_DO_LOGIN, TELA_DO_LOGIN, TELA_DO_LOGIN)
+    assert celular.toques == [(540, 1430), (471, 1044)] and celular.teclas == ["enter"]
+    assert celular.campos == {"email": EMAIL_DO_TESTE, "senha": SENHA_DO_TESTE}
+    # O Enter não entrou: toca no Entrar; continuando no login, diz que não passou.
+    celular = PaginaDeLogin(entra_pelo_enter=False)
     assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
         False, "o login não passou (a página de login continua)")
-    assert celular.toques[-1] == (540, 1050)
+    assert celular.toques[-1] == (540, 1850)
+
+
+def test_entrar_no_curso_nunca_escreve_a_senha_fora_do_campo_de_senha(bm):
+    _guardar_o_acesso(link="https://curso.exemplo.com", email=EMAIL_DO_TESTE, senha=SENHA_DO_TESTE)
+    celular = PaginaDeLogin(senha_sem_cursor=True)
+    escrever = lambda d, texto: d.escrever(texto)
+    assert cursos_robo.entrar_no_curso(celular, escrever, lambda tela, alvo: None, pausa=lambda s: None) == (
+        False, "o cursor não ficou no campo certo do login")
+    # O cursor ficou no e-mail: a senha não foi escrita em lugar nenhum, e nada foi enviado.
+    assert celular.campos == {"email": EMAIL_DO_TESTE, "senha": ""} and celular.teclas == []
+
+
+def test_campo_em_foco_diz_se_o_cursor_esta_no_campo_de_senha():
+    assert cursos_robo.campo_em_foco(TELA_DO_LOGIN) is None
+    celular = PaginaDeLogin()
+    celular.foco = "email"
+    assert cursos_robo.campo_em_foco(celular.dump_hierarchy()) is False
+    celular.foco = "senha"
+    assert cursos_robo.campo_em_foco(celular.dump_hierarchy()) is True
+    assert cursos_robo.campo_em_foco("<quebrado") is None
