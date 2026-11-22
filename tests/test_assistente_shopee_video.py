@@ -998,7 +998,10 @@ LEGENDA_2 = LEGENDA.replace("https://s.shopee.com.br/abc", "https://s.shopee.com
 
 
 def _preparar_do_amigo(monkeypatch, textos=TEXTOS):
-    """Dois vídeos na fonte, cada um com um produto (o do link abc é o 11, o do def é o 22)."""
+    """
+    Dois vídeos na fonte, cada um com um produto (o do link abc é o 11, o do def é o 22). O link convertido sai sem a
+    rede: https://s.shopee.com.br/rafa-ETIQUETA/o fim do link da fonte.
+    """
     async def gerar(arquivo, nome="", leves=False):
         return textos
 
@@ -1006,8 +1009,12 @@ def _preparar_do_amigo(monkeypatch, textos=TEXTOS):
         item = "11" if link.endswith("abc") else "22"
         return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "item": item}], link
 
+    async def converter(link, etiqueta):
+        return f"https://s.shopee.com.br/rafa-{etiqueta}/{link.rsplit('/', 1)[-1]}"
+
     monkeypatch.setattr(asv, "gerar_textos", gerar)
     monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    monkeypatch.setattr(asv.api_shopee, "converter_link_shopee", converter)
     _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"),
           ("velho", LEGENDA_2, "archive/velho.mp4", "2026-10-01 10:00"))
 
@@ -1056,6 +1063,23 @@ def test_pedido_do_rafael_no_grupo_vai_ao_privado_com_o_postei_e_ao_grupo(monkey
     bot = BotDoGrupo()
     assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:05"))) == asv.MANDADO_NO_PRIVADO
     assert {envio["chat"] for envio in bot.envios} == {42}
+
+
+def test_link_que_vai_ao_grupo_dos_amigos_e_o_do_rafael_com_a_etiqueta_do_grupo(monkeypatch):
+    # Pedido do Rafael (22/11): o link dos passos no grupo é o dele, convertido com a etiqueta do grupo, para a compra
+    # de quem o abre, nos 7 dias da Shopee, dar a comissão a ele. No privado dele, o link continua o da fonte.
+    _preparar_do_amigo(monkeypatch)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:00"))) == asv.MANDADO_AO_AMIGO
+    passos = bot.envios[-1]["conteudo"]
+    assert "🔗 https://s.shopee.com.br/rafa-grupoamigos/abc\n" in passos
+    assert "s.shopee.com.br/abc" not in passos
+    bot = BotDoGrupo()
+    rafael = {"id": 42, "mencao": "@rafa_teste", "grupo": -1001, "responder_a": 77}
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:05"), no_grupo=rafael)) == asv.MANDADO_NO_PRIVADO
+    no_privado, no_grupo = bot.envios[1], bot.envios[3]
+    assert no_privado["chat"] == 42 and "🔗 https://s.shopee.com.br/def\n" in no_privado["conteudo"]
+    assert no_grupo["chat"] == -1001 and "🔗 https://s.shopee.com.br/rafa-grupoamigos/def\n" in no_grupo["conteudo"]
 
 
 def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):

@@ -232,6 +232,9 @@ ETIQUETA_SHOPEE_VIDEO = "shopeevideo"
 # Os links dos produtos do vídeo do robô da Shopee Vídeo que vai ao Canal Afiliados depois
 # de postado (pedidos_do_canal.py).
 ETIQUETA_CANAL_AFILIADOS = "canalafiliados"
+# O link de cada vídeo que vai ao grupo dos amigos (amigos_shopee_video.py), o do Rafael: a compra
+# de quem abre o link, nos 7 dias da Shopee, fica com ele (pedido de 22/11).
+ETIQUETA_GRUPO_DOS_AMIGOS = "grupoamigos"
 
 
 def etiquetas(sub_ids):

@@ -1079,10 +1079,11 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     # O nome de cada produto no vídeo, para o Rafael colar no Adicionar (P265 1).
     nomes = await nomes_no_video([p["nome"] for p in produtos]) if produtos else {}
     if amigo:
+        do_grupo = await link_para_o_grupo(link)
         if _ja_mandado(video["id"]):
             # O robô roda em outro processo e pode pegar o vídeo no meio do preparo: ele não vai a duas pessoas.
             return JA_COM_OUTRO
-        await _mandar_ao_amigo(bot, amigo, arquivo, montar_mensagem(textos, produtos, link, mudo, nomes=nomes,
+        await _mandar_ao_amigo(bot, amigo, arquivo, montar_mensagem(textos, produtos, do_grupo, mudo, nomes=nomes,
                                                                     amigo=amigo["mencao"]))
         registrar(video["id"], "enviado", "", agora, item=item, amigo=dono)
         return MANDADO_AO_AMIGO
@@ -1095,11 +1096,24 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         # O pedido do Rafael no grupo dos amigos: o mesmo vídeo vai ao grupo, em resposta ao pedido, com os passos sem
         # o Postei ✅, que fica no privado (P281 1).
         try:
-            await _mandar_ao_amigo(bot, no_grupo, arquivo, montar_mensagem(textos, produtos, link, mudo, nomes=nomes,
-                                                                         amigo=no_grupo["mencao"]))
+            passos = montar_mensagem(textos, produtos, await link_para_o_grupo(link), mudo, nomes=nomes,
+                                     amigo=no_grupo["mencao"])
+            await _mandar_ao_amigo(bot, no_grupo, arquivo, passos)
         except Exception as e:
             logger.warning(f"⚠️ [Grupo dos Amigos] O vídeo do Rafael não saiu no grupo: {type(e).__name__}")
     return MANDADO_NO_PRIVADO
+
+
+async def link_para_o_grupo(link):
+    """
+    O link do vídeo nos passos que vão ao grupo dos amigos, convertido no link de afiliado do Rafael, com a etiqueta
+    do grupo: quem o abre para favoritar o produto fica com ele, e a compra dessa pessoa nos 7 dias da Shopee dá a
+    comissão a ele. O link da fonte pode ser de outro afiliado (o Espião guarda o do canal de origem). Sem a
+    conversão, vai o da fonte, como nos outros robôs (o api_shopee anota o link sem conversão, que o diagnóstico
+    conta). No privado do Rafael, o link continua o da fonte.
+    Pedido do Rafael (22/11): DECISOES.md, Shopee Vídeo.
+    """
+    return await api_shopee.converter_link_shopee(link, api_shopee.ETIQUETA_GRUPO_DOS_AMIGOS)
 
 
 def _ja_mandado(id_unico):

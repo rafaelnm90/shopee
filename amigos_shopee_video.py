@@ -7,13 +7,15 @@ resposta à mensagem do pedido. Só pede quem o Rafael liberou: quem toca sem es
 o Rafael recebe o nome no privado, com o Liberar ✅. O Rafael sempre pode pedir: o vídeo dele é preparado como o
 Enviar 1 Agora 📤 e vai ao privado, com o Postei ✅, e ao grupo (P281 1). A mensagem do pedido diz em quanto tempo o
 vídeo fica pronto (minutos_estimados). Nenhum vídeo vai a duas pessoas, e o produto que o amigo já
-recebeu não volta para ele (assistente_shopee_video.preparar_para_o_amigo). O robô e o assistente do Rafael não mudam.
+recebeu não volta para ele (assistente_shopee_video.preparar_para_o_amigo). O link dos passos no grupo é o do
+Rafael, com a etiqueta do grupo (assistente_shopee_video.link_para_o_grupo, pedido de 22/11). O robô e o
+assistente do Rafael não mudam.
 
 O bot_mestre inclui o router, chama configurar_dependencias e passa o /amigos (comando_amigos) antes do tratamento
 das mensagens soltas nos grupos, que fica com todas elas. O painel_shopee_video mostra o botão Grupo dos Amigos 👥;
 nele, o Liberar Amigos ✅ mostra o nome de cada um que tocou e ainda não foi liberado. Depois do 1º /amigos, o comando
 fica no menu do grupo, visível só para o Rafael.
-Escolhas do Rafael (21 e 22/11/2026, P271 2 a P281 1): DECISOES.md, Shopee Vídeo.
+Escolhas do Rafael (21 e 22/11/2026, P271 2 a P282 1 e o pedido do link): DECISOES.md, Shopee Vídeo.
 """
 import asyncio
 import html
@@ -517,7 +519,8 @@ def texto_do_painel(config, agora=None):
         "como os do assistente. Nenhum vídeo vai a duas pessoas (nem a você), e o produto que um amigo já recebeu não "
         "volta para ele. O seu robô e o assistente continuam como estão. Você também pode pedir pelo botão, sem se "
         "liberar: o seu vídeo é preparado como o Enviar 1 Agora 📤 e vai ao seu privado, com o Postei ✅, e ao "
-        "grupo. A mensagem de cada pedido diz em quanto tempo o vídeo fica pronto.\n\n"
+        "grupo. A mensagem de cada pedido diz em quanto tempo o vídeo fica pronto. O link do produto nos passos do "
+        "grupo é o seu link de afiliado: a compra de quem o abre, nos 7 dias da Shopee, dá a comissão a você.\n\n"
         f"Status: {status}\n"
         f"💬 Grupo: {grupo}\n"
         f"⏳ Pedidos na fila: <b>{len(config['fila'])}</b>\n"
