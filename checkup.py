@@ -1261,13 +1261,17 @@ def _linha_da_foto_do_comeco(medicao):
 FORMATOS_DO_VIDEO_DE_IA_SV = ("vendedor", "maos_e_voz", "unboxing", "comedia_16s", "propaganda_tv", "demonstracao",
                               "fala", "inusitado", "comedia")
 OUTRO_FORMATO_SV = "outro"
+# A propaganda de TV com um dos personagens (P278 1) conta à parte da que mostra só o produto (propaganda_tv), para
+# saber se o personagem traz mais visualizações.
+PROPAGANDA_COM_PERSONAGEM_SV = "propaganda_tv_personagem"
 
 
 def formatos_do_video_de_ia_da_shopee_video(agora=None):
     """
     A medição dos formatos do vídeo de IA da Shopee Vídeo (P269 1): os vídeos de IA postados nestes últimos dias, cada
-    formato (o "formato" do rascunho, ou o "estilo" nos de antes dele) contra os outros vídeos de IA
-    (visualizacoes_shopee_video.comparar_os_formatos). O checkup só mostra os formatos, contagens e %.
+    formato (o "formato" do rascunho, ou o "estilo" nos de antes dele; a propaganda com personagem, P278 1, à
+    parte) contra os outros vídeos de IA (visualizacoes_shopee_video.comparar_os_formatos). O checkup só mostra os
+    formatos, contagens e %.
     """
     limite = (_agora(agora) - timedelta(days=DIAS_DA_COMPARACAO_DA_CAPA)).strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -1289,8 +1293,11 @@ def formatos_do_video_de_ia_da_shopee_video(agora=None):
             # Os vídeos da fonte ficam de fora: a medição é só entre os vídeos de IA.
             continue
         formato = str(dados.get("formato") or dados.get("estilo") or "")
-        videos.append({"postado_em": postado_em, "marca": marca, "vistas": vistas,
-                       "formato": formato if formato in FORMATOS_DO_VIDEO_DE_IA_SV else OUTRO_FORMATO_SV})
+        if formato not in FORMATOS_DO_VIDEO_DE_IA_SV:
+            formato = OUTRO_FORMATO_SV
+        elif formato == visualizacoes_shopee_video.FORMATO_DA_PROPAGANDA and dados.get("personagem"):
+            formato = PROPAGANDA_COM_PERSONAGEM_SV
+        videos.append({"postado_em": postado_em, "marca": marca, "vistas": vistas, "formato": formato})
     return visualizacoes_shopee_video.comparar_os_formatos(videos)
 
 

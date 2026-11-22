@@ -9738,7 +9738,9 @@ def test_video_de_ia_anota_a_imagem_do_personagem_e_o_rascunho_leva_o_personagem
     assert resumo["personagem"] == "vovo" and resumo["imagem"] == {"estado": "feita", "personagem": "vovo",
                                                                   "tentativas": 2}
     assert "👤 Personagem: Vovó" in robo.flow.legenda_da_producao(resumo)
-    for motivo, ok in ((robo.flow.SEM_FOTO_APROVADA, None), ("a IA não escolheu o personagem", 0)):
+    # A propaganda que a IA quis só com o produto (P278 1) não é falha, como a falta de foto aprovada.
+    for motivo, ok in ((robo.flow.SEM_FOTO_APROVADA, None), (robo.flow.SO_O_PRODUTO, None),
+                       ("a IA não escolheu o personagem", 0)):
         robo.flow.guardar_producao(imagem={"estado": "sem", "motivo": motivo, "personagem": ""})
         robo._anotar_a_imagem(momento("2026-10-22 09:00"))
         assert consultar("SELECT resultado, detalhe, ok FROM registro_processos ORDER BY id DESC LIMIT 1") == (

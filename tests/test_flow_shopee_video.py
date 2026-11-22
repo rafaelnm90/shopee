@@ -2188,14 +2188,18 @@ FALA_DO_LOCUTOR_OUVIDA = [(0.4, 0.8, "Seu"), (0.8, 1.3, "quarto"), (1.3, 1.8, "m
 def test_pedido_da_propaganda_de_tv_tem_os_planos_de_comercial_e_o_locutor_sem_ninguem_falando(monkeypatch):
     # Escolha do Rafael (21/11, P268 1): o vídeo de IA com cara de propaganda de TV, de 8 s, "não com cara de IA, de
     # Shopee": o produto em planos de comercial, com luz de estúdio, e um locutor em off; ninguém fala para a câmera.
+    # Desde a P278 1 (22/11), o locutor fala até 10 palavras, com calma, até por volta dos 6 s, como na amostra nº 11.
     tv = flow.PEDIDO_DA_PROPAGANDA.format(nome="Luminária de Mesa", evitar="", bebida="")
     for trecho in ("cara de propaganda de TV de verdade", "2 ou 3 planos de cinema", "locutor profissional",
                    "fala em off", "ninguém fala na tela", "premium TV commercial", "no one speaks on camera",
-                   "no text, no logo", f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras ao todo",
-                   "do 1º segundo até perto do fim", "o produto sozinho no centro do quadro",
+                   "no text, no logo", f"2 frases curtas com até {flow.PALAVRAS_DO_LOCUTOR_CURTO} palavras ao todo",
+                   "do 1º segundo até por volta dos 6 segundos", "a fala tem de caber inteira nos 8 segundos",
+                   "o plano final do produto fica só com a trilha", "the voice-over ends before the final hero shot",
+                   "o produto sozinho no centro do quadro",
                    "idêntico ao da foto em todos os planos", "palavras curtas, comuns e fáceis de falar",
                    "sem preço", "Luminária de Mesa", '{"serve": true ou false'):
         assert trecho in tv, trecho
+    assert f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras" not in tv and "até perto do fim" not in tv
     pedidos, respostas = [], []
 
     async def gerar(texto, imagens=None):
@@ -2301,7 +2305,7 @@ def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_a
                                                                                             tmp_path):
     # Escolha do Rafael (21/11, P270 1: "vamos testar qm sabe fica legal, mas eu tenho q experimentar primeiro"): a
     # propaganda de TV de 8 s começa pela imagem de um dos personagens com o produto, no quadro de um comercial, e ele
-    # usa o produto sem falar, com o locutor em off. Só no privado; o vídeo do dia continua pela foto do anúncio.
+    # usa o produto sem falar, com o locutor em off. Só no privado; na amostra, sempre com um personagem.
     _aprovadas(tmp_path, "vovo")
     escolhas = _escolha_da_propaganda(monkeypatch)
     pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, PEDIDO_DA_PROPAGANDA_DA_VOVO])
@@ -2312,6 +2316,7 @@ def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_a
     assert escolhas == [([], True, False, True)]
     # A escolha do personagem pede a ação e a cena de um comercial; o pedido do vídeo é o da propaganda pela imagem.
     assert flow.TRECHO_DA_PROPAGANDA_NO_PERSONAGEM in pedidos[0][0]
+    assert flow.TRECHO_DO_SO_O_PRODUTO not in pedidos[0][0]
     pela_imagem = pedidos[2][0]
     for trecho in ("A pessoa da imagem é a atriz ou o ator do comercial", "mas não fala", "o personagem Vovó",
                    "the person from the first frame acts without speaking", "no one speaks on camera"):
@@ -2324,7 +2329,7 @@ def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_a
     (caminho, legenda), = celular.mandados
     for trecho in ("com cara de propaganda de TV com um dos seus personagens (P270 1)", "👤 Personagem: Vovó",
                    f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
-                   "No robô, a propaganda continua pela foto do anúncio até o seu OK"):
+                   "No robô, desde a P278 1, a IA decide pelo produto se a propaganda mostra um personagem"):
         assert trecho in legenda, trecho
     atual = flow.amostra_guardada()
     assert (atual["personagem"], atual["imagem"]["estado"], atual["estilo"]) == (
@@ -2335,7 +2340,7 @@ def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_a
 def test_amostra_da_propaganda_com_personagem_pede_a_fala_curta_que_cabe_nos_8_s(celular, monkeypatch, tmp_path):
     # Escolha do Rafael (21/11, P275 1): na amostra nº 9, a fala do locutor (14 palavras) ocupou 7,6 s dos 7,9 s e saiu
     # embolada e cortada no fim. A próxima amostra com personagem pede até 10 palavras, com calma, até por volta dos
-    # 6 s, e o plano final fica com a trilha. A propaganda do robô, pela foto do anúncio, fica como está (P264 4).
+    # 6 s, e o plano final fica com a trilha. Desde a P278 1, a propaganda do robô também.
     _aprovadas(tmp_path, "vovo")
     _escolha_da_propaganda(monkeypatch)
     pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, PEDIDO_DA_PROPAGANDA_DA_VOVO])
@@ -2350,9 +2355,10 @@ def test_amostra_da_propaganda_com_personagem_pede_a_fala_curta_que_cabe_nos_8_s
                    "o plano final do produto fica só com a trilha", "the voice-over ends before the final hero shot"):
         assert trecho in pela_imagem, trecho
     assert f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras" not in pela_imagem
-    # A propaganda do robô, pela foto do anúncio, continua com a fala do mesmo tamanho.
-    assert f"com até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras ao todo" in flow.PEDIDO_DA_PROPAGANDA
-    assert "the voice-over ends before the final hero shot" not in flow.PEDIDO_DA_PROPAGANDA
+    # Desde a P278 1, a propaganda do robô pela foto do anúncio também tem a fala curta.
+    assert f"com até {flow.PALAVRAS_DO_LOCUTOR_CURTO} palavras ao todo" in flow.PEDIDO_DA_PROPAGANDA
+    assert "the voice-over ends before the final hero shot" in flow.PEDIDO_DA_PROPAGANDA
+    assert f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras" not in flow.PEDIDO_DA_PROPAGANDA
 
 
 def test_imagem_refeita_com_o_mesmo_nome_da_de_antes_vale(celular, monkeypatch, tmp_path, capsys):
@@ -3186,11 +3192,17 @@ def _escolhido_da_propaganda(**extra):
                 duracao_pedida=8, motivo_da_duracao="bonito de se ver", **extra)
 
 
-def test_producao_da_propaganda_de_tv_gera_uma_vez_pela_foto_e_fica_inteira(celular, monkeypatch, tmp_path, capsys):
-    # Escolha do Rafael (21/11, P269 1): a propaganda de TV que a IA escolheu é de 8 s, um Gerar só (24 créditos), pela
-    # foto do anúncio (a imagem do personagem é do vendedor e da comédia), e fica sempre inteira: a pausa entre os
-    # planos e o produto no fim, depois da última frase do locutor, são o comercial (decisão do Claude pela P262).
+SO_O_PRODUTO_NA_PROPAGANDA = '{"personagem": "nenhum", "acao": "", "cena": ""}'
+
+
+def test_producao_da_propaganda_so_com_o_produto_gera_uma_vez_pela_foto_e_fica_inteira(celular, monkeypatch, tmp_path,
+                                                                                     capsys):
+    # Escolha do Rafael (21/11, P269 1): a propaganda de TV é de 8 s, um Gerar só (24 créditos), e fica sempre
+    # inteira: a pausa entre os planos e o produto no fim, depois da última frase do locutor, são o comercial (decisão
+    # do Claude pela P262). Desde a P278 1 (22/11), a IA escolhe pelo produto se ela mostra um personagem: quando
+    # quer só o produto, nenhuma imagem é feita, e o vídeo sai pela foto do anúncio.
     _aprovadas(tmp_path, "vovo")
+    pedidos = _ia_da_imagem(monkeypatch, [SO_O_PRODUTO_NA_PROPAGANDA])
     monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 8.0)
     montagens = _corte_falso(monkeypatch)
     estilos = flow.estilos_recentes()
@@ -3199,13 +3211,15 @@ def test_producao_da_propaganda_de_tv_gera_uma_vez_pela_foto_e_fica_inteira(celu
     assert (atual["formato"], atual["estilo"], atual["duracao_pedida"]) == (
         flow.ESTILO_DA_PROPAGANDA, flow.ESTILO_DA_PROPAGANDA, 8)
     assert atual["custo"] == 24 and flow.estilos_recentes() == estilos
-    # Mesmo com a foto de um personagem aprovada, a propaganda não pede a imagem dele.
-    assert not flow.pede_a_imagem(atual)
+    assert flow.pede_a_imagem(atual)
     assert flow.producao_no_celular(celular, atual) is True
+    # A escolha do personagem da propaganda do robô pode dizer que o comercial fica melhor só com o produto.
+    assert flow.TRECHO_DO_SO_O_PRODUTO in pedidos[0][0] and celular.fotos_das_imagens == []
     assert celular.geracoes == 1 and celular.extensoes == 0 and celular.toques_proibidos == []
     assert celular.texto == "Premium TV commercial of the exact tumbler."
     atual = flow.producao()
-    assert atual["estado"] == "baixado" and "imagem" not in atual
+    assert atual["estado"] == "baixado" and "foto_do_video" not in atual and "personagem" not in atual
+    assert atual["imagem"]["estado"] == "sem" and atual["imagem"]["motivo"] == flow.SO_O_PRODUTO
     assert flow.formatos_recentes()[-1] == flow.ESTILO_DA_PROPAGANDA
     monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: LOCUTOR_COM_PAUSA)
     assert flow.conferir_a_producao() == "pronto"
@@ -3220,12 +3234,62 @@ def test_producao_da_propaganda_de_tv_gera_uma_vez_pela_foto_e_fica_inteira(celu
     legenda = flow.legenda_da_producao(pronto)
     for trecho in ("Omni 1.2 Flash, 8 s (24 créditos de IA)", f"🎭 Estilo: {flow.ESTILOS[flow.ESTILO_DA_PROPAGANDA]}",
                    "⏱️ 8 s, sem o Estender (a propaganda de TV tem sempre 8 s)", f"🎙️ Locutor: {FALA_DO_LOCUTOR}",
-                   "✂️ Propaganda de TV: o vídeo fica inteiro, sem cortar o silêncio"):
+                   "✂️ Propaganda de TV: o vídeo fica inteiro, sem cortar o silêncio",
+                   "👤 Sem personagem: a IA escolheu mostrar só o produto neste comercial (pela foto do anúncio)"):
         assert trecho in legenda, trecho
-    assert "🗣️ Fala:" not in legenda and "👤" not in legenda and celular.mandados == []
+    assert "🗣️ Fala:" not in legenda and celular.mandados == []
     saida = capsys.readouterr().out
     for privado in ("Copo", "tumbler", "quarto"):
         assert privado not in saida, privado
+
+
+def test_producao_da_propaganda_com_personagem_sai_da_imagem_dele_com_a_fala_curta(celular, monkeypatch, tmp_path):
+    # Escolha do Rafael (22/11, P278 1, depois da amostra nº 11): na propaganda do robô, a IA escolhe pelo produto se
+    # o comercial mostra um dos personagens; com ele, o vídeo sai da imagem dele com o produto, no quadro de um
+    # comercial, e o pedido escrito pela imagem é o da propaganda, com o personagem sem falar e o locutor curto.
+    _aprovadas(tmp_path, "vovo")
+    pedidos = _ia_da_imagem(monkeypatch, [ESCOLHA_DA_VOVO, IMAGEM_CONFIRMADA, PEDIDO_DA_PROPAGANDA_DA_VOVO])
+    galeria = _galeria(monkeypatch)
+    monkeypatch.setattr(flow.videos, "duracao", lambda caminho, timeout=30: 8.0)
+    atual = flow.comecar_producao("2026-11-22", _escolhido_da_propaganda(), 1)
+    assert flow.pede_a_imagem(atual)
+    assert flow.producao_no_celular(celular, atual) is True
+    escolha, _conferencia, pela_imagem = pedidos
+    assert flow.TRECHO_DO_SO_O_PRODUTO in escolha[0] and flow.TRECHO_DA_PROPAGANDA_NO_PERSONAGEM in escolha[0]
+    for trecho in ("A pessoa da imagem é a atriz ou o ator do comercial", "mas não fala",
+                   f"2 frases curtas com até {flow.PALAVRAS_DO_LOCUTOR_CURTO} palavras ao todo",
+                   "the person from the first frame acts without speaking"):
+        assert trecho in pela_imagem[0], trecho
+    assert celular.fotos_das_imagens == [True] and celular.geracoes == 1 and celular.extensoes == 0
+    assert celular.texto == flow.com_a_diccao("Premium TV commercial: the grandma from the first frame uses the lamp "
+                                              "without speaking.")
+    # O vídeo sai da imagem do personagem, e não da foto do anúncio.
+    assert galeria[-1].endswith("producao_2026-11-22_imagem.jpg")
+    atual = flow.producao()
+    assert (atual["personagem"], atual["imagem"]["estado"], atual["estilo"]) == (
+        "vovo", "feita", flow.ESTILO_DA_PROPAGANDA)
+    assert atual["fala"] == FALA_DO_LOCUTOR and atual["formato"] == flow.ESTILO_DA_PROPAGANDA
+    monkeypatch.setattr(flow.videos, "palavras_faladas", lambda caminho: FALA_DO_LOCUTOR_OUVIDA)
+    assert flow.conferir_a_producao() == "pronto"
+    pronto = flow.video_pronto()
+    assert pronto["silencio"]["motivo"] == flow.PROPAGANDA_INTEIRA
+    assert "👤 Personagem: Vovó" in flow.legenda_da_producao(pronto)
+
+
+def test_so_o_produto_na_escolha_do_personagem_vale_so_na_propaganda_do_robo(monkeypatch):
+    # P278 1: na propaganda do robô, a IA pode responder que o comercial fica melhor só com o produto; na amostra da
+    # propaganda com personagem (P270 1) e no vendedor, a mesma resposta não vale.
+    personagens = [p for p in flow.PERSONAGENS if p["chave"] == "vovo"]
+    pedidos = _ia_da_imagem(monkeypatch, [SO_O_PRODUTO_NA_PROPAGANDA, SO_O_PRODUTO_NA_PROPAGANDA,
+                                          '{"personagem": "Nenhum (só o vaso)", "acao": "", "cena": ""}'])
+    assert flow.escolher_o_personagem("Vaso de Vidro", _jpeg(), personagens, flow.ESTILO_DA_PROPAGANDA,
+                                      so_o_produto=True) == {"personagem": flow.NENHUM_PERSONAGEM, "acao": "",
+                                                             "cena": ""}
+    assert flow.escolher_o_personagem("Vaso de Vidro", _jpeg(), personagens, flow.ESTILO_DA_PROPAGANDA) is None
+    assert flow.TRECHO_DO_SO_O_PRODUTO in pedidos[0][0] and flow.TRECHO_DO_SO_O_PRODUTO not in pedidos[1][0]
+    # O "Nenhum" com maiúscula e com o porquê depois também vale.
+    assert flow.escolher_o_personagem("Vaso de Vidro", _jpeg(), personagens, flow.ESTILO_DA_PROPAGANDA,
+                                      so_o_produto=True)["personagem"] == flow.NENHUM_PERSONAGEM
 
 
 def test_producao_de_8_s_pela_imagem_do_personagem_pede_o_video_curto(celular, monkeypatch, tmp_path):

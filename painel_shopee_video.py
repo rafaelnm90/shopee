@@ -1724,17 +1724,22 @@ def limite_dos_videos_de_ia():
 def texto_video_ia(config, agora=None):
     """
     A tela do Vídeo de IA ✨. Escolhas do Rafael (15/11, P232 1 e P234 1; 17/11, P247 1; 18/11, P252 1; 19/11, P256 2 e
-    P260 1; 20/11, P262; 21/11, P269 3): DECISOES.md, Shopee Vídeo.
+    P260 1; 20/11, P262; 21/11, P269 3; 22/11, P278 1): DECISOES.md, Shopee Vídeo.
     """
     (modelo, custo_curto), custo = robo.flow.MODELO_DA_PRODUCAO, robo.flow.CUSTO_DA_PRODUCAO
     gratis = robo.flow.CREDITOS_GRATIS_DO_DIA
     if robo.flow.SO_A_PROPAGANDA_NA_PRODUCAO:
-        # Escolha do Rafael (21/11, P269 3): todo vídeo de IA é a propaganda de TV de 8 s.
+        # Escolhas do Rafael (21/11, P269 3): todo vídeo de IA é a propaganda de TV de 8 s; (22/11, P278 1) com um dos
+        # personagens ou só com o produto, que a IA escolhe pelo produto.
         formato = (
             "um vídeo de 8 s feito por IA com cara de propaganda de TV: o produto em 2 ou 3 planos de cinema, com luz "
-            "de estúdio, e um locutor em off, sem ninguém falando para a câmera, feito pela foto do anúncio. É um "
-            f"Gerar só no {modelo} ({custo_curto} créditos, dentro dos {gratis} grátis do dia).")
-        roteiro = "escreve o pedido e a fala do locutor"
+            "de estúdio, e um locutor em off, sem ninguém falando para a câmera. A IA escolhe pelo produto se o "
+            "comercial mostra um dos personagens que você aprovou usando o produto, sem falar (o vídeo começa por uma "
+            "imagem dele com o produto, feita no modo Imagem do Flow, sem crédito, e conferida pela IA), ou só o "
+            f"produto, pela foto do anúncio. É um Gerar só no {modelo} ({custo_curto} créditos, dentro dos {gratis} "
+            "grátis do dia).")
+        roteiro = (f"escreve o pedido e a fala do locutor (até {robo.flow.PALAVRAS_DO_LOCUTOR_CURTO} palavras, para "
+                   "caber nos 8 s)")
         silencio = "A propaganda fica sempre inteira, sem cortar o silêncio."
     else:
         formato = (

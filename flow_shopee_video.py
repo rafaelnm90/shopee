@@ -58,7 +58,11 @@ silêncio (SO_A_PROPAGANDA_NA_PRODUCAO); os outros formatos ficam só nas amostr
 da propaganda com as dos vídeos de IA dos formatos de antes. A amostra da propaganda com um dos personagens (P270 1,
 21/11/2026; --tv --personagem), o teste que o Rafael pediu antes do robô: a IA escolhe o personagem pelo produto, o
 modo Imagem faz a imagem dele com o produto no quadro de um comercial (imagem_da_amostra), e o comercial sai dela,
-com o personagem usando o produto sem falar e o locutor em off (PEDIDO_DA_PROPAGANDA_PELA_IMAGEM).
+com o personagem usando o produto sem falar e o locutor em off (PEDIDO_DA_PROPAGANDA_PELA_IMAGEM). Desde a P278 1
+(22/11/2026), com o OK do Rafael à amostra nº 11, a propaganda do robô também pode ter um personagem: a IA
+escolhe pelo produto se o comercial mostra um dos personagens usando o produto, pela imagem dele, ou só o produto,
+pela foto do anúncio (pede_a_imagem e NENHUM_PERSONAGEM), e o locutor fala até PALAVRAS_DO_LOCUTOR_CURTO palavras,
+com calma, até por volta dos 6 s, com ou sem o personagem.
 
 Usado pelo workflow video_ia.yml (acao flow, flow-sem-gerar, amostra, amostra-16s, amostra-16s-mesmo,
 amostra-16s-fala-inteira, amostra-16s-maos-e-voz ou amostra-tv). O
@@ -305,8 +309,9 @@ ESTILO_DAS_MAOS_E_VOZ = "maos_e_voz"
 ESTILO_DA_PROPAGANDA = "propaganda_tv"
 # Todo vídeo de IA da produção é a propaganda de TV de 8 s (P269 3): o vendedor, o mãos e voz, o unboxing e a comédia
 # saem dela e ficam só nas amostras. Com False, volta a escolha do formato pela IA (P262), com a propaganda entre os
-# formatos (a P269 1, que ele respondeu primeiro e trocou pela 3 sete minutos depois). Escolha do Rafael (P269 3):
-# DECISOES.md, Shopee Vídeo.
+# formatos (a P269 1, que ele respondeu primeiro e trocou pela 3 sete minutos depois). Desde a P278 1, com um dos
+# personagens ou só com o produto, que a IA escolhe pelo produto (pede_a_imagem). Escolhas do Rafael (P269 3 e
+# P278 1): DECISOES.md, Shopee Vídeo.
 SO_A_PROPAGANDA_NA_PRODUCAO = True
 ESTILOS = {"demonstracao": "demonstração (o produto em uso)", "fala": "pessoa falando do produto",
            "inusitado": "inusitado (viral)", "comedia": "comédia",
@@ -372,6 +377,12 @@ PALAVRAS_POR_PARTE = 10
 # enquanto só na amostra (amostra --longa --fala-inteira): o vídeo de IA do dia e o De IA ✨ mudam com o OK do Rafael
 # a ela. Escolha do Rafael (P255 1): DECISOES.md, Shopee Vídeo.
 PALAVRAS_DA_FALA_INTEIRA = 14
+# A fala do locutor da propaganda de TV (P275 1 e P278 1): com até 14 palavras, a da amostra nº 9 ocupou 7,6 s dos
+# 7,9 s e saiu embolada e cortada no fim. Com até 10 palavras (o tanto que, no vídeo de 16 s, terminava antes dos
+# 6 s), o locutor fala com calma até por volta dos 6 s, e o plano final do produto fica com a trilha: na amostra
+# nº 11, 7,1 s de fala, sem corte no fim. Primeiro só na amostra com personagem (P275 1); desde a P278 1, em toda
+# propaganda do robô, com ou sem o personagem. Escolhas do Rafael (P275 1 e P278 1): DECISOES.md, Shopee Vídeo.
+PALAVRAS_DO_LOCUTOR_CURTO = 10
 # O pedido do vídeo de 16 s (P246 1): uma pessoa vendendo o produto do começo ao fim, como nos vídeos de IA do feed
 # que o Rafael mostrou (16/11/2026): o gancho logo no começo, as vantagens mostradas de perto e a chamada no fim. Em
 # duas partes de 8 s: a 1ª gerada pela foto (prompt) e a 2ª pelo Estender do Flow (continuacao), que continua a mesma
@@ -651,8 +662,8 @@ PEDIDO_DAS_MAOS_E_VOZ_CURTO = (
     "nada perigoso, nojento ou com criança."
 )
 # O pedido da propaganda de TV de 8 s (P268 1): um Gerar só, com os cuidados contra as alucinações da P248 1 (o produto
-# idêntico em todos os planos, sem mudar de estado, e um gesto só no plano de uso) e o locutor falando do 1º segundo
-# até perto do fim, sem pausa longa, com o tanto de palavras do vídeo de 8 s (P262 e P264 4).
+# idêntico em todos os planos, sem mudar de estado, e um gesto só no plano de uso) e, desde a P278 1, a fala curta do
+# locutor (PALAVRAS_DO_LOCUTOR_CURTO), com calma até por volta dos 6 s, como na propaganda com personagem.
 PEDIDO_DA_PROPAGANDA = (
     "Você é diretor de comerciais de TV e de streaming, no Brasil. A imagem é a foto oficial do anúncio do produto "
     "\"{nome}\". O Google Flow vai gerar um vídeo de 8 segundos, em pé (9:16) e com som, a partir dessa foto, com cara "
@@ -673,14 +684,15 @@ PEDIDO_DA_PROPAGANDA = (
     + REGRAS_DA_FOTO +
     "- prompt: em inglês, até 100 palavras, o comercial de 8 segundos, com os planos em ordem e o que se vê em cada "
     "um: o produto da foto, idêntico (mesma forma, cor, material, tamanho, quantidade e detalhes; nada acrescentado, "
-    "tirado ou trocado) e bem à vista; o locutor fala do 1º segundo até perto do fim, sem pausa longa, entre aspas, em "
-    f"português do Brasil, 2 ou 3 frases curtas com até {PALAVRAS_DA_FALA_INTEIRA} palavras ao todo, uma por plano: o "
-    "gancho (uma promessa ou uma pergunta), a vantagem que se vê no produto e o slogan com a chamada para comprar (por "
-    "exemplo: \"Seu quarto merece outra luz. Na medida certa, onde você quiser. Garanta a sua.\"). Escreva no pedido: "
-    "premium TV commercial, shot on a cinema camera, photorealistic, real textures, no CGI look, cinematic lighting, "
-    "shallow depth of field, smooth camera moves, clean cuts, final hero shot of the product, professional Brazilian "
-    "Portuguese voice-over announcer, no one speaks on camera, subtle commercial music under the voice, no subtitles, "
-    "no text, no logo.\n"
+    "tirado ou trocado) e bem à vista; o locutor fala com calma, sem pressa, do 1º segundo até por volta dos 6 "
+    "segundos, sem pausa longa, entre aspas, em português do Brasil, 2 frases curtas com até "
+    f"{PALAVRAS_DO_LOCUTOR_CURTO} palavras ao todo (a fala tem de caber inteira nos 8 segundos): a vantagem que se vê "
+    "no produto e o slogan com a chamada para comprar (por exemplo: \"Na medida certa, onde você quiser. Garanta a "
+    "sua.\"); o plano final do produto fica só com a trilha. Escreva no pedido: premium TV commercial, shot on a "
+    "cinema camera, photorealistic, real textures, no CGI look, cinematic lighting, shallow depth of field, smooth "
+    "camera moves, clean cuts, final hero shot of the product, professional Brazilian Portuguese voice-over announcer "
+    "speaking calmly, the voice-over ends before the final hero shot, no one speaks on camera, subtle commercial "
+    "music under the voice, no subtitles, no text, no logo.\n"
     "- fala: tudo o que o locutor fala, em português, como vai sair no vídeo.\n"
     "- cena: uma frase em português que descreve os planos do comercial, para o Rafael.\n"
     + _FALA_SEM_EMBOLAR +
@@ -2577,8 +2589,9 @@ def producao_no_celular(d, atual):
     """
     O vídeo do dia no Flow, na rodada do robô (a trava e a tela já conferidas por ele). O de 16 s ("longa", P247
     1): o Gerar dos 8 s no MODELO_DA_PRODUCAO, o Estender e o Baixar, em etapas que a rodada seguinte retoma pelo
-    estado (no_flow_longo); antes do Gerar do vendedor e da comédia, a imagem do personagem com o produto (P260 1,
-    imagem_da_producao): valendo, o vídeo sai dela; sem ela, pela foto do anúncio, como antes. O de 8 s (o "curta"
+    estado (no_flow_longo); antes do Gerar do vendedor, da comédia e, desde a P278 1, da propaganda de TV, a imagem
+    do personagem com o produto (P260 1, imagem_da_producao): valendo, o vídeo sai dela; sem ela (ou com a IA
+    querendo a propaganda só com o produto), pela foto do anúncio, como antes. O de 8 s (o "curta"
     que a IA escolheu, P262, com a imagem do personagem no vendedor, e o andamento de antes da P247 1): o Gerar e o
     Baixar, ou só o Baixar do que já foi gerado ("gerando"). True com o vídeo no servidor ("baixado"), False quando
     ele não ficou pronto a tempo (a próxima rodada continua); Parada com o passo que parou, com o caso guardado.
@@ -3190,11 +3203,20 @@ TRECHO_DA_COMEDIA = (
     "É um vídeo de comédia: a ação é o começo de uma situação engraçada, com o jeito do personagem diante do produto "
     "(por exemplo, olhando-o de lado, com cara de desconfiada), sempre com o produto inteiro e virado para a câmera; "
     "a graça é da situação, nunca do corpo, da aparência ou de um grupo. ")
-# A propaganda de TV com um dos personagens (P270 1, a amostra): ele usa o produto como num comercial, sem falar.
+# A propaganda de TV com um dos personagens (P270 1, a amostra; desde a P278 1, também o robô): ele usa o produto
+# como num comercial, sem falar.
 TRECHO_DA_PROPAGANDA_NO_PERSONAGEM = (
     "É um comercial de TV: a ação é o personagem usando o produto como num comercial, com um gesto simples e um "
     "sorriso, sempre com o produto inteiro e bem à vista; a cena é um lugar bonito e caprichado, com cara de "
     "comercial. ")
+# Na propaganda do robô (P278 1), a IA escolhe também se o comercial mostra um personagem ou só o produto: a
+# resposta NENHUM_PERSONAGEM no lugar da chave. Na amostra com personagem (P270 1), sempre um personagem.
+NENHUM_PERSONAGEM = "nenhum"
+TRECHO_DO_SO_O_PRODUTO = (
+    "Se o comercial fica melhor só com o produto, sem pessoa (o produto que se vende pela beleza dele e brilha "
+    f"sozinho na tela, ou que ficaria estranho na mão de alguém), responda \"{NENHUM_PERSONAGEM}\" no "
+    "personagem, com a ação e a cena vazias; se ver uma pessoa usando o produto ajuda a vender (o que se veste, se "
+    "usa no corpo, nas mãos ou em casa), escolha o personagem. ")
 PEDIDO_DO_PERSONAGEM_COM_O_PRODUTO = (
     "Você monta a primeira cena de um vídeo de venda da Shopee Vídeo: um dos personagens fixos com o produto da foto "
     "({nome}). Os personagens:\n{personagens}\n"
@@ -3261,17 +3283,21 @@ def foto_do_personagem_com_o_produto(foto_do_personagem, foto_do_produto):
         return None
 
 
-def escolher_o_personagem(nome, foto, personagens, formato=None):
+def escolher_o_personagem(nome, foto, personagens, formato=None, so_o_produto=False):
     """
     A escolha da IA para a imagem do personagem com o produto: {"personagem" (a chave, entre os personagens dados),
     "acao", "cena"}; None sem resposta ou com uma chave de fora. formato: None na imagem de teste (P253 1);
     ESTILO_DO_VENDEDOR ou ESTILO_DA_COMEDIA no vídeo de IA da produção (P260 1), com cada personagem da comédia
-    descrito pela graça dele (GRACA_NA_COMEDIA); ESTILO_DA_PROPAGANDA na amostra da propaganda com um personagem
-    (P270 1), com a ação e a cena de um comercial.
+    descrito pela graça dele (GRACA_NA_COMEDIA); ESTILO_DA_PROPAGANDA na propaganda com um personagem (a amostra da
+    P270 1 e, desde a P278 1, o robô), com a ação e a cena de um comercial. so_o_produto (a propaganda do robô,
+    P278 1): a IA pode responder que o comercial fica melhor só com o produto, e a escolha é {"personagem":
+    NENHUM_PERSONAGEM}, sem a ação e a cena.
     """
     comedia = formato == ESTILO_DA_COMEDIA
     trecho = (TRECHO_DA_COMEDIA if comedia else TRECHO_DA_PROPAGANDA_NO_PERSONAGEM if formato == ESTILO_DA_PROPAGANDA
               else TRECHO_DA_IMAGEM_DE_TESTE if formato is None else "")
+    if so_o_produto:
+        trecho += TRECHO_DO_SO_O_PRODUTO
     lista = "\n".join(f"- {p['chave']}: {p['nome']} "
                       f"({GRACA_NA_COMEDIA.get(p['chave'], p['resumo']) if comedia else p['resumo']})"
                       for p in personagens)
@@ -3289,6 +3315,9 @@ def escolher_o_personagem(nome, foto, personagens, formato=None):
     if not isinstance(dados, dict):
         return None
     escolha = {campo: " ".join(str(dados.get(campo) or "").split()) for campo in ("personagem", "acao", "cena")}
+    # "Nenhum", com maiúscula ou com o porquê depois, também vale (nenhuma chave de personagem começa assim).
+    if so_o_produto and escolha["personagem"].lower().startswith(NENHUM_PERSONAGEM):
+        return {"personagem": NENHUM_PERSONAGEM, "acao": "", "cena": ""}
     if escolha["personagem"] not in {p["chave"] for p in personagens} or not escolha["acao"] or not escolha["cena"]:
         return None
     escolha["acao"], escolha["cena"] = escolha["acao"][:200].rstrip(" ,."), escolha["cena"][:120].rstrip(" ,.")
@@ -3479,6 +3508,8 @@ def mandar_a_imagem_de_teste():
 # P258 1, P251 1, P259 1 e P260 1): DECISOES.md, Shopee Vídeo.
 TENTATIVAS_DA_IMAGEM = 2
 SEM_FOTO_APROVADA = "nenhuma foto de personagem aprovada para este formato"
+# A propaganda do robô que a IA quis só com o produto (P278 1): o vídeo sai pela foto do anúncio, e não é falha.
+SO_O_PRODUTO = "a IA escolheu mostrar só o produto"
 # O começo do pedido do vídeo pela imagem: a 1ª imagem é o 1º quadro (o que o Flow anima), e a foto do anúncio vai
 # junto, para o produto ficar idêntico. Os cuidados contra as alucinações são os do PEDIDO_DO_VENDEDOR (P248 1).
 _COMECO_PELA_IMAGEM = (
@@ -3521,14 +3552,9 @@ PEDIDO_DO_VENDEDOR_PELA_IMAGEM_CURTO = _COMECO_PELA_IMAGEM_CURTO + (
     f"detalhes; nada acrescentado, tirado ou trocado) e bem à vista, e {_FALA_DO_CURTO} Fotorrealista, com a luz da "
     "imagem e a câmera parada.\n"
 ) + _FIM_DO_CURTO
-# A fala do locutor da propaganda com personagem (P275 1, 21/11/2026): com as 14 palavras da PEDIDO_DA_PROPAGANDA, a
-# fala da amostra nº 9 ocupou 7,6 s dos 7,9 s e saiu embolada e cortada no fim. Com até 10 palavras (o tanto que, no
-# vídeo de 16 s, terminava antes dos 6 s), o locutor fala com calma até por volta dos 6 s, e o plano final do produto
-# fica com a trilha. Só nesta amostra: a propaganda do robô, pela foto do anúncio, continua com a fala do mesmo
-# tamanho (P264 4). Escolha do Rafael (P275 1): DECISOES.md, Shopee Vídeo.
-PALAVRAS_DO_LOCUTOR_CURTO = 10
-# A propaganda de TV de 8 s pela imagem do personagem com o produto (P270 1, a amostra): o personagem é o ator do
-# comercial e usa o produto sem falar; o locutor fala em off, como na PEDIDO_DA_PROPAGANDA (P268 1).
+# A propaganda de TV de 8 s pela imagem do personagem com o produto (P270 1, a amostra; desde a P278 1, também o
+# robô): o personagem é o ator do comercial e usa o produto sem falar; o locutor fala em off, como na
+# PEDIDO_DA_PROPAGANDA (P268 1).
 PEDIDO_DA_PROPAGANDA_PELA_IMAGEM = (
     "Você é diretor de comerciais de TV e de streaming, no Brasil. A 1ª imagem é o primeiro quadro do comercial: "
     "{quem}, já com o produto \"{nome}\". A 2ª é a foto oficial do anúncio, para o produto ficar idêntico a ela. O "
@@ -3584,13 +3610,14 @@ PEDIDO_DA_COMEDIA_PELA_IMAGEM = _COMECO_PELA_IMAGEM + (
 
 def pede_a_imagem(atual):
     """
-    O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia e o de 8 s
-    do vendedor (P262), antes do Gerar e sem a imagem tentada; o unboxing e o mãos e voz (sem rosto), a propaganda de
-    TV (P269 3, pela foto do anúncio, sem ninguém falando para a câmera) e o andamento sem o formato (de antes dela),
-    não.
+    O andamento pede a imagem do personagem antes do Gerar (P260 1)? O de 16 s do vendedor ou da comédia, o de 8 s
+    do vendedor (P262) e, desde a P278 1, a propaganda de TV (a IA escolhe pelo produto se ela mostra um dos
+    personagens ou só o produto), antes do Gerar e sem a imagem tentada; o unboxing e o mãos e voz (sem rosto) e o
+    andamento sem o formato (de antes dela), não.
     """
     return bool((atual.get("longa") or atual.get("curta")) and atual.get("estado") == "escolhido"
-                and not atual.get("imagem") and atual.get("formato") in (ESTILO_DO_VENDEDOR, ESTILO_DA_COMEDIA))
+                and not atual.get("imagem")
+                and atual.get("formato") in (ESTILO_DO_VENDEDOR, ESTILO_DA_COMEDIA, ESTILO_DA_PROPAGANDA))
 
 
 def elenco_do_formato(formato, aprovadas=None):
@@ -3670,8 +3697,8 @@ def imagem_da_producao(d, atual):
     celular na mão: a escolha do personagem pela IA, a foto de referência na galeria, o saldo do Flow (SemCreditos sem
     os créditos do vídeo: nem a imagem é feita), a imagem no modo Imagem, sem crédito, e a conferência da IA, refeita
     uma vez; valendo, o pedido do vídeo pela imagem ("foto_do_video", "personagem" e o pedido novo no andamento). Sem
-    ela, o porquê fica no andamento e o vídeo sai pela foto do anúncio (a parada no Flow fica nos casos). Devolve o
-    andamento.
+    ela, o porquê fica no andamento e o vídeo sai pela foto do anúncio (a parada no Flow fica nos casos); na
+    propaganda de TV (P278 1), também quando a IA a quer só com o produto (SO_O_PRODUTO). Devolve o andamento.
     """
     return _imagem_do_personagem(d, atual, guardar_producao, producao, f"producao_{atual['data']}", "Vídeo de IA")
 
@@ -3689,10 +3716,13 @@ def _imagem_do_personagem(d, atual, guardar_no, ler, prefixo, quem, pela_foto=Tr
     O caminho da imagem do personagem com o produto, igual no vídeo do dia e na amostra (imagem_da_producao e
     imagem_da_amostra): guardar_no e ler são o andamento de cada um, prefixo o começo dos arquivos e quem o rótulo do
     log; pela_foto=False quando, sem a imagem, nada é gerado (a amostra). Na propaganda de TV (P270 1), a imagem é o
-    quadro de um comercial, e o pedido pela imagem, o da propaganda.
+    quadro de um comercial, e o pedido pela imagem, o da propaganda; na do robô (P278 1), a IA escolhe pelo produto
+    se o comercial mostra um personagem ou só o produto (SO_O_PRODUTO: o vídeo sai pela foto do anúncio).
     """
     formato = atual.get("formato")
     propaganda = formato == ESTILO_DA_PROPAGANDA
+    # Só o produto é escolha da propaganda do robô (P278 1): a amostra com personagem (P270 1) tem sempre um.
+    so_o_produto = propaganda and pela_foto
 
     def sem(motivo, chave="", conferencia=None):
         return _sem_a_imagem(motivo, chave, conferencia, guardar_no, ler, quem, pela_foto)
@@ -3705,9 +3735,12 @@ def _imagem_do_personagem(d, atual, guardar_no, ler, prefixo, quem, pela_foto=Tr
             foto = jpeg_sem_metadados(arquivo.read())
     except OSError:
         foto = None
-    escolha = escolher_o_personagem(atual.get("nome", ""), foto, elenco, formato) if foto else None
+    escolha = (escolher_o_personagem(atual.get("nome", ""), foto, elenco, formato, so_o_produto=so_o_produto)
+               if foto else None)
     if not escolha:
         return sem("a IA não escolheu o personagem")
+    if escolha["personagem"] == NENHUM_PERSONAGEM:
+        return sem(SO_O_PRODUTO)
     chave = escolha["personagem"]
     try:
         with open(aprovadas[chave], "rb") as arquivo:
@@ -3770,6 +3803,8 @@ def linha_do_personagem(atual):
         p = personagem(imagem.get("personagem")) or {"nome": imagem.get("personagem") or "?"}
         return (f"👤 Personagem: {p['nome']} (o vídeo saiu da imagem do personagem com o produto, feita no modo Imagem "
                 "do Flow, sem crédito)")
+    if imagem.get("estado") == "sem" and imagem.get("motivo") == SO_O_PRODUTO:
+        return "👤 Sem personagem: a IA escolheu mostrar só o produto neste comercial (pela foto do anúncio)"
     if imagem.get("estado") == "sem":
         comedia = "; a comédia fica para outro vídeo" if atual.get("formato") == ESTILO_DA_COMEDIA else ""
         return (f"👤 Sem personagem desta vez ({imagem.get('motivo') or 'sem detalhes'}): o vídeo saiu pela foto do "
@@ -3871,11 +3906,11 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     if propaganda:
         # A amostra da propaganda de TV (P268 1) é só para ver; desde a P269 3, a propaganda é o formato de todo
-        # vídeo de IA do robô; a com o personagem (P270 1) só vai ao robô com o OK do Rafael.
+        # vídeo de IA do robô, e desde a P278 1, com um dos personagens ou só com o produto.
         if com_personagem:
-            linhas.append("Nada foi postado: é só para você ver a propaganda com um dos seus personagens. No robô, a "
-                          "propaganda continua pela foto do anúncio até o seu OK; com ele, a IA decide pelo produto se "
-                          "mostra um personagem usando o produto ou só o produto (P270 1).")
+            linhas.append("Nada foi postado: é só para você ver a propaganda com um dos seus personagens. No robô, "
+                          "desde a P278 1, a IA decide pelo produto se a propaganda mostra um personagem usando o "
+                          "produto ou só o produto.")
         else:
             linhas.append("Nada foi postado: é só para você ver como fica a propaganda de TV, que é, desde a P269 3, "
                           "o formato de todo vídeo de IA do robô.")

@@ -1381,6 +1381,30 @@ def test_medicao_dos_formatos_do_video_de_ia_so_com_os_formatos_contagens_e_porc
         assert privado not in "\n".join(linhas), privado
 
 
+def test_medicao_dos_formatos_conta_a_propaganda_com_personagem_a_parte():
+    # Escolha do Rafael (22/11, P278 1): a propaganda de TV do robô pode mostrar um dos personagens ou só o produto. A
+    # medição dos formatos (P269 1) conta a com personagem à parte, para saber se ele traz mais visualizações; só o
+    # nome fixo do formato vai ao log, nunca a chave do personagem.
+    import robo_shopee_video as robo
+    for postado, video_ia, marca, vistas in (
+            ("2026-10-20 09:00:00", {"estilo": "propaganda_tv", "formato": "propaganda_tv", "curta": True}, "a",
+             [["2026-10-21 09:00:00", 3000]]),
+            ("2026-10-20 10:00:00", {"estilo": "propaganda_tv", "formato": "propaganda_tv", "curta": True,
+                                     "personagem": "vovo"}, "b", [["2026-10-21 10:00:00", 6000]]),
+            ("2026-10-20 11:00:00", {"estilo": "vendedor", "formato": "vendedor"}, "c",
+             [["2026-10-21 11:00:00", 1500]])):
+        robo.atualizar(robo.criar("v", AGORA - timedelta(days=3)), estado="postado", postado_em=postado,
+                       marca=marca, vistas=vistas, video_ia=video_ia)
+    linhas = checkup._linhas_dos_formatos(checkup.formatos_do_video_de_ia_da_shopee_video(AGORA))
+    sem_ler = "com 3 dia(s): sem comparação ainda (0 contra 0)"
+    assert linhas[1:] == ["   propaganda_tv: 1 (lidos 1) | com 1 dia(s): -20% (1 contra 2) | " + sem_ler,
+                          "   propaganda_tv_personagem: 1 (lidos 1) | com 1 dia(s): +167% (1 contra 2) | " + sem_ler,
+                          "   vendedor: 1 (lidos 1) | com 1 dia(s): -67% (1 contra 2) | " + sem_ler]
+    assert checkup.PROPAGANDA_COM_PERSONAGEM_SV not in checkup.FORMATOS_DO_VIDEO_DE_IA_SV
+    for privado in ("vovo", "3000", "6000", "1500"):
+        assert privado not in "\n".join(linhas), privado
+
+
 def test_lugares_da_ia_nos_rascunhos_com_o_alto_ocupado_so_com_os_nomes_fixos():
     # P220 1: o texto nosso que, na hora dele, cairia em cima do produto ou de um rosto (pelos lugares livres de
     # cada momento que a IA deu) não aparece. No rascunho do filtro de café de 13/11, nenhum dos 3 entrou com o
