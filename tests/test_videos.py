@@ -193,6 +193,51 @@ def test_palavras_faladas_pelo_reconhecimento_de_voz(monkeypatch, tmp_path):
     assert videos.palavras_faladas(str(video)) is None
 
 
+def test_fala_em_trechos_para_o_claude_ler_a_aula(monkeypatch, tmp_path):
+    # P288 3: a fala inteira de uma aula gravada, trecho por trecho, com o segundo de cada um (cursos_robo).
+    import sys
+    import types
+    video = tmp_path / "aula.mkv"
+    video.write_bytes(b"video")
+    pedidos = []
+
+    class Modelo:
+        def __init__(self, nome, device, compute_type):
+            pedidos.append((nome, device, compute_type))
+
+        def transcribe(self, caminho, language, vad_filter):
+            pedidos.append((language, vad_filter))
+            trecho = lambda inicio, texto: types.SimpleNamespace(start=inicio, text=texto)
+            return iter([trecho(0.5, " Bem-vindos à aula."), trecho(4.0, "  "), trecho(6.2, " Primeiro passo.")]), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=Modelo))
+    assert videos.fala_em_trechos(str(video)) == [(0.5, "Bem-vindos à aula."), (6.2, "Primeiro passo.")]
+    assert pedidos == [(videos.MODELO_DA_FALA, "cpu", "int8"), ("pt", True)]
+    assert videos.fala_em_trechos(str(tmp_path / "outra.mkv")) is None
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    assert videos.fala_em_trechos(str(video)) is None
+
+
+def test_folhas_de_quadros_espalhados_para_o_claude(tmp_path):
+    # P288 3: até `maximo` quadros do começo ao fim, 5 lado a lado por folha (a receita do ver_video.sh).
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        assert videos.folhas_de_quadros("nao_existe.mp4", str(tmp_path)) == 0
+        return
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=100:size=160x120:rate=2",
+                    str(video)], check=True)
+    pasta = tmp_path / "folhas"
+    pasta.mkdir()
+    # 100 s com até 10 quadros: um a cada 10 s, 5 por folha, 2 folhas de 5 x 80 px (e o espaço entre eles).
+    assert videos.folhas_de_quadros(str(video), str(pasta), maximo=10, largura=80) == 2
+    from PIL import Image
+    with Image.open(pasta / "folha_01.jpg") as folha:
+        assert folha.size[0] >= 5 * 80
+    assert videos.folhas_de_quadros(str(tmp_path / "nao_existe.mp4"), str(pasta)) == 0
+
+
 def test_abertura_do_exemplo_com_a_passagem_de_uma_capa_para_a_outra(tmp_path):
     # P175 1: só a abertura, para o exemplo do painel; o 1º quadro é a capa da grade inteira e, em
     # `passagem` segundos, ela se desfaz na do vídeo aberto.

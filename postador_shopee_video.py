@@ -105,6 +105,7 @@ import assistente_shopee_video as assistente
 import avisar_rafael
 import casos_robo
 import celular_robo
+import cursos_robo
 import db
 import legendas
 import registro_processos
@@ -115,7 +116,8 @@ from fuso import fuso_horario
 PACOTE = av.PACOTE_SHOPEE
 # Os apps que o passo abrir do explorar abre: a Shopee (abrir) e o Google Flow do teste da P229
 # (abrir:flow), do jeito que ele está, para mapear as telas sem depender da tela inicial do celular.
-APPS_DO_EXPLORAR = {"": PACOTE, "flow": "com.google.android.apps.labs.whisk"}
+# O Chrome abre como estava (a última aba): é onde o celular toca as aulas do curso que o robô grava (P288 3).
+APPS_DO_EXPLORAR = {"": PACOTE, "flow": "com.google.android.apps.labs.whisk", "chrome": "com.android.chrome"}
 PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
 CHAVE_PAINEL = "shopee_video"  # a mesma chave do painel_shopee_video
@@ -2667,7 +2669,7 @@ def separar_passos(texto):
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "aumentar", "esperar",
                   "escrever", "pagina-inicial",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
-                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela"}
+                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela", "gravar"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -2681,12 +2683,44 @@ def separar_passos(texto):
     return passos
 
 
+def gravar_no_explorar(d, argumento):
+    """
+    O passo gravar:SEGUNDOS do explorar (P288 3): o servidor grava a tela e o som do celular
+    (cursos_robo), guarda num caso as folhas de quadros e a fala, que vão cifradas ao Claude
+    (casos_robo.yml exportar), apaga a gravação e diz no log só os números.
+    """
+    try:
+        segundos = int(argumento or cursos_robo.PADRAO_NO_EXPLORAR)
+    except ValueError:
+        return False, "gravar pede os segundos (ex.: gravar:20)"
+    if not 0 < segundos <= cursos_robo.MAXIMO_NO_EXPLORAR:
+        return False, f"gravar vai de 1 a {cursos_robo.MAXIMO_NO_EXPLORAR} s"
+    alvo = getattr(d, "serial", None)
+    if not alvo:
+        return False, "sem o endereço do celular"
+    with tempfile.TemporaryDirectory() as pasta:
+        arquivo = os.path.join(pasta, "gravacao.mkv")
+        ok, motivo = cursos_robo.gravar(alvo, segundos, arquivo)
+        if not ok:
+            return False, motivo
+        medidos = cursos_robo.numeros(arquivo)
+        caso = casos_robo.guardar(d, "explorar", "gravacao", "gravação do explorar", passo="explorar")
+        folhas, palavras = cursos_robo.para_o_claude(arquivo, caso) if caso else (None, None)
+    linha = cursos_robo.linha_dos_numeros(medidos, folhas, palavras)
+    problema = cursos_robo.problema(medidos)
+    if problema:
+        return False, f"{problema} ({linha})"
+    if not caso:
+        return False, f"gravado, mas o caso não foi guardado ({linha})"
+    return True, f"gravado e guardado para o Claude, casos_robo.yml exportar ({linha})"
+
+
 def fazer_passo(d, nome, argumento):
     """Faz um passo. Devolve (deu certo, o que dizer no log)."""
     if nome == "abrir":
         pacote = APPS_DO_EXPLORAR.get(argumento.lower())
         if not pacote:
-            return False, "abrir abre a Shopee (abrir) ou o Google Flow (abrir:flow)"
+            return False, "abrir abre a Shopee (abrir), o Google Flow (abrir:flow) ou o Chrome (abrir:chrome)"
         d.app_start(pacote, wait=True)
         return True, "app aberto"
     if nome == "fechar":
@@ -2745,6 +2779,8 @@ def fazer_passo(d, nome, argumento):
         except ValueError:
             return False, "aumentar pede X,Y,DE,ATE"
         return dois_dedos(d, x, y, de, ate)
+    if nome == "gravar":
+        return gravar_no_explorar(d, argumento)
     if nome == "caso":
         pasta = casos_robo.guardar(d, "explorar", "tela", argumento or "tela do explorar", passo="explorar")
         return (True, "tela guardada para o Claude (casos_robo.yml exportar)") if pasta else (

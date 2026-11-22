@@ -45,7 +45,8 @@ def test_painel_vazio_mostra_os_sites_e_o_que_falta_cadastrar(bm, Msg, Est):
     assert "https://login.tailscale.com/" in texto and "Sign in with Google" in texto
     assert "a da sua conta Google" in texto
     assert "https://cloud.oracle.com/" in texto and "Nome da conta na nuvem" in texto
-    assert "Onde está a senha" in texto and texto.count("não cadastrad") == 5
+    assert "Onde está a senha" in texto and texto.count("não cadastrad") == 8
+    assert "Curso que o robô grava" in texto and texto.count("mande ao Claude na conversa") == 3
     assert rodar(est.get_state()) == ac.AcessosFluxo.menu.state
     teclado = _textos(ac.teclado_painel())
     assert "Editar Tailscale ✏️" in teclado and "Editar Oracle ✏️" in teclado and ac.EDITAR_BACKUP in teclado
@@ -244,7 +245,32 @@ def test_guardar_cifrado_grava_so_os_campos_dos_botoes(bm):
             pass
         else:
             raise AssertionError(dados)
-    assert ac.ler_acessos() == {"tailscale": {}, "oracle": {}, "backup": {"onde": LINK}}
+    assert ac.ler_acessos() == {"tailscale": {}, "oracle": {}, "backup": {"onde": LINK}, "curso": {}}
+
+
+def test_guardar_cifrado_guarda_o_acesso_do_curso_e_o_painel_esconde_a_senha(bm):
+    # P288 3: o Rafael manda o acesso do curso ao Claude (pedido dele, 22/11); o robô usa para entrar no Chrome.
+    ac = _ac(bm)
+    chave = Fernet.generate_key()
+    curso = {"link": " https://curso.exemplo.com/m/courses ", "email": "aluno@exemplo.com", "senha": "senha do curso"}
+    assert ac.guardar_cifrado(ac.cifrar({"curso": curso}, chave), chave) == ["curso"]
+    assert ac.ler_acessos()["curso"] == {"link": "https://curso.exemplo.com/m/courses",
+                                          "email": "aluno@exemplo.com", "senha": "senha do curso"}
+    texto = ac.texto_painel(ac.ler_acessos())
+    assert '<a href="https://curso.exemplo.com/m/courses">' in texto
+    assert "<code>aluno@exemplo.com</code>" in texto and "<tg-spoiler>senha do curso</tg-spoiler>" in texto
+    assert "mande ao Claude na conversa" not in texto
+    assert ac.texto_da_confirmacao(["curso"]).startswith("🔐 Guardei o acesso do curso que o robô grava")
+    # O link que não é https e o login que não é e-mail: recusa, sem gravar.
+    for dados in ({"curso": {"link": "curso.exemplo.com"}}, {"curso": {"email": "aluno"}},
+                  {"curso": {"cartao": "1"}}):
+        try:
+            ac.guardar_cifrado(ac.cifrar(dados, chave), chave)
+        except ac.Recusado:
+            pass
+        else:
+            raise AssertionError(dados)
+    assert ac.ler_acessos()["curso"]["link"] == "https://curso.exemplo.com/m/courses"
 
 
 def test_guardar_pelo_workflow_avisa_o_rafael_e_o_log_nao_mostra_o_dado(bm, monkeypatch, capsys, caplog):

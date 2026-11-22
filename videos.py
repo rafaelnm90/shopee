@@ -625,6 +625,47 @@ def palavras_faladas(caminho):
         return None
 
 
+def fala_em_trechos(caminho):
+    """
+    [(início, texto)] da fala em português do vídeo, trecho por trecho, em segundos desde o começo dele, na
+    ordem; [] sem fala. None quando não dá para ouvir, como em palavras_faladas. É a fala inteira para o
+    Claude ler (as aulas gravadas pelo celular do robô, cursos_robo).
+    """
+    if not os.path.exists(caminho):
+        return None
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        return None
+    try:
+        modelo = WhisperModel(MODELO_DA_FALA, device="cpu", compute_type="int8")
+        trechos, _info = modelo.transcribe(caminho, language="pt", vad_filter=True)
+        return [(float(trecho.start), trecho.text.strip()) for trecho in trechos if trecho.text.strip()]
+    except Exception as e:
+        logger.warning(f"⚠️ [Vídeos] O reconhecimento de voz não ouviu o vídeo: {type(e).__name__}")
+        return None
+
+
+def folhas_de_quadros(caminho, pasta, maximo=40, largura=360, por_folha=5, timeout=900):
+    """
+    Folhas de quadros do vídeo para o Claude ver por inteiro (folha_01.jpg...), a receita do
+    .claude/scripts/ver_video.sh: até maximo quadros espalhados do começo ao fim (um a cada 2 s, no
+    mínimo), por_folha lado a lado em cada folha, cada um com essa largura. Devolve quantas folhas
+    saíram; vídeo que não abre dá 0, sem erro.
+    """
+    segundos = duracao(caminho)
+    if segundos <= 0:
+        return 0
+    intervalo = max(2, math.ceil(segundos / maximo))
+    try:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", caminho, "-vf",
+                        f"fps=1/{intervalo},scale={largura}:-2,tile={por_folha}x1:padding=4",
+                        os.path.join(pasta, "folha_%02d.jpg")], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return len([nome for nome in os.listdir(pasta) if re.fullmatch(r"folha_\d+\.jpg", nome)])
+
+
 # Na emenda de dois trechos, o som entra e sai em 30 ms, sem estalo.
 EMENDA_DO_SOM = 0.03
 

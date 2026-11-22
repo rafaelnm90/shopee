@@ -20,7 +20,10 @@ name: Android virtual (Shopee Vídeo)
 #   apagar          desliga e apaga tudo dentro do Android (apps e login da
 #                   Shopee), como um reset de fábrica; fica desligado;
 #   tailscale       liga o servidor à rede privada do Rafael (plano do celular
-#                   de verdade), com a chave do segredo TAILSCALE_AUTHKEY.
+#                   de verdade), com a chave do segredo TAILSCALE_AUTHKEY;
+#   instalar-gravador instala no servidor o gravador da tela e do som do celular
+#                   (scrcpy, cursos_robo.py), para as aulas do curso que o robô
+#                   grava (P288 3); o explorar grava com o passo gravar:SEGUNDOS.
 #
 # O repositório é público, e os logs do Actions também: o android_virtual.py
 # imprime só estados e números, nunca o link da tela, e o explorar mostra só a
@@ -31,7 +34,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, explorar-celular, desligar, apagar, tailscale]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, explorar-celular, desligar, apagar, tailscale, instalar-gravador]
         default: estado
       passos:
         description: "Só no explorar: passos separados por ; (ex.: abrir; tocar:Eu)"
@@ -63,6 +66,8 @@ jobs:
               venv/bin/python3 postador_shopee_video.py --explorar "$PASSOS"
             elif [ "${{ inputs.acao }}" = "explorar-celular" ]; then
               venv/bin/python3 postador_shopee_video.py --explorar --celular "$PASSOS"
+            elif [ "${{ inputs.acao }}" = "instalar-gravador" ]; then
+              venv/bin/python3 cursos_robo.py instalar
             else
               venv/bin/python3 android_virtual.py ${{ inputs.acao != 'estado' && format('--{0}', inputs.acao) || '' }}
             fi
