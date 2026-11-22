@@ -487,7 +487,7 @@ def elementos(xml):
             achados.append({"texto": texto, "descricao": descricao, "id": ident, "clicavel": clicavel,
                             "classe": no.get("class", "").rsplit(".", 1)[-1], "caixa": caixa,
                             "marcado": no.get("checked") == "true", "pacote": no.get("package", ""),
-                            "foco": no.get("focused") == "true"})
+                            "foco": no.get("focused") == "true", "senha": no.get("password") == "true"})
     return achados
 
 
@@ -499,7 +499,10 @@ def descrever(xml):
         partes = [f"({(x1 + x2) // 2},{(y1 + y2) // 2})", el["classe"] or "?"]
         if el["id"]:
             partes.append(f"id={el['id'] if ID_DE_CODIGO.fullmatch(el['id']) else '…'}")
-        if el["texto"]:
+        if el.get("senha"):
+            # O campo de senha (o login do curso, P288 3): nem os pontinhos, que dariam o tamanho dela.
+            partes.append("[senha]")
+        elif el["texto"]:
             partes.append(f'"{mascarar(el["texto"])}"')
         if el["descricao"]:
             partes.append(f'desc="{mascarar(el["descricao"])}"')
@@ -2669,7 +2672,7 @@ def separar_passos(texto):
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "aumentar", "esperar",
                   "escrever", "pagina-inicial",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
-                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela", "gravar"}
+                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela", "gravar", "entrar"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -2717,10 +2720,17 @@ def gravar_no_explorar(d, argumento):
 
 def fazer_passo(d, nome, argumento):
     """Faz um passo. Devolve (deu certo, o que dizer no log)."""
+    if nome == "abrir" and argumento.lower() == "curso":
+        return cursos_robo.abrir_o_curso(d)
+    if nome == "entrar":
+        if argumento.lower() != "curso":
+            return False, "entrar só entra no curso (entrar:curso)"
+        return cursos_robo.entrar_no_curso(d, escrever, achar)
     if nome == "abrir":
         pacote = APPS_DO_EXPLORAR.get(argumento.lower())
         if not pacote:
-            return False, "abrir abre a Shopee (abrir), o Google Flow (abrir:flow) ou o Chrome (abrir:chrome)"
+            return False, ("abrir abre a Shopee (abrir), o Google Flow (abrir:flow), o Chrome (abrir:chrome) "
+                           "ou o curso (abrir:curso)")
         d.app_start(pacote, wait=True)
         return True, "app aberto"
     if nome == "fechar":
