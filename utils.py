@@ -1,8 +1,9 @@
 """
 Funções compartilhadas pelos robôs: registro de erros, cache de análises da IA,
-cache de nomes de grupos e validação de IDs do Telegram. O acesso ao banco fica
-no db.py.
+cache de nomes de grupos, validação de IDs do Telegram e a menção clicável de quem
+escreveu (mencao_do_usuario). O acesso ao banco fica no db.py.
 """
+import html
 import os
 import json
 from datetime import datetime
@@ -16,6 +17,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 MAX_ERRORS = 50
+
+
+def mencao_do_usuario(usuario):
+    """A menção clicável de quem está no Telegram, em HTML: o @ quando existe, senão o nome com o link pelo id."""
+    if getattr(usuario, "username", None):
+        return f"@{usuario.username}"
+    nome = getattr(usuario, "first_name", None) or "Membro"
+    return f"<a href='tg://user?id={usuario.id}'>{html.escape(nome)}</a>"
 
 def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
     """

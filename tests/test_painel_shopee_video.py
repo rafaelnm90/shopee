@@ -31,7 +31,7 @@ def test_painel_comeca_pausado_com_5_a_10_das_13h_as_22h(bm, Msg, Est):
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu.state
     assert _textos(sv.teclado_painel(sv.ler_config())) == [
         "Rascunhos do Robô 📝", "Aprovados para Postar ⏳", "Robô Automático 🤖", "Modo Assistente 📲",
-        "Fonte dos Vídeos 🎞️", "Como Funciona ❓", "Voltar aos Canais 🔙"]
+        "Fonte dos Vídeos 🎞️", "Grupo dos Amigos 👥", "Como Funciona ❓", "Voltar aos Canais 🔙"]
     msg = Msg("Modo Assistente 📲")
     rodar(sv.menu_assistente_handler(msg, est))
     texto = msg.saidas[-1]

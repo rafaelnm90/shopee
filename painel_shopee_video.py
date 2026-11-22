@@ -791,6 +791,8 @@ PAUSA_ROBO = ["Pausar Postagem ⏸️", "Retomar Postagem ▶️"]
 BOTAO_MENU_ROBO = "Robô Automático 🤖"
 BOTAO_MENU_ASSISTENTE = "Modo Assistente 📲"
 BOTAO_COMO_FUNCIONA = "Como Funciona ❓"
+# A tela do grupo dos amigos fica no amigos_shopee_video, que importa este módulo (P277 1).
+BOTAO_GRUPO_DOS_AMIGOS = "Grupo dos Amigos 👥"
 BOTAO_VOLTAR_ROBO = "Voltar ao Robô 🔙"
 
 
@@ -802,7 +804,8 @@ def teclado_painel(config):
     return montar_teclado([
         [KeyboardButton(text=BOTAO_RASCUNHOS), KeyboardButton(text=BOTAO_APROVADOS)],
         [KeyboardButton(text=BOTAO_MENU_ROBO), KeyboardButton(text=BOTAO_MENU_ASSISTENTE)],
-        [KeyboardButton(text="Fonte dos Vídeos 🎞️"), KeyboardButton(text=BOTAO_COMO_FUNCIONA)],
+        [KeyboardButton(text="Fonte dos Vídeos 🎞️"), KeyboardButton(text=BOTAO_GRUPO_DOS_AMIGOS)],
+        [KeyboardButton(text=BOTAO_COMO_FUNCIONA)],
         [KeyboardButton(text="Voltar aos Canais 🔙")],
     ])
 
@@ -966,6 +969,7 @@ def texto_painel(config, agora=None):
         f"📲 <b>{BOTAO_MENU_ASSISTENTE}</b>: ligar ou pausar os envios no seu privado, quantos por dia, o "
         "horário e o Enviar 1 Agora.\n"
         "🎞️ <b>Fonte dos Vídeos</b>: de onde os dois puxam os vídeos.\n"
+        f"👥 <b>{BOTAO_GRUPO_DOS_AMIGOS}</b>: os vídeos que os amigos que você libera pedem no grupo deles.\n"
         f"❓ <b>{BOTAO_COMO_FUNCIONA}</b>: o resumo de tudo, para quando você esquecer."
     )
 
