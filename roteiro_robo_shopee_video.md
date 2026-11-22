@@ -87,6 +87,12 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   selo Criador. Embaixo, os emojis rápidos e o campo "add a comment" com o botão de enviar
   ao lado (x≈1007). O toque em **Responder** abre o teclado e o campo vira "… a …" (a
   resposta àquela pessoa); o voltar fecha o teclado e o segundo voltar sai da resposta.
+  A caixa de escrever é outra janela por cima do painel (outra `ReactTransparentActivity_`),
+  e a leitura da tela traz só ela. Depois do enviar, o texto fica no campo, com três
+  pontinhos no lugar do enviar, até a Shopee aceitar; aceito, a caixa fecha sozinha e o
+  comentário entra na lista. Em 22/11/2026, à 01:24, o envio passou de 12 s, e a rolagem
+  com ele no meio fechou a caixa: o comentário não saiu (o robô espera o texto sair do
+  campo, `_esperar_o_envio`).
 - **Feed Live e Vídeo (mapeado no Motorola em 24/10/2026):** a aba de baixo **Live e
   Vídeo** abre o player em tela cheia, com as abas Vídeos, Lives e **Para você** no alto;
   o rolar passa ao seguinte. **Live:** ids `live_room_in_video_feed_…`,

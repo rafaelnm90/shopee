@@ -904,6 +904,78 @@ def test_comentario_do_feed_que_nao_aparece_conta_no_dia_e_o_video_nao_volta(mon
     assert casos == [("feed", "parou", robo.MOTIVO_DO_FEED_SEM_O_COMENTARIO, "painel")]
 
 
+class CelularDoFeedQueDemoraAEnviar(CelularDoFeed):
+    """
+    O envio que demora (Motorola, 22/11/2026, 01:24): depois do toque no enviar, o texto fica no campo, com o
+    teclado e os três pontinhos no lugar do enviar, e a leitura da tela traz só a caixa de escrever, por
+    `leituras` leituras; aí o comentário entra na lista e a caixa fecha. A rolagem, ou o voltar sem o teclado,
+    com o envio no meio fecha a caixa, e o comentário não sai.
+    """
+
+    def __init__(self, leituras, **k):
+        super().__init__(**k)
+        self.leituras, self.faltam = leituras, 0
+
+    def dump_hierarchy(self):
+        if self.atual != "enviando":
+            return super().dump_hierarchy()
+        self.faltam -= 1
+        if self.faltam <= 0:
+            self.comentarios.setdefault(self.indice, []).append(self.escrito)
+            self.atual, self.escrito, self.em_foco = "painel", "", False
+            return super().dump_hierarchy()
+        teclado = ([_el(ident="key_pos_space", classe="FrameLayout", caixa=(300, 1900, 800, 1950))]
+                   if self.em_foco else [])
+        return _xml(_el(self.escrito, desc="input comment", classe="EditText", caixa=(40, 2290, 930, 2350),
+                        clicavel=True), *teclado)
+
+    def click(self, x, y):
+        if self.atual == "enviando":
+            self.toques.append((x, y))
+            return
+        antes = self.atual
+        super().click(x, y)
+        if antes == "escrevendo" and self.atual == "painel":
+            self.escrito = self.comentarios[self.indice].pop()
+            self.atual, self.faltam = "enviando", self.leituras
+
+    def press(self, tecla, meta=None):
+        if self.atual == "enviando" and not self.em_foco:
+            self.atual, self.escrito = "painel", ""
+            return
+        super().press(tecla, meta)
+
+    def swipe(self, *pontos):
+        if self.atual == "enviando":
+            self.atual, self.escrito, self.em_foco = "painel", "", False
+        elif self.atual != "painel":
+            super().swipe(*pontos)
+
+
+def test_comentario_do_feed_espera_o_envio_que_demora_antes_de_mexer_na_tela(avisos, ia_do_feed):
+    # 22/11/2026, 01:24: o envio passou de 12 s, e o voltar e a rolagem do robô, 4 s depois do toque no
+    # enviar, fecharam a caixa de escrever com ele no meio. O robô espera o texto sair do campo.
+    app = CelularDoFeedQueDemoraAEnviar(leituras=4, videos=[("Loja da Bia", "Mini saia linda")])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {0: ["Que achado! 0"]}
+    assert not robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_ENVIO, "")
+
+
+def test_envio_do_comentario_que_nao_termina_tem_o_motivo_dele(monkeypatch, avisos, ia_do_feed):
+    app = CelularDoFeedQueDemoraAEnviar(leituras=1000, videos=[("Loja da Bia", "Mini saia linda")])
+    casos = []
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: casos.append(motivo))
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: comentário enviado sem aparecer na lista"
+    assert casos == [robo.MOTIVO_DO_FEED_SEM_O_ENVIO]
+    assert robo.passo_do_motivo(robo.MOTIVO_DO_FEED_SEM_O_ENVIO) == "esperar o envio"
+    envios = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_ENVIO, "")
+    assert [r for _m, _p, r, _d, _o in envios] == ["envio sem terminar"]
+    assert [d for _m, _p, r, d, _o in robo.registro_processos.sequencia("shopee_video", "feed: comentar", "")
+            if r == "não confirmado"] == ["o envio não terminou"]
+    # Pode ter saído depois: o vídeo não volta e conta no dia, como o enviado sem aparecer.
+    assert it.resultado_de(it.marca("Loja da Bia", "Mini saia linda"), "video_feed") == "não confirmado"
+
+
 class CelularDoFeedSemComentarios(CelularDoFeed):
     """O vídeo sem nenhum comentário: o painel abre sem o título "N Comentários" (Motorola, 25/10/2026)."""
 

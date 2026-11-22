@@ -1260,6 +1260,7 @@ PASSOS = (
     ("campo de escrever", "escrever o texto"),
     ("botão de enviar", "enviar"),
     ("resposta não", "conferir a resposta"),
+    ("envio do comentário", "esperar o envio"),
     ("comentário não apareceu", "conferir o comentário"),
     ("coração do vídeo do feed", "curtir no feed"),
     ("Centro do criador", "achar a Saúde no Centro do criador"),
@@ -9314,10 +9315,41 @@ def _fechar_teclado(d):
         pausa(2)
 
 
+# Depois do toque no enviar, o texto fica no campo, com três pontinhos no lugar do enviar, até a Shopee aceitar o
+# comentário; aceito, a caixa de escrever fecha sozinha e ele entra na lista. Em 22/11/2026, à 01:24 (Motorola), o
+# envio passou de 12 s, e o voltar e a rolagem do robô, 4 s depois do toque, fecharam a caixa com ele no meio: o
+# comentário não saiu. O robô espera o texto sair do campo, olhando a tela de PASSO_DA_ESPERA_DO_ENVIO em
+# PASSO_DA_ESPERA_DO_ENVIO s, até ESPERA_DO_ENVIO s depois do toque; o que não termina fica no registro.
+PRIMEIRA_OLHADA_DO_ENVIO = 4
+PASSO_DA_ESPERA_DO_ENVIO = 3
+ESPERA_DO_ENVIO = 30
+PROCESSO_DO_ENVIO = "enviar comentário"
+
+
+def _esperar_o_envio(d, texto):
+    """
+    Espera o texto enviado sair do campo de escrever (a caixa fecha ou o campo se esvazia): True quando ele
+    saiu; False quando continua no campo ESPERA_DO_ENVIO s depois do toque no enviar (o envio não terminou).
+    """
+    esperado = PRIMEIRA_OLHADA_DO_ENVIO
+    pausa(esperado)
+    while True:
+        campo = interacoes.campo_de_escrever(tela(d))
+        if not campo or not interacoes.parecidos(campo["texto"], texto):
+            return True
+        if esperado >= ESPERA_DO_ENVIO:
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_ENVIO, "envio sem terminar",
+                                         f"o texto ficou no campo {ESPERA_DO_ENVIO} s depois do enviar", ok=False)
+            return False
+        pausa(PASSO_DA_ESPERA_DO_ENVIO)
+        esperado += PASSO_DA_ESPERA_DO_ENVIO
+
+
 def _escrever_e_enviar(d, texto):
     """
-    Escreve no campo em foco, confere o que ficou e toca no enviar ao lado. Para antes de
-    enviar se o campo não mostra exatamente o texto.
+    Escreve no campo em foco, confere o que ficou, toca no enviar ao lado e espera o envio
+    terminar (_esperar_o_envio). Para antes de enviar se o campo não mostra exatamente o
+    texto. Devolve se o envio terminou.
     """
     ps.escrever(d, texto)
     pausa(2)
@@ -9333,8 +9365,9 @@ def _escrever_e_enviar(d, texto):
     if ps.proibido_no_ponto(xml, *enviar):
         raise Parada(ps.RECUSA)
     d.click(*enviar)
-    pausa(4)
+    terminou = _esperar_o_envio(d, texto)
     _fechar_teclado(d)
+    return terminou
 
 
 def _responder_um(d, texto, agora=None):
@@ -9534,8 +9567,9 @@ def painel_de_comentarios(d, segundos=12):
 
 def _comentar_no_feed(d, video, texto):
     """
-    Abre os comentários pelo balão, escreve e envia. Devolve se o comentário apareceu na
-    lista; antes de enviar, o que não dá certo para (Parada).
+    Abre os comentários pelo balão, escreve e envia. Devolve (apareceu, terminou): se o
+    comentário apareceu na lista e se o envio terminou (_esperar_o_envio); antes de enviar,
+    o que não dá certo para (Parada).
     """
     xml = tela(d)
     if ps.proibido_no_ponto(xml, *video["balao"]):
@@ -9555,14 +9589,14 @@ def _comentar_no_feed(d, video, texto):
         pausa(2)
         if not interacoes.campo_de_escrever(tela(d)):
             raise Parada("o campo de comentar não abriu")
-    _escrever_e_enviar(d, texto)
+    terminou = _escrever_e_enviar(d, texto)
     for vez in range(2):
         if any(interacoes.parecidos(c["texto"], texto) for c in interacoes.comentarios_do_painel(tela(d))):
-            return True
+            return True, terminou
         if not vez:
             ps.rolar(d, para_cima=True)
             pausa(2)
-    return False
+    return False, terminou
 
 
 def interagir_no_feed(d, agora=None):
@@ -9655,6 +9689,7 @@ def _tela_do_video(d):
 
 
 MOTIVO_DO_FEED_SEM_O_COMENTARIO = "o comentário não apareceu no vídeo do feed"
+MOTIVO_DO_FEED_SEM_O_ENVIO = "o envio do comentário no vídeo do feed não terminou"
 
 
 def _interagir_com(d, video, marca, anteriores, agora=None):
@@ -9683,7 +9718,7 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
         registrar_tentativa("feed", "curtido", agora=agora)
         return "feed: 1 vídeo curtido, sem comentário"
     try:
-        apareceu = _comentar_no_feed(d, video, texto)
+        apareceu, terminou = _comentar_no_feed(d, video, texto)
     except Parada as e:
         # A curtida já saiu: o vídeo fica como só curtido (sem a faixa do painel, conta nos do dia, para nunca
         # passarem de VIDEOS_NO_FEED_POR_DIA curtidas por dia). A parada segue para o caso e o checkup.
@@ -9695,12 +9730,15 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
     if not apareceu:
         # Enviado sem aparecer: pode ter saído, então o vídeo não volta e conta no dia. O caso
         # guarda o painel logo depois do envio e os toques até ele: às 23:38 de 08/11, sem o
-        # caso, não deu para ver por que o comentário não apareceu.
+        # caso, não deu para ver por que o comentário não apareceu. O envio que não terminou
+        # (o texto ainda no campo) tem o motivo dele.
+        motivo = MOTIVO_DO_FEED_SEM_O_COMENTARIO if terminou else MOTIVO_DO_FEED_SEM_O_ENVIO
         _feito_no_feed(marca, "não confirmado", agora)
-        registro_processos.registrar(REGISTRO, "feed: comentar", "não confirmado", "enviado sem aparecer na lista",
+        registro_processos.registrar(REGISTRO, "feed: comentar", "não confirmado",
+                                     "enviado sem aparecer na lista" if terminou else "o envio não terminou",
                                      ok=False, origem=marca)
-        registrar_tentativa("feed", "parou", MOTIVO_DO_FEED_SEM_O_COMENTARIO, agora=agora)
-        _guardar_caso(d, "feed", "parou", MOTIVO_DO_FEED_SEM_O_COMENTARIO, agora=agora)
+        registrar_tentativa("feed", "parou", motivo, agora=agora)
+        _guardar_caso(d, "feed", "parou", motivo, agora=agora)
         _avisar_o_comentario_do_feed(d, video, texto, "não confirmado", agora)
         return "feed: comentário enviado sem aparecer na lista"
     _feito_no_feed(marca, "comentado", agora)
