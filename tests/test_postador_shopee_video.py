@@ -1175,6 +1175,29 @@ def test_abrir_abre_a_shopee_o_flow_ou_o_chrome_e_nada_mais():
     assert Celular.abertos == [ps.PACOTE, "com.google.android.apps.labs.whisk", "com.android.chrome"]
 
 
+def test_explorar_abre_o_curso_e_entra_pelo_acesso_guardado(monkeypatch):
+    # P288 3: abrir:curso abre o link guardado no Chrome, e entrar:curso faz o login com o que o Rafael mandou.
+    chamados = []
+    monkeypatch.setattr(ps.cursos_robo, "abrir_o_curso", lambda d: chamados.append("abrir") or (True, "curso aberto"))
+    monkeypatch.setattr(ps.cursos_robo, "entrar_no_curso",
+                        lambda d, escrever, achar: chamados.append((escrever, achar)) or (True, "login feito"))
+    assert ps.separar_passos("abrir:curso; entrar:curso") == [("abrir", "curso"), ("entrar", "curso")]
+    assert ps.fazer_passo(object(), "abrir", "curso") == (True, "curso aberto")
+    assert ps.fazer_passo(object(), "entrar", "curso") == (True, "login feito")
+    assert chamados == ["abrir", (ps.escrever, ps.achar)]
+    assert ps.fazer_passo(object(), "entrar", "shopee") == (False, "entrar só entra no curso (entrar:curso)")
+
+
+def test_campo_de_senha_nunca_vai_ao_log():
+    # Nem os pontinhos da senha digitada, que dariam o tamanho dela.
+    tela = """<hierarchy>
+      <node class="android.widget.EditText" text="••••••••••" password="true" bounds="[40,840][1040,940]" />
+      <node class="android.widget.EditText" text="aluno@exemplo.com" password="false" bounds="[40,700][1040,800]" />
+    </hierarchy>"""
+    linhas = "\n".join(ps.descrever(tela))
+    assert "[senha]" in linhas and "•" not in linhas and "aluno" not in linhas
+
+
 def test_gravar_no_explorar_guarda_quadros_e_fala_para_o_claude_e_o_log_so_tem_numeros(monkeypatch, tmp_path):
     # P288 3: o servidor grava a tela e o som do celular; a fala e os quadros vão cifrados no caso,
     # e o log diz só os números. Preta ou muda, o player não deixa gravar e o passo falha.

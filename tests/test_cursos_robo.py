@@ -176,3 +176,82 @@ def test_para_o_claude_grava_a_fala_com_o_segundo_de_cada_trecho(monkeypatch, tm
     os.remove(tmp_path / "fala.txt")
     assert cursos_robo.para_o_claude("aula.mkv", str(tmp_path)) == (3, None)
     assert not (tmp_path / "fala.txt").exists()
+
+
+TELA_DO_LOGIN = """<hierarchy>
+  <node class="android.widget.TextView" text="Acesse sua área de membros" bounds="[100,600][980,660]" />
+  <node class="android.widget.EditText" text="" password="false" bounds="[40,700][1040,800]" />
+  <node class="android.widget.EditText" text="" password="true" bounds="[40,840][1040,940]" />
+  <node class="android.widget.Button" text="Entrar" bounds="[40,1000][1040,1100]" />
+</hierarchy>"""
+TELA_DO_CURSO = """<hierarchy>
+  <node class="android.widget.TextView" text="Cursos" bounds="[0,100][300,160]" />
+</hierarchy>"""
+
+
+class Chrome:
+    """O celular de mentira com o Chrome: as telas em sequência, os toques, as teclas e os comandos."""
+
+    def __init__(self, *telas):
+        self.telas, self.toques, self.teclas, self.comandos = list(telas), [], [], []
+
+    def dump_hierarchy(self):
+        return self.telas.pop(0) if len(self.telas) > 1 else self.telas[0]
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+    def shell(self, partes):
+        self.comandos.append(partes)
+
+
+def _guardar_o_acesso(**campos):
+    import db
+    db.salvar_config("acessos_servidor", {"curso": campos})
+
+
+def test_abrir_o_curso_pelo_link_guardado_sem_o_link_no_log(bm):
+    celular = Chrome(TELA_DO_CURSO)
+    assert cursos_robo.abrir_o_curso(celular) == (False, "sem o link do curso no Acessos do Servidor")
+    assert celular.comandos == []
+    _guardar_o_acesso(link="https://curso.exemplo.com/m/courses")
+    ok, texto = cursos_robo.abrir_o_curso(celular)
+    assert (ok, texto) == (True, "curso aberto no Chrome")
+    assert celular.comandos == [["am", "start", "-a", "android.intent.action.VIEW", "-d",
+                                 "https://curso.exemplo.com/m/courses", "-p", "com.android.chrome"]]
+
+
+def test_campos_do_login_so_na_pagina_de_login():
+    assert cursos_robo.campos_do_login(TELA_DO_LOGIN) == ((540, 750), (540, 890))
+    assert cursos_robo.campos_do_login(TELA_DO_CURSO) is None
+    assert cursos_robo.campos_do_login("<quebrado") is None
+
+
+def test_entrar_no_curso_escreve_o_login_guardado_e_confere_que_passou(bm):
+    escritos = []
+    escrever = lambda d, texto: escritos.append(texto)
+    achar = lambda tela, alvo: (540, 1050) if alvo == "Entrar" and "Entrar" in tela else None
+    sem_pausa = lambda segundos: None
+    # Sem o e-mail e a senha guardados, nada é tocado.
+    celular = Chrome(TELA_DO_LOGIN)
+    assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
+        False, "sem o login do curso no Acessos do Servidor")
+    assert celular.toques == [] and escritos == []
+    _guardar_o_acesso(link="https://curso.exemplo.com", email="aluno@exemplo.com", senha="senha do curso")
+    # Fora da página de login, também não.
+    celular = Chrome(TELA_DO_CURSO)
+    assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
+        False, "a tela não é a de login do curso")
+    # Na página de login: o e-mail no 1º campo, a senha no de senha e o Enter do teclado.
+    celular = Chrome(TELA_DO_LOGIN, TELA_DO_CURSO)
+    assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (True, "login feito")
+    assert celular.toques == [(540, 750), (540, 890)] and celular.teclas == ["enter"]
+    assert escritos == ["aluno@exemplo.com", "senha do curso"]
+    # O Enter não passou: toca no Entrar; continuando no login, diz que não passou.
+    celular = Chrome(TELA_DO_LOGIN, TELA_DO_LOGIN, TELA_DO_LOGIN)
+    assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
+        False, "o login não passou (a página de login continua)")
+    assert celular.toques[-1] == (540, 1050)

@@ -21,7 +21,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
+import xml.etree.ElementTree as ET
 
 from PIL import Image, ImageStat
 
@@ -58,6 +60,11 @@ QUADROS_PARA_O_CLAUDE = 40
 BRILHO_DO_PRETO = 8
 QUADROS_DO_BRILHO = 6
 LARGURA_DO_BRILHO = 160
+
+# O curso abre no Chrome do celular, pelo link guardado no Acessos do Servidor 🔐, e o robô faz o login
+# com o e-mail e a senha que o Rafael mandou ao Claude (pedido dele, 22/11). Nada disso vai ao log.
+PACOTE_DO_CHROME = "com.android.chrome"
+ESPERA_DO_LOGIN = 6
 
 # O que o scrcpy escreve no erro vira um motivo fixo: a saída dele traz o endereço do celular.
 MOTIVOS_DO_GRAVADOR = (
@@ -247,6 +254,70 @@ def linha_dos_numeros(medidos, folhas=None, palavras=None):
     if palavras is not None:
         partes.append(f"{palavras} palavra(s) na fala")
     return ", ".join(partes)
+
+
+def acesso_do_curso():
+    """{"link", "email", "senha"} do curso, do Acessos do Servidor 🔐; {} enquanto o Rafael não mandou."""
+    import painel_acessos
+    return painel_acessos.ler_acessos()["curso"]
+
+
+def abrir_o_curso(d):
+    """Abre o link do curso no Chrome do celular. (ok, o que dizer no log, sem o link)."""
+    link = acesso_do_curso().get("link")
+    if not link:
+        return False, "sem o link do curso no Acessos do Servidor"
+    d.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", link, "-p", PACOTE_DO_CHROME])
+    return True, "curso aberto no Chrome"
+
+
+def campos_do_login(xml):
+    """Os centros (e-mail, senha) dos campos da página de login; None quando a tela não é a de login."""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return None
+    email = senha = None
+    for no in raiz.iter("node"):
+        caixa = re.fullmatch(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", no.get("bounds", ""))
+        if not no.get("class", "").endswith("EditText") or not caixa:
+            continue
+        x1, y1, x2, y2 = map(int, caixa.groups())
+        centro = ((x1 + x2) // 2, (y1 + y2) // 2)
+        if no.get("password") == "true":
+            senha = senha or centro
+        else:
+            email = email or centro
+    return (email, senha) if email and senha else None
+
+
+def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
+    """
+    Na página de login do curso, escreve o e-mail e a senha guardados e entra (o Enter do teclado e,
+    se a página continuar, o botão Entrar). escrever e achar são os do explorar. (ok, o que dizer no log).
+    """
+    acesso = acesso_do_curso()
+    if not acesso.get("email") or not acesso.get("senha"):
+        return False, "sem o login do curso no Acessos do Servidor"
+    campos = campos_do_login(d.dump_hierarchy())
+    if not campos:
+        return False, "a tela não é a de login do curso"
+    for (x, y), valor in zip(campos, (acesso["email"], acesso["senha"])):
+        d.click(x, y)
+        pausa(1)
+        escrever(d, valor)
+    d.press("enter")
+    pausa(ESPERA_DO_LOGIN)
+    tela = d.dump_hierarchy()
+    if campos_do_login(tela):
+        ponto = achar(tela, "Entrar")
+        if ponto:
+            d.click(*ponto)
+            pausa(ESPERA_DO_LOGIN)
+            tela = d.dump_hierarchy()
+    if campos_do_login(tela):
+        return False, "o login não passou (a página de login continua)"
+    return True, "login feito"
 
 
 def main(argumentos):
