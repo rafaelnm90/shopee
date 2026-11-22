@@ -2695,6 +2695,10 @@ def test_janela_do_produto_mostra_o_campo_do_nome_e_o_selecionar_cupom():
     assert ps.janela_de_editar_aberta(lista) and not ps.na_lista_de_cupons(lista) and not ps.nome_curto_na_janela(lista)
     curto = ps.elementos(_janela_do_produto(campo="Bdhsuh", aviso="4 caracteres a mais necessários"))
     assert ps.nome_curto_na_janela(curto)
+    # O nome com emoji o app recusa com o aviso no mesmo lugar (rascunhos de 22/11 às 10:05 e às 10:25).
+    emoji = ps.elementos(_janela_do_produto(campo="Caneca de Presente ☕", aviso="Emoji não permitido"))
+    assert ps.emoji_no_nome_na_janela(emoji) and not ps.emoji_no_nome_na_janela(lista)
+    assert not ps.nome_curto_na_janela(emoji) and not ps.emoji_no_nome_na_janela(curto)
 
 
 def test_tela_dos_cupons_sem_cupom_e_o_criar_cupom_proibido():

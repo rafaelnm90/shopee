@@ -4,6 +4,7 @@ import json
 import os
 import random
 import time
+import unicodedata
 from datetime import datetime
 from xml.sax.saxutils import escape
 
@@ -10692,16 +10693,18 @@ def _no_da_janela(texto="", caixa=(0, 0, 10, 10), classe="android.widget.TextVie
 class JanelaDoProduto:
     """
     A janela "Editar informações do produto" do Adicionar, como o Rafael gravou em 21/11: o campo Nome do produto,
-    o aviso de nome curto (menos de 10 letras), o Selecionar Cupom, que abre a tela dos cupons, e o Feito. O voltar
-    fecha o teclado, sai da tela dos cupons ou, sem nenhum dos dois, fecha a janela.
+    o aviso de nome curto (menos de 10 letras), o de emoji (recusa_emoji: o nome com emoji, como nos rascunhos de
+    22/11 às 10:05 e às 10:25), o Selecionar Cupom, que abre a tela dos cupons, e o Feito. O voltar fecha o teclado,
+    sai da tela dos cupons ou, sem nenhum dos dois, fecha a janela.
     """
     CAMPO = (58, 1924, 1049, 1971)
     SELECIONAR = (718, 2159, 1049, 2210)
     CRIAR_CUPOM = (40, 2200, 1040, 2300)
 
-    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False):
+    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False, recusa_emoji=False):
         self.tela, self.campo, self.teclado, self.foco = "janela", "", False, False
         self.escreve, self.cupom_vazio, self.voltar_fecha = escreve, cupom_vazio, voltar_fecha
+        self.recusa_emoji = recusa_emoji
         self.toques, self.teclas = [], []
 
     def dump_hierarchy(self):
@@ -10721,6 +10724,8 @@ class JanelaDoProduto:
             if 0 < len(self.campo) < 10:
                 nos.append(_no_da_janela(f"{10 - len(self.campo)} caracteres a mais necessários",
                                          (64, 1980, 600, 2010)))
+            if self.recusa_emoji and any(unicodedata.category(c) == "So" for c in self.campo):
+                nos.append(_no_da_janela("Emoji não permitido", (107, 1980, 392, 2023)))
         else:
             nos = [_no_da_janela("Adicionar Produto", (100, 150, 450, 210))]
         if self.teclado:
@@ -10800,6 +10805,19 @@ def test_nome_curto_volta_ao_do_anuncio():
     assert robo._trocar_o_nome(janela, "Caneca") is False
     assert janela.campo == ""
     assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: com o aviso de nome curto")]
+
+
+def test_nome_com_emoji_que_o_app_recusa_volta_ao_do_anuncio():
+    # 22/11, às 10:05 e às 10:25: a janela recusou o nome da IA com o emoji do fim ("Emoji não permitido" embaixo do
+    # campo), o Feito não fechou a janela, e o rascunho parou. O aviso conta como o nome que não ficou: o robô apaga e
+    # segue com o do anúncio, como a regra da P265 1 manda (DECISOES.md, Shopee Vídeo).
+    janela = JanelaDoProduto(recusa_emoji=True)
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) is False
+    assert janela.campo == "" and janela.tela == "janela"
+    assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: com o aviso de emoji")]
+    # O nome sem emoji a mesma janela aceita.
+    janela = JanelaDoProduto(recusa_emoji=True)
+    assert robo._trocar_o_nome(janela, "Caneca Geek Colecionável para Presente") is True
 
 
 def test_janela_que_fecha_no_nome_para_o_rascunho():
