@@ -217,15 +217,19 @@ def numeros(arquivo):
             "som": None if volume is None else round(volume, 1), "brilho": brilho(arquivo)}
 
 
-def problema(medidos):
-    """O que impede usar a gravação; "" quando ela serve. Preta ou muda: o player não deixa gravar (P288 3)."""
+def problema(medidos, palavras=None):
+    """
+    O que impede usar a gravação; "" quando ela serve. Preta ou muda: o player não deixa gravar (P288 3).
+    O som baixo em que a fala foi reconhecida (palavras) serve: o player deixou gravar, e o que está baixo é o
+    volume do celular (Motorola, 22/11/2026: uma aula a -61,5 LUFS, com 180 palavras reconhecidas em 60 s).
+    """
     if not medidos.get("segundos"):
         return "a gravação saiu vazia"
     if medidos.get("brilho") is None or medidos["brilho"] < BRILHO_DO_PRETO:
         return "a imagem saiu preta"
     if not medidos.get("tem_som"):
         return "a gravação saiu sem o som"
-    if medidos.get("som") is None or medidos["som"] <= videos.VOLUME_DO_MUDO:
+    if (medidos.get("som") is None or medidos["som"] <= videos.VOLUME_DO_MUDO) and not palavras:
         return "o som saiu mudo"
     return ""
 
