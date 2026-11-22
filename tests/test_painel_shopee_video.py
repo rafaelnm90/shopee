@@ -2469,15 +2469,19 @@ def test_video_de_ia_liga_e_desliga_pelo_painel_e_diz_o_do_dia(bm, Msg, Est, mon
     rodar(sv.video_ia_handler(msg, est))
     for trecho in ("Rótulo de IA ligado", "Rascunhos do Robô 📝", "O que cada botão faz", sv.limite_dos_videos_de_ia()):
         assert trecho in msg.saidas[-1]
-    # Escolha do Rafael (21/11, P269 3): todo vídeo de IA é a propaganda de TV de 8 s, um Gerar só, pela foto do
-    # anúncio e inteira; o rascunho avisa a fala do locutor embolada ou cortada (P248 1).
+    # Escolha do Rafael (21/11, P269 3): todo vídeo de IA é a propaganda de TV de 8 s, um Gerar só e inteira; o
+    # rascunho avisa a fala do locutor embolada ou cortada (P248 1).
     for trecho in ("um vídeo de 8 s feito por IA com cara de propaganda de TV: o produto em 2 ou 3 planos de cinema",
-                   "um locutor em off, sem ninguém falando para a câmera, feito pela foto do anúncio",
+                   "um locutor em off, sem ninguém falando para a câmera",
+                   # Escolha do Rafael (22/11, P278 1): com um dos personagens ou só com o produto.
+                   "A IA escolhe pelo produto se o comercial mostra um dos personagens que você aprovou usando "
+                   "o produto, sem falar", "ou só o produto, pela foto do anúncio",
                    "É um Gerar só no Omni 1.2 Flash (24 créditos, dentro dos 50 grátis do dia)",
-                   "escreve o pedido e a fala do locutor", "o rascunho avisa se ela saiu embolada ou cortada",
+                   "escreve o pedido e a fala do locutor (até 10 palavras, para caber nos 8 s)",
+                   "o rascunho avisa se ela saiu embolada ou cortada",
                    "A propaganda fica sempre inteira, sem cortar o silêncio"):
         assert trecho in msg.saidas[-1], trecho
-    for fora in ("16 s", "unboxing", "comédia", "personagens", "estilo que varia"):
+    for fora in ("16 s", "unboxing", "comédia", "estilo que varia"):
         assert fora not in msg.saidas[-1], fora
     # O limite do dia conta o do robô e os do Preparar 1 Agora ⚡ → De IA ✨ (P243), com o custo da propaganda.
     assert sv.limite_dos_videos_de_ia() == (

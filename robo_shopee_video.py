@@ -3387,11 +3387,12 @@ def preparar_o_de_ia(d, config, agora=None, comeco=None):
 # Estender), e a fala que o servidor ouve vai no rascunho (P248 1). Desde a P260 1, o vídeo começa pela imagem de um
 # personagem com o produto (flow.imagem_da_producao; sem ela, sai pela foto do anúncio, como antes), e o formato podia
 # ser também a comédia (P251 1), o unboxing (P256 2) e o mãos e voz (P262). Desde a P269 3, todo vídeo de IA do robô é
-# a propaganda de TV de 8 s, pela foto do anúncio (flow.SO_A_PROPAGANDA_NA_PRODUCAO: 24 créditos, dentro dos 50
-# grátis do dia). O do robô é 1 por dia; os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no limite do dia
+# a propaganda de TV de 8 s (flow.SO_A_PROPAGANDA_NA_PRODUCAO: 24 créditos, dentro dos 50 grátis do dia), e desde a
+# P278 1 a IA escolhe pelo produto se ela mostra um dos personagens, pela imagem dele, ou só o produto, pela foto do
+# anúncio. O do robô é 1 por dia; os do Preparar 1 Agora ⚡ → De IA ✨ contam junto no limite do dia
 # (VIDEOS_DE_IA_POR_DIA, P243). No registro, só rótulos fixos, chaves e números.
 # Escolhas do Rafael (15/11/2026, P232 1 e P234 1; 16/11/2026, P243; 17/11/2026, P247 1; 19/11/2026, P260 1;
-# 21/11/2026, P269 3): DECISOES.md, Shopee Vídeo.
+# 21/11/2026, P269 3; 22/11/2026, P278 1): DECISOES.md, Shopee Vídeo.
 PROCESSO_DO_VIDEO_DE_IA = "vídeo de IA do dia"
 # Quantos dos produtos que pagam mais vão à IA em cada tentativa, um por um, até ela achar a foto boa para o vídeo.
 FOTOS_PARA_A_IA = 5
@@ -3904,7 +3905,8 @@ def _anotar_o_silencio(atual, agora=None):
 def _anotar_a_imagem(agora=None):
     """
     O que houve com a imagem do personagem com o produto (P260 1) no registro: o personagem (a chave) e quantas
-    imagens, ou o porquê sem ela (o texto fixo do código; sem foto aprovada não é falha). Nada sem a imagem tentada.
+    imagens, ou o porquê sem ela (o texto fixo do código; sem foto aprovada e a propaganda que a IA quis só com o
+    produto, P278 1, não são falha). Nada sem a imagem tentada.
     """
     imagem = flow.producao().get("imagem") or {}
     if imagem.get("estado") == "feita":
@@ -3914,7 +3916,8 @@ def _anotar_a_imagem(agora=None):
     elif imagem.get("estado") == "sem":
         motivo = imagem.get("motivo") or "?"
         registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "sem a imagem do personagem", motivo,
-                                     ok=None if motivo == flow.SEM_FOTO_APROVADA else False, agora=agora)
+                                     ok=None if motivo in (flow.SEM_FOTO_APROVADA, flow.SO_O_PRODUTO) else False,
+                                     agora=agora)
 
 
 def de_onde_veio_o_produto_do_video_de_ia(atual):
