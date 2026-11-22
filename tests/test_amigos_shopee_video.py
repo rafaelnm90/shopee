@@ -254,6 +254,54 @@ def test_o_amigos_passa_antes_das_mensagens_soltas_dos_grupos(bm):
     assert rodar(solto.check(msg, bot=bm.bot, raw_state=None))[0]
 
 
+def test_o_amigos_e_o_toque_no_botao_passam_pela_trava_do_bot(am, bm, monkeypatch):
+    # Em 22/11, o /amigos do Rafael no grupo não chegou ao comando: a trava do bot_mestre (BloqueioAdminMiddleware) só
+    # deixa o Rafael usar o bot no privado e barra o toque de quem não é ele. Aqui, pelo dispatcher, com a trava.
+    from aiogram import types
+    chegaram = []
+
+    async def comando(message):
+        chegaram.append(("amigos", message.from_user.id))
+
+    async def quero(callback):
+        chegaram.append(("quero", callback.from_user.id))
+
+    monkeypatch.setattr(am, "comando_amigos", comando)
+    toque = next(h for h in am.router.callback_query.handlers if h.callback is am.quero_um_video)
+    monkeypatch.setattr(toque, "callback", quero)
+    grupo = types.Chat(id=GRUPO, type="supergroup", title="Amigos")
+    rafael = types.User(id=bm.ADMIN_ID, is_bot=False, first_name="R")
+    amigo = types.User(id=7, is_bot=False, first_name="Ana")
+    botao = types.Message(message_id=99, date=datetime.now(), chat=grupo,
+                          from_user=types.User(id=1, is_bot=True, first_name="Bot"), text="🎬")
+
+    def mensagem(n, usuario, texto):
+        return types.Update(update_id=n, message=types.Message(message_id=n, date=datetime.now(), chat=grupo,
+                                                               from_user=usuario, text=texto))
+
+    def clique(n, usuario, dados):
+        return types.Update(update_id=n, callback_query=types.CallbackQuery(
+            id=str(n), from_user=usuario, chat_instance="x", message=botao, data=dados))
+
+    rodar(bm.dp.feed_update(bm.bot, mensagem(1, rafael, "/amigos")))
+    rodar(bm.dp.feed_update(bm.bot, clique(2, amigo, am.CALLBACK_QUERO)))
+    rodar(bm.dp.feed_update(bm.bot, clique(3, rafael, am.CALLBACK_QUERO)))
+    assert chegaram == [("amigos", bm.ADMIN_ID), ("quero", 7), ("quero", bm.ADMIN_ID)]
+    # O resto continua barrado no grupo: as outras mensagens do Rafael, o /amigos de outra pessoa e outros toques.
+    trava, passou = bm.BloqueioAdminMiddleware(), []
+
+    async def handler(evento, dados):
+        passou.append(evento)
+
+    no_grupo = SimpleNamespace(id=GRUPO, type="supergroup")
+    for usuario, texto in ((rafael, "oi"), (amigo, "/amigos")):
+        rodar(trava(handler, SimpleNamespace(from_user=usuario, chat=no_grupo, text=texto), {}))
+    rodar(trava(handler, SimpleNamespace(from_user=amigo, data="outro:botao",
+                                         message=SimpleNamespace(chat=no_grupo)), {}))
+    rodar(trava(handler, SimpleNamespace(from_user=rafael, chat=no_grupo, text="/amigos@ShopeeVideoBot"), {}))
+    assert len(passou) == 1 and passou[0].text == "/amigos@ShopeeVideoBot"
+
+
 def test_mencao_do_usuario_igual_no_bot_mestre_e_no_grupo(bm):
     from utils import mencao_do_usuario
     assert mencao_do_usuario(_pessoa(7, "Ana", "ana_teste")) == "@ana_teste"

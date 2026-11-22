@@ -75,6 +75,22 @@ def configurar_dependencias(bot, scheduler, admin_id):
                       replace_existing=True, max_instances=1, coalesce=True)
 
 
+# --- A trava do bot_mestre ---
+# A trava do bot_mestre (BloqueioAdminMiddleware) só deixa o Rafael usar o bot no privado: num grupo, ela barra até as
+# mensagens dele e os toques de quem não é ele. Por ela passam só o /amigos do Rafael e o toque de qualquer pessoa no
+# Quero um vídeo 🎬; o grupo certo e quem foi liberado, o comando_amigos e o quero_um_video conferem.
+COMANDO = "/amigos"
+
+
+def via_verde(texto, clique, do_admin):
+    """O que a trava do bot_mestre deixa passar num grupo: o /amigos do Rafael e o toque no Quero um vídeo 🎬."""
+    texto = (texto or "").strip()
+    if clique:
+        return texto == CALLBACK_QUERO
+    comando = texto.split(maxsplit=1)[0].split("@", 1)[0].casefold() if texto else ""
+    return bool(do_admin) and comando == COMANDO
+
+
 # --- Dados (chave grupo_dos_amigos) ---
 # grupo e titulo: o grupo do /amigos; ligado: o grupo atende os pedidos; botao: a mensagem fixada com o botão;
 # liberados: {id do Telegram: {"nome"}} de quem pode pedir; fila: os pedidos, o mais velho primeiro; avisados:

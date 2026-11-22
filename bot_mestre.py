@@ -3609,6 +3609,12 @@ class BloqueioAdminMiddleware(BaseMiddleware):
             if chat.id == BUSCA_GRUPO_ID and (thread_busca or 1) == BUSCA_TOPICO_ID:
                 is_submissao = True
 
+        # Via verde do Grupo dos Amigos (P277 1): o /amigos do admin num grupo e o toque de qualquer pessoa no
+        # Quero um vídeo 🎬; o grupo certo e quem foi liberado, o amigos_shopee_video confere.
+        if chat and chat.type != "private" and amigos_shopee_video.via_verde(
+                texto, is_callback, getattr(usuario, "id", None) == ADMIN_ID):
+            is_submissao = True
+
         # Quem não é o admin só passa pela via verde.
         if usuario and getattr(usuario, "id", None) != ADMIN_ID:
             if not is_submissao:
