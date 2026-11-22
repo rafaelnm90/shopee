@@ -1,4 +1,7 @@
-"""Grupo dos amigos da Shopee Vídeo (P271 2 a P277 1): o /amigos, quem pode pedir, a fila, o painel e a menção."""
+"""
+Grupo dos amigos da Shopee Vídeo (P271 2 a P279 1): o /amigos (e o menu só do Rafael), quem pode pedir, o Liberar
+Amigos ✅, a fila, o painel e a menção.
+"""
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -11,10 +14,14 @@ GRUPO = -1001
 
 
 class BotFalso:
-    """Guarda cada envio (destino, texto, a mensagem a que responde e os botões), o que foi fixado e apagado."""
+    """
+    Guarda cada envio (destino, texto, a mensagem a que responde e os botões), o que foi fixado e apagado e o menu de
+    comandos de cada grupo.
+    """
 
-    def __init__(self, fixar_falha=False):
+    def __init__(self, fixar_falha=False, menu_falha=False):
         self.envios, self.fixadas, self.apagadas, self.proximo, self.fixar_falha = [], [], [], 100, fixar_falha
+        self.menus, self.menu_falha = [], menu_falha
 
     async def send_message(self, chat_id, text, **kw):
         self.proximo += 1
@@ -30,6 +37,14 @@ class BotFalso:
 
     async def delete_message(self, chat_id, message_id):
         self.apagadas.append((chat_id, message_id))
+
+    async def set_my_commands(self, commands, scope=None, **kw):
+        if self.menu_falha:
+            raise RuntimeError("sem rede")
+        self.menus.append(("pôr", [c.command for c in commands], scope.type, scope.chat_id, scope.user_id))
+
+    async def delete_my_commands(self, scope=None, **kw):
+        self.menus.append(("tirar", scope.type, scope.chat_id, scope.user_id))
 
 
 class Toque:
@@ -228,7 +243,7 @@ def test_painel_do_grupo_mostra_o_estado_os_liberados_e_os_mandados(am, Msg, Est
     assert "▶️ <b>Ligado</b>" in texto and "1. Ana &lt;3" in texto and "Amigos" in texto
     assert "hoje <b>1</b>, no total <b>1</b>" in texto and "Pedidos na fila: <b>0</b>" in texto
     assert [b.text for linha in am.teclado_do_painel(am.ler()).keyboard for b in linha] == [
-        am.BOTAO_DESLIGAR, am.BOTAO_TIRAR, am.painel.BOTAO_VOLTAR]
+        am.BOTAO_DESLIGAR, am.BOTAO_LIBERAR_AMIGOS, am.BOTAO_TIRAR, am.painel.BOTAO_VOLTAR]
     desligar = Msg(am.BOTAO_DESLIGAR)
     rodar(am.ligar_ou_desligar(desligar, est))
     assert am.ler()["ligado"] is False and "desligado" in desligar.saidas[0]
@@ -239,6 +254,8 @@ def test_a_fila_e_conferida_a_cada_minuto(am):
     agendador = AsyncIOScheduler()
     am.configurar_dependencias(am.bot_instance, agendador, am.ADMIN_ID)
     assert agendador.get_job("shopee_video_amigos").trigger.interval.total_seconds() == 60
+    # Na subida, o grupo guardado ganha o /amigos no menu do Rafael (P279 1).
+    assert agendador.get_job("shopee_video_amigos_menu").func is am.conferir_o_comando_no_menu
 
 
 def test_o_amigos_passa_antes_das_mensagens_soltas_dos_grupos(bm):
@@ -323,3 +340,76 @@ def test_amigos_sem_poder_mandar_no_grupo_avisa_o_rafael(am, bm, Msg, monkeypatc
     assert [e["chat"] for e in am.bot_instance.envios] == [bm.ADMIN_ID]
     assert "Não consegui mandar o botão no grupo" in am.bot_instance.envios[0]["texto"]
     assert am.ler()["grupo"] is None
+
+
+def test_amigos_vai_ao_menu_do_grupo_so_para_o_rafael(am, bm, Msg, monkeypatch):
+    # P279 1: depois do 1º /amigos, o comando fica no menu (o /) do grupo, visível só para o Rafael; mandado em outro
+    # grupo, o menu do de antes sai.
+    msg = Msg("/amigos")
+    msg.chat = SimpleNamespace(id=GRUPO, title="Amigos", type="supergroup")
+    rodar(am.comando_amigos(msg))
+    bot = am.bot_instance
+    assert bot.menus == [("pôr", ["amigos"], "chat_member", GRUPO, bm.ADMIN_ID)]
+    assert "visível só para você" in bot.envios[-1]["texto"]
+    outro = Msg("/amigos")
+    outro.chat = SimpleNamespace(id=-2002, title="Outro", type="supergroup")
+    rodar(am.comando_amigos(outro))
+    assert bot.menus[1:] == [("tirar", "chat_member", GRUPO, bm.ADMIN_ID),
+                             ("pôr", ["amigos"], "chat_member", -2002, bm.ADMIN_ID)]
+    # Na subida do bot, o grupo guardado tem o menu de novo; sem grupo, nada.
+    rodar(am.conferir_o_comando_no_menu())
+    assert bot.menus[-1] == ("pôr", ["amigos"], "chat_member", -2002, bm.ADMIN_ID)
+    db.salvar_config(am.CHAVE, am._padrao())
+    rodar(am.conferir_o_comando_no_menu())
+    assert len(bot.menus) == 4
+    # Sem o menu, o botão vai do mesmo jeito, e o aviso não fala do menu.
+    monkeypatch.setattr(am, "bot_instance", BotFalso(menu_falha=True))
+    rodar(am.comando_amigos(msg))
+    assert am.ler()["grupo"] == GRUPO and "menu" not in am.bot_instance.envios[-1]["texto"]
+
+
+def test_liberar_amigos_no_painel_mostra_quem_espera_e_o_liberado_sai(am, bm, monkeypatch):
+    # P279 1: em Grupo dos Amigos 👥, o Liberar Amigos ✅ (N) mostra um botão com o nome de cada um que tocou e ainda
+    # não foi liberado; o toque libera e o nome sai. Pelo dispatcher, como chega do Telegram.
+    from aiogram import types
+    _grupo(am, liberados={"9": {"nome": "Bia"}},
+           avisados={"7": {"quando": 1, "nome": "Ana"}, "8": {"quando": 2, "nome": "João (@joao)"}})
+    respostas = []
+
+    async def responder(self, text, **kw):
+        teclado = kw.get("reply_markup")
+        botoes = [b.text for linha in teclado.keyboard for b in linha] if teclado is not None else None
+        respostas.append((text, botoes))
+
+    monkeypatch.setattr(types.Message, "answer", responder)
+    privado = types.Chat(id=bm.ADMIN_ID, type="private")
+    rafael = types.User(id=bm.ADMIN_ID, is_bot=False, first_name="R")
+    numero = iter(range(1, 100))
+
+    def tocar(texto):
+        respostas.clear()
+        n = next(numero)
+        rodar(bm.dp.feed_update(bm.bot, types.Update(update_id=n, message=types.Message(
+            message_id=n, date=datetime.now(), chat=privado, from_user=rafael, text=texto))))
+        return respostas
+
+    texto, botoes = tocar(am.painel.BOTAO_GRUPO_DOS_AMIGOS)[-1]
+    assert "Esperando a liberação: <b>2</b>" in texto and "Liberar Amigos ✅ (2)" in botoes
+    texto, botoes = tocar("Liberar Amigos ✅ (2)")[-1]
+    assert botoes == ["1. Ana", "2. João (@joao)", am.BOTAO_VOLTAR_AMIGOS]
+    saidas = tocar("1. Ana")
+    config = am.ler()
+    assert config["liberados"] == {"9": {"nome": "Bia"}, "7": {"nome": "Ana"}} and "7" not in config["avisados"]
+    assert "Ana já pode pedir" in saidas[0][0] and saidas[-1][1] == ["1. João (@joao)", am.BOTAO_VOLTAR_AMIGOS]
+    # O que não é um nome da lista não libera ninguém.
+    saidas = tocar("2. Fulano")
+    assert "Toque num dos nomes" in saidas[0][0] and set(am.ler()["liberados"]) == {"9", "7"}
+    saidas = tocar("1. João (@joao)")
+    assert set(am.ler()["liberados"]) == {"9", "7", "8"} and "Ninguém mais esperando" in saidas[1][0]
+    assert am.BOTAO_LIBERAR_AMIGOS in saidas[-1][1] and "Liberar Amigos ✅ (" not in " ".join(saidas[-1][1])
+    assert "Ninguém esperando" in tocar(am.BOTAO_LIBERAR_AMIGOS)[0][0]
+    # O Voltar da lista volta à tela do grupo dos amigos.
+    _grupo(am, avisados={"7": {"quando": 1, "nome": "Ana"}})
+    tocar("Liberar Amigos ✅ (1)")
+    texto, botoes = tocar(am.BOTAO_VOLTAR_AMIGOS)[-1]
+    assert texto.startswith("👥 <b>Grupo dos Amigos 👥</b>") and am.ler()["liberados"] == {}
