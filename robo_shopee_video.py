@@ -6197,10 +6197,10 @@ def _escrever_no_campo(d, campo, texto):
 def _trocar_o_nome(d, novo, anuncio=""):
     """
     Escreve o nome da IA no campo Nome do produto da janela do Adicionar e confere: a janela aberta, o campo com o nome
-    e sem o aviso de nome curto. True quando ficou. Senão, apaga o que escreveu (o campo vazio leva o nome do anúncio,
-    como antes; anuncio: o nome da lista, que o campo vazio pode mostrar em cinza) e False. A janela que fecha no meio,
-    ou o campo que não volta ao vazio, para o rascunho. O registro diz o que houve, em rótulos fixos e números (o nome
-    não vai: o registro é público).
+    e sem os avisos do app (o de nome curto e o de emoji, que não deixam o Feito fechar a janela). True quando ficou.
+    Senão, apaga o que escreveu (o campo vazio leva o nome do anúncio, como antes; anuncio: o nome da lista, que o campo
+    vazio pode mostrar em cinza) e False. A janela que fecha no meio, ou o campo que não volta ao vazio, para o
+    rascunho. O registro diz o que houve, em rótulos fixos e números (o nome não vai: o registro é público).
     """
     campo = ps.campo_do_nome(ps.elementos(tela(d)))
     if not campo:
@@ -6212,12 +6212,12 @@ def _trocar_o_nome(d, novo, anuncio=""):
     if not ps.janela_de_editar_aberta(lista):
         raise Parada(MOTIVO_DA_JANELA_DO_NOME)
     campo = ps.campo_do_nome(lista)
-    curto = ps.nome_curto_na_janela(lista)
-    if campo and ps.mesmo_nome(campo["texto"], novo) and not curto:
+    curto, emoji = ps.nome_curto_na_janela(lista), ps.emoji_no_nome_na_janela(lista)
+    if campo and ps.mesmo_nome(campo["texto"], novo) and not curto and not emoji:
         registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, "nome da IA no produto",
                                      f"{assistente.tamanho_no_app(novo)} letras", ok=True)
         return True
-    como = ("com o aviso de nome curto" if curto else "sem o campo" if not campo
+    como = ("com o aviso de nome curto" if curto else "com o aviso de emoji" if emoji else "sem o campo" if not campo
             else "o campo com outro texto" if campo["texto"] else "o campo vazio")
     if campo:
         _escrever_no_campo(d, campo, "")

@@ -1322,6 +1322,9 @@ def janela_de_editar_aberta(lista):
 # que cria cupom e nunca se toca (TEXTOS_PROIBIDOS). O voltar dela leva de volta à janela, com o nome escrito.
 ROTULO_DO_NOME = "nome do produto"
 AVISO_DO_NOME_CURTO = "caracteres a mais necess"
+# O nome com emoji o app recusa, com o aviso no mesmo lugar do de nome curto, e o Feito não fecha a janela (os
+# rascunhos de 22/11 às 10:05 e às 10:25).
+AVISO_DE_EMOJI = "emoji não permitido"
 SELECIONAR_CUPOM = "selecionar cupom"
 TITULO_DOS_CUPONS = "adicionar cupom"
 SEM_CUPOM_PARA_ESCOLHER = "criar e adicionar cupom"
@@ -1338,6 +1341,11 @@ def campo_do_nome(lista):
 def nome_curto_na_janela(lista):
     """A janela avisa que o nome escrito tem menos letras que o mínimo do app ("N caracteres a mais necessários")?"""
     return any(AVISO_DO_NOME_CURTO in _normal(el["texto"]) for el in lista)
+
+
+def emoji_no_nome_na_janela(lista):
+    """A janela avisa que o nome escrito tem emoji, que o app não aceita ("Emoji não permitido")?"""
+    return any(AVISO_DE_EMOJI in _normal(el["texto"]) for el in lista)
 
 
 def mesmo_nome(na_tela, nome):
