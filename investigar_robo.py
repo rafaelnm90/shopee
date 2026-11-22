@@ -69,11 +69,15 @@ async def comissao(link):
     ofertas = await api_shopee.buscar_ofertas_shopee(robo.termo_da_busca(original["nome"]),
                                                      limite=robo.OFERTAS_NA_BUSCA, sort_type=5)
     sem_taxa = sum(1 for oferta in ofertas if not oferta.get("commissionRate"))
-    candidatos = robo.candidatos_de_mais_comissao(original, ofertas)
-    texto = f"comissão: {len(ofertas)} na busca ({sem_taxa} sem a taxa)"
+    antes = robo.valor_por_venda(original["preco"], original["comissao"])
+    # Os de nome e preço que podem caber na faixa do mais barato (P284 1): os que pagam mais e os mais baratos; a
+    # IA, que diz quais são o mesmo item, fica para o robô.
+    parecidos = robo.candidatos_da_troca(original, ofertas)
+    candidatos = [c for c in parecidos if c["valor"] > antes]
+    baratos = sum(1 for c in parecidos if c["preco"] < original["preco"])
+    texto = f"comissão: {len(ofertas)} na busca ({sem_taxa} sem a taxa), {baratos} parecido(s) mais barato(s)"
     if not candidatos:
         return f"{texto}, nenhum parecido pagando mais por venda", False
-    antes = robo.valor_por_venda(original["preco"], original["comissao"])
     ganho = f"+{(candidatos[0]['valor'] / antes - 1) * 100:.0f}% por venda" if antes else "o do link não paga comissão"
     return f"{texto}, {len(candidatos)} parecido(s) pagando mais por venda (o melhor: {ganho})", True
 

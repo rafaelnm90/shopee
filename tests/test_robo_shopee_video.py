@@ -1333,12 +1333,17 @@ def test_treino_avisa_quando_o_giro_nao_fica(monkeypatch, avisos):
 FOLHAS = "Folhas Prontas Facial Depilsam Ouro 10 Pares"
 
 
-def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9):
+def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9, outros=()):
     """
     A API (produto do link a 5%, pelo preço dado, e as ofertas da busca), o link curto e a
-    IA de mentira; devolve o que foi pedido.
+    IA de mentira (a que confere de uma vez quais anúncios são o mesmo item recusa os de nome
+    em outros); devolve o que foi pedido.
     """
-    pedidos = {"busca": [], "ia": [], "capa": []}
+    pedidos = {"busca": [], "ia": [], "capa": [], "iguais": []}
+
+    def iguais(video, nome, anuncios, capa=None, recusas=None, precos=(), preco_do_post=None, outra_cor=None):
+        pedidos["iguais"].append([n for n, _f in anuncios])
+        return [i for i, (n, _f) in enumerate(anuncios) if n not in outros], "o mesmo item"
 
     async def produtos_do_link(link):
         return [{"nome": FOLHAS, "preco": preco, "comissao": 5.0, "imagem": "https://cf.shopee.com.br/capa"}], link
@@ -1362,13 +1367,15 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9):
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
     monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
     monkeypatch.setattr(robo.ps, "ia_confere_produto", ia)
+    monkeypatch.setattr(robo.ps, "ia_confere_iguais", iguais)
     monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"\xff\xd8capa" if endereco else None)
     return pedidos
 
 
 def _oferta(nome, comissao, item, preco=10.9):
     return {"productName": nome, "commissionRate": str(comissao), "priceMin": str(preco),
-            "productLink": f"https://shopee.com.br/product/9/{item}", "sales": 10}
+            "productLink": f"https://shopee.com.br/product/9/{item}", "sales": 10,
+            "imageUrl": f"https://cf.shopee.com.br/anuncio/{item}"}
 
 
 def test_troca_pelo_mesmo_produto_que_paga_mais_conferido_pela_ia(monkeypatch):
@@ -1380,7 +1387,9 @@ def test_troca_pelo_mesmo_produto_que_paga_mais_conferido_pela_ia(monkeypatch):
                _oferta("Promoção Folhas Prontas Depilsam Facial Ouro", 0.08, 4)]
     pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=("https://s.shopee.com.br/4",))
     troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
-    assert pedidos["busca"] == [("Folhas Prontas Facial Depilsam Ouro 10", robo.OFERTAS_NA_BUSCA, 5)]
+    # Pelo nome, por maior comissão e por mais vendidos (P284 1).
+    assert pedidos["busca"] == [("Folhas Prontas Facial Depilsam Ouro 10", robo.OFERTAS_NA_BUSCA, 5),
+                                ("Folhas Prontas Facial Depilsam Ouro 10", robo.OFERTAS_NA_BUSCA, 2)]
     # Da maior comissão para a menor, só os de nome parecido; a IA recusou o de 9,5%.
     assert pedidos["ia"] == ["https://s.shopee.com.br/3", "https://s.shopee.com.br/4"]
     assert troca["link"] == "https://s.shopee.com.br/4" and troca["comissao"] == 8.0 and troca["antes"] == 5.0
@@ -1441,26 +1450,67 @@ def test_troca_sem_a_foto_de_capa_do_post_fica_o_do_link(monkeypatch):
     assert [r[2] for r in registro] == ["mantido - sem a foto de capa do post"]
 
 
-def test_troca_compara_os_reais_por_venda_com_preco_parecido(monkeypatch):
-    # Escolha do Rafael (28/10, P58): "paga mais" é o que ele recebe numa venda, o preço vezes
-    # a comissão, e só entra anúncio até 20% mais caro que o do link (R$ 10,90 a 5%: R$ 0,545).
-    ofertas = [_oferta(FOLHAS + " Original", 0.08, 1, preco=6.0),        # mais %, menos reais: R$ 0,48
-               _oferta(FOLHAS + " Kit", 0.06, 2, preco=12.5),            # menos %, mais reais: R$ 0,75
-               _oferta(FOLHAS + " Envio Rápido", 0.07, 3, preco=11.0),   # R$ 0,77: o que paga mais
-               _oferta(FOLHAS + " Atacado", 0.09, 4, preco=20.0),        # R$ 1,80, mas 83% mais caro
-               _oferta(FOLHAS + " Sem Preço", 0.2, 5, preco=0)]          # sem o preço, não entra
-    pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=("https://s.shopee.com.br/2",))
+def test_troca_vai_a_loja_que_paga_mais_na_faixa_do_mais_barato(monkeypatch):
+    # Escolha do Rafael (22/11, P284 1, no vídeo da máquina de lavar): só entra a loja que cobra no
+    # máximo 25% a mais que a mais barata do mesmo produto, e entre elas vai a que paga mais por
+    # venda. O do link (R$ 3.000 a 5%: R$ 150 por venda) e a loja de R$ 3.409 (R$ 209) ficam fora
+    # da faixa da de R$ 1.503: vai a de R$ 1.700, que paga menos por venda, mas vende.
+    ofertas = [_oferta(FOLHAS + " Kit", 0.0613, 4, preco=3409.0),           # R$ 209: fora da faixa
+               _oferta(FOLHAS + " Oficial", 0.05, 3, preco=1700.0),         # R$ 85: a que paga mais na faixa
+               _oferta(FOLHAS + " Envio Rápido", 0.04, 2, preco=1503.0)]    # R$ 60: a mais barata
+    pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=("https://s.shopee.com.br/3",), preco=3000.0)
     troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
-    # Do que paga mais por venda para o que paga menos; a IA recusou o de R$ 0,77.
-    assert pedidos["ia"] == ["https://s.shopee.com.br/3", "https://s.shopee.com.br/2"]
-    assert troca["link"] == "https://s.shopee.com.br/2" and troca["comissao"] == 6.0 and troca["preco"] == 12.5
-    assert troca["valor"] == pytest.approx(0.75) and troca["valor_antes"] == pytest.approx(0.545)
-    # Exatamente 20% mais caro ainda entra; um centavo a mais, não.
-    teto = round(10.9 * 1.2, 2)
-    dentro = robo.candidatos_de_mais_comissao({"nome": FOLHAS, "preco": 10.9, "comissao": 5.0},
-                                              [_oferta(FOLHAS + " Kit", 0.06, 6, preco=teto),
-                                               _oferta(FOLHAS + " Atacado", 0.06, 7, preco=teto + 0.01)])
-    assert [c["link"].rsplit("/", 1)[-1] for c in dentro] == ["6"]
+    # A IA vê de uma vez os mais baratos que o do link (eles dão o começo da faixa) e os outros.
+    assert pedidos["iguais"] == [[FOLHAS + " Envio Rápido", FOLHAS + " Oficial", FOLHAS + " Kit"]]
+    assert pedidos["ia"] == ["https://s.shopee.com.br/3"]
+    assert troca["link"] == "https://s.shopee.com.br/3" and troca["preco"] == 1700.0
+    assert troca["valor"] == pytest.approx(85.0) and troca["valor_antes"] == pytest.approx(150.0)
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("trocado", "pela faixa: 43% mais barato")]
+
+
+def test_troca_com_um_mais_barato_confirmado_tira_da_faixa_o_bem_mais_caro(monkeypatch):
+    # O do link (R$ 10,90 a 5%: R$ 0,545) está na faixa; o de R$ 9,00 confirmado pela IA faz a faixa ir
+    # até R$ 11,25, e o de R$ 12,50 (R$ 1,00 por venda) fica de fora: vai o de R$ 11,00 (R$ 0,77).
+    ofertas = [_oferta(FOLHAS + " Original", 0.05, 2, preco=9.0),
+               _oferta(FOLHAS + " Envio Rápido", 0.07, 3, preco=11.0),
+               _oferta(FOLHAS + " Kit", 0.08, 4, preco=12.5),
+               _oferta(FOLHAS + " Atacado", 0.09, 5, preco=13.63),         # acima de 25% do do link: nem vai à IA
+               _oferta(FOLHAS + " Sem Preço", 0.2, 6, preco=0)]
+    confirma = ("https://s.shopee.com.br/3", "https://s.shopee.com.br/4")
+    pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=confirma)
+    troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
+    assert pedidos["iguais"] == [[FOLHAS + " Original", FOLHAS + " Kit", FOLHAS + " Envio Rápido"]]
+    assert troca["link"] == "https://s.shopee.com.br/3" and troca["valor"] == pytest.approx(0.77)
+    # A IA que não vê o de R$ 9,00 como o mesmo item: a faixa vai até R$ 13,62, e vai o que paga mais.
+    pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=confirma, outros=(FOLHAS + " Original",))
+    troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
+    assert troca["link"] == "https://s.shopee.com.br/4" and troca["valor"] == pytest.approx(1.0)
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("trocado", "mais 41% por venda"), ("trocado", "mais 83% por venda")]
+
+
+def test_troca_pela_faixa_nunca_vai_a_um_que_paga_menos_que_o_minimo(monkeypatch):
+    # O do link (R$ 60 a 5%: R$ 3,00) fica fora da faixa do de R$ 30 (R$ 1,50 por venda), mas o da faixa paga
+    # menos que o mínimo por venda (P194 1): fica o do link, sem a conferência com o vídeo.
+    pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Original", 0.05, 2, preco=30.0)],
+                                 confirma=("https://s.shopee.com.br/2",), preco=60.0)
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
+    # O do link no topo da faixa, pagando mais que todos: fica ele.
+    pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Original", 0.04, 2, preco=50.0)], preco=60.0)
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mantido - os da faixa pagam menos que o mínimo",
+                                        "mantido - o do link é o que paga mais na faixa"]
+
+
+def test_faixa_vai_ate_25_por_cento_acima_do_mais_barato():
+    # Em centavos: exatamente 25% acima do mais barato ainda entra; um centavo a mais, não.
+    assert robo.teto_da_faixa([12.0, 10.0, 0]) == 12.5 and robo.teto_da_faixa([]) == 0
+    dentro = robo.na_faixa([10.0], [{"preco": 12.51}, {"preco": 12.5}, {"preco": 0}, {"preco": 11.0}])
+    assert dentro == [{"preco": 12.5}, {"preco": 11.0}]
+    # O mais barato pode ser um dos produtos, e não o do post.
+    assert robo.na_faixa([20.0], [{"preco": 12.0}, {"preco": 16.0}]) == [{"preco": 12.0}]
 
 
 def _troca_do_ver_produtos(monkeypatch, ofertas_pelo_nome, busca, confirma=(), curte=True):
@@ -1491,6 +1541,9 @@ def _troca_do_ver_produtos(monkeypatch, ofertas_pelo_nome, busca, confirma=(), c
     monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
     monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", encurtar)
     monkeypatch.setattr(robo.ps, "ia_confere_produto", conferir)
+    monkeypatch.setattr(robo.ps, "ia_confere_iguais",
+                        lambda video, nome, anuncios, **kw: (list(range(len(anuncios))), ""))
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"\xff\xd8anuncio" if endereco else None)
     monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: None)
     monkeypatch.setattr(robo.ps, "limpar_aviso_rapido", lambda d: None)
     monkeypatch.setattr(robo.ps, "abrir_link", lambda d, link: pedidos["abertos"].append(link))
@@ -1501,14 +1554,14 @@ def _troca_do_ver_produtos(monkeypatch, ofertas_pelo_nome, busca, confirma=(), c
 
 def test_ver_produtos_troca_cada_produto_pelo_da_loja_que_paga_mais_e_ordena_pelo_valor(monkeypatch):
     # Escolhas do Rafael (28/10, P57 e P58; 05/11, P154 3): cada produto do Ver Produtos ganha a
-    # busca da troca do link de produto (o mesmo item, que paga mais por venda, até 20% mais caro,
+    # troca do link de produto (o mesmo item, o que paga mais por venda na faixa do mais barato, P284 1,
     # conferido pela IA com a foto da página do produto do criador), e o post vai do que paga mais
     # por venda para o que paga menos: o 1º dá a foto da edição.
     termo_a, termo_b = robo.termo_da_busca(PRODUTO_A), robo.termo_da_busca(PRODUTO_B)
     pelo_nome = {PRODUTO_A: _oferta(PRODUTO_A, 0.05, 1, preco=50.0),       # R$ 2,50 por venda
                  PRODUTO_B: _oferta(PRODUTO_B, 0.08, 2, preco=100.0)}      # R$ 8,00; o C sem oferta
     busca = {termo_a: [_oferta(PRODUTO_A + " Envio Rápido", 0.10, 3, preco=55.0),   # R$ 5,50: troca
-                       _oferta(PRODUTO_A + " Atacado", 0.20, 4, preco=90.0)],       # 80% mais caro: não
+                       _oferta(PRODUTO_A + " Atacado", 0.20, 4, preco=90.0)],       # 80% mais caro: fora da faixa
              termo_b: [_oferta(PRODUTO_B + " Kit", 0.05, 5, preco=100.0)]}          # paga menos: não
     pedidos = _troca_do_ver_produtos(monkeypatch, pelo_nome, busca, confirma=("https://s.shopee.com.br/3",))
     fotos = {PRODUTO_A: b"\xff\xd8pagina A", PRODUTO_B: b"\xff\xd8pagina B", PRODUTO_C: b"\xff\xd8pagina C"}
@@ -1529,7 +1582,7 @@ def test_ver_produtos_troca_cada_produto_pelo_da_loja_que_paga_mais_e_ordena_pel
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_TROCA_DO_VER_PRODUTOS,
                                                  "2000-01-01 00:00:00")
     assert [(r[2], r[3]) for r in registro] == [("trocado", "mais 120% por venda"),
-                                                ("mantido - nenhum que pague mais por venda", ""),
+                                                ("mantido - o do link é o que paga mais na faixa", ""),
                                                 ("mantido - a API não achou o produto pelo nome", "")]
 
 
@@ -1602,7 +1655,7 @@ def test_sem_o_preco_do_link_fica_o_do_link(monkeypatch):
     # Sem o preço do produto do link não há com o que comparar: nem busca, nem IA.
     pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Kit", 0.2, 1)], preco=0.0)
     assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
-    assert pedidos == {"busca": [], "ia": [], "capa": []}
+    assert pedidos == {"busca": [], "ia": [], "capa": [], "iguais": []}
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
     assert [r[2] for r in registro] == ["mantido - a API não disse o preço do produto do link"]
 
@@ -1615,7 +1668,8 @@ def test_sem_produto_que_pague_mais_fica_o_do_link(monkeypatch):
     assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
     assert pedidos["ia"] == ["https://s.shopee.com.br/5"]
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
-    assert [r[2] for r in registro] == ["mantido - nenhum que pague mais por venda", "mantido - a IA não confirmou nenhum"]
+    assert [r[2] for r in registro] == ["mantido - o do link é o que paga mais na faixa",
+                                        "mantido - a IA não confirmou nenhum"]
     assert (robo.termo_da_busca("Kit [Oficial] Folhas (10 pares) Prontas ✨ Facial Depilsam Ouro Mel")
             == "Kit Folhas Prontas Facial Depilsam Ouro")
 
@@ -6697,17 +6751,17 @@ def _oferta_da_foto(item, preco, comissao, link=True):
             "productLink": f"https://shopee.com.br/product/9/{item}" if link else ""}
 
 
-def test_candidatos_da_foto_ate_20_por_cento_mais_caros_do_que_paga_mais_para_o_que_paga_menos():
-    # Escolhas do Rafael (P58, P59, P68): o mesmo item de outras lojas, até 20% mais caro que o
-    # do link (R$ 50: até R$ 60), nunca o que já está no rascunho nem o mesmo anúncio duas vezes,
-    # do que paga mais por venda para o que paga menos.
+def test_candidatos_da_foto_ate_25_por_cento_mais_caros_do_que_paga_mais_para_o_que_paga_menos():
+    # Escolhas do Rafael (P59, P68, P284 1): o mesmo item de outras lojas, até 25% mais caro que o
+    # do link (R$ 50: até R$ 62,50; acima disso, nunca cabe na faixa do mais barato), nunca o que já
+    # está no rascunho nem o mesmo anúncio duas vezes, do que paga mais por venda para o que paga menos.
     achados = [({}, _oferta_da_foto(1, 55, 10)),          # R$ 5,50 por venda
                ({}, _oferta_da_foto(2, 45, 20)),          # R$ 9,00: o que paga mais
-               ({}, _oferta_da_foto(3, 61, 30)),          # mais caro que o teto
+               ({}, _oferta_da_foto(3, 62.51, 30)),       # mais caro que o teto
                ({}, _oferta_da_foto(7, 50, 10)),          # o produto do rascunho
                ({}, _oferta_da_foto(2, 45, 20)),          # o mesmo anúncio de novo
                ({}, _oferta_da_foto(4, 40, 5, link=False)),
-               ({}, _oferta_da_foto(5, 60, 12))]          # exatamente no teto: R$ 7,20
+               ({}, _oferta_da_foto(5, 62.5, 12))]        # exatamente no teto: R$ 7,50
     candidatos = robo.candidatos_da_foto({"preco": 50.0, "comissao": 10.0}, "7", achados)
     assert [c["item"] for c in candidatos] == ["2", "5", "1"]
     assert candidatos[0]["valor"] == pytest.approx(9.0) and candidatos[0]["endereco"].endswith("/9/2")
@@ -6770,20 +6824,20 @@ def test_candidatos_da_foto_contam_por_que_cada_achado_ficou_de_fora():
     # Só números para o checkup: os mais caros (e quantos % acima do post está o mais barato
     # deles), o anúncio do rascunho, o mesmo anúncio de outro cartão e o que veio sem dados.
     achados = [({}, _oferta_da_foto(7, 50, 10)), ({}, _oferta_da_foto(7, 50, 10)),
-               ({}, _oferta_da_foto(3, 61, 30)), ({}, _oferta_da_foto(4, 75, 30)),
+               ({}, _oferta_da_foto(3, 63, 30)), ({}, _oferta_da_foto(4, 75, 30)),
                ({}, _oferta_da_foto(1, 55, 10)), ({}, _oferta_da_foto(1, 55, 10)),
                ({}, _oferta_da_foto(5, 40, 5, link=False))]
     fora = {}
     assert [c["item"] for c in robo.candidatos_da_foto({"preco": 50.0}, "7", achados, fora)] == ["1"]
-    assert fora == {"o do rascunho": 2, "mais caro": 2, "o mais perto": 22, "repetido": 1, "sem dados": 1}
-    assert robo._fora_do_preco(fora) == " (mais caros 2, o mais perto +22%; o do rascunho 2; repetidos 1; sem dados 1)"
+    assert fora == {"o do rascunho": 2, "mais caro": 2, "o mais perto": 26, "repetido": 1, "sem dados": 1}
+    assert robo._fora_do_preco(fora) == " (mais caros 2, o mais perto +26%; o do rascunho 2; repetidos 1; sem dados 1)"
     fora = {}
     assert robo.candidatos_da_foto({"preco": 0}, "7", achados, fora) == [] and fora == {"sem o preço do post": 1}
     assert robo._fora_do_preco(fora) == " (sem o preço do post)" and robo._fora_do_preco({}) == ""
-    # O que passa do teto por pouco nunca aparece como os 20% dele.
+    # O que passa do teto por pouco nunca aparece como os 25% dele.
     fora = {}
-    assert robo.candidatos_da_foto({"preco": 50.0}, "", [({}, _oferta_da_foto(3, 60.01, 10))], fora) == []
-    assert fora == {"mais caro": 1, "o mais perto": 21}
+    assert robo.candidatos_da_foto({"preco": 50.0}, "", [({}, _oferta_da_foto(3, 62.51, 10))], fora) == []
+    assert fora == {"mais caro": 1, "o mais perto": 26}
 
 
 @pytest.fixture
@@ -6855,6 +6909,19 @@ def test_espacos_livres_trazem_os_confirmados_pela_ia_do_que_paga_mais_para_o_qu
     assert mais[0]["foto"] == b"\xff\xd8anuncio"
     assert vistos == ["Produtos a mais (2 de 3): a mesma garrafa"]
     assert _registro_dos_espacos() == ["achados"]
+
+
+def test_espacos_livres_so_com_os_da_faixa_do_mais_barato(busca_pela_foto):
+    # Escolha do Rafael (22/11, P284 1): dos confirmados pela IA, só entram os que custam no máximo 25% a mais
+    # que o mais barato deles e do produto do post: a garrafa de R$ 30 deixa de fora as de R$ 52 e R$ 55.
+    busca_pela_foto["ofertas"]["Garrafa 2"] = _oferta_da_foto(2, 30, 11)
+    busca_pela_foto["iguais"] = [0, 1, 2]
+    original = {"preco": 50.0, "imagem": "https://cf.shopee.com.br/capa"}
+    mais = robo.espacos_livres(None, {"link": LINK, "arquivo": "v.mp4"}, PRINCIPAL, original, [],
+                               robo.time.monotonic() + 600)
+    assert [p["link"] for p in mais] == ["https://s.shopee.com.br/curto2"]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DOS_ESPACOS, "2000-01-01 00:00:00")
+    assert registro[-1][2] == "achados" and "3 confirmados, 2 fora da faixa do mais barato" in registro[-1][3]
 
 
 def test_espacos_livres_marcam_o_mesmo_modelo_em_outra_cor(busca_pela_foto, monkeypatch):
