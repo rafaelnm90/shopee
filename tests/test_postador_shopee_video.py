@@ -1198,6 +1198,22 @@ def test_campo_de_senha_nunca_vai_ao_log():
     assert "[senha]" in linhas and "•" not in linhas and "aluno" not in linhas
 
 
+def test_paginas_do_chrome_so_mostram_as_palavras_de_navegacao_no_log():
+    # O nome dos módulos e das aulas do curso (P288 3) não vai ao log público, nem as palavras que o
+    # log da Shopee mostra (Shopee, Central, Dia); no app da Shopee, elas continuam.
+    tela = """<hierarchy>
+      <node class="android.widget.TextView" package="com.android.chrome"
+            text="Dia 3 | Aula 2 - Shopee: Central da IA" bounds="[0,0][1000,50]" />
+      <node class="android.view.View" package="com.android.chrome" content-desc="Sair" clickable="true"
+            bounds="[0,60][1000,100]" />
+      <node class="android.widget.TextView" package="com.shopee.br" text="Shopee Central" bounds="[0,120][1000,160]" />
+    </hierarchy>"""
+    linhas = ps.descrever(tela)
+    assert linhas[0].endswith('TextView "… # | Aula # - …"')
+    assert linhas[1].endswith('View desc="Sair" [toque]')
+    assert linhas[2].endswith('TextView "Shopee Central"')
+
+
 def test_gravar_no_explorar_guarda_quadros_e_fala_para_o_claude_e_o_log_so_tem_numeros(monkeypatch, tmp_path):
     # P288 3: o servidor grava a tela e o som do celular; a fala e os quadros vão cifrados no caso,
     # e o log diz só os números. Preta ou muda, o player não deixa gravar e o passo falha.

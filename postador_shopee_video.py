@@ -444,11 +444,19 @@ PONTUACAO = ".,:;!?()[]{}\"'«»“”‘’-–—/|+*·•"
 ID_DE_CODIGO = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 
 
-def mascarar(texto):
+# Nas páginas do Chrome (o curso, P288 3), os nomes dos módulos e das aulas são do Rafael e não vão ao
+# log público: lá só ficam as palavras de navegação do site; o resto vira "…".
+PALAVRAS_DO_CHROME = frozenset("""
+entrar sair meu perfil notificações continuar assistindo próximo próxima anterior voltar
+módulo aula aulas assistir concluir concluída concluído
+""".split())
+
+
+def mascarar(texto, palavras=PALAVRAS_DA_TELA):
     """Forma do texto: palavras de botão e símbolos soltos (&, emoji) ficam, números viram # e o resto vira …"""
     partes = []
     for palavra in (texto or "").split():
-        if palavra.strip(PONTUACAO).casefold() in PALAVRAS_DA_TELA or not any(c.isalnum() for c in palavra):
+        if palavra.strip(PONTUACAO).casefold() in palavras or not any(c.isalnum() for c in palavra):
             partes.append(palavra)
         elif NUMERO.fullmatch(palavra):
             partes.append(re.sub(r"\d+", "#", palavra))
@@ -497,15 +505,16 @@ def descrever(xml):
     for el in elementos(xml)[:MAXIMO_LINHAS]:
         x1, y1, x2, y2 = el["caixa"]
         partes = [f"({(x1 + x2) // 2},{(y1 + y2) // 2})", el["classe"] or "?"]
+        palavras = PALAVRAS_DO_CHROME if el["pacote"] == cursos_robo.PACOTE_DO_CHROME else PALAVRAS_DA_TELA
         if el["id"]:
             partes.append(f"id={el['id'] if ID_DE_CODIGO.fullmatch(el['id']) else '…'}")
         if el.get("senha"):
             # O campo de senha (o login do curso, P288 3): nem os pontinhos, que dariam o tamanho dela.
             partes.append("[senha]")
         elif el["texto"]:
-            partes.append(f'"{mascarar(el["texto"])}"')
+            partes.append(f'"{mascarar(el["texto"], palavras)}"')
         if el["descricao"]:
-            partes.append(f'desc="{mascarar(el["descricao"])}"')
+            partes.append(f'desc="{mascarar(el["descricao"], palavras)}"')
         if el["clicavel"]:
             partes.append("[toque]")
         if el["marcado"]:
