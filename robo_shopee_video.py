@@ -9538,18 +9538,45 @@ def _esperar_o_envio(d, texto):
         esperado += PASSO_DA_ESPERA_DO_ENVIO
 
 
+# Logo depois de o campo abrir, o texto escrito às vezes não fica inteiro (Motorola, 22/11/2026, 16:39: no campo de
+# comentar do feed ficou só a 1ª letra, com o teclado aberto). O robô escreve de novo uma vez antes de desistir; o
+# registro diz quando só a 2ª deu certo, e o motivo da parada, quantas letras ficaram no campo.
+ESCRITAS_NO_CAMPO = 2
+
+
+ESCRITO_NA_2A_VEZ = "texto escrito na 2ª vez"
+
+
+def _escrever_e_conferir(d, texto):
+    """
+    Escreve no campo em foco e confere que ele mostra exatamente o texto; sem isso, escreve de novo, até
+    ESCRITAS_NO_CAMPO vezes. Devolve (ficou, letras, na_1a): se o texto ficou, quantas letras o campo mostra e,
+    quando só a 2ª escrita deu certo, o detalhe para o registro (as letras que a 1ª deixou); senão, "".
+    """
+    primeira = None
+    for _ in range(ESCRITAS_NO_CAMPO):
+        ps.escrever(d, texto)
+        pausa(2)
+        campo = d(focused=True)
+        escrito = (campo.get_text() if campo.exists else "") or ""
+        if ps._normal(escrito) == ps._normal(texto):
+            return True, len(escrito), "" if primeira is None else f"{primeira} de {len(texto)} letras na 1ª"
+        if primeira is None:
+            primeira = len(escrito)
+    return False, len(escrito), ""
+
+
 def _escrever_e_enviar(d, texto):
     """
-    Escreve no campo em foco, confere o que ficou, toca no enviar ao lado e espera o envio
-    terminar (_esperar_o_envio). Para antes de enviar se o campo não mostra exatamente o
-    texto. Devolve se o envio terminou.
+    Escreve no campo em foco, confere o que ficou (_escrever_e_conferir), toca no enviar ao
+    lado e espera o envio terminar (_esperar_o_envio). Para antes de enviar se o campo não
+    mostra exatamente o texto. Devolve se o envio terminou.
     """
-    ps.escrever(d, texto)
-    pausa(2)
-    campo = d(focused=True)
-    escrito = campo.get_text() if campo.exists else ""
-    if ps._normal(escrito) != ps._normal(texto):
-        raise Parada("o texto não ficou no campo de escrever")
+    ficou, letras, na_1a = _escrever_e_conferir(d, texto)
+    if not ficou:
+        raise Parada(f"o texto não ficou no campo de escrever ({letras} de {len(texto)} letras)")
+    if na_1a:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_ENVIO, ESCRITO_NA_2A_VEZ, na_1a, ok=None)
     xml = tela(d)
     campo_na_tela = interacoes.campo_de_escrever(xml)
     enviar = interacoes.botao_de_enviar(xml, campo_na_tela) if campo_na_tela else None
@@ -10073,12 +10100,11 @@ def _mandar_na_live(d, live, marca, texto, anteriores, agora=None):
     tocar(d, f"@{interacoes.ID_DO_DIGA_ALGUMA_COISA}", 3)
     if not tem(tela(d), f"@{interacoes.ID_DO_CAMPO_DA_LIVE}"):
         raise Parada("o campo de escrever da live não abriu")
-    ps.escrever(d, texto)
-    pausa(2)
-    campo = d(focused=True)
-    escrito = campo.get_text() if campo.exists else ""
-    if ps._normal(escrito) != ps._normal(texto):
-        raise Parada("o texto não ficou no campo da live")
+    ficou, letras, na_1a = _escrever_e_conferir(d, texto)
+    if not ficou:
+        raise Parada(f"o texto não ficou no campo da live ({letras} de {len(texto)} letras)")
+    if na_1a:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_LIVE, ESCRITO_NA_2A_VEZ, na_1a, ok=None)
     tocar(d, f"@{interacoes.ID_DO_ENVIAR_DA_LIVE}", 3)
     _fechar_teclado(d)
     if tem(tela(d), f"@{interacoes.ID_DO_CAMPO_DA_LIVE}"):
