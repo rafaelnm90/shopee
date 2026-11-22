@@ -2681,7 +2681,8 @@ def separar_passos(texto):
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "arrastar", "aumentar", "esperar",
                   "escrever", "pagina-inicial",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
-                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela", "gravar", "entrar"}
+                  "postar", "print", "copiado", "legenda", "colar", "caso", "tela", "gravar", "entrar", "volume",
+                  "midia"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -2800,6 +2801,10 @@ def fazer_passo(d, nome, argumento):
         return dois_dedos(d, x, y, de, ate)
     if nome == "gravar":
         return gravar_no_explorar(d, argumento)
+    if nome == "volume":
+        return cursos_robo.volume_no_explorar(d, argumento)
+    if nome == "midia":
+        return cursos_robo.midia_no_explorar(d, argumento)
     if nome == "caso":
         pasta = casos_robo.guardar(d, "explorar", "tela", argumento or "tela do explorar", passo="explorar")
         return (True, "tela guardada para o Claude (casos_robo.yml exportar)") if pasta else (

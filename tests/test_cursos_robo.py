@@ -330,3 +330,92 @@ def test_campo_em_foco_diz_se_o_cursor_esta_no_campo_de_senha():
     celular.foco = "senha"
     assert cursos_robo.campo_em_foco(celular.dump_hierarchy()) is True
     assert cursos_robo.campo_em_foco("<quebrado") is None
+
+
+class CelularDoVolume:
+    """O celular de mentira que responde pelo adb ao volume de mídia e à sessão de mídia do Chrome."""
+
+    def __init__(self, volume=2, maximo=15, midia="", muda=True, responde=True):
+        self.volume, self.maximo, self.midia, self.muda, self.responde = volume, maximo, midia, muda, responde
+        self.comandos = []
+
+    def shell(self, partes):
+        import types
+        self.comandos.append(partes)
+        saida = ""
+        if partes[:3] == ["cmd", "media_session", "volume"] and self.responde:
+            if "--set" in partes:
+                if self.muda:
+                    self.volume = int(partes[-1])
+                saida = f"[V] will set volume to index={partes[-1]}\n"
+            else:
+                saida = ("[V] will get volume\n[V] Connecting to AudioService\n"
+                         f"[V] volume is {self.volume} in range [0..{self.maximo}]\n")
+        elif partes[:2] == ["dumpsys", "media_session"]:
+            saida = self.midia
+        return types.SimpleNamespace(output=saida, exit_code=0)
+
+
+# A sessão de mídia de outro app e duas do Chrome (uma aba pausada e a aula tocando), no formato do Android.
+DUMP_DA_MIDIA = """MEDIA SESSION SERVICE (dumpsys media_session)
+Sessions Stack - have 3 sessions:
+  Musica com.exemplo.musica/sessao (userId=0)
+    ownerPid=111, ownerUid=10100, userId=0
+    package=com.exemplo.musica
+    active=true
+    state=PlaybackState {state=3, position=99000, buffered position=0, speed=1.0, updated=1, actions=0, error=null}
+    metadata: size=3, description=Outra musica, Outro, null
+  Chrome com.android.chrome/MediaSession (userId=0)
+    package=com.android.chrome
+    active=false
+    state=PlaybackState {state=2, position=5000, buffered position=0, speed=0.0, updated=2, actions=0, error=null}
+    metadata: size=3, description=Aula antiga do curso, Curso, null
+  Chrome com.android.chrome/MediaSession (userId=0)
+    package=com.android.chrome
+    active=true
+    state=PlaybackState {state=PLAYING(3), position=40311, buffered position=0, speed=1.0, updated=3, error=null}
+    metadata: size=3, description=Aula de agora do curso, Curso, null
+"""
+
+
+def test_volume_de_midia_lido_e_mudado_pelo_adb_sem_tocar_na_tela():
+    # P291 1: o som chega ao servidor no volume de mídia do celular; o robô o muda pelo adb, sem toque.
+    celular = CelularDoVolume(volume=2)
+    assert cursos_robo.volume_de_midia(celular) == (2, 15)
+    assert cursos_robo.mudar_o_volume(celular, 8) == (8, 15)
+    assert ["cmd", "media_session", "volume", "--stream", "3", "--set", "8"] in celular.comandos
+    assert all(partes[0] in ("cmd",) for partes in celular.comandos)
+    assert cursos_robo.volume_no_explorar(celular, "") == (True, "volume de mídia: 8 de 15")
+    assert cursos_robo.volume_no_explorar(celular, "4") == (True, "volume de mídia: de 8 para 4 de 15")
+    assert cursos_robo.volume_no_explorar(celular, "16") == (False, "volume vai de 0 a 15")
+    assert cursos_robo.volume_no_explorar(celular, "alto") == (False, "volume pede o número (ex.: volume:8)")
+    assert celular.volume == 4
+    assert cursos_robo.volume_no_explorar(CelularDoVolume(muda=False), "8") == (
+        False, "o volume de mídia não mudou (estava em 2 de 15)")
+    assert cursos_robo.volume_no_explorar(CelularDoVolume(responde=False), "") == (
+        False, "o Android não disse o volume de mídia")
+
+
+def test_estado_do_video_no_chrome_sem_o_titulo_da_aula():
+    # Com duas abas do Chrome, vale a que está tocando; o outro app não conta, e o título da aula não sai.
+    estado = cursos_robo.estado_da_midia(DUMP_DA_MIDIA)
+    assert estado == {"estado": "tocando", "posicao": 40}
+    assert "Aula" not in str(estado)
+    so_pausada = DUMP_DA_MIDIA.replace("state=PLAYING(3), position=40311", "state=2, position=7000")
+    assert cursos_robo.estado_da_midia(so_pausada) == {"estado": "pausado", "posicao": 5}
+    assert cursos_robo.estado_da_midia(DUMP_DA_MIDIA.replace("com.android.chrome", "com.outro.app")) is None
+    assert cursos_robo.estado_da_midia("") is None
+
+
+def test_midia_no_explorar_pausa_e_toca_pela_tecla_de_midia():
+    celular = CelularDoVolume(midia=DUMP_DA_MIDIA)
+    assert cursos_robo.midia_no_explorar(celular, "", pausa=lambda s: None) == (
+        True, "vídeo do Chrome: tocando, em 40 s")
+    assert not any(partes[0] == "input" for partes in celular.comandos)
+    assert cursos_robo.midia_no_explorar(celular, "pausar", pausa=lambda s: None)[0] is True
+    assert ["input", "keyevent", "KEYCODE_MEDIA_PAUSE"] in celular.comandos
+    assert cursos_robo.midia_no_explorar(celular, "Tocar", pausa=lambda s: None)[0] is True
+    assert ["input", "keyevent", "KEYCODE_MEDIA_PLAY"] in celular.comandos
+    assert cursos_robo.midia_no_explorar(celular, "pular", pausa=lambda s: None) == (
+        False, "midia lê o vídeo do Chrome (midia), pausa (midia:pausar) ou toca (midia:tocar)")
+    assert cursos_robo.midia_no_explorar(CelularDoVolume(), "", pausa=lambda s: None) == (True, "sem vídeo no Chrome")

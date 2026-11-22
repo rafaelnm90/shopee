@@ -70,6 +70,14 @@ ABA_DO_ROBO = "cursos_robo"
 ESPERA_DO_LOGIN = 20
 PASSO_DA_ESPERA = 2
 
+# O som chega ao servidor no volume de mídia do celular (P291 1): o robô o lê e o muda pelo adb, sem tocar
+# na tela nem abrir o painel de volume, e o vídeo da aula é lido, pausado e tocado pela sessão de mídia do
+# Chrome (o estado e o tempo; o título da aula, que a sessão também tem, nunca sai daqui).
+FLUXO_DE_MIDIA = 3
+ESTADOS_DA_MIDIA = {0: "sem vídeo", 1: "parado", 2: "pausado", 3: "tocando", 6: "carregando", 7: "com erro"}
+TOCANDO = 3
+TECLAS_DA_MIDIA = {"pausar": "KEYCODE_MEDIA_PAUSE", "tocar": "KEYCODE_MEDIA_PLAY"}
+
 # O que o scrcpy escreve no erro vira um motivo fixo: a saída dele traz o endereço do celular.
 MOTIVOS_DO_GRAVADOR = (
     (re.compile(r"could not find|not found|offline|unauthorized|no devices", re.I),
@@ -262,6 +270,94 @@ def linha_dos_numeros(medidos, folhas=None, palavras=None):
     if palavras is not None:
         partes.append(f"{palavras} palavra(s) na fala")
     return ", ".join(partes)
+
+
+def _saida(d, partes):
+    """O que um comando no celular escreveu; "" quando ele não respondeu."""
+    try:
+        return getattr(d.shell(partes), "output", "") or ""
+    except Exception:
+        return ""
+
+
+def ler_o_volume(texto):
+    """(atual, máximo) do volume na resposta do Android ("volume is 4 in range [0..15]"); None sem ela."""
+    achado = re.search(r"volume is (\d+) in range \[(\d+)\.\.(\d+)\]", texto or "")
+    return (int(achado.group(1)), int(achado.group(3))) if achado else None
+
+
+def volume_de_midia(d):
+    """(atual, máximo) do volume de mídia do celular, pelo adb; None quando o Android não disse."""
+    return ler_o_volume(_saida(d, ["cmd", "media_session", "volume", "--stream", str(FLUXO_DE_MIDIA), "--get"]))
+
+
+def mudar_o_volume(d, indice):
+    """Põe o volume de mídia nesse ponto, sem o painel de volume na tela, e devolve o que ficou (atual, máximo)."""
+    _saida(d, ["cmd", "media_session", "volume", "--stream", str(FLUXO_DE_MIDIA), "--set", str(int(indice))])
+    return volume_de_midia(d)
+
+
+def estado_da_midia(texto, pacote=PACOTE_DO_CHROME):
+    """
+    Na saída do dumpsys media_session, a sessão de mídia do Chrome: {"estado", "posicao"} (a posição em
+    segundos, a da última vez que o Chrome a anotou); com mais de uma, a que está tocando. None sem
+    sessão do Chrome. Só o estado e o tempo: o título da aula, que a sessão também tem, nunca sai daqui.
+    """
+    sessoes = []
+    for linha in (texto or "").splitlines():
+        achado = re.match(r"\s*package=(\S+)", linha)
+        if achado:
+            sessoes.append({"pacote": achado.group(1)})
+            continue
+        achado = re.search(r"state=PlaybackState \{state=(?:[A-Za-z_]+\()?(\d+)\)?, position=(-?\d+)", linha)
+        if achado and sessoes and "codigo" not in sessoes[-1]:
+            sessoes[-1].update(codigo=int(achado.group(1)), posicao=max(0, int(achado.group(2))) // 1000)
+    do_pacote = [s for s in sessoes if s["pacote"] == pacote and "codigo" in s]
+    if not do_pacote:
+        return None
+    escolhida = next((s for s in do_pacote if s["codigo"] == TOCANDO), do_pacote[0])
+    return {"estado": ESTADOS_DA_MIDIA.get(escolhida["codigo"], "outro"), "posicao": escolhida["posicao"]}
+
+
+def midia_do_chrome(d):
+    """O estado do vídeo no Chrome do celular agora (estado_da_midia); None sem vídeo nele."""
+    return estado_da_midia(_saida(d, ["dumpsys", "media_session"]))
+
+
+def volume_no_explorar(d, argumento):
+    """
+    O passo volume do explorar (P291 1): sem número, lê o volume de mídia; com um, muda para ele e
+    confere. O log diz só os números.
+    """
+    antes = volume_de_midia(d)
+    if antes is None:
+        return False, "o Android não disse o volume de mídia"
+    if not argumento:
+        return True, f"volume de mídia: {antes[0]} de {antes[1]}"
+    try:
+        indice = int(argumento)
+    except ValueError:
+        return False, "volume pede o número (ex.: volume:8)"
+    if not 0 <= indice <= antes[1]:
+        return False, f"volume vai de 0 a {antes[1]}"
+    depois = mudar_o_volume(d, indice)
+    if not depois or depois[0] != indice:
+        return False, f"o volume de mídia não mudou (estava em {antes[0]} de {antes[1]})"
+    return True, f"volume de mídia: de {antes[0]} para {depois[0]} de {depois[1]}"
+
+
+def midia_no_explorar(d, argumento, pausa=time.sleep):
+    """O passo midia do explorar: o estado do vídeo no Chrome e, com pausar ou tocar, a tecla de mídia antes."""
+    if argumento:
+        tecla = TECLAS_DA_MIDIA.get(argumento.lower())
+        if not tecla:
+            return False, "midia lê o vídeo do Chrome (midia), pausa (midia:pausar) ou toca (midia:tocar)"
+        _saida(d, ["input", "keyevent", tecla])
+        pausa(2)
+    midia = midia_do_chrome(d)
+    if not midia:
+        return True, "sem vídeo no Chrome"
+    return True, f"vídeo do Chrome: {midia['estado']}, em {midia['posicao']} s"
 
 
 def acesso_do_curso():

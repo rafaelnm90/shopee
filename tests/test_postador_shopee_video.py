@@ -1265,6 +1265,20 @@ def test_gravar_no_explorar_guarda_quadros_e_fala_para_o_claude_e_o_log_so_tem_n
     assert ps.fazer_passo(celular, "gravar", "20") == (False, "a gravação não saiu")
 
 
+def test_explorar_le_e_muda_o_volume_e_o_video_do_chrome(monkeypatch):
+    # P291 1: no mapeamento do curso, o volume de mídia e o vídeo do Chrome, pelo adb, sem toque na tela.
+    chamados = []
+    monkeypatch.setattr(ps.cursos_robo, "volume_no_explorar",
+                        lambda d, argumento: chamados.append(("volume", argumento)) or (True, "volume"))
+    monkeypatch.setattr(ps.cursos_robo, "midia_no_explorar",
+                        lambda d, argumento: chamados.append(("midia", argumento)) or (True, "midia"))
+    assert ps.separar_passos("volume; volume:8; midia:pausar") == [("volume", ""), ("volume", "8"),
+                                                                   ("midia", "pausar")]
+    assert ps.fazer_passo(object(), "volume", "8") == (True, "volume")
+    assert ps.fazer_passo(object(), "midia", "pausar") == (True, "midia")
+    assert chamados == [("volume", "8"), ("midia", "pausar")]
+
+
 def test_copiado_diz_so_se_e_link_da_shopee_e_o_tamanho():
     class Celular:
         clipboard = "Olha este vídeo: https://sv.shopee.com.br/share-video/abc"
