@@ -10701,11 +10701,12 @@ class JanelaDoProduto:
     SELECIONAR = (718, 2159, 1049, 2210)
     CRIAR_CUPOM = (40, 2200, 1040, 2300)
 
-    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False, recusa_emoji=False):
+    def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False, recusa_emoji=False, aceitos=()):
         self.tela, self.campo, self.teclado, self.foco = "janela", "", False, False
         self.escreve, self.cupom_vazio, self.voltar_fecha = escreve, cupom_vazio, voltar_fecha
-        self.recusa_emoji = recusa_emoji
-        self.toques, self.teclas = [], []
+        # recusa_emoji: o app recusa os emojis, menos os de aceitos (em 22/11, 🪑 e 🪞 passaram e ✨ não).
+        self.recusa_emoji, self.aceitos = recusa_emoji, set(aceitos)
+        self.toques, self.teclas, self.escritos = [], [], []
 
     def dump_hierarchy(self):
         if self.tela == "cupons":
@@ -10724,7 +10725,8 @@ class JanelaDoProduto:
             if 0 < len(self.campo) < 10:
                 nos.append(_no_da_janela(f"{10 - len(self.campo)} caracteres a mais necessários",
                                          (64, 1980, 600, 2010)))
-            if self.recusa_emoji and any(unicodedata.category(c) == "So" for c in self.campo):
+            if self.recusa_emoji and any(unicodedata.category(c) == "So" and c not in self.aceitos
+                                         for c in self.campo):
                 nos.append(_no_da_janela("Emoji não permitido", (107, 1980, 392, 2023)))
         else:
             nos = [_no_da_janela("Adicionar Produto", (100, 150, 450, 210))]
@@ -10751,6 +10753,7 @@ class JanelaDoProduto:
             exists = janela.foco
 
             def set_text(self, texto):
+                janela.escritos.append(texto)
                 if janela.escreve or not texto:
                     janela.campo = texto
         return Campo()
@@ -10784,7 +10787,7 @@ NOME_DA_IA = "Caneca Geek Colecionável para Presente ☕"
 def test_nome_da_ia_fica_no_campo_do_produto():
     # Vídeo do Rafael das 15:26 (21/11): o nome do produto trocado na janela do Adicionar, antes do Feito.
     janela = JanelaDoProduto()
-    assert robo._trocar_o_nome(janela, NOME_DA_IA) is True
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == NOME_DA_IA
     assert janela.campo == NOME_DA_IA and janela.tela == "janela" and not janela.teclado
     # O teclado fecha pelo voltar (ele cobre metade da janela), uma vez só: a janela continua aberta.
     assert janela.teclas == ["back"]
@@ -10794,7 +10797,7 @@ def test_nome_da_ia_fica_no_campo_do_produto():
 def test_nome_da_ia_que_nao_fica_deixa_o_do_anuncio():
     # O campo que não aceita o texto fica vazio: vazio, vai o nome do anúncio, como antes, e o produto segue.
     janela = JanelaDoProduto(escreve=False)
-    assert robo._trocar_o_nome(janela, NOME_DA_IA) is False
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == ""
     assert janela.campo == "" and janela.tela == "janela"
     assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: o campo vazio")]
 
@@ -10802,22 +10805,53 @@ def test_nome_da_ia_que_nao_fica_deixa_o_do_anuncio():
 def test_nome_curto_volta_ao_do_anuncio():
     # Com menos de 10 letras, o app avisa "N caracteres a mais necessários": o robô apaga e segue com o do anúncio.
     janela = JanelaDoProduto()
-    assert robo._trocar_o_nome(janela, "Caneca") is False
+    assert robo._trocar_o_nome(janela, "Caneca") == ""
     assert janela.campo == ""
     assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: com o aviso de nome curto")]
 
 
-def test_nome_com_emoji_que_o_app_recusa_volta_ao_do_anuncio():
-    # 22/11, às 10:05 e às 10:25: a janela recusou o nome da IA com o emoji do fim ("Emoji não permitido" embaixo do
-    # campo), o Feito não fechou a janela, e o rascunho parou. O aviso conta como o nome que não ficou: o robô apaga e
-    # segue com o do anúncio, como a regra da P265 1 manda (DECISOES.md, Shopee Vídeo).
+def test_nome_com_emoji_recusado_vai_com_outro_emoji_e_depois_sem_emoji(monkeypatch):
+    # 22/11, às 10:05 e às 10:25: a janela recusou o nome da IA com o emoji do fim ("Emoji não permitido"), e o
+    # Feito não fechou a janela. Escolha do Rafael (P280 2): recusado, vai o nome com outro emoji, sorteado entre
+    # os de reserva, e, recusado também, sem emoji; o rascunho segue. O que o app recusa fica anotado (só os
+    # emojis).
+    monkeypatch.setattr(robo, "EMOJIS_DE_RESERVA", ("🪄",))
     janela = JanelaDoProduto(recusa_emoji=True)
-    assert robo._trocar_o_nome(janela, NOME_DA_IA) is False
-    assert janela.campo == "" and janela.tela == "janela"
-    assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: com o aviso de emoji")]
-    # O nome sem emoji a mesma janela aceita.
-    janela = JanelaDoProduto(recusa_emoji=True)
-    assert robo._trocar_o_nome(janela, "Caneca Geek Colecionável para Presente") is True
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == "Caneca Geek Colecionável para Presente"
+    assert janela.escritos == [NOME_DA_IA, "Caneca Geek Colecionável para Presente 🪄",
+                               "Caneca Geek Colecionável para Presente"]
+    assert janela.campo == "Caneca Geek Colecionável para Presente" and janela.tela == "janela"
+    sem_emoji = "Caneca Geek Colecionável para Presente"
+    assert _registro_do_nome() == [("nome da IA no produto",
+                                    f"{robo.assistente.tamanho_no_app(sem_emoji)} letras; sem emoji")]
+    assert robo.emojis_do_nome() == {"aceitos": [], "recusados": ["☕", "🪄"]}
+
+
+def test_nome_com_emoji_recusado_vai_com_o_de_reserva_que_o_app_aceita(monkeypatch):
+    # O app aceita só alguns emojis (🪑 e 🪞 passaram em 22/11): o de reserva aceito fica no nome, anotado como aceito.
+    monkeypatch.setattr(robo, "EMOJIS_DE_RESERVA", ("🪄",))
+    janela = JanelaDoProduto(recusa_emoji=True, aceitos={"🪄"})
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == "Caneca Geek Colecionável para Presente 🪄"
+    com_outro = "Caneca Geek Colecionável para Presente 🪄"
+    assert _registro_do_nome() == [("nome da IA no produto",
+                                    f"{robo.assistente.tamanho_no_app(com_outro)} letras; com outro emoji")]
+    assert robo.emojis_do_nome() == {"aceitos": ["🪄"], "recusados": ["☕"]}
+    # O emoji que o app já recusou não é tentado de novo: vai direto o de reserva.
+    janela = JanelaDoProduto(recusa_emoji=True, aceitos={"🪄"})
+    assert robo._trocar_o_nome(janela, "Garrafa Térmica de Inox ☕") == "Garrafa Térmica de Inox 🪄"
+    assert janela.escritos == ["Garrafa Térmica de Inox 🪄"]
+    # Sem emoji de reserva livre, o nome vai sem emoji; o nome sem emoji a janela aceita como está.
+    robo.anotar_o_emoji("🪄", False)
+    assert robo.nomes_para_tentar("Garrafa Térmica de Inox ☕") == [("Garrafa Térmica de Inox", "")]
+    assert robo.nomes_para_tentar("Garrafa Térmica de Inox") == [("Garrafa Térmica de Inox", "")]
+
+
+def test_separar_o_emoji_do_nome_da_ia():
+    assert robo.separar_o_emoji("Caneca Geek ☕") == ("Caneca Geek", "☕")
+    assert robo.separar_o_emoji("Bolsa de Couro ❤️") == ("Bolsa de Couro", "❤️")
+    assert robo.separar_o_emoji("Kit 🧴 Banho ✨") == ("Kit Banho", "✨")
+    assert robo.separar_o_emoji("Fone Pro™ Sem Fio") == ("Fone Pro™ Sem Fio", "")
+    assert robo.separar_o_emoji("Família Feliz 👨‍👩‍👧") == ("Família Feliz", "👨‍👩‍👧")
 
 
 def test_janela_que_fecha_no_nome_para_o_rascunho():
@@ -10866,7 +10900,8 @@ def test_anexar_leva_o_nome_da_ia_e_guarda_o_do_anuncio(monkeypatch):
     monkeypatch.setattr(robo, "primeiro_na_tela_final", lambda d, vez=1, nome="": True)
     trocados, cupons = [], []
     monkeypatch.setattr(robo, "_trocar_o_nome",
-                        lambda d, novo, anuncio="": trocados.append(novo) or novo != "Nome que não fica")
+                        lambda d, novo, anuncio="": trocados.append(novo)
+                        or ("" if novo == "Nome que não fica" else novo))
     monkeypatch.setattr(robo, "_olhar_os_cupons", lambda d, video: cupons.append(video["link"]))
 
     def adicionar(d, video, anexados=None, **outros):
