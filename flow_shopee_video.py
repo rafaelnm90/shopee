@@ -1463,11 +1463,29 @@ def esperar_o_video(d, ja_gerado=False, guardar_telas=True, espera=None):
         time.sleep(PAUSA_DA_LEITURA)
 
 
-def _mais_novo(xml):
-    """O quadro mais novo do projeto (o 1º da grade: o mais alto e, empatado, o da esquerda); None sem quadro."""
+def _quadros_do_projeto(xml):
+    """Os quadros do projeto na tela, na ordem da grade: o mais alto primeiro e, empatados, o da esquerda."""
     quadros = [el for el in ps.elementos(xml)
                if el["pacote"] == PACOTE and el["clicavel"] and ITEM_DO_PROJETO.search(el["descricao"] or "")]
-    return min(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0])) if quadros else None
+    return sorted(quadros, key=lambda el: (el["caixa"][1], el["caixa"][0]))
+
+
+def _mais_novo(xml):
+    """O quadro mais novo do projeto (o 1º da grade: o mais alto e, empatado, o da esquerda); None sem quadro."""
+    quadros = _quadros_do_projeto(xml)
+    return quadros[0] if quadros else None
+
+
+# Quantos quadros do alto do projeto a conferência da imagem nova compara. O Flow dá o mesmo nome às imagens do mesmo
+# pedido: a 2ª imagem do personagem, refeita depois da conferência da IA, ficava no alto com o nome da 1ª, e o robô,
+# que olhava só o 1º quadro, a tomava pela de antes e parava (a amostra nº 10, em 21/11). A lista dos quadros do alto
+# muda com a imagem nova, mesmo de nome igual.
+QUADROS_DA_CONFERENCIA = 4
+
+
+def descricoes_do_alto(xml, quantos=QUADROS_DA_CONFERENCIA):
+    """As descrições dos quadros mais novos do projeto, na ordem da grade (o mais novo primeiro)."""
+    return [el["descricao"] for el in _quadros_do_projeto(xml)[:quantos]]
 
 
 def quadro_mais_novo(xml):
@@ -1477,12 +1495,6 @@ def quadro_mais_novo(xml):
         return None
     x1, y1, x2, y2 = quadro["caixa"]
     return (x1 + x2) // 2, (y1 + y2) // 2
-
-
-def descricao_do_mais_novo(xml):
-    """A descrição do quadro mais novo do projeto (o nome que o Flow deu e os itens: "…, 1 item"); "" sem quadro."""
-    quadro = _mais_novo(xml)
-    return quadro["descricao"] if quadro else ""
 
 
 def titulo_do_video(xml):
@@ -2922,17 +2934,20 @@ def titulo_da_imagem(xml):
     return None
 
 
-def abrir_a_imagem_nova(d, antes=""):
+IMAGEM_NAO_FEITA = "baixar a imagem: o alto do projeto continua como antes do Gerar; a imagem não foi feita"
+
+
+def abrir_a_imagem_nova(d, antes=()):
     """
     No projeto: o quadro mais novo (a imagem que acabou de ficar pronta), conferindo no título que é uma imagem.
-    antes: a descrição do mais novo antes do Gerar; com ela ainda no alto, o Flow não fez a imagem, e o robô não
-    abre a de antes (ela iria ao Rafael como a foto de outro personagem).
+    antes: as descrições dos quadros do alto antes do Gerar (descricoes_do_alto); com o alto igual, o Flow não fez a
+    imagem, e o robô não abre a de antes (ela iria ao Rafael como a foto de outro personagem).
     """
     ponto = ponto_parado(d, quadro_mais_novo, "imagem nova")
     if not ponto:
         raise Parada("baixar a imagem: a imagem nova não apareceu no projeto")
-    if antes and descricao_do_mais_novo(_tela(d)) == antes:
-        raise Parada("baixar a imagem: o mais novo do projeto ainda é o de antes do Gerar; a imagem não foi feita")
+    if antes and descricoes_do_alto(_tela(d)) == list(antes):
+        raise Parada(IMAGEM_NAO_FEITA)
     d.click(*ponto)
     if not esperar(d, lambda x: titulo_da_imagem(x) is not None):
         raise Parada("baixar a imagem: o mais novo do projeto não abriu como uma imagem do modelo da imagem")
@@ -3006,7 +3021,7 @@ def gerar_a_imagem(d, prompt, local, com_foto=False):
     metadados; no fim, a imagem fecha e o robô volta ao projeto. com_foto: com a foto mais nova da galeria de
     referência. Parada com o passo que parou; a imagem que não fica pronta em ESPERA_DA_IMAGEM também.
     """
-    antes = descricao_do_mais_novo(_tela(d))
+    antes = descricoes_do_alto(_tela(d))
     xml = montar_o_pedido_da_imagem(d, prompt, com_foto)
     falta = pronto_para_gerar_a_imagem(xml, prompt, 1 if com_foto else 0)
     if falta:
@@ -3635,15 +3650,17 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False, pr
     return escrito
 
 
-def _sem_a_imagem(motivo, chave="", conferencia=None, guardar_no=None, ler=None, quem="Vídeo de IA"):
+def _sem_a_imagem(motivo, chave="", conferencia=None, guardar_no=None, ler=None, quem="Vídeo de IA", pela_foto=True):
     """
     A imagem do personagem não vale desta vez: o vídeo sai pela foto do anúncio, como antes (P253 1), com o porquê no
     andamento (no log, só o texto fixo do código). guardar_no e ler: onde fica o andamento (o do vídeo do dia; na
-    amostra, o dela). Devolve o andamento.
+    amostra, o dela). pela_foto=False: quem chama não faz o vídeo sem a imagem (a amostra com personagem, P270 1), e o
+    log não diz que ele sai pela foto. Devolve o andamento.
     """
     (guardar_no or guardar_producao)(imagem={"estado": "sem", "motivo": motivo, "personagem": chave, "em": agora(),
                                              **({"conferencia": conferencia} if conferencia else {})})
-    print(f"{quem}: sem a imagem do personagem ({motivo}); o vídeo sai pela foto do anúncio")
+    depois = "; o vídeo sai pela foto do anúncio" if pela_foto else ""
+    print(f"{quem}: sem a imagem do personagem ({motivo}){depois}")
     return (ler or producao)()
 
 
@@ -3664,20 +3681,21 @@ def imagem_da_amostra(d, atual):
     A imagem do personagem com o produto da amostra da propaganda de TV com um personagem (P270 1), como a do vídeo
     do dia (imagem_da_producao), com o andamento na amostra. Devolve a amostra.
     """
-    return _imagem_do_personagem(d, atual, marcar_amostra, amostra_guardada, "amostra", "Amostra")
+    return _imagem_do_personagem(d, atual, marcar_amostra, amostra_guardada, "amostra", "Amostra", pela_foto=False)
 
 
-def _imagem_do_personagem(d, atual, guardar_no, ler, prefixo, quem):
+def _imagem_do_personagem(d, atual, guardar_no, ler, prefixo, quem, pela_foto=True):
     """
     O caminho da imagem do personagem com o produto, igual no vídeo do dia e na amostra (imagem_da_producao e
     imagem_da_amostra): guardar_no e ler são o andamento de cada um, prefixo o começo dos arquivos e quem o rótulo do
-    log. Na propaganda de TV (P270 1), a imagem é o quadro de um comercial, e o pedido pela imagem, o da propaganda.
+    log; pela_foto=False quando, sem a imagem, nada é gerado (a amostra). Na propaganda de TV (P270 1), a imagem é o
+    quadro de um comercial, e o pedido pela imagem, o da propaganda.
     """
     formato = atual.get("formato")
     propaganda = formato == ESTILO_DA_PROPAGANDA
 
     def sem(motivo, chave="", conferencia=None):
-        return _sem_a_imagem(motivo, chave, conferencia, guardar_no, ler, quem)
+        return _sem_a_imagem(motivo, chave, conferencia, guardar_no, ler, quem, pela_foto)
     aprovadas = fotos_aprovadas()
     elenco = elenco_do_formato(formato, aprovadas)
     if not elenco:
