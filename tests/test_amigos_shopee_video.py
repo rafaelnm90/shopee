@@ -1,6 +1,6 @@
 """
-Grupo dos amigos da Shopee Vídeo (P271 2 a P279 1): o /amigos (e o menu só do Rafael), quem pode pedir, o Liberar
-Amigos ✅, a fila, o painel e a menção.
+Grupo dos amigos da Shopee Vídeo (P271 2 a P281 1): o /amigos (e o menu só do Rafael), quem pode pedir, o Liberar
+Amigos ✅, a fila, o pedido do Rafael, a estimativa de tempo, o painel e a menção.
 """
 from datetime import datetime
 from types import SimpleNamespace
@@ -168,6 +168,66 @@ def test_cada_toque_e_um_pedido_e_o_video_responde_a_mensagem_do_pedido(am, monk
     assert am.ler()["fila"] == []
     resposta = bot.envios[-1]
     assert "não tenho vídeo novo" in resposta["texto"] and resposta["responde_a"] == bot.envios[1]["id"]
+
+
+def test_o_rafael_pede_sem_se_liberar_e_o_pedido_vai_como_o_enviar_1_agora(am, bm, monkeypatch):
+    # P281 1: o Rafael sempre pode pedir pelo botão do grupo; o vídeo dele é preparado como o Enviar 1 Agora 📤 (as
+    # regras do assistente dele) e vai ao privado, com o Postei ✅, e ao grupo, em resposta ao pedido.
+    _grupo(am)
+    atender = _sem_atender_na_hora(am, monkeypatch)
+    bot = am.bot_instance
+    rafael = _pessoa(bm.ADMIN_ID, "Rafael", "rafa_teste")
+    rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, rafael)))
+    assert len(bot.envios) == 1 and "ainda não foi liberado" not in bot.envios[0]["texto"]
+    assert "(1º da fila)" in bot.envios[0]["texto"] and atender == [1] and am.ler()["avisados"] == {}
+    pedidos = []
+
+    async def preparar(bot_, admin_id, agora=None, fonte="autorais", cobrindo=False, no_grupo=None):
+        pedidos.append((admin_id, fonte, cobrindo, no_grupo))
+        return am.assistente.MANDADO_NO_PRIVADO
+
+    async def do_amigo(*a, **k):
+        raise AssertionError("o pedido do Rafael não é preparado como o de um amigo")
+
+    monkeypatch.setattr(am.assistente, "preparar_e_enviar", preparar)
+    monkeypatch.setattr(am.assistente, "preparar_para_o_amigo", do_amigo)
+    rodar(am.atender_a_fila())
+    (admin_id, fonte, cobrindo, no_grupo), = pedidos
+    assert admin_id == bm.ADMIN_ID and fonte == am.painel.ler_config()["fonte"] and cobrindo is False
+    assert (no_grupo["grupo"], no_grupo["responder_a"], no_grupo["mencao"]) == (GRUPO, bot.envios[0]["id"],
+                                                                               "@rafa_teste")
+    assert am.ler()["fila"] == [] and len(am.ler()["preparos"]) == 1
+    # Sem vídeo na fonte, o grupo responde que agora não tem vídeo novo, e o tempo não entra na estimativa.
+    rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, rafael)))
+
+    async def sem_video(*a, **k):
+        return am.assistente.SEM_VIDEO_NO_ENVIO + "Vídeos Autorais para mandar (a fila está vazia ou sem arquivos)"
+
+    monkeypatch.setattr(am.assistente, "preparar_e_enviar", sem_video)
+    rodar(am.atender_a_fila())
+    resposta = bot.envios[-1]
+    assert "não tenho vídeo novo" in resposta["texto"] and resposta["responde_a"] == bot.envios[-2]["id"]
+    assert len(am.ler()["preparos"]) == 1
+
+
+def test_a_mensagem_do_pedido_diz_em_quanto_tempo_o_video_fica_pronto(am, monkeypatch):
+    # Pedido do Rafael (22/11): a estimativa de tempo depois do toque, pela mediana do preparo dos últimos pedidos
+    # feitos, vezes a posição na fila (sem nenhum feito ainda, 3 min por pedido).
+    _grupo(am, liberados={"7": {"nome": "Ana"}})
+    _sem_atender_na_hora(am, monkeypatch)
+    bot = am.bot_instance
+    ana = _pessoa(7, "Ana")
+    rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, ana)))
+    assert "(1º da fila). Fica pronto em cerca de 3 min." in bot.envios[-1]["texto"]
+    for segundos in (100, 110, 600):
+        am.anotar_preparo(segundos)
+    rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, ana)))
+    # 2º da fila, com a mediana de 110 s: 220 s, cerca de 4 min.
+    assert "(2º da fila). Fica pronto em cerca de 4 min." in bot.envios[-1]["texto"]
+    for _ in range(20):
+        am.anotar_preparo(60)
+    assert am.ler()["preparos"] == [60] * am.PREPAROS_GUARDADOS
+    assert am.minutos_estimados(am.ler(), 1) == 1 and am.minutos_estimados({"preparos": []}, 2) == 6
 
 
 def test_desligado_o_botao_avisa_e_a_fila_espera(am, monkeypatch):

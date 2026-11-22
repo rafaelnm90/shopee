@@ -897,20 +897,27 @@ def montar_mensagem(textos, produtos, link, mudo=False, cobrindo=False, nomes=No
 
 # --- Envio ---
 
-async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobrindo=False):
+# As frases do envio no privado que o grupo dos amigos também lê (o pedido do Rafael no grupo, P281 1).
+MANDADO_NO_PRIVADO = "postagem mandada no seu privado"
+SEM_VIDEO_NO_ENVIO = "não há vídeo em "
+
+
+async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobrindo=False, no_grupo=None):
     """
     Prepara o próximo vídeo e manda no privado. Devolve o que aconteceu, numa frase,
     para o log e para o botão Enviar 1 Agora. cobrindo=True: o robô está pausado sozinho, sem o
-    celular, e o vídeo postado conta no plano do dia dele (P156 1).
+    celular, e o vídeo postado conta no plano do dia dele (P156 1). no_grupo ({"mencao", "grupo",
+    "responder_a"}): o pedido do Rafael no grupo dos amigos, e o mesmo vídeo vai também ao grupo (P281 1).
     """
     for _ in range(VIDEOS_POR_ENVIO):
         video = proximo_video(fonte)
         if not video:
             registro_processos.registrar("shopee_video", "assistente: envio", "sem vídeo na fonte", ok=False)
-            return f"não há vídeo em {FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
+            return f"{SEM_VIDEO_NO_ENVIO}{FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
         try:
             with tempfile.TemporaryDirectory() as pasta:
-                resultado = await _preparar_e_enviar(bot, admin_id, video, agora, fonte, pasta, cobrindo)
+                resultado = await _preparar_e_enviar(bot, admin_id, video, agora, fonte, pasta, cobrindo,
+                                                     no_grupo=no_grupo)
         except Exception as e:
             # Vídeo que dá erro (ex.: o Telegram recusa o arquivo) é pulado: sem isso, ele
             # voltaria em todo horário e travaria a fila.
@@ -920,7 +927,7 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobri
         # As frases do resultado são fixas (_preparar_e_enviar).
         registro_processos.registrar("shopee_video", "assistente: envio", resultado,
                                      ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO)
-                                     else resultado == "postagem mandada no seu privado")
+                                     else resultado == MANDADO_NO_PRIVADO)
         if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO):
             return resultado
     return (f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos deu para mandar (só vai o vídeo editado e de produto que "
@@ -1006,10 +1013,12 @@ def _edicao_ligada(fonte):
     return edicao_video.vale_para(fonte)
 
 
-async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None, cobrindo=False, amigo=None):
+async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None, cobrindo=False, amigo=None,
+                             no_grupo=None):
     """
     Prepara o vídeo e manda no privado do Rafael (admin_id) ou, com amigo (preparar_para_o_amigo), no grupo dos
-    amigos. Devolve a frase fixa do que aconteceu.
+    amigos. Com no_grupo (o pedido do Rafael no grupo), vai ao privado e o mesmo vídeo ao grupo. Devolve a frase
+    fixa do que aconteceu.
     """
     from aiogram.types import FSInputFile
 
@@ -1082,7 +1091,15 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo, cobrindo, nomes), parse_mode="HTML",
                            disable_web_page_preview=True, reply_markup=botao_postei(video["id"]))
     registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo, item=item)
-    return "postagem mandada no seu privado"
+    if no_grupo:
+        # O pedido do Rafael no grupo dos amigos: o mesmo vídeo vai ao grupo, em resposta ao pedido, com os passos sem
+        # o Postei ✅, que fica no privado (P281 1).
+        try:
+            await _mandar_ao_amigo(bot, no_grupo, arquivo, montar_mensagem(textos, produtos, link, mudo, nomes=nomes,
+                                                                         amigo=no_grupo["mencao"]))
+        except Exception as e:
+            logger.warning(f"⚠️ [Grupo dos Amigos] O vídeo do Rafael não saiu no grupo: {type(e).__name__}")
+    return MANDADO_NO_PRIVADO
 
 
 def _ja_mandado(id_unico):
