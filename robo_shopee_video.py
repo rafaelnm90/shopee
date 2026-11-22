@@ -5047,9 +5047,10 @@ def opcoes_na_faixa(video, original, capa):
     (P33, P57 e P284 1): as buscas da API pelo nome (ORDENS_DA_TROCA), os candidatos_da_troca, e a
     IA confere de uma vez, pela foto de cada anúncio com a capa do post, quais são o mesmo item, da
     mesma cor. Dos confirmados, ficam os que cabem na faixa do mais barato deles e do produto do
-    link: os que pagam mais por venda que ele ou, com ele fora da faixa, os que pagam pelo menos o
-    mínimo por venda (MINIMO_POR_VENDA, ou o que ele paga, se for menos), do que paga mais para o
-    que paga menos. Devolve (opções, o resultado do registro quando não há nenhuma, ou "").
+    link: os que pagam mais por venda que ele ou, com ele fora da faixa, todos os da faixa que pagam
+    alguma comissão, mesmo abaixo do mínimo por venda (P286 2: o da faixa é o que vende), do que
+    paga mais para o que paga menos. Devolve (opções, o resultado do registro quando não há
+    nenhuma, ou "").
     """
     termo = termo_da_busca(original["nome"])
     ofertas = []
@@ -5085,8 +5086,9 @@ def opcoes_na_faixa(video, original, capa):
         opcoes = [c for c in confirmados if c["preco"] <= teto and c["valor"] > antes]
         porque = "mantido - o do link é o que paga mais na faixa"
     else:
-        opcoes = [c for c in confirmados if c["preco"] <= teto and c["valor"] >= min(MINIMO_POR_VENDA, antes)]
-        porque = "mantido - os da faixa pagam menos que o mínimo"
+        # Escolha do Rafael (22/11, P286 2): fora da faixa, vale a loja da faixa mesmo abaixo do mínimo por venda.
+        opcoes = [c for c in confirmados if c["preco"] <= teto and c["valor"] > 0]
+        porque = "mantido - os da faixa não pagam comissão"
     return sorted(opcoes, key=lambda c: (-c["valor"], -c["vendas"])), "" if opcoes else porque
 
 
@@ -5110,7 +5112,7 @@ def trocar_pela_maior_comissao(video):
     O primeiro confirmado vale: {nome, link, comissao, preco, valor, antes, valor_antes, vistos},
     com o link curto que o celular abre. Nenhum: None, e o robô segue com o produto do link. A
     troca é um ganho a mais: um erro nela nunca derruba o rascunho.
-    Escolhas do Rafael (25/10, P33; 28/10, P58; 22/11, P284 1): DECISOES.md, Shopee Vídeo.
+    Escolhas do Rafael (25/10, P33; 28/10, P58; 22/11, P284 1 e P286 2): DECISOES.md, Shopee Vídeo.
     """
     try:
         return _trocar_pela_maior_comissao(video)

@@ -1490,18 +1490,24 @@ def test_troca_com_um_mais_barato_confirmado_tira_da_faixa_o_bem_mais_caro(monke
     assert [(r[2], r[3]) for r in registro] == [("trocado", "mais 41% por venda"), ("trocado", "mais 83% por venda")]
 
 
-def test_troca_pela_faixa_nunca_vai_a_um_que_paga_menos_que_o_minimo(monkeypatch):
-    # O do link (R$ 60 a 5%: R$ 3,00) fica fora da faixa do de R$ 30 (R$ 1,50 por venda), mas o da faixa paga
-    # menos que o mínimo por venda (P194 1): fica o do link, sem a conferência com o vídeo.
+def test_troca_pela_faixa_vai_a_loja_que_vende_mesmo_abaixo_do_minimo(monkeypatch):
+    # Escolha do Rafael (22/11, P286 2): o do link (R$ 60 a 5%: R$ 3,00) fica fora da faixa do de R$ 30, e a
+    # troca vai a ele mesmo pagando menos que o mínimo por venda (R$ 1,50): é o que vende.
     pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Original", 0.05, 2, preco=30.0)],
                                  confirma=("https://s.shopee.com.br/2",), preco=60.0)
+    troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
+    assert troca["link"] == "https://s.shopee.com.br/2" and troca["valor"] == pytest.approx(1.5)
+    assert pedidos["ia"] == ["https://s.shopee.com.br/2"]
+    # O da faixa que não paga comissão nenhuma não entra: fica o do link, sem a conferência com o vídeo.
+    pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Original", 0, 2, preco=30.0)], preco=60.0)
     assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
     # O do link no topo da faixa, pagando mais que todos: fica ele.
     pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Original", 0.04, 2, preco=50.0)], preco=60.0)
     assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
     registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
-    assert [r[2] for r in registro] == ["mantido - os da faixa pagam menos que o mínimo",
-                                        "mantido - o do link é o que paga mais na faixa"]
+    assert [(r[2], r[3]) for r in registro] == [("trocado", "pela faixa: 50% mais barato"),
+                                                ("mantido - os da faixa não pagam comissão", ""),
+                                                ("mantido - o do link é o que paga mais na faixa", "")]
 
 
 def test_faixa_vai_ate_25_por_cento_acima_do_mais_barato():
