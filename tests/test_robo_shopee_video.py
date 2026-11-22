@@ -618,6 +618,37 @@ def test_com_o_explorar_no_celular_a_rodada_nao_toca(monkeypatch, avisos):
         assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
 
 
+def test_a_aula_do_curso_solta_o_celular_antes_da_rodada(monkeypatch, avisos):
+    # O robô da Shopee Vídeo nunca para por causa do curso (pedido do Rafael, 22/11/2026): com a gravação da
+    # madrugada no celular, a rodada pede o celular a ela antes de pegar a trava.
+    ativar(robo_inicio=0, robo_fim=24)
+    pedidos = []
+    monkeypatch.setattr(robo.cursos_robo, "liberar_para_o_robo",
+                        lambda quem="robô", **_: pedidos.append(quem) or True)
+    with robo.celular_robo.trava() as livre:
+        assert livre
+        assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
+        assert pedidos == []
+        robo.cursos_robo.anotar_o_sinal()
+        assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
+    assert pedidos == ["robô"]
+
+
+def test_a_rodada_devolve_o_volume_que_a_aula_do_curso_deixou_no_meio(monkeypatch, avisos):
+    # A gravação que cai no meio da aula deixa o volume de mídia no meio (P291 1): a rodada que usa o
+    # celular o devolve antes de agir, e uma falha nisso não para o robô.
+    ativar(robo_inicio=0, robo_fim=24)
+    ordem = []
+    monkeypatch.setattr(robo, "o_que_fazer", lambda config, agora: ("feed", None))
+    monkeypatch.setattr(robo, "_agir", lambda d, acao, *a, **k: ordem.append(acao) or f"{acao} feito")
+    monkeypatch.setattr(robo.cursos_robo, "devolver_o_volume", lambda d: ordem.append("volume"))
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 10:00")) == "feed feito"
+    assert ordem == ["volume", "feed"]
+    monkeypatch.setattr(robo.cursos_robo, "devolver_o_volume", lambda d: 1 / 0)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 10:20")) == "feed feito"
+    assert ordem == ["volume", "feed", "feed"]
+
+
 def test_na_hora_do_descurtir_a_rodada_que_nao_chega_a_limpeza_fica_no_registro(monkeypatch, avisos):
     # A limpeza das 4h que não roda tem de dizer por quê: a rodada da hora que não chega a ela
     # (o explorar no celular, a tela aberta no privado) anota o porquê, como o robô pausado.

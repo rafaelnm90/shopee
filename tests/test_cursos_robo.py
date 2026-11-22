@@ -554,3 +554,121 @@ def test_gravacao_em_fundo_para_com_o_ctrl_c_e_fecha_o_arquivo(tmp_path):
 
     outra = cursos_robo.GravacaoEmFundo("celular:5555", str(tmp_path / "outra.mkv"), 60, abrir=sem_celular)
     assert outra.parar() == (False, "o celular não respondeu ao gravador")
+
+
+def test_fim_da_aula_pela_sessao_de_midia():
+    olho = cursos_robo.OlhoNaAula()
+    # Antes de tocar, nada acaba (a página ainda carrega o vídeo).
+    assert olho.olhar(None, 0) is None and olho.olhar({"estado": "pausado", "posicao": 0}, 30) is None
+    assert olho.olhar({"estado": "tocando", "posicao": 5}, 35) is None
+    assert olho.olhar({"estado": "tocando", "posicao": 600}, 630) is None and olho.maior == 600
+    # Parado depois de tocar: acaba depois de PARADO_NO_FIM s; carregando, espera mais.
+    assert olho.olhar({"estado": "pausado", "posicao": 610}, 640) is None
+    assert olho.olhar({"estado": "pausado", "posicao": 610}, 654) is None
+    assert olho.olhar({"estado": "pausado", "posicao": 610}, 655) == "o vídeo parou"
+    olho.de_novo()
+    assert olho.olhar({"estado": "carregando", "posicao": 610}, 660) is None
+    assert olho.olhar({"estado": "carregando", "posicao": 610}, 700) is None
+    assert olho.olhar({"estado": "carregando", "posicao": 610}, 780) == "carregando demais"
+    # O vídeo que volta ao começo é outro (a aula seguinte, que o site começa sozinho).
+    assert olho.olhar({"estado": "tocando", "posicao": 2}, 790) == "outro vídeo começou"
+    assert cursos_robo.OlhoNaAula().olhar(None, 10) is None
+
+
+def test_quadros_da_aula_um_a_cada_20_s_de_40_a_120():
+    assert cursos_robo.quadros_da_aula(600) == 40
+    assert cursos_robo.quadros_da_aula(1800) == 90
+    assert cursos_robo.quadros_da_aula(7200) == 120
+    assert cursos_robo.quadros_da_aula(None) == 40
+
+
+def test_aula_guardada_so_com_a_fala_e_os_quadros_e_o_video_sai(monkeypatch, tmp_path):
+    # P290 1: o vídeo da aula sai logo depois de lido; ficam a fala e as folhas, e o aula.json só de números.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    monkeypatch.setattr(cursos_robo, "numeros",
+                        lambda arquivo: {"segundos": 1800, "tem_som": True, "som": -20.0, "brilho": 90})
+    pedidos = []
+
+    def para_o_claude(arquivo, pasta, quadros):
+        pedidos.append(quadros)
+        (tmp_path / "aulas").joinpath(os.path.basename(pasta), "fala.txt").write_text("[0.0s] texto da aula")
+        return 18, 4100
+
+    monkeypatch.setattr(cursos_robo, "para_o_claude", para_o_claude)
+    video = tmp_path / "aula.mkv"
+    video.write_bytes(b"video")
+    pasta, info = cursos_robo.guardar_a_aula(str(video), 1, 7, "o vídeo parou", _br("2026-11-23 23:30"))
+    assert os.path.basename(pasta) == "20261123-233000-c01-a007"
+    assert not video.exists() and pedidos == [90]
+    assert info == {"curso": 1, "aula": 7, "gravada_em": "2026-11-23 23:30:00", "fim": "o vídeo parou",
+                    "segundos": 1800, "som": -20.0, "brilho": 90, "folhas": 18, "palavras": 4100, "problema": ""}
+    import json
+    assert json.loads((tmp_path / "aulas" / os.path.basename(pasta) / "aula.json").read_text()) == info
+    assert cursos_robo.aulas_guardadas() == ["20261123-233000-c01-a007"]
+
+
+def test_pacote_das_aulas_ate_o_tamanho_e_o_apagar_so_das_que_foram(monkeypatch, tmp_path):
+    pasta = tmp_path / "aulas"
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(pasta))
+    monkeypatch.setattr(cursos_robo, "TAMANHO_DO_PACOTE", 250)
+    nomes = ["20261123-230000-c01-a001", "20261123-233000-c01-a002", "20261124-001000-c01-a003"]
+    for nome in nomes:
+        (pasta / nome).mkdir(parents=True)
+        (pasta / nome / "fala.txt").write_bytes(b"x" * 100)
+    (pasta / "outra-coisa").mkdir()
+    assert cursos_robo.aulas_guardadas() == nomes
+    assert cursos_robo.aulas_do_pacote() == nomes[:2]
+    assert cursos_robo.aulas_do_pacote(ate=nomes[0]) == nomes[:1]
+    monkeypatch.setattr(cursos_robo, "TAMANHO_DO_PACOTE", 10)
+    assert cursos_robo.aulas_do_pacote() == nomes[:1]   # ao menos uma, mesmo maior que o pacote
+    assert cursos_robo.apagar_aulas(nomes[1]) == 2
+    assert cursos_robo.aulas_guardadas() == nomes[2:]
+
+
+def test_aulas_vao_cifradas_e_so_abrem_com_a_chave(monkeypatch, tmp_path):
+    from cryptography.fernet import Fernet
+    import registro_privado
+    pasta = tmp_path / "aulas"
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(pasta))
+    (pasta / "20261123-230000-c01-a001").mkdir(parents=True)
+    (pasta / "20261123-230000-c01-a001" / "fala.txt").write_text("[0.0s] conteúdo da aula")
+    chave = Fernet.generate_key()
+    monkeypatch.setattr(registro_privado, "chave", lambda: chave)
+    texto = cursos_robo.cifrado_das_aulas()
+    assert texto.startswith("gAAAAA") and "conteúdo" not in texto
+    destino = tmp_path / "aberto"
+    assert cursos_robo.abrir_aulas(texto, chave.decode(), str(destino)) == ["20261123-230000-c01-a001"]
+    assert (destino / "20261123-230000-c01-a001" / "fala.txt").read_text() == "[0.0s] conteúdo da aula"
+
+
+def test_comando_das_aulas_do_workflow_so_com_contagens_e_nomes_de_pasta(monkeypatch, tmp_path, capsys):
+    from cryptography.fernet import Fernet
+    import registro_privado
+    pasta = tmp_path / "aulas"
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(pasta))
+    nomes = ["20261123-230000-c01-a001", "20261123-233000-c01-a002"]
+    for nome in nomes:
+        (pasta / nome).mkdir(parents=True)
+        (pasta / nome / "fala.txt").write_text("[0.0s] conteúdo da aula")
+    chave = Fernet.generate_key()
+    monkeypatch.setattr(registro_privado, "chave", lambda: chave)
+
+    def rodar(*argumentos):
+        codigo = cursos_robo.main(["aulas", *argumentos])
+        return codigo, capsys.readouterr().out.strip()
+    assert rodar("contar") == (0, "2")
+    assert rodar("ultima") == (0, nomes[1])
+    codigo, texto = rodar("cifrado", nomes[0])
+    assert codigo == 0 and texto.startswith("gAAAAA") and "conteúdo" not in texto
+    # O ler, no scratchpad do Claude, abre com a chave do ambiente dele.
+    arquivo = tmp_path / "aulas.zip.cifrado"
+    arquivo.write_text(texto)
+    monkeypatch.setenv(registro_privado.VARIAVEL_CHAVE, chave.decode())
+    codigo, saida = rodar("ler", str(arquivo), str(tmp_path / "aberto"))
+    assert codigo == 0 and saida.splitlines()[0].startswith("1 aula(s)") and nomes[0] in saida
+    assert "conteúdo" not in saida
+    # O apagar só aceita o nome de uma aula, e tira só até ela.
+    assert rodar("apagar", "../outra")[0] == 2 and cursos_robo.aulas_guardadas() == nomes
+    assert rodar("apagar", nomes[0]) == (0, "1 aula(s) apagada(s) do servidor.")
+    assert cursos_robo.aulas_guardadas() == nomes[1:]
+    assert rodar("outra")[0] == 2
