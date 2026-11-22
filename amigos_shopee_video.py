@@ -114,7 +114,8 @@ def via_verde(texto, clique, do_admin):
 # liberados: {id do Telegram: {"nome"}} de quem pode pedir; fila: os pedidos, o mais velho primeiro; avisados:
 # {id: {"quando", "nome"}} do último aviso no privado do Rafael de quem tocou sem estar liberado (o Liberar ✅ pega o
 # nome dali; quem está ali espera no Liberar Amigos ✅ do painel até ser liberado); preparos: os segundos de preparo
-# dos últimos pedidos feitos, para a estimativa (minutos_estimados).
+# dos últimos pedidos feitos, para a estimativa (minutos_estimados). Em avisados, mensagens: os ⛔ no grupo, que saem
+# quando a pessoa é liberada (P282 1).
 
 def _padrao():
     return {"grupo": None, "titulo": "", "ligado": False, "botao": None, "liberados": {}, "fila": [], "avisados": {},
@@ -157,6 +158,37 @@ def pendentes(config):
     """Quem tocou em Quero um vídeo 🎬 e ainda não foi liberado: {id: nome}, na ordem do 1º toque."""
     return {ident: dados.get("nome") or ident for ident, dados in config["avisados"].items()
             if ident not in config["liberados"]}
+
+
+def anotar_o_aviso(ident, mensagem):
+    """O ⛔ de quem tocou sem estar liberado, para sair do grupo quando ele for liberado (P282 1)."""
+    def alterar(dados):
+        aviso = dados["avisados"].setdefault(str(ident), {})
+        aviso["mensagens"] = (list(aviso.get("mensagens") or []) + [mensagem])[-10:]
+    _alterar(alterar)
+
+
+def avisos_no_grupo(ident):
+    """Os ⛔ no grupo de quem espera a liberação (as mensagens anotadas em anotar_o_aviso)."""
+    return list((ler()["avisados"].get(str(ident)) or {}).get("mensagens") or [])
+
+
+async def apagar_os_avisos(mensagens):
+    """
+    Os ⛔ de quem acabou de ser liberado saem do grupo (P282 1). O Telegram só deixa o bot apagar mensagem de até 48 h:
+    a mais velha fica, e o Rafael apaga à mão.
+    """
+    if not mensagens:
+        return
+    grupo, apagadas = ler()["grupo"], 0
+    for mensagem in mensagens:
+        try:
+            await bot_instance.delete_message(grupo, mensagem)
+            apagadas += 1
+        except Exception as e:
+            logger.warning(f"⚠️ [Grupo dos Amigos] O aviso de não liberado não saiu do grupo: {type(e).__name__}")
+    registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "aviso de não liberado apagado",
+                                 f"{apagadas} de {len(mensagens)}", ok=apagadas == len(mensagens))
 
 
 def tirar(ident):
@@ -204,7 +236,7 @@ def avisar_agora(ident, nome, agora=None):
     def alterar(dados):
         if momento - float((dados["avisados"].get(str(ident)) or {}).get("quando", 0)) < ESPERA_DO_AVISO:
             return False
-        dados["avisados"][str(ident)] = {"quando": momento, "nome": nome}
+        dados["avisados"][str(ident)] = {**(dados["avisados"].get(str(ident)) or {}), "quando": momento, "nome": nome}
         return True
     return bool(_alterar(alterar))
 
@@ -340,8 +372,10 @@ async def quero_um_video(callback: types.CallbackQuery):
         registro_processos.registrar("shopee_video", PROCESSO_DO_PEDIDO, "não liberado", "avisado no privado",
                                      ok=None)
         try:
-            await bot_instance.send_message(grupo, f"⛔ {mencao}, você ainda não foi liberado para pedir vídeos. Já "
-                                                   "avisei o administrador.", parse_mode="HTML")
+            aviso = await bot_instance.send_message(
+                grupo, f"⛔ {mencao}, você ainda não foi liberado para pedir vídeos. Já avisei o administrador.",
+                parse_mode="HTML")
+            anotar_o_aviso(usuario.id, aviso.message_id)
             await bot_instance.send_message(
                 ADMIN_ID, f"👥 <b>Grupo dos Amigos:</b> {mencao} ({html.escape(nome)}) tocou em {BOTAO_QUERO}, mas "
                           f"ainda não foi liberado. Toque em {BOTAO_LIBERAR} para ele poder pedir vídeos.",
@@ -365,15 +399,20 @@ async def quero_um_video(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith(CALLBACK_LIBERAR))
 async def liberar_amigo(callback: types.CallbackQuery):
-    """O Liberar ✅ do aviso no privado do Rafael: quem tocou no botão do grupo passa a poder pedir."""
+    """
+    O Liberar ✅ do aviso no privado do Rafael: quem tocou no botão do grupo passa a poder pedir, e o ⛔ dele sai do
+    grupo (P282 1).
+    """
     if callback.from_user is None or callback.from_user.id != ADMIN_ID:
         return
     ident = callback.data[len(CALLBACK_LIBERAR):]
     if not ident.lstrip("-").isdigit():
         await callback.answer()
         return
+    avisos = avisos_no_grupo(ident)
     novo, nome = liberar(int(ident))
     registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "liberado" if novo else "já liberado", ok=True)
+    await apagar_os_avisos(avisos)
     await callback.answer("Liberado: já pode pedir vídeos no grupo." if novo else "Já estava liberado.")
     try:
         await callback.message.edit_text(f"✅ <b>Liberado:</b> {html.escape(nome)} já pode pedir vídeos no grupo dos "
@@ -488,8 +527,8 @@ def texto_do_painel(config, agora=None):
         "<b>O que cada botão faz</b>\n"
         f"▶️ <b>{BOTAO_LIGAR}</b> / ⏸️ <b>{BOTAO_DESLIGAR}</b>: volta a atender ou pausa os pedidos do grupo.\n"
         f"✅ <b>{BOTAO_LIBERAR_AMIGOS}</b>: um botão com o nome de cada um que tocou em {BOTAO_QUERO} e ainda não "
-        "foi liberado; o toque no nome libera, e ele sai da lista. O aviso de cada um no privado, com o "
-        f"{BOTAO_LIBERAR}, continua.\n"
+        "foi liberado; o toque no nome libera, ele sai da lista, e o ⛔ dele sai do grupo. O aviso de cada um no "
+        f"privado, com o {BOTAO_LIBERAR}, continua.\n"
         f"➖ <b>{BOTAO_TIRAR}</b>: escolha quem não pode mais pedir (os pedidos dele na fila saem).\n"
         f"🔙 <b>{painel.BOTAO_VOLTAR}</b>: volta à tela da Shopee Vídeo.\n\n"
         "Para pôr o botão no grupo: mande /amigos lá (o bot precisa ser administrador, com a permissão de fixar "
@@ -615,16 +654,21 @@ async def voltar_ao_grupo_dos_amigos(message: types.Message, state: FSMContext):
 
 @router.message(AmigosFluxo.liberando)
 async def liberar_da_lista(message: types.Message, state: FSMContext):
-    """O toque num nome do Liberar Amigos ✅: libera, e a lista volta sem ele (vazia, volta ao painel)."""
+    """
+    O toque num nome do Liberar Amigos ✅: libera (o ⛔ dele sai do grupo, P282 1), e a lista volta sem ele (vazia,
+    volta ao painel).
+    """
     if not _admin(message): return
     config = ler()
     ident = _botoes_dos_pendentes(config).get(message.text or "")
     if ident is None:
         await message.answer(f"Toque num dos nomes ou em {BOTAO_VOLTAR_AMIGOS}.", reply_markup=teclado_liberar(config))
         return
+    avisos = avisos_no_grupo(ident)
     novo, nome = liberar(ident)
     registro_processos.registrar("shopee_video", PROCESSO_DO_PAINEL, "liberado" if novo else "já liberado",
                                  "pelo painel", ok=True)
+    await apagar_os_avisos(avisos)
     await message.answer(f"✅ <b>Liberado:</b> {html.escape(nome)} já pode pedir vídeos no grupo.", parse_mode="HTML")
     config = ler()
     if pendentes(config):

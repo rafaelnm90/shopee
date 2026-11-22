@@ -2,6 +2,7 @@
 Grupo dos amigos da Shopee Vídeo (P271 2 a P281 1): o /amigos (e o menu só do Rafael), quem pode pedir, o Liberar
 Amigos ✅, a fila, o pedido do Rafael, a estimativa de tempo, o painel e a menção.
 """
+import time
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -141,6 +142,38 @@ def test_quem_nao_foi_liberado_e_avisado_e_o_rafael_libera(am, bm, monkeypatch):
     assert am.ler()["liberados"] == {"7": {"nome": "Ana & Cia"}} and "Ana &amp; Cia" in liberar.editado
     rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, ana)))
     assert len(am.ler()["fila"]) == 1 and atender == [1]
+
+
+def test_liberado_o_aviso_de_nao_liberado_sai_do_grupo(am, bm, Msg, Est, monkeypatch):
+    # P282 1: quando o Rafael libera (pelo Liberar ✅ do privado ou pelo Liberar Amigos ✅ do painel), o ⛔ da pessoa sai
+    # do grupo. O Telegram só deixa o bot apagar até 48 h: o que não sai fica no registro.
+    _grupo(am)
+    _sem_atender_na_hora(am, monkeypatch)
+    bot = am.bot_instance
+    rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, _pessoa(7, "Ana"))))
+    aviso = bot.envios[0]
+    assert "ainda não foi liberado" in aviso["texto"] and am.avisos_no_grupo(7) == [aviso["id"]]
+    # O aviso de novo, depois das 6 h, guarda os dois ⛔.
+    assert am.avisar_agora(7, "Ana", agora=time.time() + am.ESPERA_DO_AVISO + 60)
+    am.anotar_o_aviso(7, 999)
+    assert am.avisos_no_grupo(7) == [aviso["id"], 999]
+    rodar(am.liberar_amigo(Toque(am.CALLBACK_LIBERAR + "7", _pessoa(bm.ADMIN_ID, "Rafael"), chat_id=bm.ADMIN_ID)))
+    assert bot.apagadas == [(GRUPO, aviso["id"]), (GRUPO, 999)] and "7" in am.ler()["liberados"]
+
+    class BotQueNaoApaga(BotFalso):
+        async def delete_message(self, chat_id, message_id):
+            raise RuntimeError("message can't be deleted")
+
+    monkeypatch.setattr(am, "bot_instance", BotQueNaoApaga())
+    rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, _pessoa(8, "Bia"))))
+    msg, est = Msg("1. Bia"), Est()
+    rodar(est.set_state(am.AmigosFluxo.liberando))
+    rodar(am.liberar_da_lista(msg, est))
+    assert "8" in am.ler()["liberados"] and "Liberado" in msg.saidas[0]
+    linhas = [(r[2], r[3]) for r in am.registro_processos.sequencia("shopee_video", am.PROCESSO_DO_PAINEL,
+                                                                     "2000-01-01 00:00:00")
+              if r[2] == "aviso de não liberado apagado"]
+    assert linhas == [("aviso de não liberado apagado", "2 de 2"), ("aviso de não liberado apagado", "0 de 1")]
 
 
 def test_cada_toque_e_um_pedido_e_o_video_responde_a_mensagem_do_pedido(am, monkeypatch):
