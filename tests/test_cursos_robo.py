@@ -1032,6 +1032,10 @@ class SiteDoCurso(CelularDoVolume):
 
     def swipe(self, x1, y1, x2, y2, duracao=None):
         self.rolagens.append((x1, y1, x2, y2))
+        if y2 > y1 and not self.barra_escondida and not self.rolada and not self.pagina and not self.nova_guia:
+            # No alto da página, o arrasto para baixo é o "puxar para atualizar" do Chrome: a página recarrega o
+            # endereço da barra, que o Próximo não muda (a aula aberta pela barra volta).
+            self._abrir(next(n for n, aula in enumerate(self.aulas) if aula[2] == self.endereco_na_barra))
         if y2 > y1 and self.rolagem_funciona:
             self.barra_escondida = False
         if y1 > y2 and self._tipo(self.aberta) == "texto longo":
@@ -1719,6 +1723,38 @@ def test_o_baixar_que_tira_a_pagina_da_tela_nao_guarda_a_aula_e_a_noite_volta_pe
     assert [(linha[2], linha[3]) for linha in linhas] == [
         ("não guardada", "curso 4, aula 2: a página da aula saiu da tela depois do Baixar")]
     assert cursos_robo.proxima_aula() == (4, 2) and cursos_robo.mapa_das_aulas()["cursos"]["4"]["fim"]
+
+
+def test_a_pagina_que_volta_para_uma_aula_de_antes_nao_e_gravada_como_a_seguinte(noite_do_curso, monkeypatch):
+    # 23/11/2026, 12:00: a página recarregou o endereço da barra (o da 1ª aula) logo depois do Próximo. Sem a
+    # conferência pelo nome no Próximo, a noite gravaria a 1ª aula de novo, como se fosse cada uma das seguintes, a
+    # noite toda.
+    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
+    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
+    site = SiteDoCurso(aulas)
+    original = cursos_robo._tipo_da_pagina
+
+    def tipo_e_recarrega(d, tela, pausa):
+        feito = original(d, tela, pausa)
+        if d.aberta == 1:
+            d._abrir(0)                      # o Chrome recarregou o endereço da barra: a 1ª aula
+        return feito
+    monkeypatch.setattr(cursos_robo, "_tipo_da_pagina", tipo_e_recarrega)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: a aula não "
+                      "abriu (a página voltou para uma aula de antes)")
+    assert noite_do_curso.gravadas == ["Aula um"]
+    assert len(cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]) == 1
+    # A página de uma aula de antes, mais longe (a 1ª, quando a da vez é a 3ª): o nome no Próximo dela é o de uma aula
+    # do mapa.
+    cursos_robo.anotar_a_aula_seguinte(4, 2, "Dia 01")
+    na_primeira = SiteDoCurso(aulas)
+    assert not cursos_robo.na_aula_certa(na_primeira, 4, 3, "Aula dois")
+    assert cursos_robo.na_aula_certa(SiteDoCurso(aulas, aberta=2), 4, 3, "Aula dois")
+    monkeypatch.setattr(cursos_robo, "_tipo_da_pagina", original)
+    # Nenhuma noite gira sem fim: passado o limite de voltas, ela para.
+    monkeypatch.setattr(cursos_robo, "VOLTAS_DA_NOITE", 0)
+    assert noite_do_curso(SiteDoCurso(aulas), AjudanteNaHora()).endswith("parou: a noite passou de 0 voltas")
 
 
 def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, monkeypatch, tmp_path):
