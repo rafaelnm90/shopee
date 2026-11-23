@@ -696,11 +696,14 @@ def _sessao_do_chrome(estado, posicao_s):
 
 
 class AulaNoCelular(CelularDoVolume):
-    """O celular de mentira com a aula aberta no Chrome: toca no play e para sozinha aos `dura` s."""
+    """
+    O celular de mentira com a aula no Chrome: a página abre como em abre (o tipo e o porquê de ir_para_o_endereco),
+    toca no play e para sozinha aos `dura` s.
+    """
 
-    def __init__(self, relogio, dura=60, carrega=False, **opcoes):
+    def __init__(self, relogio, dura=60, carrega=False, abre=("com vídeo", ""), **opcoes):
         super().__init__(**opcoes)
-        self.relogio, self.dura, self.carrega = relogio, dura, carrega
+        self.relogio, self.dura, self.carrega, self.abre = relogio, dura, carrega, abre
         self.comeco, self.pausada, self.eventos = None, False, []
 
     def tocar(self, d):
@@ -751,20 +754,26 @@ def _gravar_a_aula(celular, tmp_path, tempo, quando=None, madrugada=lambda: True
         if quando:
             quando(tempo[0], gravadores)
 
+    def ir_para_a_aula(d):
+        # A página abre com o gravador já gravando: o vídeo pode começar sozinho com ela.
+        celular.eventos.append("abriu gravando" if gravadores and gravadores[0].vivo else "abriu sem gravar")
+        return celular.abre
+
     destino = str(tmp_path / "aula.mkv")
-    feito = cursos_robo.gravar_a_aula_aberta(celular, "celular:5555", destino, celular.tocar, pausa=pausa,
-                                             relogio=lambda: tempo[0], abrir=abrir, madrugada=madrugada)
+    feito = cursos_robo.gravar_a_aula(celular, "celular:5555", destino, ir_para_a_aula, celular.tocar, pausa=pausa,
+                                      relogio=lambda: tempo[0], abrir=abrir, madrugada=madrugada)
     return feito, destino, gravadores
 
 
 def test_aula_aberta_gravada_inteira_com_o_volume_de_volta_antes_de_o_gravador_parar(bm, tmp_path):
     # P291 1 e o pedido de 22/11 (o celular no quarto do Rafael): o gravador liga antes de o volume subir e
-    # para só depois de a aula pausar e o volume voltar.
+    # para só depois de a aula pausar e o volume voltar. A página da aula abre já com ele gravando (23/11: o vídeo
+    # pode começar sozinho com a página, e o começo dele fica na gravação).
     tempo = [0.0]
     celular = AulaNoCelular(lambda: tempo[0], dura=60, volume=2)
     feito, destino, gravadores = _gravar_a_aula(celular, tmp_path, tempo)
-    assert feito == (True, "o vídeo parou")
-    assert celular.eventos == ["volume 8", "play", "volume 2", "gravador parou"]
+    assert feito == (True, True, "o vídeo parou")
+    assert celular.eventos == ["volume 8", "abriu gravando", "play", "volume 2", "gravador parou"]
     assert os.path.exists(destino) and celular.volume == 2
     assert cursos_robo.estado_da_noite()["volume_antes"] is None
     # Enquanto grava, o sinal ao robô fica renovado (quem solta é a noite, no fim).
@@ -783,8 +792,8 @@ def test_robo_que_pede_o_celular_para_a_aula_que_fica_pela_metade(bm, tmp_path):
             cursos_robo.pedir_o_celular("robô")
 
     feito, destino, _ = _gravar_a_aula(celular, tmp_path, tempo, quando)
-    assert feito == (False, "o robô pediu o celular")
-    assert celular.eventos == ["volume 8", "play", "pausa", "volume 2", "gravador parou"]
+    assert feito == (True, False, "o robô pediu o celular")
+    assert celular.eventos == ["volume 8", "abriu gravando", "play", "pausa", "volume 2", "gravador parou"]
     assert tempo[0] < 40 and celular.volume == 2
 
 
@@ -798,8 +807,8 @@ def test_gravador_que_cai_no_meio_pausa_a_aula_e_devolve_o_volume(bm, tmp_path):
             gravadores[0].vivo = False
 
     feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, quando)
-    assert feito == (False, "o gravador parou no meio")
-    assert celular.eventos == ["volume 8", "play", "pausa", "volume 2"]
+    assert feito == (True, False, "o gravador parou no meio")
+    assert celular.eventos == ["volume 8", "abriu gravando", "play", "pausa", "volume 2"]
 
 
 def test_gravador_que_nao_grava_o_som_nao_deixa_a_aula_tocar(bm, tmp_path):
@@ -807,7 +816,7 @@ def test_gravador_que_nao_grava_o_som_nao_deixa_a_aula_tocar(bm, tmp_path):
     tempo = [0.0]
     celular = AulaNoCelular(lambda: tempo[0], volume=2)
     feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, gravador_vivo=False)
-    assert feito == (False, "o gravador não ficou gravando")
+    assert feito == (False, False, "o gravador não ficou gravando")
     assert celular.eventos == [] and celular.volume == 2
 
 
@@ -816,15 +825,30 @@ def test_madrugada_que_acaba_e_video_que_nao_carrega_param_a_aula(bm, tmp_path):
     tempo = [0.0]
     celular = AulaNoCelular(lambda: tempo[0], dura=600, volume=2)
     feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, madrugada=lambda: tempo[0] < 40)
-    assert feito == (False, "a madrugada acabou")
+    assert feito == (True, False, "a madrugada acabou")
     assert celular.eventos[-3:] == ["pausa", "volume 2", "gravador parou"]
     # O vídeo que fica carregando não conta como aula inteira.
     tempo = [0.0]
     cursos_robo._anotar(volume_antes=None)
     celular = AulaNoCelular(lambda: tempo[0], dura=600, carrega=True, volume=2)
     feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo)
-    assert feito == (False, "carregando demais")
+    assert feito == (True, False, "carregando demais")
     assert celular.eventos[-2:] == ["volume 2", "gravador parou"]
+
+
+def test_a_pagina_que_nao_abre_ou_sem_video_nao_toca_e_o_volume_volta(bm, tmp_path):
+    # A aula que não abriu (o endereço que não ficou na barra) e a aula sem vídeo: nada de play, e o volume volta
+    # antes de o gravador parar, como no fim de qualquer aula.
+    for abre, feito_esperado in ((None, "o endereço não ficou escrito na barra"),
+                                 ("sem vídeo", "")):
+        tempo = [0.0]
+        cursos_robo._anotar(volume_antes=None)
+        celular = AulaNoCelular(lambda: tempo[0], volume=2, abre=(abre, feito_esperado))
+        feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo)
+        esperado = ((False, False, "a aula não abriu (o endereço não ficou escrito na barra)") if abre is None
+                    else (True, False, "sem vídeo"))
+        assert feito == esperado
+        assert celular.eventos == ["volume 8", "abriu gravando", "volume 2", "gravador parou"]
 
 
 CHROME = "com.android.chrome"
@@ -832,18 +856,40 @@ CHROME = "com.android.chrome"
 
 class SiteDoCurso(CelularDoVolume):
     """
-    O Chrome de mentira com o site do curso: as aulas em ordem [(nome, segundos, endereço)], a barra de endereço,
-    o play (só com a página no alto) e a barra do Próximo. Trocar de aula pelo Próximo deixa a página rolada. Com outro
-    app na frente (na_frente), só ele aparece na tela; abre_o_chrome=False: o Chrome não vem para a frente.
+    O Chrome de mentira com o site do curso: as aulas em ordem [(nome, segundos, endereço[, tipo])], a barra de
+    endereço, o player (só com a página no alto) e a barra do Próximo. O endereço vai à barra pelo adb, tecla por tecla,
+    e o Enter abre a aula escrita. Trocar de aula pelo Próximo deixa a página rolada. Com outro app na frente
+    (na_frente), só ele aparece na tela; abre_o_chrome=False: o Chrome não vem para a frente. A aula de tipo
+    "documento" não tem player; autoplay: a página aberta começa a tocar sozinha (sem o play na tela); escreve=False:
+    o que vai pelo adb não chega à barra; completa: o pedaço que o Chrome completa sozinho depois do escrito, marcado;
+    rotulo_no_texto: o nome do play no texto do botão, como no Motorola. aberturas: (volume, gravando) de cada Enter.
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
-                 **opcoes):
+                 autoplay=False, escreve=True, completa="", rotulo_no_texto=False, **opcoes):
         super().__init__(**opcoes)
         self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
         self.escrito, self.barra_em_foco, self.toques = None, False, []
         self.na_frente, self.abre_o_chrome, self.abertos = na_frente, abre_o_chrome, []
-        self.volumes_ao_abrir = []
+        self.autoplay, self.escreve, self.completa, self.rotulo_no_texto = autoplay, escreve, completa, rotulo_no_texto
+        self.aberturas, self.gravando, self.teclas = [], False, []
+
+    def _com_video(self, numero):
+        return len(self.aulas[numero]) < 4 or self.aulas[numero][3] != "documento"
+
+    def _tocando(self):
+        return "state=3," in self.midia or "PLAYING(3)" in self.midia
+
+    def _player(self):
+        if not self._com_video(self.aberta):
+            return []
+        nos = ['<node class="android.widget.SeekBar" resource-id="plyr-seek-1" clickable="true" text="" '
+               'content-desc="" bounds="[380,1015][417,1067]" />']
+        if self._tocando():
+            return nos
+        rotulo = 'text="Tocar vídeo" content-desc=""' if self.rotulo_no_texto else 'text="" content-desc="Tocar vídeo"'
+        return nos + [f'<node class="android.widget.ToggleButton" resource-id="" clickable="true" {rotulo} '
+                      f'bounds="{caixa}" />' for caixa in ("[191,996][280,1083]", "[475,729][603,857]")]
 
     def app_current(self):
         return {"package": self.na_frente, "activity": ""}
@@ -857,12 +903,15 @@ class SiteDoCurso(CelularDoVolume):
         if self.na_frente != CHROME:
             return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="true" '
                     'text="Eu" content-desc="" bounds="[880,2250][1080,2394]" /></hierarchy>')
+        barra = self.aulas[self.aberta][2].removeprefix("https://")
+        if self.barra_em_foco and self.escrito is not None:
+            barra = self.escrito
         nos = ['<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
-               f'text="{self.aulas[self.aberta][2].removeprefix("https://")}" content-desc="" '
-               'bounds="[211,120][691,267]" />']
+               f'text="{barra}" content-desc="" bounds="[211,120][691,267]" />']
         if self.no_alto:
-            nos.append('<node class="android.widget.ToggleButton" resource-id="" clickable="true" text="" '
-                       'content-desc="Tocar vídeo" bounds="[475,729][603,857]" />')
+            nos += self._player()
+        nos.append('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
+                   'text="Módulos" content-desc="" bounds="[60,1466][336,1658]" />')
         if self.aberta + 1 < len(self.aulas):
             nos.append('<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
                        f'text="Próximo: {self.aulas[self.aberta + 1][0]}" bounds="[0,2175][1080,2394]" />')
@@ -871,23 +920,32 @@ class SiteDoCurso(CelularDoVolume):
     def click(self, x, y):
         self.toques.append((x, y))
         if 211 <= x <= 691 and 120 <= y <= 267:
-            self.barra_em_foco = True
-        elif (x, y) == (539, 793) and self.no_alto and self.play_toca:
+            self.barra_em_foco, self.escrito = True, None
+        elif (x, y) == (539, 793) and self.no_alto and self.play_toca and self._com_video(self.aberta):
             self.midia = _sessao_do_chrome(3, 1)
         elif y >= 2175 and self.aberta + 1 < len(self.aulas):
-            self.aberta, self.no_alto, self.midia = self.aberta + 1, False, SEM_SESSOES
+            self.aberta, self.no_alto = self.aberta + 1, False
+            self.midia = _sessao_do_chrome(3, 0) if self.autoplay and self._com_video(self.aberta) else SEM_SESSOES
 
     def press(self, tecla):
-        if tecla == "enter" and self.barra_em_foco:
-            self.volumes_ao_abrir.append(self.volume)
-            alvo = next((n for n, aula in enumerate(self.aulas) if aula[2] == self.escrito), None)
-            if alvo is not None:
-                self.aberta, self.no_alto, self.midia = alvo, True, SEM_SESSOES
+        self.teclas.append(tecla)
+        if tecla == "back":
             self.barra_em_foco = False
 
-
-def _escrever_na_barra(d, texto):
-    d.escrito = texto
+    def shell(self, partes):
+        if partes[:2] == ["input", "text"] and self.barra_em_foco and self.escreve:
+            self.escrito = partes[2] + self.completa
+        if partes == ["input", "keyevent", "KEYCODE_FORWARD_DEL"]:
+            if self.barra_em_foco and self.completa and (self.escrito or "").endswith(self.completa):
+                self.escrito = self.escrito[:-len(self.completa)]
+        if partes == ["input", "keyevent", "KEYCODE_ENTER"] and self.barra_em_foco:
+            self.aberturas.append((self.volume, self.gravando))
+            alvo = next((n for n, aula in enumerate(self.aulas) if aula[2] == self.escrito), None)
+            if alvo is not None:
+                self.aberta, self.no_alto = alvo, True
+                self.midia = _sessao_do_chrome(3, 0) if self.autoplay and self._com_video(alvo) else SEM_SESSOES
+            self.barra_em_foco = False
+        return super().shell(partes)
 
 
 AULAS_DO_SITE = [("Aula um", 300, "https://escola.exemplo.pro/m/lessons/aaa111"),
@@ -895,49 +953,95 @@ AULAS_DO_SITE = [("Aula um", 300, "https://escola.exemplo.pro/m/lessons/aaa111")
                  ("Aula três", 120, "https://escola.exemplo.pro/m/lessons/ccc333")]
 
 
+SEM_ESPERA = {"pausa": lambda segundos: None}
+AULA_DE_DOCUMENTO = ("Dia 01", 0, "https://escola.exemplo.pro/m/lessons/doc444", "documento")
+
+
 def test_a_aula_abre_pelo_endereco_na_mesma_guia_e_do_alto():
     # O link por fora abria uma guia nova a cada vez (de 8 para 11 no mapa de 22/11/2026): a aula abre pela barra de
     # endereço da guia da frente, e a página nova vem do alto, com o play na tela.
     site = SiteDoCurso(AULAS_DO_SITE, aberta=0, no_alto=False)
-    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[2][2], _escrever_na_barra, pausa=lambda s: None)
-    assert aberta == (True, "") and site.aberta == 2 and site.no_alto and site.toques == [(451, 193)]
+    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[2][2], **SEM_ESPERA)
+    assert aberta == ("com vídeo", "") and site.aberta == 2 and site.no_alto and site.toques == [(451, 193)]
     assert site.abertos == []                                           # o Chrome já estava na frente
     # O endereço que a página não abre: o porquê depois da espera.
-    assert cursos_robo.ir_para_o_endereco(site, "https://escola.exemplo.pro/m/lessons/zzz999", _escrever_na_barra,
-                                          pausa=lambda s: None) == (False, "o endereço da aula não ficou na barra")
+    assert cursos_robo.ir_para_o_endereco(site, "https://escola.exemplo.pro/m/lessons/zzz999", **SEM_ESPERA) == (
+        None, "o endereço da aula não ficou na barra")
 
 
-def test_a_pagina_sem_o_play_diz_o_estado_do_video():
-    # A página da aula pode começar a tocar o vídeo sozinha, sem o play na tela: o porquê leva o estado do vídeo.
+def test_o_endereco_vai_a_barra_como_num_teclado_e_o_enter_so_com_ele_la():
+    # Às 03:00, 03:15 e 03:30 de 23/11/2026, o texto posto pela acessibilidade aparecia na barra, mas o Enter abria
+    # outra página (a do Gemini): o endereço vai pelo adb, tecla por tecla, e o Enter só vem com ele na barra.
+    endereco = AULAS_DO_SITE[1][2]
+    site = SiteDoCurso(AULAS_DO_SITE)
+    assert cursos_robo.ir_para_o_endereco(site, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    escrito = site.comandos.index(["input", "text", endereco])
+    assert site.comandos.index(["input", "keyevent", "KEYCODE_ENTER"]) > escrito
+    # O pedaço que o Chrome completa sozinho sai com a tecla de apagar à frente, antes do Enter.
+    completado = SiteDoCurso(AULAS_DO_SITE, completa="-outra")
+    assert cursos_robo.ir_para_o_endereco(completado, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    assert completado.aberta == 1
+    # O que não chega à barra: sem o Enter, a barra sai da edição, e a página de antes fica como estava.
+    surdo = SiteDoCurso(AULAS_DO_SITE, escreve=False)
+    assert cursos_robo.ir_para_o_endereco(surdo, endereco, **SEM_ESPERA) == (
+        None, "o endereço não ficou escrito na barra")
+    assert ["input", "keyevent", "KEYCODE_ENTER"] not in surdo.comandos and surdo.teclas == ["back"]
+    assert surdo.aberta == 0
+
+
+def test_a_pagina_que_toca_sozinha_abriu_e_segue_sem_o_play():
+    # Aberta pela barra, a página da aula pode começar a tocar sozinha, sem o play na tela: ela abriu, e o play não é
+    # tocado (seria a pausa).
+    site = SiteDoCurso(AULAS_DO_SITE, autoplay=True)
+    assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], **SEM_ESPERA) == ("com vídeo", "")
+    assert cursos_robo.tocar_pelo_play(site, **SEM_ESPERA) and site.toques == [(451, 193)]
+
+
+def test_o_play_pelo_texto_do_botao_como_no_motorola():
+    # Na tela das 03:45 de 23/11/2026, a aula abriu com o player, mas o nome do play vinha no texto do botão, e a noite
+    # procurava na descrição: vale qualquer um.
+    motorola = TELA_DA_AULA.replace('text="" content-desc="Tocar vídeo"', 'text="Tocar vídeo" content-desc=""')
+    assert 'text="Tocar vídeo"' in motorola and cursos_robo.botao_do_play(motorola) == (539, 793)
+    site = SiteDoCurso(AULAS_DO_SITE, rotulo_no_texto=True)
+    assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[2][2], **SEM_ESPERA) == ("com vídeo", "")
+    assert cursos_robo.tocar_pelo_play(site, **SEM_ESPERA) and site.toques[-1] == (539, 793)
+
+
+def test_a_aula_sem_video_e_a_pagina_sem_o_play():
+    # Há aulas que são um documento ou um texto (o vídeo do Rafael das 08:22 de 23/11/2026): a página pronta, com as
+    # abas, sem player nenhum, nem depois de mais um tempo, é a aula sem vídeo.
+    aulas = AULAS_DO_SITE[:1] + [AULA_DE_DOCUMENTO]
+    assert cursos_robo.ir_para_o_endereco(SiteDoCurso(aulas), AULA_DE_DOCUMENTO[2], **SEM_ESPERA) == ("sem vídeo", "")
+
+    # O player na página sem o play à vista e sem o vídeo tocando: o porquê leva o estado do vídeo.
     class SemPlay(SiteDoCurso):
-        def press(self, tecla):
-            super().press(tecla)
-            self.no_alto, self.midia = False, _sessao_do_chrome(3, 9)
+        def _player(self):
+            return super()._player()[:1]
 
     site = SemPlay(AULAS_DO_SITE, aberta=0)
-    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], _escrever_na_barra, pausa=lambda s: None)
-    assert aberta == (False, "a página não mostrou o player; vídeo do Chrome: tocando, em 9 s")
+    assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], **SEM_ESPERA) == (
+        None, "a página não mostrou o player; sem vídeo no Chrome")
 
 
 def test_a_aula_abre_com_a_shopee_na_frente_trazendo_o_chrome():
     # A rodada do robô termina com a Shopee no Eu: o Chrome vem para a frente antes de o endereço da aula ir à barra.
     site = SiteDoCurso(AULAS_DO_SITE, aberta=0, na_frente="com.shopee.br")
-    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], _escrever_na_barra, pausa=lambda s: None)
-    assert aberta == (True, "") and site.abertos == [CHROME] and site.aberta == 1
+    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], **SEM_ESPERA)
+    assert aberta == ("com vídeo", "") and site.abertos == [CHROME] and site.aberta == 1
     # O Chrome que não vem para a frente (a tela de bloqueio por cima): nada é tocado, e o porquê vai ao registro.
     preso = SiteDoCurso(AULAS_DO_SITE, na_frente="com.android.systemui", abre_o_chrome=False)
-    aberta = cursos_robo.ir_para_o_endereco(preso, AULAS_DO_SITE[1][2], _escrever_na_barra, pausa=lambda s: None)
-    assert aberta == (False, "o Chrome não veio para a frente") and preso.toques == []
+    aberta = cursos_robo.ir_para_o_endereco(preso, AULAS_DO_SITE[1][2], **SEM_ESPERA)
+    assert aberta == (None, "o Chrome não veio para a frente") and preso.toques == []
 
 
 def test_o_play_da_aula_conferido_pela_sessao_de_midia():
     site = SiteDoCurso(AULAS_DO_SITE, no_alto=True)
-    assert cursos_robo.tocar_pelo_play(site, pausa=lambda s: None) and site.toques == [(539, 793)]
-    # Com o player fora da tela, nada é tocado; o play que não faz o vídeo tocar dá False.
+    assert cursos_robo.tocar_pelo_play(site, **SEM_ESPERA) and site.toques == [(539, 793)]
+    # Com o player fora da tela, nada é tocado; o play que não faz o vídeo tocar dá False, tocado uma vez só.
     rolada = SiteDoCurso(AULAS_DO_SITE, no_alto=False)
-    assert not cursos_robo.tocar_pelo_play(rolada, pausa=lambda s: None) and rolada.toques == []
-    assert not cursos_robo.tocar_pelo_play(SiteDoCurso(AULAS_DO_SITE, no_alto=True, play_toca=False),
-                                           pausa=lambda s: None)
+    assert not cursos_robo.tocar_pelo_play(rolada, **SEM_ESPERA) and rolada.toques == []
+    parado = SiteDoCurso(AULAS_DO_SITE, no_alto=True, play_toca=False)
+    assert not cursos_robo.tocar_pelo_play(parado, **SEM_ESPERA) and parado.toques == [(539, 793)]
 
 
 def test_o_mapa_das_aulas_segue_a_ordem_dos_cursos_e_o_proximo_do_site(bm):
@@ -984,6 +1088,29 @@ def test_o_claude_guarda_a_primeira_aula_de_cada_curso_pelo_explorar(bm):
         False, "o curso 4 já tem aula gravada: a 1ª dele não muda")
 
 
+def test_o_explorar_abre_a_aula_como_a_noite_sem_mudar_o_mapa(bm):
+    # O teste de dia, com o celular mudo (23/11/2026): curso:abrir:N abre a 1ª aula do curso N pela barra, como a
+    # noite, e curso:proximo, a seguinte; o log diz só o tipo da aula, o estado do vídeo e se o play está na tela.
+    aulas = AULAS_DO_SITE[:2] + [AULA_DE_DOCUMENTO]
+    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
+    site = SiteDoCurso(aulas, aberta=2)
+    com_video = (True, "aula aberta, com vídeo: sem vídeo no Chrome; o play na tela")
+    assert cursos_robo.curso_no_explorar(site, "abrir:4", **SEM_ESPERA) == com_video and site.aberta == 0
+    assert cursos_robo.curso_no_explorar(site, "proximo", **SEM_ESPERA) == com_video and site.aberta == 1
+    assert cursos_robo.curso_no_explorar(site, "proximo", **SEM_ESPERA) == (
+        True, "aula aberta, sem vídeo: sem vídeo no Chrome; sem o play na tela")
+    # Na última aula, sem o Próximo; o curso sem a 1ª aula no mapa; e o mapa não muda.
+    assert cursos_robo.curso_no_explorar(site, "proximo", **SEM_ESPERA) == (
+        False, "a tela não é a de uma aula com o Próximo")
+    assert cursos_robo.curso_no_explorar(site, "abrir:5", **SEM_ESPERA) == (
+        False, "o curso 5 ainda não tem a 1ª aula no mapa")
+    assert len(cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]) == 1
+    # Com esses passos (e o midia:tocar), o explorar deixa o celular mudo também de dia.
+    assert cursos_robo.toca_aula("curso", "abrir:4") and cursos_robo.toca_aula("curso", "proximo")
+    assert cursos_robo.toca_aula("midia", "tocar") and not cursos_robo.toca_aula("midia", "pausar")
+    assert not cursos_robo.toca_aula("curso", "primeira:4") and not cursos_robo.toca_aula("curso", "")
+
+
 class AjudanteNaHora:
     """O ajudante de mentira: lê cada aula na hora em que ela chega (a de número problema_na sai preta)."""
 
@@ -1013,23 +1140,37 @@ def noite_do_curso(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(cursos_robo, "disco_usado", lambda caminho=None: 20)
     monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
     gravadas, casos = [], []
-    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo: casos.append(motivo), raising=False)
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso",
+                        lambda d, motivo, resultado="não abriu": casos.append((motivo, resultado)), raising=False)
 
     def rodar(site, ajudante, fim_da=lambda endereco: (True, "o vídeo parou")):
-        def gravar(d, alvo, destino, tocar, pausa=None, **_):
-            assert tocar(d)
-            gravadas.append(cursos_robo.endereco_da_aula(d.dump_hierarchy()))
-            with open(destino, "wb") as arquivo:
-                arquivo.write(b"aula")
-            return fim_da(gravadas[-1])
+        def gravar(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, **_):
+            # Na ordem da gravação de verdade: o gravador (que deixa o alto-falante mudo), o volume, a página e o play.
+            d.gravando = True
+            try:
+                cursos_robo.subir_o_volume(d)
+                tipo, porque = ir_para_a_aula(d)
+                if not tipo:
+                    return False, False, f"a aula não abriu ({porque})"
+                if tipo == cursos_robo.SEM_VIDEO:
+                    return True, False, tipo
+                assert tocar(d)
+                gravadas.append(cursos_robo.endereco_da_aula(d.dump_hierarchy()))
+                with open(destino, "wb") as arquivo:
+                    arquivo.write(b"aula")
+                return (True,) + tuple(fim_da(gravadas[-1]))
+            finally:
+                cursos_robo.pausar_o_que_toca(d, pausa)
+                cursos_robo.devolver_o_volume(d, pausa)
+                d.gravando = False
 
-        monkeypatch.setattr(cursos_robo, "gravar_a_aula_aberta", gravar)
+        monkeypatch.setattr(cursos_robo, "gravar_a_aula", gravar, raising=False)
 
         @contextlib.contextmanager
         def trava():
             yield True
-        return cursos_robo.noite(conectar=lambda: site, escrever=_escrever_na_barra, pausa=lambda s: None,
-                                 ajudante=ajudante, trava=trava, conectado=lambda: True)
+        return cursos_robo.noite(conectar=lambda: site, pausa=lambda s: None, ajudante=ajudante, trava=trava,
+                                 conectado=lambda: True)
     rodar.gravadas, rodar.casos = gravadas, casos
     return rodar
 
@@ -1040,7 +1181,8 @@ def test_a_noite_grava_o_curso_inteiro_pelo_proximo_do_site(noite_do_curso):
     cursos_robo.guardar_a_primeira_aula(4, um)
     site, ajudante = SiteDoCurso(AULAS_DO_SITE, aberta=2), AjudanteNaHora()
     resumo = noite_do_curso(site, ajudante)
-    assert resumo == "3 aula(s) gravada(s), 3 guardada(s), 0 pela metade; parou: nenhuma aula por gravar"
+    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 0 sem vídeo; parou: nenhuma aula por "
+                      "gravar")
     assert noite_do_curso.gravadas == [um, dois, tres]
     assert ajudante.lidas == [(4, 1, "o vídeo parou"), (4, 2, "o vídeo parou"), (4, 3, "o vídeo parou")]
     curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
@@ -1065,24 +1207,59 @@ def test_a_aula_que_nao_abre_fica_no_registro_com_o_porque(noite_do_curso):
     cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
     site = SiteDoCurso(AULAS_DO_SITE, na_frente="com.android.systemui", abre_o_chrome=False)
     resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade; parou: a aula não abriu (o Chrome não "
-                      "veio para a frente)")
+    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade, 0 sem vídeo; parou: a aula não abriu (o "
+                      "Chrome não veio para a frente)")
     import registro_processos
     linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
     assert [(linha[2], linha[3]) for linha in linhas] == [
         ("não abriu", "curso 4, aula 1: a aula não abriu (o Chrome não veio para a frente)")] * 2
     # A tela da 1ª que não abriu fica guardada para o Claude achar o porquê (só uma por noite).
-    assert noite_do_curso.casos == ["a aula não abriu (o Chrome não veio para a frente)"]
+    assert noite_do_curso.casos == [("a aula não abriu (o Chrome não veio para a frente)", "não abriu")]
 
 
-def test_a_aula_so_abre_com_o_celular_mudo(noite_do_curso):
+def test_a_aula_so_abre_muda_ou_com_o_gravador_gravando(noite_do_curso):
     # O vídeo pode começar a tocar sozinho quando a página da aula abre, e o celular fica no quarto do Rafael (pedido
-    # dele, 22/11): cada aula abre com o volume de mídia em 0, e o de antes fica guardado para voltar depois.
+    # dele, 22/11): a página da aula seguinte, achada pelo Próximo, abre com o volume de mídia em 0; a aula da
+    # gravação abre com o volume da aula só com o gravador gravando (o som vai só ao servidor). O de antes fica
+    # guardado, e a próxima rodada do robô o devolve.
     cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6)
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6, autoplay=True)
     resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo.startswith("3 aula(s) gravada(s)") and site.volumes_ao_abrir and set(site.volumes_ao_abrir) == {0}
+    assert resumo.startswith("3 aula(s) gravada(s)")
+    assert all(volume == 0 or gravando for volume, gravando in site.aberturas)
+    assert (0, False) in site.aberturas and (8, True) in site.aberturas
     assert cursos_robo.estado_da_noite()["volume_antes"] == 6
+
+
+def test_a_aula_que_toca_sozinha_e_gravada_sem_tocar_no_play(noite_do_curso):
+    # A aula que começa a tocar com a página é gravada do começo, com o gravador ligado antes de ela abrir, e o play
+    # não é tocado (seria a pausa).
+    um = AULAS_DO_SITE[0][2]
+    cursos_robo.guardar_a_primeira_aula(4, um)
+    site = SiteDoCurso(AULAS_DO_SITE, autoplay=True)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)") and noite_do_curso.gravadas == [aula[2] for aula in AULAS_DO_SITE]
+    assert (539, 793) not in site.toques
+
+
+def test_a_aula_sem_video_nao_para_a_noite_e_fica_marcada_no_mapa(noite_do_curso):
+    # O vídeo do Rafael das 08:22 de 23/11/2026: há aulas que são um documento ou um texto. A noite não para nelas: a
+    # aula fica marcada no mapa (o documento é baixado depois pelo botão do site), e a seguinte vem pelo Próximo dela.
+    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
+    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
+    resumo = noite_do_curso(SiteDoCurso(aulas), AjudanteNaHora())
+    assert resumo == ("2 aula(s) gravada(s), 2 guardada(s), 0 pela metade, 1 sem vídeo; parou: nenhuma aula por "
+                      "gravar")
+    assert noite_do_curso.gravadas == [aulas[0][2], aulas[2][2]]
+    documento = cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"][1]
+    assert documento["endereco"] == AULA_DE_DOCUMENTO[2] and documento["sem_video"] and not documento["gravada_em"]
+    import registro_processos
+    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas if linha[2] == "sem vídeo"] == [
+        ("sem vídeo", "curso 4, aula 2: a aula não tem vídeo")]
+    # A tela da 1ª aula sem vídeo da noite fica guardada, para o Claude conferir que era mesmo um documento.
+    assert noite_do_curso.casos == [("a aula não tem vídeo", "sem vídeo")]
+    assert cursos_robo.resumo_do_mapa().startswith("curso 4: terminado (2 aulas, 1 sem vídeo)")
 
 
 def test_sem_a_leitura_do_volume_a_aula_nao_abre(noite_do_curso):
@@ -1102,7 +1279,7 @@ def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_c
     resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE), ajudante,
                             fim_da=lambda endereco: (True, "o vídeo parou") if endereco == um
                             else (False, "o robô pediu o celular"))
-    assert resumo == "1 aula(s) gravada(s), 1 guardada(s), 1 pela metade; parou: o robô pediu o celular"
+    assert resumo == "1 aula(s) gravada(s), 1 guardada(s), 1 pela metade, 0 sem vídeo; parou: o robô pediu o celular"
     assert cursos_robo.proxima_aula() == (4, {"endereco": dois, "nome": "Aula dois", "gravada_em": ""})
     assert os.listdir(cursos_robo.PASTA_DAS_GRAVACOES) == []
     # O registro diz qual aula ficou pela metade e por quê, só com números (o relatório da manhã, pedido de 23/11).
