@@ -64,7 +64,10 @@ Passos, separados por ponto e vírgula:
     curso:primeira:N com a 1ª aula de um curso aberta no Chrome, guarda o endereço dela no banco
                      como a 1ª do curso N (a posição na lista de Turmas, cursos_robo); curso
                      mostra quantas aulas cada curso tem no mapa e quantas foram gravadas (só
-                     números no log)
+                     números no log); curso:abrir:N abre a 1ª aula do curso N pela barra de
+                     endereço, como a noite abre, e curso:proximo, a seguinte à aberta, e dizem
+                     se a aula tem vídeo, o estado dele e se o play está na tela (com o celular
+                     mudo também de dia, como no midia:tocar)
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
@@ -2953,8 +2956,12 @@ def recusa_da_madrugada(passos, agora=None):
 
 
 def mexe_na_tela(nome, argumento):
-    """O passo mexe no app que está na frente (o vídeo do Chrome também: midia:pausar e midia:tocar)?"""
-    return nome in MEXEM_NA_TELA or (nome == "midia" and bool(argumento))
+    """
+    O passo mexe no app que está na frente (o vídeo do Chrome também: midia:pausar e midia:tocar; e a aula aberta
+    pela barra ou pelo Próximo: curso:abrir:N e curso:proximo)?
+    """
+    return nome in MEXEM_NA_TELA or (nome == "midia" and bool(argumento)) or (
+        nome == "curso" and cursos_robo.toca_aula(nome, argumento))
 
 
 def chrome_na_frente(d):
@@ -3041,9 +3048,11 @@ def _explorar(texto, d, celular):
         d = conectar(celular)
     if eh_verificacao(_tela(d)):
         return parar_na_verificacao(celular)
-    if not da_madrugada:
+    # O vídeo de uma aula pode tocar: de madrugada e nos passos que abrem ou tocam uma aula, o celular fica mudo.
+    if not da_madrugada and not any(cursos_robo.toca_aula(nome, argumento) for nome, argumento in passos):
         return _fazer_os_passos(d, passos, celular)
-    print("celular: madrugada do curso (P294 1): só o Chrome do curso, com o celular mudo")
+    print("celular: madrugada do curso (P294 1): só o Chrome do curso, com o celular mudo" if da_madrugada
+          else "celular: aula do curso, com o celular mudo")
     try:
         mudo = cursos_robo.calar_o_celular(d)
     except Exception as e:
@@ -3054,7 +3063,7 @@ def _explorar(texto, d, celular):
         print(f"volume: o celular não ficou mudo ({motivo}); nada foi tocado")
         return False
     try:
-        return _fazer_os_passos(d, passos, celular, da_madrugada=True)
+        return _fazer_os_passos(d, passos, celular, da_madrugada=da_madrugada)
     finally:
         try:
             voltou = cursos_robo.devolver_o_volume(d)

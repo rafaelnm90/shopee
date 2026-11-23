@@ -1220,6 +1220,9 @@ def test_de_madrugada_o_passo_curso_guarda_o_mapa_sem_mexer_na_tela(de_madrugada
     # O passo curso (a 1ª aula de cada curso no mapa das aulas) vale no explorar do curso de madrugada e não toca.
     assert ps.recusa_da_madrugada([("abrir", "chrome"), ("curso", "primeira:4"), ("curso", "")]) is None
     assert not ps.mexe_na_tela("curso", "primeira:4")
+    # Abrir uma aula (pela barra ou pelo Próximo) mexe no Chrome: de madrugada, só com ele na frente.
+    assert ps.mexe_na_tela("curso", "abrir:4") and ps.mexe_na_tela("curso", "proximo")
+    assert ps.recusa_da_madrugada([("abrir", "curso"), ("curso", "abrir:4"), ("curso", "proximo")]) is None
     assert ps.separar_passos("curso:primeira:4; curso") == [("curso", "primeira:4"), ("curso", "")]
 
 
@@ -1234,6 +1237,33 @@ def test_a_aula_que_ficou_tocando_e_pausada_antes_de_o_volume_voltar(de_madrugad
     assert ps.explorar("abrir:chrome; midia:tocar", celular=True) is True
     assert aparelho.tocando and aparelho.volumes == [6, 0, 0]
     assert "ficou mudo" in capsys.readouterr().out and ps.cursos_robo.estado_da_noite()["volume_antes"] == 6
+
+
+@pytest.fixture
+def de_dia(relogio, monkeypatch):
+    """10:00, no Horário do Robô (8h às 22h), com o celular conectado."""
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    relogio("10:00")
+    monkeypatch.setattr(ps.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(ps.av, "tela_aberta", lambda: False)
+
+    def com(aparelho):
+        monkeypatch.setattr(ps, "conectar", lambda celular: aparelho)
+        return aparelho
+    return com
+
+
+def test_de_dia_o_passo_que_toca_uma_aula_deixa_o_celular_mudo(de_dia, capsys):
+    # O celular fica no quarto do Rafael (pedido dele, 22/11/2026): também de dia, o passo que abre ou toca uma aula
+    # (o teste da abertura das aulas, 23/11) deixa o celular mudo, e o volume de antes volta no fim, com nada tocando.
+    aparelho = de_dia(AparelhoDoChrome())
+    assert ps.explorar("abrir:chrome; midia:tocar", celular=True) is True
+    assert not aparelho.tocando and aparelho.volumes == [6, 0, 6]
+    assert "aula do curso, com o celular mudo" in capsys.readouterr().out
+    # Sem passo de aula, o volume fica como está.
+    aparelho = de_dia(AparelhoDoChrome())
+    assert ps.explorar("abrir:chrome; xy:100,200", celular=True) is True
+    assert aparelho.volumes == [6] and aparelho.toques == [(100, 200)]
 
 
 def test_de_madrugada_sem_o_chrome_na_frente_nada_mais_e_tocado(de_madrugada, capsys):
