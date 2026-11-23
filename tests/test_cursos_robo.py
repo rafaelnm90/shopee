@@ -499,6 +499,11 @@ def test_volume_da_aula_sobe_ao_meio_e_volta_ao_de_antes(bm):
     assert cursos_robo.devolver_o_volume(celular) and celular.volume == 2
     assert cursos_robo.estado_da_noite()["volume_antes"] is None
     assert not cursos_robo.devolver_o_volume(celular)
+    # A gravação que cai e começa de novo antes de o volume voltar guarda o de antes da 1ª, não o da aula.
+    assert cursos_robo.subir_o_volume(celular) == (8, 15)
+    assert cursos_robo.subir_o_volume(celular) == (8, 15)
+    assert cursos_robo.estado_da_noite()["volume_antes"] == 2
+    assert cursos_robo.devolver_o_volume(celular) and celular.volume == 2
     # Já acima do meio, fica como está.
     alto = CelularDoVolume(volume=12)
     assert cursos_robo.subir_o_volume(alto) == (12, 15)
