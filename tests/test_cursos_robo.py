@@ -39,8 +39,9 @@ def test_gravador_grava_sem_janela_sem_tocar_no_celular_e_no_tempo(tmp_path):
     assert cursos_robo.gravar("celular:5555", 20, destino, rodar=rodar) == (True, "gravado")
     comando, opcoes = chamados[0]
     assert comando[:3] == ["scrcpy", "-s", "celular:5555"]
-    for opcao in ("--no-window", "--no-playback", "--no-control", f"--record={destino}", "--record-format=mkv",
-                  "--time-limit=20"):
+    # Sem o som da gravação, o gravador para (--require-audio): a aula nunca toca alto no quarto do Rafael.
+    for opcao in ("--no-window", "--no-playback", "--no-control", "--require-audio", f"--record={destino}",
+                  "--record-format=mkv", "--time-limit=20"):
         assert opcao in comando
     assert opcoes["timeout"] == 20 + cursos_robo.FOLGA_DO_GRAVADOR
     assert opcoes["env"]["SDL_VIDEODRIVER"] == opcoes["env"]["SDL_AUDIODRIVER"] == "dummy"
@@ -332,12 +333,16 @@ def test_campo_em_foco_diz_se_o_cursor_esta_no_campo_de_senha():
     assert cursos_robo.campo_em_foco("<quebrado") is None
 
 
+# O dumpsys media_session sem nenhum vídeo ou som no celular.
+SEM_SESSOES = "MEDIA SESSION SERVICE (dumpsys media_session)\nSessions Stack - have 0 sessions:\n"
+
+
 class CelularDoVolume:
     """O celular de mentira que responde pelo adb ao volume de mídia e à sessão de mídia do Chrome."""
 
-    def __init__(self, volume=2, maximo=15, midia="", muda=True, responde=True):
+    def __init__(self, volume=2, maximo=15, midia=SEM_SESSOES, muda=True, responde=True, pausa_funciona=True):
         self.volume, self.maximo, self.midia, self.muda, self.responde = volume, maximo, midia, muda, responde
-        self.comandos = []
+        self.pausa_funciona, self.comandos = pausa_funciona, []
 
     def shell(self, partes):
         import types
@@ -353,6 +358,8 @@ class CelularDoVolume:
                          f"[V] volume is {self.volume} in range [0..{self.maximo}]\n")
         elif partes[:2] == ["dumpsys", "media_session"]:
             saida = self.midia
+        elif partes == ["input", "keyevent", "KEYCODE_MEDIA_PAUSE"] and self.pausa_funciona:
+            self.midia = self.midia.replace("state=PLAYING(3)", "state=PAUSED(2)").replace("state=3,", "state=2,")
         return types.SimpleNamespace(output=saida, exit_code=0)
 
 
@@ -527,6 +534,27 @@ def test_calar_o_celular_para_o_explorar_de_madrugada(bm):
     # Sem resposta do Android, None (o explorar não toca em nada).
     cursos_robo._anotar(volume_antes=None)
     assert cursos_robo.calar_o_celular(CelularDoVolume(responde=False)) is None
+
+
+def test_o_volume_so_volta_com_nada_tocando_no_celular_do_quarto_do_rafael(bm):
+    # O celular fica no quarto do Rafael (pedido dele, 22/11/2026): o que toca é pausado antes de o volume voltar.
+    assert cursos_robo.tocando_agora(DUMP_DA_MIDIA)
+    assert not cursos_robo.tocando_agora(SEM_SESSOES)
+    assert cursos_robo.tocando_agora(SEM_SESSOES + "    state=PlaybackState {state=6, position=0, speed=0.0}\n")
+    celular = CelularDoVolume(volume=8, midia=DUMP_DA_MIDIA)
+    cursos_robo._anotar(volume_antes=2)
+    assert cursos_robo.devolver_o_volume(celular, pausa=lambda s: None) and celular.volume == 2
+    pausou = celular.comandos.index(["input", "keyevent", "KEYCODE_MEDIA_PAUSE"])
+    voltou = next(n for n, partes in enumerate(celular.comandos) if "--set" in partes)
+    assert pausou < voltou and not cursos_robo.tocando_agora(celular.midia)
+    # O que não pausa (ou o Android que não responde) deixa o celular mudo, nunca alto; o de antes volta depois.
+    for celular in (CelularDoVolume(volume=8, midia=DUMP_DA_MIDIA, pausa_funciona=False),
+                    CelularDoVolume(volume=8, midia="")):
+        cursos_robo._anotar(volume_antes=2)
+        assert not cursos_robo.devolver_o_volume(celular, pausa=lambda s: None)
+        assert celular.volume == 0 and cursos_robo.estado_da_noite()["volume_antes"] == 2
+    celular.midia = SEM_SESSOES
+    assert cursos_robo.devolver_o_volume(celular, pausa=lambda s: None) and celular.volume == 2
 
 
 class ProcessoDoGravador:

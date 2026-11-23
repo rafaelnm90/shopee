@@ -84,6 +84,7 @@ PASSO_DA_ESPERA = 2
 FLUXO_DE_MIDIA = 3
 ESTADOS_DA_MIDIA = {0: "sem vídeo", 1: "parado", 2: "pausado", 3: "tocando", 6: "carregando", 7: "com erro"}
 TOCANDO = 3
+CARREGANDO = 6
 TECLAS_DA_MIDIA = {"pausar": "KEYCODE_MEDIA_PAUSE", "tocar": "KEYCODE_MEDIA_PLAY"}
 
 # O que o scrcpy escreve no erro vira um motivo fixo: a saída dele traz o endereço do celular.
@@ -178,7 +179,9 @@ def instalar(rodar=subprocess.run, abrir=urllib.request.urlopen):
 
 def comando_do_gravador(alvo, segundos, destino):
     """O scrcpy que grava sem janela, sem tocar no celular e sem passar do tempo."""
-    return ["scrcpy", "-s", alvo, "--no-window", "--no-playback", "--no-control",
+    # --require-audio: sem o som da gravação, o gravador para. Gravando o som, o alto-falante do celular fica
+    # mudo; sem ele, a aula tocaria alto no quarto do Rafael (pedido dele, 22/11/2026).
+    return ["scrcpy", "-s", alvo, "--no-window", "--no-playback", "--no-control", "--require-audio",
             f"--record={destino}", "--record-format=mkv", f"--time-limit={int(segundos)}",
             f"--max-size={LADO_MAIOR}", f"--max-fps={QUADROS_POR_SEGUNDO}",
             f"--video-bit-rate={TAXA_DO_VIDEO}", f"--audio-bit-rate={TAXA_DO_SOM}"]
@@ -607,10 +610,41 @@ def calar_o_celular(d):
     return antes if antes[0] == 0 else mudar_o_volume(d, 0)
 
 
-def devolver_o_volume(d):
-    """O volume de mídia de antes da aula, de volta; sem um guardado, nada. True se voltou."""
+def tocando_agora(texto):
+    """Na saída do dumpsys media_session: algum app está tocando (ou carregando para tocar) um vídeo ou um som?"""
+    estados = re.findall(r"state=PlaybackState \{state=(?:[A-Za-z_]+\()?(\d+)", texto or "")
+    return any(int(estado) in (TOCANDO, CARREGANDO) for estado in estados)
+
+
+def pausar_o_que_toca(d, pausa=None):
+    """
+    O que toca no celular, pausado pela tecla de mídia e conferido. True quando nada toca; False sem a leitura do
+    Android ou com algo ainda tocando.
+    """
+    pausa = pausa or time.sleep
+    for _ in range(3):
+        texto = _saida(d, ["dumpsys", "media_session"])
+        if not texto:
+            return False
+        if not tocando_agora(texto):
+            return True
+        _saida(d, ["input", "keyevent", TECLAS_DA_MIDIA["pausar"]])
+        pausa(1)
+    texto = _saida(d, ["dumpsys", "media_session"])
+    return bool(texto) and not tocando_agora(texto)
+
+
+def devolver_o_volume(d, pausa=None):
+    """
+    O volume de mídia de antes da aula, de volta; sem um guardado, nada. True se voltou. O celular fica no quarto
+    do Rafael (pedido dele, 22/11/2026): o que toca nele é pausado antes, e, sem a certeza de que nada toca, o
+    celular fica mudo, nunca alto, e o de antes volta na próxima vez que o robô usar o celular.
+    """
     antes = estado_da_noite().get("volume_antes")
     if antes is None:
+        return False
+    if not pausar_o_que_toca(d, pausa):
+        mudar_o_volume(d, 0)
         return False
     depois = mudar_o_volume(d, antes)
     if not depois or depois[0] != antes:
