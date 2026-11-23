@@ -484,16 +484,20 @@ def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
 
 
 # --- As páginas do curso no Chrome (mapeadas em 22/11/2026, com o celular mudo) ---
-# Na aula, o player tem os botões pela descrição ("Tocar vídeo" no meio dele e na barra); embaixo, as abas Módulos,
-# Comentários e Anotações. Na aba Módulos, cada módulo é um botão e, aberto, mostra uma linha por aula com o nome e a
-# duração ("Nome 4:54"), numa lista que rola por dentro. A barra "Próximo: Nome" leva à aula seguinte do curso, e o
-# endereço da aula fica na barra do Chrome (".../m/lessons/<código>"). Trocando de aula pela lista, a página continua
-# rolada, e o player some da tela e da leitura dela: a página sobe antes do play. Os nomes das aulas e os endereços
-# ficam só no banco do servidor, nunca no log nem no repositório.
+# Na aula, o player tem os botões pelo nome ("Tocar vídeo" no meio dele e na barra; o nome vem no texto do botão no
+# Chrome do Motorola, como na tela das 03:45 de 23/11/2026, e na descrição em outros) e os ids "plyr-..."; embaixo,
+# as abas Módulos, Comentários e Anotações. Na aba Módulos, cada módulo é um botão e, aberto, mostra uma linha por aula
+# com o nome e a duração ("Nome 4:54"), numa lista que rola por dentro. A barra "Próximo: Nome" leva à aula seguinte
+# do curso, e o endereço da aula fica na barra do Chrome (".../m/lessons/<código>"). Trocando de aula pela lista, a
+# página continua rolada, e o player some da tela e da leitura dela: a página sobe antes do play. Há aulas sem vídeo,
+# um documento ou um texto (o vídeo do Rafael das 08:22 de 23/11/2026): a página dela tem as abas, sem player nenhum.
+# Os nomes das aulas e os endereços ficam só no banco do servidor, nunca no log nem no repositório.
 LINHA_DA_AULA = re.compile(r"(?P<nome>.*\S)\s+(?P<tempo>\d{1,2}(?::\d{2}){1,2})")
 CAMINHO_DA_AULA = re.compile(r"[\w.-]+/m/lessons/[\w-]+")
 ROTULO_DO_PROXIMO = "Próximo:"
 ROTULO_DO_PLAY = "Tocar vídeo"
+ID_DO_PLAYER = "plyr-"
+ID_DAS_ABAS = "trigger-modules"
 
 
 def segundos_do_tempo(texto):
@@ -558,24 +562,53 @@ def botao_do_proximo(xml):
 
 
 def botao_do_play(xml):
-    """O centro do play do player (o maior dos "Tocar vídeo"); None com o player fora da tela."""
-    botoes = [no for no in _nos(xml) if no["clicavel"] and no["descricao"] == ROTULO_DO_PLAY]
+    """
+    O centro do play do player (o maior dos "Tocar vídeo", pelo texto ou pela descrição do botão); None com o player
+    fora da tela. Só o play: o mudo do player nunca é tocado (pedido do Rafael, 23/11/2026), e o som da aula é o volume
+    de mídia do Android.
+    """
+    botoes = [no for no in _nos(xml) if no["clicavel"] and ROTULO_DO_PLAY in (no["texto"], no["descricao"])]
     if not botoes:
         return None
     maior = max(botoes, key=lambda no: (no["caixa"][2] - no["caixa"][0]) * (no["caixa"][3] - no["caixa"][1]))
     return _centro(maior["caixa"])
 
 
+def tem_player(xml):
+    """A página tem o player de vídeo (os ids "plyr-..." ou o "Tocar vídeo"), mesmo sem o play à vista?"""
+    return any(no["id"].startswith(ID_DO_PLAYER) for no in _nos(xml)) or bool(botao_do_play(xml))
+
+
+def pagina_da_aula_pronta(xml):
+    """A página da aula já mostra as abas (Módulos, Comentários e Anotações), que vêm com ela, com vídeo ou sem?"""
+    return any(no["id"].endswith(ID_DAS_ABAS) for no in _nos(xml))
+
+
+def texto_da_barra(xml):
+    """O que está escrito na barra de endereço do Chrome; None sem ela na tela."""
+    return next((no["texto"] for no in _nos(xml) if no["id"] == "url_bar"), None)
+
+
+def _sem_o_https(texto):
+    return (texto or "").strip().removeprefix("https://").rstrip("/")
+
+
 # A aula abre pela barra de endereço da guia que está na frente (o link por fora abre uma guia nova a cada vez: de 8
-# para 11 guias no mapa de 22/11/2026), e a página nova vem do alto, com o player na tela. O play é conferido pela
-# sessão de mídia do Chrome. A rodada do robô termina com a Shopee no Eu (deixar_sem_video), e a noite pode começar com
-# ela na frente: o Chrome vem para a frente antes da barra.
+# para 11 guias no mapa de 22/11/2026), e a página nova vem do alto, com o player na tela. O endereço vai à barra
+# tecla por tecla, pelo adb, como num teclado (escrever_na_barra), e só com ele conferido na barra vem o Enter. A página
+# pode começar a tocar o vídeo sozinha, sem o play na tela: o vídeo tocando também diz que ela abriu. O play é
+# conferido pela sessão de mídia do Chrome. A rodada do robô termina com a Shopee no Eu (deixar_sem_video), e a noite
+# pode começar com ela na frente: o Chrome vem para a frente antes da barra.
 ESPERA_DA_PAGINA = 20
+ESPERA_SEM_O_PLAYER = 10
 ESPERA_DO_PLAY = 30
 ESPERA_DO_CHROME = 3
+COM_VIDEO = "com vídeo"
+SEM_VIDEO = "sem vídeo"
 # Por que a aula não abriu, em palavras fixas (o registro de cada aula e o relatório da manhã).
 SEM_O_CHROME = "o Chrome não veio para a frente"
 SEM_A_BARRA = "sem a barra de endereço do Chrome"
+SEM_A_ESCRITA = "o endereço não ficou escrito na barra"
 SEM_O_ENDERECO = "o endereço da aula não ficou na barra"
 SEM_O_PLAYER = "a página não mostrou o player"
 
@@ -596,30 +629,64 @@ def trazer_o_chrome(d, pausa=None):
     (pausa or time.sleep)(ESPERA_DO_CHROME)
 
 
-def ir_para_o_endereco(d, endereco, escrever, pausa=None):
+def escrever_na_barra(d, endereco, pausa=None):
     """
-    Abre o endereço da aula na guia da frente do Chrome, escrito na barra de endereço (escrever é o do explorar), e
-    espera a página nova mostrar o player. (True, "") com a aula aberta, do alto; (False, o porquê) quando não abriu.
+    O endereço escrito na barra de endereço do Chrome (já tocada, com o de antes marcado) tecla por tecla, pelo adb,
+    como num teclado. O texto posto pela acessibilidade, o jeito dos campos da Shopee, aparecia na barra, mas o Chrome
+    não o tomava como escrito, e o Enter abria outra página (a do Gemini, às 03:00, 03:15 e 03:30 de 23/11/2026). O
+    pedaço que o Chrome completa sozinho depois do escrito fica marcado e sai com a tecla de apagar à frente. True com
+    a barra mostrando o endereço.
+    """
+    pausa = pausa or time.sleep
+    _saida(d, ["input", "text", endereco])
+    pausa(1)
+    _saida(d, ["input", "keyevent", "KEYCODE_FORWARD_DEL"])
+    pausa(1)
+    return _sem_o_https(texto_da_barra(d.dump_hierarchy())) == _sem_o_https(endereco)
+
+
+def _tocando_ou_carregando(midia):
+    return bool(midia) and midia["estado"] in ("tocando", "carregando")
+
+
+def ir_para_o_endereco(d, endereco, pausa=None):
+    """
+    Abre o endereço da aula na guia da frente do Chrome, escrito na barra de endereço, e espera a página nova:
+    (COM_VIDEO, "") com o player na tela ou o vídeo tocando sozinho; (SEM_VIDEO, "") na aula sem vídeo (um documento
+    ou um texto: a página pronta, sem player nenhum, nem depois de mais um tempo); (None, o porquê) quando não abriu.
+    O que tocava antes é pausado, e o vídeo tocando depois do Enter é o da página nova.
     """
     pausa = pausa or time.sleep
     trazer_o_chrome(d, pausa)
     barra = next((no for no in _nos(d.dump_hierarchy()) if no["id"] == "url_bar"), None)
     if not barra:
-        return False, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME
+        return None, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME
+    pausar_o_que_toca(d, pausa)
     d.click(*_centro(barra["caixa"]))
     pausa(1)
-    escrever(d, endereco)
-    d.press("enter")
+    if not escrever_na_barra(d, endereco, pausa):
+        # Sem o Enter: a barra sai da edição, e a página de antes fica como estava.
+        d.press("back")
+        return None, SEM_A_ESCRITA
+    _saida(d, ["input", "keyevent", "KEYCODE_ENTER"])
     tela = ""
     for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
         pausa(PASSO_DA_ESPERA)
         tela = d.dump_hierarchy()
-        if endereco_da_aula(tela) == endereco and botao_do_play(tela):
-            return True, ""
+        if endereco_da_aula(tela) == endereco and (botao_do_play(tela) or _tocando_ou_carregando(midia_do_chrome(d))):
+            return COM_VIDEO, ""
     if endereco_da_aula(tela) != endereco:
-        return False, SEM_O_ENDERECO
-    # A página da aula sem o play: o estado do vídeo vai junto (ele pode ter começado a tocar sozinho).
-    return False, f"{SEM_O_PLAYER}; {descrever_a_midia(midia_do_chrome(d))}"
+        return None, SEM_O_ENDERECO
+    if pagina_da_aula_pronta(tela) and not tem_player(tela):
+        # A página pronta sem player: mais um tempo para o player que demora, e então é a aula sem vídeo.
+        pausa(ESPERA_SEM_O_PLAYER)
+        tela = d.dump_hierarchy()
+        if endereco_da_aula(tela) == endereco and pagina_da_aula_pronta(tela) and not tem_player(tela):
+            return (COM_VIDEO, "") if _tocando_ou_carregando(midia_do_chrome(d)) else (SEM_VIDEO, "")
+        if endereco_da_aula(tela) == endereco and botao_do_play(tela):
+            return COM_VIDEO, ""
+    # A página da aula sem o play: o estado do vídeo vai junto.
+    return None, f"{SEM_O_PLAYER}; {descrever_a_midia(midia_do_chrome(d))}"
 
 
 # --- O mapa das aulas (P293 1), só no banco do servidor ---
@@ -632,7 +699,10 @@ CHAVE_DO_MAPA = "curso_mapa"
 
 
 def mapa_das_aulas():
-    """{"cursos": {"posição": {"aulas": [{"endereco", "nome", "gravada_em"}], "fim": bool}}} do banco."""
+    """
+    {"cursos": {"posição": {"aulas": [{"endereco", "nome", "gravada_em", "sem_video"?}], "fim": bool}}} do banco; a
+    aula sem vídeo (um documento ou um texto) tem a hora em que foi vista em sem_video.
+    """
     mapa = db.ler_config(CHAVE_DO_MAPA, {}) or {}
     mapa.setdefault("cursos", {})
     return mapa
@@ -675,7 +745,7 @@ def proxima_aula(mapa=None):
         aulas = curso.get("aulas") or []
         if curso.get("fim") or not aulas:
             continue
-        falta = next((aula for aula in aulas if not aula.get("gravada_em")), None)
+        falta = next((aula for aula in aulas if not aula.get("gravada_em") and not aula.get("sem_video")), None)
         return posicao, falta
     return None
 
@@ -686,6 +756,18 @@ def anotar_a_aula_gravada(posicao, endereco, agora=None):
         for aula in curso["aulas"]:
             if aula["endereco"] == endereco:
                 aula["gravada_em"] = _texto(_agora(agora))
+    _mudar_o_curso(posicao, mudar)
+
+
+def anotar_a_aula_sem_video(posicao, endereco, agora=None):
+    """
+    A aula sem vídeo (um documento ou um texto), vista sem gravar: fica marcada no mapa, para o documento ser baixado
+    depois pelo botão do site (P288 3 e o vídeo do Rafael das 08:22 de 23/11/2026), e a seguinte vem pelo Próximo dela.
+    """
+    def mudar(curso):
+        for aula in curso["aulas"]:
+            if aula["endereco"] == endereco:
+                aula["sem_video"] = _texto(_agora(agora))
     _mudar_o_curso(posicao, mudar)
 
 
@@ -719,29 +801,66 @@ def resumo_do_mapa(mapa=None):
         curso = mapa["cursos"].get(str(posicao)) or {}
         aulas = curso.get("aulas") or []
         gravadas = sum(1 for aula in aulas if aula.get("gravada_em"))
+        sem_video = sum(1 for aula in aulas if aula.get("sem_video"))
+        sem = f", {sem_video} sem vídeo" if sem_video else ""
         if curso.get("fim"):
-            partes.append(f"curso {posicao}: terminado ({gravadas} aulas)")
+            partes.append(f"curso {posicao}: terminado ({gravadas} aulas{sem})")
         elif aulas:
-            partes.append(f"curso {posicao}: {gravadas} de {len(aulas)} aula(s) conhecida(s) gravada(s)")
+            partes.append(f"curso {posicao}: {gravadas} de {len(aulas)} aula(s) conhecida(s) gravada(s){sem}")
         else:
             partes.append(f"curso {posicao}: sem a 1ª aula")
     return "; ".join(partes)
 
 
-def curso_no_explorar(d, argumento):
+def _aberta_no_explorar(d, tipo, porque):
+    """O que o explorar diz da aula que tentou abrir: o tipo, o vídeo e o play, só em palavras fixas e números."""
+    if not tipo:
+        return False, f"a aula não abriu ({porque})"
+    play = "o play na tela" if botao_do_play(d.dump_hierarchy()) else "sem o play na tela"
+    return True, f"aula aberta, {tipo}: {descrever_a_midia(midia_do_chrome(d))}; {play}"
+
+
+def _proxima_no_explorar(d, pausa):
+    """O passo curso:proximo: toca no Próximo da aula aberta e abre a seguinte pela barra, do alto, sem mudar o mapa."""
+    tela = d.dump_hierarchy()
+    atual, ponto = endereco_da_aula(tela), botao_do_proximo(tela)
+    if not atual or not ponto:
+        return False, "a tela não é a de uma aula com o Próximo"
+    d.click(*ponto)
+    for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
+        pausa(PASSO_DA_ESPERA)
+        nova = endereco_da_aula(d.dump_hierarchy())
+        if nova and nova != atual:
+            pausar_o_que_toca(d, pausa)
+            tipo, porque = ir_para_o_endereco(d, nova, pausa)
+            return _aberta_no_explorar(d, tipo, porque)
+    return False, "o Próximo não abriu a aula seguinte"
+
+
+def curso_no_explorar(d, argumento, pausa=time.sleep):
     """
     O passo curso do explorar: curso:primeira:N guarda a aula aberta no Chrome como a 1ª do curso na posição N da lista
-    de Turmas (o Claude a abre com o mapa do site); curso sozinho diz o mapa em números. O endereço fica no banco, e o
-    log diz só números.
+    de Turmas (o Claude a abre com o mapa do site); curso:abrir:N abre a 1ª aula do curso N pela barra de endereço,
+    como a noite abre, e curso:proximo, a seguinte à aberta (os dois sem mudar o mapa, com o celular mudo); curso
+    sozinho diz o mapa em números. O endereço fica no banco, e o log diz só números e palavras fixas.
     """
     partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
     if not partes:
         return True, resumo_do_mapa()
-    if partes[0] != "primeira" or len(partes) != 2 or not partes[1].isdigit():
-        return False, "curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso diz o mapa"
+    if partes == ["proximo"]:
+        return _proxima_no_explorar(d, pausa)
+    if partes[0] not in ("primeira", "abrir") or len(partes) != 2 or not partes[1].isdigit():
+        return False, ("curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso:abrir:N abre a 1ª do curso "
+                       "N; curso:proximo abre a seguinte; curso diz o mapa")
     posicao = int(partes[1])
     if posicao not in ORDEM_DOS_CURSOS:
         return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
+    if partes[0] == "abrir":
+        aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
+        if not aulas:
+            return False, f"o curso {posicao} ainda não tem a 1ª aula no mapa"
+        tipo, porque = ir_para_o_endereco(d, aulas[0]["endereco"], pausa)
+        return _aberta_no_explorar(d, tipo, porque)
     endereco = endereco_da_aula(d.dump_hierarchy())
     if not endereco:
         return False, "a tela não é a de uma aula do curso"
@@ -750,18 +869,33 @@ def curso_no_explorar(d, argumento):
     return True, f"1ª aula do curso {posicao} guardada"
 
 
+def toca_aula(nome, argumento):
+    """
+    O passo do explorar pode fazer o vídeo de uma aula tocar (abrir uma aula ou tocar o vídeo do Chrome)? Com ele,
+    também de dia, o celular fica mudo: ele fica no quarto do Rafael (pedido dele, 22/11/2026).
+    """
+    acao = (argumento or "").split(":")[0].strip().lower()
+    return (nome == "curso" and acao in ("abrir", "proximo")) or (nome == "midia" and acao == "tocar")
+
+
 def tocar_pelo_play(d, pausa=None):
-    """O play do player da aula, conferido pela sessão de mídia do Chrome: True com a aula tocando."""
+    """
+    A aula tocando, conferida pela sessão de mídia do Chrome: a que começou sozinha com a página segue sem toque (a
+    que está carregando, também); a outra, pelo play do player, tocado uma vez só. True com a aula tocando.
+    """
     pausa = pausa or time.sleep
-    ponto = botao_do_play(d.dump_hierarchy())
-    if not ponto:
-        return False
-    d.click(*ponto)
+    tocado = False
     for _ in range(ESPERA_DO_PLAY // PASSO_DA_ESPERA):
-        pausa(PASSO_DA_ESPERA)
         midia = midia_do_chrome(d)
         if midia and midia["estado"] == "tocando":
             return True
+        if not tocado and not _tocando_ou_carregando(midia):
+            ponto = botao_do_play(d.dump_hierarchy())
+            if not ponto:
+                return False
+            d.click(*ponto)
+            tocado = True
+        pausa(PASSO_DA_ESPERA)
     return False
 
 
@@ -1042,14 +1176,16 @@ def _madrugada_agora():
     return na_madrugada(db.ler_config("shopee_video", {}) or {})
 
 
-def gravar_a_aula_aberta(d, alvo, destino, tocar, pausa=None, relogio=None, abrir=subprocess.Popen,
-                         madrugada=None):
+def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=None, abrir=subprocess.Popen,
+                  madrugada=None):
     """
-    A aula já aberta no Chrome do celular, gravada em destino. A ordem protege o quarto do Rafael (pedido dele,
-    22/11/2026): o gravador liga antes e, gravando o som, deixa o alto-falante mudo; o volume sobe só com ele
-    gravando; no fim, a aula pausa e o volume volta antes de o gravador parar. tocar(d) dá o play e diz se o vídeo
-    tocou. O robô que pede o celular, a madrugada que acaba (3h45) e o gravador que cai param a aula, que fica pela
-    metade (P295 1: ela volta depois, do início). Devolve (inteira, motivo fixo).
+    A aula aberta no Chrome do celular e gravada em destino, do começo ao fim. A ordem protege o quarto do Rafael
+    (pedido dele, 22/11/2026): o gravador liga antes e, gravando o som, deixa o alto-falante mudo; o volume sobe só
+    com ele gravando; a aula abre (ir_para_a_aula) já com o gravador ligado, porque o vídeo pode começar a tocar
+    sozinho com a página (23/11/2026), e tocar(d) dá o play quando ele não começou; no fim, a aula pausa e o volume
+    volta antes de o gravador parar. O robô que pede o celular, a madrugada que acaba (3h45) e o gravador que cai
+    param a aula, que fica pela metade (P295 1: ela volta depois, do início). Devolve (aberta, inteira, motivo fixo):
+    aberta diz se a página da aula abriu; na aula sem vídeo, (True, False, SEM_VIDEO).
     """
     pausa = pausa or time.sleep
     relogio = relogio or time.monotonic
@@ -1060,24 +1196,29 @@ def gravar_a_aula_aberta(d, alvo, destino, tocar, pausa=None, relogio=None, abri
     try:
         pausa(ESPERA_DO_GRAVADOR)
         if not gravacao.rodando():
-            return False, "o gravador não ficou gravando"
+            return False, False, "o gravador não ficou gravando"
         if not subir_o_volume(d):
-            return False, "sem o volume de mídia"
+            return False, False, "sem o volume de mídia"
+        tipo, porque = ir_para_a_aula(d)
+        if not tipo:
+            return False, False, f"a aula não abriu ({porque})"
+        if tipo == SEM_VIDEO:
+            return True, False, SEM_VIDEO
         if not tocar(d):
-            return False, "a aula não começou a tocar"
+            return True, False, "a aula não começou a tocar"
         olho, comeco = OlhoNaAula(), relogio()
         while True:
             pausa(OLHADA_DA_AULA)
             anotar_o_sinal()
             if not gravacao.rodando():
-                return False, "o gravador parou no meio"
+                return True, False, "o gravador parou no meio"
             if pediram_o_celular(inicio):
-                return False, "o robô pediu o celular"
+                return True, False, "o robô pediu o celular"
             if not madrugada():
-                return False, "a madrugada acabou"
+                return True, False, "a madrugada acabou"
             fim = olho.olhar(midia_do_chrome(d), relogio() - comeco)
             if fim:
-                return fim != "carregando demais", fim
+                return True, fim != "carregando demais", fim
     finally:
         # Primeiro a aula pausa e o volume volta (ou fica mudo), e só depois o gravador para: parado o gravador, o
         # alto-falante volta a tocar.
@@ -1196,13 +1337,14 @@ PARADAS_DA_AULA = ("o robô pediu o celular", "a madrugada acabou")
 SEM_O_MUDO = "o celular não ficou mudo antes de abrir a aula"
 
 
-def guardar_o_caso(d, motivo):
+def guardar_o_caso(d, motivo, resultado="não abriu"):
     """
     A tela da 1ª aula da noite que não abriu (o print, a forma da tela e o log do Chrome), guardada para o Claude
-    achar o porquê (casos_robo: cifrada no exportar, nunca no repositório).
+    achar o porquê, e a da 1ª aula sem vídeo, para ele conferir que era mesmo um documento ou um texto (casos_robo:
+    cifrada no exportar, nunca no repositório).
     """
     import casos_robo
-    return casos_robo.guardar(d, "curso", "não abriu", motivo, passo="abrir a aula")
+    return casos_robo.guardar(d, "curso", resultado, motivo, passo="abrir a aula")
 
 
 def nome_no_proximo(xml):
@@ -1213,22 +1355,19 @@ def nome_no_proximo(xml):
     return ""
 
 
-def abrir_a_da_vez(d, posicao, aula, escrever, pausa=None):
+def endereco_da_vez(d, posicao, aula, pausa=None):
     """
-    Abre a aula da vez no Chrome, do alto: (endereço, motivo fixo). Sem a aula (a seguinte vem pelo Próximo da última
-    gravada), abre a última, toca no Próximo e anota a nova no mapa; sem o Próximo, o curso terminou. Endereço None
-    quando não abriu.
+    O endereço da aula da vez, com o celular mudo, antes de o gravador ligar: (endereço, ""). Com a aula no mapa, o
+    dela; sem ela (a seguinte vem pelo Próximo da última do curso), abre a última, toca no Próximo, anota a nova no
+    mapa e pausa o que começar a tocar. (None, o porquê) sem o endereço; "o curso terminou" na última aula.
     """
     pausa = pausa or time.sleep
     if aula:
-        aberta, porque = ir_para_o_endereco(d, aula["endereco"], escrever, pausa)
-        if aberta:
-            return aula["endereco"], "aula aberta"
-        return None, f"a aula não abriu ({porque})"
+        return aula["endereco"], ""
     ultima = mapa_das_aulas()["cursos"][str(posicao)]["aulas"][-1]["endereco"]
-    aberta, porque = ir_para_o_endereco(d, ultima, escrever, pausa)
-    if not aberta:
-        return None, f"a última aula gravada não abriu ({porque})"
+    tipo, porque = ir_para_o_endereco(d, ultima, pausa)
+    if not tipo:
+        return None, f"a última aula do mapa não abriu ({porque})"
     tela = d.dump_hierarchy()
     ponto = botao_do_proximo(tela)
     if not ponto:
@@ -1240,12 +1379,11 @@ def abrir_a_da_vez(d, posicao, aula, escrever, pausa=None):
         pausa(PASSO_DA_ESPERA)
         nova = endereco_da_aula(d.dump_hierarchy())
         if nova and nova != ultima:
+            # A seguinte pode começar a tocar sozinha (muda): pausada já, ela abre de novo pela barra, do alto, com o
+            # gravador ligado.
+            pausar_o_que_toca(d, pausa)
             anotar_a_aula_seguinte(posicao, nova, nome)
-            # Trocando de aula sem recarregar, a página pode ficar rolada: a nova abre de novo pela barra, do alto.
-            aberta, porque = ir_para_o_endereco(d, nova, escrever, pausa)
-            if aberta:
-                return nova, "aula seguinte aberta"
-            return None, f"a aula seguinte não abriu ({porque})"
+            return nova, ""
     return None, "o Próximo não abriu a aula seguinte"
 
 
@@ -1334,17 +1472,17 @@ class Ajudante:
         self._linha.join()
 
 
-def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, conectado=None):
+def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
     """
     A gravação de uma madrugada (P289 1 a P295 1): as aulas da vez, uma a uma, até a madrugada acabar, o disco encher,
-    o robô pedir o celular ou acabarem as aulas. Devolve o que aconteceu numa frase só com números (vai ao log).
+    o robô pedir o celular ou acabarem as aulas. A aula sem vídeo (um documento ou um texto) não para a noite: fica
+    marcada no mapa, e a seguinte vem pelo Próximo dela. Devolve o que aconteceu numa frase só com números (vai ao log).
     """
     import celular_robo
     pausa = pausa or time.sleep
-    if conectar is None or escrever is None:
+    if conectar is None:
         import postador_shopee_video as ps
-        conectar = conectar or (lambda: ps.conectar(celular=True))
-        escrever = escrever or ps.escrever
+        conectar = (lambda: ps.conectar(celular=True))
     trava = trava or celular_robo.trava
     conectado = conectado or celular_robo.conectado
     if not CURSO_EM_ANDAMENTO:
@@ -1352,7 +1490,7 @@ def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, c
     os.makedirs(PASTA_DAS_GRAVACOES, exist_ok=True)
     ajudante = ajudante or Ajudante()
     ajudante.mandar_as_que_ficaram()
-    gravadas = metade = falhas = 0
+    gravadas = metade = falhas = sem_video = 0
     motivo = "nenhuma aula por gravar"
     try:
         while True:
@@ -1379,20 +1517,25 @@ def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, c
                     break
                 anotar_o_sinal()
                 d = conectar()
-                # O vídeo da aula pode começar a tocar sozinho quando a página abre: ela só abre com o celular mudo,
-                # que fica no quarto do Rafael (pedido dele, 22/11/2026: DECISOES.md, Trabalho com o Claude).
+                # O vídeo da aula pode começar a tocar sozinho quando a página abre: o celular fica mudo até o gravador
+                # ligar, e então o som vai só ao servidor (o celular fica no quarto do Rafael, pedido dele de
+                # 22/11/2026: DECISOES.md, Trabalho com o Claude).
                 if not calar_o_celular(d):
                     motivo = SEM_O_MUDO
                     break
-                endereco, detalhe = abrir_a_da_vez(d, posicao, aula, escrever, pausa)
-                if not endereco and detalhe != "o curso terminou" and not falhas:
-                    guardar_o_caso(d, detalhe)
-                inteira, fim, destino = False, detalhe, ""
+                endereco, detalhe = endereco_da_vez(d, posicao, aula, pausa)
+                aberta, inteira, fim, destino = False, False, detalhe, ""
                 if endereco:
                     destino = os.path.join(PASTA_DAS_GRAVACOES, f"{_agora():%Y%m%d-%H%M%S}.mkv")
-                    inteira, fim = gravar_a_aula_aberta(d, getattr(d, "serial", ""), destino,
-                                                        lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa)
-            if endereco and inteira:
+                    aberta, inteira, fim = gravar_a_aula(
+                        d, getattr(d, "serial", ""), destino,
+                        lambda celular: ir_para_o_endereco(celular, endereco, pausa),
+                        lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa)
+                if fim == SEM_VIDEO and not sem_video:
+                    guardar_o_caso(d, "a aula não tem vídeo", "sem vídeo")
+                elif not aberta and fim != "o curso terminou" and not falhas:
+                    guardar_o_caso(d, fim)
+            if inteira:
                 # Marcada já: a seguinte vem pelo Próximo dela, enquanto o ajudante lê esta.
                 anotar_a_aula_gravada(posicao, endereco)
                 gravadas += 1
@@ -1401,14 +1544,23 @@ def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, c
                 continue
             if destino and os.path.exists(destino):
                 os.remove(destino)
-            if detalhe == "o curso terminou":
+            if fim == "o curso terminou":
                 continue
-            resultado = "pela metade" if endereco else "não abriu"
-            aberta = endereco or (aula or {}).get("endereco")
+            numero = numero_da_aula(posicao, endereco or (aula or {}).get("endereco"))
+            if fim == SEM_VIDEO:
+                # Um documento ou um texto: o documento é baixado depois pelo botão do site (pedido do Rafael,
+                # 23/11/2026: DECISOES.md, Trabalho com o Claude).
+                anotar_a_aula_sem_video(posicao, endereco)
+                sem_video += 1
+                falhas = 0
+                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, SEM_VIDEO,
+                                             f"{qual_aula(posicao, numero)}: a aula não tem vídeo", ok=None)
+                continue
+            resultado = "pela metade" if aberta else "não abriu"
             registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, resultado,
-                                         f"{qual_aula(posicao, numero_da_aula(posicao, aberta))}: {fim}",
+                                         f"{qual_aula(posicao, numero)}: {fim}",
                                          ok=None if fim in PARADAS_DA_AULA else False)
-            if endereco:
+            if aberta:
                 metade += 1
             if fim in PARADAS_DA_AULA:
                 motivo = fim
@@ -1420,8 +1572,8 @@ def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, c
     finally:
         soltar_o_sinal()
         ajudante.acabar()
-    resumo = (f"{gravadas} aula(s) gravada(s), {ajudante.guardadas} guardada(s), {metade} pela metade; parou: "
-              f"{ajudante.problema or motivo}")
+    resumo = (f"{gravadas} aula(s) gravada(s), {ajudante.guardadas} guardada(s), {metade} pela metade, "
+              f"{sem_video} sem vídeo; parou: {ajudante.problema or motivo}")
     registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_NOITE, "concluída", resumo, ok=not ajudante.problema)
     return resumo
 
