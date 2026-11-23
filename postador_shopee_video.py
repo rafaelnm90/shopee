@@ -2915,6 +2915,58 @@ ESPERA_DO_CELULAR = 15 * 60
 PAUSA_DA_ESPERA = 15
 
 
+# De madrugada, fora do Horário do Robô, o explorar mexe só no Chrome do curso (P294 1, 22/11/2026), enquanto o
+# curso não termina (cursos_robo.CURSO_EM_ANDAMENTO) e até as 3h45 (cursos_robo.na_madrugada): o 1º passo abre o
+# curso ou o Chrome, só estes passos valem, e os que mexem no que está na tela conferem antes que o Chrome está na
+# frente. A Shopee continua sem ser aberta de madrugada, como desde 18/10, e o celular fica mudo enquanto isso.
+PASSOS_DA_MADRUGADA = {"abrir", "entrar", "gravar", "volume", "midia", "caso", "esperar", "tela", "xy", "tocar",
+                       "rolar", "arrastar", "voltar", "inicio"}
+APPS_DA_MADRUGADA = {"curso", "chrome"}
+MEXEM_NA_TELA = {"entrar", "xy", "tocar", "rolar", "arrastar", "voltar"}
+
+
+def recusa_da_madrugada(passos, agora=None):
+    """
+    Fora do Horário do Robô: por que o explorar não pode mexer no celular agora (P294 1). None quando pode, na
+    madrugada do curso, com o 1º passo abrindo o curso ou o Chrome e só os passos dele.
+    """
+    if not cursos_robo.CURSO_EM_ANDAMENTO:
+        return "sem curso por gravar"
+    if not cursos_robo.na_madrugada(db.ler_config(CHAVE_PAINEL, {}) or {}, agora):
+        return "fora da madrugada do curso (até as 3h45)"
+    if not passos or passos[0][0] != "abrir" or passos[0][1].lower() not in APPS_DA_MADRUGADA:
+        return "de madrugada, o 1º passo abre o curso ou o Chrome (abrir:curso ou abrir:chrome)"
+    for nome, argumento in passos:
+        if nome not in PASSOS_DA_MADRUGADA or (nome == "abrir" and argumento.lower() not in APPS_DA_MADRUGADA):
+            return f"de madrugada, só os passos do Chrome do curso (o passo {nome} não)"
+    return None
+
+
+def mexe_na_tela(nome, argumento):
+    """O passo mexe no app que está na frente (o vídeo do Chrome também: midia:pausar e midia:tocar)?"""
+    return nome in MEXEM_NA_TELA or (nome == "midia" and bool(argumento))
+
+
+def chrome_na_frente(d):
+    try:
+        return (d.app_current() or {}).get("package") == cursos_robo.PACOTE_DO_CHROME
+    except Exception:
+        return False
+
+
+def _passos_ou_nada(texto):
+    try:
+        return separar_passos(texto)
+    except ValueError:
+        return []
+
+
+def _recusar_fora_do_horario(recusa):
+    inicio, fim = horario_das_rodadas()
+    print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília): {recusa}; nada foi tocado")
+    return None
+
+
 def explorar(texto, d=None, celular=False):
     """
     Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar
@@ -2929,13 +2981,12 @@ def explorar(texto, d=None, celular=False):
     logging.disable(logging.CRITICAL)
     try:
         if celular and d is None:
-            # A gravação do curso de madrugada solta o celular, como para o robô. Fora do Horário do Robô o
-            # explorar não toca no celular (_explorar), e a aula segue sem parar.
+            # A gravação do curso de madrugada solta o celular, como para o robô. O explorar que não vai mexer
+            # no celular (fora do Horário do Robô, sem ser só o Chrome do curso) não para a aula.
             if cursos_robo.gravando():
-                if not no_horario_das_rodadas():
-                    inicio, fim = horario_das_rodadas()
-                    print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
-                    return None
+                recusa = None if no_horario_das_rodadas() else recusa_da_madrugada(_passos_ou_nada(texto))
+                if recusa:
+                    return _recusar_fora_do_horario(recusa)
                 cursos_robo.liberar_para_o_robo("explorar")
             tentativas = ESPERA_DO_CELULAR // PAUSA_DA_ESPERA + 1
             for tentativa in range(tentativas):
@@ -2963,14 +3014,16 @@ def _explorar(texto, d, celular):
         return None
     if not passos:
         passos = [("tela", "")]
+    da_madrugada = False
     if d is None:
         if celular and not celular_robo.conectado():
             print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
             return None
         if celular and not no_horario_das_rodadas():
-            inicio, fim = horario_das_rodadas()
-            print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
-            return None
+            recusa = recusa_da_madrugada(passos)
+            if recusa:
+                return _recusar_fora_do_horario(recusa)
+            da_madrugada = True
         if celular and av.tela_aberta():
             # O Rafael pode estar mexendo no celular pela tela: o robô não toca junto.
             print("celular: a tela do celular está aberta no privado do Rafael; nada foi tocado")
@@ -2981,7 +3034,34 @@ def _explorar(texto, d, celular):
         d = conectar(celular)
     if eh_verificacao(_tela(d)):
         return parar_na_verificacao(celular)
+    if not da_madrugada:
+        return _fazer_os_passos(d, passos, celular)
+    print("celular: madrugada do curso (P294 1): só o Chrome do curso, com o celular mudo")
+    try:
+        mudo = cursos_robo.calar_o_celular(d)
+    except Exception as e:
+        mudo, motivo = None, type(e).__name__
+    else:
+        motivo = "sem o volume do Android"
+    if not mudo or mudo[0] != 0:
+        print(f"volume: o celular não ficou mudo ({motivo}); nada foi tocado")
+        return False
+    try:
+        return _fazer_os_passos(d, passos, celular, da_madrugada=True)
+    finally:
+        try:
+            voltou = cursos_robo.devolver_o_volume(d)
+        except Exception:
+            voltou = False
+        print("volume: de volta ao de antes" if voltou else
+              "volume: não voltou ao de antes; a próxima rodada do robô devolve")
+
+
+def _fazer_os_passos(d, passos, celular, da_madrugada=False):
     for numero, (nome, argumento) in enumerate(passos, 1):
+        if da_madrugada and mexe_na_tela(nome, argumento) and not chrome_na_frente(d):
+            print(f"\n== passo {numero}: {nome} → o Chrome não está na frente: de madrugada, nada mais é tocado")
+            return False
         try:
             ok, resultado = fazer_passo(d, nome, argumento)
         except Exception as e:
