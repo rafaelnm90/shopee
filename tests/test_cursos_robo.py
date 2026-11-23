@@ -1466,3 +1466,96 @@ def test_comando_das_aulas_do_workflow_so_com_contagens_e_nomes_de_pasta(monkeyp
     assert rodar("apagar", nomes[0]) == (0, "1 aula(s) apagada(s) do servidor.")
     assert cursos_robo.aulas_guardadas() == nomes[1:]
     assert rodar("outra")[0] == 2
+
+
+class CelularDosBaixados:
+    """
+    O celular de mentira com a pasta Download: cada leitura (o find depois da marca) devolve a próxima lista de
+    leituras [(hora, bytes, caminho)], e o pull traz o arquivo ao servidor.
+    """
+
+    def __init__(self, leituras, conteudo=b"%PDF-1.4 documento"):
+        self.leituras, self.conteudo, self.comandos, self.puxados = list(leituras), conteudo, [], []
+
+    def shell(self, partes):
+        import types
+        self.comandos.append(partes)
+        saida = ""
+        if partes[:2] == ["find", cursos_robo.PASTA_DOS_BAIXADOS]:
+            lista = self.leituras.pop(0) if len(self.leituras) > 1 else (self.leituras[0] if self.leituras else [])
+            saida = "".join(f"{hora} {tamanho} {caminho}\n" for hora, tamanho, caminho in lista)
+        return types.SimpleNamespace(output=saida, exit_code=0)
+
+    def pull(self, remoto, local):
+        self.puxados.append(remoto)
+        with open(local, "wb") as arquivo:
+            arquivo.write(self.conteudo)
+
+
+def test_o_documento_baixado_e_o_mais_novo_ja_inteiro_depois_da_marca():
+    celular = CelularDosBaixados([[(1700000100, 2048, "/sdcard/Download/Material da aula.pdf"),
+                                   (1700000200, 10, "/sdcard/Download/.pending-1700-Outro.pdf"),
+                                   (1700000300, 99, "/sdcard/Download/Planilha.xlsx.crdownload"),
+                                   (1700000050, 512, "/sdcard/Download/Antigo.pdf")]])
+    assert cursos_robo.baixados_depois_da_marca(celular) == [("/sdcard/Download/Material da aula.pdf", 2048),
+                                                             ("/sdcard/Download/Antigo.pdf", 512)]
+    comando = celular.comandos[0]
+    assert comando[:6] == ["find", "/sdcard/Download", "-maxdepth", "1", "-type", "f"]
+    assert comando[comando.index("-newer") + 1] == cursos_robo.MARCA_DO_CURSO
+    assert cursos_robo.nome_do_documento("/sdcard/Download/Material da aula.PDF", 2) == "documento_2.pdf"
+    assert cursos_robo.nome_do_documento("/sdcard/Download/sem extensao", 1) == "documento_1"
+
+
+def test_o_documento_vem_ao_servidor_quando_para_de_crescer_e_sai_do_celular(tmp_path):
+    caminho = "/sdcard/Download/Material da aula.pdf"
+    celular = CelularDosBaixados([[], [(1700000100, 100, caminho)], [(1700000100, 2048, caminho)],
+                                  [(1700000100, 2048, caminho)]])
+    nome, tamanho, porque = cursos_robo.trazer_o_baixado(celular, str(tmp_path / "aula"), 1, **SEM_ESPERA)
+    assert (nome, tamanho, porque) == ("documento_1.pdf", 2048, "")
+    assert (tmp_path / "aula" / "documento_1.pdf").read_bytes() == b"%PDF-1.4 documento"
+    assert celular.puxados == [caminho]
+    # O baixado e a marca saem do celular, e a galeria fica sabendo.
+    assert ["rm", "-f", caminho, cursos_robo.MARCA_DO_CURSO] in celular.comandos
+    assert any(partes[:2] == ["am", "broadcast"] for partes in celular.comandos)
+
+
+def test_o_documento_que_nao_aparece_ou_grande_demais_fica_so_anotado(tmp_path, monkeypatch):
+    nada = CelularDosBaixados([[]])
+    assert cursos_robo.trazer_o_baixado(nada, str(tmp_path / "a"), 1, espera=6, **SEM_ESPERA) == (
+        None, 0, "o documento não apareceu no celular")
+    assert nada.puxados == [] and not (tmp_path / "a").exists()
+    monkeypatch.setattr(cursos_robo, "MAIOR_DOCUMENTO", 1000)
+    caminho = "/sdcard/Download/Livro.pdf"
+    grande = CelularDosBaixados([[(1700000100, 5000, caminho)]])
+    assert cursos_robo.trazer_o_baixado(grande, str(tmp_path / "b"), 1, **SEM_ESPERA) == (
+        None, 5000, "o documento é grande demais para o pacote")
+    # Não vem ao servidor, mas sai do celular (a memória dele não enche).
+    assert grande.puxados == [] and ["rm", "-f", caminho, cursos_robo.MARCA_DO_CURSO] in grande.comandos
+
+
+PAGINA_DE_TEXTO = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+<node class="android.widget.FrameLayout" text="" content-desc="" bounds="[0,0][1080,2400]">
+<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" text="escola.exemplo.pro/m/lessons/x"
+ content-desc="" bounds="[211,120][691,267]" />
+<node class="android.webkit.WebView" text="Escola" content-desc="" bounds="[0,270][1080,2400]">
+<node class="android.view.View" text="" content-desc="" bounds="[0,270][1080,2400]">
+<node class="android.widget.TextView" text="Sobre a aula" content-desc="" bounds="[60,300][900,360]" />
+<node class="android.widget.TextView" text="Leia o   material   com atenção." content-desc=""
+ bounds="[60,380][900,460]" />
+<node class="android.widget.TextView" text="Leia o material com atenção." content-desc="" bounds="[60,380][900,460]" />
+<node class="android.view.View" text="" content-desc="Material de apoio" bounds="[60,480][900,540]" />
+</node>
+</node>
+<node class="android.widget.ImageButton" resource-id="com.android.chrome:id/menu_button" text=""
+ content-desc="Personalizar e controlar o Google Chrome" bounds="[960,120][1080,267]" />
+</node>
+</hierarchy>"""
+
+
+def test_o_texto_da_pagina_sem_a_barra_e_os_botoes_do_chrome():
+    assert cursos_robo.textos_da_pagina(PAGINA_DE_TEXTO) == [
+        "Escola", "Sobre a aula", "Leia o material com atenção.", "Material de apoio"]
+    so_o_app = "<hierarchy><node class='android.widget.TextView' text='Eu' /></hierarchy>"
+    assert cursos_robo.textos_da_pagina(so_o_app) == []
+    assert cursos_robo.textos_da_pagina("") == []
