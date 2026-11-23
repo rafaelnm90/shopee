@@ -916,6 +916,105 @@ def tocar_pelo_play(d, pausa=None):
     return False
 
 
+# --- O que a aula tem além do vídeo (pedidos do Rafael de 23/11/2026, às 08:44 e às 09:12) ---
+# O Claude faz o papel de aluno do curso inteiro: além da videoaula, o texto da aula e os documentos, baixados pelo
+# botão do próprio site (nunca por fora do player, P288 3). O Chrome guarda o baixado na pasta Download do celular; a
+# marca, um arquivo vazio criado antes do toque, diz qual é o novo, e ele vem ao servidor quando para de crescer e sai
+# do celular (a memória dele não enche). Tudo vai só à pasta da aula, cifrado ao Claude pelo cursos_robo.yml, nunca ao
+# log nem ao repositório: o log diz só quantos. O documento maior que MAIOR_DOCUMENTO fica só anotado (o pacote ao
+# Claude tem até 40 MB, e o servidor não pode lotar: P290 1).
+PASTA_DOS_BAIXADOS = "/sdcard/Download"
+MARCA_DO_CURSO = PASTA_DOS_BAIXADOS + "/.curso_antes_do_baixar"
+ESPERA_DO_DOCUMENTO = 90
+MAIOR_DOCUMENTO = 30 * 1024 * 1024
+
+
+def textos_da_pagina(xml):
+    """
+    Os textos da página aberta no Chrome, na ordem da página (a do leitor de tela), sem a barra e os botões do
+    próprio Chrome: o título da aula, a descrição, os nomes dos módulos... [] sem a página na tela.
+    """
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return []
+    pagina = next((no for no in raiz.iter("node") if no.get("class") == "android.webkit.WebView"), None)
+    if pagina is None:
+        return []
+    textos = []
+    for no in pagina.iter("node"):
+        for chave in ("text", "content-desc"):
+            valor = " ".join((no.get(chave) or "").split())
+            if valor and (not textos or textos[-1] != valor):
+                textos.append(valor)
+    return textos
+
+
+def marcar_antes_de_baixar(d):
+    """A marca no celular logo antes do toque no botão de baixar do site; a hora do baixado tem de passar a dela."""
+    _saida(d, ["touch", MARCA_DO_CURSO])
+
+
+def baixados_depois_da_marca(d):
+    """
+    Os arquivos que o Chrome baixou depois da marca, já inteiros: [(caminho no celular, bytes)], o mais novo primeiro.
+    O que começa com ponto (o ".pending-…" do Android) e o ".crdownload" ainda estão sendo gravados.
+    """
+    comando = ["find", PASTA_DOS_BAIXADOS, "-maxdepth", "1", "-type", "f", "-newer", MARCA_DO_CURSO,
+               "-exec", "stat", "-c", "%Y %s %n", "{}", "+"]
+    achados = []
+    for linha in _saida(d, comando).splitlines():
+        partes = linha.strip().split(" ", 2)
+        if len(partes) != 3 or not partes[0].isdigit() or not partes[1].isdigit():
+            continue
+        nome = os.path.basename(partes[2])
+        if not nome.startswith(".") and not nome.endswith(".crdownload"):
+            achados.append((int(partes[0]), int(partes[1]), partes[2]))
+    return [(caminho, tamanho) for _, tamanho, caminho in sorted(achados, reverse=True)]
+
+
+def nome_do_documento(caminho, numero):
+    """O nome do documento na pasta da aula: documento_N com a extensão do baixado (o nome dele fica só no celular)."""
+    extensao = os.path.splitext(caminho)[1].lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,5}", extensao):
+        extensao = ""
+    return f"documento_{numero}{extensao}"
+
+
+def trazer_o_baixado(d, pasta, numero=1, pausa=None, espera=ESPERA_DO_DOCUMENTO):
+    """
+    O documento que o Chrome baixou depois da marca, trazido à pasta da aula quando para de crescer (duas leituras
+    iguais seguidas) e tirado do celular. (nome na pasta, bytes, "") ou (None, bytes, o porquê em palavras fixas).
+    """
+    pausa = pausa or time.sleep
+    anterior = None
+    for _ in range(max(1, espera // PASSO_DA_ESPERA)):
+        pausa(PASSO_DA_ESPERA)
+        novos = baixados_depois_da_marca(d)
+        atual = novos[0] if novos else None
+        if atual and atual[1] > 0 and atual == anterior:
+            break
+        anterior = atual
+    else:
+        return None, 0, "o documento não apareceu no celular"
+    remoto, tamanho = atual
+    try:
+        if tamanho > MAIOR_DOCUMENTO:
+            return None, tamanho, "o documento é grande demais para o pacote"
+        os.makedirs(pasta, exist_ok=True)
+        nome = nome_do_documento(remoto, numero)
+        try:
+            d.pull(remoto, os.path.join(pasta, nome))
+        except Exception as e:
+            return None, tamanho, f"o documento não veio do celular ({type(e).__name__})"
+        if not os.path.exists(os.path.join(pasta, nome)) or not os.path.getsize(os.path.join(pasta, nome)):
+            return None, tamanho, "o documento não veio do celular"
+        return nome, tamanho, ""
+    finally:
+        _saida(d, ["rm", "-f", remoto, MARCA_DO_CURSO])
+        _saida(d, ["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + remoto])
+
+
 # --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026, e P296 1, 23/11/2026) ---
 # Depois do Horário do Robô, de madrugada, as aulas são gravadas uma a uma até um pouco antes da limpeza
 # das 4h (P289 1), na velocidade normal (P292 1), com o volume de mídia no meio só durante a aula (P291 1)
