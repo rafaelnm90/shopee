@@ -623,6 +623,147 @@ def test_fim_da_aula_pela_sessao_de_midia():
     assert cursos_robo.OlhoNaAula().olhar(None, 10) is None
 
 
+def _sessao_do_chrome(estado, posicao_s):
+    """O dumpsys media_session com só a aula no Chrome, nesse estado (3 tocando, 2 pausada, 6 carregando)."""
+    return ("MEDIA SESSION SERVICE (dumpsys media_session)\nSessions Stack - have 1 sessions:\n"
+            "  Chrome com.android.chrome/MediaSession (userId=0)\n    package=com.android.chrome\n    active=true\n"
+            f"    state=PlaybackState {{state={estado}, position={int(posicao_s * 1000)}, buffered position=0, "
+            f"speed={1.0 if estado == 3 else 0.0}, updated=1, actions=0, error=null}}\n"
+            "    metadata: size=3, description=Aula, Curso, null\n")
+
+
+class AulaNoCelular(CelularDoVolume):
+    """O celular de mentira com a aula aberta no Chrome: toca no play e para sozinha aos `dura` s."""
+
+    def __init__(self, relogio, dura=60, carrega=False, **opcoes):
+        super().__init__(**opcoes)
+        self.relogio, self.dura, self.carrega = relogio, dura, carrega
+        self.comeco, self.pausada, self.eventos = None, False, []
+
+    def tocar(self, d):
+        self.comeco = self.relogio()
+        self.eventos.append("play")
+        return True
+
+    def shell(self, partes):
+        if partes[:2] == ["dumpsys", "media_session"]:
+            self.midia = self._midia()
+        if partes == ["input", "keyevent", "KEYCODE_MEDIA_PAUSE"]:
+            self.eventos.append("pausa")
+            self.pausada = True
+        if "--set" in partes:
+            self.eventos.append(f"volume {partes[-1]}")
+        return super().shell(partes)
+
+    def _midia(self):
+        if self.comeco is None:
+            return SEM_SESSOES
+        tocou = self.relogio() - self.comeco
+        if self.pausada or tocou >= self.dura:
+            return _sessao_do_chrome(2, min(tocou, self.dura))
+        if self.carrega and tocou >= 20:
+            return _sessao_do_chrome(6, 20)
+        return _sessao_do_chrome(3, tocou)
+
+
+def _gravar_a_aula(celular, tmp_path, tempo, quando=None, madrugada=lambda: True, gravador_vivo=True):
+    """Grava a aula de mentira com o relógio de mentira; quando(t) roda a cada pausa (o robô pede, o gravador cai)."""
+    gravadores = []
+
+    def abrir(comando, **opcoes):
+        processo = ProcessoDoGravador(comando, **opcoes)
+        processo.vivo = gravador_vivo
+        original = processo.send_signal
+
+        def parar(sinal):
+            celular.eventos.append("gravador parou")
+            original(sinal)
+
+        processo.send_signal = parar
+        gravadores.append(processo)
+        return processo
+
+    def pausa(segundos):
+        tempo[0] += segundos
+        if quando:
+            quando(tempo[0], gravadores)
+
+    destino = str(tmp_path / "aula.mkv")
+    feito = cursos_robo.gravar_a_aula_aberta(celular, "celular:5555", destino, celular.tocar, pausa=pausa,
+                                             relogio=lambda: tempo[0], abrir=abrir, madrugada=madrugada)
+    return feito, destino, gravadores
+
+
+def test_aula_aberta_gravada_inteira_com_o_volume_de_volta_antes_de_o_gravador_parar(bm, tmp_path):
+    # P291 1 e o pedido de 22/11 (o celular no quarto do Rafael): o gravador liga antes de o volume subir e
+    # para só depois de a aula pausar e o volume voltar.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=60, volume=2)
+    feito, destino, gravadores = _gravar_a_aula(celular, tmp_path, tempo)
+    assert feito == (True, "o vídeo parou")
+    assert celular.eventos == ["volume 8", "play", "volume 2", "gravador parou"]
+    assert os.path.exists(destino) and celular.volume == 2
+    assert cursos_robo.estado_da_noite()["volume_antes"] is None
+    # Enquanto grava, o sinal ao robô fica renovado (quem solta é a noite, no fim).
+    assert cursos_robo.gravando()
+    assert "--require-audio" in gravadores[0].comando and tempo[0] >= 5 + 60 + cursos_robo.PARADO_NO_FIM
+
+
+def test_robo_que_pede_o_celular_para_a_aula_que_fica_pela_metade(bm, tmp_path):
+    # O robô da Shopee Vídeo tem a preferência (pedido de 22/11): a aula pausa e solta o celular na hora, e
+    # fica pela metade (P295 1: volta depois, do início).
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, volume=2)
+
+    def quando(agora, gravadores):
+        if agora >= 30 and "pedido_em" not in cursos_robo.estado_da_noite():
+            cursos_robo.pedir_o_celular("robô")
+
+    feito, destino, _ = _gravar_a_aula(celular, tmp_path, tempo, quando)
+    assert feito == (False, "o robô pediu o celular")
+    assert celular.eventos == ["volume 8", "play", "pausa", "volume 2", "gravador parou"]
+    assert tempo[0] < 40 and celular.volume == 2
+
+
+def test_gravador_que_cai_no_meio_pausa_a_aula_e_devolve_o_volume(bm, tmp_path):
+    # Parado o gravador, o alto-falante volta a tocar: a aula pausa e o volume volta na hora.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, volume=2)
+
+    def quando(agora, gravadores):
+        if agora >= 20:
+            gravadores[0].vivo = False
+
+    feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, quando)
+    assert feito == (False, "o gravador parou no meio")
+    assert celular.eventos == ["volume 8", "play", "pausa", "volume 2"]
+
+
+def test_gravador_que_nao_grava_o_som_nao_deixa_a_aula_tocar(bm, tmp_path):
+    # Sem o som da gravação, o --require-audio para o gravador, e o alto-falante não ficaria mudo.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], volume=2)
+    feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, gravador_vivo=False)
+    assert feito == (False, "o gravador não ficou gravando")
+    assert celular.eventos == [] and celular.volume == 2
+
+
+def test_madrugada_que_acaba_e_video_que_nao_carrega_param_a_aula(bm, tmp_path):
+    # Às 3h45 (P289 1), a aula para pela metade, antes do descurtir das 4h.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, volume=2)
+    feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, madrugada=lambda: tempo[0] < 40)
+    assert feito == (False, "a madrugada acabou")
+    assert celular.eventos[-3:] == ["pausa", "volume 2", "gravador parou"]
+    # O vídeo que fica carregando não conta como aula inteira.
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, carrega=True, volume=2)
+    feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo)
+    assert feito == (False, "carregando demais")
+    assert celular.eventos[-2:] == ["volume 2", "gravador parou"]
+
+
 def test_quadros_da_aula_um_a_cada_20_s_de_40_a_120():
     assert cursos_robo.quadros_da_aula(600) == 40
     assert cursos_robo.quadros_da_aula(1800) == 90
