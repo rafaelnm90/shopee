@@ -907,6 +907,18 @@ def test_a_aula_abre_pelo_endereco_na_mesma_guia_e_do_alto():
                                           pausa=lambda s: None) == (False, "o endereço da aula não ficou na barra")
 
 
+def test_a_pagina_sem_o_play_diz_o_estado_do_video():
+    # A página da aula pode começar a tocar o vídeo sozinha, sem o play na tela: o porquê leva o estado do vídeo.
+    class SemPlay(SiteDoCurso):
+        def press(self, tecla):
+            super().press(tecla)
+            self.no_alto, self.midia = False, _sessao_do_chrome(3, 9)
+
+    site = SemPlay(AULAS_DO_SITE, aberta=0)
+    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], _escrever_na_barra, pausa=lambda s: None)
+    assert aberta == (False, "a página não mostrou o player; vídeo do Chrome: tocando, em 9 s")
+
+
 def test_a_aula_abre_com_a_shopee_na_frente_trazendo_o_chrome():
     # A rodada do robô termina com a Shopee no Eu: o Chrome vem para a frente antes de o endereço da aula ir à barra.
     site = SiteDoCurso(AULAS_DO_SITE, aberta=0, na_frente="com.shopee.br")

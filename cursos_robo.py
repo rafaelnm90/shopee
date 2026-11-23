@@ -382,10 +382,14 @@ def midia_no_explorar(d, argumento, pausa=time.sleep):
             return False, "midia lê o vídeo do Chrome (midia), pausa (midia:pausar) ou toca (midia:tocar)"
         _saida(d, ["input", "keyevent", tecla])
         pausa(2)
-    midia = midia_do_chrome(d)
+    return True, descrever_a_midia(midia_do_chrome(d))
+
+
+def descrever_a_midia(midia):
+    """O estado do vídeo no Chrome em palavras fixas e números (o log do explorar e o registro da aula)."""
     if not midia:
-        return True, "sem vídeo no Chrome"
-    return True, f"vídeo do Chrome: {midia['estado']}, em {midia['posicao']} s"
+        return "sem vídeo no Chrome"
+    return f"vídeo do Chrome: {midia['estado']}, em {midia['posicao']} s"
 
 
 def acesso_do_curso():
@@ -612,7 +616,10 @@ def ir_para_o_endereco(d, endereco, escrever, pausa=None):
         tela = d.dump_hierarchy()
         if endereco_da_aula(tela) == endereco and botao_do_play(tela):
             return True, ""
-    return False, SEM_O_PLAYER if endereco_da_aula(tela) == endereco else SEM_O_ENDERECO
+    if endereco_da_aula(tela) != endereco:
+        return False, SEM_O_ENDERECO
+    # A página da aula sem o play: o estado do vídeo vai junto (ele pode ter começado a tocar sozinho).
+    return False, f"{SEM_O_PLAYER}; {descrever_a_midia(midia_do_chrome(d))}"
 
 
 # --- O mapa das aulas (P293 1), só no banco do servidor ---
