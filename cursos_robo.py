@@ -727,6 +727,65 @@ class OlhoNaAula:
         self.parado_desde = None
 
 
+# A aula aberta no Chrome, gravada do começo ao fim. A cada OLHADA_DA_AULA s, a gravação renova o sinal ao robô e
+# confere o gravador, o pedido do celular, a hora e o vídeo. O gravador grava até AULA_MAIS_LONGA de uma vez (a
+# madrugada acaba antes); o que não está gravando ESPERA_DO_GRAVADOR s depois de ligar não grava (sem o som, o
+# --require-audio o para logo).
+OLHADA_DA_AULA = 3
+AULA_MAIS_LONGA = 4 * 60 * 60
+ESPERA_DO_GRAVADOR = 5
+
+
+def _madrugada_agora():
+    return na_madrugada(db.ler_config("shopee_video", {}) or {})
+
+
+def gravar_a_aula_aberta(d, alvo, destino, tocar, pausa=None, relogio=None, abrir=subprocess.Popen,
+                         madrugada=None):
+    """
+    A aula já aberta no Chrome do celular, gravada em destino. A ordem protege o quarto do Rafael (pedido dele,
+    22/11/2026): o gravador liga antes e, gravando o som, deixa o alto-falante mudo; o volume sobe só com ele
+    gravando; no fim, a aula pausa e o volume volta antes de o gravador parar. tocar(d) dá o play e diz se o vídeo
+    tocou. O robô que pede o celular, a madrugada que acaba (3h45) e o gravador que cai param a aula, que fica pela
+    metade (P295 1: ela volta depois, do início). Devolve (inteira, motivo fixo).
+    """
+    pausa = pausa or time.sleep
+    relogio = relogio or time.monotonic
+    madrugada = madrugada or _madrugada_agora
+    inicio = _texto(_agora())
+    anotar_o_sinal()
+    gravacao = GravacaoEmFundo(alvo, destino, AULA_MAIS_LONGA, abrir=abrir)
+    try:
+        pausa(ESPERA_DO_GRAVADOR)
+        if not gravacao.rodando():
+            return False, "o gravador não ficou gravando"
+        if not subir_o_volume(d):
+            return False, "sem o volume de mídia"
+        if not tocar(d):
+            return False, "a aula não começou a tocar"
+        olho, comeco = OlhoNaAula(), relogio()
+        while True:
+            pausa(OLHADA_DA_AULA)
+            anotar_o_sinal()
+            if not gravacao.rodando():
+                return False, "o gravador parou no meio"
+            if pediram_o_celular(inicio):
+                return False, "o robô pediu o celular"
+            if not madrugada():
+                return False, "a madrugada acabou"
+            fim = olho.olhar(midia_do_chrome(d), relogio() - comeco)
+            if fim:
+                return fim != "carregando demais", fim
+    finally:
+        # Primeiro a aula pausa e o volume volta (ou fica mudo), e só depois o gravador para: parado o gravador, o
+        # alto-falante volta a tocar.
+        try:
+            pausar_o_que_toca(d, pausa)
+            devolver_o_volume(d, pausa)
+        finally:
+            gravacao.parar()
+
+
 # As aulas gravadas ficam no servidor só como a fala e as folhas de quadros (o vídeo sai logo depois),
 # até o Claude ler: o cursos_robo.yml leva as mais velhas, cifradas, num pacote de até TAMANHO_DO_PACOTE
 # (o GitHub não aceita arquivo de mais de 100 MB), e o apagar tira do servidor as que foram no pacote.
