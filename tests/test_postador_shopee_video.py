@@ -1216,6 +1216,13 @@ def test_de_madrugada_o_explorar_mexe_so_no_chrome_do_curso_com_o_celular_mudo(d
         assert "fora do horário das rodadas" in capsys.readouterr().out
 
 
+def test_de_madrugada_o_passo_curso_guarda_o_mapa_sem_mexer_na_tela(de_madrugada):
+    # O passo curso (a 1ª aula de cada curso no mapa das aulas) vale no explorar do curso de madrugada e não toca.
+    assert ps.recusa_da_madrugada([("abrir", "chrome"), ("curso", "primeira:4"), ("curso", "")]) is None
+    assert not ps.mexe_na_tela("curso", "primeira:4")
+    assert ps.separar_passos("curso:primeira:4; curso") == [("curso", "primeira:4"), ("curso", "")]
+
+
 def test_a_aula_que_ficou_tocando_e_pausada_antes_de_o_volume_voltar(de_madrugada, capsys):
     # O celular fica no quarto do Rafael (pedido dele, 22/11/2026): nada toca alto de madrugada.
     aparelho = de_madrugada(AparelhoDoChrome())

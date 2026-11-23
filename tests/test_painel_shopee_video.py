@@ -1797,6 +1797,38 @@ def test_a_aula_do_curso_nao_segura_os_botoes_e_a_rodada_dos_15_min_nao_a_para(b
     assert pedidos[0][-1] == "--rodada" and liberados == []
 
 
+def test_a_gravacao_do_curso_liga_numa_unidade_propria_so_na_hora_dela(bm, monkeypatch):
+    # P289 1: de madrugada, com aula por gravar, o agendador do robô liga a unidade curso-noite, com a prioridade baixa
+    # e um nome fixo (nunca duas ao mesmo tempo).
+    sv = _painel(bm)
+    pedidos = _comandos(sv, monkeypatch, voltas_ativa=0)
+    monkeypatch.setattr(sv.cursos_robo, "pode_comecar_a_noite", lambda agora=None: True)
+    assert rodar(sv.ligar_a_noite_do_curso())
+    criar = next(partes for partes in pedidos if "systemd-run" in partes)
+    assert "--unit=curso-noite" in criar and "--property=Nice=10" in criar and criar[-2:] == (sv.CURSOS, "noite")
+    # Já rodando, não liga outra; fora da hora dela, nem pergunta ao systemd.
+    pedidos.clear()
+    _comandos(sv, monkeypatch, voltas_ativa=1)
+    assert not rodar(sv.ligar_a_noite_do_curso())
+    monkeypatch.setattr(sv.cursos_robo, "pode_comecar_a_noite", lambda agora=None: False)
+    pedidos = _comandos(sv, monkeypatch)
+    assert not rodar(sv.ligar_a_noite_do_curso()) and pedidos == []
+
+
+def test_a_rodada_dos_15_min_liga_a_gravacao_do_curso(bm, monkeypatch):
+    sv = _painel(bm)
+    ligadas = []
+
+    async def ligar():
+        ligadas.append(True)
+        return True
+
+    monkeypatch.setattr(sv, "ligar_a_noite_do_curso", ligar)
+    monkeypatch.setattr(sv.robo, "no_horario", lambda config, agora=None: False)
+    rodar(sv.verificar_robo())
+    assert ligadas == [True]
+
+
 def test_sem_o_systemd_run_a_rodada_vai_como_processo_do_bot(bm, monkeypatch):
     from conftest import consultar
     sv = _painel(bm)
