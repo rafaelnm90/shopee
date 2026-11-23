@@ -1223,6 +1223,7 @@ def test_cancelar_o_tirar_produto_volta_ao_rascunho_sem_mudar_nada(bm, Msg, Est)
 def test_robo_roda_a_cada_15_min_so_ativo_e_no_horario(bm, monkeypatch):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     sv = _painel(bm)
+    monkeypatch.setattr(sv.cursos_robo, "CURSO_EM_ANDAMENTO", False)  # o Dia Todo de depois do curso (P296 1)
     agendador = AsyncIOScheduler(timezone=bm.FUSO_STR)
     sv.configurar_dependencias(sv.bot_instance, agendador, sv.ADMIN_ID)
     from datetime import datetime
@@ -1599,6 +1600,7 @@ def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, mon
     from datetime import datetime, timedelta
     from fuso import fuso_horario
     sv = _painel(bm)
+    monkeypatch.setattr(sv.cursos_robo, "CURSO_EM_ANDAMENTO", False)  # o Dia Todo de depois do curso (P296 1)
     pedidos, rodadas, enviados = [], [], []
 
     async def preparar(bot, admin_id, agora=None, fonte=None, cobrindo=False):
@@ -1795,6 +1797,16 @@ def test_a_aula_do_curso_nao_segura_os_botoes_e_a_rodada_dos_15_min_nao_a_para(b
         assert not sv.robo_ocupado()
         rodar(sv.rodar_robo("--rodada"))
     assert pedidos[0][-1] == "--rodada" and liberados == []
+
+
+def test_o_painel_mostra_o_horario_do_robo_sem_a_madrugada_do_curso(bm, monkeypatch):
+    # P296 1: com o Dia Todo, enquanto o curso não termina, o painel diz que o robô fica das 4h às 24h.
+    sv = _painel(bm)
+    monkeypatch.setattr(sv.cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    assert "das 4h às 24h" in sv.nota_do_curso({"robo_inicio": 0, "robo_fim": 24})
+    assert sv.nota_do_curso({"robo_inicio": 8, "robo_fim": 22}) == ""
+    monkeypatch.setattr(sv.cursos_robo, "CURSO_EM_ANDAMENTO", False)
+    assert sv.nota_do_curso({"robo_inicio": 0, "robo_fim": 24}) == ""
 
 
 def test_a_gravacao_do_curso_liga_numa_unidade_propria_so_na_hora_dela(bm, monkeypatch):

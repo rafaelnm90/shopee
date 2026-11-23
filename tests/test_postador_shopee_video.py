@@ -1264,6 +1264,24 @@ def test_a_madrugada_do_curso_acaba_as_3h45_e_com_o_curso_terminado(de_madrugada
     assert "sem curso por gravar" in capsys.readouterr().out
 
 
+def test_com_o_dia_todo_a_madrugada_do_curso_tambem_vale_para_o_explorar(de_madrugada, relogio, monkeypatch, capsys):
+    # P296 1: com o Horário do Robô no Dia Todo, da 0h às 4h o explorar só mexe no Chrome do curso, como fora do
+    # Horário do Robô; às 4h, tudo como antes. Terminado o curso, volta o Dia Todo.
+    monkeypatch.setattr(ps.cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    aparelho = de_madrugada(AparelhoDoChrome())
+    ps.db.salvar_config(ps.CHAVE_PAINEL, {"robo_inicio": 0, "robo_fim": 24})
+    relogio("01:00")
+    assert ps.horario_das_rodadas() == (4, 24) and not ps.no_horario_das_rodadas()
+    assert ps.explorar("tela", celular=True) is None
+    assert "o 1º passo abre o curso ou o Chrome" in capsys.readouterr().out
+    assert aparelho.toques == []
+    relogio("04:30")
+    assert ps.no_horario_das_rodadas()
+    monkeypatch.setattr(ps.cursos_robo, "CURSO_EM_ANDAMENTO", False)
+    relogio("01:00")
+    assert ps.horario_das_rodadas() == (0, 24) and ps.no_horario_das_rodadas()
+
+
 def test_so_fica_vermelho_quando_nem_comecou():
     assert ps.codigo_de_saida(True) == 0
     assert ps.codigo_de_saida(False) == 0

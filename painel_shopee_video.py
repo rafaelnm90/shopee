@@ -593,6 +593,14 @@ def rotulo_janela(inicio, fim):
     return "o dia todo (24h)" if (inicio, fim) == (0, 24) else f"das {inicio}h às {fim}h"
 
 
+def nota_do_curso(config):
+    """Enquanto o curso não termina, o Horário do Robô que vale, sem a madrugada, que é do curso (P296 1)."""
+    inicio, fim = cursos_robo.horario_do_robo(config["robo_inicio"], config["robo_fim"])
+    if (inicio, fim) == (int(config["robo_inicio"]), int(config["robo_fim"])):
+        return ""
+    return f" (até o curso acabar, {rotulo_janela(inicio, fim)}: antes, o celular grava as aulas)"
+
+
 def plano_de_hoje(chave, agora=None):
     """Os horários do plano de hoje guardado na chave (o do robô ou o do assistente); None sem o de hoje."""
     plano = db.ler_config(chave, {}) or {}
@@ -1049,7 +1057,7 @@ def texto_robo(config, agora=None, celular=None):
         f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
         f"{pontos}"
         f"{plano}"
-        f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>\n"
+        f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>{nota_do_curso(config)}\n"
         f"💬 Respostas aos comentários: <b>{robo.LEITURAS_DAS_RESPOSTAS} vezes por dia</b>, das "
         f"{robo.DURANTE_O_DIA[0]}h às {robo.DURANTE_O_DIA[1]}h, com pelo menos "
         f"{int(robo.ESPACO_DAS_RESPOSTAS.total_seconds() // 3600)} h entre uma e outra; comentário num post antigo: "
@@ -2400,7 +2408,8 @@ async def pedir_janela_robo(message: types.Message, state: FSMContext):
         "Em que horário o robô pode tocar no celular? Os rascunhos e as postagens aprovadas se "
         "espalham dentro dessa faixa, em minutos sorteados.\n\n"
         f"Envie <code>início-fim</code> (ex.: <code>{exemplo_do_horario(config, True)}</code>) ou toque em Dia Todo.\n"
-        f"<i>Hoje está {rotulo_janela(config['robo_inicio'], config['robo_fim'])}. Fora dele, se a Shopee "
+        f"<i>Hoje está {rotulo_janela(config['robo_inicio'], config['robo_fim'])}{nota_do_curso(config)}. Fora dele, "
+        "se a Shopee "
         "pedir a verificação, ninguém resolve até você acordar.</i>",
         parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
     await state.set_state(ShopeeVideoFluxo.aguardando_janela_robo)

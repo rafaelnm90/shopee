@@ -642,6 +642,7 @@ def test_feed_espalhado_no_dia_todo_e_o_que_falha_tenta_de_novo_na_rodada_seguin
     # Escolha do Rafael (P152): os 5 do dia espalhados pelo Horário do Robô (no Dia Todo, um a
     # cada 4h40: a hora das 4h conta, porque acabada a limpeza ela fica livre, P161 1); o que falha
     # não conta, e a rodada seguinte tenta de novo, até dar certo.
+    monkeypatch.setattr(robo.cursos_robo, "CURSO_EM_ANDAMENTO", False)  # o Dia Todo de depois do curso (P296 1)
     config = {**robo.PADRAO, "robo_inicio": 0, "robo_fim": 24}
     robo.db.salvar_config(robo.CHAVE_CONFIG, config)
     assert robo.intervalo_do_feed(config) == timedelta(hours=4, minutes=40)

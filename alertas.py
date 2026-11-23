@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 
 import avisar_rafael
 import backup_dados
+import cursos_robo
 import db
 from fuso import fuso_horario
 
@@ -128,7 +129,8 @@ def _robo_sem_rodar(agora):
             return None
     except ValueError:
         pass
-    inicio, fim = config.get("robo_inicio", 9), config.get("robo_fim", 21)
+    # Enquanto o curso não termina, a madrugada é dele e o robô não roda (P296 1): ela não conta.
+    inicio, fim = cursos_robo.horario_do_robo(config.get("robo_inicio", 9), config.get("robo_fim", 21))
     comeco = agora.replace(hour=int(inicio), minute=0, second=0, microsecond=0)
     if not (int(inicio) <= agora.hour < int(fim)) or agora - comeco < SEM_RODADA:
         return None

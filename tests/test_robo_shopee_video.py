@@ -374,10 +374,11 @@ def test_aprovado_sai_em_qualquer_hora_do_horario_do_robo():
     assert robo.proxima_postagem(_sem_hora(), momento("2026-10-25 21:58"), sorteio=Sorteio) == "2026-10-26 08:05:00"
 
 
-def test_feed_se_espalha_pelo_horario_do_robo_inteiro():
+def test_feed_se_espalha_pelo_horario_do_robo_inteiro(monkeypatch):
     # Escolha do Rafael (P152): os 5 do dia pelo Horário do Robô, no passo das rodadas, com a folga da
     # rodada que começa um pouco antes. A hora das 4h conta: acabada a limpeza, ela fica livre (P161 1).
     from datetime import timedelta
+    monkeypatch.setattr(robo.cursos_robo, "CURSO_EM_ANDAMENTO", False)  # o Dia Todo de depois do curso (P296 1)
     assert robo.interacoes.VIDEOS_NO_FEED_POR_DIA == 5
     assert robo.intervalo_do_feed({**robo.PADRAO}) == timedelta(hours=2, minutes=40)               # 8h às 22h
     assert robo.intervalo_do_feed({**robo.PADRAO, "robo_inicio": 0, "robo_fim": 24}) == timedelta(hours=4,
@@ -541,6 +542,30 @@ def test_fora_do_horario_nao_toca(monkeypatch, avisos):
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 22:00")) == "fora do Horário do Robô"
 
 
+def test_enquanto_o_curso_nao_acaba_o_robo_do_dia_todo_comeca_as_4h(monkeypatch, avisos):
+    # P296 1: da 0h às 3h45 a madrugada é do curso. O robô não começa nada sozinho (nem pede o celular à aula), e o
+    # plano do dia, os posts aprovados e o espaço do feed ficam das 4h às 24h; terminado o curso, volta o Dia Todo.
+    monkeypatch.setattr(robo.cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    ativar(robo_inicio=0, robo_fim=24)
+    pedidos = []
+    monkeypatch.setattr(robo.cursos_robo, "gravando", lambda: True)
+    monkeypatch.setattr(robo.cursos_robo, "liberar_para_o_robo", lambda quem: pedidos.append(quem))
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-11-24 02:00")) == "fora do Horário do Robô"
+    assert pedidos == []
+    config = robo.ler_config()
+    assert robo.trechos_de_postar(config) == [(4 * 60, 24 * 60 - 1)]
+    plano = robo.planejar({**config, "robo_limite_min": 6, "robo_limite_max": 6}, "2026-11-24")
+    assert len(plano) == 6 and all(h >= "04:00" for h in plano)
+    postar = robo.proxima_postagem(config, momento("2026-11-24 01:00"), random.Random(1))
+    assert "2026-11-24 04:00:00" < postar < "2026-11-24 05:00:00"
+    assert robo.no_horario(config, momento("2026-11-24 04:10"))
+    feed_no_curso = robo.intervalo_do_feed(config, momento("2026-11-24 12:00"))
+    monkeypatch.setattr(robo.cursos_robo, "CURSO_EM_ANDAMENTO", False)
+    assert robo.no_horario(config, momento("2026-11-24 02:00"))
+    assert robo.trechos_de_postar(config) == [(0, 24 * 60 - 1)]
+    assert robo.intervalo_do_feed(config, momento("2026-11-24 12:00")) > feed_no_curso
+
+
 def test_celular_desconectado_tenta_sozinho_e_sem_ele_pausa_e_avisa(monkeypatch, avisos):
     ativar(robo_inicio=0, robo_fim=24)
     tentativas = []
@@ -578,6 +603,7 @@ def test_pareamento_vencido_avisa_para_parear_e_nao_para_ligar_a_depuracao(monke
 def test_rodada_anota_o_prazo_do_pareamento(monkeypatch, avisos):
     # Pedido do Rafael (31/10): a opção que impede o pareamento de vencer fica sempre ligada; o
     # robô a lê quando usa o celular, e o alertas.py avisa se ela desligar.
+    monkeypatch.setattr(robo.cursos_robo, "CURSO_EM_ANDAMENTO", False)  # o Dia Todo de depois do curso (P296 1)
     ativar(robo_inicio=0, robo_fim=24)
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-22 10:00")))
     anotados = []
@@ -592,6 +618,7 @@ def test_rodada_anota_o_prazo_do_pareamento(monkeypatch, avisos):
 
 
 def test_celular_que_reconecta_sozinho_segue_a_rodada(monkeypatch, avisos):
+    monkeypatch.setattr(robo.cursos_robo, "CURSO_EM_ANDAMENTO", False)  # o Dia Todo de depois do curso (P296 1)
     ativar(robo_inicio=0, robo_fim=24)
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-22 10:00")))
     monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)

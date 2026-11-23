@@ -733,13 +733,15 @@ def tocar_pelo_play(d, pausa=None):
     return False
 
 
-# --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026) ---
+# --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026, e P296 1, 23/11/2026) ---
 # Depois do Horário do Robô, de madrugada, as aulas são gravadas uma a uma até um pouco antes da limpeza
 # das 4h (P289 1), na velocidade normal (P292 1), com o volume de mídia no meio só durante a aula (P291 1)
 # e só com o disco do servidor abaixo de 70% (P290 1). O robô da Shopee Vídeo tem a preferência (pedido do
-# Rafael, 22/11): com o Horário do Robô o dia todo não há madrugada, e o robô que precisa do celular (um
-# botão do painel, a limpeza das 4h) pede, e a aula para e solta o celular em segundos.
+# Rafael, 22/11): o robô que precisa do celular (um botão do painel, a limpeza das 4h) pede, e a aula para e
+# solta o celular em segundos. Com o Horário do Robô no Dia Todo, enquanto o curso não termina, o robô
+# começa às 4h, e a madrugada da 0h às 3h45 é do curso (P296 1, horario_do_robo).
 FIM_DA_NOITE = (3, 45)
+HORA_DO_ROBO_NO_CURSO = 4
 LIMITE_DO_DISCO = 70
 VOLUME_NA_AULA = 0.5
 CHAVE_DA_NOITE = "curso_gravacao"
@@ -762,13 +764,26 @@ def _texto(momento):
     return momento.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def horario_do_robo(inicio, fim):
+    """
+    (início, fim) do Horário do Robô que vale agora, em horas: o do painel e, enquanto o curso não termina, sem a
+    madrugada, que é do curso (o robô começa às HORA_DO_ROBO_NO_CURSO). Terminado o curso, volta o do painel, como o
+    Dia Todo. Escolha do Rafael (P296 1, 23/11/2026): DECISOES.md, Trabalho com o Claude.
+    """
+    inicio, fim = int(inicio), int(fim)
+    if CURSO_EM_ANDAMENTO and inicio < HORA_DO_ROBO_NO_CURSO < fim:
+        return HORA_DO_ROBO_NO_CURSO, fim
+    return inicio, fim
+
+
 def na_madrugada(config, agora=None):
     """
-    Agora é a madrugada da gravação: fora do Horário do Robô (config, a do painel) e antes do FIM_DA_NOITE
-    (P289 1)? Com o Horário do Robô o dia todo, nunca.
+    Agora é a madrugada da gravação: fora do Horário do Robô (config, a do painel, sem a madrugada do curso:
+    horario_do_robo) e antes do FIM_DA_NOITE (P289 1)? Com o Horário do Robô no Dia Todo, da 0h às 3h45 enquanto o
+    curso não termina (P296 1); terminado, nunca.
     """
     momento = _agora(agora)
-    inicio, fim = int(config.get("robo_inicio", 8)), int(config.get("robo_fim", 22))
+    inicio, fim = horario_do_robo(config.get("robo_inicio", 8), config.get("robo_fim", 22))
     if inicio <= 0 and fim >= 24:
         return False
     minutos = momento.hour * 60 + momento.minute

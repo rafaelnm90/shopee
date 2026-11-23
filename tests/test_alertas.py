@@ -68,6 +68,19 @@ def test_disco_backup_erros_e_robo_da_shopee_video_parado(monkeypatch):
     assert "70 min" in alertas.graves([], AGORA + timedelta(minutes=60))["robo_sv"]
 
 
+def test_a_madrugada_do_curso_nao_conta_como_robo_parado(monkeypatch):
+    # P296 1: com o Dia Todo, da 0h às 4h o robô não roda enquanto o curso não termina, e isso não é grave.
+    monkeypatch.setattr(alertas.cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    db.salvar_config("shopee_video", {"robo_pausado": False, "robo_inicio": 0, "robo_fim": 24})
+    db.salvar_config("shopee_video_robo", {"ultima_rodada_em": "2026-10-24 23:50:00"})
+    madrugada = datetime(2026, 10, 25, 3, 0, tzinfo=fuso_horario)
+    assert "robo_sv" not in alertas.graves([], madrugada)
+    # Às 4h ele volta a rodar: parado desde a véspera, às 5h30 é grave.
+    assert "robo_sv" in alertas.graves([], madrugada.replace(hour=5, minute=30))
+    monkeypatch.setattr(alertas.cursos_robo, "CURSO_EM_ANDAMENTO", False)
+    assert "robo_sv" in alertas.graves([], madrugada)
+
+
 def test_saida_so_com_rotulos(monkeypatch, capsys):
     monkeypatch.setattr(alertas.avisar_rafael, "mandar_texto", lambda texto: True)
     alertas.main(["verificar", "motor_userbot_bot"])
