@@ -1154,9 +1154,10 @@ def test_no_celular_so_das_8h_as_22h(hora, comeca, relogio, monkeypatch, capsys)
 class AparelhoDoChrome(Aparelho):
     """O Motorola de madrugada: o abrir:chrome traz o Chrome para a frente, e o volume de mídia responde."""
 
-    def __init__(self, abre_o_chrome=True, volume=6):
+    def __init__(self, abre_o_chrome=True, volume=6, pausa_funciona=True):
         super().__init__()
         self.na_frente, self.abre_o_chrome, self.volume, self.volumes = "com.shopee.br", abre_o_chrome, volume, [volume]
+        self.tocando, self.pausa_funciona = False, pausa_funciona
 
     def app_start(self, pacote, wait=False):
         super().app_start(pacote, wait)
@@ -1172,6 +1173,14 @@ class AparelhoDoChrome(Aparelho):
                 self.volume = int(partes[-1])
                 self.volumes.append(self.volume)
             return Resposta(f"volume is {self.volume} in range [0..15]")
+        if partes[:2] == ["dumpsys", "media_session"]:
+            estado = 3 if self.tocando else 2
+            return Resposta("MEDIA SESSION SERVICE (dumpsys media_session)\n    package=com.android.chrome\n"
+                            f"    state=PlaybackState {{state={estado}, position=1000, speed=1.0, updated=1}}\n")
+        if partes == ["input", "keyevent", "KEYCODE_MEDIA_PLAY"]:
+            self.tocando = True
+        if partes == ["input", "keyevent", "KEYCODE_MEDIA_PAUSE"] and self.pausa_funciona:
+            self.tocando = False
         return super().shell(partes)
 
 
@@ -1205,6 +1214,19 @@ def test_de_madrugada_o_explorar_mexe_so_no_chrome_do_curso_com_o_celular_mudo(d
         assert ps.explorar(passos, celular=True) is None, passos
         assert aparelho.toques == [] and aparelho.comandos == [] and aparelho.volumes == [6], passos
         assert "fora do horário das rodadas" in capsys.readouterr().out
+
+
+def test_a_aula_que_ficou_tocando_e_pausada_antes_de_o_volume_voltar(de_madrugada, capsys):
+    # O celular fica no quarto do Rafael (pedido dele, 22/11/2026): nada toca alto de madrugada.
+    aparelho = de_madrugada(AparelhoDoChrome())
+    assert ps.explorar("abrir:chrome; midia:tocar", celular=True) is True
+    assert not aparelho.tocando and aparelho.volumes == [6, 0, 6]
+    assert "com nada tocando" in capsys.readouterr().out
+    # A aula que não pausa deixa o celular mudo, e o volume de antes volta na próxima rodada do robô.
+    aparelho = de_madrugada(AparelhoDoChrome(pausa_funciona=False))
+    assert ps.explorar("abrir:chrome; midia:tocar", celular=True) is True
+    assert aparelho.tocando and aparelho.volumes == [6, 0, 0]
+    assert "ficou mudo" in capsys.readouterr().out and ps.cursos_robo.estado_da_noite()["volume_antes"] == 6
 
 
 def test_de_madrugada_sem_o_chrome_na_frente_nada_mais_e_tocado(de_madrugada, capsys):

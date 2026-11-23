@@ -3053,8 +3053,8 @@ def _explorar(texto, d, celular):
             voltou = cursos_robo.devolver_o_volume(d)
         except Exception:
             voltou = False
-        print("volume: de volta ao de antes" if voltou else
-              "volume: não voltou ao de antes; a próxima rodada do robô devolve")
+        print("volume: de volta ao de antes, com nada tocando" if voltou else
+              "volume: ficou mudo (algo toca ou o Android não respondeu); a próxima rodada do robô devolve")
 
 
 def _fazer_os_passos(d, passos, celular, da_madrugada=False):
