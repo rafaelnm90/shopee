@@ -251,11 +251,14 @@ class PaginaDeLogin:
     e-mail no campo de e-mail e a senha no de senha.
     """
 
-    def __init__(self, entra_pelo_enter=True, senha_sem_cursor=False):
+    def __init__(self, entra_pelo_enter=True, senha_sem_cursor=False, preenchimento=False):
         self.foco, self.teclado, self.entrou = None, False, False
         self.campos = {"email": "", "senha": ""}
         self.toques, self.teclas = [], []
         self.entra_pelo_enter, self.senha_sem_cursor = entra_pelo_enter, senha_sem_cursor
+        # A janela do gerenciador de senhas do Chrome (23/11/2026): abre no 1º toque num campo, cobre a página e sai
+        # pela tecla voltar, sem deixar o cursor no campo.
+        self.preenchimento, self.folha, self.folha_fechada = preenchimento, False, False
 
     def _caixas(self):
         sobe = 560 if self.teclado else 0
@@ -264,6 +267,12 @@ class PaginaDeLogin:
     def dump_hierarchy(self):
         if self.entrou:
             return TELA_DO_CURSO
+        if self.folha:
+            return ('<hierarchy><node class="android.widget.TextView" '
+                    'resource-id="com.android.chrome:id/touch_to_fill_sheet_title" text="Usar a senha salva?" '
+                    'bounds="[0,1780][1080,1850]" /><node class="android.widget.Button" '
+                    'resource-id="com.android.chrome:id/touch_to_fill_button_title" text="Continuar" '
+                    'bounds="[40,2200][1040,2340]" /></hierarchy>')
         nos = "".join(
             f'<node class="android.widget.EditText" text="" password="{str(nome == "senha").lower()}" '
             f'focused="{str(self.foco == nome).lower()}" bounds="[{x1},{y1}][{x2},{y2}]" />'
@@ -274,7 +283,9 @@ class PaginaDeLogin:
     def click(self, x, y):
         self.toques.append((x, y))
         for nome, (x1, y1, x2, y2) in self._caixas().items():
-            if x1 <= x <= x2 and y1 <= y <= y2 and not (nome == "senha" and self.senha_sem_cursor):
+            if x1 <= x <= x2 and y1 <= y <= y2 and self.preenchimento and not self.folha_fechada:
+                self.folha = True
+            elif x1 <= x <= x2 and y1 <= y <= y2 and not (nome == "senha" and self.senha_sem_cursor):
                 self.foco, self.teclado = nome, True
 
     def escrever(self, texto):
@@ -283,6 +294,9 @@ class PaginaDeLogin:
 
     def press(self, tecla):
         self.teclas.append(tecla)
+        if tecla == "back" and self.folha:
+            self.folha, self.folha_fechada = False, True
+            return
         certo = self.campos == {"email": EMAIL_DO_TESTE, "senha": SENHA_DO_TESTE}
         self.entrou = tecla == "enter" and certo and self.entra_pelo_enter
 
@@ -313,6 +327,20 @@ def test_entrar_no_curso_escreve_o_login_guardado_e_confere_que_passou(bm):
     assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=sem_pausa) == (
         False, "o login não passou (a página de login continua)")
     assert celular.toques[-1] == (540, 1850)
+
+
+def test_entrar_no_curso_fecha_a_janela_de_senhas_do_chrome_e_escreve_o_login_guardado(bm):
+    # 23/11/2026, 10:05: o toque no campo do e-mail abriu a janela do gerenciador de senhas do Chrome, que cobre a
+    # página, e o login parou ("o cursor não ficou no campo certo"). Ela sai pela tecla voltar, sem nada escolhido nela,
+    # e o campo é tocado de novo.
+    _guardar_o_acesso(link="https://curso.exemplo.com", email=EMAIL_DO_TESTE, senha=SENHA_DO_TESTE)
+    celular = PaginaDeLogin(preenchimento=True)
+    escrever = lambda d, texto: d.escrever(texto)
+    achar = lambda tela, alvo: None
+    assert cursos_robo.entrar_no_curso(celular, escrever, achar, pausa=lambda s: None) == (True, "login feito")
+    assert celular.campos == {"email": EMAIL_DO_TESTE, "senha": SENHA_DO_TESTE}
+    assert celular.teclas == ["back", "enter"] and celular.toques[:2] == [(540, 1430), (540, 1430)]
+    assert all(not (40 <= x <= 1040 and 2200 <= y <= 2340) for x, y in celular.toques)
 
 
 def test_entrar_no_curso_nunca_escreve_a_senha_fora_do_campo_de_senha(bm):
@@ -869,8 +897,13 @@ class SiteDoCurso(CelularDoVolume):
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
                  autoplay=False, escreve=True, completa="", rotulo_no_texto=False, nova_guia=False,
-                 barra_escondida=False, rolagem_funciona=True, **opcoes):
+                 barra_escondida=False, rolagem_funciona=True, sessao_vencida=False, inicio_na_guia_nova=False,
+                 outro_site=False, **opcoes):
         super().__init__(**opcoes)
+        # A página fora das aulas em que o Enter caiu: "login" (a sessão vencida), "inicio" (a página inicial do
+        # curso, pela guia nova) ou "outro" (outro site); None na aula aberta.
+        self.logado, self.inicio_na_guia_nova, self.outro_site = not sessao_vencida, inicio_na_guia_nova, outro_site
+        self.pagina, self.logins = None, []
         self.nova_guia, self.barra_escondida, self.rolagem_funciona = nova_guia, barra_escondida, rolagem_funciona
         self.rolagens = []
         self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
@@ -912,6 +945,11 @@ class SiteDoCurso(CelularDoVolume):
             return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
                     'resource-id="com.android.chrome:id/search_box_text" clickable="true" text="" content-desc="" '
                     'bounds="[100,540][840,626]" /></hierarchy>')
+        if self.pagina and not self.barra_em_foco:
+            endereco, resto = PAGINAS_FORA_DAS_AULAS[self.pagina]
+            return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
+                    'resource-id="com.android.chrome:id/url_bar" clickable="true" '
+                    f'text="{endereco}" content-desc="" bounds="[211,120][691,267]" />{resto}</hierarchy>')
         barra = self.aulas[self.aberta][2].removeprefix("https://")
         if self.barra_em_foco and self.escrito is not None:
             barra = self.escrito
@@ -958,11 +996,39 @@ class SiteDoCurso(CelularDoVolume):
         if partes == ["input", "keyevent", "KEYCODE_ENTER"] and self.barra_em_foco:
             self.aberturas.append((self.volume, self.gravando))
             alvo = next((n for n, aula in enumerate(self.aulas) if aula[2] == self.escrito), None)
-            if alvo is not None:
-                self.aberta, self.no_alto, self.nova_guia = alvo, True, False
+            if alvo is not None and self.outro_site:
+                self.pagina = "outro"
+            elif alvo is not None and not self.logado:
+                self.pagina = "login"
+            elif alvo is not None and self.nova_guia and self.inicio_na_guia_nova:
+                self.pagina, self.nova_guia = "inicio", False
+            elif alvo is not None:
+                self.aberta, self.no_alto, self.nova_guia, self.pagina = alvo, True, False, None
                 self.midia = _sessao_do_chrome(3, 0) if self.autoplay and self._com_video(alvo) else SEM_SESSOES
             self.barra_em_foco = False
         return super().shell(partes)
+
+
+# As páginas fora das aulas: (o endereço na barra, o resto da tela).
+PAGINAS_FORA_DAS_AULAS = {
+    "login": ("escola.exemplo.pro/login",
+              '<node class="android.widget.EditText" text="" password="false" bounds="[42,1369][1039,1492]" />'
+              '<node class="android.widget.EditText" text="" password="true" bounds="[42,1542][900,1666]" />'),
+    "inicio": ("escola.exemplo.pro/m/courses",
+               '<node class="android.widget.Button" resource-id="" clickable="true" text="Próximo" '
+               'content-desc="" bounds="[800,900][960,1040]" />'),
+    "outro": ("www.busca.exemplo.com/search?q=aula", ""),
+}
+
+
+def _login_de_mentira(passa=True):
+    """O entrar da noite: anota com que volume e se gravando o login foi feito e, se passa, entra no site."""
+    def entrar(d, pausa):
+        d.logins.append((d.volume, d.gravando))
+        if passa:
+            d.logado, d.pagina = True, "inicio"
+        return (True, "login feito") if passa else (False, "o login não passou (a página de login continua)")
+    return entrar
 
 
 AULAS_DO_SITE = [("Aula um", 300, "https://escola.exemplo.pro/m/lessons/aaa111"),
@@ -1021,6 +1087,36 @@ def test_a_aula_abre_pela_caixa_da_nova_guia_e_com_a_barra_escondida():
     assert cursos_robo.ir_para_o_endereco(presa, AULAS_DO_SITE[2][2], **SEM_ESPERA) == (
         None, "sem a barra de endereço do Chrome")
     assert presa.toques == []
+
+
+def test_a_sessao_vencida_entra_com_o_acesso_guardado_e_abre_a_aula():
+    # 23/11/2026, 09:53: horas depois do último login, o endereço da aula levou à página de login do site. O robô entra
+    # com o acesso guardado (pedido do Rafael de 22/11) e escreve o endereço de novo.
+    um = AULAS_DO_SITE[0][2]
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, sessao_vencida=True)
+    entrar = _login_de_mentira()
+    assert cursos_robo.ir_para_o_endereco(site, um, entrar=entrar, **SEM_ESPERA) == (cursos_robo.COM_VIDEO, "")
+    assert len(site.logins) == 1 and len(site.aberturas) == 2
+    assert cursos_robo.endereco_da_aula(site.dump_hierarchy()) == um
+    # O login que não passa para ali, sem insistir.
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, sessao_vencida=True)
+    assert cursos_robo.ir_para_o_endereco(site, um, entrar=_login_de_mentira(passa=False), **SEM_ESPERA) == (
+        None, cursos_robo.SEM_O_LOGIN)
+    assert len(site.logins) == 1 and len(site.aberturas) == 1
+
+
+def test_a_guia_nova_que_leva_a_pagina_inicial_abre_a_aula_na_segunda_vez():
+    # Pela caixa da Nova guia (o Chrome depois de horas parado), o endereço levou à página inicial do curso; na mesma
+    # guia, a 2ª vez abre a aula. Uma página de outro site não é tentada de novo.
+    um = AULAS_DO_SITE[0][2]
+    site = SiteDoCurso(AULAS_DO_SITE, nova_guia=True, inicio_na_guia_nova=True)
+    assert cursos_robo.ir_para_o_endereco(site, um, entrar=_login_de_mentira(), **SEM_ESPERA) == (
+        cursos_robo.COM_VIDEO, "")
+    assert len(site.aberturas) == 2 and site.logins == []
+    fora = SiteDoCurso(AULAS_DO_SITE, outro_site=True)
+    assert cursos_robo.ir_para_o_endereco(fora, um, entrar=_login_de_mentira(), **SEM_ESPERA) == (
+        None, cursos_robo.SEM_O_ENDERECO)
+    assert len(fora.aberturas) == 1 and fora.logins == []
 
 
 def test_a_pagina_que_toca_sozinha_abriu_e_segue_sem_o_play():
@@ -1263,6 +1359,17 @@ def test_a_aula_so_abre_muda_ou_com_o_gravador_gravando(noite_do_curso):
     assert all(volume == 0 or gravando for volume, gravando in site.aberturas)
     assert (0, False) in site.aberturas and (8, True) in site.aberturas
     assert cursos_robo.estado_da_noite()["volume_antes"] == 6
+
+
+def test_a_noite_entra_no_site_muda_antes_de_ligar_o_gravador(noite_do_curso, monkeypatch):
+    # Com a sessão do site vencida, a aula abre antes, muda e sem o gravador, e o login fica fora da gravação (a tela do
+    # login nunca vai às folhas de quadros); depois, a aula abre de novo, do começo, gravando.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    site = SiteDoCurso(AULAS_DO_SITE, volume=6, sessao_vencida=True)
+    monkeypatch.setattr(cursos_robo, "_entrar", _login_de_mentira(), raising=False)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)")
+    assert site.logins == [(0, False)]
 
 
 def test_a_aula_que_toca_sozinha_e_gravada_sem_tocar_no_play(noite_do_curso):
