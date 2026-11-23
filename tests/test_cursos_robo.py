@@ -332,7 +332,8 @@ TELA_DA_AULA = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
         bounds="[191,996][280,1083]" />
   <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="" content-desc="Tocar vídeo"
         bounds="[475,729][603,857]" />
-  <node class="android.view.View" resource-id="" clickable="false" text="" content-desc="" bounds="[42,1112][1039,2075]">
+  <node class="android.view.View" resource-id="" clickable="false" text="" content-desc=""
+        bounds="[42,1112][1039,2075]">
     <node class="android.widget.Button" resource-id="" clickable="true" text="Aula de exemplo um 8:03"
           content-desc="" bounds="[178,1204][942,1290]" />
     <node class="android.widget.Button" resource-id="" clickable="true"
@@ -826,8 +827,8 @@ class SiteDoCurso(CelularDoVolume):
             nos.append('<node class="android.widget.ToggleButton" resource-id="" clickable="true" text="" '
                        'content-desc="Tocar vídeo" bounds="[475,729][603,857]" />')
         if self.aberta + 1 < len(self.aulas):
-            nos.append('<node class="android.widget.Button" resource-id="" clickable="true" '
-                       f'text="Próximo: {self.aulas[self.aberta + 1][0]}" content-desc="" bounds="[0,2175][1080,2394]" />')
+            nos.append('<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
+                       f'text="Próximo: {self.aulas[self.aberta + 1][0]}" bounds="[0,2175][1080,2394]" />')
         return '<hierarchy rotation="0">' + "".join(nos) + "</hierarchy>"
 
     def click(self, x, y):
