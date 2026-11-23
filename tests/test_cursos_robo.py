@@ -827,18 +827,35 @@ def test_madrugada_que_acaba_e_video_que_nao_carrega_param_a_aula(bm, tmp_path):
     assert celular.eventos[-2:] == ["volume 2", "gravador parou"]
 
 
+CHROME = "com.android.chrome"
+
+
 class SiteDoCurso(CelularDoVolume):
     """
     O Chrome de mentira com o site do curso: as aulas em ordem [(nome, segundos, endereço)], a barra de endereço,
-    o play (só com a página no alto) e a barra do Próximo. Trocar de aula pelo Próximo deixa a página rolada.
+    o play (só com a página no alto) e a barra do Próximo. Trocar de aula pelo Próximo deixa a página rolada. Com outro
+    app na frente (na_frente), só ele aparece na tela; abre_o_chrome=False: o Chrome não vem para a frente.
     """
 
-    def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, **opcoes):
+    def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
+                 **opcoes):
         super().__init__(**opcoes)
         self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
         self.escrito, self.barra_em_foco, self.toques = None, False, []
+        self.na_frente, self.abre_o_chrome, self.abertos = na_frente, abre_o_chrome, []
+
+    def app_current(self):
+        return {"package": self.na_frente, "activity": ""}
+
+    def app_start(self, pacote, wait=False):
+        self.abertos.append(pacote)
+        if self.abre_o_chrome:
+            self.na_frente = pacote
 
     def dump_hierarchy(self):
+        if self.na_frente != CHROME:
+            return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="true" '
+                    'text="Eu" content-desc="" bounds="[880,2250][1080,2394]" /></hierarchy>')
         nos = ['<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
                f'text="{self.aulas[self.aberta][2].removeprefix("https://")}" content-desc="" '
                'bounds="[211,120][691,267]" />']
@@ -880,11 +897,23 @@ def test_a_aula_abre_pelo_endereco_na_mesma_guia_e_do_alto():
     # O link por fora abria uma guia nova a cada vez (de 8 para 11 no mapa de 22/11/2026): a aula abre pela barra de
     # endereço da guia da frente, e a página nova vem do alto, com o play na tela.
     site = SiteDoCurso(AULAS_DO_SITE, aberta=0, no_alto=False)
-    assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[2][2], _escrever_na_barra, pausa=lambda s: None)
-    assert site.aberta == 2 and site.no_alto and site.toques == [(451, 193)]
-    # O endereço que a página não abre: False depois da espera.
-    assert not cursos_robo.ir_para_o_endereco(site, "https://escola.exemplo.pro/m/lessons/zzz999", _escrever_na_barra,
-                                              pausa=lambda s: None)
+    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[2][2], _escrever_na_barra, pausa=lambda s: None)
+    assert aberta == (True, "") and site.aberta == 2 and site.no_alto and site.toques == [(451, 193)]
+    assert site.abertos == []                                           # o Chrome já estava na frente
+    # O endereço que a página não abre: o porquê depois da espera.
+    assert cursos_robo.ir_para_o_endereco(site, "https://escola.exemplo.pro/m/lessons/zzz999", _escrever_na_barra,
+                                          pausa=lambda s: None) == (False, "o endereço da aula não ficou na barra")
+
+
+def test_a_aula_abre_com_a_shopee_na_frente_trazendo_o_chrome():
+    # A rodada do robô termina com a Shopee no Eu: o Chrome vem para a frente antes de o endereço da aula ir à barra.
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=0, na_frente="com.shopee.br")
+    aberta = cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], _escrever_na_barra, pausa=lambda s: None)
+    assert aberta == (True, "") and site.abertos == [CHROME] and site.aberta == 1
+    # O Chrome que não vem para a frente (a tela de bloqueio por cima): nada é tocado, e o porquê vai ao registro.
+    preso = SiteDoCurso(AULAS_DO_SITE, na_frente="com.android.systemui", abre_o_chrome=False)
+    aberta = cursos_robo.ir_para_o_endereco(preso, AULAS_DO_SITE[1][2], _escrever_na_barra, pausa=lambda s: None)
+    assert aberta == (False, "o Chrome não veio para a frente") and preso.toques == []
 
 
 def test_o_play_da_aula_conferido_pela_sessao_de_midia():
@@ -1004,6 +1033,29 @@ def test_a_noite_grava_o_curso_inteiro_pelo_proximo_do_site(noite_do_curso):
     assert all(aula["gravada_em"] for aula in curso["aulas"]) and not cursos_robo.gravando()
     import registro_processos
     assert registro_processos.sequencia("curso", "noite do curso", "2000-01-01 00:00:00")
+
+
+def test_a_noite_que_comeca_com_a_shopee_na_frente_grava_a_aula_da_vez(noite_do_curso):
+    # A rodada do robô deixa a Shopee no Eu, e a noite começa com ela na frente: o Chrome vem antes da 1ª aula.
+    um = AULAS_DO_SITE[0][2]
+    cursos_robo.guardar_a_primeira_aula(4, um)
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, na_frente="com.shopee.br")
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)") and noite_do_curso.gravadas[0] == um
+    assert site.abertos == [CHROME]
+
+
+def test_a_aula_que_nao_abre_fica_no_registro_com_o_porque(noite_do_curso):
+    # O porquê de a aula não abrir vai ao registro de cada aula, para o relatório da manhã; 2 seguidas param a noite.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    site = SiteDoCurso(AULAS_DO_SITE, na_frente="com.android.systemui", abre_o_chrome=False)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade; parou: a aula não abriu (o Chrome não "
+                      "veio para a frente)")
+    import registro_processos
+    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas] == [
+        ("não abriu", "curso 4, aula 1: a aula não abriu (o Chrome não veio para a frente)")] * 2
 
 
 def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_curso):

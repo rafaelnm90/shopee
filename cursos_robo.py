@@ -564,30 +564,55 @@ def botao_do_play(xml):
 
 # A aula abre pela barra de endereço da guia que está na frente (o link por fora abre uma guia nova a cada vez: de 8
 # para 11 guias no mapa de 22/11/2026), e a página nova vem do alto, com o player na tela. O play é conferido pela
-# sessão de mídia do Chrome.
+# sessão de mídia do Chrome. A rodada do robô termina com a Shopee no Eu (deixar_sem_video), e a noite pode começar com
+# ela na frente: o Chrome vem para a frente antes da barra.
 ESPERA_DA_PAGINA = 20
 ESPERA_DO_PLAY = 30
+ESPERA_DO_CHROME = 3
+# Por que a aula não abriu, em palavras fixas (o registro de cada aula e o relatório da manhã).
+SEM_O_CHROME = "o Chrome não veio para a frente"
+SEM_A_BARRA = "sem a barra de endereço do Chrome"
+SEM_O_ENDERECO = "o endereço da aula não ficou na barra"
+SEM_O_PLAYER = "a página não mostrou o player"
+
+
+def app_da_frente(d):
+    """O pacote do app que está na frente do celular; "" sem a leitura."""
+    try:
+        return (d.app_current() or {}).get("package") or ""
+    except Exception:
+        return ""
+
+
+def trazer_o_chrome(d, pausa=None):
+    """O Chrome na frente do celular (o robô deixa a Shopee no Eu no fim de cada rodada que mexe no celular)."""
+    if app_da_frente(d) == PACOTE_DO_CHROME:
+        return
+    d.app_start(PACOTE_DO_CHROME, wait=True)
+    (pausa or time.sleep)(ESPERA_DO_CHROME)
 
 
 def ir_para_o_endereco(d, endereco, escrever, pausa=None):
     """
     Abre o endereço da aula na guia da frente do Chrome, escrito na barra de endereço (escrever é o do explorar), e
-    espera a página nova mostrar o player. True com a aula aberta, do alto.
+    espera a página nova mostrar o player. (True, "") com a aula aberta, do alto; (False, o porquê) quando não abriu.
     """
     pausa = pausa or time.sleep
+    trazer_o_chrome(d, pausa)
     barra = next((no for no in _nos(d.dump_hierarchy()) if no["id"] == "url_bar"), None)
     if not barra:
-        return False
+        return False, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME
     d.click(*_centro(barra["caixa"]))
     pausa(1)
     escrever(d, endereco)
     d.press("enter")
+    tela = ""
     for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
         pausa(PASSO_DA_ESPERA)
         tela = d.dump_hierarchy()
         if endereco_da_aula(tela) == endereco and botao_do_play(tela):
-            return True
-    return False
+            return True, ""
+    return False, SEM_O_PLAYER if endereco_da_aula(tela) == endereco else SEM_O_ENDERECO
 
 
 # --- O mapa das aulas (P293 1), só no banco do servidor ---
@@ -1179,12 +1204,14 @@ def abrir_a_da_vez(d, posicao, aula, escrever, pausa=None):
     """
     pausa = pausa or time.sleep
     if aula:
-        if ir_para_o_endereco(d, aula["endereco"], escrever, pausa):
+        aberta, porque = ir_para_o_endereco(d, aula["endereco"], escrever, pausa)
+        if aberta:
             return aula["endereco"], "aula aberta"
-        return None, "a aula não abriu"
+        return None, f"a aula não abriu ({porque})"
     ultima = mapa_das_aulas()["cursos"][str(posicao)]["aulas"][-1]["endereco"]
-    if not ir_para_o_endereco(d, ultima, escrever, pausa):
-        return None, "a última aula gravada não abriu"
+    aberta, porque = ir_para_o_endereco(d, ultima, escrever, pausa)
+    if not aberta:
+        return None, f"a última aula gravada não abriu ({porque})"
     tela = d.dump_hierarchy()
     ponto = botao_do_proximo(tela)
     if not ponto:
@@ -1198,9 +1225,10 @@ def abrir_a_da_vez(d, posicao, aula, escrever, pausa=None):
         if nova and nova != ultima:
             anotar_a_aula_seguinte(posicao, nova, nome)
             # Trocando de aula sem recarregar, a página pode ficar rolada: a nova abre de novo pela barra, do alto.
-            if ir_para_o_endereco(d, nova, escrever, pausa):
+            aberta, porque = ir_para_o_endereco(d, nova, escrever, pausa)
+            if aberta:
                 return nova, "aula seguinte aberta"
-            return None, "a aula seguinte não abriu"
+            return None, f"a aula seguinte não abriu ({porque})"
     return None, "o Próximo não abriu a aula seguinte"
 
 
