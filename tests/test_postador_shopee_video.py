@@ -1151,6 +1151,90 @@ def test_no_celular_so_das_8h_as_22h(hora, comeca, relogio, monkeypatch, capsys)
     assert ("fora do horário das rodadas" in capsys.readouterr().out) is not comeca
 
 
+class AparelhoDoChrome(Aparelho):
+    """O Motorola de madrugada: o abrir:chrome traz o Chrome para a frente, e o volume de mídia responde."""
+
+    def __init__(self, abre_o_chrome=True, volume=6):
+        super().__init__()
+        self.na_frente, self.abre_o_chrome, self.volume, self.volumes = "com.shopee.br", abre_o_chrome, volume, [volume]
+
+    def app_start(self, pacote, wait=False):
+        super().app_start(pacote, wait)
+        if self.abre_o_chrome:
+            self.na_frente = pacote
+
+    def app_current(self):
+        return {"package": self.na_frente, "activity": "org.chromium.chrome.browser.ChromeTabbedActivity"}
+
+    def shell(self, partes):
+        if partes[:3] == ["cmd", "media_session", "volume"]:
+            if "--set" in partes:
+                self.volume = int(partes[-1])
+                self.volumes.append(self.volume)
+            return Resposta(f"volume is {self.volume} in range [0..15]")
+        return super().shell(partes)
+
+
+@pytest.fixture
+def de_madrugada(relogio, monkeypatch):
+    """23:30, fora do Horário do Robô (8h às 22h), com o celular conectado."""
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    relogio("23:30")
+    monkeypatch.setattr(ps.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(ps.av, "tela_aberta", lambda: False)
+
+    def com(aparelho):
+        monkeypatch.setattr(ps, "conectar", lambda celular: aparelho)
+        return aparelho
+    return com
+
+
+def test_de_madrugada_o_explorar_mexe_so_no_chrome_do_curso_com_o_celular_mudo(de_madrugada, capsys):
+    # P294 1 (22/11/2026): fora do Horário do Robô, só o Chrome do curso, e a Shopee nunca é aberta.
+    aparelho = de_madrugada(AparelhoDoChrome())
+    assert ps.explorar("abrir:chrome; xy:100,200; voltar", celular=True) is True
+    assert aparelho.toques == [(100, 200)] and aparelho.teclas == ["back"]
+    assert aparelho.comandos[0] == ["abrir", "com.android.chrome"]
+    # Mudo enquanto mexe (sem barulho à noite), e o volume de antes volta no fim.
+    assert aparelho.volumes == [6, 0, 6] and ps.cursos_robo.estado_da_noite()["volume_antes"] is None
+    assert "madrugada do curso" in capsys.readouterr().out
+    # O que não é o Chrome do curso continua recusado, sem tocar em nada.
+    for passos in ("xy:10,20", "abrir; xy:10,20", "abrir:flow", "abrir:chrome; fechar", "abrir:chrome; postar",
+                   "abrir:chrome; escrever:oi", "abrir:chrome; abrir"):
+        aparelho = de_madrugada(AparelhoDoChrome())
+        assert ps.explorar(passos, celular=True) is None, passos
+        assert aparelho.toques == [] and aparelho.comandos == [] and aparelho.volumes == [6], passos
+        assert "fora do horário das rodadas" in capsys.readouterr().out
+
+
+def test_de_madrugada_sem_o_chrome_na_frente_nada_mais_e_tocado(de_madrugada, capsys):
+    aparelho = de_madrugada(AparelhoDoChrome(abre_o_chrome=False))
+    assert ps.explorar("abrir:chrome; xy:100,200; midia:tocar; voltar", celular=True) is False
+    assert aparelho.toques == [] and aparelho.teclas == [] and aparelho.volumes == [6, 0, 6]
+    assert "o Chrome não está na frente" in capsys.readouterr().out
+
+
+def test_o_celular_que_nao_fica_mudo_nao_e_tocado_de_madrugada(de_madrugada, monkeypatch, capsys):
+    aparelho = de_madrugada(AparelhoDoChrome())
+    monkeypatch.setattr(ps.cursos_robo, "volume_de_midia", lambda d: None)
+    assert ps.explorar("abrir:chrome; xy:100,200", celular=True) is False
+    assert aparelho.toques == [] and aparelho.comandos == []
+    assert "não ficou mudo" in capsys.readouterr().out
+
+
+def test_a_madrugada_do_curso_acaba_as_3h45_e_com_o_curso_terminado(de_madrugada, relogio, monkeypatch, capsys):
+    aparelho = de_madrugada(AparelhoDoChrome())
+    relogio("03:50")
+    assert ps.explorar("abrir:chrome; xy:100,200", celular=True) is None
+    assert "fora da madrugada do curso" in capsys.readouterr().out
+    # Terminado o curso, tudo volta ao normal (pedido do Rafael, 22/11/2026): de madrugada, nada.
+    relogio("23:30")
+    monkeypatch.setattr(ps.cursos_robo, "CURSO_EM_ANDAMENTO", False)
+    assert ps.explorar("abrir:chrome; xy:100,200", celular=True) is None
+    assert aparelho.toques == [] and aparelho.comandos == [] and aparelho.volumes == [6]
+    assert "sem curso por gravar" in capsys.readouterr().out
+
+
 def test_so_fica_vermelho_quando_nem_comecou():
     assert ps.codigo_de_saida(True) == 0
     assert ps.codigo_de_saida(False) == 0

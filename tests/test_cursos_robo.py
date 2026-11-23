@@ -514,6 +514,21 @@ def test_volume_da_aula_sobe_ao_meio_e_volta_ao_de_antes(bm):
     assert cursos_robo.estado_da_noite()["volume_antes"] is None
 
 
+def test_calar_o_celular_para_o_explorar_de_madrugada(bm):
+    # P294 1: de madrugada, o explorar do curso deixa o celular mudo, e o volume de antes volta no fim.
+    celular = CelularDoVolume(volume=6)
+    assert cursos_robo.calar_o_celular(celular) == (0, 15)
+    assert cursos_robo.estado_da_noite()["volume_antes"] == 6
+    assert cursos_robo.devolver_o_volume(celular) and celular.volume == 6
+    # Já mudo, nada muda.
+    mudo = CelularDoVolume(volume=0)
+    assert cursos_robo.calar_o_celular(mudo) == (0, 15)
+    assert not any("--set" in partes for partes in mudo.comandos)
+    # Sem resposta do Android, None (o explorar não toca em nada).
+    cursos_robo._anotar(volume_antes=None)
+    assert cursos_robo.calar_o_celular(CelularDoVolume(responde=False)) is None
+
+
 class ProcessoDoGravador:
     """O scrcpy de mentira: grava (ou não) o arquivo quando recebe o Ctrl+C."""
 

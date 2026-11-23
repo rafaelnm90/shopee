@@ -490,6 +490,10 @@ SINAL_VALE = 120
 # Quanto o robô espera a gravação soltar o celular, olhando a cada PASSO_DA_ESPERA_DO_ROBO.
 ESPERA_PELO_CELULAR = 120
 PASSO_DA_ESPERA_DO_ROBO = 3
+# Enquanto o curso não termina, a madrugada é dele: a gravação das aulas e o explorar que mexe só no Chrome do
+# curso, para o Claude mapear o site (P294 1). Terminado o curso, volta a False e tudo volta ao normal (pedido do
+# Rafael, 22/11/2026: DECISOES.md, Trabalho com o Claude).
+CURSO_EM_ANDAMENTO = True
 
 
 def _agora(agora=None):
@@ -587,6 +591,20 @@ def subir_o_volume(d):
         _anotar(volume_antes=antes[0])
     alvo = round(antes[1] * VOLUME_NA_AULA)
     return antes if antes[0] >= alvo else mudar_o_volume(d, alvo)
+
+
+def calar_o_celular(d):
+    """
+    O volume de mídia em 0 para o explorar do curso de madrugada (P294 1): o celular não faz barulho à noite. O de
+    antes fica guardado como o da aula e volta no fim (devolver_o_volume). (atual, máximo) depois, ou None sem o
+    volume.
+    """
+    antes = volume_de_midia(d)
+    if not antes:
+        return None
+    if estado_da_noite().get("volume_antes") is None:
+        _anotar(volume_antes=antes[0])
+    return antes if antes[0] == 0 else mudar_o_volume(d, 0)
 
 
 def devolver_o_volume(d):
