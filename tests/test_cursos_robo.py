@@ -323,6 +323,49 @@ def test_entrar_no_curso_nunca_escreve_a_senha_fora_do_campo_de_senha(bm):
     assert celular.campos == {"email": EMAIL_DO_TESTE, "senha": ""} and celular.teclas == []
 
 
+# A página de uma aula, na forma que o Chrome do Motorola mostra (22/11/2026), com nomes e endereço inventados.
+TELA_DA_AULA = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true"
+        text="escola.exemplo.pro/m/lessons/abcDEF123_x-y" content-desc="" bounds="[211,120][691,267]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="" content-desc="Tocar vídeo"
+        bounds="[191,996][280,1083]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="" content-desc="Tocar vídeo"
+        bounds="[475,729][603,857]" />
+  <node class="android.view.View" resource-id="" clickable="false" text="" content-desc="" bounds="[42,1112][1039,2075]">
+    <node class="android.widget.Button" resource-id="" clickable="true" text="Aula de exemplo um 8:03"
+          content-desc="" bounds="[178,1204][942,1290]" />
+    <node class="android.widget.Button" resource-id="" clickable="true"
+          text="Aula de exemplo dois com nome comprido 28:58" content-desc="" bounds="[178,1508][942,1608]" />
+    <node class="android.widget.Button" resource-id="" clickable="true" text="Encontro gravado 1:02:03"
+          content-desc="" bounds="[178,1674][942,1760]" />
+  </node>
+  <node class="android.widget.Button" resource-id="radix-_r_5p_" clickable="true" text="68% Módulo de exemplo"
+        content-desc="" bounds="[42,1912][1010,2036]" />
+  <node class="android.widget.Button" resource-id="" clickable="true" text="Próximo: Aula de exemplo dois"
+        content-desc="" bounds="[0,2175][1080,2394]" />
+</hierarchy>"""
+
+
+def test_a_pagina_da_aula_lida_pela_tela_do_chrome():
+    # Mapa do site de 22/11/2026: a linha da aula traz a duração, a barra do Chrome o endereço, e o "Próximo:" leva à
+    # aula seguinte. O botão do módulo (sem duração) não é aula.
+    assert cursos_robo.segundos_do_tempo("4:54") == 294 and cursos_robo.segundos_do_tempo("1:02:03") == 3723
+    assert cursos_robo.linhas_das_aulas(TELA_DA_AULA) == [
+        ("Aula de exemplo um", 483, (560, 1247)), ("Aula de exemplo dois com nome comprido", 1738, (560, 1558)),
+        ("Encontro gravado", 3723, (560, 1717))]
+    assert cursos_robo.endereco_da_aula(TELA_DA_AULA) == "https://escola.exemplo.pro/m/lessons/abcDEF123_x-y"
+    assert cursos_robo.botao_do_proximo(TELA_DA_AULA) == (540, 2284)
+    # O play do meio do player, o maior dos dois "Tocar vídeo".
+    assert cursos_robo.botao_do_play(TELA_DA_AULA) == (539, 793)
+    # Fora de uma aula (a página dos cursos), na última aula (sem o Próximo) e com o player fora da tela: nada.
+    fora = TELA_DA_AULA.replace("/m/lessons/abcDEF123_x-y", "/m/courses").replace("Próximo: ", "Comentar ")
+    fora = fora.replace('content-desc="Tocar vídeo"', 'content-desc=""')
+    assert cursos_robo.endereco_da_aula(fora) is None
+    assert cursos_robo.botao_do_proximo(fora) is None and cursos_robo.botao_do_play(fora) is None
+    assert cursos_robo.linhas_das_aulas("<quebrado") == [] and cursos_robo.endereco_da_aula("") is None
+
+
 def test_campo_em_foco_diz_se_o_cursor_esta_no_campo_de_senha():
     assert cursos_robo.campo_em_foco(TELA_DO_LOGIN) is None
     celular = PaginaDeLogin()
@@ -762,6 +805,101 @@ def test_madrugada_que_acaba_e_video_que_nao_carrega_param_a_aula(bm, tmp_path):
     feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo)
     assert feito == (False, "carregando demais")
     assert celular.eventos[-2:] == ["volume 2", "gravador parou"]
+
+
+class SiteDoCurso(CelularDoVolume):
+    """
+    O Chrome de mentira com o site do curso: as aulas em ordem [(nome, segundos, endereço)], a barra de endereço,
+    o play (só com a página no alto) e a barra do Próximo. Trocar de aula pelo Próximo deixa a página rolada.
+    """
+
+    def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, **opcoes):
+        super().__init__(**opcoes)
+        self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
+        self.escrito, self.barra_em_foco, self.toques = None, False, []
+
+    def dump_hierarchy(self):
+        nos = ['<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
+               f'text="{self.aulas[self.aberta][2].removeprefix("https://")}" content-desc="" '
+               'bounds="[211,120][691,267]" />']
+        if self.no_alto:
+            nos.append('<node class="android.widget.ToggleButton" resource-id="" clickable="true" text="" '
+                       'content-desc="Tocar vídeo" bounds="[475,729][603,857]" />')
+        if self.aberta + 1 < len(self.aulas):
+            nos.append('<node class="android.widget.Button" resource-id="" clickable="true" '
+                       f'text="Próximo: {self.aulas[self.aberta + 1][0]}" content-desc="" bounds="[0,2175][1080,2394]" />')
+        return '<hierarchy rotation="0">' + "".join(nos) + "</hierarchy>"
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+        if 211 <= x <= 691 and 120 <= y <= 267:
+            self.barra_em_foco = True
+        elif (x, y) == (539, 793) and self.no_alto and self.play_toca:
+            self.midia = _sessao_do_chrome(3, 1)
+        elif y >= 2175 and self.aberta + 1 < len(self.aulas):
+            self.aberta, self.no_alto, self.midia = self.aberta + 1, False, SEM_SESSOES
+
+    def press(self, tecla):
+        if tecla == "enter" and self.barra_em_foco:
+            alvo = next((n for n, aula in enumerate(self.aulas) if aula[2] == self.escrito), None)
+            if alvo is not None:
+                self.aberta, self.no_alto, self.midia = alvo, True, SEM_SESSOES
+            self.barra_em_foco = False
+
+
+def _escrever_na_barra(d, texto):
+    d.escrito = texto
+
+
+AULAS_DO_SITE = [("Aula um", 300, "https://escola.exemplo.pro/m/lessons/aaa111"),
+                 ("Aula dois", 600, "https://escola.exemplo.pro/m/lessons/bbb222"),
+                 ("Aula três", 120, "https://escola.exemplo.pro/m/lessons/ccc333")]
+
+
+def test_a_aula_abre_pelo_endereco_na_mesma_guia_e_do_alto():
+    # O link por fora abria uma guia nova a cada vez (de 8 para 11 no mapa de 22/11/2026): a aula abre pela barra de
+    # endereço da guia da frente, e a página nova vem do alto, com o play na tela.
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=0, no_alto=False)
+    assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[2][2], _escrever_na_barra, pausa=lambda s: None)
+    assert site.aberta == 2 and site.no_alto and site.toques == [(451, 193)]
+    # O endereço que a página não abre: False depois da espera.
+    assert not cursos_robo.ir_para_o_endereco(site, "https://escola.exemplo.pro/m/lessons/zzz999", _escrever_na_barra,
+                                              pausa=lambda s: None)
+
+
+def test_o_play_da_aula_conferido_pela_sessao_de_midia():
+    site = SiteDoCurso(AULAS_DO_SITE, no_alto=True)
+    assert cursos_robo.tocar_pelo_play(site, pausa=lambda s: None) and site.toques == [(539, 793)]
+    # Com o player fora da tela, nada é tocado; o play que não faz o vídeo tocar dá False.
+    rolada = SiteDoCurso(AULAS_DO_SITE, no_alto=False)
+    assert not cursos_robo.tocar_pelo_play(rolada, pausa=lambda s: None) and rolada.toques == []
+    assert not cursos_robo.tocar_pelo_play(SiteDoCurso(AULAS_DO_SITE, no_alto=True, play_toca=False),
+                                           pausa=lambda s: None)
+
+
+def test_o_mapa_das_aulas_segue_a_ordem_dos_cursos_e_o_proximo_do_site(bm):
+    # P293 1: os cursos pela posição na lista de Turmas (os de Shopee Vídeo primeiro, o dos encontros ao vivo por
+    # último). A 1ª aula de cada um vem do Claude; as outras, do "Próximo" do site.
+    um, dois, tres = (aula[2] for aula in AULAS_DO_SITE)
+    assert cursos_robo.proxima_aula() is None
+    assert not cursos_robo.guardar_a_primeira_aula(9, um) and not cursos_robo.guardar_a_primeira_aula(4, "x/y")
+    assert cursos_robo.guardar_a_primeira_aula(5, tres) and cursos_robo.guardar_a_primeira_aula(4, um)
+    assert cursos_robo.proxima_aula() == (4, {"endereco": um, "nome": "", "gravada_em": ""})
+    # Gravada a 1ª, a seguinte vem pelo Próximo dela; a que ficou pela metade volta inteira (P295 1).
+    cursos_robo.anotar_a_aula_gravada(4, um, _br("2026-11-24 00:30"))
+    assert cursos_robo.proxima_aula() == (4, None)
+    cursos_robo.anotar_a_aula_seguinte(4, dois, "Aula dois")
+    cursos_robo.anotar_a_aula_seguinte(4, dois, "Aula dois")
+    assert cursos_robo.proxima_aula() == (4, {"endereco": dois, "nome": "Aula dois", "gravada_em": ""})
+    # Depois de uma aula gravada, a 1ª do curso não muda mais; antes, o Claude pode corrigir.
+    assert not cursos_robo.guardar_a_primeira_aula(4, tres)
+    assert cursos_robo.guardar_a_primeira_aula(5, dois) and cursos_robo.mapa_das_aulas()["cursos"]["5"]["aulas"] == [
+        {"endereco": dois, "nome": "", "gravada_em": ""}]
+    # Terminado o curso (a última aula, sem o Próximo), vem o seguinte da ordem.
+    cursos_robo.anotar_a_aula_gravada(4, dois)
+    cursos_robo.anotar_o_fim_do_curso(4)
+    assert cursos_robo.proxima_aula() == (5, {"endereco": dois, "nome": "", "gravada_em": ""})
+    assert len(cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]) == 2
 
 
 def test_quadros_da_aula_um_a_cada_20_s_de_40_a_120():

@@ -478,6 +478,212 @@ def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
     return (True, "login feito") if saiu else (False, "o login não passou (a página de login continua)")
 
 
+# --- As páginas do curso no Chrome (mapeadas em 22/11/2026, com o celular mudo) ---
+# Na aula, o player tem os botões pela descrição ("Tocar vídeo" no meio dele e na barra); embaixo, as abas Módulos,
+# Comentários e Anotações. Na aba Módulos, cada módulo é um botão e, aberto, mostra uma linha por aula com o nome e a
+# duração ("Nome 4:54"), numa lista que rola por dentro. A barra "Próximo: Nome" leva à aula seguinte do curso, e o
+# endereço da aula fica na barra do Chrome (".../m/lessons/<código>"). Trocando de aula pela lista, a página continua
+# rolada, e o player some da tela e da leitura dela: a página sobe antes do play. Os nomes das aulas e os endereços
+# ficam só no banco do servidor, nunca no log nem no repositório.
+LINHA_DA_AULA = re.compile(r"(?P<nome>.*\S)\s+(?P<tempo>\d{1,2}(?::\d{2}){1,2})")
+CAMINHO_DA_AULA = re.compile(r"[\w.-]+/m/lessons/[\w-]+")
+ROTULO_DO_PROXIMO = "Próximo:"
+ROTULO_DO_PLAY = "Tocar vídeo"
+
+
+def segundos_do_tempo(texto):
+    """A duração escrita na linha da aula em segundos: "4:54" dá 294; "1:02:03", 3723."""
+    total = 0
+    for parte in texto.split(":"):
+        total = total * 60 + int(parte)
+    return total
+
+
+def _nos(xml):
+    """Os nós da tela com tamanho: texto, descrição, id, classe, caixa e se aceitam toque. [] sem a tela."""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return []
+    nos = []
+    for no in raiz.iter("node"):
+        caixa = re.fullmatch(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", no.get("bounds", ""))
+        if not caixa:
+            continue
+        x1, y1, x2, y2 = map(int, caixa.groups())
+        if x2 > x1 and y2 > y1:
+            nos.append({"texto": no.get("text", ""), "descricao": no.get("content-desc", ""),
+                        "id": no.get("resource-id", "").split(":id/")[-1],
+                        "classe": no.get("class", "").rsplit(".", 1)[-1], "caixa": (x1, y1, x2, y2),
+                        "clicavel": no.get("clickable") == "true"})
+    return nos
+
+
+def _centro(caixa):
+    x1, y1, x2, y2 = caixa
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def linhas_das_aulas(xml):
+    """As linhas das aulas da aba Módulos que estão na tela, de cima para baixo: [(nome, segundos, centro)]."""
+    linhas = []
+    for no in _nos(xml):
+        achado = LINHA_DA_AULA.fullmatch(" ".join(no["texto"].split()))
+        if no["clicavel"] and no["classe"] == "Button" and achado:
+            linhas.append((achado["nome"], segundos_do_tempo(achado["tempo"]), _centro(no["caixa"])))
+    return sorted(linhas, key=lambda linha: linha[2][1])
+
+
+def endereco_da_aula(xml):
+    """O endereço da aula aberta no Chrome, pela barra de endereço; None fora de uma aula."""
+    for no in _nos(xml):
+        if no["id"] == "url_bar":
+            texto = no["texto"].strip().removeprefix("https://")
+            if CAMINHO_DA_AULA.fullmatch(texto):
+                return "https://" + texto
+    return None
+
+
+def botao_do_proximo(xml):
+    """O centro da barra "Próximo: Nome", que leva à aula seguinte do curso; None na última aula."""
+    for no in _nos(xml):
+        if no["clicavel"] and no["texto"].startswith(ROTULO_DO_PROXIMO):
+            return _centro(no["caixa"])
+    return None
+
+
+def botao_do_play(xml):
+    """O centro do play do player (o maior dos "Tocar vídeo"); None com o player fora da tela."""
+    botoes = [no for no in _nos(xml) if no["clicavel"] and no["descricao"] == ROTULO_DO_PLAY]
+    if not botoes:
+        return None
+    maior = max(botoes, key=lambda no: (no["caixa"][2] - no["caixa"][0]) * (no["caixa"][3] - no["caixa"][1]))
+    return _centro(maior["caixa"])
+
+
+# A aula abre pela barra de endereço da guia que está na frente (o link por fora abre uma guia nova a cada vez: de 8
+# para 11 guias no mapa de 22/11/2026), e a página nova vem do alto, com o player na tela. O play é conferido pela
+# sessão de mídia do Chrome.
+ESPERA_DA_PAGINA = 20
+ESPERA_DO_PLAY = 30
+
+
+def ir_para_o_endereco(d, endereco, escrever, pausa=None):
+    """
+    Abre o endereço da aula na guia da frente do Chrome, escrito na barra de endereço (escrever é o do explorar), e
+    espera a página nova mostrar o player. True com a aula aberta, do alto.
+    """
+    pausa = pausa or time.sleep
+    barra = next((no for no in _nos(d.dump_hierarchy()) if no["id"] == "url_bar"), None)
+    if not barra:
+        return False
+    d.click(*_centro(barra["caixa"]))
+    pausa(1)
+    escrever(d, endereco)
+    d.press("enter")
+    for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
+        pausa(PASSO_DA_ESPERA)
+        tela = d.dump_hierarchy()
+        if endereco_da_aula(tela) == endereco and botao_do_play(tela):
+            return True
+    return False
+
+
+# --- O mapa das aulas (P293 1), só no banco do servidor ---
+# Os 7 cursos da turma do Rafael pela posição na lista de Turmas do site (Continuar aprendendo → Turmas): primeiro os
+# dois de Shopee Vídeo, depois os outros na ordem da lista e, por último, o dos encontros ao vivo (P293 1). Os nomes dos
+# cursos não vão ao repositório. A 1ª aula de cada curso é guardada pelo Claude, com o passo curso:primeira:N do
+# explorar na página dela; as outras vêm uma a uma pelo "Próximo" do site, com o endereço e o nome guardados aqui.
+ORDEM_DOS_CURSOS = (4, 5, 1, 2, 6, 7, 3)
+CHAVE_DO_MAPA = "curso_mapa"
+
+
+def mapa_das_aulas():
+    """{"cursos": {"posição": {"aulas": [{"endereco", "nome", "gravada_em"}], "fim": bool}}} do banco."""
+    mapa = db.ler_config(CHAVE_DO_MAPA, {}) or {}
+    mapa.setdefault("cursos", {})
+    return mapa
+
+
+def _mudar_o_curso(posicao, mudar):
+    """Muda o curso dessa posição no mapa, numa transação só; devolve o que mudar(curso) devolver."""
+    def mudar_o_mapa(mapa):
+        return mudar(mapa.setdefault("cursos", {}).setdefault(str(int(posicao)), {"aulas": [], "fim": False}))
+    return db.atualizar_config(CHAVE_DO_MAPA, mudar_o_mapa)
+
+
+def guardar_a_primeira_aula(posicao, endereco):
+    """
+    A 1ª aula do curso nessa posição da lista de Turmas, guardada pelo Claude (passo curso:primeira:N). Antes de alguma
+    aula do curso ser gravada, troca a que estava (o Claude pode corrigir); depois, o mapa do curso não muda. True se
+    guardou.
+    """
+    if int(posicao) not in ORDEM_DOS_CURSOS or not CAMINHO_DA_AULA.fullmatch(endereco.removeprefix("https://")):
+        return False
+
+    def mudar(curso):
+        if any(aula.get("gravada_em") for aula in curso["aulas"]):
+            return False
+        curso["aulas"] = [{"endereco": endereco, "nome": "", "gravada_em": ""}]
+        return True
+    return bool(_mudar_o_curso(posicao, mudar))
+
+
+def proxima_aula(mapa=None):
+    """
+    A aula da vez, na ordem dos cursos: (posição, aula) com a 1ª aula ainda não gravada do curso (a que ficou pela
+    metade volta inteira, do início: P295 1); (posição, None) quando todas as guardadas do curso foram gravadas e a
+    seguinte vem pelo "Próximo" da última. Pula o curso terminado e o que ainda não tem a 1ª aula guardada. None sem
+    nada a gravar.
+    """
+    mapa = mapa or mapa_das_aulas()
+    for posicao in ORDEM_DOS_CURSOS:
+        curso = mapa["cursos"].get(str(posicao)) or {}
+        aulas = curso.get("aulas") or []
+        if curso.get("fim") or not aulas:
+            continue
+        falta = next((aula for aula in aulas if not aula.get("gravada_em")), None)
+        return posicao, falta
+    return None
+
+
+def anotar_a_aula_gravada(posicao, endereco, agora=None):
+    """A aula do curso gravada inteira: a próxima vez segue para a seguinte."""
+    def mudar(curso):
+        for aula in curso["aulas"]:
+            if aula["endereco"] == endereco:
+                aula["gravada_em"] = _texto(_agora(agora))
+    _mudar_o_curso(posicao, mudar)
+
+
+def anotar_a_aula_seguinte(posicao, endereco, nome):
+    """A aula que o "Próximo" abriu, no fim da lista do curso (sem repetir a que já está nela)."""
+    def mudar(curso):
+        if all(aula["endereco"] != endereco for aula in curso["aulas"]):
+            curso["aulas"].append({"endereco": endereco, "nome": nome, "gravada_em": ""})
+    _mudar_o_curso(posicao, mudar)
+
+
+def anotar_o_fim_do_curso(posicao):
+    """A última aula do curso (sem o "Próximo") gravada: o curso terminou."""
+    _mudar_o_curso(posicao, lambda curso: curso.update(fim=True))
+
+
+def tocar_pelo_play(d, pausa=None):
+    """O play do player da aula, conferido pela sessão de mídia do Chrome: True com a aula tocando."""
+    pausa = pausa or time.sleep
+    ponto = botao_do_play(d.dump_hierarchy())
+    if not ponto:
+        return False
+    d.click(*ponto)
+    for _ in range(ESPERA_DO_PLAY // PASSO_DA_ESPERA):
+        pausa(PASSO_DA_ESPERA)
+        midia = midia_do_chrome(d)
+        if midia and midia["estado"] == "tocando":
+            return True
+    return False
+
+
 # --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026) ---
 # Depois do Horário do Robô, de madrugada, as aulas são gravadas uma a uma até um pouco antes da limpeza
 # das 4h (P289 1), na velocidade normal (P292 1), com o volume de mídia no meio só durante a aula (P291 1)
