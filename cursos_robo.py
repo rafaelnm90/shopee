@@ -440,12 +440,38 @@ def campo_em_foco(xml):
     return None
 
 
+# As janelas que o próprio Chrome abre embaixo da página: a do gerenciador de senhas ("touch to fill"), que oferece a
+# senha salva quando um campo do login é tocado, e a de salvar a senha depois do login. Elas cobrem a página (a leitura
+# da tela não mostra os campos com ela aberta, no Motorola, em 23/11/2026) e saem pela tecla voltar, sem escolher nada.
+FOLHAS_DO_CHROME = ("com.android.chrome:id/touch_to_fill", "com.android.chrome:id/bottom_sheet")
+
+
+def folha_do_chrome_na_tela(xml):
+    """Uma janela do próprio Chrome (FOLHAS_DO_CHROME) está aberta embaixo da página?"""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return False
+    return any(no.get("resource-id", "").startswith(FOLHAS_DO_CHROME) for no in raiz.iter("node"))
+
+
+def _fechar_a_folha_do_chrome(d, pausa):
+    """Fecha a janela do Chrome pela tecla voltar, só com ela na tela (sem ela, voltar mudaria a página). A tela."""
+    tela = d.dump_hierarchy()
+    if folha_do_chrome_na_tela(tela):
+        d.press("back")
+        pausa(1)
+        tela = d.dump_hierarchy()
+    return tela
+
+
 def _saiu_do_login(d, pausa):
     """Espera o site entrar, conferindo a página de 2 em 2 s. (saiu, a última tela lida)."""
     tela = ""
     for _ in range(ESPERA_DO_LOGIN // PASSO_DA_ESPERA):
         pausa(PASSO_DA_ESPERA)
-        tela = d.dump_hierarchy()
+        # A janela de salvar a senha cobre a página e esconde os campos: fechada antes, a leitura é a da página.
+        tela = _fechar_a_folha_do_chrome(d, pausa)
         if not campos_do_login(tela):
             return True, tela
     return False, tela
@@ -461,16 +487,21 @@ def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
     acesso = acesso_do_curso()
     if not acesso.get("email") or not acesso.get("senha"):
         return False, "sem o login do curso no Acessos do Servidor"
-    if not campos_do_login(d.dump_hierarchy()):
+    if not campos_do_login(_fechar_a_folha_do_chrome(d, pausa)):
         return False, "a tela não é a de login do curso"
     for indice, valor in enumerate((acesso["email"], acesso["senha"])):
-        campos = campos_do_login(d.dump_hierarchy())
-        if not campos:
-            return False, "a página de login mudou no meio"
-        d.click(*campos[indice])
-        pausa(1)
-        foco = campo_em_foco(d.dump_hierarchy())
-        if foco is None or foco != (indice == 1):
+        # O toque no campo pode abrir a janela do gerenciador de senhas do Chrome, que cobre a página: ela é fechada,
+        # e o campo é tocado de novo quando o cursor não ficou nele (o robô escreve o login guardado, conferido).
+        for _ in range(2):
+            campos = campos_do_login(_fechar_a_folha_do_chrome(d, pausa))
+            if not campos:
+                return False, "a página de login mudou no meio"
+            d.click(*campos[indice])
+            pausa(1)
+            foco = campo_em_foco(_fechar_a_folha_do_chrome(d, pausa))
+            if foco is not None and foco == (indice == 1):
+                break
+        else:
             return False, "o cursor não ficou no campo certo do login"
         escrever(d, valor)
     d.press("enter")
@@ -480,7 +511,11 @@ def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
         if ponto:
             d.click(*ponto)
             saiu, tela = _saiu_do_login(d, pausa)
-    return (True, "login feito") if saiu else (False, "o login não passou (a página de login continua)")
+    if not saiu:
+        return False, "o login não passou (a página de login continua)"
+    # A janela de salvar a senha, que o Chrome abre depois do login, sai sem escolher nada.
+    _fechar_a_folha_do_chrome(d, pausa)
+    return True, "login feito"
 
 
 # --- As páginas do curso no Chrome (mapeadas em 22/11/2026, com o celular mudo) ---
@@ -660,49 +695,88 @@ def _tocando_ou_carregando(midia):
     return bool(midia) and midia["estado"] in ("tocando", "carregando")
 
 
-def ir_para_o_endereco(d, endereco, pausa=None):
-    """
-    Abre o endereço da aula na guia da frente do Chrome, escrito na barra de endereço, e espera a página nova:
-    (COM_VIDEO, "") com o player na tela ou o vídeo tocando sozinho; (SEM_VIDEO, "") na aula sem vídeo (um documento
-    ou um texto: a página pronta, sem player nenhum, nem depois de mais um tempo); (None, o porquê) quando não abriu.
-    O que tocava antes é pausado, e o vídeo tocando depois do Enter é o da página nova.
-    """
-    pausa = pausa or time.sleep
+def _abrir_pela_barra(d, endereco, pausa):
+    """Uma vez: o endereço escrito na barra da guia da frente e a página nova esperada. (tipo, porque, a tela)."""
     trazer_o_chrome(d, pausa)
-    barra = barra_na_tela(d.dump_hierarchy())
+    tela = _fechar_a_folha_do_chrome(d, pausa)
+    barra = barra_na_tela(tela)
     if not barra and app_da_frente(d) == PACOTE_DO_CHROME:
         # A barra some quando a página rola para baixo: rolando para cima, ela volta.
         d.swipe(540, 700, 540, 1500, 0.3)
         pausa(1)
-        barra = barra_na_tela(d.dump_hierarchy())
+        tela = d.dump_hierarchy()
+        barra = barra_na_tela(tela)
     if not barra:
-        return None, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME
+        return None, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME, tela
     pausar_o_que_toca(d, pausa)
     d.click(*_centro(barra["caixa"]))
     pausa(1)
     if not escrever_na_barra(d, endereco, pausa):
         # Sem o Enter: a barra sai da edição, e a página de antes fica como estava.
         d.press("back")
-        return None, SEM_A_ESCRITA
+        return None, SEM_A_ESCRITA, tela
     _saida(d, ["input", "keyevent", "KEYCODE_ENTER"])
     tela = ""
     for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
         pausa(PASSO_DA_ESPERA)
-        tela = d.dump_hierarchy()
+        tela = _fechar_a_folha_do_chrome(d, pausa)
         if endereco_da_aula(tela) == endereco and (botao_do_play(tela) or _tocando_ou_carregando(midia_do_chrome(d))):
-            return COM_VIDEO, ""
+            return COM_VIDEO, "", tela
     if endereco_da_aula(tela) != endereco:
-        return None, SEM_O_ENDERECO
+        return None, SEM_O_ENDERECO, tela
     if pagina_da_aula_pronta(tela) and not tem_player(tela):
         # A página pronta sem player: mais um tempo para o player que demora, e então é a aula sem vídeo.
         pausa(ESPERA_SEM_O_PLAYER)
         tela = d.dump_hierarchy()
         if endereco_da_aula(tela) == endereco and pagina_da_aula_pronta(tela) and not tem_player(tela):
-            return (COM_VIDEO, "") if _tocando_ou_carregando(midia_do_chrome(d)) else (SEM_VIDEO, "")
+            return ((COM_VIDEO, "", tela) if _tocando_ou_carregando(midia_do_chrome(d)) else (SEM_VIDEO, "", tela))
         if endereco_da_aula(tela) == endereco and botao_do_play(tela):
-            return COM_VIDEO, ""
+            return COM_VIDEO, "", tela
     # A página da aula sem o play: o estado do vídeo vai junto.
-    return None, f"{SEM_O_PLAYER}; {descrever_a_midia(midia_do_chrome(d))}"
+    return None, f"{SEM_O_PLAYER}; {descrever_a_midia(midia_do_chrome(d))}", tela
+
+
+# A sessão do site vence depois de algumas horas (às 09:53 de 23/11/2026, o endereço da aula levou à página de login),
+# e a guia nova (a Nova guia, onde o Chrome abre depois de horas parado) leva o endereço à página inicial do curso: o
+# endereço é escrito de novo, até VEZES_NA_BARRA vezes, com o login feito no meio quando o site pede.
+VEZES_NA_BARRA = 4
+SEM_O_LOGIN = "o site pediu o login, e o login não passou"
+
+
+def _entrar(d, pausa):
+    """O login do curso com o acesso guardado (entrar_no_curso), com o escrever e o achar do explorar."""
+    import postador_shopee_video as ps   # aqui dentro: o postador importa este módulo
+    return entrar_no_curso(d, ps.escrever, ps.achar, pausa)
+
+
+def _mesmo_site(barra, endereco):
+    """A barra mostra uma página do site do curso (o mesmo do endereço da aula)?"""
+    return bool(barra) and _sem_o_https(barra).split("/", 1)[0] == _sem_o_https(endereco).split("/", 1)[0]
+
+
+def ir_para_o_endereco(d, endereco, pausa=None, entrar=None):
+    """
+    Abre o endereço da aula na guia da frente do Chrome, escrito na barra de endereço, e espera a página nova:
+    (COM_VIDEO, "") com o player na tela ou o vídeo tocando sozinho; (SEM_VIDEO, "") na aula sem vídeo (um documento
+    ou um texto: a página pronta, sem player nenhum, nem depois de mais um tempo); (None, o porquê) quando não abriu.
+    O que tocava antes é pausado, e o vídeo tocando depois do Enter é o da página nova. Na página de login (a sessão
+    do site vencida), o robô entra com o acesso guardado (pedido do Rafael de 22/11/2026:
+    DECISOES.md, Trabalho com o Claude) e escreve o endereço de novo; noutra página do site, de novo (_mesmo_site).
+    """
+    pausa = pausa or time.sleep
+    entrar = entrar or _entrar
+    logado = False
+    for _ in range(VEZES_NA_BARRA):
+        tipo, porque, tela = _abrir_pela_barra(d, endereco, pausa)
+        if tipo or porque != SEM_O_ENDERECO:
+            return tipo, porque
+        if campos_do_login(tela):
+            if logado or not entrar(d, pausa)[0]:
+                return None, SEM_O_LOGIN
+            logado = True
+        elif not _mesmo_site(texto_da_barra(tela), endereco):
+            return None, SEM_O_ENDERECO
+    return None, SEM_O_ENDERECO
 
 
 # --- O mapa das aulas (P293 1), só no banco do servidor ---
@@ -1642,11 +1716,21 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 endereco, detalhe = endereco_da_vez(d, posicao, aula, pausa)
                 aberta, inteira, fim, destino = False, False, detalhe, ""
                 if endereco:
-                    destino = os.path.join(PASTA_DAS_GRAVACOES, f"{_agora():%Y%m%d-%H%M%S}.mkv")
-                    aberta, inteira, fim = gravar_a_aula(
-                        d, getattr(d, "serial", ""), destino,
-                        lambda celular: ir_para_o_endereco(celular, endereco, pausa),
-                        lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa)
+                    # A aula abre antes, muda e sem o gravador: o login que a sessão vencida pede fica fora da gravação
+                    # (23/11/2026), e a aula sem vídeo é reconhecida sem gravar nada. Depois, ela abre de novo, do
+                    # começo, com o gravador ligado.
+                    tipo, porque = ir_para_o_endereco(d, endereco, pausa)
+                    pausar_o_que_toca(d, pausa)
+                    if not tipo:
+                        fim = f"a aula não abriu ({porque})"
+                    elif tipo == SEM_VIDEO:
+                        aberta, fim = True, SEM_VIDEO
+                    else:
+                        destino = os.path.join(PASTA_DAS_GRAVACOES, f"{_agora():%Y%m%d-%H%M%S}.mkv")
+                        aberta, inteira, fim = gravar_a_aula(
+                            d, getattr(d, "serial", ""), destino,
+                            lambda celular: ir_para_o_endereco(celular, endereco, pausa),
+                            lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa)
                 if fim == SEM_VIDEO and not sem_video:
                     guardar_o_caso(d, "a aula não tem vídeo", "sem vídeo")
                 elif not aberta and fim != "o curso terminou" and not falhas:
