@@ -798,13 +798,16 @@ FIM_DO_CURSO = "o curso terminou"
 SEM_A_SEGUINTE = "o Próximo não abriu a aula seguinte"
 AVISO_EM_CIMA = "um aviso do Chrome ficou em cima do Próximo"
 SEM_A_PAGINA = "a página da aula não está na tela"
+VOLTOU = "a página voltou para uma aula de antes"
 VEZES_SEM_O_PROXIMO = 3
 
 
 def _tipo_da_pagina(d, tela, pausa):
     """
-    O tipo da aula que o Próximo abriu: (COM_VIDEO, "") com o play na tela ou o vídeo tocando sozinho; (SEM_VIDEO, "")
-    com a página pronta sem player nenhum, nem depois de mais um tempo e da página rolada ao alto; (None, o porquê).
+    O tipo da aula que o Próximo abriu (a página nova vem do alto): (COM_VIDEO, "") com o play na tela ou o vídeo
+    tocando sozinho; (SEM_VIDEO, "") com a página pronta sem player nenhum, nem depois de mais um tempo; (None, o
+    porquê). A página nunca é arrastada para baixo aqui: no alto dela, o Chrome toma o arrasto por "puxar para
+    atualizar" e recarrega o endereço da barra, que é o da 1ª aula aberta pela barra (o teste de 23/11/2026, às 12:00).
     """
     for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
         if botao_do_play(tela) or _tocando_ou_carregando(midia_do_chrome(d)):
@@ -815,8 +818,6 @@ def _tipo_da_pagina(d, tela, pausa):
         tela = d.dump_hierarchy()
     if pagina_da_aula_pronta(tela) and not tem_player(tela):
         pausa(ESPERA_SEM_O_PLAYER)
-        d.swipe(540, 700, 540, 1500, 0.3)
-        pausa(1)
         tela = d.dump_hierarchy()
         if botao_do_play(tela) or _tocando_ou_carregando(midia_do_chrome(d)):
             return COM_VIDEO, ""
@@ -867,8 +868,22 @@ def passar_para_a_seguinte(d, pausa=None):
             if sem_o_proximo < 2:
                 continue
         tipo, porque = _tipo_da_pagina(d, tela, pausa)
+        if tipo and nome_no_proximo(d.dump_hierarchy()) == nome:
+            # A página que recarregou (ou voltou) mostra de novo o Próximo da aula de antes.
+            return None, VOLTOU, nome
         return tipo, porque, nome
     return None, SEM_A_SEGUINTE, nome
+
+
+def na_aula_certa(d, posicao, numero, nome):
+    """
+    A página é a aula `numero` do curso? O Próximo dela mostra o nome da aula seguinte: o nome de uma aula até a
+    `numero` (a dela, `nome`, ou uma das de antes, do mapa) quer dizer que a página voltou para uma aula de antes, e a
+    noite não pode gravar de novo uma aula como se fosse a seguinte.
+    """
+    aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
+    conhecidos = {aula.get("nome") for aula in aulas[1:int(numero) - 1] if aula.get("nome")} | {nome}
+    return nome_no_proximo(d.dump_hierarchy()) not in conhecidos
 
 
 def chegar_na_aula(d, posicao, numero, pausa=None, vigiar=None):
@@ -893,6 +908,8 @@ def chegar_na_aula(d, posicao, numero, pausa=None, vigiar=None):
             return None, parar
         pausar_o_que_toca(d, pausa)
         tipo, porque, nome = passar_para_a_seguinte(d, pausa)
+        if tipo and not na_aula_certa(d, posicao, seguinte, nome):
+            tipo, porque = None, VOLTOU
         if tipo:
             anotar_a_aula_seguinte(posicao, seguinte, nome)
     pausar_o_que_toca(d, pausa)
@@ -1887,6 +1904,7 @@ PROCESSO_DA_NOITE = "noite do curso"
 PASTA_DAS_GRAVACOES = os.path.expanduser("~/shopee_video/aulas_brutas")
 # Quantas aulas que não abrem, seguidas, fazem a noite parar (o site fora, o login que caiu): a seguinte tenta de novo.
 FALHAS_SEGUIDAS = 2
+VOLTAS_DA_NOITE = 200
 # O que para a aula sem ser falha: ela volta depois, inteira (P295 1), e a noite acaba aqui.
 PARADAS_DA_AULA = ("o robô pediu o celular", "a madrugada acabou")
 SEM_O_MUDO = "o celular não ficou mudo antes de abrir a aula"
@@ -1982,8 +2000,13 @@ class Ajudante:
 
 
 def _abrir_a_seguinte(d, posicao, numero, pausa):
-    """A aula `numero` pelo Próximo da aberta (a de antes dela), anotada no mapa com o nome: (tipo, porque)."""
+    """
+    A aula `numero` pelo Próximo da aberta (a de antes dela), conferida pelo nome (na_aula_certa) e anotada no mapa com
+    ele: (tipo, porque).
+    """
     tipo, porque, nome = passar_para_a_seguinte(d, pausa)
+    if tipo and not na_aula_certa(d, posicao, numero, nome):
+        return None, VOLTOU
     if tipo:
         anotar_a_aula_seguinte(posicao, numero, nome)
     return tipo, porque
@@ -2031,9 +2054,14 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
     ajudante.mandar_as_que_ficaram()
     gravadas = metade = falhas = sem_video = 0
     motivo = "nenhuma aula por gravar"
-    aberta, pular, com_caso = None, set(), False
+    aberta, pular, com_caso, voltas = None, set(), False, 0
     try:
         while True:
+            voltas += 1
+            if voltas > VOLTAS_DA_NOITE:
+                # Nenhuma noite grava tantas aulas: o site fez a noite girar sem sair do lugar.
+                motivo = f"a noite passou de {VOLTAS_DA_NOITE} voltas"
+                break
             if ajudante.problema:
                 motivo = ajudante.problema
                 break
