@@ -498,6 +498,7 @@ ROTULO_DO_PROXIMO = "Próximo:"
 ROTULO_DO_PLAY = "Tocar vídeo"
 ID_DO_PLAYER = "plyr-"
 ID_DAS_ABAS = "trigger-modules"
+CAIXA_DA_NOVA_GUIA = "search_box_text"
 
 
 def segundos_do_tempo(texto):
@@ -589,6 +590,16 @@ def texto_da_barra(xml):
     return next((no["texto"] for no in _nos(xml) if no["id"] == "url_bar"), None)
 
 
+def barra_na_tela(xml):
+    """
+    Onde escrever o endereço: a barra de endereço no alto do Chrome ou, na página de Nova guia (onde o Chrome abre
+    depois de horas parado, como em 23/11/2026), a caixa de busca dela, que abre a barra. None sem nenhuma à vista (a
+    barra some quando a página rola para baixo).
+    """
+    return next((no for no in _nos(xml) if no["id"] in ("url_bar", CAIXA_DA_NOVA_GUIA) and no["caixa"][1] >= 0),
+                None)
+
+
 def _sem_o_https(texto):
     return (texto or "").strip().removeprefix("https://").rstrip("/")
 
@@ -658,7 +669,12 @@ def ir_para_o_endereco(d, endereco, pausa=None):
     """
     pausa = pausa or time.sleep
     trazer_o_chrome(d, pausa)
-    barra = next((no for no in _nos(d.dump_hierarchy()) if no["id"] == "url_bar"), None)
+    barra = barra_na_tela(d.dump_hierarchy())
+    if not barra and app_da_frente(d) == PACOTE_DO_CHROME:
+        # A barra some quando a página rola para baixo: rolando para cima, ela volta.
+        d.swipe(540, 700, 540, 1500, 0.3)
+        pausa(1)
+        barra = barra_na_tela(d.dump_hierarchy())
     if not barra:
         return None, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME
     pausar_o_que_toca(d, pausa)
@@ -761,8 +777,9 @@ def anotar_a_aula_gravada(posicao, endereco, agora=None):
 
 def anotar_a_aula_sem_video(posicao, endereco, agora=None):
     """
-    A aula sem vídeo (um documento ou um texto), vista sem gravar: fica marcada no mapa, para o documento ser baixado
-    depois pelo botão do site (P288 3 e o vídeo do Rafael das 08:22 de 23/11/2026), e a seguinte vem pelo Próximo dela.
+    A aula sem vídeo (um documento ou um texto), que a noite ainda não sabe guardar: fica marcada no mapa e volta quando
+    souber (o documento baixado pelo botão do site, o texto e os links da aula: nenhuma aula é pulada, pedidos do Rafael
+    de 23/11/2026), e a seguinte vem pelo Próximo dela.
     """
     def mudar(curso):
         for aula in curso["aulas"]:
@@ -1548,8 +1565,8 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 continue
             numero = numero_da_aula(posicao, endereco or (aula or {}).get("endereco"))
             if fim == SEM_VIDEO:
-                # Um documento ou um texto: o documento é baixado depois pelo botão do site (pedido do Rafael,
-                # 23/11/2026: DECISOES.md, Trabalho com o Claude).
+                # Um documento ou um texto: fica marcada e volta, sem ser pulada (pedidos do Rafael de 23/11/2026:
+                # DECISOES.md, Trabalho com o Claude).
                 anotar_a_aula_sem_video(posicao, endereco)
                 sem_video += 1
                 falhas = 0

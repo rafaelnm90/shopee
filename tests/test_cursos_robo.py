@@ -863,11 +863,16 @@ class SiteDoCurso(CelularDoVolume):
     "documento" não tem player; autoplay: a página aberta começa a tocar sozinha (sem o play na tela); escreve=False:
     o que vai pelo adb não chega à barra; completa: o pedaço que o Chrome completa sozinho depois do escrito, marcado;
     rotulo_no_texto: o nome do play no texto do botão, como no Motorola. aberturas: (volume, gravando) de cada Enter.
+    nova_guia: o Chrome na página de Nova guia (a caixa de busca dela abre a barra); barra_escondida: a página rolada
+    para baixo, sem a barra no alto (rolar para cima a traz, se a rolagem funciona).
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
-                 autoplay=False, escreve=True, completa="", rotulo_no_texto=False, **opcoes):
+                 autoplay=False, escreve=True, completa="", rotulo_no_texto=False, nova_guia=False,
+                 barra_escondida=False, rolagem_funciona=True, **opcoes):
         super().__init__(**opcoes)
+        self.nova_guia, self.barra_escondida, self.rolagem_funciona = nova_guia, barra_escondida, rolagem_funciona
+        self.rolagens = []
         self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
         self.escrito, self.barra_em_foco, self.toques = None, False, []
         self.na_frente, self.abre_o_chrome, self.abertos = na_frente, abre_o_chrome, []
@@ -903,11 +908,16 @@ class SiteDoCurso(CelularDoVolume):
         if self.na_frente != CHROME:
             return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="true" '
                     'text="Eu" content-desc="" bounds="[880,2250][1080,2394]" /></hierarchy>')
+        if self.nova_guia and not self.barra_em_foco:
+            return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
+                    'resource-id="com.android.chrome:id/search_box_text" clickable="true" text="" content-desc="" '
+                    'bounds="[100,540][840,626]" /></hierarchy>')
         barra = self.aulas[self.aberta][2].removeprefix("https://")
         if self.barra_em_foco and self.escrito is not None:
             barra = self.escrito
-        nos = ['<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
-               f'text="{barra}" content-desc="" bounds="[211,120][691,267]" />']
+        nos = [] if self.barra_escondida and not self.barra_em_foco else [
+            '<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
+            f'text="{barra}" content-desc="" bounds="[211,120][691,267]" />']
         if self.no_alto:
             nos += self._player()
         nos.append('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
@@ -917,9 +927,16 @@ class SiteDoCurso(CelularDoVolume):
                        f'text="Próximo: {self.aulas[self.aberta + 1][0]}" bounds="[0,2175][1080,2394]" />')
         return '<hierarchy rotation="0">' + "".join(nos) + "</hierarchy>"
 
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        self.rolagens.append((x1, y1, x2, y2))
+        if y2 > y1 and self.rolagem_funciona:
+            self.barra_escondida = False
+
     def click(self, x, y):
         self.toques.append((x, y))
-        if 211 <= x <= 691 and 120 <= y <= 267:
+        if self.nova_guia and 100 <= x <= 840 and 540 <= y <= 626 and not self.barra_em_foco:
+            self.barra_em_foco, self.escrito = True, None
+        elif 211 <= x <= 691 and 120 <= y <= 267 and not self.barra_escondida:
             self.barra_em_foco, self.escrito = True, None
         elif (x, y) == (539, 793) and self.no_alto and self.play_toca and self._com_video(self.aberta):
             self.midia = _sessao_do_chrome(3, 1)
@@ -942,7 +959,7 @@ class SiteDoCurso(CelularDoVolume):
             self.aberturas.append((self.volume, self.gravando))
             alvo = next((n for n, aula in enumerate(self.aulas) if aula[2] == self.escrito), None)
             if alvo is not None:
-                self.aberta, self.no_alto = alvo, True
+                self.aberta, self.no_alto, self.nova_guia = alvo, True, False
                 self.midia = _sessao_do_chrome(3, 0) if self.autoplay and self._com_video(alvo) else SEM_SESSOES
             self.barra_em_foco = False
         return super().shell(partes)
@@ -987,6 +1004,23 @@ def test_o_endereco_vai_a_barra_como_num_teclado_e_o_enter_so_com_ele_la():
         None, "o endereço não ficou escrito na barra")
     assert ["input", "keyevent", "KEYCODE_ENTER"] not in surdo.comandos and surdo.teclas == ["back"]
     assert surdo.aberta == 0
+
+
+def test_a_aula_abre_pela_caixa_da_nova_guia_e_com_a_barra_escondida():
+    # Depois de horas parado, o Chrome abre na página de Nova guia, sem a barra no alto (o teste de dia de 23/11/2026):
+    # a caixa de busca dela abre a barra, e o endereço vai por ela.
+    site = SiteDoCurso(AULAS_DO_SITE, nova_guia=True)
+    assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], **SEM_ESPERA) == ("com vídeo", "")
+    assert site.toques == [(470, 583)] and site.aberta == 1
+    # Com a página rolada para baixo, a barra some: rolar para cima a traz de volta.
+    rolada = SiteDoCurso(AULAS_DO_SITE, barra_escondida=True)
+    assert cursos_robo.ir_para_o_endereco(rolada, AULAS_DO_SITE[2][2], **SEM_ESPERA) == ("com vídeo", "")
+    assert rolada.rolagens == [(540, 700, 540, 1500)] and rolada.aberta == 2
+    # A barra que não volta: nada é tocado, e o porquê vai ao registro.
+    presa = SiteDoCurso(AULAS_DO_SITE, barra_escondida=True, rolagem_funciona=False)
+    assert cursos_robo.ir_para_o_endereco(presa, AULAS_DO_SITE[2][2], **SEM_ESPERA) == (
+        None, "sem a barra de endereço do Chrome")
+    assert presa.toques == []
 
 
 def test_a_pagina_que_toca_sozinha_abriu_e_segue_sem_o_play():
