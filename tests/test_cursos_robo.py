@@ -761,8 +761,11 @@ class AulaNoCelular(CelularDoVolume):
         return _sessao_do_chrome(3, tocou)
 
 
-def _gravar_a_aula(celular, tmp_path, tempo, quando=None, madrugada=lambda: True, gravador_vivo=True):
-    """Grava a aula de mentira com o relógio de mentira; quando(t) roda a cada pausa (o robô pede, o gravador cai)."""
+def _gravar_a_aula(celular, tmp_path, tempo, quando=None, madrugada=lambda: True, gravador_vivo=True, **opcoes):
+    """
+    Grava a aula de mentira com o relógio de mentira; quando(t) roda a cada pausa (o robô pede, o gravador cai). As
+    opcoes vão à gravação (o maximo do teste de dia).
+    """
     gravadores = []
 
     def abrir(comando, **opcoes):
@@ -790,7 +793,7 @@ def _gravar_a_aula(celular, tmp_path, tempo, quando=None, madrugada=lambda: True
 
     destino = str(tmp_path / "aula.mkv")
     feito = cursos_robo.gravar_a_aula(celular, "celular:5555", destino, ir_para_a_aula, celular.tocar, pausa=pausa,
-                                      relogio=lambda: tempo[0], abrir=abrir, madrugada=madrugada)
+                                      relogio=lambda: tempo[0], abrir=abrir, madrugada=madrugada, **opcoes)
     return feito, destino, gravadores
 
 
@@ -838,6 +841,17 @@ def test_gravador_que_cai_no_meio_pausa_a_aula_e_devolve_o_volume(bm, tmp_path):
     feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, quando)
     assert feito == (True, False, "o gravador parou no meio")
     assert celular.eventos == ["volume 8", "abriu gravando", "play", "pausa", "volume 2"]
+
+
+def test_o_teste_de_dia_grava_no_maximo_dez_minutos(bm, tmp_path):
+    # A noite grava até AULA_MAIS_LONGA de uma vez; o teste de dia (curso:gravar:N), até GRAVACAO_DO_TESTE.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=60, volume=2)
+    feito, _, gravadores = _gravar_a_aula(celular, tmp_path, tempo, maximo=cursos_robo.GRAVACAO_DO_TESTE)
+    assert feito == (True, True, "o vídeo parou") and "--time-limit=600" in gravadores[0].comando
+    tempo = [0.0]
+    _, _, gravadores = _gravar_a_aula(AulaNoCelular(lambda: tempo[0], dura=60), tmp_path, tempo)
+    assert f"--time-limit={cursos_robo.AULA_MAIS_LONGA}" in gravadores[0].comando
 
 
 def test_gravador_que_nao_grava_o_som_nao_deixa_a_aula_tocar(bm, tmp_path):
@@ -1870,6 +1884,91 @@ def test_o_explorar_guarda_a_pagina_da_videoaula_sem_tocar_no_play(bm, monkeypat
     assert pasta.endswith("-c00-a000") and com_texto.toques == [] and not com_texto._tocando()
     with open(os.path.join(tmp_path / "aulas", pasta, "aula.json"), encoding="utf-8") as arquivo:
         assert json.load(arquivo)["tipo"] == cursos_robo.PAGINA_DA_VIDEOAULA
+
+
+@pytest.fixture
+def teste_de_dia(bm, monkeypatch, tmp_path):
+    """
+    O passo curso:gravar:N de dia, com a gravação de mentira na ordem da de verdade: fim(site) diz como a aula acabou
+    (com o arquivo gravado). Anota o máximo e a madrugada de cada gravação e o que foi lido de cada uma.
+    """
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
+    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: False)
+    gravacoes, lidas = [], []
+
+    def rodar(site, passo="gravar:5", fim=lambda site: (True, "o vídeo parou")):
+        def gravar(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, madrugada=None, maximo=None, **_):
+            gravacoes.append((maximo, madrugada()))
+            d.gravando = True
+            try:
+                cursos_robo.subir_o_volume(d)
+                tipo, porque = ir_para_a_aula(d)
+                if not tipo:
+                    return False, False, f"a aula não abriu ({porque})"
+                assert tocar(d)
+                with open(destino, "wb") as arquivo:
+                    arquivo.write(b"aula")
+                return (True,) + tuple(fim(d))
+            finally:
+                cursos_robo.pausar_o_que_toca(d, pausa)
+                cursos_robo.devolver_o_volume(d, pausa)
+                d.gravando = False
+
+        def guardar(arquivo, curso, aula, como_acabou, agora=None):
+            lidas.append((os.path.exists(arquivo), curso, aula, como_acabou))
+            os.remove(arquivo)
+            return "pasta", {"segundos": 95, "som": -21.4, "palavras": 230, "folhas": 2, "problema": ""}
+
+        monkeypatch.setattr(cursos_robo, "gravar_a_aula", gravar, raising=False)
+        monkeypatch.setattr(cursos_robo, "guardar_a_aula", guardar, raising=False)
+        # O explorar deixa o celular mudo antes dos passos que tocam uma aula, e o volume volta no fim dele.
+        assert cursos_robo.toca_aula("curso", passo) and cursos_robo.calar_o_celular(site)[0] == 0
+        return cursos_robo.curso_no_explorar(site, passo, **SEM_ESPERA)
+    rodar.gravacoes, rodar.lidas, rodar.brutas = gravacoes, lidas, tmp_path / "brutas"
+    return rodar
+
+
+def test_o_teste_de_dia_grava_a_primeira_aula_como_a_noite(teste_de_dia):
+    # O teste de dia da gravação da noite (23/11/2026): a 1ª aula do curso abre antes, muda e sem o gravador, e de novo
+    # pela barra com o gravador gravando; o play só com o vídeo parado; a gravação tem no máximo 10 min e é lida como a
+    # aula 0 do curso 0. Depois, o celular fica mudo até o explorar devolver o volume; o log diz só números.
+    cursos_robo.guardar_a_primeira_aula(5, AULAS_DO_SITE[0][2])
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6)
+    assert teste_de_dia(site) == (
+        True, "aula gravada inteira (o vídeo parou): 95 s, som -21.4 LUFS, 230 palavra(s), 2 folha(s) de quadros, sem "
+              "problema; para ler: cursos_robo.yml exportar")
+    assert teste_de_dia.gravacoes == [(cursos_robo.GRAVACAO_DO_TESTE, True)]
+    assert teste_de_dia.lidas == [(True, 0, 0, "o vídeo parou")] and not os.listdir(teste_de_dia.brutas)
+    assert site.aberturas == [(0, False), (8, True)] and site.aberta == 0 and site.toques[-1] == (539, 793)
+    assert site.volume == 0 and cursos_robo.estado_da_noite()["volume_antes"] == 6
+    # O mapa não muda: a aula do teste não conta como gravada.
+    assert cursos_robo.proxima_aula() == (5, 1)
+
+
+def test_o_teste_de_dia_recusa_a_madrugada_o_curso_sem_mapa_e_a_aula_sem_video(teste_de_dia, monkeypatch):
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2)
+    assert teste_de_dia(site) == (False, "o curso 5 ainda não tem a 1ª aula no mapa")
+    cursos_robo.guardar_a_primeira_aula(5, AULA_DE_DOCUMENTO[2])
+    documento = SiteDoCurso([AULA_DE_DOCUMENTO, AULAS_DO_SITE[0]], aberta=1)
+    assert teste_de_dia(documento) == (False, "a 1ª aula do curso 5 não tem vídeo")
+    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
+    assert teste_de_dia(site) == (False, "de madrugada, quem grava as aulas é a noite")
+    assert site.toques == [] and teste_de_dia.gravacoes == [] and teste_de_dia.lidas == []
+    assert not cursos_robo.curso_no_explorar(site, "gravar:9", **SEM_ESPERA)[0]
+
+
+def test_o_robo_que_pede_o_celular_no_teste_de_dia_tem_o_celular_na_hora(teste_de_dia):
+    # O robô da Shopee Vídeo tem a preferência também no teste: a gravação para e sai sem ser lida (a leitura da fala
+    # seguraria o celular), e o celular fica mudo.
+    cursos_robo.guardar_a_primeira_aula(5, AULAS_DO_SITE[0][2])
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6)
+    assert teste_de_dia(site, fim=lambda d: (False, "o robô pediu o celular")) == (
+        False, "a gravação parou (o robô pediu o celular) e saiu sem ser lida")
+    assert teste_de_dia.lidas == [] and not os.listdir(teste_de_dia.brutas) and site.volume == 0
+    # A aula que não começou a tocar também não tem o que ler.
+    assert teste_de_dia(site, fim=lambda d: (False, cursos_robo.NAO_TOCOU)) == (
+        False, "a gravação parou (a aula não começou a tocar) e saiu sem ser lida")
+    assert teste_de_dia.lidas == [] and not os.listdir(teste_de_dia.brutas)
 
 
 def test_a_pagina_que_ainda_carrega_nao_passa_por_a_ultima_aula(noite_do_curso):
