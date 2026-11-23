@@ -871,13 +871,16 @@ def passar_para_a_seguinte(d, pausa=None):
     return None, SEM_A_SEGUINTE, nome
 
 
-def chegar_na_aula(d, posicao, numero, pausa=None):
+def chegar_na_aula(d, posicao, numero, pausa=None, vigiar=None):
     """
     A aula `numero` do curso aberta, muda e sem o gravador: a 1ª pelo endereço guardado (com o login que a sessão
     vencida pede) e as outras pelo Próximo, uma a uma, com o que começar a tocar pausado. Cada aula achada pelo Próximo
-    fica no mapa, com o nome dela. (tipo da aula, "") ou (None, o porquê).
+    fica no mapa, com o nome dela. vigiar(), a cada aula, renova o sinal ao robô e diz o porquê de parar ("" para
+    seguir): o caminho até uma aula do fim do curso leva minutos, e o robô tem a preferência no celular (22/11/2026).
+    (tipo da aula, "") ou (None, o porquê).
     """
     pausa = pausa or time.sleep
+    vigiar = vigiar or (lambda: "")
     aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
     if not aulas:
         return None, f"o curso {posicao} ainda não tem a 1ª aula no mapa"
@@ -885,6 +888,9 @@ def chegar_na_aula(d, posicao, numero, pausa=None):
     for seguinte in range(2, int(numero) + 1):
         if not tipo:
             break
+        parar = vigiar()
+        if parar:
+            return None, parar
         pausar_o_que_toca(d, pausa)
         tipo, porque, nome = passar_para_a_seguinte(d, pausa)
         if tipo:
@@ -1983,17 +1989,17 @@ def _abrir_a_seguinte(d, posicao, numero, pausa):
     return tipo, porque
 
 
-def _antes_da_gravacao(d, posicao, numero, aberta, pausa):
+def _antes_da_gravacao(d, posicao, numero, aberta, pausa, vigiar=None):
     """
     O celular pronto para gravar a aula `numero`, sem o gravador: a 1ª do curso aberta pelo endereço (o login que a
     sessão vencida pede fica fora da gravação), e a de antes da da vez na tela (a da vez abre pelo Próximo dela, já com
     o gravador gravando). (aberta agora, "") ou (None, o porquê); FIM_DO_CURSO sem o Próximo depois da última.
     """
     if numero == 1:
-        tipo, porque = chegar_na_aula(d, posicao, 1, pausa)
+        tipo, porque = chegar_na_aula(d, posicao, 1, pausa, vigiar)
         return ((posicao, 1), "") if tipo else (None, porque)
     if aberta != (posicao, numero - 1):
-        tipo, porque = chegar_na_aula(d, posicao, numero - 1, pausa)
+        tipo, porque = chegar_na_aula(d, posicao, numero - 1, pausa, vigiar)
         if not tipo:
             return None, porque
     tela, ponto = proximo_na_tela(d, pausa)
@@ -2058,7 +2064,14 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 if not calar_o_celular(d):
                     motivo = SEM_O_MUDO
                     break
-                aberta, porque = _antes_da_gravacao(d, posicao, numero, aberta, pausa)
+                inicio = _texto(_agora())
+
+                def vigiar():
+                    anotar_o_sinal()
+                    if pediram_o_celular(inicio):
+                        return "o robô pediu o celular"
+                    return "" if _madrugada_agora() else "a madrugada acabou"
+                aberta, porque = _antes_da_gravacao(d, posicao, numero, aberta, pausa, vigiar)
                 if porque == FIM_DO_CURSO:
                     if numero > len(mapa_das_aulas()["cursos"][str(posicao)]["aulas"]):
                         anotar_o_fim_do_curso(posicao)
@@ -2083,13 +2096,6 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                     if fim == SEM_VIDEO and not calar_o_celular(d):
                         fim = SEM_O_MUDO
                     elif fim == SEM_VIDEO:
-                        inicio = _texto(_agora())
-
-                        def vigiar():
-                            anotar_o_sinal()
-                            if pediram_o_celular(inicio):
-                                return "o robô pediu o celular"
-                            return "" if _madrugada_agora() else "a madrugada acabou"
                         pasta, info = guardar_a_aula_sem_video(d, posicao, numero, pausa, vigiar)
                         guardada, fim = bool(pasta), (SEM_VIDEO if pasta else info["problema"])
                         if not pasta:

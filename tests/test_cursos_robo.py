@@ -1613,6 +1613,19 @@ def test_chegar_na_aula_pelo_comeco_do_curso_mudo_e_sem_o_gravador(bm):
     assert cursos_robo.chegar_na_aula(site, 5, 1, **SEM_ESPERA) == (None, "o curso 5 ainda não tem a 1ª aula no mapa")
 
 
+def test_o_caminho_ate_a_aula_renova_o_sinal_e_solta_o_celular_quando_o_robo_pede(bm):
+    # O robô da Shopee Vídeo tem a preferência (22/11): o caminho até uma aula do fim do curso leva minutos, e a cada
+    # aula a noite renova o sinal ao robô e para na hora em que ele pede o celular.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    site, vistas = SiteDoCurso(AULAS_DO_SITE, aberta=2), []
+
+    def vigiar():
+        vistas.append(site.aberta)
+        return "o robô pediu o celular" if len(vistas) == 2 else ""
+    assert cursos_robo.chegar_na_aula(site, 4, 3, vigiar=vigiar, **SEM_ESPERA) == (None, "o robô pediu o celular")
+    assert vistas == [0, 1] and site.aberta == 1
+
+
 def test_o_proximo_espera_o_aviso_do_chrome_sair_e_nunca_toca_com_ele_na_tela():
     # O aviso do download do Chrome (com o Abrir) fica embaixo, onde está o Próximo: o Próximo só é tocado depois de ele
     # sair; com ele na tela o tempo todo, nada é tocado.
