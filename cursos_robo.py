@@ -1084,13 +1084,58 @@ def _guardar_no_explorar(d, pausa):
     return True, f"aula sem vídeo guardada: {descrever_a_aula_guardada(info)}"
 
 
+GRAVACAO_DO_TESTE = 10 * 60
+
+
+def _gravar_no_explorar(d, posicao, pausa):
+    """
+    O passo curso:gravar:N, o teste de dia da gravação da noite: a 1ª aula do curso N abre antes, muda e sem o
+    gravador (o login que a sessão vencida pede fica fora da gravação), e de novo pelo endereço com o gravador já
+    gravando, como a noite abre; gravada até o fim, no máximo GRAVACAO_DO_TESTE s, e guardada como a aula 0 do curso 0,
+    com a fala e as folhas de quadros. O som da aula vai só ao servidor, e antes e depois o celular fica mudo; o robô
+    que pede o celular para o teste, como para a noite, e a gravação sai sem ser lida. De madrugada, quem grava é a
+    noite. O log diz só números e palavras fixas.
+    """
+    if _madrugada_agora():
+        return False, "de madrugada, quem grava as aulas é a noite"
+    aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
+    if not aulas:
+        return False, f"o curso {posicao} ainda não tem a 1ª aula no mapa"
+    tipo, porque = chegar_na_aula(d, posicao, 1, pausa)
+    if not tipo:
+        return False, f"a aula não abriu ({porque})"
+    if tipo == SEM_VIDEO:
+        return False, f"a 1ª aula do curso {posicao} não tem vídeo"
+    os.makedirs(PASTA_DAS_GRAVACOES, exist_ok=True)
+    destino = os.path.join(PASTA_DAS_GRAVACOES, f"{_agora():%Y%m%d-%H%M%S}.mkv")
+    endereco = aulas[0]["endereco"]
+    aberta, inteira, fim = gravar_a_aula(
+        d, getattr(d, "serial", ""), destino, lambda celular: ir_para_o_endereco(celular, endereco, pausa),
+        lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa, madrugada=lambda: True,
+        maximo=GRAVACAO_DO_TESTE)
+    calar_o_celular(d)
+    tocou = aberta and fim not in PARADAS_DA_AULA + (SEM_VIDEO, NAO_TOCOU)
+    if not tocou or not os.path.exists(destino) or not os.path.getsize(destino):
+        # O robô que pede o celular o tem na hora (a leitura da fala o seguraria), e a aula que não tocou não tem o
+        # que ler: a gravação sai sem ser lida, e o teste fica para depois.
+        if os.path.exists(destino):
+            os.remove(destino)
+        return False, f"a gravação parou ({fim}) e saiu sem ser lida"
+    _pasta, info = guardar_a_aula(destino, 0, 0, fim)
+    return not info.get("problema"), (
+        f"aula gravada {'inteira' if inteira else 'pela metade'} ({fim}): {info.get('segundos')} s, som "
+        f"{info.get('som')} LUFS, {info.get('palavras')} palavra(s), {info.get('folhas')} folha(s) de quadros, "
+        f"{info.get('problema') or 'sem problema'}; para ler: cursos_robo.yml exportar")
+
+
 def curso_no_explorar(d, argumento, pausa=time.sleep):
     """
     O passo curso do explorar: curso:primeira:N guarda a aula aberta no Chrome como a 1ª do curso na posição N da lista
     de Turmas (o Claude a abre com o mapa do site); curso:abrir:N abre a 1ª aula do curso N pela barra de endereço,
     como a noite abre, e curso:proximo, a seguinte à aberta, pelo Próximo (os dois sem mudar o mapa, com o celular
-    mudo); curso:guardar guarda a aula sem vídeo aberta (ou a página da videoaula), como a noite; curso sozinho diz o
-    mapa em números. O endereço fica no banco, e o log diz só números e palavras fixas.
+    mudo); curso:guardar guarda a aula sem vídeo aberta (ou a página da videoaula), como a noite; curso:gravar:N grava
+    de dia a 1ª aula do curso N como a noite grava (o teste); curso sozinho diz o mapa em números. O endereço fica no
+    banco, e o log diz só números e palavras fixas.
     """
     partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
     if not partes:
@@ -1099,13 +1144,15 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
         return _proxima_no_explorar(d, pausa)
     if partes == ["guardar"]:
         return _guardar_no_explorar(d, pausa)
-    if partes[0] not in ("primeira", "abrir") or len(partes) != 2 or not partes[1].isdigit():
+    if partes[0] not in ("primeira", "abrir", "gravar") or len(partes) != 2 or not partes[1].isdigit():
         return False, ("curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso:abrir:N abre a 1ª do curso "
                        "N; curso:proximo abre a seguinte; curso:guardar guarda a aula sem vídeo aberta (ou a página "
-                       "da videoaula); curso diz o mapa")
+                       "da videoaula); curso:gravar:N grava a 1ª do curso N como a noite; curso diz o mapa")
     posicao = int(partes[1])
     if posicao not in ORDEM_DOS_CURSOS:
         return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
+    if partes[0] == "gravar":
+        return _gravar_no_explorar(d, posicao, pausa)
     if partes[0] == "abrir":
         aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
         if not aulas:
@@ -1126,7 +1173,7 @@ def toca_aula(nome, argumento):
     também de dia, o celular fica mudo: ele fica no quarto do Rafael (pedido dele, 22/11/2026).
     """
     acao = (argumento or "").split(":")[0].strip().lower()
-    return (nome == "curso" and acao in ("abrir", "proximo")) or (nome == "midia" and acao == "tocar")
+    return (nome == "curso" and acao in ("abrir", "proximo", "gravar")) or (nome == "midia" and acao == "tocar")
 
 
 def tocar_pelo_play(d, pausa=None):
@@ -1840,6 +1887,7 @@ class OlhoNaAula:
 OLHADA_DA_AULA = 3
 AULA_MAIS_LONGA = 4 * 60 * 60
 ESPERA_DO_GRAVADOR = 5
+NAO_TOCOU = "a aula não começou a tocar"
 
 
 def _madrugada_agora():
@@ -1847,7 +1895,7 @@ def _madrugada_agora():
 
 
 def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=None, abrir=subprocess.Popen,
-                  madrugada=None):
+                  madrugada=None, maximo=AULA_MAIS_LONGA):
     """
     A aula aberta no Chrome do celular e gravada em destino, do começo ao fim. A ordem protege o quarto do Rafael
     (pedido dele, 22/11/2026): o gravador liga antes e, gravando o som, deixa o alto-falante mudo; o volume sobe só
@@ -1855,14 +1903,15 @@ def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=N
     sozinho com a página (23/11/2026), e tocar(d) dá o play quando ele não começou; no fim, a aula pausa e o volume
     volta antes de o gravador parar. O robô que pede o celular, a madrugada que acaba (3h45) e o gravador que cai
     param a aula, que fica pela metade (P295 1: ela volta depois, do início). Devolve (aberta, inteira, motivo fixo):
-    aberta diz se a página da aula abriu; na aula sem vídeo, (True, False, SEM_VIDEO).
+    aberta diz se a página da aula abriu; na aula sem vídeo, (True, False, SEM_VIDEO). maximo: o tempo máximo da
+    gravação, em segundos (o teste de dia grava menos que a noite).
     """
     pausa = pausa or time.sleep
     relogio = relogio or time.monotonic
     madrugada = madrugada or _madrugada_agora
     inicio = _texto(_agora())
     anotar_o_sinal()
-    gravacao = GravacaoEmFundo(alvo, destino, AULA_MAIS_LONGA, abrir=abrir)
+    gravacao = GravacaoEmFundo(alvo, destino, maximo, abrir=abrir)
     try:
         pausa(ESPERA_DO_GRAVADOR)
         if not gravacao.rodando():
@@ -1875,7 +1924,7 @@ def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=N
         if tipo == SEM_VIDEO:
             return True, False, SEM_VIDEO
         if not tocar(d):
-            return True, False, "a aula não começou a tocar"
+            return True, False, NAO_TOCOU
         olho, comeco = OlhoNaAula(), relogio()
         while True:
             pausa(OLHADA_DA_AULA)
