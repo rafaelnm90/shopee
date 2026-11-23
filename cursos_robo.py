@@ -1066,13 +1066,18 @@ def _proxima_no_explorar(d, pausa):
 def _guardar_no_explorar(d, pausa):
     """
     O passo curso:guardar: a aula sem vídeo aberta no Chrome guardada como a noite guarda, na pasta das aulas, como a
-    aula 0 do curso 0 (o teste de dia vai ao Claude pelo cursos_robo.yml). O log diz só números.
+    aula 0 do curso 0 (o teste de dia vai ao Claude pelo cursos_robo.yml); na videoaula, só a página dela, sem tocar no
+    play. O log diz só números.
     """
     tela = d.dump_hierarchy()
     if not pagina_da_aula_pronta(tela):
         return False, "a tela não é a de uma aula do curso"
     if tem_player(tela):
-        return False, "a aula aberta tem vídeo: ela é gravada, não guardada"
+        # A videoaula: só a página dela (o texto, os links e o documento), como a noite guarda depois da gravação.
+        pasta, info = guardar_a_aula_sem_video(d, 0, 0, pausa, tipo=PAGINA_DA_VIDEOAULA)
+        if not pasta:
+            return False, f"a página da videoaula não foi guardada ({info['problema']})"
+        return True, f"página da videoaula guardada: {descrever_a_aula_guardada(info)}"
     pasta, info = guardar_a_aula_sem_video(d, 0, 0, pausa)
     if not pasta:
         return False, f"a aula não foi guardada ({info['problema']})"
@@ -1084,8 +1089,8 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
     O passo curso do explorar: curso:primeira:N guarda a aula aberta no Chrome como a 1ª do curso na posição N da lista
     de Turmas (o Claude a abre com o mapa do site); curso:abrir:N abre a 1ª aula do curso N pela barra de endereço,
     como a noite abre, e curso:proximo, a seguinte à aberta, pelo Próximo (os dois sem mudar o mapa, com o celular
-    mudo); curso:guardar guarda a aula sem vídeo aberta, como a noite; curso sozinho diz o mapa em números. O endereço
-    fica no banco, e o log diz só números e palavras fixas.
+    mudo); curso:guardar guarda a aula sem vídeo aberta (ou a página da videoaula), como a noite; curso sozinho diz o
+    mapa em números. O endereço fica no banco, e o log diz só números e palavras fixas.
     """
     partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
     if not partes:
@@ -1096,8 +1101,8 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
         return _guardar_no_explorar(d, pausa)
     if partes[0] not in ("primeira", "abrir") or len(partes) != 2 or not partes[1].isdigit():
         return False, ("curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso:abrir:N abre a 1ª do curso "
-                       "N; curso:proximo abre a seguinte; curso:guardar guarda a aula sem vídeo aberta; curso diz o "
-                       "mapa")
+                       "N; curso:proximo abre a seguinte; curso:guardar guarda a aula sem vídeo aberta (ou a página "
+                       "da videoaula); curso diz o mapa")
     posicao = int(partes[1])
     if posicao not in ORDEM_DOS_CURSOS:
         return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
@@ -1389,6 +1394,9 @@ def _baixar_o_documento(d, ponto, pasta, pausa):
     return None, porque
 
 
+PAGINA_VAZIA = "a página da aula não mostrou texto nem documento"
+
+
 def _ler_a_aula(d, pasta, pausa, vigiar):
     """As telas, o texto e o documento da aula aberta, na pasta. (info só de números, o porquê de parar ou "")."""
     textos, links, telas, ver_mais, documento, anterior = [], [], 0, 0, None, None
@@ -1426,7 +1434,7 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
         rolar_a_pagina(d)
         pausa(ESPERA_DA_ROLAGEM)
     if not textos and not documento:
-        return {}, "a página da aula não mostrou texto nem documento"
+        return {}, PAGINA_VAZIA
     with open(os.path.join(pasta, "texto.txt"), "w", encoding="utf-8") as saida:
         saida.write("\n".join(textos) + "\n")
         if links:
@@ -1434,11 +1442,16 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
     return {"telas": telas, "linhas": len(textos), "links": len(links), "documento": documento}, ""
 
 
-def guardar_a_aula_sem_video(d, curso, numero, pausa=None, vigiar=None, agora=None):
+PAGINA_DA_VIDEOAULA = "página da videoaula"
+
+
+def guardar_a_aula_sem_video(d, curso, numero, pausa=None, vigiar=None, agora=None, tipo=SEM_VIDEO):
     """
     A aula sem vídeo aberta no Chrome guardada na pasta das aulas, como as gravadas: as telas, o texto e o documento
     (_ler_a_aula), com o aula.json só de números. vigiar() renova o sinal ao robô e diz o porquê de parar no meio (""
-    para seguir). (pasta, aula.json) ou (None, {"problema": o porquê}): a pasta pela metade sai.
+    para seguir). Com tipo=PAGINA_DA_VIDEOAULA, é a página da aula em vídeo já gravada (o texto dela, com as instruções
+    e os links, e o documento que ela tiver). (pasta, aula.json) ou (None, {"problema": o porquê}): a pasta pela metade
+    sai.
     """
     pausa = pausa or time.sleep
     vigiar = vigiar or (lambda: "")
@@ -1453,7 +1466,7 @@ def guardar_a_aula_sem_video(d, curso, numero, pausa=None, vigiar=None, agora=No
     if problema:
         shutil.rmtree(pasta, ignore_errors=True)
         return None, {"problema": problema}
-    info.update(curso=int(curso), aula=int(numero), gravada_em=_texto(momento), tipo=SEM_VIDEO, problema="")
+    info.update(curso=int(curso), aula=int(numero), gravada_em=_texto(momento), tipo=tipo, problema="")
     with open(os.path.join(pasta, "aula.json"), "w", encoding="utf-8") as saida:
         json.dump(info, saida, ensure_ascii=False, indent=1)
     return pasta, info
@@ -2012,6 +2025,36 @@ def _abrir_a_seguinte(d, posicao, numero, pausa):
     return tipo, porque
 
 
+OUTRA_PAGINA = "a página não é a da aula gravada"
+
+
+def _guardar_a_pagina_da_videoaula(d, posicao, numero, pausa, vigiar):
+    """
+    Depois da videoaula gravada inteira, a página dela também vai ao Claude: o texto com as instruções e os links, e o
+    documento que ela tiver (pedidos do Rafael de 23/11/2026, às 08:44 e às 09:12), conferida antes pelo nome no
+    Próximo. Sem ela, a aula gravada vale do mesmo jeito, e o registro diz o porquê (a videoaula sem nada escrito
+    embaixo do vídeo não vai ao registro). Devolve o porquê de a noite parar ("o robô pediu o celular", "a madrugada
+    acabou") ou "".
+    """
+    aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
+    nome = (aulas[int(numero) - 1].get("nome") or "") if len(aulas) >= int(numero) else ""
+    if na_aula_certa(d, posicao, numero, nome):
+        pasta, info = guardar_a_aula_sem_video(d, posicao, numero, pausa, vigiar, tipo=PAGINA_DA_VIDEOAULA)
+    else:
+        pasta, info = None, {"problema": OUTRA_PAGINA}
+    if pasta:
+        registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "página guardada",
+                                     f"{qual_aula(posicao, numero)}: {descrever_a_aula_guardada(info)}", ok=True)
+        return ""
+    if info["problema"] in PARADAS_DA_AULA:
+        return info["problema"]
+    if info["problema"] == PAGINA_VAZIA:
+        return ""
+    registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "página não guardada",
+                                 f"{qual_aula(posicao, numero)}: {info['problema']}", ok=None)
+    return ""
+
+
 def _antes_da_gravacao(d, posicao, numero, aberta, pausa, vigiar=None):
     """
     O celular pronto para gravar a aula `numero`, sem o gravador: a 1ª do curso aberta pelo endereço (o login que a
@@ -2038,7 +2081,8 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
     1ª de cada curso abre pelo endereço, e cada uma das outras pelo Próximo da de antes, com o gravador já gravando,
     para o vídeo que começa sozinho ficar inteiro. A aula sem vídeo (um documento ou um texto) é guardada com a página
     e o documento (guardar_a_aula_sem_video); a que não fica guardada volta na noite seguinte, e a noite segue para a
-    próxima: nenhuma aula é pulada. Devolve o que aconteceu numa frase só com números (vai ao log).
+    próxima: nenhuma aula é pulada. Da videoaula gravada inteira, a página também é guardada, com o celular mudo
+    (_guardar_a_pagina_da_videoaula). Devolve o que aconteceu numa frase só com números (vai ao log).
     """
     import celular_robo
     pausa = pausa or time.sleep
@@ -2080,6 +2124,7 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 break
             posicao, numero = da_vez
             guardada, inteira, aberta_na_gravacao, fim, destino, info = False, False, False, "", "", {}
+            parar_depois = ""
             with trava() as livre:
                 if not livre:
                     motivo = "o celular com o robô"
@@ -2121,6 +2166,9 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                     # O site que passa sozinho para a aula seguinte no fim do vídeo deixa na tela outra aula: a próxima
                     # vez, a noite chega à da vez pelo começo do curso.
                     aberta = (posicao, numero) if aberta_na_gravacao and fim != "outro vídeo começou" else None
+                    if inteira and aberta and calar_o_celular(d):
+                        # A página da videoaula (o texto, os links e o documento), com o vídeo já pausado e mudo.
+                        parar_depois = _guardar_a_pagina_da_videoaula(d, posicao, numero, pausa, vigiar)
                     if fim == SEM_VIDEO and not calar_o_celular(d):
                         fim = SEM_O_MUDO
                     elif fim == SEM_VIDEO:
@@ -2139,6 +2187,9 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 gravadas += 1
                 falhas = 0
                 ajudante.mandar(destino, posicao, numero, fim)
+                if parar_depois:
+                    motivo = parar_depois
+                    break
                 continue
             if destino and os.path.exists(destino):
                 os.remove(destino)

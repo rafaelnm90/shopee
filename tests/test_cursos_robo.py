@@ -1,5 +1,6 @@
 """O gravador das aulas do curso pelo celular do robô (cursos_robo, P288 3)."""
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -896,13 +897,15 @@ class SiteDoCurso(CelularDoVolume):
     gravando) de cada aula aberta (pelo Enter ou pelo Próximo). nova_guia: o Chrome na página de Nova guia (a caixa de
     busca dela abre a barra); barra_escondida: a página rolada para baixo, sem a barra no alto (rolar para cima a traz,
     se a rolagem funciona). baixa: o Baixar do leitor de PDF baixa o documento; aviso: quantas leituras da tela o aviso
-    do download do Chrome fica nela.
+    do download do Chrome fica nela. texto_na_videoaula: a página da videoaula tem, embaixo do vídeo, um texto e um
+    link. volumes_das_telas: o volume de mídia em cada print da tela.
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
                  autoplay=False, escreve=True, completa="", rotulo_no_texto=False, nova_guia=False,
                  barra_escondida=False, rolagem_funciona=True, sessao_vencida=False, inicio_na_guia_nova=False,
-                 outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False, **opcoes):
+                 outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
+                 texto_na_videoaula=False, **opcoes):
         super().__init__(**opcoes)
         # A página fora das aulas em que o Enter caiu: "login" (a sessão vencida), "inicio" (a página inicial do
         # curso, pela guia nova) ou "outro" (outro site); None na aula aberta.
@@ -921,6 +924,7 @@ class SiteDoCurso(CelularDoVolume):
         # O Próximo que só aparece depois de algumas leituras da página nova (ela ainda carrega) e o Baixar que abre o
         # documento no lugar da página da aula.
         self.atraso_do_proximo, self.sem_o_proximo, self.baixar_sai = atraso_do_proximo, 0, baixar_sai
+        self.texto_na_videoaula, self.volumes_das_telas = texto_na_videoaula, []
 
     def _tipo(self, numero):
         return self.aulas[numero][3] if len(self.aulas[numero]) > 3 else "vídeo"
@@ -1010,6 +1014,13 @@ class SiteDoCurso(CelularDoVolume):
         abas = "[60,1466][336,1658]"
         if not self._com_video(self.aberta):
             nos, abas = self._sem_video()
+        elif self.texto_na_videoaula:
+            nos += ['<node class="android.widget.TextView" resource-id="" text="Tarefa da aula" content-desc="" '
+                    'bounds="[42,1200][1021,1260]" />',
+                    '<node class="android.view.View" resource-id="" clickable="true" text="" '
+                    'content-desc="Planilha de apoio" bounds="[42,1300][787,1345]">'
+                    '<node class="android.view.View" resource-id="" clickable="false" text="Planilha de apoio" '
+                    'content-desc="" bounds="[42,1300][787,1345]" /></node>']
         nos.append('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
                    f'text="Módulos" content-desc="" bounds="{abas}" />')
         if self.sem_o_proximo:
@@ -1028,6 +1039,7 @@ class SiteDoCurso(CelularDoVolume):
 
     def screenshot(self):
         from PIL import Image
+        self.volumes_das_telas.append(self.volume)
         return Image.new("RGB", (1080, 2400), (30, 30, 30))
 
     def swipe(self, x1, y1, x2, y2, duracao=None):
@@ -1580,6 +1592,76 @@ def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_c
     assert [(linha[2], linha[3]) for linha in linhas] == [("pela metade", "curso 4, aula 2: o robô pediu o celular")]
 
 
+def test_a_noite_guarda_tambem_a_pagina_de_cada_videoaula(noite_do_curso):
+    # Pedidos do Rafael de 23/11 (08:44 e 09:12): tudo o que está nas aulas vai ao Claude, também o texto e os links
+    # embaixo de cada videoaula. Gravada a aula inteira, a página dela é guardada à parte, com o celular mudo e sem
+    # tocar em nada, e a noite segue para a seguinte pelo Próximo.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    site, ajudante = SiteDoCurso(AULAS_DO_SITE, aberta=2, texto_na_videoaula=True), AjudanteNaHora()
+    resumo = noite_do_curso(site, ajudante)
+    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: nenhuma "
+                      "aula por gravar")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula três"]
+    paginas = sorted(os.listdir(cursos_robo.PASTA_DAS_AULAS))
+    assert [nome[-8:] for nome in paginas] == ["c04-a001", "c04-a002", "c04-a003"]
+    for nome in paginas:
+        pasta = os.path.join(cursos_robo.PASTA_DAS_AULAS, nome)
+        with open(os.path.join(pasta, "aula.json"), encoding="utf-8") as arquivo:
+            info = json.load(arquivo)
+        assert (info["tipo"], info["linhas"], info["links"], info["documento"]) == (
+            cursos_robo.PAGINA_DA_VIDEOAULA, 2, 1, None)
+        with open(os.path.join(pasta, "texto.txt"), encoding="utf-8") as arquivo:
+            assert "Tarefa da aula" in arquivo.read()
+    assert site.volumes_das_telas == [0, 0, 0]
+    # Só a barra de endereço (a 1ª aula), o play e o Próximo: nada no texto ou no link da página.
+    assert all(y <= 267 or y >= 2175 or (x, y) == (539, 793) for x, y in site.toques)
+    import registro_processos
+    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas] == [
+        ("página guardada", f"curso 4, aula {numero}: 1 tela(s), 2 linha(s), 1 link(s), sem documento")
+        for numero in (1, 2, 3)]
+
+
+def test_o_robo_que_pede_o_celular_na_pagina_da_videoaula_para_a_noite_com_a_aula_gravada(noite_do_curso, monkeypatch):
+    # O robô tem a preferência (22/11): pedido o celular enquanto a página é lida, a noite para, e a aula gravada
+    # inteira vale (a página pela metade sai).
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    ajudante, gravou = AjudanteNaHora(), []
+    monkeypatch.setattr(cursos_robo, "pediram_o_celular", lambda inicio: bool(gravou))
+
+    def fim_da(nome):
+        gravou.append(nome)
+        return True, "o vídeo parou"
+    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE, texto_na_videoaula=True), ajudante, fim_da=fim_da)
+    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: o robô "
+                      "pediu o celular")
+    assert ajudante.lidas == [(4, 1, "o vídeo parou")] and cursos_robo.proxima_aula() == (4, 2)
+    assert os.listdir(cursos_robo.PASTA_DAS_AULAS) == []
+
+
+def test_a_pagina_de_outra_aula_nao_e_guardada_como_a_da_videoaula(bm, monkeypatch, tmp_path):
+    # A página que voltou para a aula de antes (o Próximo com o nome da própria aula gravada) não é guardada como a
+    # dela: o registro diz o porquê, e a aula gravada vale do mesmo jeito.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    cursos_robo.anotar_a_aula_seguinte(4, 2, "Aula dois")
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=0, no_alto=True, texto_na_videoaula=True)
+    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ""
+    assert not os.path.exists(tmp_path / "aulas") and site.toques == []
+    import registro_processos
+    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas] == [
+        ("página não guardada", "curso 4, aula 2: a página não é a da aula gravada")]
+    # Na aula certa, a mesma página é guardada; a videoaula sem nada embaixo do vídeo não vai ao registro.
+    site._abrir(1)
+    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ""
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    assert pasta.endswith("-c04-a002")
+    site.texto_na_videoaula = False
+    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ""
+    assert len(registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")) == 2
+
+
 def test_a_gravacao_preta_para_a_noite_e_a_aula_volta_a_ficar_por_gravar(noite_do_curso):
     # P288 3: preta ou muda, o player não deixa gravar, e a gravação para.
     cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
@@ -1685,10 +1767,22 @@ def test_o_explorar_guarda_a_aula_sem_video_aberta(bm, monkeypatch, tmp_path):
         True, "aula sem vídeo guardada: 1 tela(s), 5 linha(s), 1 link(s), documento de 2 KB")
     (pasta,) = os.listdir(tmp_path / "aulas")
     assert pasta.endswith("-c00-a000") and site.baixados == []
-    com_video = SiteDoCurso(AULAS_DO_SITE, no_alto=True)
-    assert cursos_robo.curso_no_explorar(com_video, "guardar", **SEM_ESPERA) == (
-        False, "a aula aberta tem vídeo: ela é gravada, não guardada")
     assert not cursos_robo.toca_aula("curso", "guardar")
+
+
+def test_o_explorar_guarda_a_pagina_da_videoaula_sem_tocar_no_play(bm, monkeypatch, tmp_path):
+    # O teste de dia da página da videoaula (curso:guardar): o texto e o link embaixo do vídeo, sem tocar no player.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    vazia = SiteDoCurso(AULAS_DO_SITE, no_alto=True)
+    assert cursos_robo.curso_no_explorar(vazia, "guardar", **SEM_ESPERA) == (
+        False, "a página da videoaula não foi guardada (a página da aula não mostrou texto nem documento)")
+    com_texto = SiteDoCurso(AULAS_DO_SITE, no_alto=True, texto_na_videoaula=True)
+    assert cursos_robo.curso_no_explorar(com_texto, "guardar", **SEM_ESPERA) == (
+        True, "página da videoaula guardada: 1 tela(s), 2 linha(s), 1 link(s), sem documento")
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    assert pasta.endswith("-c00-a000") and com_texto.toques == [] and not com_texto._tocando()
+    with open(os.path.join(tmp_path / "aulas", pasta, "aula.json"), encoding="utf-8") as arquivo:
+        assert json.load(arquivo)["tipo"] == cursos_robo.PAGINA_DA_VIDEOAULA
 
 
 def test_a_pagina_que_ainda_carrega_nao_passa_por_a_ultima_aula(noite_do_curso):
