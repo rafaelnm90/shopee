@@ -165,16 +165,21 @@ def test_explorar_no_celular_espera_o_robo_soltar_o_celular(monkeypatch, capsys)
     assert sum(pausas) == ps.ESPERA_DO_CELULAR and "nada foi tocado" in capsys.readouterr().out
 
 
-def test_explorar_no_celular_pede_o_celular_a_aula_do_curso(monkeypatch):
-    # A gravação do curso de madrugada solta o celular para o explorar, como para o robô (22/11/2026).
+def test_explorar_no_celular_pede_o_celular_a_aula_do_curso(monkeypatch, capsys):
+    # A gravação do curso de madrugada solta o celular para o explorar, como para o robô (22/11/2026). Fora do
+    # Horário do Robô o explorar não toca no celular, e a aula segue sem parar.
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     liberados, feitos = [], []
     monkeypatch.setattr(ps.cursos_robo, "liberar_para_o_robo",
                         lambda quem="robô", **_: liberados.append(quem) or True)
     monkeypatch.setattr(ps, "_explorar", lambda texto, d, celular: feitos.append(texto) or True)
+    monkeypatch.setattr(ps, "no_horario_das_rodadas", lambda agora=None: True)
     assert ps.explorar("tela", celular=True) is True and liberados == []
     ps.cursos_robo.anotar_o_sinal()
     assert ps.explorar("tela", celular=True) is True and liberados == ["explorar"] and feitos == ["tela", "tela"]
+    monkeypatch.setattr(ps, "no_horario_das_rodadas", lambda agora=None: False)
+    assert ps.explorar("tela", celular=True) is None and liberados == ["explorar"] and feitos == ["tela", "tela"]
+    assert "fora do horário das rodadas" in capsys.readouterr().out
 
 
 def test_explorar_toca_e_descreve_cada_tela(capsys):

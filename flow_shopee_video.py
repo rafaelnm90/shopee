@@ -112,6 +112,7 @@ import assistente_shopee_video as assistente
 import avisar_rafael
 import casos_robo
 import celular_robo
+import cursos_robo
 import db
 import postador_shopee_video as ps
 import videos
@@ -3123,6 +3124,8 @@ def fotos_dos_personagens(chaves=None):
         if not celular_robo.conectado():
             print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
             return 1
+        # A gravação do curso de madrugada solta o celular, como para o robô (pedido de 22/11/2026).
+        cursos_robo.liberar_para_o_robo("flow")
         tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
         for tentativa in range(tentativas):
             with celular_robo.trava() as livre:
@@ -3413,6 +3416,8 @@ def imagem_de_teste():
     if not celular_robo.conectado():
         print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
         return 1
+    # A gravação do curso de madrugada solta o celular, como para o robô (pedido de 22/11/2026).
+    cursos_robo.liberar_para_o_robo("flow")
     tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
     for tentativa in range(tentativas):
         with celular_robo.trava() as livre:
@@ -4122,6 +4127,8 @@ def amostra(sem_gerar=False, longa=False, mesmo=False, fala_inteira=False, maos_
     if not celular_robo.conectado():
         print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
         return 1
+    # A gravação do curso de madrugada solta o celular, como para o robô (pedido de 22/11/2026).
+    cursos_robo.liberar_para_o_robo("flow")
     tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
     for tentativa in range(tentativas):
         with celular_robo.trava() as livre:
@@ -4219,6 +4226,8 @@ def teste(sem_gerar=False):
         inicio, fim = ps.horario_das_rodadas()
         print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
         return 1
+    # A gravação do curso de madrugada solta o celular, como para o robô (pedido de 22/11/2026).
+    cursos_robo.liberar_para_o_robo("flow")
     tentativas = ps.ESPERA_DO_CELULAR // ps.PAUSA_DA_ESPERA + 1
     for tentativa in range(tentativas):
         with celular_robo.trava() as livre:

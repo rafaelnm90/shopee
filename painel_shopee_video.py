@@ -148,7 +148,7 @@ NOME_NO_LOG = "robo_shopee_video"
 def robo_ocupado():
     """
     Uma rodada (deste bot ou de antes de um reinício) ou o explorar está no celular agora? A gravação do curso
-    de madrugada não conta: ela solta o celular para o robô na hora (rodar_robo), e o robô da Shopee Vídeo
+    de madrugada não conta: a rodada do robô pede o celular a ela, e ela solta na hora. O robô da Shopee Vídeo
     nunca para por causa do curso (pedido do Rafael, 22/11/2026: DECISOES.md, Trabalho com o Claude).
     """
     return _rodada.locked() or (celular_robo.ocupado() and not cursos_robo.gravando())
@@ -194,8 +194,6 @@ async def rodar_robo(*argumentos):
     o log; o que importa ao Rafael o próprio robô manda no privado.
     """
     async with _rodada:
-        if cursos_robo.gravando():
-            await asyncio.to_thread(cursos_robo.liberar_para_o_robo, "robô")
         if await _rodar_fora_do_bot(argumentos):
             return
         processo = await asyncio.create_subprocess_exec(sys.executable, ROBO, *argumentos,

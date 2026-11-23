@@ -594,6 +594,26 @@ def test_gera_com_tudo_conferido_espera_pronto_e_baixa_o_video(celular, capsys):
     assert flow.proximo_modelo(db.ler_config(flow.CHAVE, {})["teste"]) == ("Veo 3.1 - Lite", 10)
 
 
+def test_os_testes_do_flow_pedem_o_celular_a_aula_do_curso_antes_da_trava(celular, monkeypatch):
+    # A gravação do curso de madrugada solta o celular para o robô e para os testes do Flow (pedido de 22/11/2026),
+    # depois de o teste ver que vai usar o celular.
+    ordem = []
+    monkeypatch.setattr(flow.cursos_robo, "liberar_para_o_robo",
+                        lambda quem="robô", **_: ordem.append(quem) or True)
+
+    @contextlib.contextmanager
+    def trava():
+        ordem.append("trava")
+        yield True
+    monkeypatch.setattr(flow.celular_robo, "trava", trava)
+    monkeypatch.setattr(flow, "no_celular", lambda *a, **k: ordem.append("celular") or 1)
+    flow.guardar(teste=celular.teste)
+    monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: False)
+    assert flow.teste() == 1 and ordem == []
+    monkeypatch.setattr(flow.ps, "no_horario_das_rodadas", lambda: True)
+    assert flow.teste() == 1 and ordem == ["flow", "trava", "celular"]
+
+
 def test_teste_gera_baixa_confere_e_manda_no_privado(celular, capsys):
     flow.guardar(teste=celular.teste)
     assert flow.teste() == 0

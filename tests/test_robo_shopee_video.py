@@ -632,6 +632,10 @@ def test_a_aula_do_curso_solta_o_celular_antes_da_rodada(monkeypatch, avisos):
         robo.cursos_robo.anotar_o_sinal()
         assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
     assert pedidos == ["robô"]
+    # De madrugada, fora do Horário do Robô, a rodada dos 15 min não chega ao celular e não para a aula.
+    ativar(robo_inicio=8, robo_fim=22)
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:30")) == "fora do Horário do Robô"
+    assert pedidos == ["robô"]
 
 
 def test_a_rodada_devolve_o_volume_que_a_aula_do_curso_deixou_no_meio(monkeypatch, avisos):
