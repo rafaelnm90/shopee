@@ -1018,6 +1018,10 @@ def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_c
     assert resumo == "1 aula(s) gravada(s), 1 guardada(s), 1 pela metade; parou: o robô pediu o celular"
     assert cursos_robo.proxima_aula() == (4, {"endereco": dois, "nome": "Aula dois", "gravada_em": ""})
     assert os.listdir(cursos_robo.PASTA_DAS_GRAVACOES) == []
+    # O registro diz qual aula ficou pela metade e por quê, só com números (o relatório da manhã, pedido de 23/11).
+    import registro_processos
+    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas] == [("pela metade", "curso 4, aula 2: o robô pediu o celular")]
 
 
 def test_a_gravacao_preta_para_a_noite_e_a_aula_volta_a_ficar_por_gravar(noite_do_curso):
@@ -1060,6 +1064,11 @@ def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, m
     assert os.listdir(brutas) == []
     # A muda volta a ficar por gravar; a outra continua gravada.
     assert cursos_robo.proxima_aula() == (4, {"endereco": dois, "nome": "Aula dois", "gravada_em": ""})
+    # O registro diz qual aula foi guardada e qual não serviu, e por quê, só com números (pedido de 23/11).
+    import registro_processos
+    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
+    assert [(linha[2], linha[3]) for linha in linhas] == [("guardada", "curso 4, aula 1"),
+                                                         ("não serviu", "curso 4, aula 2: o som saiu mudo")]
 
 
 def test_quadros_da_aula_um_a_cada_20_s_de_40_a_120():

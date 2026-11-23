@@ -1210,6 +1210,14 @@ def numero_da_aula(posicao, endereco, mapa=None):
     return next((numero for numero, aula in enumerate(aulas, 1) if aula["endereco"] == endereco), 0)
 
 
+def qual_aula(posicao, numero):
+    """
+    "curso N, aula M", só números, para o registro de cada aula: o relatório da manhã diz qual aula deu certo e qual
+    não deu, e por quê (pedido do Rafael, 23/11/2026). A aula fora do mapa sai só com o curso.
+    """
+    return f"curso {posicao}, aula {numero}" if numero else f"curso {posicao}"
+
+
 def pode_comecar_a_noite(agora=None):
     """
     O painel liga a unidade da noite? Só com o curso em andamento, na madrugada, com o disco abaixo do limite e alguma
@@ -1247,11 +1255,12 @@ class Ajudante:
                 # Preta ou muda: o player não deixa gravar (P288 3); a aula volta a ficar por gravar, e a noite para.
                 self.problema = self.problema or info["problema"]
                 desmarcar_a_aula(posicao, endereco)
-                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "não serviu", info["problema"],
-                                             ok=False)
+                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "não serviu",
+                                             f"{qual_aula(posicao, numero)}: {info['problema']}", ok=False)
             else:
                 self.guardadas += 1
-                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "guardada", ok=True)
+                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "guardada",
+                                             qual_aula(posicao, numero), ok=True)
 
     def mandar(self, arquivo, posicao, numero, endereco, fim):
         """A aula gravada vai para a fila; o .json ao lado do vídeo deixa a noite seguinte ler a que ficou na fila."""
@@ -1343,7 +1352,9 @@ def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, c
             if detalhe == "o curso terminou":
                 continue
             resultado = "pela metade" if endereco else "não abriu"
-            registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, resultado, fim,
+            aberta = endereco or (aula or {}).get("endereco")
+            registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, resultado,
+                                         f"{qual_aula(posicao, numero_da_aula(posicao, aberta))}: {fim}",
                                          ok=None if fim in PARADAS_DA_AULA else False)
             if endereco:
                 metade += 1
