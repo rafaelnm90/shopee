@@ -843,6 +843,7 @@ class SiteDoCurso(CelularDoVolume):
         self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
         self.escrito, self.barra_em_foco, self.toques = None, False, []
         self.na_frente, self.abre_o_chrome, self.abertos = na_frente, abre_o_chrome, []
+        self.volumes_ao_abrir = []
 
     def app_current(self):
         return {"package": self.na_frente, "activity": ""}
@@ -878,6 +879,7 @@ class SiteDoCurso(CelularDoVolume):
 
     def press(self, tecla):
         if tecla == "enter" and self.barra_em_foco:
+            self.volumes_ao_abrir.append(self.volume)
             alvo = next((n for n, aula in enumerate(self.aulas) if aula[2] == self.escrito), None)
             if alvo is not None:
                 self.aberta, self.no_alto, self.midia = alvo, True, SEM_SESSOES
@@ -998,7 +1000,8 @@ def noite_do_curso(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
     monkeypatch.setattr(cursos_robo, "disco_usado", lambda caminho=None: 20)
     monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
-    gravadas = []
+    gravadas, casos = [], []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo: casos.append(motivo), raising=False)
 
     def rodar(site, ajudante, fim_da=lambda endereco: (True, "o vídeo parou")):
         def gravar(d, alvo, destino, tocar, pausa=None, **_):
@@ -1015,7 +1018,7 @@ def noite_do_curso(bm, monkeypatch, tmp_path):
             yield True
         return cursos_robo.noite(conectar=lambda: site, escrever=_escrever_na_barra, pausa=lambda s: None,
                                  ajudante=ajudante, trava=trava, conectado=lambda: True)
-    rodar.gravadas = gravadas
+    rodar.gravadas, rodar.casos = gravadas, casos
     return rodar
 
 
@@ -1056,6 +1059,26 @@ def test_a_aula_que_nao_abre_fica_no_registro_com_o_porque(noite_do_curso):
     linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
     assert [(linha[2], linha[3]) for linha in linhas] == [
         ("não abriu", "curso 4, aula 1: a aula não abriu (o Chrome não veio para a frente)")] * 2
+    # A tela da 1ª que não abriu fica guardada para o Claude achar o porquê (só uma por noite).
+    assert noite_do_curso.casos == ["a aula não abriu (o Chrome não veio para a frente)"]
+
+
+def test_a_aula_so_abre_com_o_celular_mudo(noite_do_curso):
+    # O vídeo pode começar a tocar sozinho quando a página da aula abre, e o celular fica no quarto do Rafael (pedido
+    # dele, 22/11): cada aula abre com o volume de mídia em 0, e o de antes fica guardado para voltar depois.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)") and site.volumes_ao_abrir and set(site.volumes_ao_abrir) == {0}
+    assert cursos_robo.estado_da_noite()["volume_antes"] == 6
+
+
+def test_sem_a_leitura_do_volume_a_aula_nao_abre(noite_do_curso):
+    # Sem a certeza de o celular estar mudo, a aula não abre: nada é tocado, e a noite para.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    surdo = SiteDoCurso(AULAS_DO_SITE, responde=False)
+    resumo = noite_do_curso(surdo, AjudanteNaHora())
+    assert resumo.endswith("parou: o celular não ficou mudo antes de abrir a aula") and surdo.toques == []
 
 
 def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_curso):
