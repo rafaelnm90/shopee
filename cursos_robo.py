@@ -34,6 +34,7 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageStat
 
 import db
+import registro_processos
 import videos
 from fuso import fuso_horario
 
@@ -656,6 +657,15 @@ def anotar_a_aula_gravada(posicao, endereco, agora=None):
     _mudar_o_curso(posicao, mudar)
 
 
+def desmarcar_a_aula(posicao, endereco):
+    """A aula gravada que não serviu (preta ou muda) volta a ficar por gravar."""
+    def mudar(curso):
+        for aula in curso["aulas"]:
+            if aula["endereco"] == endereco:
+                aula["gravada_em"] = ""
+    _mudar_o_curso(posicao, mudar)
+
+
 def anotar_a_aula_seguinte(posicao, endereco, nome):
     """A aula que o "Próximo" abriu, no fim da lista do curso (sem repetir a que já está nela)."""
     def mudar(curso):
@@ -667,6 +677,45 @@ def anotar_a_aula_seguinte(posicao, endereco, nome):
 def anotar_o_fim_do_curso(posicao):
     """A última aula do curso (sem o "Próximo") gravada: o curso terminou."""
     _mudar_o_curso(posicao, lambda curso: curso.update(fim=True))
+
+
+def resumo_do_mapa(mapa=None):
+    """O mapa só em números, curso a curso na ordem: as aulas conhecidas, as gravadas e se o curso terminou."""
+    mapa = mapa or mapa_das_aulas()
+    partes = []
+    for posicao in ORDEM_DOS_CURSOS:
+        curso = mapa["cursos"].get(str(posicao)) or {}
+        aulas = curso.get("aulas") or []
+        gravadas = sum(1 for aula in aulas if aula.get("gravada_em"))
+        if curso.get("fim"):
+            partes.append(f"curso {posicao}: terminado ({gravadas} aulas)")
+        elif aulas:
+            partes.append(f"curso {posicao}: {gravadas} de {len(aulas)} aula(s) conhecida(s) gravada(s)")
+        else:
+            partes.append(f"curso {posicao}: sem a 1ª aula")
+    return "; ".join(partes)
+
+
+def curso_no_explorar(d, argumento):
+    """
+    O passo curso do explorar: curso:primeira:N guarda a aula aberta no Chrome como a 1ª do curso na posição N da lista
+    de Turmas (o Claude a abre com o mapa do site); curso sozinho diz o mapa em números. O endereço fica no banco, e o
+    log diz só números.
+    """
+    partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
+    if not partes:
+        return True, resumo_do_mapa()
+    if partes[0] != "primeira" or len(partes) != 2 or not partes[1].isdigit():
+        return False, "curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso diz o mapa"
+    posicao = int(partes[1])
+    if posicao not in ORDEM_DOS_CURSOS:
+        return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
+    endereco = endereco_da_aula(d.dump_hierarchy())
+    if not endereco:
+        return False, "a tela não é a de uma aula do curso"
+    if not guardar_a_primeira_aula(posicao, endereco):
+        return False, f"o curso {posicao} já tem aula gravada: a 1ª dele não muda"
+    return True, f"1ª aula do curso {posicao} guardada"
 
 
 def tocar_pelo_play(d, pausa=None):
@@ -1083,6 +1132,222 @@ def apagar_aulas(ate):
     return len(saem)
 
 
+# --- A noite da gravação (P289 1 a P295 1) ---
+# A unidade do systemd que o painel liga de madrugada (cursos_robo.py noite) grava as aulas da vez, uma a uma, com o
+# celular (a trava do robô) só para abrir e gravar a aula; a fala e as folhas de quadros saem num ajudante à parte,
+# com o celular livre, enquanto a aula seguinte grava. Para quando a madrugada acaba (3h45), o disco passa de 70%, o
+# robô pede o celular ou a gravação sai preta ou muda (P288 3); a aula que fica pela metade é apagada e volta depois,
+# inteira, do início (P295 1). Nada vai ao privado do Rafael de madrugada: o celular dele faria barulho.
+REGISTRO_DO_CURSO = "curso"
+PROCESSO_DA_AULA = "aula do curso"
+PROCESSO_DA_NOITE = "noite do curso"
+PASTA_DAS_GRAVACOES = os.path.expanduser("~/shopee_video/aulas_brutas")
+# Quantas aulas que não abrem, seguidas, fazem a noite parar (o site fora, o login que caiu): a seguinte tenta de novo.
+FALHAS_SEGUIDAS = 2
+# O que para a aula sem ser falha: ela volta depois, inteira (P295 1), e a noite acaba aqui.
+PARADAS_DA_AULA = ("o robô pediu o celular", "a madrugada acabou")
+
+
+def nome_no_proximo(xml):
+    """O nome da aula seguinte, escrito na barra "Próximo: Nome"; "" sem ela."""
+    for no in _nos(xml):
+        if no["clicavel"] and no["texto"].startswith(ROTULO_DO_PROXIMO):
+            return no["texto"][len(ROTULO_DO_PROXIMO):].strip()
+    return ""
+
+
+def abrir_a_da_vez(d, posicao, aula, escrever, pausa=None):
+    """
+    Abre a aula da vez no Chrome, do alto: (endereço, motivo fixo). Sem a aula (a seguinte vem pelo Próximo da última
+    gravada), abre a última, toca no Próximo e anota a nova no mapa; sem o Próximo, o curso terminou. Endereço None
+    quando não abriu.
+    """
+    pausa = pausa or time.sleep
+    if aula:
+        if ir_para_o_endereco(d, aula["endereco"], escrever, pausa):
+            return aula["endereco"], "aula aberta"
+        return None, "a aula não abriu"
+    ultima = mapa_das_aulas()["cursos"][str(posicao)]["aulas"][-1]["endereco"]
+    if not ir_para_o_endereco(d, ultima, escrever, pausa):
+        return None, "a última aula gravada não abriu"
+    tela = d.dump_hierarchy()
+    ponto = botao_do_proximo(tela)
+    if not ponto:
+        anotar_o_fim_do_curso(posicao)
+        return None, "o curso terminou"
+    nome = nome_no_proximo(tela)
+    d.click(*ponto)
+    for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
+        pausa(PASSO_DA_ESPERA)
+        nova = endereco_da_aula(d.dump_hierarchy())
+        if nova and nova != ultima:
+            anotar_a_aula_seguinte(posicao, nova, nome)
+            # Trocando de aula sem recarregar, a página pode ficar rolada: a nova abre de novo pela barra, do alto.
+            if ir_para_o_endereco(d, nova, escrever, pausa):
+                return nova, "aula seguinte aberta"
+            return None, "a aula seguinte não abriu"
+    return None, "o Próximo não abriu a aula seguinte"
+
+
+def numero_da_aula(posicao, endereco, mapa=None):
+    """A posição da aula na lista do curso (1, 2...), para o nome da pasta dela; 0 fora do mapa."""
+    aulas = ((mapa or mapa_das_aulas())["cursos"].get(str(posicao)) or {}).get("aulas") or []
+    return next((numero for numero, aula in enumerate(aulas, 1) if aula["endereco"] == endereco), 0)
+
+
+def pode_comecar_a_noite(agora=None):
+    """
+    O painel liga a unidade da noite? Só com o curso em andamento, na madrugada, com o disco abaixo do limite e alguma
+    aula por gravar (a unidade confere tudo de novo).
+    """
+    return (CURSO_EM_ANDAMENTO and na_madrugada(db.ler_config("shopee_video", {}) or {}, agora)
+            and disco_usado() < LIMITE_DO_DISCO and proxima_aula() is not None)
+
+
+class Ajudante:
+    """A fala e as folhas de quadros de cada aula gravada, uma de cada vez, à parte, com o celular livre."""
+
+    def __init__(self, guardar=None):
+        import queue
+        import threading
+        self.fila, self.problema, self.guardadas = queue.Queue(), "", 0
+        self._guardar = guardar or guardar_a_aula
+        self._linha = threading.Thread(target=self._trabalhar, daemon=True)
+        self._linha.start()
+
+    def _trabalhar(self):
+        while True:
+            item = self.fila.get()
+            if item is None:
+                return
+            arquivo, posicao, numero, endereco, fim = item
+            try:
+                _pasta, info = self._guardar(arquivo, posicao, numero, fim)
+            except Exception as e:
+                info = {"problema": f"a aula não foi lida ({type(e).__name__})"}
+            for resto in (arquivo, arquivo + ".json"):
+                if os.path.exists(resto):
+                    os.remove(resto)
+            if info.get("problema"):
+                # Preta ou muda: o player não deixa gravar (P288 3); a aula volta a ficar por gravar, e a noite para.
+                self.problema = self.problema or info["problema"]
+                desmarcar_a_aula(posicao, endereco)
+                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "não serviu", info["problema"],
+                                             ok=False)
+            else:
+                self.guardadas += 1
+                registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "guardada", ok=True)
+
+    def mandar(self, arquivo, posicao, numero, endereco, fim):
+        """A aula gravada vai para a fila; o .json ao lado do vídeo deixa a noite seguinte ler a que ficou na fila."""
+        with open(arquivo + ".json", "w", encoding="utf-8") as saida:
+            json.dump({"posicao": posicao, "numero": numero, "endereco": endereco, "fim": fim}, saida)
+        self.fila.put((arquivo, posicao, numero, endereco, fim))
+
+    def mandar_as_que_ficaram(self):
+        """As gravações de uma noite que acabou antes de lê-las (a unidade parada no meio) voltam para a fila."""
+        if not os.path.isdir(PASTA_DAS_GRAVACOES):
+            return 0
+        voltaram = 0
+        for nome in sorted(os.listdir(PASTA_DAS_GRAVACOES)):
+            caminho = os.path.join(PASTA_DAS_GRAVACOES, nome)
+            if not nome.endswith(".mkv") or not os.path.exists(caminho + ".json"):
+                continue
+            with open(caminho + ".json", encoding="utf-8") as entrada:
+                dados = json.load(entrada)
+            self.fila.put((caminho, dados["posicao"], dados["numero"], dados["endereco"], dados["fim"]))
+            voltaram += 1
+        return voltaram
+
+    def acabar(self):
+        """Espera as aulas da fila serem lidas."""
+        self.fila.put(None)
+        self._linha.join()
+
+
+def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, conectado=None):
+    """
+    A gravação de uma madrugada (P289 1 a P295 1): as aulas da vez, uma a uma, até a madrugada acabar, o disco encher,
+    o robô pedir o celular ou acabarem as aulas. Devolve o que aconteceu numa frase só com números (vai ao log).
+    """
+    import celular_robo
+    pausa = pausa or time.sleep
+    if conectar is None or escrever is None:
+        import postador_shopee_video as ps
+        conectar = conectar or (lambda: ps.conectar(celular=True))
+        escrever = escrever or ps.escrever
+    trava = trava or celular_robo.trava
+    conectado = conectado or celular_robo.conectado
+    if not CURSO_EM_ANDAMENTO:
+        return "sem curso por gravar"
+    os.makedirs(PASTA_DAS_GRAVACOES, exist_ok=True)
+    ajudante = ajudante or Ajudante()
+    ajudante.mandar_as_que_ficaram()
+    gravadas = metade = falhas = 0
+    motivo = "nenhuma aula por gravar"
+    try:
+        while True:
+            if ajudante.problema:
+                motivo = ajudante.problema
+                break
+            if not _madrugada_agora():
+                motivo = "a madrugada acabou"
+                break
+            if disco_usado() >= LIMITE_DO_DISCO:
+                motivo = f"o disco passou de {LIMITE_DO_DISCO}%"
+                break
+            da_vez = proxima_aula()
+            if not da_vez:
+                motivo = "nenhuma aula por gravar"
+                break
+            if not conectado():
+                motivo = "o celular desconectado"
+                break
+            posicao, aula = da_vez
+            with trava() as livre:
+                if not livre:
+                    motivo = "o celular com o robô"
+                    break
+                anotar_o_sinal()
+                d = conectar()
+                endereco, detalhe = abrir_a_da_vez(d, posicao, aula, escrever, pausa)
+                inteira, fim, destino = False, detalhe, ""
+                if endereco:
+                    destino = os.path.join(PASTA_DAS_GRAVACOES, f"{_agora():%Y%m%d-%H%M%S}.mkv")
+                    inteira, fim = gravar_a_aula_aberta(d, getattr(d, "serial", ""), destino,
+                                                        lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa)
+            if endereco and inteira:
+                # Marcada já: a seguinte vem pelo Próximo dela, enquanto o ajudante lê esta.
+                anotar_a_aula_gravada(posicao, endereco)
+                gravadas += 1
+                falhas = 0
+                ajudante.mandar(destino, posicao, numero_da_aula(posicao, endereco), endereco, fim)
+                continue
+            if destino and os.path.exists(destino):
+                os.remove(destino)
+            if detalhe == "o curso terminou":
+                continue
+            resultado = "pela metade" if endereco else "não abriu"
+            registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, resultado, fim,
+                                         ok=None if fim in PARADAS_DA_AULA else False)
+            if endereco:
+                metade += 1
+            if fim in PARADAS_DA_AULA:
+                motivo = fim
+                break
+            falhas += 1
+            if falhas >= FALHAS_SEGUIDAS:
+                motivo = fim
+                break
+    finally:
+        soltar_o_sinal()
+        ajudante.acabar()
+    resumo = (f"{gravadas} aula(s) gravada(s), {ajudante.guardadas} guardada(s), {metade} pela metade; parou: "
+              f"{ajudante.problema or motivo}")
+    registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_NOITE, "concluída", resumo, ok=not ajudante.problema)
+    return resumo
+
+
 def abrir_aulas(texto_cifrado, valor_chave, destino):
     """Abre o pacote do ramo numa pasta (no scratchpad do Claude, nunca no repositório). Devolve as aulas."""
     from cryptography.fernet import Fernet
@@ -1143,7 +1408,10 @@ def main(argumentos):
         return 0
     if argumentos[:1] == ["aulas"]:
         return _aulas(argumentos[1:])
-    print("uso: cursos_robo.py instalar | estado | aulas ...")
+    if argumentos == ["noite"]:
+        print(noite())
+        return 0
+    print("uso: cursos_robo.py instalar | estado | aulas ... | noite")
     return 2
 
 

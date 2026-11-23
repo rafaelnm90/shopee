@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 
+import pytest
+
 import cursos_robo
 
 
@@ -901,6 +903,146 @@ def test_o_mapa_das_aulas_segue_a_ordem_dos_cursos_e_o_proximo_do_site(bm):
     cursos_robo.anotar_o_fim_do_curso(4)
     assert cursos_robo.proxima_aula() == (5, {"endereco": dois, "nome": "", "gravada_em": ""})
     assert len(cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]) == 2
+
+
+def test_o_claude_guarda_a_primeira_aula_de_cada_curso_pelo_explorar(bm):
+    # O passo curso:primeira:N lê o endereço na barra do Chrome e o guarda no banco; o log diz só números.
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=1)
+    assert cursos_robo.curso_no_explorar(site, "primeira:4") == (True, "1ª aula do curso 4 guardada")
+    assert cursos_robo.proxima_aula() == (4, {"endereco": AULAS_DO_SITE[1][2], "nome": "", "gravada_em": ""})
+    assert cursos_robo.curso_no_explorar(site, "primeira:9") == (
+        False, "o curso vai de 1 a 7 (a posição na lista de Turmas)")
+    assert not cursos_robo.curso_no_explorar(site, "primeira:x")[0]
+    assert not cursos_robo.curso_no_explorar(site, "segunda:4")[0]
+    fora = SiteDoCurso([("Cursos", 0, "https://escola.exemplo.pro/m/courses")])
+    assert cursos_robo.curso_no_explorar(fora, "primeira:5") == (False, "a tela não é a de uma aula do curso")
+    ok, resumo = cursos_robo.curso_no_explorar(site, "")
+    assert ok and resumo.startswith("curso 4: 0 de 1 aula(s) conhecida(s) gravada(s); curso 5: sem a 1ª aula")
+    assert "escola" not in resumo and "Aula" not in resumo
+    cursos_robo.anotar_a_aula_gravada(4, AULAS_DO_SITE[1][2])
+    assert cursos_robo.curso_no_explorar(site, "primeira:4") == (
+        False, "o curso 4 já tem aula gravada: a 1ª dele não muda")
+
+
+class AjudanteNaHora:
+    """O ajudante de mentira: lê cada aula na hora em que ela chega (a de número problema_na sai preta)."""
+
+    def __init__(self, problema_na=None):
+        self.problema, self.guardadas, self.lidas, self.problema_na = "", 0, [], problema_na
+
+    def mandar_as_que_ficaram(self):
+        return 0
+
+    def mandar(self, arquivo, posicao, numero, endereco, fim):
+        self.lidas.append((posicao, numero, fim))
+        if numero == self.problema_na:
+            self.problema = "a imagem saiu preta"
+            cursos_robo.desmarcar_a_aula(posicao, endereco)
+        else:
+            self.guardadas += 1
+
+    def acabar(self):
+        pass
+
+
+@pytest.fixture
+def noite_do_curso(bm, monkeypatch, tmp_path):
+    """A madrugada do curso com o celular livre, o disco folgado e a gravação de mentira (gravar(numero) diz o fim)."""
+    import contextlib
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
+    monkeypatch.setattr(cursos_robo, "disco_usado", lambda caminho=None: 20)
+    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
+    gravadas = []
+
+    def rodar(site, ajudante, fim_da=lambda endereco: (True, "o vídeo parou")):
+        def gravar(d, alvo, destino, tocar, pausa=None, **_):
+            assert tocar(d)
+            gravadas.append(cursos_robo.endereco_da_aula(d.dump_hierarchy()))
+            with open(destino, "wb") as arquivo:
+                arquivo.write(b"aula")
+            return fim_da(gravadas[-1])
+
+        monkeypatch.setattr(cursos_robo, "gravar_a_aula_aberta", gravar)
+
+        @contextlib.contextmanager
+        def trava():
+            yield True
+        return cursos_robo.noite(conectar=lambda: site, escrever=_escrever_na_barra, pausa=lambda s: None,
+                                 ajudante=ajudante, trava=trava, conectado=lambda: True)
+    rodar.gravadas = gravadas
+    return rodar
+
+
+def test_a_noite_grava_o_curso_inteiro_pelo_proximo_do_site(noite_do_curso):
+    # P289 1 a P293 1: da 1ª aula guardada pelo Claude, a noite segue o Próximo do site até a última, e o curso termina.
+    um, dois, tres = (aula[2] for aula in AULAS_DO_SITE)
+    cursos_robo.guardar_a_primeira_aula(4, um)
+    site, ajudante = SiteDoCurso(AULAS_DO_SITE, aberta=2), AjudanteNaHora()
+    resumo = noite_do_curso(site, ajudante)
+    assert resumo == "3 aula(s) gravada(s), 3 guardada(s), 0 pela metade; parou: nenhuma aula por gravar"
+    assert noite_do_curso.gravadas == [um, dois, tres]
+    assert ajudante.lidas == [(4, 1, "o vídeo parou"), (4, 2, "o vídeo parou"), (4, 3, "o vídeo parou")]
+    curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
+    assert curso["fim"] and [aula["nome"] for aula in curso["aulas"]] == ["", "Aula dois", "Aula três"]
+    assert all(aula["gravada_em"] for aula in curso["aulas"]) and not cursos_robo.gravando()
+    import registro_processos
+    assert registro_processos.sequencia("curso", "noite do curso", "2000-01-01 00:00:00")
+
+
+def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_curso):
+    # O robô da Shopee Vídeo tem a preferência (22/11): a aula fica pela metade, o vídeo dela sai, e ela volta depois,
+    # inteira, do início (P295 1).
+    um, dois, _ = (aula[2] for aula in AULAS_DO_SITE)
+    cursos_robo.guardar_a_primeira_aula(4, um)
+    ajudante = AjudanteNaHora()
+    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE), ajudante,
+                            fim_da=lambda endereco: (True, "o vídeo parou") if endereco == um
+                            else (False, "o robô pediu o celular"))
+    assert resumo == "1 aula(s) gravada(s), 1 guardada(s), 1 pela metade; parou: o robô pediu o celular"
+    assert cursos_robo.proxima_aula() == (4, {"endereco": dois, "nome": "Aula dois", "gravada_em": ""})
+    assert os.listdir(cursos_robo.PASTA_DAS_GRAVACOES) == []
+
+
+def test_a_gravacao_preta_para_a_noite_e_a_aula_volta_a_ficar_por_gravar(noite_do_curso):
+    # P288 3: preta ou muda, o player não deixa gravar, e a gravação para.
+    um = AULAS_DO_SITE[0][2]
+    cursos_robo.guardar_a_primeira_aula(4, um)
+    ajudante = AjudanteNaHora(problema_na=1)
+    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE), ajudante)
+    assert resumo.endswith("parou: a imagem saiu preta") and noite_do_curso.gravadas == [um]
+    assert cursos_robo.proxima_aula() == (4, {"endereco": um, "nome": "", "gravada_em": ""})
+
+
+def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, monkeypatch, tmp_path):
+    brutas = tmp_path / "brutas"
+    brutas.mkdir()
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(brutas))
+    um, dois, _ = (aula[2] for aula in AULAS_DO_SITE)
+    cursos_robo.guardar_a_primeira_aula(4, um)
+    cursos_robo.anotar_a_aula_seguinte(4, dois, "Aula dois")
+    for endereco in (um, dois):
+        cursos_robo.anotar_a_aula_gravada(4, endereco)
+    lidas = []
+
+    def guardar(arquivo, posicao, numero, fim):
+        lidas.append((posicao, numero))
+        return None, {"problema": "o som saiu mudo" if numero == 2 else ""}
+
+    # A gravação que ficou na fila de uma noite parada no meio (o .json ao lado) é lida na seguinte.
+    sobra = brutas / "20261124-010000.mkv"
+    sobra.write_bytes(b"aula")
+    (brutas / "20261124-010000.mkv.json").write_text(
+        '{"posicao": 4, "numero": 1, "endereco": "%s", "fim": "o vídeo parou"}' % um)
+    ajudante = cursos_robo.Ajudante(guardar=guardar)
+    assert ajudante.mandar_as_que_ficaram() == 1
+    nova = brutas / "20261124-012000.mkv"
+    nova.write_bytes(b"aula")
+    ajudante.mandar(str(nova), 4, 2, dois, "o vídeo parou")
+    ajudante.acabar()
+    assert lidas == [(4, 1), (4, 2)] and ajudante.guardadas == 1 and ajudante.problema == "o som saiu mudo"
+    assert os.listdir(brutas) == []
+    # A muda volta a ficar por gravar; a outra continua gravada.
+    assert cursos_robo.proxima_aula() == (4, {"endereco": dois, "nome": "Aula dois", "gravada_em": ""})
 
 
 def test_quadros_da_aula_um_a_cada_20_s_de_40_a_120():

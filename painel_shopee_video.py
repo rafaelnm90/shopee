@@ -187,6 +187,29 @@ async def _rodar_fora_do_bot(argumentos):
     return True
 
 
+# A gravação do curso de madrugada (P289 1 a P295 1) roda numa unidade própria do systemd, ligada pelo agendador do
+# robô: o nome fixo nunca deixa duas ao mesmo tempo, a prioridade baixa (Nice) não pesa no servidor, e ela acaba
+# sozinha às 3h45 (o tempo máximo da unidade é a madrugada mais longa e a leitura da última aula). Log: curso_noite.
+UNIDADE_DO_CURSO = "curso-noite"
+CURSOS = os.path.join(os.path.dirname(ROBO), "cursos_robo.py")
+MAXIMO_DA_NOITE = 7 * 60 * 60
+
+
+async def ligar_a_noite_do_curso():
+    """Liga a gravação do curso, se é a hora dela (cursos_robo.pode_comecar_a_noite) e ela ainda não roda."""
+    if not cursos_robo.pode_comecar_a_noite():
+        return False
+    if await _comando("systemctl", "is-active", "--quiet", UNIDADE_DO_CURSO) == 0:
+        return False
+    criada = await _comando(
+        "sudo", "-n", "systemd-run", f"--unit={UNIDADE_DO_CURSO}", "--collect", "--quiet",
+        f"--uid={os.getuid()}", f"--working-directory={os.path.dirname(ROBO)}",
+        f"--property=RuntimeMaxSec={MAXIMO_DA_NOITE}", "--property=Nice=10", "--property=SyslogIdentifier=curso_noite",
+        "--setenv=PYTHONUNBUFFERED=1", sys.executable, CURSOS, "noite")
+    registro_processos.registrar("curso", "noite do curso", "ligada" if criada == 0 else "não ligou", ok=criada == 0)
+    return criada == 0
+
+
 async def rodar_robo(*argumentos):
     """
     Uma rodada do robô automático num processo à parte: ele passa minutos tocando no
@@ -218,6 +241,12 @@ async def verificar_robo():
             await bot_instance.send_message(ADMIN_ID, aviso)
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] Aviso do fim da suspensão não saiu: {type(e).__name__}")
+    # A gravação do curso de madrugada liga sozinha fora do Horário do Robô; o robô tem a preferência no celular (pedido
+    # do Rafael, 22/11/2026: DECISOES.md, Trabalho com o Claude).
+    try:
+        await ligar_a_noite_do_curso()
+    except Exception as e:
+        logger.warning(f"⚠️ [Curso] A gravação da madrugada não ligou: {type(e).__name__}")
     config = ler_config()
     if not robo_ocupado() and robo.pedidos_de_agora():
         # O pedido do Fazer Agora ⏩ que ainda espera vale mesmo pausado ou fora do horário (P162 1).

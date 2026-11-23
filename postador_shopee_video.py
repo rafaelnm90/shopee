@@ -61,6 +61,10 @@ Passos, separados por ponto e vírgula:
     caso             guarda o print e a forma da tela como um caso do casos_robo, cifrado, para
                      o Claude ver a imagem da tela (casos_robo.yml exportar), nunca no log;
                      caso:TEXTO diz o que é
+    curso:primeira:N com a 1ª aula de um curso aberta no Chrome, guarda o endereço dela no banco
+                     como a 1ª do curso N (a posição na lista de Turmas, cursos_robo); curso
+                     mostra quantas aulas cada curso tem no mapa e quantas foram gravadas (só
+                     números no log)
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
@@ -2682,7 +2686,7 @@ def separar_passos(texto):
                   "escrever", "pagina-inicial",
                   "link", "video", "foto", "titulo", "comentario", "ia", "curtir", "produto", "conferir",
                   "postar", "print", "copiado", "legenda", "colar", "caso", "tela", "gravar", "entrar", "volume",
-                  "midia"}
+                  "midia", "curso"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -2805,6 +2809,8 @@ def fazer_passo(d, nome, argumento):
         return cursos_robo.volume_no_explorar(d, argumento)
     if nome == "midia":
         return cursos_robo.midia_no_explorar(d, argumento)
+    if nome == "curso":
+        return cursos_robo.curso_no_explorar(d, argumento)
     if nome == "caso":
         pasta = casos_robo.guardar(d, "explorar", "tela", argumento or "tela do explorar", passo="explorar")
         return (True, "tela guardada para o Claude (casos_robo.yml exportar)") if pasta else (
@@ -2920,7 +2926,7 @@ PAUSA_DA_ESPERA = 15
 # curso ou o Chrome, só estes passos valem, e os que mexem no que está na tela conferem antes que o Chrome está na
 # frente. A Shopee continua sem ser aberta de madrugada, como desde 18/10, e o celular fica mudo enquanto isso.
 PASSOS_DA_MADRUGADA = {"abrir", "entrar", "gravar", "volume", "midia", "caso", "esperar", "tela", "xy", "tocar",
-                       "rolar", "arrastar", "voltar", "inicio"}
+                       "rolar", "arrastar", "voltar", "inicio", "curso"}
 APPS_DA_MADRUGADA = {"curso", "chrome"}
 MEXEM_NA_TELA = {"entrar", "xy", "tocar", "rolar", "arrastar", "voltar"}
 
