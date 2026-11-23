@@ -497,15 +497,32 @@ def _br(texto):
     return datetime.strptime(texto, "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
 
 
-def test_madrugada_e_fora_do_horario_do_robo_e_antes_das_3h45():
+def test_madrugada_e_fora_do_horario_do_robo_e_antes_das_3h45(monkeypatch):
     # P289 1: grava de madrugada, fora do Horário do Robô, parando antes da limpeza das 4h.
     horario = {"robo_inicio": 8, "robo_fim": 22}
     for hora, vale in (("21:59", False), ("22:00", True), ("23:30", True), ("00:30", True), ("03:44", True),
                        ("03:45", False), ("04:00", False), ("07:59", False), ("12:00", False)):
         assert cursos_robo.na_madrugada(horario, _br(f"2026-11-23 {hora}")) is vale, hora
-    # O robô tem a preferência: com o Horário do Robô o dia todo, não há madrugada.
+    # Enquanto o curso não termina, a madrugada da 0h às 3h45 é dele, também com o Horário do Robô no Dia Todo ou
+    # começando antes das 4h: o robô começa às 4h (P296 1).
+    monkeypatch.setattr(cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    for horario in ({"robo_inicio": 0, "robo_fim": 24}, {"robo_inicio": 2, "robo_fim": 22}):
+        for hora, vale in (("00:00", True), ("02:30", True), ("03:44", True), ("03:45", False), ("04:00", False)):
+            assert cursos_robo.na_madrugada(horario, _br(f"2026-11-23 {hora}")) is vale, (horario, hora)
+
+
+def test_p296_o_robo_comeca_as_4h_so_enquanto_o_curso_nao_acaba(monkeypatch):
+    # P296 1: com o Horário do Robô no Dia Todo, o robô fica das 4h às 24h até o curso acabar; depois, o do painel.
+    monkeypatch.setattr(cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    assert cursos_robo.horario_do_robo(0, 24) == (4, 24)
+    assert cursos_robo.horario_do_robo(2, 22) == (4, 22)
+    assert cursos_robo.horario_do_robo(8, 22) == (8, 22)
+    assert cursos_robo.horario_do_robo(4, 24) == (4, 24)
+    monkeypatch.setattr(cursos_robo, "CURSO_EM_ANDAMENTO", False)
+    assert cursos_robo.horario_do_robo(0, 24) == (0, 24)
+    assert cursos_robo.horario_do_robo(2, 22) == (2, 22)
+    # Terminado o curso, o Dia Todo volta a não ter madrugada, e o Horário que começa às 2h a encurta.
     assert not cursos_robo.na_madrugada({"robo_inicio": 0, "robo_fim": 24}, _br("2026-11-23 02:00"))
-    # O Horário do Robô que começa antes das 3h45 encurta a madrugada.
     assert cursos_robo.na_madrugada({"robo_inicio": 2, "robo_fim": 22}, _br("2026-11-23 01:00"))
     assert not cursos_robo.na_madrugada({"robo_inicio": 2, "robo_fim": 22}, _br("2026-11-23 02:30"))
 

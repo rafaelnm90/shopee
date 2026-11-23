@@ -2903,9 +2903,13 @@ def conectar(celular=False):
 
 
 def horario_das_rodadas():
-    """(início, fim) das rodadas no celular, em horas de Brasília: o Horário do Robô 🕗 do painel."""
+    """
+    (início, fim) das rodadas no celular, em horas de Brasília: o Horário do Robô 🕗 do painel, sem a madrugada do
+    curso enquanto ele não termina (P296 1, cursos_robo.horario_do_robo).
+    """
     config = db.ler_config(CHAVE_PAINEL, {}) or {}
-    return (config.get("robo_inicio", HORARIO_DAS_RODADAS[0]), config.get("robo_fim", HORARIO_DAS_RODADAS[1]))
+    return cursos_robo.horario_do_robo(config.get("robo_inicio", HORARIO_DAS_RODADAS[0]),
+                                       config.get("robo_fim", HORARIO_DAS_RODADAS[1]))
 
 
 def no_horario_das_rodadas(agora=None):

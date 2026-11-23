@@ -306,9 +306,19 @@ def agora_br(agora=None):
     return agora or datetime.now(fuso_horario)
 
 
+def janela_do_robo(config):
+    """
+    (início, fim) do Horário do Robô que vale agora: o do painel e, enquanto o curso não termina, sem a madrugada,
+    que é do curso; com o Dia Todo, das 4h às 24h (P296 1: DECISOES.md, Trabalho com o Claude). Os botões do painel
+    valem a qualquer hora, como sempre.
+    """
+    return cursos_robo.horario_do_robo(config["robo_inicio"], config["robo_fim"])
+
+
 def no_horario_do_robo(config, agora=None):
-    """Agora está no Horário do Robô do painel?"""
-    return config["robo_inicio"] <= agora_br(agora).hour < config["robo_fim"]
+    """Agora está no Horário do Robô (o do painel, sem a madrugada do curso: janela_do_robo)?"""
+    inicio, fim = janela_do_robo(config)
+    return inicio <= agora_br(agora).hour < fim
 
 
 def no_horario(config, agora=None):
@@ -405,7 +415,8 @@ def trechos_de_postar(config):
     inteiro. A hora do descurtir também entra: o horário que cai nela espera a limpeza acabar
     (o_que_fazer). Escolha do Rafael (06/11, P161 1): DECISOES.md, Shopee Vídeo.
     """
-    inicio, fim = config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1)
+    inicio, fim = janela_do_robo(config)
+    inicio, fim = inicio * 60, min(fim * 60, 24 * 60 - 1)
     return [(inicio, fim)] if fim > inicio else []
 
 
@@ -1608,13 +1619,14 @@ def proxima_postagem(config, agora=None, sorteio=random):
     else:
         quando = momento + timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
     # Ajusta até cair no Horário do Robô: fora dele, o começo do próximo, com uns minutos sorteados.
+    inicio, fim = janela_do_robo(config)
     for _ in range(6):
-        if quando.hour >= config["robo_fim"] or (quando.date() > momento.date() and quando.hour < config["robo_inicio"]):
-            dia = quando.date() if quando.hour < config["robo_inicio"] else quando.date() + timedelta(days=1)
-            quando = datetime(dia.year, dia.month, dia.day, config["robo_inicio"], tzinfo=momento.tzinfo)
+        if quando.hour >= fim or (quando.date() > momento.date() and quando.hour < inicio):
+            dia = quando.date() if quando.hour < inicio else quando.date() + timedelta(days=1)
+            quando = datetime(dia.year, dia.month, dia.day, inicio, tzinfo=momento.tzinfo)
             quando += timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
-        elif quando.hour < config["robo_inicio"]:
-            quando = quando.replace(hour=config["robo_inicio"], minute=0) + timedelta(
+        elif quando.hour < inicio:
+            quando = quando.replace(hour=inicio, minute=0) + timedelta(
                 minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
         else:
             break
@@ -8704,8 +8716,8 @@ def intervalo_do_feed(config, agora=None):
     No Dia Todo, com 5 por dia, 4h40; das 8h às 22h, 2h40. A hora das 4h conta: acabada a limpeza, ela fica livre
     (P161 1).
     """
-    horas = int(config["robo_fim"]) - int(config["robo_inicio"])
-    return espaco_entre_comentarios(horas, comentarios_do_dia(interacoes.FEED, agora, config))
+    inicio, fim = janela_do_robo(config)
+    return espaco_entre_comentarios(fim - inicio, comentarios_do_dia(interacoes.FEED, agora, config))
 
 
 def _ir_as_notificacoes(d):
@@ -10029,8 +10041,8 @@ def live_pendente(agora=None):
     if not lives_que_faltam(agora):
         return False
     config = ler_config()
-    espaco = espaco_entre_comentarios(int(config["robo_fim"]) - int(config["robo_inicio"]),
-                                      comentarios_do_dia(interacoes.LIVES, agora, config))
+    inicio, fim = janela_do_robo(config)
+    espaco = espaco_entre_comentarios(fim - inicio, comentarios_do_dia(interacoes.LIVES, agora, config))
     return (ler_estado().get("live_em") or "") <= _momento(agora_br(agora) - espaco)
 
 
