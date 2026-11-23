@@ -1780,9 +1780,10 @@ def test_rodada_roda_numa_unidade_propria_e_o_reinicio_do_bot_nao_a_mata(bm, mon
         "unidade própria", 1)
 
 
-def test_a_aula_do_curso_nao_segura_os_botoes_e_solta_o_celular_para_a_rodada(bm, monkeypatch):
+def test_a_aula_do_curso_nao_segura_os_botoes_e_a_rodada_dos_15_min_nao_a_para(bm, monkeypatch):
     # O robô da Shopee Vídeo nunca para por causa do curso (pedido do Rafael, 22/11/2026): com a gravação da
-    # madrugada no celular, os botões não dizem que o robô está ocupado, e a rodada pede o celular a ela antes.
+    # madrugada no celular, os botões não dizem que o robô está ocupado. Quem pede o celular à aula é a própria
+    # rodada do robô, depois de ver que vai usá-lo: a rodada dos 15 min, fora do Horário do Robô, não a para.
     sv = _painel(bm)
     pedidos = _comandos(sv, monkeypatch, voltas_ativa=0)
     liberados = []
@@ -1792,11 +1793,8 @@ def test_a_aula_do_curso_nao_segura_os_botoes_e_solta_o_celular_para_a_rodada(bm
         assert livre and sv.robo_ocupado()
         sv.cursos_robo.anotar_o_sinal()
         assert not sv.robo_ocupado()
-    rodar(sv.rodar_robo("--rodada"))
-    assert liberados == ["robô"] and pedidos[0][-1] == "--rodada"
-    sv.cursos_robo.soltar_o_sinal()
-    rodar(sv.rodar_robo("--rodada"))
-    assert liberados == ["robô"]
+        rodar(sv.rodar_robo("--rodada"))
+    assert pedidos[0][-1] == "--rodada" and liberados == []
 
 
 def test_sem_o_systemd_run_a_rodada_vai_como_processo_do_bot(bm, monkeypatch):

@@ -2929,8 +2929,13 @@ def explorar(texto, d=None, celular=False):
     logging.disable(logging.CRITICAL)
     try:
         if celular and d is None:
-            # A gravação do curso de madrugada solta o celular, como para o robô.
+            # A gravação do curso de madrugada solta o celular, como para o robô. Fora do Horário do Robô o
+            # explorar não toca no celular (_explorar), e a aula segue sem parar.
             if cursos_robo.gravando():
+                if not no_horario_das_rodadas():
+                    inicio, fim = horario_das_rodadas()
+                    print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
+                    return None
                 cursos_robo.liberar_para_o_robo("explorar")
             tentativas = ESPERA_DO_CELULAR // PAUSA_DA_ESPERA + 1
             for tentativa in range(tentativas):
