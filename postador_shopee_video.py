@@ -2958,10 +2958,7 @@ def mexe_na_tela(nome, argumento):
 
 
 def chrome_na_frente(d):
-    try:
-        return (d.app_current() or {}).get("package") == cursos_robo.PACOTE_DO_CHROME
-    except Exception:
-        return False
+    return cursos_robo.app_da_frente(d) == cursos_robo.PACOTE_DO_CHROME
 
 
 def _passos_ou_nada(texto):
