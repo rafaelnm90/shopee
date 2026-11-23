@@ -577,12 +577,14 @@ def subir_o_volume(d):
     """
     O volume de mídia no meio para a aula (P291 1), guardando o de antes no banco: ele volta no fim da aula
     ou, se a gravação cair no meio, na próxima vez que o robô usar o celular (devolver_o_volume). Já acima
-    do meio, fica como está. (atual, máximo) depois, ou None sem o volume.
+    do meio, fica como está. O de antes que ainda não voltou (a gravação caiu e começou de novo) fica: o de
+    agora já é o da aula. (atual, máximo) depois, ou None sem o volume.
     """
     antes = volume_de_midia(d)
     if not antes:
         return None
-    _anotar(volume_antes=antes[0])
+    if estado_da_noite().get("volume_antes") is None:
+        _anotar(volume_antes=antes[0])
     alvo = round(antes[1] * VOLUME_NA_AULA)
     return antes if antes[0] >= alvo else mudar_o_volume(d, alvo)
 
