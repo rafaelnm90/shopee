@@ -893,9 +893,9 @@ def subir_o_volume(d):
 
 def calar_o_celular(d):
     """
-    O volume de mídia em 0 para o explorar do curso de madrugada (P294 1): o celular não faz barulho à noite. O de
-    antes fica guardado como o da aula e volta no fim (devolver_o_volume). (atual, máximo) depois, ou None sem o
-    volume.
+    O volume de mídia em 0 de madrugada, no explorar do curso (P294 1) e antes de cada aula abrir (o vídeo pode
+    começar a tocar sozinho): o celular não faz barulho à noite. O de antes fica guardado como o da aula e volta no
+    fim (devolver_o_volume). (atual, máximo) depois, ou None sem o volume.
     """
     antes = volume_de_midia(d)
     if not antes:
@@ -1186,6 +1186,16 @@ PASTA_DAS_GRAVACOES = os.path.expanduser("~/shopee_video/aulas_brutas")
 FALHAS_SEGUIDAS = 2
 # O que para a aula sem ser falha: ela volta depois, inteira (P295 1), e a noite acaba aqui.
 PARADAS_DA_AULA = ("o robô pediu o celular", "a madrugada acabou")
+SEM_O_MUDO = "o celular não ficou mudo antes de abrir a aula"
+
+
+def guardar_o_caso(d, motivo):
+    """
+    A tela da 1ª aula da noite que não abriu (o print, a forma da tela e o log do Chrome), guardada para o Claude
+    achar o porquê (casos_robo: cifrada no exportar, nunca no repositório).
+    """
+    import casos_robo
+    return casos_robo.guardar(d, "curso", "não abriu", motivo, passo="abrir a aula")
 
 
 def nome_no_proximo(xml):
@@ -1362,7 +1372,14 @@ def noite(conectar=None, escrever=None, pausa=None, ajudante=None, trava=None, c
                     break
                 anotar_o_sinal()
                 d = conectar()
+                # O vídeo da aula pode começar a tocar sozinho quando a página abre: ela só abre com o celular mudo,
+                # que fica no quarto do Rafael (pedido dele, 22/11/2026: DECISOES.md, Trabalho com o Claude).
+                if not calar_o_celular(d):
+                    motivo = SEM_O_MUDO
+                    break
                 endereco, detalhe = abrir_a_da_vez(d, posicao, aula, escrever, pausa)
+                if not endereco and detalhe != "o curso terminou" and not falhas:
+                    guardar_o_caso(d, detalhe)
                 inteira, fim, destino = False, detalhe, ""
                 if endereco:
                     destino = os.path.join(PASTA_DAS_GRAVACOES, f"{_agora():%Y%m%d-%H%M%S}.mkv")
