@@ -1396,10 +1396,83 @@ def _baixar_o_documento(d, ponto, pasta, pausa):
 
 PAGINA_VAZIA = "a página da aula não mostrou texto nem documento"
 
+# A aula de slides (o teste de dia de 23/11/2026, a 3ª aula do curso 5): um carrossel de imagens, com o Anterior e o
+# Próximo dele (sem os dois pontos, que são da barra da aula seguinte) e as miniaturas embaixo. Cada imagem vai
+# inteira, recortada da tela, como um aluno passando os slides (pedidos do Rafael de 23/11/2026, às 08:44 e às 09:12).
+ROTULO_DA_IMAGEM = "Imagem da aula"
+ROTULO_DO_PROXIMO_DO_CARROSSEL = "Próximo"
+SLIDES_DA_AULA = 80
+ESPERA_DO_SLIDE = 2
+QUALIDADE_DO_SLIDE = 85
+# Numa cópia pequena em cinza, o ponto que muda mais que DIFERENCA_DO_PONTO (de 0 a 255) mudou; a imagem com menos
+# de PONTOS_DIFERENTES pontos mudados é a mesma (o fim do carrossel, ou a volta ao 1º slide). Uma palavra nova num
+# slide muda dezenas de pontos; o ruído entre dois prints da mesma imagem, nenhum.
+TAMANHO_DA_COMPARACAO = (96, 54)
+DIFERENCA_DO_PONTO = 24
+PONTOS_DIFERENTES = 12
+
+
+def carrossel_na_tela(xml):
+    """
+    A caixa da imagem da aula à vista (a maior) e o centro do Próximo do carrossel; (None, None) sem um carrossel na
+    tela. O Próximo do carrossel é só "Próximo": o da barra da aula seguinte tem os dois pontos e nunca é tocado aqui.
+    """
+    nos = _nos_da_aula(xml)
+    imagens = [no["caixa"] for no in nos if no["descricao"] == ROTULO_DA_IMAGEM]
+    botao = next((_centro(no["caixa"]) for no in nos
+                  if no["clicavel"] and ROTULO_DO_PROXIMO_DO_CARROSSEL in (no["texto"], no["descricao"])), None)
+    if not imagens or not botao:
+        return None, None
+    return max(imagens, key=lambda caixa: (caixa[2] - caixa[0]) * (caixa[3] - caixa[1])), botao
+
+
+def mesma_imagem(uma, outra):
+    """As duas imagens são o mesmo slide? Pelos pontos que mudam, numa cópia pequena em cinza."""
+    from PIL import ImageChops
+    uma = uma.convert("L").resize(TAMANHO_DA_COMPARACAO)
+    outra = outra.convert("L").resize(TAMANHO_DA_COMPARACAO)
+    diferenca = ImageChops.difference(uma, outra)
+    return sum(diferenca.histogram()[DIFERENCA_DO_PONTO + 1:]) < PONTOS_DIFERENTES
+
+
+def _passar_os_slides(d, pasta, pausa, vigiar, caixa):
+    """
+    Os slides do carrossel da aula, um a um pelo Próximo dele, cada um recortado da tela (slide_NN.jpg) no tamanho
+    em que aparece, até o último: o que não muda depois do toque (conferido duas vezes, para o slide que ainda
+    desliza) ou o que volta ao 1º. (quantos, o porquê de parar ou "").
+    """
+    primeiro = anterior = None
+    slides = 0
+    for _ in range(SLIDES_DA_AULA):
+        porque = vigiar()
+        if porque:
+            return slides, porque
+        imagem = d.screenshot().convert("RGB").crop(caixa)
+        if anterior is not None and mesma_imagem(imagem, anterior):
+            pausa(ESPERA_DO_SLIDE)
+            imagem = d.screenshot().convert("RGB").crop(caixa)
+        if anterior is not None and (mesma_imagem(imagem, anterior) or mesma_imagem(imagem, primeiro)):
+            break
+        slides += 1
+        imagem.save(os.path.join(pasta, f"slide_{slides:02d}.jpg"), "JPEG", quality=QUALIDADE_DO_SLIDE)
+        if primeiro is None:
+            primeiro = imagem
+        anterior = imagem
+        tela = d.dump_hierarchy()
+        _caixa, botao = carrossel_na_tela(tela)
+        if not botao or not _livre_para_tocar(tela, botao):
+            break
+        d.click(*botao)
+        pausa(ESPERA_DO_SLIDE)
+    return slides, ""
+
 
 def _ler_a_aula(d, pasta, pausa, vigiar):
-    """As telas, o texto e o documento da aula aberta, na pasta. (info só de números, o porquê de parar ou "")."""
-    textos, links, telas, ver_mais, documento, anterior = [], [], 0, 0, None, None
+    """
+    As telas, os slides do carrossel, o texto e o documento da aula aberta, na pasta. (info só de números, o porquê de
+    parar ou "").
+    """
+    textos, links, telas, ver_mais, documento, anterior, slides = [], [], 0, 0, None, None, None
     for numero in range(1, TELAS_DA_AULA + 1):
         porque = vigiar()
         if porque:
@@ -1407,6 +1480,12 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         if not _nos_da_aula(tela):
             return {}, "a página da aula saiu da tela"
+        caixa, _botao = carrossel_na_tela(tela) if slides is None else (None, None)
+        if caixa:
+            slides, porque = _passar_os_slides(d, pasta, pausa, vigiar, caixa)
+            if porque:
+                return {}, porque
+            tela = d.dump_hierarchy()
         ponto = botao_do_ver_mais(tela)
         if ponto and ver_mais < VEZES_DO_VER_MAIS and _livre_para_tocar(tela, ponto):
             d.click(*ponto)
@@ -1433,13 +1512,14 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
         anterior = atuais
         rolar_a_pagina(d)
         pausa(ESPERA_DA_ROLAGEM)
-    if not textos and not documento:
+    if not textos and not documento and not slides:
         return {}, PAGINA_VAZIA
     with open(os.path.join(pasta, "texto.txt"), "w", encoding="utf-8") as saida:
         saida.write("\n".join(textos) + "\n")
         if links:
             saida.write("\nLinks da aula (anotados, sem abrir):\n" + "".join(f"- {link}\n" for link in links))
-    return {"telas": telas, "linhas": len(textos), "links": len(links), "documento": documento}, ""
+    return {"telas": telas, "slides": slides or 0, "linhas": len(textos), "links": len(links),
+            "documento": documento}, ""
 
 
 PAGINA_DA_VIDEOAULA = "página da videoaula"
@@ -1473,7 +1553,10 @@ def guardar_a_aula_sem_video(d, curso, numero, pausa=None, vigiar=None, agora=No
 
 
 def descrever_a_aula_guardada(info):
-    """A aula sem vídeo guardada em números, para o registro e o explorar: telas, linhas, links e o documento."""
+    """
+    A aula sem vídeo guardada em números, para o registro e o explorar: telas, slides (só na aula que tem), linhas,
+    links e o documento.
+    """
     documento = info.get("documento")
     if not documento:
         doc = "sem documento"
@@ -1481,7 +1564,9 @@ def descrever_a_aula_guardada(info):
         doc = f"documento de {documento['bytes'] // 1024} KB, grande demais, só anotado"
     else:
         doc = f"documento de {documento['bytes'] // 1024} KB"
-    return f"{info.get('telas', 0)} tela(s), {info.get('linhas', 0)} linha(s), {info.get('links', 0)} link(s), {doc}"
+    slides = f"{info['slides']} slide(s), " if info.get("slides") else ""
+    return (f"{info.get('telas', 0)} tela(s), {slides}{info.get('linhas', 0)} linha(s), {info.get('links', 0)} "
+            f"link(s), {doc}")
 
 
 # --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026, e P296 1, 23/11/2026) ---

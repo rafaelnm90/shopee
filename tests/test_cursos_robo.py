@@ -898,14 +898,15 @@ class SiteDoCurso(CelularDoVolume):
     busca dela abre a barra); barra_escondida: a página rolada para baixo, sem a barra no alto (rolar para cima a traz,
     se a rolagem funciona). baixa: o Baixar do leitor de PDF baixa o documento; aviso: quantas leituras da tela o aviso
     do download do Chrome fica nela. texto_na_videoaula: a página da videoaula tem, embaixo do vídeo, um texto e um
-    link. volumes_das_telas: o volume de mídia em cada print da tela.
+    link. volumes_das_telas: o volume de mídia em cada print da tela. A aula de tipo "slides" é um carrossel de
+    imagens (slides: quantas), com o Anterior e o Próximo dele; carrossel_volta: o Próximo do último volta ao 1º.
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
                  autoplay=False, escreve=True, completa="", rotulo_no_texto=False, nova_guia=False,
                  barra_escondida=False, rolagem_funciona=True, sessao_vencida=False, inicio_na_guia_nova=False,
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
-                 texto_na_videoaula=False, **opcoes):
+                 texto_na_videoaula=False, slides=4, carrossel_volta=False, **opcoes):
         super().__init__(**opcoes)
         # A página fora das aulas em que o Enter caiu: "login" (a sessão vencida), "inicio" (a página inicial do
         # curso, pela guia nova) ou "outro" (outro site); None na aula aberta.
@@ -925,6 +926,7 @@ class SiteDoCurso(CelularDoVolume):
         # documento no lugar da página da aula.
         self.atraso_do_proximo, self.sem_o_proximo, self.baixar_sai = atraso_do_proximo, 0, baixar_sai
         self.texto_na_videoaula, self.volumes_das_telas = texto_na_videoaula, []
+        self.slides, self.carrossel_volta, self.slide = slides, carrossel_volta, 0
 
     def _tipo(self, numero):
         return self.aulas[numero][3] if len(self.aulas[numero]) > 3 else "vídeo"
@@ -949,6 +951,21 @@ class SiteDoCurso(CelularDoVolume):
     def _sem_video(self):
         """O leitor de PDF, o texto e o link da aula sem vídeo (como no site, 23/11/2026)."""
         nos = []
+        if self._tipo(self.aberta) == "slides":
+            # O carrossel da 3ª aula do curso 5 (23/11/2026, 12:53): o Anterior e o Próximo dele, a imagem da aula
+            # (e a seguinte, quase fora da tela) e as miniaturas.
+            return ['<node class="android.widget.Button" resource-id="" clickable="true" text="Anterior" '
+                    'content-desc="" bounds="[157,763][220,826]" />',
+                    '<node class="android.widget.Button" resource-id="" clickable="true" text="Próximo" '
+                    'content-desc="" bounds="[858,763][921,826]" />',
+                    '<node class="android.widget.Image" resource-id="" clickable="false" text="" '
+                    'content-desc="Imagem da aula" bounds="[141,540][937,991]" />',
+                    '<node class="android.widget.Image" resource-id="" clickable="false" text="" '
+                    'content-desc="Imagem da aula" bounds="[968,540][1080,991]" />',
+                    '<node class="android.widget.Button" resource-id="" clickable="true" text="imagem do carrossel" '
+                    'content-desc="" bounds="[141,1015][346,1133]" />',
+                    '<node class="android.widget.TextView" resource-id="" text="Instruções da aula" content-desc="" '
+                    'bounds="[42,1285][1021,1335]" />'], "[60,1555][336,1747]"
         if self._tipo(self.aberta) == "documento":
             nos += ['<node class="android.widget.TextView" resource-id="p8R_mc0" text="Lista de produtos do dia" '
                     'content-desc="" bounds="[86,820][900,876]" />',
@@ -1038,9 +1055,14 @@ class SiteDoCurso(CelularDoVolume):
         return '<hierarchy rotation="0">' + "".join(fora[:1]) + pagina + "".join(fora[1:]) + "</hierarchy>"
 
     def screenshot(self):
-        from PIL import Image
+        from PIL import Image, ImageDraw
         self.volumes_das_telas.append(self.volume)
-        return Image.new("RGB", (1080, 2400), (30, 30, 30))
+        imagem = Image.new("RGB", (1080, 2400), (30, 30, 30))
+        if self._tipo(self.aberta) == "slides":
+            desenho = ImageDraw.Draw(imagem)
+            desenho.rectangle((141, 540, 937, 991), fill=(250 - 40 * self.slide, 240, 200))
+            desenho.rectangle((200 + 80 * self.slide, 600, 300 + 80 * self.slide, 700), fill=(200, 80, 40))
+        return imagem
 
     def swipe(self, x1, y1, x2, y2, duracao=None):
         self.rolagens.append((x1, y1, x2, y2))
@@ -1054,7 +1076,7 @@ class SiteDoCurso(CelularDoVolume):
             self.rolada = 1
 
     def _abrir(self, numero):
-        self.aberta, self.no_alto, self.ver_mais_aberto, self.rolada = numero, True, False, 0
+        self.aberta, self.no_alto, self.ver_mais_aberto, self.rolada, self.slide = numero, True, False, 0, 0
         self.sem_o_proximo = self.atraso_do_proximo
         self.midia = _sessao_do_chrome(3, 0) if self.autoplay and self._com_video(numero) else SEM_SESSOES
 
@@ -1073,6 +1095,11 @@ class SiteDoCurso(CelularDoVolume):
                 self.pagina = "documento"
         elif (x, y) == (115, 2011) and self._tipo(self.aberta) == "documento":
             self.ver_mais_aberto = True
+        elif (x, y) == (889, 794) and self._tipo(self.aberta) == "slides":
+            if self.slide + 1 < self.slides:
+                self.slide += 1
+            elif self.carrossel_volta:
+                self.slide = 0
         elif y >= 2175 and self.aberta + 1 < len(self.aulas):
             self.aberturas.append((self.volume, self.gravando))
             self._abrir(self.aberta + 1)
@@ -1149,6 +1176,7 @@ AULAS_DO_SITE = [("Aula um", 300, "https://escola.exemplo.pro/m/lessons/aaa111")
 
 SEM_ESPERA = {"pausa": lambda segundos: None}
 AULA_DE_DOCUMENTO = ("Dia 01", 0, "https://escola.exemplo.pro/m/lessons/doc444", "documento")
+AULA_DE_SLIDES = ("Instruções", 0, "https://escola.exemplo.pro/m/lessons/sli555", "slides")
 
 
 def test_a_aula_abre_pelo_endereco_na_mesma_guia_e_do_alto():
@@ -1744,6 +1772,65 @@ def test_a_aula_sem_video_para_no_meio_quando_o_robo_pede_o_celular(bm, monkeypa
     assert cursos_robo.guardar_a_aula_sem_video(site, 5, 2, vigiar=lambda: "o robô pediu o celular",
                                                 **SEM_ESPERA) == (None, {"problema": "o robô pediu o celular"})
     assert os.listdir(tmp_path / "aulas") == [] and site.toques == []
+
+
+@pytest.mark.parametrize("volta", [False, True])
+def test_a_aula_de_slides_guarda_cada_imagem_do_carrossel(bm, monkeypatch, tmp_path, volta):
+    # O teste de dia de 23/11 (12:53): a 3ª aula do curso 5 é um carrossel de imagens, com o Anterior e o Próximo
+    # dele. Cada slide vai recortado da tela, no tamanho em que aparece, pelo Próximo do carrossel (nunca o da barra da
+    # aula seguinte), até o último: o que não muda com o toque ou o que volta ao 1º.
+    from PIL import Image
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_SLIDES, AULAS_DO_SITE[0]], no_alto=True, carrossel_volta=volta)
+    pasta, info = cursos_robo.guardar_a_aula_sem_video(site, 5, 3, **SEM_ESPERA)
+    assert info["slides"] == 4 and info["linhas"] == 1
+    assert sorted(nome for nome in os.listdir(pasta) if nome.startswith("slide_")) == [
+        f"slide_0{numero}.jpg" for numero in (1, 2, 3, 4)]
+    assert site.toques == [(889, 794)] * 4 and site.aberta == 0
+    imagens = []
+    for numero in (1, 2, 3, 4):
+        with Image.open(os.path.join(pasta, f"slide_0{numero}.jpg")) as slide:
+            assert slide.size == (796, 451)
+            imagens.append(slide.copy())
+    assert not any(cursos_robo.mesma_imagem(imagens[n], imagens[n + 1]) for n in range(3))
+    assert cursos_robo.descrever_a_aula_guardada(info) == "1 tela(s), 4 slide(s), 1 linha(s), 0 link(s), sem documento"
+
+
+def test_um_slide_com_uma_palavra_a_mais_nao_e_o_mesmo():
+    # Dois prints da mesma imagem são o mesmo slide; o slide que só ganha uma palavra é outro (não é o fim do
+    # carrossel).
+    from PIL import Image, ImageDraw
+    slide = Image.new("RGB", (796, 451), (250, 240, 200))
+    ImageDraw.Draw(slide).rectangle((60, 60, 700, 110), fill=(120, 60, 20))
+    print_de_novo = slide.copy()
+    print_de_novo.putpixel((300, 300), (240, 230, 190))
+    com_palavra = slide.copy()
+    ImageDraw.Draw(com_palavra).rectangle((60, 200, 200, 240), fill=(120, 60, 20))
+    assert cursos_robo.mesma_imagem(slide, print_de_novo)
+    assert not cursos_robo.mesma_imagem(slide, com_palavra)
+
+
+def test_os_slides_param_quando_o_robo_pede_o_celular(bm, monkeypatch, tmp_path):
+    # O robô tem a preferência (22/11): no meio dos slides, a aula para e a pasta pela metade sai.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site, chamadas = SiteDoCurso([AULA_DE_SLIDES], no_alto=True), []
+
+    def vigiar():
+        chamadas.append(1)
+        return "o robô pediu o celular" if len(chamadas) > 3 else ""
+    assert cursos_robo.guardar_a_aula_sem_video(site, 5, 3, vigiar=vigiar, **SEM_ESPERA) == (
+        None, {"problema": "o robô pediu o celular"})
+    assert os.listdir(tmp_path / "aulas") == [] and site.toques == [(889, 794)] * 2
+
+
+def test_o_proximo_do_carrossel_nao_e_o_da_aula_seguinte():
+    # O Próximo do carrossel é só "Próximo"; o da barra tem os dois pontos e o nome da aula seguinte.
+    site = SiteDoCurso([AULA_DE_SLIDES, AULAS_DO_SITE[0]], no_alto=True)
+    tela = site.dump_hierarchy()
+    assert cursos_robo.carrossel_na_tela(tela) == ((141, 540, 937, 991), (889, 794))
+    assert cursos_robo.nome_no_proximo(tela) == "Aula um" and cursos_robo.botao_do_proximo(tela) == (540, 2284)
+    assert cursos_robo.carrossel_na_tela(SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True).dump_hierarchy()) == (
+        None, None)
 
 
 def test_os_toques_da_aula_nunca_caem_no_proximo_na_bolha_do_chat_ou_na_barra():
