@@ -1078,6 +1078,19 @@ LISTA_PELA_METADE = "a lista das aulas não chegou ao fim"
 MODULO_SEM_TOQUE = "o botão de um módulo ficou fora do alcance"
 
 
+# O alto da página da aula diz o andamento do curso ("12% concluído · 3/28 aulas"): o total confere a lista lida.
+TOTAL_DO_CURSO = re.compile(r"concluído\s*·\s*\d+\s*/\s*(?P<total>\d+)\s+aulas")
+
+
+def total_de_aulas(xml):
+    """O total de aulas do curso, pelo andamento no alto da página da aula; None sem ele na tela."""
+    for no in _nos(xml):
+        achado = TOTAL_DO_CURSO.search(" ".join(no["texto"].split()))
+        if achado:
+            return int(achado["total"])
+    return None
+
+
 def itens_da_lista(xml):
     """
     A aba Módulos à vista: (a caixa da lista na tela, [{"tipo": "módulo" ou "aula", "nome", "segundos", "caixa"}] de
@@ -1114,10 +1127,17 @@ def _tocavel(tela, caixa):
 
 
 def _juntar_as_aulas(lidas, vistas):
-    """As aulas do módulo vistas nesta tela depois das já lidas, sem repetir o pedaço que as duas leituras mostram."""
+    """
+    As aulas do módulo vistas nesta tela depois das já lidas, sem repetir o pedaço que as duas leituras mostram,
+    reconhecido pelos nomes: logo depois do toque no módulo, a linha da aula pode vir ainda sem a duração, que aparece
+    na leitura seguinte (o curso 1, em 24/11/2026, ficou com 13 aulas repetidas). A duração que faltava vem da nova.
+    """
     for tamanho in range(min(len(lidas), len(vistas)), 0, -1):
-        if lidas[-tamanho:] == vistas[:tamanho]:
-            return lidas + vistas[tamanho:]
+        if [nome for nome, _ in lidas[-tamanho:]] == [nome for nome, _ in vistas[:tamanho]]:
+            comeco = len(lidas) - tamanho
+            iguais = [(nome, segundos if segundos is not None else vista[1])
+                      for (nome, segundos), vista in zip(lidas[comeco:], vistas[:tamanho])]
+            return lidas[:comeco] + iguais + vistas[tamanho:]
     return lidas + vistas
 
 
@@ -1146,11 +1166,12 @@ def _uma_olhada_na_lista(itens, modulos):
     return vistas, None, None
 
 
-def ler_a_lista(d, pausa=None):
+def ler_a_lista(d, pausa=None, ao_comecar=None):
     """
     A lista das aulas do curso aberto no Chrome, pela aba Módulos: ([{"modulo", "nome", "segundos"}], "") com os
     módulos na ordem e as aulas na ordem de cada um, ou (None, o porquê). Cada módulo fechado é aberto pelo botão dele
-    (um toque só: o que não mostra aula nenhuma fica vazio), e a página rola só para baixo, até o fim dela.
+    (um toque só: o que não mostra aula nenhuma fica vazio), e a página rola só para baixo, até o fim dela. ao_comecar
+    é chamado uma vez, com o começo da lista na tela (o explorar guarda essa tela para o Claude).
     """
     pausa = pausa or time.sleep
     modulos, tocados, antes, sem_a_lista, aba_tocada = [], set(), None, 0, False
@@ -1172,6 +1193,9 @@ def ler_a_lista(d, pausa=None):
         if not modulos and (itens[0]["tipo"] != "módulo" or caixa[1] <= topo):
             # A lista que já começa cortada no alto da página: o começo dela passou, e a página não volta para cima.
             return None, LISTA_SEM_O_COMECO
+        if ao_comecar:
+            ao_comecar()
+            ao_comecar = None
         vistas, novo, abaixo = _uma_olhada_na_lista(itens, modulos)
         if modulos:
             modulos[-1]["aulas"] = _juntar_as_aulas(modulos[-1]["aulas"], vistas)
@@ -1217,13 +1241,30 @@ def _tocar_na_aba_modulos(d, tela, pausa):
     return True
 
 
+MARCAS_DA_AULA = ("gravada_em", "sem_video", "vista_em")
+
+
 def guardar_a_lista(posicao, lista, agora=None):
-    """A lista das aulas do curso dessa posição, lida da aba Módulos, no mapa (só no banco do servidor)."""
+    """
+    A lista das aulas do curso dessa posição, lida da aba Módulos, no mapa (só no banco do servidor). As marcas de cada
+    aula (gravada, guardada sem vídeo, conferida pelo Claude) passam para a lista nova pelo módulo e pelo nome: ler a
+    lista de novo não faz a noite gravar outra vez o que já foi gravado.
+    """
     momento = _texto(_agora(agora))
 
     def mudar(curso):
-        curso["lista"] = [{"modulo": aula["modulo"], "nome": aula["nome"], "segundos": aula["segundos"]}
-                          for aula in lista]
+        antigas = {}
+        for aula in curso.get("lista") or []:
+            antigas.setdefault((aula.get("modulo"), aula.get("nome")), []).append(aula)
+        nova = []
+        for aula in lista:
+            entrada = {"modulo": aula["modulo"], "nome": aula["nome"], "segundos": aula["segundos"]}
+            iguais = antigas.get((aula["modulo"], aula["nome"]))
+            if iguais:
+                velha = iguais.pop(0)
+                entrada.update({chave: velha[chave] for chave in MARCAS_DA_AULA if velha.get(chave)})
+            nova.append(entrada)
+        curso["lista"] = nova
         curso["lista_em"] = momento
     _mudar_o_curso(posicao, mudar)
 
@@ -1572,14 +1613,21 @@ def _lista_no_explorar(d, posicao, pausa):
         guardar_o_caso(d, porque, "curso não abriu", passo="abrir o curso pelo endereço")
         return False, f"a aula não abriu ({porque})"
     pausar_o_que_toca(d, pausa)
-    lista, porque = ler_a_lista(d, pausa)
+    total = total_de_aulas(d.dump_hierarchy())
+    lista, porque = ler_a_lista(d, pausa, ao_comecar=lambda: guardar_o_caso(
+        d, "o começo da lista", "lista das aulas", passo="ler a lista das aulas"))
     pausar_o_que_toca(d, pausa)
     if not lista:
         # A tela de onde a lista não passou vai ao Claude pelos casos (o print e a forma dela, cifrados).
         guardar_o_caso(d, porque, "lista não lida", passo="ler a lista das aulas")
         return False, f"a lista do curso {posicao} não foi lida ({porque})"
+    if total and len(lista) != total:
+        # A lista que não bate com o total do site (aula repetida ou que faltou) não é guardada.
+        guardar_o_caso(d, "a lista não bate com o total do site", "lista não bate", passo="ler a lista das aulas")
+        return False, (f"a lista do curso {posicao} tem {len(lista)} aula(s), e o site diz {total}: a lista não foi "
+                       f"guardada")
     guardar_a_lista(posicao, lista)
-    return True, descrever_a_lista(posicao, lista)
+    return True, descrever_a_lista(posicao, lista) + (", o mesmo total do site" if total else ", sem o total do site")
 
 
 def _tocar_no_explorar(d, posicao, numero, pausa):
