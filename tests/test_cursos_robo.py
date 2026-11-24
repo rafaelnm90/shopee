@@ -969,8 +969,12 @@ class SiteDoCurso(CelularDoVolume):
                  autoplay=False, escreve=True, completa="", rotulo_no_texto=False, nova_guia=False,
                  barra_escondida=False, rolagem_funciona=True, sessao_vencida=False, inicio_na_guia_nova=False,
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
-                 texto_na_videoaula=False, slides=4, carrossel_volta=False, **opcoes):
+                 texto_na_videoaula=False, slides=4, carrossel_volta=False, em_branco=0, branco_ate_voltar=False,
+                 **opcoes):
         super().__init__(**opcoes)
+        # A guia em branco depois do Enter (24/11/2026): em_branco leituras da tela sem nada da página, ou, com
+        # branco_ate_voltar, até o Chrome sair da frente e voltar.
+        self.em_branco, self.branco_ate_voltar, self.brancos, self.preso = em_branco, branco_ate_voltar, 0, False
         # A página fora das aulas em que o Enter caiu: "login" (a sessão vencida), "inicio" (a página inicial do
         # curso, pela guia nova) ou "outro" (outro site); None na aula aberta.
         self.logado, self.inicio_na_guia_nova, self.outro_site = not sessao_vencida, inicio_na_guia_nova, outro_site
@@ -1068,6 +1072,8 @@ class SiteDoCurso(CelularDoVolume):
 
     def app_start(self, pacote, wait=False):
         self.abertos.append(pacote)
+        if self.abre_o_chrome and pacote == CHROME and self.na_frente != CHROME:
+            self.preso = False
         if self.abre_o_chrome:
             self.na_frente = pacote
 
@@ -1085,6 +1091,13 @@ class SiteDoCurso(CelularDoVolume):
                     'resource-id="com.android.chrome:id/url_bar" clickable="true" '
                     f'text="{endereco}" content-desc="" bounds="[211,120][691,267]" />{resto}</hierarchy>')
         barra = self.endereco_na_barra.removeprefix("https://")
+        if (self.brancos or self.preso) and not self.barra_em_foco:
+            # A guia sem nada da página: só a barra com o endereço e o quadro do Chrome, sem a página (o WebView).
+            self.brancos = max(0, self.brancos - 1)
+            return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
+                    f'resource-id="com.android.chrome:id/url_bar" clickable="true" text="{barra}" content-desc="" '
+                    'bounds="[211,120][691,267]" /><node class="android.widget.FrameLayout" resource-id="" '
+                    'clickable="false" text="" content-desc="Guia" bounds="[0,267][1080,2394]" /></hierarchy>')
         if self.barra_em_foco and self.escrito is not None:
             barra = self.escrito
         fora = [] if self.barra_escondida and not self.barra_em_foco else [
@@ -1171,6 +1184,8 @@ class SiteDoCurso(CelularDoVolume):
         self.teclas.append(tecla)
         if tecla == "back":
             self.barra_em_foco = False
+        if tecla == "home":
+            self.na_frente, self.barra_em_foco = "com.android.launcher", False
 
     def pull(self, remoto, local):
         self.puxados.append(remoto)
@@ -1196,6 +1211,7 @@ class SiteDoCurso(CelularDoVolume):
             elif alvo is not None:
                 self.nova_guia, self.pagina, self.endereco_na_barra = False, None, self.aulas[alvo][2]
                 self._abrir(alvo)
+                self.brancos, self.preso = self.em_branco, self.branco_ate_voltar
             self.barra_em_foco = False
         if partes[:1] == ["touch"]:
             self.marcado = True
@@ -1289,6 +1305,25 @@ def test_a_aula_abre_pela_caixa_da_nova_guia_e_com_a_barra_escondida():
     assert cursos_robo.ir_para_o_endereco(presa, AULAS_DO_SITE[2][2], **SEM_ESPERA) == (
         None, "sem a barra de endereço do Chrome")
     assert presa.toques == []
+
+
+def test_a_guia_em_branco_espera_mais_e_o_chrome_sai_da_frente_e_volta():
+    # 24/11/2026, das 04:05 às 04:25, nos cursos 4, 6 e 7: depois do Enter, a barra já com o endereço da aula e a guia
+    # sem nada da página por minutos; a página só apareceu quando o Chrome saiu da frente e voltou. Em branco, a espera
+    # passa dos 20 s, e o Chrome sai da frente e volta, sem nenhum toque na página.
+    endereco = AULAS_DO_SITE[1][2]
+    presa = SiteDoCurso(AULAS_DO_SITE, branco_ate_voltar=True)
+    assert cursos_robo.ir_para_o_endereco(presa, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    assert presa.teclas == ["home"] and presa.abertos == [CHROME] and presa.toques == [(451, 193)]
+    # A que só demora mais que os 20 s também abre, na mesma espera.
+    lenta = SiteDoCurso(AULAS_DO_SITE, em_branco=15)
+    assert cursos_robo.ir_para_o_endereco(lenta, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    # A que fica em branco: o Chrome sai da frente no máximo duas vezes, e o porquê vai ao registro.
+    branca = SiteDoCurso(AULAS_DO_SITE, em_branco=1000)
+    assert cursos_robo.ir_para_o_endereco(branca, endereco, **SEM_ESPERA) == (None, cursos_robo.EM_BRANCO)
+    assert branca.teclas == ["home", "home"] and branca.toques == [(451, 193)]
+    # A página de verdade (com o que o site mostra) nunca passa por em branco.
+    assert not cursos_robo.pagina_em_branco(SiteDoCurso(AULAS_DO_SITE, no_alto=True).dump_hierarchy())
 
 
 def test_a_sessao_vencida_entra_com_o_acesso_guardado_e_abre_a_aula():
@@ -1899,6 +1934,18 @@ def test_a_lista_com_a_pagina_no_alto_e_a_aba_de_comentarios_aberta():
     lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
     assert (lista, porque) == (LISTA_DO_CURSO[:4], "")
     assert site.toques == ["a aba Módulos", "módulo 0", "módulo 1"] and site.puxados == []
+
+
+def test_a_aula_abre_pela_lista_tambem_com_a_aba_de_comentarios_aberta(bm, monkeypatch):
+    # Nas gravações da noite de 24/11/2026, a aba aberta embaixo da aula era a de Comentários (o site lembra a última
+    # escolhida): sem a lista na tela, a aba Módulos é tocada uma vez, e a aula abre pela lista como sempre.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    site = ListaDoSite(MODULOS_DO_CURSO, comeco=2600, aba_aberta=False, aberta=4)
+    assert cursos_robo.abrir_pela_lista(site, 4, 2, pausa=lambda segundos: None) == (True, "")
+    assert site.toques == ["a aba Módulos", "módulo 1", "aula Sobre o suporte"] and site.puxados == []
 
 
 def test_a_lista_que_comeca_cortada_no_alto_nao_vale():
