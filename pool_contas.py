@@ -1623,6 +1623,24 @@ async def situacao_pelo_acesso(cliente, conta, grupo_id):
     return None
 
 
+# O começo das mensagens de erro do Telethon que dizem o porquê, e a palavra fixa de cada uma: o texto inteiro
+# pode trazer ids e nomes, e vai só ao log do servidor.
+FORMAS_DO_ERRO = (
+    ("Could not find the input entity", "entidade fora do cache"),
+    ("Cannot find any entity", "entidade não achada"),
+    ("Not a valid string", "sessão inválida"),
+    ("No user has", "nome de usuário não achado"),
+)
+
+
+def forma_do_erro(erro):
+    """': palavra fixa' do porquê de um erro conhecido do Telethon; ': outro texto' ou '' (sem texto) no resto."""
+    texto = str(erro)
+    if not texto:
+        return ""
+    return ": " + next((forma for comeco, forma in FORMAS_DO_ERRO if comeco in texto), "outro texto")
+
+
 async def checar_conta(conta, grupo_id=None, cliente=None):
     """
     Conecta com a conta, descobre em que pé ela está e grava no banco.
@@ -1647,6 +1665,8 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
         grupo_id = obter_grupo_autorais()
 
     emprestado = cliente is not None
+    # Em que parte da checagem o erro inesperado aconteceu: vai ao registro, só com palavras fixas.
+    passo = "abrir a sessão"
     try:
         if not emprestado:
             cliente = await criar_cliente(conta)
@@ -1655,6 +1675,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
 
         # Atualiza os dados de identidade a cada checagem: nome, @ e id.
         # É isto que faz a tabela "se atualizar sozinha" depois do login.
+        passo = "ler a conta"
         eu = await cliente.get_me()
         if eu:
             nome = " ".join(filter(None, [eu.first_name, eu.last_name])).strip()
@@ -1666,6 +1687,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
         # para o cadastro já avisar mesmo com a conta ainda fora do grupo de origem.
         # Conta sem papel escolhido também, para o painel não mostrar a linha vazia.
         if papel_da_conta(conta) != PAPEL_REPOSTAGEM:
+            passo = "conferir o canal de destino"
             await conferir_destino(cliente, conta)
 
         if not grupo_id:
@@ -1674,6 +1696,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
             return (conta.get("status_grupo"), SESSAO_OK)
 
         # A checagem de participação propriamente dita.
+        passo = "conferir o grupo"
         try:
             entidade = await cliente.get_entity(grupo_id)
             permissoes = await cliente.get_permissions(entidade, "me")
@@ -1706,6 +1729,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
             # (sem "left") é estar no grupo. Erro aqui (FloodWait, rede) sobe para
             # os tratadores de fora, que guardam o motivo e não mudam o estado.
             logger.debug(f"🗂️ [Pool] {apelido}: cache vazio, procurando o grupo nas conversas...")
+            passo = "procurar o grupo nas conversas"
             entidade = None
             async for dialogo in cliente.iter_dialogs():
                 if dialogo.id == grupo_id:
@@ -1729,6 +1753,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
                 atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
                                  erro="o grupo de origem não está nas conversas da conta")
                 return (fora, SESSAO_OK)
+            passo = "ler as permissões no grupo"
             try:
                 permissoes = await cliente.get_permissions(entidade, "me")
             except errors.UserNotParticipantError:
@@ -1761,8 +1786,9 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
     except Exception as e:
         atualizar_status(apelido, erro=f"{type(e).__name__}: {e}")
         logger.error(f"❌ [Pool] Erro ao checar '{apelido}': {type(e).__name__}: {e}")
-        # O tipo do erro no registro: o checkup só vê a forma da linha do log, sem o tipo.
-        registro_processos.registrar("autorais", "checagem da conta", "erro", type(e).__name__, ok=False)
+        # O tipo do erro, o passo e a forma da mensagem no registro: o checkup só vê a forma da linha do log.
+        registro_processos.registrar("autorais", "checagem da conta", "erro",
+                                     f"{type(e).__name__} em {passo}{forma_do_erro(e)}", ok=False)
         return (conta.get("status_grupo"), conta.get("status_sessao"))
 
     finally:
