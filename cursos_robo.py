@@ -1220,6 +1220,102 @@ def descrever_a_lista(posicao, lista):
             f"({sum(com) // 60} min de vídeo) e {len(lista) - len(com)} sem")
 
 
+# A aula aberta pelo toque no nome dela na lista (o caminho que a noite vai seguir: pedido do Rafael de 24/11/2026, de
+# ver as aulas em ordem, da 1ª à última de cada curso). O curso abre pelo endereço guardado (a aula em que o site
+# parou), a página rola para baixo até a linha da aula, o módulo dela é aberto pelo botão, e a linha é tocada; a aula
+# aberta é conferida pelo Próximo, que tem de mostrar a aula seguinte da lista (nenhuma, na última do curso).
+SEM_A_AULA_NA_LISTA = "a aula não apareceu na lista"
+FORA_DA_LISTA = "a aula não está na lista do curso"
+OUTRA_AULA = "a página não é a da aula tocada na lista"
+
+
+def lista_do_curso(posicao, mapa=None):
+    """A lista das aulas do curso dessa posição, lida da aba Módulos ([] antes do curso:lista:N)."""
+    return ((mapa or mapa_das_aulas())["cursos"].get(str(posicao)) or {}).get("lista") or []
+
+
+def endereco_do_curso(posicao, mapa=None):
+    """O endereço guardado do curso (curso:primeira:N), que abre a aula em que o site parou; "" sem ele."""
+    aulas = ((mapa or mapa_das_aulas())["cursos"].get(str(posicao)) or {}).get("aulas") or []
+    return aulas[0].get("endereco", "") if aulas else ""
+
+
+def _linha_na_tela(itens, alvo, dentro):
+    """
+    Uma tela da lista: (a linha da aula alvo, se à vista; o botão do módulo dela, se à vista e fechado; se a tela
+    termina dentro do módulo dela). As linhas no alto da tela, antes de qualquer botão, são do módulo em que a tela de
+    antes terminou (dentro).
+    """
+    linha, fechado = None, None
+    for numero, item in enumerate(itens):
+        if item["tipo"] == "módulo":
+            dentro = item["nome"] == alvo["modulo"]
+            abaixo = itens[numero + 1] if numero + 1 < len(itens) else None
+            if dentro and not (abaixo and abaixo["tipo"] == "aula"):
+                fechado = item
+        elif dentro and linha is None and item["nome"] == alvo["nome"]:
+            linha = item
+    return linha, fechado, dentro
+
+
+def abrir_pela_lista(d, posicao, numero, pausa=None):
+    """
+    A aula `numero` da lista do curso aberta pelo toque no nome dela na aba Módulos, com o curso aberto antes pelo
+    endereço guardado: (True, "") com a aula conferida pelo Próximo, ou (False, o porquê). A página só rola para
+    baixo, e o botão do módulo dela é tocado uma vez, se fechado.
+    """
+    pausa = pausa or time.sleep
+    lista = lista_do_curso(posicao)
+    if not 1 <= int(numero) <= len(lista):
+        return False, FORA_DA_LISTA
+    alvo = lista[int(numero) - 1]
+    tipo, porque = ir_para_o_endereco(d, endereco_do_curso(posicao), pausa)
+    if not tipo:
+        return False, f"a aula não abriu ({porque})"
+    pausar_o_que_toca(d, pausa)
+    dentro, tocado, antes, sem_a_lista = False, False, None, 0
+    for _ in range(VOLTAS_DA_LISTA):
+        tela = _fechar_a_folha_do_chrome(d, pausa)
+        achado = itens_da_lista(tela)
+        if not achado or not achado[1]:
+            sem_a_lista += 1
+            if sem_a_lista > TELAS_DA_AULA:
+                return False, SEM_A_LISTA
+            rolar_a_pagina(d)
+            pausa(ESPERA_DA_ROLAGEM)
+            continue
+        itens = achado[1]
+        linha, fechado, fim_dentro = _linha_na_tela(itens, alvo, dentro)
+        if linha and _tocavel(tela, linha["caixa"]):
+            d.click(*_centro(linha["caixa"]))
+            return _conferir_a_aula_tocada(d, lista, int(numero), pausa)
+        if fechado and not tocado:
+            espaco = fechado["caixa"][3] + ESPACO_DA_AULA < _topo_do_proximo(tela)
+            if espaco and _tocavel(tela, fechado["caixa"]):
+                d.click(*_centro(fechado["caixa"]))
+                tocado = True
+                pausa(ESPERA_DO_MODULO)
+                continue
+        marca = [(item["tipo"], item["nome"], item["caixa"]) for item in itens]
+        if marca == antes:
+            return False, SEM_A_AULA_NA_LISTA
+        antes, dentro = marca, fim_dentro
+        rolar_a_pagina(d)
+        pausa(ESPERA_DA_ROLAGEM)
+    return False, SEM_A_AULA_NA_LISTA
+
+
+def _conferir_a_aula_tocada(d, lista, numero, pausa):
+    """A aula tocada na lista abriu? O Próximo mostra a seguinte da lista (ou nenhuma, na última). (ok, porque)."""
+    seguinte = lista[numero]["nome"] if numero < len(lista) else ""
+    for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
+        pausa(PASSO_DA_ESPERA)
+        tela, _ponto = proximo_na_tela(d, pausa)
+        if nome_no_proximo(tela) == seguinte:
+            return True, ""
+    return False, OUTRA_AULA
+
+
 def _aberta_no_explorar(d, tipo, porque):
     """O que o explorar diz da aula que tentou abrir: o tipo, o vídeo e o play, só em palavras fixas e números."""
     if not tipo:
@@ -1323,6 +1419,26 @@ def _lista_no_explorar(d, posicao, pausa):
     return True, descrever_a_lista(posicao, lista)
 
 
+def _tocar_no_explorar(d, posicao, numero, pausa):
+    """
+    O passo curso:tocar:N:K, o teste de dia da abertura pela lista (com o celular mudo): a aula K da lista do curso N
+    tocada pelo nome, o que tocar pausado, e a tela de depois guardada para o Claude pelos casos (o print e a forma
+    dela, cifrados), para ele ver onde a página ficou. O log diz só se abriu, o player e o vídeo, em palavras fixas.
+    """
+    if posicao not in ORDEM_DOS_CURSOS:
+        return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
+    if not lista_do_curso(posicao):
+        return False, f"o curso {posicao} ainda não tem a lista das aulas (curso:lista:{posicao})"
+    ok, porque = abrir_pela_lista(d, posicao, numero, pausa)
+    pausar_o_que_toca(d, pausa)
+    guardar_o_caso(d, "aula aberta pela lista" if ok else porque, "aula pela lista", passo="abrir a aula pela lista")
+    if not ok:
+        return False, f"a aula {numero} do curso {posicao} não abriu pela lista ({porque})"
+    player = "o player à vista" if tem_player(d.dump_hierarchy()) else "sem o player à vista"
+    return True, (f"aula {numero} do curso {posicao} aberta pela lista: {player}; "
+                  f"{descrever_a_midia(midia_do_chrome(d))}")
+
+
 def curso_no_explorar(d, argumento, pausa=time.sleep):
     """
     O passo curso do explorar: curso:primeira:N guarda a aula aberta no Chrome como a 1ª do curso na posição N da lista
@@ -1330,8 +1446,9 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
     como a noite abre, e curso:proximo, a seguinte à aberta, pelo Próximo (os dois sem mudar o mapa, com o celular
     mudo); curso:guardar guarda a aula sem vídeo aberta (ou a página da videoaula), como a noite; curso:gravar:N grava
     de dia a 1ª aula do curso N como a noite grava (o teste); curso:lista:N lê da aba Módulos a lista das aulas do curso
-    N, na ordem, e a guarda no mapa (com o celular mudo); curso sozinho diz o mapa em números. O endereço e os nomes
-    ficam no banco, e o log diz só números e palavras fixas.
+    N, na ordem, e a guarda no mapa (com o celular mudo); curso:tocar:N:K abre a aula K dessa lista pelo toque no nome
+    dela, como a noite vai abrir, e guarda a tela para o Claude (casos); curso sozinho diz o mapa em números. O
+    endereço e os nomes ficam no banco, e o log diz só números e palavras fixas.
     """
     partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
     if not partes:
@@ -1340,11 +1457,13 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
         return _proxima_no_explorar(d, pausa)
     if partes == ["guardar"]:
         return _guardar_no_explorar(d, pausa)
+    if partes[0] == "tocar" and len(partes) == 3 and partes[1].isdigit() and partes[2].isdigit():
+        return _tocar_no_explorar(d, int(partes[1]), int(partes[2]), pausa)
     if partes[0] not in ("primeira", "abrir", "gravar", "lista") or len(partes) != 2 or not partes[1].isdigit():
         return False, ("curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso:abrir:N abre a 1ª do curso "
                        "N; curso:proximo abre a seguinte; curso:guardar guarda a aula sem vídeo aberta (ou a página "
                        "da videoaula); curso:gravar:N grava a 1ª do curso N como a noite; curso:lista:N lê a lista "
-                       "das aulas do curso N; curso diz o mapa")
+                       "das aulas do curso N; curso:tocar:N:K abre a aula K da lista pelo nome; curso diz o mapa")
     posicao = int(partes[1])
     if posicao not in ORDEM_DOS_CURSOS:
         return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
@@ -1372,7 +1491,7 @@ def toca_aula(nome, argumento):
     também de dia, o celular fica mudo: ele fica no quarto do Rafael (pedido dele, 22/11/2026).
     """
     acao = (argumento or "").split(":")[0].strip().lower()
-    return ((nome == "curso" and acao in ("abrir", "proximo", "gravar", "lista"))
+    return ((nome == "curso" and acao in ("abrir", "proximo", "gravar", "lista", "tocar"))
             or (nome == "midia" and acao == "tocar"))
 
 

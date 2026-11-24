@@ -2309,14 +2309,17 @@ class ListaDoSite:
     embaixo das abas; rolagem: quanto a página já rolou para baixo. O arrasto com o dedo para cima rola a página para
     baixo (até o fim dela); o para baixo fica anotado em puxados (no alto, o Chrome recarregaria a página). A barra do
     Próximo e a bolha do chat ficam por cima da página, e cada toque fica anotado com o que estava embaixo dele.
-    aba_aberta=False: outra aba (Comentários) aberta, sem a lista, até o toque na aba Módulos.
+    aba_aberta=False: outra aba (Comentários) aberta, sem a lista, até o toque na aba Módulos. aberta: a aula aberta,
+    pela ordem da lista inteira (a barra do Próximo mostra a seguinte; na última, nenhuma); o toque numa linha abre a
+    aula dela.
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
-    def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True):
+    def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0):
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
-        self.comeco, self.rolagem, self.aba_aberta = comeco, rolagem, aba_aberta
+        self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
         self.toques, self.puxados, self.teclas = [], [], []
+        self.todas = [aula for _modulo, aulas in modulos for aula, _tempo in aulas]
 
     def _itens(self):
         """(tipo, chave, texto, x1, x2, y1, y2 na página) de cada botão da lista, e o fim da página."""
@@ -2359,14 +2362,15 @@ class ListaDoSite:
                        + "</node>")
         pagina = ('<node class="android.webkit.WebView" resource-id="" text="" content-desc="" '
                   f'bounds="[0,{self.TOPO}][1080,{self.FIM}]">' + "".join(nos) + "</node>")
-        return ('<hierarchy rotation="0">' + pagina
-                + '<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
-                  'text="Próximo: Aula seguinte Próxima aula:" bounds="[0,2175][1080,2394]" />'
-                  '<node class="android.widget.Button" resource-id="" clickable="true" text="" content-desc="" '
+        proximo = ('<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
+                   f'text="Próximo: {self.todas[self.aberta + 1]} Próxima aula:" bounds="[0,2175][1080,2394]" />'
+                   if self.aberta + 1 < len(self.todas) else "")
+        return ('<hierarchy rotation="0">' + pagina + proximo
+                + '<node class="android.widget.Button" resource-id="" clickable="true" text="" content-desc="" '
                   'bounds="[884,1999][1039,2157]" /></hierarchy>')
 
     def click(self, x, y):
-        if y >= self.PROXIMO:
+        if y >= self.PROXIMO and self.aberta + 1 < len(self.todas):
             self.toques.append("o Próximo")
             return
         if 884 <= x <= 1039 and 1999 <= y <= 2157:
@@ -2377,6 +2381,8 @@ class ListaDoSite:
             topo, baixo = self._na_tela(y1, y2)
             if x1 <= x <= x2 and topo <= y <= baixo:
                 self.toques.append(f"{tipo} {chave}")
+                if tipo == "aula":
+                    self.aberta = self.todas.index(chave)
                 if tipo == "módulo":
                     if chave in self.abertos:
                         self.abertos.discard(chave)
@@ -2494,3 +2500,69 @@ def test_a_lista_pelo_explorar_fica_no_mapa_e_vai_ao_claude_sem_os_enderecos(bm,
     assert not ok and texto == f"a lista do curso 4 não foi lida ({cursos_robo.LISTA_SEM_O_COMECO})"
     assert casos == [(cursos_robo.LISTA_SEM_O_COMECO, "lista não lida", "ler a lista das aulas")]
     assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["lista"] == LISTA_DO_CURSO
+
+
+@pytest.mark.parametrize("numero, toques", [
+    (1, []), (3, ["módulo 1", "aula Como escolher o produto"]), (5, ["módulo 3", "aula Dia 01"]),
+    (18, ["módulo 3", "aula Dia 14"]), (19, ["módulo 4", "aula Encontro gravado"])])
+def test_a_aula_aberta_pelo_nome_na_lista_e_conferida_pelo_proximo(bm, monkeypatch, numero, toques):
+    # O caminho da noite (pedido do Rafael de 24/11/2026, as aulas em ordem): o curso abre pelo endereço (a aula em
+    # que o site parou), a página rola até a linha da aula, o módulo dela abre pelo botão, e a linha é tocada; o Próximo
+    # confere que abriu a aula certa. Só o módulo da aula é aberto; a 1ª, no módulo já aberto, é tocada direto.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={0}, aberta=2)
+    assert cursos_robo.abrir_pela_lista(site, 4, numero, pausa=lambda segundos: None) == (True, "")
+    nome = LISTA_DO_CURSO[numero - 1]["nome"]
+    assert site.todas[site.aberta] == nome
+    assert site.toques == (toques or [f"aula {nome}"]) and site.puxados == []
+
+
+def test_a_aula_que_nao_aparece_na_lista_ou_abre_outra_nao_vale(bm, monkeypatch):
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    sem_pausa = {"pausa": lambda segundos: None}
+    # Antes do curso:lista:N, nenhuma aula abre pela lista.
+    assert cursos_robo.abrir_pela_lista(ListaDoSite(MODULOS_DO_CURSO), 4, 1, **sem_pausa) == (
+        False, cursos_robo.FORA_DA_LISTA)
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    assert cursos_robo.abrir_pela_lista(ListaDoSite(MODULOS_DO_CURSO), 4, 20, **sem_pausa) == (
+        False, cursos_robo.FORA_DA_LISTA)
+    # O site mudou a lista: a aula não está mais no módulo dela.
+    outra = [(modulo, [aula for aula in aulas if aula[0] != "Regras"]) for modulo, aulas in MODULOS_DO_CURSO]
+    site = ListaDoSite(outra, abertos={0})
+    assert cursos_robo.abrir_pela_lista(site, 4, 4, **sem_pausa) == (False, cursos_robo.SEM_A_AULA_NA_LISTA)
+    assert site.puxados == [] and not any(toque.startswith("aula") for toque in site.toques)
+
+    # A linha tocada que não abre a aula (o Próximo não muda): a página não é a da aula da vez.
+    class SemAbrir(ListaDoSite):
+        def click(self, x, y):
+            aberta = self.aberta
+            super().click(x, y)
+            self.aberta = aberta
+    assert cursos_robo.abrir_pela_lista(SemAbrir(MODULOS_DO_CURSO, abertos={0}, aberta=9), 4, 3, **sem_pausa) == (
+        False, cursos_robo.OUTRA_AULA)
+
+
+def test_o_explorar_abre_a_aula_pela_lista_e_guarda_a_tela_para_o_claude(bm, monkeypatch):
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    monkeypatch.setattr(cursos_robo, "midia_do_chrome", lambda d: None)
+    casos = []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo, resultado="", passo="": casos.append(
+        (motivo, resultado, passo)))
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={0})
+    assert cursos_robo.toca_aula("curso", "tocar:4:3")
+    assert cursos_robo.curso_no_explorar(site, "tocar:4:3", pausa=lambda s: None) == (
+        False, "o curso 4 ainda não tem a lista das aulas (curso:lista:4)")
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    assert cursos_robo.curso_no_explorar(site, "tocar:4:3", pausa=lambda s: None) == (
+        True, "aula 3 do curso 4 aberta pela lista: sem o player à vista; sem vídeo no Chrome")
+    assert casos == [("aula aberta pela lista", "aula pela lista", "abrir a aula pela lista")]
+    assert cursos_robo.curso_no_explorar(site, "tocar:4:30", pausa=lambda s: None) == (
+        False, f"a aula 30 do curso 4 não abriu pela lista ({cursos_robo.FORA_DA_LISTA})")
+    assert not cursos_robo.curso_no_explorar(site, "tocar:9:1", pausa=lambda s: None)[0]
