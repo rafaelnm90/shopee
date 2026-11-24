@@ -3160,25 +3160,38 @@ def test_o_modulo_que_a_rolagem_passou_por_cima_da_caixa_volta_e_e_aberto():
     assert [toque for toque in site.toques if toque.startswith("módulo")] == [f"módulo {n}" for n in range(8)]
 
 
-def test_a_duracao_que_aparece_depois_da_linha_e_lida_antes_de_seguir():
+def test_a_duracao_que_aparece_depois_da_linha_e_lida_antes_de_seguir(monkeypatch):
     # 24/11/2026, 2ª leitura dos cursos 3 e 4: as primeiras aulas do módulo aberto vieram sem a duração, que o site
     # põe um instante depois da linha; aberto o módulo, o de antes fecha e a página pula, e as linhas saíram da tela
     # sem ela (sem a duração, a noite não confere se gravou o vídeo inteiro). A tela é lida de novo antes de seguir.
     modulos = [("Módulo Um", [(f"Aula 1.{n}", "3:00") for n in range(3)]),
                ("Módulo Dois", [(f"Aula 2.{n}", "4:00") for n in range(16)])]
+    marcas = (0.101, 0.102, 0.103, 0.104)
+    monkeypatch.setattr(cursos_robo, "ESPERAS_DA_DURACAO", marcas)
     esperas = []
     site = ListaDoSite(modulos, um_aberto=True, numeros=True, atrasadas={"Aula 2.0", "Aula 2.1"}, atraso=3)
     lista, porque = cursos_robo.ler_a_lista(site, pausa=esperas.append)
     assert porque == ""
     assert [(aula["nome"], aula["segundos"]) for aula in lista] == (
         [(f"Aula 1.{n}", 180) for n in range(3)] + [(f"Aula 2.{n}", 240) for n in range(16)])
-    assert esperas.count(cursos_robo.ESPERA_DA_DURACAO) <= cursos_robo.RELEITURAS_DA_DURACAO
+    assert sum(espera in marcas for espera in esperas) <= cursos_robo.RELEITURAS_DA_DURACAO
     # A aula sem vídeo, que nunca tem a duração, ganha só as releituras da primeira tela em que aparece.
     sem_video = [("Materiais", [(f"Texto {n}", None) for n in range(12)])]
     esperas = []
     lista, porque = cursos_robo.ler_a_lista(ListaDoSite(sem_video, abertos={0}, numeros=True), pausa=esperas.append)
     assert porque == "" and [aula["segundos"] for aula in lista] == [None] * 12
-    assert 1 <= esperas.count(cursos_robo.ESPERA_DA_DURACAO) <= 3 * cursos_robo.RELEITURAS_DA_DURACAO
+    assert 1 <= sum(espera in marcas for espera in esperas) <= 3 * cursos_robo.RELEITURAS_DA_DURACAO
+
+
+def test_a_duracao_que_demora_nas_primeiras_aulas_do_modulo_aberto_e_lida():
+    # 24/11/2026, 3ª leitura dos cursos 1, 3 e 4: nas primeiras aulas do módulo que acabou de abrir, a duração demorou
+    # mais que as 2 releituras de 1 s, e o módulo seguinte, aberto logo depois, fechou o de antes: as aulas ficaram sem
+    # ela. A tela é lida de novo com esperas maiores (ESPERAS_DA_DURACAO) antes de a leitura seguir.
+    modulos = [("Módulo Um", [("Aula 1.0", "2:01"), ("Aula 1.1", "4:31")]), ("Módulo Dois", [("Aula 2.0", "1:08")])]
+    site = ListaDoSite(modulos, um_aberto=True, numeros=True, atrasadas={"Aula 1.0", "Aula 1.1"}, atraso=5)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda s: None)
+    assert porque == "" and [aula["segundos"] for aula in lista] == [121, 271, 68]
+    assert site.toques == ["módulo 0", "módulo 1"]
 
 
 # Três módulos como os do curso 4 (24/11/2026), com a duração de cada linha só depois de ela passar pela caixa.
@@ -3235,17 +3248,24 @@ def test_a_aula_que_a_caixa_nao_traz_para_dentro_fica_com_a_duracao_da_leitura_a
     monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
     monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda *a, **k: None)
     ok, texto = cursos_robo.curso_no_explorar(site(), "lista:4", pausa=lambda s: None)
-    assert ok and texto.endswith(f" ({len(presas)} sem a linha lida dentro da caixa), sem o total do site")
+    assert ok and texto.endswith(f" ({len(presas)} sem a linha lida dentro da caixa), sem o total do site; "
+                                 f"{len(presas)} aula(s) com a duração da leitura anterior")
     guardada = cursos_robo.lista_do_curso(4)
     assert [aula["segundos"] for aula in guardada] == [121] * 16
     assert not any("sem_conferir" in aula for aula in guardada)
 
 
-def test_a_falta_da_duracao_lida_dentro_da_caixa_vale_na_lista_guardada(bm):
-    # A aula lida sem a duração dentro da caixa (o vídeo trocado por um texto, por exemplo) fica sem ela, também com a
-    # duração na leitura anterior; só a não conferida fica com a de antes, também sem o número da aula no site.
+def test_a_aula_lida_sem_a_duracao_fica_com_a_da_leitura_anterior(bm):
+    # A duração só aparece na linha da aula com vídeo: a leitura que não a viu (a linha fora da caixa, ou a duração que
+    # demorou a aparecer, nos cursos 1, 3 e 4 em 24/11/2026) fica com a da leitura anterior da mesma aula, pelo número
+    # dela no site ou, sem ele, pelo módulo e pelo nome; guardar_a_lista diz quantas. A aula que nenhuma leitura viu com
+    # a duração continua sem ela.
     cursos_robo.guardar_a_lista(4, [{"modulo": "Módulo", "nome": "Aula", "segundos": 121, "aula": "3156"},
-                                    {"modulo": "Módulo", "nome": "Outra", "segundos": 90}])
-    cursos_robo.guardar_a_lista(4, [{"modulo": "Módulo", "nome": "Aula", "segundos": None, "aula": "3156"},
-                                    {"modulo": "Módulo", "nome": "Outra", "segundos": None, "sem_conferir": True}])
-    assert [aula["segundos"] for aula in cursos_robo.lista_do_curso(4)] == [None, 90]
+                                    {"modulo": "Módulo", "nome": "Outra", "segundos": 90},
+                                    {"modulo": "Módulo", "nome": "Texto", "segundos": None, "aula": "3142"}])
+    de_antes = cursos_robo.guardar_a_lista(4, [
+        {"modulo": "Módulo", "nome": "Aula", "segundos": None, "aula": "3156"},
+        {"modulo": "Módulo", "nome": "Outra", "segundos": None, "sem_conferir": True},
+        {"modulo": "Módulo", "nome": "Texto", "segundos": None, "aula": "3142"}])
+    assert de_antes == 2 and [aula["segundos"] for aula in cursos_robo.lista_do_curso(4)] == [121, 90, None]
+    assert cursos_robo.guardar_a_lista(4, cursos_robo.lista_do_curso(4)) == 0
