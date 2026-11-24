@@ -67,7 +67,9 @@ Passos, separados por ponto e vírgula:
                      números no log); curso:abrir:N abre a 1ª aula do curso N pela barra de
                      endereço, como a noite abre, e curso:proximo, a seguinte à aberta, e dizem
                      se a aula tem vídeo, o estado dele e se o play está na tela (com o celular
-                     mudo também de dia, como no midia:tocar)
+                     mudo também de dia, como no midia:tocar); curso:lista:N lê da aba Módulos
+                     a lista das aulas do curso N, na ordem, e a guarda no mapa (os nomes só no
+                     banco; no log, só quantos módulos, aulas e minutos)
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael

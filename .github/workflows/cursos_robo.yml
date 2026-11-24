@@ -4,7 +4,8 @@ name: Aulas do curso (gravadas pelo celular do robô, cifradas)
 # P289 1 a P293 1): de cada aula, só a fala em texto e as folhas de quadros, para o Claude
 # estudar. Só roda à mão. Ações:
 #   exportar  leva as aulas mais velhas, cifradas pelo servidor, ao ramo aulas-curso (um
-#             commit só, trocado a cada exportação), num pacote de até 40 MB;
+#             commit só, trocado a cada exportação), num pacote de até 40 MB, com o mapa
+#             das aulas (a lista de cada curso, sem os endereços);
 #   apagar    depois de lido: apaga do servidor as aulas que foram no pacote, e o ramo.
 # Pedido do Rafael: o servidor não pode lotar, e nada do curso fica acumulado.
 #
@@ -71,7 +72,8 @@ jobs:
 
           QUANTAS=$(servidor contar | tr -dc '0-9')
           echo "Aulas guardadas no servidor: ${QUANTAS:-?}"
-          if [ "${QUANTAS:-0}" = "0" ]; then
+          # Sem aula guardada, o pacote vai só com o mapa (mapa.json), quando algum curso já tem a lista das aulas.
+          if [ "${QUANTAS:-0}" = "0" ] && [ "$(servidor tem-lista | tr -dc '01')" != "1" ]; then
             echo "Nada para exportar."
             exit 0
           fi
@@ -99,4 +101,4 @@ jobs:
               -c user.email="41898173+github-actions[bot]@users.noreply.github.com" \
               commit -q -m "Aulas do curso (cifradas)"
           git push -q -f origin aulas-curso
-          echo "✅ Aulas cifradas no ramo aulas-curso (até ${ULTIMA})."
+          echo "✅ Aulas cifradas no ramo aulas-curso (até ${ULTIMA:-nenhuma aula, só o mapa})."

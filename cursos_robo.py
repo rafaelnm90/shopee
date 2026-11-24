@@ -1047,6 +1047,179 @@ def resumo_do_mapa(mapa=None):
     return "; ".join(partes)
 
 
+# --- A lista das aulas, pela aba Módulos (pedido do Rafael de 24/11/2026, às 00:17) ---
+# O endereço guardado de cada curso abre a aula em que o site parou (a 1ª ainda não vista), e não a 1ª do curso: na
+# noite de 24/11/2026, o curso 4 abriu na 15ª aula (as de antes o Rafael viu à mão) e o 5 na 2ª (a 1ª, o teste de dia
+# viu). A lista inteira, na ordem, vem da aba Módulos: cada módulo é um botão ("N% Nome do módulo"), e o aberto mostra
+# embaixo uma linha por aula, mais à direita ("Nome 7:28"; a aula sem vídeo pode vir sem a duração). O Claude a lê de
+# dia, com o celular mudo, pelo passo curso:lista:N do explorar, e ela fica no mapa (só no banco do servidor), com os
+# módulos na ordem e as aulas na ordem de cada um: é a lista das aulas com o check de cada uma que o Rafael pediu. Só
+# os botões dos módulos são tocados, e a página só rola para baixo (o dedo para cima): no alto dela, o arrasto para
+# baixo recarregaria a página.
+ID_DA_LISTA = "-content-modules"
+MODULO_DA_LISTA = re.compile(r"\d{1,3}%\s+(?P<nome>.*\S)")
+# O botão baixo demais está cortado pela beira da tela (ou embaixo da barra do Próximo): não é tocado.
+ALTURA_DO_BOTAO = 60
+# Embaixo do módulo aberto vem a 1ª aula dele: sem esse espaço à vista, a lista rola antes de saber se ele está aberto.
+ESPACO_DA_AULA = 160
+VOLTAS_DA_LISTA = 150
+ESPERA_DO_MODULO = 1.5
+SEM_A_LISTA = "a aba Módulos não apareceu na tela"
+LISTA_SEM_O_COMECO = "o começo da lista ficou fora da tela"
+LISTA_PELA_METADE = "a lista das aulas não chegou ao fim"
+MODULO_SEM_TOQUE = "o botão de um módulo ficou fora do alcance"
+
+
+def itens_da_lista(xml):
+    """
+    A aba Módulos à vista: (a caixa da lista na tela, [{"tipo": "módulo" ou "aula", "nome", "segundos", "caixa"}] de
+    cima para baixo); None sem ela na tela. A aula sem a duração na linha tem segundos None.
+    """
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return None
+    lista = next((no for no in raiz.iter("node") if no.get("resource-id", "").endswith(ID_DA_LISTA)), None)
+    caixa = re.fullmatch(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", lista.get("bounds", "")) if lista is not None \
+        else None
+    if not caixa:
+        return None
+    itens = []
+    for no in _nos(ET.tostring(lista, encoding="unicode")):
+        texto = " ".join(no["texto"].split())
+        if not no["clicavel"] or no["classe"] != "Button" or not texto or texto.startswith(ROTULO_DO_PROXIMO):
+            continue
+        modulo = MODULO_DA_LISTA.fullmatch(texto)
+        if no["id"] and modulo:
+            itens.append({"tipo": "módulo", "nome": modulo["nome"], "segundos": None, "caixa": no["caixa"]})
+        elif not no["id"] and not modulo:
+            linha = LINHA_DA_AULA.fullmatch(texto)
+            itens.append({"tipo": "aula", "nome": linha["nome"] if linha else texto,
+                          "segundos": segundos_do_tempo(linha["tempo"]) if linha else None, "caixa": no["caixa"]})
+    return tuple(map(int, caixa.groups())), sorted(itens, key=lambda item: item["caixa"][1])
+
+
+def _tocavel(tela, caixa):
+    """O botão está inteiro na tela, acima da barra do Próximo e longe da bolha do chat e da barra do Chrome?"""
+    return (caixa[3] - caixa[1] >= ALTURA_DO_BOTAO and caixa[3] < _topo_do_proximo(tela)
+            and _livre_para_tocar(tela, _centro(caixa)))
+
+
+def _juntar_as_aulas(lidas, vistas):
+    """As aulas do módulo vistas nesta tela depois das já lidas, sem repetir o pedaço que as duas leituras mostram."""
+    for tamanho in range(min(len(lidas), len(vistas)), 0, -1):
+        if lidas[-tamanho:] == vistas[:tamanho]:
+            return lidas + vistas[tamanho:]
+    return lidas + vistas
+
+
+def _uma_olhada_na_lista(itens, modulos):
+    """
+    Uma tela da lista: as aulas do módulo que está sendo lido (o último de `modulos`) e o primeiro módulo novo depois
+    dele, com o item logo abaixo deste. As aulas no alto da tela, antes de qualquer botão, são do módulo lido, se o
+    botão dele já saiu da tela; as de um módulo já lido ficam de fora.
+    """
+    lido = modulos[-1] if modulos else None
+    nomes = {modulo["nome"] for modulo in modulos}
+    botao_do_lido = any(item["tipo"] == "módulo" and lido and item["nome"] == lido["nome"] for item in itens)
+    dono, vistas = (lido if lido and not botao_do_lido else None), []
+    for numero, item in enumerate(itens):
+        if item["tipo"] == "aula":
+            if dono is lido and lido is not None:
+                vistas.append((item["nome"], item["segundos"]))
+            continue
+        if lido and item["nome"] == lido["nome"]:
+            dono = lido
+        elif item["nome"] in nomes:
+            dono = None
+        else:
+            abaixo = itens[numero + 1] if numero + 1 < len(itens) else None
+            return vistas, item, abaixo
+    return vistas, None, None
+
+
+def ler_a_lista(d, pausa=None):
+    """
+    A lista das aulas do curso aberto no Chrome, pela aba Módulos: ([{"modulo", "nome", "segundos"}], "") com os
+    módulos na ordem e as aulas na ordem de cada um, ou (None, o porquê). Cada módulo fechado é aberto pelo botão dele
+    (um toque só: o que não mostra aula nenhuma fica vazio), e a página rola só para baixo, até o fim dela.
+    """
+    pausa = pausa or time.sleep
+    modulos, tocados, antes, sem_a_lista, aba_tocada = [], set(), None, 0, False
+    for _ in range(VOLTAS_DA_LISTA):
+        tela = _fechar_a_folha_do_chrome(d, pausa)
+        achado = itens_da_lista(tela)
+        if not achado or not achado[1]:
+            aba = next((no for no in _nos(tela) if no["id"].endswith(ID_DAS_ABAS) and no["clicavel"]), None)
+            if (not achado and not aba_tocada and aba and _tocavel(tela, aba["caixa"])
+                    and aba["caixa"][3] + ESPACO_DA_AULA < _topo_do_proximo(tela)):
+                # A aba Módulos à vista, com lugar embaixo dela, e a lista nada: outra aba está aberta.
+                d.click(*_centro(aba["caixa"]))
+                aba_tocada = True
+                pausa(ESPERA_DO_MODULO)
+                continue
+            sem_a_lista += 1
+            if sem_a_lista > TELAS_DA_AULA:
+                return None, SEM_A_LISTA
+            rolar_a_pagina(d)
+            pausa(ESPERA_DA_ROLAGEM)
+            continue
+        caixa, itens = achado
+        topo = next((no["caixa"][1] for no in _nos(tela) if no["classe"] == "WebView"), 0)
+        if not modulos and (itens[0]["tipo"] != "módulo" or caixa[1] <= topo):
+            # A lista que já começa cortada no alto da página: o começo dela passou, e a página não volta para cima.
+            return None, LISTA_SEM_O_COMECO
+        vistas, novo, abaixo = _uma_olhada_na_lista(itens, modulos)
+        if modulos:
+            modulos[-1]["aulas"] = _juntar_as_aulas(modulos[-1]["aulas"], vistas)
+        if novo:
+            if abaixo and abaixo["tipo"] == "aula":
+                # Aberto: as aulas dele estão logo embaixo (a próxima olhada, na mesma tela, as lê).
+                modulos.append({"nome": novo["nome"], "aulas": []})
+                continue
+            espaco = abaixo is not None or novo["caixa"][3] + ESPACO_DA_AULA < _topo_do_proximo(tela)
+            if espaco and novo["nome"] in tocados:
+                # Tocado e sem aula nenhuma embaixo: um módulo vazio.
+                modulos.append({"nome": novo["nome"], "aulas": []})
+                continue
+            if espaco and _tocavel(tela, novo["caixa"]):
+                d.click(*_centro(novo["caixa"]))
+                tocados.add(novo["nome"])
+                pausa(ESPERA_DO_MODULO)
+                continue
+        marca = [(item["tipo"], item["nome"], item["caixa"]) for item in itens]
+        if marca == antes:
+            # A página não rolou mais: o fim dela.
+            if novo:
+                return None, MODULO_SEM_TOQUE
+            aulas = [{"modulo": modulo["nome"], "nome": nome, "segundos": segundos}
+                     for modulo in modulos for nome, segundos in modulo["aulas"]]
+            return (aulas, "") if aulas else (None, LISTA_PELA_METADE)
+        antes = marca
+        rolar_a_pagina(d)
+        pausa(ESPERA_DA_ROLAGEM)
+    return None, LISTA_PELA_METADE
+
+
+def guardar_a_lista(posicao, lista, agora=None):
+    """A lista das aulas do curso dessa posição, lida da aba Módulos, no mapa (só no banco do servidor)."""
+    momento = _texto(_agora(agora))
+
+    def mudar(curso):
+        curso["lista"] = [{"modulo": aula["modulo"], "nome": aula["nome"], "segundos": aula["segundos"]}
+                          for aula in lista]
+        curso["lista_em"] = momento
+    _mudar_o_curso(posicao, mudar)
+
+
+def descrever_a_lista(posicao, lista):
+    """A lista lida, só em números (o log do explorar é público)."""
+    modulos = len({aula["modulo"] for aula in lista})
+    com = [aula["segundos"] for aula in lista if aula["segundos"]]
+    return (f"lista do curso {posicao}: {modulos} módulo(s) com aula, {len(lista)} aula(s), {len(com)} com a duração "
+            f"({sum(com) // 60} min de vídeo) e {len(lista) - len(com)} sem")
+
+
 def _aberta_no_explorar(d, tipo, porque):
     """O que o explorar diz da aula que tentou abrir: o tipo, o vídeo e o play, só em palavras fixas e números."""
     if not tipo:
@@ -1128,14 +1301,35 @@ def _gravar_no_explorar(d, posicao, pausa):
         f"{info.get('problema') or 'sem problema'}; para ler: cursos_robo.yml exportar")
 
 
+def _lista_no_explorar(d, posicao, pausa):
+    """
+    O passo curso:lista:N: o curso N aberto pelo endereço guardado (a aula em que o site parou), o que tocar pausado, e
+    a lista das aulas lida da aba Módulos e guardada no mapa, só com ela inteira. O log diz só números.
+    """
+    aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
+    if not aulas:
+        return False, f"o curso {posicao} ainda não tem a 1ª aula no mapa"
+    tipo, porque = ir_para_o_endereco(d, aulas[0]["endereco"], pausa)
+    if not tipo:
+        return False, f"a aula não abriu ({porque})"
+    pausar_o_que_toca(d, pausa)
+    lista, porque = ler_a_lista(d, pausa)
+    pausar_o_que_toca(d, pausa)
+    if not lista:
+        return False, f"a lista do curso {posicao} não foi lida ({porque})"
+    guardar_a_lista(posicao, lista)
+    return True, descrever_a_lista(posicao, lista)
+
+
 def curso_no_explorar(d, argumento, pausa=time.sleep):
     """
     O passo curso do explorar: curso:primeira:N guarda a aula aberta no Chrome como a 1ª do curso na posição N da lista
     de Turmas (o Claude a abre com o mapa do site); curso:abrir:N abre a 1ª aula do curso N pela barra de endereço,
     como a noite abre, e curso:proximo, a seguinte à aberta, pelo Próximo (os dois sem mudar o mapa, com o celular
     mudo); curso:guardar guarda a aula sem vídeo aberta (ou a página da videoaula), como a noite; curso:gravar:N grava
-    de dia a 1ª aula do curso N como a noite grava (o teste); curso sozinho diz o mapa em números. O endereço fica no
-    banco, e o log diz só números e palavras fixas.
+    de dia a 1ª aula do curso N como a noite grava (o teste); curso:lista:N lê da aba Módulos a lista das aulas do curso
+    N, na ordem, e a guarda no mapa (com o celular mudo); curso sozinho diz o mapa em números. O endereço e os nomes
+    ficam no banco, e o log diz só números e palavras fixas.
     """
     partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
     if not partes:
@@ -1144,15 +1338,18 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
         return _proxima_no_explorar(d, pausa)
     if partes == ["guardar"]:
         return _guardar_no_explorar(d, pausa)
-    if partes[0] not in ("primeira", "abrir", "gravar") or len(partes) != 2 or not partes[1].isdigit():
+    if partes[0] not in ("primeira", "abrir", "gravar", "lista") or len(partes) != 2 or not partes[1].isdigit():
         return False, ("curso:primeira:N guarda a aula aberta como a 1ª do curso N; curso:abrir:N abre a 1ª do curso "
                        "N; curso:proximo abre a seguinte; curso:guardar guarda a aula sem vídeo aberta (ou a página "
-                       "da videoaula); curso:gravar:N grava a 1ª do curso N como a noite; curso diz o mapa")
+                       "da videoaula); curso:gravar:N grava a 1ª do curso N como a noite; curso:lista:N lê a lista "
+                       "das aulas do curso N; curso diz o mapa")
     posicao = int(partes[1])
     if posicao not in ORDEM_DOS_CURSOS:
         return False, f"o curso vai de 1 a {len(ORDEM_DOS_CURSOS)} (a posição na lista de Turmas)"
     if partes[0] == "gravar":
         return _gravar_no_explorar(d, posicao, pausa)
+    if partes[0] == "lista":
+        return _lista_no_explorar(d, posicao, pausa)
     if partes[0] == "abrir":
         aulas = (mapa_das_aulas()["cursos"].get(str(posicao)) or {}).get("aulas") or []
         if not aulas:
@@ -1173,7 +1370,8 @@ def toca_aula(nome, argumento):
     também de dia, o celular fica mudo: ele fica no quarto do Rafael (pedido dele, 22/11/2026).
     """
     acao = (argumento or "").split(":")[0].strip().lower()
-    return (nome == "curso" and acao in ("abrir", "proximo", "gravar")) or (nome == "midia" and acao == "tocar")
+    return ((nome == "curso" and acao in ("abrir", "proximo", "gravar", "lista"))
+            or (nome == "midia" and acao == "tocar"))
 
 
 def tocar_pelo_play(d, pausa=None):
@@ -2012,10 +2210,34 @@ def aulas_do_pacote(ate=None):
     return escolhidas
 
 
+def mapa_para_o_claude(mapa=None):
+    """
+    O mapa sem os endereços, para o pacote do Claude (mapa.json): os cursos na ordem, com a lista das aulas lida da aba
+    Módulos (os módulos, os nomes e as durações) e o que a noite já guardou de cada uma. É de onde sai a lista das aulas
+    com o check de cada uma, no relatório da manhã (pedido do Rafael de 24/11/2026).
+    """
+    mapa = mapa or mapa_das_aulas()
+    cursos = {}
+    for posicao in ORDEM_DOS_CURSOS:
+        curso = mapa["cursos"].get(str(posicao)) or {}
+        cursos[str(posicao)] = {
+            "lista": curso.get("lista") or [], "lista_em": curso.get("lista_em", ""), "fim": bool(curso.get("fim")),
+            "aulas": [{chave: valor for chave, valor in aula.items() if chave != "endereco"}
+                      for aula in curso.get("aulas") or []]}
+    return {"ordem": list(ORDEM_DOS_CURSOS), "cursos": cursos}
+
+
+def tem_lista(mapa=None):
+    """Algum curso já tem a lista das aulas no mapa (o exportar leva o mapa ao Claude mesmo sem aula guardada)?"""
+    mapa = mapa or mapa_das_aulas()
+    return any((curso or {}).get("lista") for curso in mapa["cursos"].values())
+
+
 def pacote_das_aulas(ate=None):
-    """O zip das aulas do próximo pacote, em bytes."""
+    """O zip das aulas do próximo pacote, em bytes, com o mapa sem os endereços (mapa.json)."""
     memoria = io.BytesIO()
     with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as arquivo_zip:
+        arquivo_zip.writestr("mapa.json", json.dumps(mapa_para_o_claude(), ensure_ascii=False, indent=1))
         for nome in aulas_do_pacote(ate):
             for raiz, _, arquivos in os.walk(os.path.join(PASTA_DAS_AULAS, nome)):
                 for arquivo in arquivos:
@@ -2428,6 +2650,8 @@ def _ler_aulas(caminho, destino):
     print(f"{len(nomes)} aula(s) em {destino}:")
     for nome in nomes:
         print(f"   {nome}")
+    if os.path.exists(os.path.join(destino, "mapa.json")):
+        print("   mapa.json (a lista das aulas de cada curso e o que a noite já guardou)")
     return 0
 
 
@@ -2440,6 +2664,9 @@ def _aulas(argumentos):
         lista = aulas_do_pacote()
         print(lista[-1] if lista else "")
         return 0
+    if argumentos == ["tem-lista"]:
+        print(1 if tem_lista() else 0)
+        return 0
     if argumentos[:1] == ["cifrado"] and len(argumentos) <= 2:
         print(cifrado_das_aulas(argumentos[1] if len(argumentos) == 2 else None))
         return 0
@@ -2448,7 +2675,7 @@ def _aulas(argumentos):
         return 0
     if argumentos[:1] == ["ler"] and len(argumentos) == 3:
         return _ler_aulas(argumentos[1], argumentos[2])
-    print("uso: cursos_robo.py aulas contar | ultima | cifrado [ATE] | apagar ATE | ler ARQUIVO PASTA")
+    print("uso: cursos_robo.py aulas contar | ultima | tem-lista | cifrado [ATE] | apagar ATE | ler ARQUIVO PASTA")
     return 2
 
 
