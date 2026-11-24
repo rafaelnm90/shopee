@@ -668,6 +668,13 @@ SEM_A_BARRA = "sem a barra de endereço do Chrome"
 SEM_A_ESCRITA = "o endereço não ficou escrito na barra"
 SEM_O_ENDERECO = "o endereço da aula não ficou na barra"
 SEM_O_PLAYER = "a página não mostrou o player"
+EM_BRANCO = "a página da aula ficou em branco"
+# Depois do Enter, a guia pode ficar sem nada da página, só com o quadro do Chrome, mesmo com o endereço da aula na
+# barra: às 04:05, 04:16 e 04:25 de 24/11/2026, nos cursos 4, 6 e 7, por mais de 20 s, e a página só apareceu quando
+# o Chrome saiu da frente e voltou (a rodada do robô no meio). Em branco, a espera vai até ESPERA_DA_PAGINA_EM_BRANCO,
+# e o Chrome sai da frente e volta a cada ESPERA_DA_PAGINA, até VEZES_FORA_DA_FRENTE vezes, sem toque na página.
+ESPERA_DA_PAGINA_EM_BRANCO = 90
+VEZES_FORA_DA_FRENTE = 2
 
 
 def app_da_frente(d):
@@ -706,6 +713,23 @@ def _tocando_ou_carregando(midia):
     return bool(midia) and midia["estado"] in ("tocando", "carregando")
 
 
+def pagina_em_branco(xml):
+    """A guia do Chrome sem nada da página: a página (o WebView) fora da tela ou sem nenhum nó dentro dela."""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return False
+    pagina = next((no for no in raiz.iter("node") if no.get("class") == "android.webkit.WebView"), None)
+    return pagina is None or len(_nos(ET.tostring(pagina, encoding="unicode"))) <= 1
+
+
+def _sair_e_voltar_ao_chrome(d, pausa):
+    """O Chrome sai da frente (a tela inicial do Android) e volta, com a mesma guia: nada é tocado na página."""
+    d.press("home")
+    pausa(ESPERA_DO_CHROME)
+    trazer_o_chrome(d, pausa)
+
+
 def _abrir_pela_barra(d, endereco, pausa):
     """Uma vez: o endereço escrito na barra da guia da frente e a página nova esperada. (tipo, porque, a tela)."""
     trazer_o_chrome(d, pausa)
@@ -727,12 +751,20 @@ def _abrir_pela_barra(d, endereco, pausa):
         d.press("back")
         return None, SEM_A_ESCRITA, tela
     _saida(d, ["input", "keyevent", "KEYCODE_ENTER"])
-    tela = ""
-    for _ in range(ESPERA_DA_PAGINA // PASSO_DA_ESPERA):
+    tela, fora_da_frente = "", 0
+    for volta in range(1, ESPERA_DA_PAGINA_EM_BRANCO // PASSO_DA_ESPERA + 1):
         pausa(PASSO_DA_ESPERA)
         tela = _fechar_a_folha_do_chrome(d, pausa)
         if endereco_da_aula(tela) == endereco and (botao_do_play(tela) or _tocando_ou_carregando(midia_do_chrome(d))):
             return COM_VIDEO, "", tela
+        em_branco = endereco_da_aula(tela) == endereco and pagina_em_branco(tela)
+        if volta * PASSO_DA_ESPERA >= ESPERA_DA_PAGINA and not em_branco:
+            break
+        if em_branco and volta % (ESPERA_DA_PAGINA // PASSO_DA_ESPERA) == 0 and fora_da_frente < VEZES_FORA_DA_FRENTE:
+            fora_da_frente += 1
+            _sair_e_voltar_ao_chrome(d, pausa)
+    if endereco_da_aula(tela) == endereco and pagina_em_branco(tela):
+        return None, EM_BRANCO, tela
     if endereco_da_aula(tela) != endereco:
         return None, SEM_O_ENDERECO, tela
     if pagina_da_aula_pronta(tela) and not tem_player(tela):
@@ -1126,13 +1158,8 @@ def ler_a_lista(d, pausa=None):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         achado = itens_da_lista(tela)
         if not achado or not achado[1]:
-            aba = next((no for no in _nos(tela) if no["id"].endswith(ID_DAS_ABAS) and no["clicavel"]), None)
-            if (not achado and not aba_tocada and aba and _tocavel(tela, aba["caixa"])
-                    and aba["caixa"][3] + ESPACO_DA_AULA < _topo_do_proximo(tela)):
-                # A aba Módulos à vista, com lugar embaixo dela, e a lista nada: outra aba está aberta.
-                d.click(*_centro(aba["caixa"]))
+            if not achado and not aba_tocada and _tocar_na_aba_modulos(d, tela, pausa):
                 aba_tocada = True
-                pausa(ESPERA_DO_MODULO)
                 continue
             sem_a_lista += 1
             if sem_a_lista > TELAS_DA_AULA:
@@ -1175,6 +1202,19 @@ def ler_a_lista(d, pausa=None):
         rolar_a_pagina(d)
         pausa(ESPERA_DA_ROLAGEM)
     return None, LISTA_PELA_METADE
+
+
+def _tocar_na_aba_modulos(d, tela, pausa):
+    """
+    A aba Módulos à vista, com lugar embaixo dela, e a lista nada: outra aba está aberta (o site lembra a última
+    escolhida; na noite de 24/11/2026, a de Comentários). A aba Módulos é tocada. True se tocou.
+    """
+    aba = next((no for no in _nos(tela) if no["id"].endswith(ID_DAS_ABAS) and no["clicavel"]), None)
+    if not aba or not _tocavel(tela, aba["caixa"]) or aba["caixa"][3] + ESPACO_DA_AULA >= _topo_do_proximo(tela):
+        return False
+    d.click(*_centro(aba["caixa"]))
+    pausa(ESPERA_DO_MODULO)
+    return True
 
 
 def guardar_a_lista(posicao, lista, agora=None):
@@ -1266,7 +1306,7 @@ def abrir_pela_lista(d, posicao, numero, pausa=None, no_curso=False, vigiar=None
 def _tocar_na_lista(d, lista, numero, pausa, vigiar):
     """A linha da aula `numero` achada na aba Módulos, rolando a página para baixo, e tocada. (ok, porque)."""
     alvo = lista[numero - 1]
-    dentro, tocado, antes, sem_a_lista = False, False, None, 0
+    dentro, tocado, antes, sem_a_lista, aba_tocada = False, False, None, 0, False
     for _ in range(VOLTAS_DA_LISTA):
         parar = vigiar()
         if parar:
@@ -1274,6 +1314,9 @@ def _tocar_na_lista(d, lista, numero, pausa, vigiar):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         achado = itens_da_lista(tela)
         if not achado or not achado[1]:
+            if not achado and not aba_tocada and _tocar_na_aba_modulos(d, tela, pausa):
+                aba_tocada = True
+                continue
             sem_a_lista += 1
             if sem_a_lista > TELAS_DA_AULA:
                 return False, SEM_A_LISTA
@@ -1525,6 +1568,8 @@ def _lista_no_explorar(d, posicao, pausa):
         return False, f"o curso {posicao} ainda não tem a 1ª aula no mapa"
     tipo, porque = ir_para_o_endereco(d, aulas[0]["endereco"], pausa)
     if not tipo:
+        # A tela de onde o curso não abriu (a guia em branco de 24/11/2026, por exemplo) vai ao Claude pelos casos.
+        guardar_o_caso(d, porque, "curso não abriu", passo="abrir o curso pelo endereço")
         return False, f"a aula não abriu ({porque})"
     pausar_o_que_toca(d, pausa)
     lista, porque = ler_a_lista(d, pausa)
