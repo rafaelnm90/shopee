@@ -1814,19 +1814,20 @@ class ListaDoSite:
     24/11/2026), e as linhas fora dela continuam na leitura da tela, com o lugar que teriam; o toque fora da caixa cai
     no que está embaixo dela ("fora da lista"); o arrasto para baixo dentro da caixa, com linha escondida por cima,
     volta a caixa (subidas), e o resto fica em puxados. vai_a_aberta: aberto o módulo da aula aberta, o site rola a
-    caixa sozinho até ela.
+    caixa sozinho até ela. impulso: a rolagem por dentro da caixa anda essa vez o arrasto do dedo (o embalo da página).
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
     def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
                  total=None, sem_andamento=(), numeros=False, atrasadas=(), margem=400, altura_da_lista=None,
-                 vai_a_aberta=False):
+                 vai_a_aberta=False, impulso=1.0):
         # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
         self.total, self.sem_andamento = total, set(sem_andamento)
         self.numeros, self.atrasadas, self.vezes, self.margem = numeros, set(atrasadas), {}, margem
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
         self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
         self.altura_da_lista, self.vai_a_aberta, self.dentro = altura_da_lista, vai_a_aberta, 0
+        self.impulso = impulso
         self.toques, self.puxados, self.teclas, self.subidas = [], [], [], []
         self.todas = [aula for _modulo, aulas in modulos for aula, _tempo in aulas]
 
@@ -1960,12 +1961,12 @@ class ListaDoSite:
         if y2 > y1:
             if na_caixa and self.dentro > 0:
                 self.subidas.append((x1, y1, x2, y2))
-                self.dentro = max(0, self.dentro - (y2 - y1))
+                self.dentro = max(0, self.dentro - int((y2 - y1) * self.impulso))
             else:
                 self.puxados.append((x1, y1, x2, y2))
             return
         if na_caixa and self.dentro < maximo:
-            self.dentro = min(maximo, self.dentro + (y1 - y2))
+            self.dentro = min(maximo, self.dentro + int((y1 - y2) * self.impulso))
             return
         _itens, fim = self._itens()
         self.rolagem = max(0, min(fim - (self.FIM - self.TOPO), self.rolagem + (y1 - y2)))
@@ -3015,3 +3016,18 @@ def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, m
     assert cursos_robo.proxima_aula() == (4, 2)
     assert _registro_das_aulas() == [("guardada", "curso 4, aula 1"),
                                      ("não serviu", "curso 4, aula 2: o som saiu mudo")]
+
+
+def test_o_modulo_que_a_rolagem_passou_por_cima_da_caixa_volta_e_e_aberto():
+    # O curso 7, em 24/11/2026 (às 09:09): a rolagem por dentro da caixa da lista anda mais que o dedo, e o botão do
+    # módulo seguinte, meio escondido embaixo da caixa, pulou por cima dela; o leitor descia até o fim e parava ("o
+    # botão de um módulo ficou fora do alcance"). A caixa volta um pedaço, por dentro, e o módulo é aberto.
+    modulos = [("Módulo Um", [(f"Aula 1.{n}", "3:00") for n in range(5)]),
+               ("Módulo Dois", [("Aula 2.0", "2:00"), ("Aula 2.1", "2:00")])]
+    modulos += [(f"Módulo {n}", [(f"Aula {n}.0", "1:00")]) for n in range(3, 9)]
+    site = ListaDoSite(modulos, um_aberto=True, comeco=848, margem=0, altura_da_lista=960, impulso=1.25)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda s: None)
+    assert porque == ""
+    assert [aula["nome"] for aula in lista] == [aula for _modulo, aulas in modulos for aula, _tempo in aulas]
+    assert site.subidas and "fora da lista" not in site.toques and site.puxados == []
+    assert [toque for toque in site.toques if toque.startswith("módulo")] == [f"módulo {n}" for n in range(8)]
