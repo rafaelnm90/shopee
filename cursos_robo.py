@@ -526,11 +526,15 @@ def entrar_no_curso(d, escrever, achar, pausa=time.sleep):
 # do curso, e o endereço da aula fica na barra do Chrome (".../m/lessons/<código>"). Trocando de aula pela lista, a
 # página continua rolada, e o player some da tela e da leitura dela: a página sobe antes do play. Há aulas sem vídeo,
 # um documento ou um texto (o vídeo do Rafael das 08:22 de 23/11/2026): a página dela tem as abas, sem player nenhum.
-# Os nomes das aulas e os endereços ficam só no banco do servidor, nunca no log nem no repositório.
+# Os nomes das aulas e os endereços ficam só no banco do servidor, nunca no log nem no repositório. Com o vídeo pausado,
+# a barra do player mostra, da esquerda para a direita (24/11/2026): Reiniciar (volta o vídeo ao começo), Retroceder
+# 10s, Tocar vídeo, Avançar 10s, a barra do tempo, Mutar (nunca tocado), o volume, Configurações (a Velocidade),
+# picture-in-picture e tela cheia. O site guarda onde o vídeo de cada aula parou e o abre dali.
 LINHA_DA_AULA = re.compile(r"(?P<nome>.*\S)\s+(?P<tempo>\d{1,2}(?::\d{2}){1,2})")
 CAMINHO_DA_AULA = re.compile(r"[\w.-]+/m/lessons/[\w-]+")
 ROTULO_DO_PROXIMO = "Próximo:"
 ROTULO_DO_PLAY = "Tocar vídeo"
+ROTULO_DO_REINICIAR = "Reiniciar"
 ID_DO_PLAYER = "plyr-"
 ID_DAS_ABAS = "trigger-modules"
 CAIXA_DA_NOVA_GUIA = "search_box_text"
@@ -621,6 +625,15 @@ def botao_do_play(xml):
         return None
     maior = max(botoes, key=lambda no: (no["caixa"][2] - no["caixa"][0]) * (no["caixa"][3] - no["caixa"][1]))
     return _centro(maior["caixa"])
+
+
+def botao_do_reiniciar(xml):
+    """
+    O centro do Reiniciar da barra do player, que volta o vídeo ao começo (a barra aparece com o vídeo pausado); None
+    sem ele à vista. Só ele: o Mutar, na mesma barra, nunca é tocado (pedido do Rafael, 23/11/2026).
+    """
+    botoes = [no for no in _nos(xml) if no["clicavel"] and ROTULO_DO_REINICIAR in (no["texto"], no["descricao"])]
+    return _centro(botoes[0]["caixa"]) if botoes else None
 
 
 def tem_player(xml):
@@ -1777,7 +1790,8 @@ def _gravar_no_explorar(d, posicao, numero, pausa):
         d, getattr(d, "serial", ""), destino, lambda celular: abrir_a_aula_da_vez(celular, posicao, numero, pausa),
         lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa, madrugada=lambda: True,
         maximo=GRAVACAO_DO_TESTE, duracao=lista[numero - 1].get("segundos"),
-        na_aula_certa=lambda celular: na_aula(celular, posicao, numero, pausa))
+        na_aula_certa=lambda celular: na_aula(celular, posicao, numero, pausa),
+        reiniciar=lambda celular: voltar_ao_comeco(celular, pausa))
     calar_o_celular(d)
     tocou = aberta and fim not in PARADAS_DA_AULA + (SEM_VIDEO, NAO_TOCOU, OUTRA_PAGINA)
     if not tocou or not os.path.exists(destino) or not os.path.getsize(destino):
@@ -1932,6 +1946,29 @@ def tocar_pelo_play(d, pausa=None):
             tocado = True
         pausa(PASSO_DA_ESPERA)
     return False
+
+
+# Depois do Reiniciar, o vídeo pausado está no começo: a sessão de mídia diz até este segundo.
+COMECO_DO_REINICIAR = 2
+
+
+def voltar_ao_comeco(d, pausa=None):
+    """
+    O vídeo da aula que o site abriu adiantado (ele guarda onde a aula parou: a das 3h45, a que o robô interrompeu, a
+    que o Rafael viu à mão) volta ao começo: pausado, pelo Reiniciar da barra do player (o teste de 24/11/2026 o levou
+    dos 12 s aos 0 s). True com a sessão de mídia do Chrome no começo e o vídeo parado.
+    """
+    pausa = pausa or time.sleep
+    if not pausar_o_que_toca(d, pausa):
+        return False
+    xml = d.dump_hierarchy()
+    ponto = botao_do_reiniciar(xml)
+    if not ponto or not _livre_para_tocar(xml, ponto):
+        return False
+    d.click(*ponto)
+    pausa(PASSO_DA_ESPERA)
+    midia = midia_do_chrome(d)
+    return bool(midia) and midia["estado"] != "tocando" and midia["posicao"] <= COMECO_DO_REINICIAR
 
 
 # --- O que a aula tem além do vídeo (pedidos do Rafael de 23/11/2026, às 08:44 e às 09:12) ---
@@ -2374,6 +2411,12 @@ PASSO_DA_ESPERA_DO_ROBO = 3
 # curso, para o Claude mapear o site (P294 1). Terminado o curso, volta a False e tudo volta ao normal (pedido do
 # Rafael, 22/11/2026: DECISOES.md, Trabalho com o Claude).
 CURSO_EM_ANDAMENTO = True
+# A aula da vez só começa se cabe no resto da madrugada, com a duração da lista e a FOLGA_DA_AULA (abrir a aula antes e
+# guardar a página dela depois, em segundos): a que para às 3h45 fica pela metade (P295 1), e o site guarda onde ela
+# parou.
+FOLGA_DA_AULA = 5 * 60
+NAO_CABE = "a aula da vez não cabe no resto da madrugada"
+MAIOR_QUE_A_MADRUGADA = "a aula da vez é mais longa que a madrugada inteira"
 
 
 def _agora(agora=None):
@@ -2416,6 +2459,47 @@ def disco_usado(caminho=None):
     """O quanto do disco do servidor está em uso, em %, como o df mostra (arredondado para cima)."""
     uso = shutil.disk_usage(caminho or os.path.expanduser("~"))
     return math.ceil(uso.used * 100 / max(1, uso.used + uso.free))
+
+
+def _fim_da_madrugada(inicio):
+    """O fim da madrugada da gravação, em minutos depois da 0h: o FIM_DA_NOITE ou o começo do robô, o que vem antes."""
+    return min(int(inicio) * 60, FIM_DA_NOITE[0] * 60 + FIM_DA_NOITE[1])
+
+
+def janela_da_madrugada(config):
+    """Os minutos da madrugada da gravação inteira (na_madrugada): do fim do Horário do Robô ao fim dela."""
+    inicio, fim = horario_do_robo(config.get("robo_inicio", 8), config.get("robo_fim", 22))
+    if inicio <= 0 and fim >= 24:
+        return 0
+    return (24 * 60 - fim * 60 if fim < 24 else 0) + _fim_da_madrugada(inicio)
+
+
+def resto_da_madrugada(config, agora=None):
+    """Os segundos que faltam para a madrugada da gravação acabar (na_madrugada); 0 fora dela."""
+    momento = _agora(agora)
+    if not na_madrugada(config, momento):
+        return 0
+    inicio, fim = horario_do_robo(config.get("robo_inicio", 8), config.get("robo_fim", 22))
+    segundos = momento.hour * 3600 + momento.minute * 60 + momento.second
+    if segundos >= fim * 3600:
+        return 24 * 3600 - segundos + _fim_da_madrugada(inicio) * 60
+    return max(0, _fim_da_madrugada(inicio) * 60 - segundos)
+
+
+def aula_fora_da_madrugada(duracao, config=None, agora=None):
+    """
+    Por que a aula da vez não começa agora ("" quando ela cabe): com a duração da lista (em segundos) e a FOLGA_DA_AULA,
+    ela precisa caber no resto da madrugada (NAO_CABE; ela fica para a noite seguinte, a 1ª dela). A sem duração (um
+    documento ou um texto) cabe sempre; a mais longa que a madrugada inteira para a noite com o porquê dela
+    (MAIOR_QUE_A_MADRUGADA), para o Claude ver no relatório da manhã.
+    """
+    if not duracao:
+        return ""
+    config = config if config is not None else (db.ler_config("shopee_video", {}) or {})
+    precisa = int(duracao) + FOLGA_DA_AULA
+    if precisa > janela_da_madrugada(config) * 60:
+        return MAIOR_QUE_A_MADRUGADA
+    return "" if precisa <= resto_da_madrugada(config, agora) else NAO_CABE
 
 
 def estado_da_noite():
@@ -2561,7 +2645,9 @@ class GravacaoEmFundo:
         return self.processo.poll() is None
 
     def parar(self, espera=30):
-        """Para a gravação e fecha o arquivo. (ok, motivo fixo)."""
+        """Para a gravação e fecha o arquivo. (ok, motivo fixo). Parada antes (a gravação começada de novo), nada."""
+        if self._saida.closed:
+            return False, "o gravador já tinha parado"
         if self.rodando():
             self.processo.send_signal(signal.SIGINT)
             try:
@@ -2646,8 +2732,27 @@ def _madrugada_agora():
     return na_madrugada(db.ler_config("shopee_video", {}) or {})
 
 
+def _gravar_de_novo(d, gravacao, alvo, destino, maximo, abrir, pausa):
+    """
+    A gravação começada de novo, com o vídeo da aula pausado no começo (voltar_ao_comeco): o celular fica mudo enquanto
+    o gravador para e liga (sem ele gravando, o alto-falante toca), e o volume da aula volta só com o novo gravando.
+    (gravação, "" ou o motivo fixo de não ter dado).
+    """
+    calar_o_celular(d)
+    gravacao.parar()
+    if os.path.exists(destino):
+        os.remove(destino)
+    gravacao = GravacaoEmFundo(alvo, destino, maximo, abrir=abrir)
+    pausa(ESPERA_DO_GRAVADOR)
+    if not gravacao.rodando():
+        return gravacao, "o gravador não ficou gravando"
+    if not subir_o_volume(d):
+        return gravacao, "sem o volume de mídia"
+    return gravacao, ""
+
+
 def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=None, abrir=subprocess.Popen,
-                  madrugada=None, maximo=AULA_MAIS_LONGA, duracao=None, na_aula_certa=None):
+                  madrugada=None, maximo=AULA_MAIS_LONGA, duracao=None, na_aula_certa=None, reiniciar=None):
     """
     A aula aberta no Chrome do celular e gravada em destino, do começo ao fim. A ordem protege o quarto do Rafael
     (pedido dele, 22/11/2026): o gravador liga antes e, gravando o som, deixa o alto-falante mudo; o volume sobe só
@@ -2657,10 +2762,11 @@ def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=N
     param a aula, que fica pela metade (P295 1: ela volta depois, do início). Devolve (aberta, inteira, motivo fixo):
     aberta diz se a página da aula abriu; na aula sem vídeo, (True, False, SEM_VIDEO). maximo: o tempo máximo da
     gravação, em segundos (o teste de dia grava menos que a noite). duracao: a da lista das aulas, em segundos; com ela,
-    o vídeo que não começou do início (o site lembra onde a pessoa parou: a gravação para logo) ou que parou antes do
-    fim fica pela metade. na_aula_certa(d): com o vídeo tocando, a página ainda é a da aula da vez? Sem ela, a
-    gravação para: o vídeo que toca é o de outra aula (pedido do Rafael de 24/11/2026: nunca achar que viu a aula sem
-    tê-la visto).
+    o vídeo que parou antes do fim fica pela metade, e o que não começou do início (o site lembra onde a aula parou)
+    volta ao começo por reiniciar(d) (voltar_ao_comeco), uma vez, com a gravação começada de novo (_gravar_de_novo);
+    sem reiniciar, ou se ele não voltou, a gravação para logo e a aula fica pela metade. na_aula_certa(d): com o vídeo
+    tocando, a página ainda é a da aula da vez? Sem ela, a gravação para: o vídeo que toca é o de outra aula (pedido do
+    Rafael de 24/11/2026: nunca achar que viu a aula sem tê-la visto).
     """
     pausa = pausa or time.sleep
     relogio = relogio or time.monotonic
@@ -2684,7 +2790,7 @@ def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=N
             return True, False, NAO_TOCOU
         if na_aula_certa and not na_aula_certa(d):
             return True, False, OUTRA_PAGINA
-        olho, comeco, comeco_conferido = OlhoNaAula(), relogio(), False
+        olho, comeco, comeco_conferido, reiniciada = OlhoNaAula(), relogio(), False, False
         while True:
             pausa(OLHADA_DA_AULA)
             anotar_o_sinal()
@@ -2699,7 +2805,19 @@ def gravar_a_aula(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, relogio=N
                 # Do início, o vídeo não pode ter tocado mais que o tempo desde que a página da aula começou a abrir.
                 comeco_conferido = True
                 if olho.primeira > relogio() - aberta_em + COMECO_TOLERADO:
-                    return True, False, f"{NAO_DO_INICIO} (em {olho.primeira} s de {duracao} s)"
+                    adiantada = f"{NAO_DO_INICIO} (em {olho.primeira} s de {duracao} s)"
+                    if reiniciada or not reiniciar or not reiniciar(d):
+                        return True, False, adiantada
+                    # O vídeo está pausado no começo: a gravação começa de novo, sem o pedaço adiantado.
+                    reiniciada = True
+                    gravacao, porque = _gravar_de_novo(d, gravacao, alvo, destino, maximo, abrir, pausa)
+                    if porque:
+                        return True, False, porque
+                    aberta_em = relogio()
+                    if not tocar(d):
+                        return True, False, NAO_TOCOU
+                    olho, comeco, comeco_conferido = OlhoNaAula(), relogio(), False
+                    continue
             if fim and fim != "carregando demais" and duracao and olho.maior + FOLGA_DO_FIM < duracao:
                 return True, False, f"{ANTES_DO_FIM} (em {olho.maior} s de {duracao} s)"
             if fim:
@@ -3010,7 +3128,8 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
     """
     A gravação de uma madrugada (P289 1 a P295 1): as aulas da vez, uma a uma, na ordem da lista de cada curso, da 1ª à
     última, curso por curso (pedido do Rafael de 24/11/2026), até a madrugada acabar, o disco encher, o robô pedir o
-    celular ou acabarem as aulas. A aula da vez abre já com o gravador gravando, para o vídeo que começa sozinho ficar
+    celular, a aula da vez não caber no resto da madrugada (aula_fora_da_madrugada: ela é a 1ª da noite seguinte) ou
+    acabarem as aulas. A aula da vez abre já com o gravador gravando, para o vídeo que começa sozinho ficar
     inteiro (abrir_a_aula_da_vez): pelo Próximo da de antes, que vem antes pela lista, muda, quando não está na tela,
     ou, na 1ª do curso, pelo toque no nome dela na lista. A gravação que não chega ao fim da duração da lista fica pela
     metade. A aula sem vídeo (um documento ou um texto) é guardada com a página e o documento
@@ -3058,6 +3177,10 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 motivo = "o celular desconectado"
                 break
             posicao, numero = da_vez
+            fora = aula_fora_da_madrugada(lista_do_curso(posicao)[numero - 1].get("segundos"))
+            if fora:
+                motivo = fora
+                break
             guardada, inteira, aberta_na_gravacao, fim, destino, info = False, False, False, "", "", {}
             parar_depois = ""
             with trava() as livre:
@@ -3089,7 +3212,8 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                         lambda celular: abrir_a_aula_da_vez(celular, posicao, numero, pausa, vigiar),
                         lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa,
                         duracao=lista_do_curso(posicao)[numero - 1].get("segundos"),
-                        na_aula_certa=lambda celular: na_aula(celular, posicao, numero, pausa))
+                        na_aula_certa=lambda celular: na_aula(celular, posicao, numero, pausa),
+                        reiniciar=lambda celular: voltar_ao_comeco(celular, pausa))
                     aberta = (posicao, numero) if aberta_na_gravacao else None
                     if inteira and calar_o_celular(d):
                         # A página da videoaula (o texto, os links e o documento), com o vídeo já pausado e mudo.
@@ -3149,8 +3273,8 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 motivo = fim
                 break
             if fim.startswith(NAO_DO_INICIO):
-                # Nas aulas que o Rafael viu à mão, o site pode lembrar onde ele parou: não é falha do caminho, e a
-                # noite segue (o registro diz em que segundo o vídeo começou).
+                # O site guarda onde a aula parou, e o Reiniciar do player não a voltou ao começo: não é falha do
+                # caminho, e a noite segue (o registro diz em que segundo o vídeo começou).
                 continue
             falhas += 1
             if falhas >= FALHAS_SEGUIDAS:

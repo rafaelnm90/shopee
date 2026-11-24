@@ -540,6 +540,27 @@ def test_madrugada_e_fora_do_horario_do_robo_e_antes_das_3h45(monkeypatch):
             assert cursos_robo.na_madrugada(horario, _br(f"2026-11-23 {hora}")) is vale, (horario, hora)
 
 
+def test_o_resto_da_madrugada_e_a_aula_que_cabe_nele(monkeypatch):
+    # A aula que para às 3h45 fica pela metade (P295 1), e o site guarda onde ela parou: a da vez só começa se cabe no
+    # resto da madrugada, com a folga de abrir a aula e de guardar a página dela.
+    monkeypatch.setattr(cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    dia_todo = {"robo_inicio": 0, "robo_fim": 24}
+    assert cursos_robo.janela_da_madrugada(dia_todo) == 225
+    for hora, resto in (("00:00", 225 * 60), ("03:15", 30 * 60), ("03:44", 60), ("03:45", 0), ("12:00", 0)):
+        assert cursos_robo.resto_da_madrugada(dia_todo, _br(f"2026-11-25 {hora}")) == resto, hora
+    # Com o robô das 8h às 22h, a madrugada vai das 22h às 3h45, passando da meia-noite.
+    das_8_as_22 = {"robo_inicio": 8, "robo_fim": 22}
+    assert cursos_robo.janela_da_madrugada(das_8_as_22) == 345
+    assert cursos_robo.resto_da_madrugada(das_8_as_22, _br("2026-11-24 23:00")) == (60 + 225) * 60
+    # A aula de 3h11 (a mais longa das listas de 24/11/2026) cabe na madrugada que começa e não cabe à 1h; a sem a
+    # duração na lista (um documento ou um texto) cabe sempre; a mais longa que a madrugada inteira para a noite.
+    assert cursos_robo.aula_fora_da_madrugada(191 * 60, dia_todo, _br("2026-11-25 00:05")) == ""
+    assert cursos_robo.aula_fora_da_madrugada(191 * 60, dia_todo, _br("2026-11-25 01:00")) == cursos_robo.NAO_CABE
+    assert cursos_robo.aula_fora_da_madrugada(None, dia_todo, _br("2026-11-25 03:44")) == ""
+    assert cursos_robo.aula_fora_da_madrugada(4 * 60 * 60, dia_todo, _br("2026-11-25 00:00")) == (
+        cursos_robo.MAIOR_QUE_A_MADRUGADA)
+
+
 def test_p296_o_robo_comeca_as_4h_so_enquanto_o_curso_nao_acaba(monkeypatch):
     # P296 1: com o Horário do Robô no Dia Todo, o robô fica das 4h às 24h até o curso acabar; depois, o do painel.
     monkeypatch.setattr(cursos_robo, "CURSO_EM_ANDAMENTO", True)
@@ -739,6 +760,12 @@ class AulaNoCelular(CelularDoVolume):
     def tocar(self, d):
         self.comeco = self.relogio()
         self.eventos.append("play")
+        return True
+
+    def reiniciar(self, d):
+        """O Reiniciar do player: o vídeo, pausado, volta ao começo, e o play seguinte toca dali."""
+        self.eventos.append("reiniciar")
+        self.comeca_em, self.comeco, self.pausada = 0, None, False
         return True
 
     def shell(self, partes):
@@ -941,6 +968,78 @@ def test_o_video_conferido_pela_duracao_da_lista_do_inicio_ao_fim(bm, tmp_path):
     cursos_robo._anotar(volume_antes=None)
     feito, _, _ = _gravar_a_aula(AulaNoCelular(lambda: tempo[0], dura=600, comeca_em=200, volume=2), tmp_path, tempo)
     assert feito == (True, True, "o vídeo parou")
+
+
+def test_o_video_adiantado_volta_ao_comeco_e_a_gravacao_comeca_de_novo(bm, tmp_path):
+    # O site guarda onde o vídeo de cada aula parou (a das 3h45, a que o robô interrompeu): com o Reiniciar do player,
+    # o vídeo adiantado volta ao começo uma vez, e a gravação começa de novo, sem o pedaço adiantado. O celular fica
+    # mudo enquanto o gravador para e liga, e o volume da aula volta só com o novo gravando.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, comeca_em=200, volume=2)
+    feito, _, gravadores = _gravar_a_aula(celular, tmp_path, tempo, duracao=600, reiniciar=celular.reiniciar)
+    assert feito == (True, True, "o vídeo parou") and len(gravadores) == 2
+    assert celular.eventos == ["volume 8", "abriu gravando", "play", "reiniciar", "volume 0", "gravador parou",
+                               "volume 8", "play", "volume 2", "gravador parou"]
+    # O Reiniciar que não leva o vídeo ao começo vale uma vez só: a aula fica pela metade, como sem ele.
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, comeca_em=200, volume=2)
+    feito, _, gravadores = _gravar_a_aula(celular, tmp_path, tempo, duracao=600, reiniciar=lambda d: True)
+    assert feito[:2] == (True, False) and feito[2].startswith(cursos_robo.NAO_DO_INICIO) and len(gravadores) == 2
+
+
+# A barra do player com o vídeo pausado, na forma do Chrome do Motorola (24/11/2026), com o endereço inventado.
+BARRA_DO_PLAYER = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true"
+        text="escola.exemplo.pro/m/lessons/abcDEF123_x-y" content-desc="" bounds="[211,120][691,267]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="Reiniciar" content-desc=""
+        bounds="[10,889][99,975]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="Retroceder 10s" content-desc=""
+        bounds="[102,889][189,975]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="Tocar vídeo" content-desc=""
+        bounds="[191,889][280,975]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="Mutar" content-desc=""
+        bounds="[504,889][593,975]" />
+  <node class="android.widget.ToggleButton" resource-id="" clickable="true" text="Configurações" content-desc=""
+        bounds="[798,889][887,975]" />
+  <node class="android.widget.Button" resource-id="" clickable="true" text="Próximo: Aula de exemplo dois"
+        content-desc="" bounds="[0,2175][1080,2394]" />
+</hierarchy>"""
+
+
+class PlayerPausado(CelularDoVolume):
+    """O Chrome de mentira com a aula em `posicao` s e a barra do player à vista; o Reiniciar a leva a 0 s (volta)."""
+
+    def __init__(self, posicao=49, estado=2, barra=BARRA_DO_PLAYER, volta=True, **opcoes):
+        super().__init__(midia=_sessao_do_chrome(estado, posicao), **opcoes)
+        self.barra, self.volta, self.toques = barra, volta, []
+
+    def dump_hierarchy(self):
+        return self.barra
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+        if (x, y) == (54, 932) and self.volta:
+            self.midia = _sessao_do_chrome(2, 0)
+
+
+def test_o_reiniciar_do_player_volta_o_video_ao_comeco_sem_tocar_no_mudo(bm):
+    # O teste de 24/11/2026: pausado aos 49 s e reaberto, o vídeo voltou aos 54 s; pausado aos 12 s, o Reiniciar o
+    # levou aos 0 s. Só o Reiniciar é tocado: o Mutar, na mesma barra, nunca (pedido do Rafael, 23/11/2026).
+    sem_espera = {"pausa": lambda s: None}
+    celular = PlayerPausado()
+    assert cursos_robo.voltar_ao_comeco(celular, **sem_espera) and celular.toques == [(54, 932)]
+    # Tocando, o vídeo pausa antes do toque (a barra aparece com ele parado).
+    celular = PlayerPausado(estado=3)
+    assert cursos_robo.voltar_ao_comeco(celular, **sem_espera) and celular.toques == [(54, 932)]
+    assert ["input", "keyevent", "KEYCODE_MEDIA_PAUSE"] in celular.comandos
+    # Sem o Reiniciar à vista, nada é tocado; o vídeo que não chegou ao começo não vale.
+    celular = PlayerPausado(barra=BARRA_DO_PLAYER.replace('text="Reiniciar"', 'text="Legendas"'))
+    assert not cursos_robo.voltar_ao_comeco(celular, **sem_espera) and celular.toques == []
+    celular = PlayerPausado(volta=False)
+    assert not cursos_robo.voltar_ao_comeco(celular, **sem_espera) and celular.toques == [(54, 932)]
+    assert cursos_robo.botao_do_reiniciar(BARRA_DO_PLAYER) == (54, 932)
 
 
 CHROME = "com.android.chrome"
@@ -2564,6 +2663,8 @@ def noite_do_curso(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
     monkeypatch.setattr(cursos_robo, "disco_usado", lambda caminho=None: 20)
     monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
+    # A madrugada mal começou: cabe qualquer aula da lista de mentira.
+    monkeypatch.setattr(cursos_robo, "resto_da_madrugada", lambda config, agora=None: 4 * 60 * 60, raising=False)
     gravadas, duracoes, casos = [], [], []
     monkeypatch.setattr(cursos_robo, "guardar_o_caso",
                         lambda d, motivo, resultado="não abriu", passo="": casos.append((motivo, resultado)),
@@ -2632,6 +2733,17 @@ def test_a_noite_grava_as_aulas_na_ordem_da_lista_e_nao_pula_nenhuma(noite_do_cu
     assert pasta.endswith("-c04-a003") and not cursos_robo.gravando()
     # O documento saiu do celular, e nenhum link foi tocado.
     assert site.baixados == [] and (464, 1942) not in site.toques
+
+
+def test_a_aula_que_nao_cabe_no_resto_da_madrugada_fica_para_a_noite_seguinte(noite_do_curso, monkeypatch):
+    # A 1ª aula (5 min, com a folga de 5 min) cabe nos 700 s que faltam; a 2ª (10 min) não: a noite para nela, sem
+    # abri-la e sem pular para a seguinte, e ela é a 1ª da noite seguinte.
+    _lista_no_mapa(4)
+    monkeypatch.setattr(cursos_robo, "resto_da_madrugada", lambda config, agora=None: 700)
+    resumo = noite_do_curso(_curso_da_noite(), AjudanteNaHora())
+    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: "
+                      + cursos_robo.NAO_CABE)
+    assert noite_do_curso.gravadas == ["Aula um"] and cursos_robo.proxima_aula() == (4, 2)
 
 
 def test_a_noite_que_comeca_com_a_shopee_na_frente_e_a_sessao_vencida(noite_do_curso, monkeypatch):
