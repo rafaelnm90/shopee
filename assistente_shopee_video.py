@@ -478,7 +478,7 @@ async def produtos_do_link(link):
 async def _consultar_produto(loja, item):
     # Números direto na consulta: declarar a variável como Int64 dá "wrong type".
     consulta = (f"query {{ productOfferV2(shopId: {int(loja)}, itemId: {int(item)}, limit: 1) "
-                "{ nodes { productName priceMin priceMax commissionRate imageUrl } } }")
+                f"{{ nodes {{ productName priceMin priceMax {api_shopee.CAMPOS_DA_COMISSAO} imageUrl }} }} }}")
     headers, corpo = api_shopee.gerar_headers_e_payload({"query": consulta})
     try:
         async with aiohttp.ClientSession() as sessao:

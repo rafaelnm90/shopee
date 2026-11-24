@@ -141,9 +141,13 @@ def test_a_linha_da_comissao_da_sonda():
                 {**_produto(2, 30, 0.03, 4.8), "sellerCommissionRate": "0", "shopeeCommissionRate": "0.03"},
                 {**_produto(3, 30, 0.07, 4.8), "sellerCommissionRate": "0.03", "shopeeCommissionRate": "0.025"},
                 _produto(4, 30, 0.05, 4.8)]                          # sem as partes
+    # A parte da Shopee de cada produto, da mais comum para a menos comum: 3% em 2 e 2,5% em 1.
     assert video_ia.contagens_da_comissao(produtos) == (
-        "   comissão: com as duas partes: 3 de 4 | a da Shopee em 3%: 2 | com a extra do vendedor: 2 | "
+        "   comissão: com as duas partes: 3 de 4 | a da Shopee: 3% em 2, 2,5% em 1 | com a extra do vendedor: 2 | "
         "a da API é a soma das duas: 2")
+    assert video_ia.contagens_da_comissao(produtos[3:]) == (
+        "   comissão: com as duas partes: 0 de 1 | a da Shopee: nenhuma | com a extra do vendedor: 0 | "
+        "a da API é a soma das duas: 0")
     # Na lista da sonda, é a última linha, e o que pagam por venda é pela comissão do vídeo (R$ 3,45 no 1º).
     linhas = video_ia.contagens_da_lista(produtos[:1], set(), lambda preco, comissao: preco * comissao / 100, 2.0)
     assert linhas[-1].startswith("   comissão: com as duas partes: 1 de 1")

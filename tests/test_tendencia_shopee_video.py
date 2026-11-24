@@ -287,8 +287,12 @@ def test_a_tendencia_anota_a_comissao_do_video(monkeypatch):
             return False
 
         def post(self, url, headers=None, data=None):
+            pedidos.append(data)
             return Resposta()
 
+    pedidos = []
     monkeypatch.setattr(tv.aiohttp, "ClientSession", Sessao)
     oferta = rodar(tv._oferta("11", "22"))
     assert oferta == {"vendas": 1500, "nota": 4.8, "comissao": 0.115, "preco": 30.0}
+    # A consulta pede a parte da Shopee e a do vendedor (a sonda de 24/11/2026 achou as duas em todos os produtos).
+    assert "sellerCommissionRate" in str(pedidos[0]) and "shopeeCommissionRate" in str(pedidos[0])

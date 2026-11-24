@@ -829,3 +829,14 @@ def test_comissao_no_video_e_a_da_shopee_video_mais_a_extra_do_vendedor():
     com_extra = {"commissionRate": "0.13", "sellerCommissionRate": "0.1", "shopeeCommissionRate": "0.03"}
     assert 30 * api_shopee.porcento_no_video(com_extra) / 100 == pytest.approx(3.45)
     assert api_shopee.porcento_no_video({"commissionRate": "0.05"}) == 3.5
+
+
+def test_a_busca_e_a_lista_em_alta_pedem_as_duas_partes_da_comissao():
+    # P297 1: a sonda de 24/11/2026 achou a parte da Shopee e a do vendedor em todos os produtos, e a da Shopee nem
+    # sempre nos 3% das redes. Pedidas na busca, a extra do vendedor vem da API, sem a conta pelo total: no de 7% na
+    # API com 2% da Shopee e 5% do vendedor, o vídeo paga 6,5% (pelo total menos 3%, dariam 5,5%).
+    for campo in ("commissionRate", "sellerCommissionRate", "shopeeCommissionRate"):
+        assert campo in api_shopee.CAMPOS_DA_OFERTA.split()
+    oferta = {"commissionRate": "0.07", "sellerCommissionRate": "0.05", "shopeeCommissionRate": "0.02"}
+    assert api_shopee.porcento_no_video(oferta) == 6.5
+    assert api_shopee.porcento_no_video({"commissionRate": "0.07"}) == 5.5

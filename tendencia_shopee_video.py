@@ -110,7 +110,7 @@ async def _oferta(loja, item):
     """{vendas, nota, comissao, preco} do produto pela API de afiliado, ou None sem a oferta ou sem resposta."""
     # Números direto na consulta: declarar a variável como Int64 dá "wrong type".
     consulta = (f"query {{ productOfferV2(shopId: {int(loja)}, itemId: {int(item)}, limit: 1) "
-                "{ nodes { sales ratingStar commissionRate priceMin } } }")
+                f"{{ nodes {{ sales ratingStar {api_shopee.CAMPOS_DA_COMISSAO} priceMin }} }} }}")
     headers, corpo = api_shopee.gerar_headers_e_payload({"query": consulta})
     try:
         async with aiohttp.ClientSession() as sessao:

@@ -257,10 +257,12 @@ def contagens_da_lista(produtos, ja_postados, valor_por_venda, minimo):
 def contagens_da_comissao(produtos):
     """
     A linha da comissão de uma lista da sonda (P297 1), só contagens: quantos produtos trazem a parte da Shopee e a do
-    vendedor, em quantos a da Shopee é a das redes sociais (COMISSAO_DA_SHOPEE_NAS_REDES), quantos têm a extra do
-    vendedor e em quantos a commissionRate é a soma das duas, que é a conta da api_shopee.comissao_no_video.
+    vendedor, quantos têm cada parte da Shopee (a das redes sociais é COMISSAO_DA_SHOPEE_NAS_REDES; as outras, a
+    sonda mostra quais são), quantos têm a extra do vendedor e em quantos a commissionRate é a soma das duas, que é a
+    conta da api_shopee.comissao_no_video.
     """
-    com_as_partes = nas_redes = com_extra = soma = 0
+    com_as_partes = com_extra = soma = 0
+    partes_da_shopee = {}
     for produto in produtos:
         total = api_shopee._taxa(produto.get("commissionRate"))
         vendedor = api_shopee._taxa(produto.get("sellerCommissionRate"))
@@ -268,10 +270,14 @@ def contagens_da_comissao(produtos):
         if vendedor is None or da_shopee is None:
             continue
         com_as_partes += 1
-        nas_redes += abs(da_shopee - api_shopee.COMISSAO_DA_SHOPEE_NAS_REDES) < 1e-9
+        porcento = round(da_shopee * 100, 2)
+        partes_da_shopee[porcento] = partes_da_shopee.get(porcento, 0) + 1
         com_extra += vendedor > 0
         soma += total is not None and abs(total - (da_shopee + vendedor)) < 1e-6
-    return (f"   comissão: com as duas partes: {com_as_partes} de {len(produtos)} | a da Shopee em 3%: {nas_redes} | "
+    # Da parte mais comum para a menos comum (no empate, a maior primeiro), com a vírgula do português.
+    ordem = sorted(partes_da_shopee.items(), key=lambda parte: (-parte[1], -parte[0]))
+    partes = ", ".join(f"{f'{p:g}'.replace('.', ',')}% em {n}" for p, n in ordem) or "nenhuma"
+    return (f"   comissão: com as duas partes: {com_as_partes} de {len(produtos)} | a da Shopee: {partes} | "
             f"com a extra do vendedor: {com_extra} | a da API é a soma das duas: {soma}")
 
 
