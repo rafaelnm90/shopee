@@ -1809,15 +1809,16 @@ class ListaDoSite:
     pela ordem da lista inteira (a barra do Próximo mostra a seguinte; na última, nenhuma); o toque numa linha abre a
     aula dela. sem_andamento: os módulos que vêm sem o "N%" na frente do nome (o 1º do curso 5, em 24/11/2026).
     numeros: cada linha de aula dentro do bloco com o número da aula no site (o id só de algarismos); atrasadas: as
-    aulas cuja linha vem sem a duração nas duas primeiras telas em que aparece.
+    aulas cuja linha vem sem a duração nas duas primeiras telas em que aparece. margem: quanto de página sobra
+    embaixo do último item da lista.
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
     def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
-                 total=None, sem_andamento=(), numeros=False, atrasadas=()):
+                 total=None, sem_andamento=(), numeros=False, atrasadas=(), margem=400):
         # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
         self.total, self.sem_andamento = total, set(sem_andamento)
-        self.numeros, self.atrasadas, self.vezes = numeros, set(atrasadas), {}
+        self.numeros, self.atrasadas, self.vezes, self.margem = numeros, set(atrasadas), {}, margem
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
         self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
         self.toques, self.puxados, self.teclas = [], [], []
@@ -1834,7 +1835,7 @@ class ListaDoSite:
                 for aula, tempo in aulas:
                     itens.append(("aula", aula, f"{aula} {tempo}" if tempo else aula, 178, 942, y, y + 86))
                     y += 150
-        return itens, y + 400
+        return itens, y + self.margem
 
     def _na_tela(self, y1, y2):
         y1, y2 = y1 - self.rolagem + self.TOPO, y2 - self.rolagem + self.TOPO
@@ -2075,6 +2076,35 @@ def test_a_aula_e_reconhecida_pelo_numero_do_site_tambem_quando_o_texto_muda():
         ("Primeiros passos", "Como escolher o produto", 725), ("Primeiros passos", "Regras", 190)]
     # O número da aula vem com cada linha (e fica na lista guardada, ao lado do nome).
     assert [aula["aula"] for aula in lista] == ["4000", "4001", "4002", "4003", "4004", "4005"]
+
+
+def test_o_ultimo_modulo_no_fim_da_pagina_e_aberto_na_lista_e_pela_noite(bm, monkeypatch):
+    # 24/11/2026, curso 6: o último módulo ficou no fim da página, sem lugar embaixo para as aulas, e a lista parou
+    # ("o botão de um módulo ficou fora do alcance"). Sem aula à vista no fim da página, ele está fechado: é tocado
+    # uma vez, na leitura da lista e na abertura de uma aula dele pela noite.
+    ultima = len(LISTA_DO_CURSO) - 1
+    site = ListaDoSite(MODULOS_DO_CURSO, margem=50, aberta=ultima)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
+    assert (lista, porque) == (LISTA_DO_CURSO, "")
+    assert site.toques == ["módulo 0", "módulo 1", "módulo 2", "módulo 3", "módulo 4"] and site.puxados == []
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={0, 1, 2, 3}, margem=50, aberta=ultima)
+    assert cursos_robo.abrir_pela_lista(site, 4, ultima + 1, pausa=lambda segundos: None) == (True, "")
+    assert site.toques == ["módulo 4", "aula Encontro gravado"] and site.puxados == []
+
+
+def test_a_aula_da_noite_achada_pelo_numero_dela():
+    # Com o número da aula na lista e na tela, a linha certa é a do número, também com duas aulas de mesmo nome; sem
+    # ele, pelo nome.
+    alvo = {"modulo": "Lives", "nome": "Live", "aula": "4002"}
+    itens = [{"tipo": "módulo", "nome": "Lives", "caixa": (42, 300, 1010, 420)},
+             {"tipo": "aula", "nome": "Live", "aula": "4001", "caixa": (178, 500, 942, 580)},
+             {"tipo": "aula", "nome": "Live", "aula": "4002", "caixa": (178, 650, 942, 730)}]
+    assert cursos_robo._linha_na_tela(itens, alvo, False)[0]["aula"] == "4002"
+    assert cursos_robo._linha_na_tela(itens, {"modulo": "Lives", "nome": "Live"}, False)[0]["aula"] == "4001"
 
 
 def test_juntar_as_aulas_pelo_numero_da_aula():

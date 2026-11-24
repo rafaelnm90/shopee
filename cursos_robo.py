@@ -1254,6 +1254,19 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
         marca = [(item["tipo"], item["nome"], item["caixa"]) for item in itens]
         if marca == antes:
             # A página não rolou mais: o fim dela.
+            if novo and novo["nome"] in tocados:
+                # Tocado no fim da página e ainda sem aula embaixo: um módulo vazio.
+                modulos.append({"nome": novo["nome"], "aulas": []})
+                antes = None
+                continue
+            if novo and _tocavel(tela, novo["caixa"]):
+                # O último módulo, no fim da página, sem lugar embaixo para as aulas (o curso 6, em 24/11/2026): sem
+                # aula à vista, ele está fechado (aberto, as aulas dele alongariam a página) e é tocado uma vez.
+                d.click(*_centro(novo["caixa"]))
+                tocados.add(novo["nome"])
+                pausa(ESPERA_DO_MODULO)
+                antes = None
+                continue
             if novo:
                 return None, MODULO_SEM_TOQUE
             aulas = [_aula_da_lista(modulo["nome"], aula) for modulo in modulos for aula in modulo["aulas"]]
@@ -1363,9 +1376,16 @@ def _linha_na_tela(itens, alvo, dentro):
             abaixo = itens[numero + 1] if numero + 1 < len(itens) else None
             if dentro and not (abaixo and abaixo["tipo"] == "aula"):
                 fechado = item
-        elif dentro and linha is None and item["nome"] == alvo["nome"]:
+        elif dentro and linha is None and _a_mesma_aula(item, alvo):
             linha = item
     return linha, fechado, dentro
+
+
+def _a_mesma_aula(item, alvo):
+    """A linha da tela é a aula da lista? Pelo número da aula no site, quando as duas o têm; senão, pelo nome."""
+    if item.get("aula") and alvo.get("aula"):
+        return item["aula"] == alvo["aula"]
+    return item["nome"] == alvo["nome"]
 
 
 def abrir_pela_lista(d, posicao, numero, pausa=None, no_curso=False, vigiar=None):
@@ -1429,6 +1449,12 @@ def _tocar_na_lista(d, lista, numero, pausa, vigiar):
                 pausa(ESPERA_DO_MODULO)
                 continue
         marca = [(item["tipo"], item["nome"], item["caixa"]) for item in itens]
+        if marca == antes and fechado and not tocado and _tocavel(tela, fechado["caixa"]):
+            # O módulo da aula no fim da página, sem lugar embaixo para as aulas: fechado, é tocado uma vez.
+            d.click(*_centro(fechado["caixa"]))
+            tocado, antes = True, None
+            pausa(ESPERA_DO_MODULO)
+            continue
         if marca == antes:
             return False, SEM_A_AULA_NA_LISTA
         antes, dentro = marca, fim_dentro
