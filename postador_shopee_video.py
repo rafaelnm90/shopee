@@ -61,16 +61,18 @@ Passos, separados por ponto e vírgula:
     caso             guarda o print e a forma da tela como um caso do casos_robo, cifrado, para
                      o Claude ver a imagem da tela (casos_robo.yml exportar), nunca no log;
                      caso:TEXTO diz o que é
-    curso:primeira:N com a 1ª aula de um curso aberta no Chrome, guarda o endereço dela no banco
-                     como a 1ª do curso N (a posição na lista de Turmas, cursos_robo); curso
-                     mostra quantas aulas cada curso tem no mapa e quantas foram gravadas (só
-                     números no log); curso:abrir:N abre a 1ª aula do curso N pela barra de
-                     endereço, como a noite abre, e curso:proximo, a seguinte à aberta, e dizem
-                     se a aula tem vídeo, o estado dele e se o play está na tela (com o celular
-                     mudo também de dia, como no midia:tocar); curso:lista:N lê da aba Módulos
-                     a lista das aulas do curso N, na ordem, e a guarda no mapa (os nomes só no
-                     banco; no log, só quantos módulos, aulas e minutos); curso:tocar:N:K abre a
-                     aula K dessa lista pelo toque no nome dela e guarda a tela como um caso
+    curso:primeira:N com uma aula de um curso aberta no Chrome, guarda o endereço dela no banco
+                     como o do curso N (a posição na lista de Turmas, cursos_robo); curso
+                     mostra, de cada curso, quantas aulas da lista foram vistas e quantas
+                     esperam a conferência (só números no log); curso:abrir:N abre o curso N
+                     pelo endereço (a aula em que o site parou), e curso:proximo, a seguinte à
+                     aberta, e dizem se a aula tem vídeo, o estado dele e se o play está na
+                     tela (com o celular mudo também de dia, como no midia:tocar);
+                     curso:lista:N lê da aba Módulos a lista das aulas do curso N, na ordem, e
+                     a guarda no mapa (os nomes só no banco; no log, só quantos módulos, aulas
+                     e minutos); curso:tocar:N:K abre a aula K dessa lista pelo toque no nome
+                     dela e guarda a tela como um caso; curso:gravar:N[:K] grava a aula K (sem
+                     o K, a 1ª) como a noite grava, por até 10 min (o teste de dia)
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
