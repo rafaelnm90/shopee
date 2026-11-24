@@ -544,24 +544,26 @@ def segundos_do_tempo(texto):
     return total
 
 
+def _no(no):
+    """Um nó da tela: texto, descrição, id, classe, caixa e se aceita toque; None sem tamanho."""
+    caixa = re.fullmatch(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", no.get("bounds", ""))
+    if not caixa:
+        return None
+    x1, y1, x2, y2 = map(int, caixa.groups())
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return {"texto": no.get("text", ""), "descricao": no.get("content-desc", ""),
+            "id": no.get("resource-id", "").split(":id/")[-1], "classe": no.get("class", "").rsplit(".", 1)[-1],
+            "caixa": (x1, y1, x2, y2), "clicavel": no.get("clickable") == "true"}
+
+
 def _nos(xml):
     """Os nós da tela com tamanho: texto, descrição, id, classe, caixa e se aceitam toque. [] sem a tela."""
     try:
         raiz = ET.fromstring(xml or "")
     except ET.ParseError:
         return []
-    nos = []
-    for no in raiz.iter("node"):
-        caixa = re.fullmatch(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", no.get("bounds", ""))
-        if not caixa:
-            continue
-        x1, y1, x2, y2 = map(int, caixa.groups())
-        if x2 > x1 and y2 > y1:
-            nos.append({"texto": no.get("text", ""), "descricao": no.get("content-desc", ""),
-                        "id": no.get("resource-id", "").split(":id/")[-1],
-                        "classe": no.get("class", "").rsplit(".", 1)[-1], "caixa": (x1, y1, x2, y2),
-                        "clicavel": no.get("clickable") == "true"})
-    return nos
+    return [dados for dados in map(_no, raiz.iter("node")) if dados]
 
 
 def _centro(caixa):
@@ -1109,10 +1111,12 @@ def itens_da_lista(xml):
         else None
     if not caixa:
         return None
+    pais = {filho: pai for pai in lista.iter("node") for filho in pai}
     itens = []
-    for no in _nos(ET.tostring(lista, encoding="unicode")):
-        texto = " ".join(no["texto"].split())
-        if not no["clicavel"] or no["classe"] != "Button" or not texto or texto.startswith(ROTULO_DO_PROXIMO):
+    for elemento in lista.iter("node"):
+        no = _no(elemento)
+        texto = " ".join(no["texto"].split()) if no else ""
+        if not texto or not no["clicavel"] or no["classe"] != "Button" or texto.startswith(ROTULO_DO_PROXIMO):
             continue
         if no["id"].startswith(ID_DO_MODULO):
             itens.append({"tipo": "módulo", "nome": MODULO_DA_LISTA.fullmatch(texto)["nome"], "segundos": None,
@@ -1120,8 +1124,22 @@ def itens_da_lista(xml):
         elif not no["id"]:
             linha = LINHA_DA_AULA.fullmatch(texto)
             itens.append({"tipo": "aula", "nome": linha["nome"] if linha else texto,
-                          "segundos": segundos_do_tempo(linha["tempo"]) if linha else None, "caixa": no["caixa"]})
+                          "segundos": segundos_do_tempo(linha["tempo"]) if linha else None, "caixa": no["caixa"],
+                          "aula": _numero_da_aula(elemento, pais)})
     return tuple(map(int, caixa.groups())), sorted(itens, key=lambda item: item["caixa"][1])
+
+
+def _numero_da_aula(elemento, pais):
+    """
+    O número da aula no site, o do bloco em volta da linha dela na lista (o id só de algarismos, como "4981"); "" sem
+    ele. É a identidade da linha em toda leitura, também quando o texto dela muda (a duração que aparece depois).
+    """
+    while elemento is not None:
+        ident = elemento.get("resource-id", "").split(":id/")[-1]
+        if ident.isdigit():
+            return ident
+        elemento = pais.get(elemento)
+    return ""
 
 
 def _tocavel(tela, caixa):
@@ -1130,17 +1148,24 @@ def _tocavel(tela, caixa):
             and _livre_para_tocar(tela, _centro(caixa)))
 
 
+def _chave_da_aula(aula):
+    """A identidade da linha lida, (nome, segundos[, número]): o número da aula no site, ou o nome sem ele."""
+    return aula[2] if len(aula) > 2 and aula[2] else aula[0]
+
+
 def _juntar_as_aulas(lidas, vistas):
     """
     As aulas do módulo vistas nesta tela depois das já lidas, sem repetir o pedaço que as duas leituras mostram,
-    reconhecido pelos nomes: logo depois do toque no módulo, a linha da aula pode vir ainda sem a duração, que aparece
-    na leitura seguinte (o curso 1, em 24/11/2026, ficou com 13 aulas repetidas). A duração que faltava vem da nova.
+    reconhecido pelo número da aula no site ou, sem ele, pelo nome: logo depois do toque no módulo, a linha da aula pode
+    vir ainda sem a duração, que aparece na leitura seguinte (o curso 1, em 24/11/2026, ficou com 13 aulas repetidas).
+    A linha nova vale quando traz a duração: o nome que termina como uma hora ("Mentoria 20:00"), sem a duração, é
+    lido como "Mentoria" e 20 min. Sem ela, fica a de antes.
     """
     for tamanho in range(min(len(lidas), len(vistas)), 0, -1):
-        if [nome for nome, _ in lidas[-tamanho:]] == [nome for nome, _ in vistas[:tamanho]]:
+        if [_chave_da_aula(aula) for aula in lidas[-tamanho:]] == [_chave_da_aula(aula) for aula in vistas[:tamanho]]:
             comeco = len(lidas) - tamanho
-            iguais = [(nome, segundos if segundos is not None else vista[1])
-                      for (nome, segundos), vista in zip(lidas[comeco:], vistas[:tamanho])]
+            iguais = [vista if vista[1] is not None else velha[:2] + vista[2:]
+                      for velha, vista in zip(lidas[comeco:], vistas[:tamanho])]
             return lidas[:comeco] + iguais + vistas[tamanho:]
     return lidas + vistas
 
@@ -1158,7 +1183,7 @@ def _uma_olhada_na_lista(itens, modulos):
     for numero, item in enumerate(itens):
         if item["tipo"] == "aula":
             if dono is lido and lido is not None:
-                vistas.append((item["nome"], item["segundos"]))
+                vistas.append((item["nome"], item["segundos"], item.get("aula", "")))
             continue
         if lido and item["nome"] == lido["nome"]:
             dono = lido
@@ -1168,6 +1193,14 @@ def _uma_olhada_na_lista(itens, modulos):
             abaixo = itens[numero + 1] if numero + 1 < len(itens) else None
             return vistas, item, abaixo
     return vistas, None, None
+
+
+def _aula_da_lista(modulo, aula):
+    """A aula lida (nome, segundos[, número]) como linha da lista: o número da aula no site só quando a linha o traz."""
+    entrada = {"modulo": modulo, "nome": aula[0], "segundos": aula[1]}
+    if len(aula) > 2 and aula[2]:
+        entrada["aula"] = aula[2]
+    return entrada
 
 
 def ler_a_lista(d, pausa=None, ao_comecar=None):
@@ -1223,8 +1256,7 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
             # A página não rolou mais: o fim dela.
             if novo:
                 return None, MODULO_SEM_TOQUE
-            aulas = [{"modulo": modulo["nome"], "nome": nome, "segundos": segundos}
-                     for modulo in modulos for nome, segundos in modulo["aulas"]]
+            aulas = [_aula_da_lista(modulo["nome"], aula) for modulo in modulos for aula in modulo["aulas"]]
             return (aulas, "") if aulas else (None, LISTA_PELA_METADE)
         antes = marca
         rolar_a_pagina(d)
@@ -1263,6 +1295,8 @@ def guardar_a_lista(posicao, lista, agora=None):
         nova = []
         for aula in lista:
             entrada = {"modulo": aula["modulo"], "nome": aula["nome"], "segundos": aula["segundos"]}
+            if aula.get("aula"):
+                entrada["aula"] = aula["aula"]
             iguais = antigas.get((aula["modulo"], aula["nome"]))
             if iguais:
                 velha = iguais.pop(0)
@@ -1270,6 +1304,20 @@ def guardar_a_lista(posicao, lista, agora=None):
             nova.append(entrada)
         curso["lista"] = nova
         curso["lista_em"] = momento
+        curso.pop("lista_sem_bater", None)
+    _mudar_o_curso(posicao, mudar)
+
+
+def guardar_a_lista_sem_bater(posicao, lista, total, agora=None):
+    """
+    A lista lida que não bate com o total do site fica à parte no mapa (só no banco), sem valer para a noite: vai ao
+    Claude no pacote das aulas, para ele achar a linha que sobra ou falta (a do curso 7, em 24/11/2026, veio com 2
+    aulas a mais). A lista que bate, guardada depois, a tira.
+    """
+    momento = _texto(_agora(agora))
+
+    def mudar(curso):
+        curso["lista_sem_bater"] = {"em": momento, "total": total, "lista": lista}
     _mudar_o_curso(posicao, mudar)
 
 
@@ -1626,10 +1674,13 @@ def _lista_no_explorar(d, posicao, pausa):
         guardar_o_caso(d, porque, "lista não lida", passo="ler a lista das aulas")
         return False, f"a lista do curso {posicao} não foi lida ({porque})"
     if total and len(lista) != total:
-        # A lista que não bate com o total do site (aula repetida ou que faltou) não é guardada.
+        # A lista que não bate com o total do site (aula repetida ou que faltou) não vale para a noite: fica à parte,
+        # para o Claude conferir, com a contagem dos números de aula diferentes que ela tem.
+        guardar_a_lista_sem_bater(posicao, lista, total)
         guardar_o_caso(d, "a lista não bate com o total do site", "lista não bate", passo="ler a lista das aulas")
-        return False, (f"a lista do curso {posicao} tem {len(lista)} aula(s), e o site diz {total}: a lista não foi "
-                       f"guardada")
+        numeros = len({aula["aula"] for aula in lista if aula.get("aula")})
+        return False, (f"a lista do curso {posicao} tem {len(lista)} aula(s), {numeros} com o número da aula, e o site "
+                       f"diz {total}: a lista não foi guardada, só a cópia para o Claude conferir")
     guardar_a_lista(posicao, lista)
     return True, descrever_a_lista(posicao, lista) + (", o mesmo total do site" if total else ", sem o total do site")
 
@@ -2591,13 +2642,18 @@ def mapa_para_o_claude(mapa=None):
     for posicao in ORDEM_DOS_CURSOS:
         curso = mapa["cursos"].get(str(posicao)) or {}
         cursos[str(posicao)] = {"lista": curso.get("lista") or [], "lista_em": curso.get("lista_em", "")}
+        if curso.get("lista_sem_bater"):
+            cursos[str(posicao)]["lista_sem_bater"] = curso["lista_sem_bater"]
     return {"ordem": list(ORDEM_DOS_CURSOS), "cursos": cursos}
 
 
 def tem_lista(mapa=None):
-    """Algum curso já tem a lista das aulas no mapa (o exportar leva o mapa ao Claude mesmo sem aula guardada)?"""
+    """
+    Algum curso já tem a lista das aulas no mapa, ou a cópia da que não bateu com o site (o exportar leva o mapa ao
+    Claude mesmo sem aula guardada)?
+    """
     mapa = mapa or mapa_das_aulas()
-    return any((curso or {}).get("lista") for curso in mapa["cursos"].values())
+    return any((curso or {}).get("lista") or (curso or {}).get("lista_sem_bater") for curso in mapa["cursos"].values())
 
 
 def pacote_das_aulas(ate=None):

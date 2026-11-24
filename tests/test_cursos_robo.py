@@ -1808,13 +1808,16 @@ class ListaDoSite:
     aba_aberta=False: outra aba (Comentários) aberta, sem a lista, até o toque na aba Módulos. aberta: a aula aberta,
     pela ordem da lista inteira (a barra do Próximo mostra a seguinte; na última, nenhuma); o toque numa linha abre a
     aula dela. sem_andamento: os módulos que vêm sem o "N%" na frente do nome (o 1º do curso 5, em 24/11/2026).
+    numeros: cada linha de aula dentro do bloco com o número da aula no site (o id só de algarismos); atrasadas: as
+    aulas cuja linha vem sem a duração nas duas primeiras telas em que aparece.
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
     def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
-                 total=None, sem_andamento=()):
+                 total=None, sem_andamento=(), numeros=False, atrasadas=()):
         # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
         self.total, self.sem_andamento = total, set(sem_andamento)
+        self.numeros, self.atrasadas, self.vezes = numeros, set(atrasadas), {}
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
         self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
         self.toques, self.puxados, self.teclas = [], [], []
@@ -1860,8 +1863,16 @@ class ListaDoSite:
                 if tipo == "módulo":
                     dentro.append(f'<node class="android.view.View" resource-id="" clickable="false" text="{texto}" '
                                   f'content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
-                dentro.append(f'<node class="android.widget.Button" resource-id="{ident}" clickable="true" '
-                              f'text="{texto}" content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
+                if tipo == "aula" and chave in self.atrasadas:
+                    self.vezes[chave] = self.vezes.get(chave, 0) + 1
+                    texto = chave if self.vezes[chave] <= 2 else texto
+                botao = (f'<node class="android.widget.Button" resource-id="{ident}" clickable="true" '
+                         f'text="{texto}" content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
+                if tipo == "aula" and self.numeros:
+                    botao = (f'<node class="android.view.View" resource-id="{4000 + self.todas.index(chave)}" '
+                             f'clickable="false" text="" content-desc="" bounds="[110,{topo}][{x2},{baixo}]">'
+                             + botao + "</node>")
+                dentro.append(botao)
             nos.append('<node class="android.view.View" resource-id="radix-_r_m_-content-modules" clickable="false" '
                        f'text="" content-desc="" bounds="[42,{lista[0]}][1039,{lista[1]}]">' + "".join(dentro)
                        + "</node>")
@@ -2048,6 +2059,35 @@ def test_a_aula_que_ganha_a_duracao_na_leitura_seguinte_nao_se_repete():
         ("Dia 01", None), ("Dia 02", None)]
 
 
+def test_a_aula_e_reconhecida_pelo_numero_do_site_tambem_quando_o_texto_muda():
+    # Cada linha de aula fica num bloco com o número da aula no site ("4981", em 24/11/2026): é a identidade dela em
+    # toda leitura. O nome que termina como uma hora ("Mentoria 20:00"), antes de a duração aparecer, é lido como
+    # "Mentoria" e 20 min; na leitura seguinte, com a duração, é a mesma aula, e não outra (a lista do curso 7 veio
+    # com 2 aulas a mais que o site).
+    mentorias = ("Mentorias ao vivo", [("Mentoria 20:00", "1:30:00"), ("Mentoria 21:00", "1:10:00")])
+    site = ListaDoSite([MODULOS_DO_CURSO[0], mentorias, MODULOS_DO_CURSO[1]], abertos={0, 1}, numeros=True,
+                       atrasadas={"Mentoria 20:00", "Mentoria 21:00"}, comeco=1600)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
+    assert porque == ""
+    assert [(aula["modulo"], aula["nome"], aula["segundos"]) for aula in lista] == [
+        ("Comece por aqui", "Boas vindas", 448), ("Mentorias ao vivo", "Mentoria 20:00", 5400),
+        ("Mentorias ao vivo", "Mentoria 21:00", 4200), ("Primeiros passos", "Sobre o suporte", None),
+        ("Primeiros passos", "Como escolher o produto", 725), ("Primeiros passos", "Regras", 190)]
+    # O número da aula vem com cada linha (e fica na lista guardada, ao lado do nome).
+    assert [aula["aula"] for aula in lista] == ["4000", "4001", "4002", "4003", "4004", "4005"]
+
+
+def test_juntar_as_aulas_pelo_numero_da_aula():
+    # Com o número da aula, o pedaço repetido é reconhecido por ele, e a linha nova vale quando traz a duração.
+    lidas = [("Aula 01", 330, "11"), ("Mentoria", 1200, "12")]
+    vistas = [("Mentoria 20:00", 5400, "12"), ("Aula 03", 60, "13")]
+    assert cursos_robo._juntar_as_aulas(lidas, vistas) == [
+        ("Aula 01", 330, "11"), ("Mentoria 20:00", 5400, "12"), ("Aula 03", 60, "13")]
+    # Sem a duração na leitura nova, fica a linha de antes; duas aulas de mesmo nome e números diferentes são duas.
+    assert cursos_robo._juntar_as_aulas([("Dia", 60, "1")], [("Dia", None, "1"), ("Dia", None, "2")]) == [
+        ("Dia", 60, "1"), ("Dia", None, "2")]
+
+
 def test_ler_a_lista_de_novo_mantem_as_marcas_das_aulas(bm):
     # Ler a lista de novo (para consertar uma lista errada, como as de 24/11/2026) não apaga o que a noite gravou nem o
     # check do Claude: as marcas passam para a lista nova pelo módulo e pelo nome, também com uma aula nova no meio.
@@ -2075,8 +2115,16 @@ def test_a_lista_que_nao_bate_com_o_total_do_site_nao_e_guardada(bm, monkeypatch
         resultado))
     ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, abertos={0}, total=20), "lista:4",
                                               pausa=lambda segundos: None)
-    assert not ok and texto == "a lista do curso 4 tem 19 aula(s), e o site diz 20: a lista não foi guardada"
+    assert not ok and texto == ("a lista do curso 4 tem 19 aula(s), 0 com o número da aula, e o site diz 20: a lista "
+                                "não foi guardada, só a cópia para o Claude conferir")
     assert casos == ["lista das aulas", "lista não bate"] and not cursos_robo.lista_do_curso(4)
+    # A lista que não bate fica à parte, só para o Claude conferir (vai no pacote das aulas, com o total do site); a
+    # noite não a usa. A lista que bate, guardada depois, a tira.
+    copia = cursos_robo.mapa_para_o_claude()["cursos"]["4"]["lista_sem_bater"]
+    assert copia["total"] == 20 and len(copia["lista"]) == 19 and cursos_robo.tem_lista()
+    assert cursos_robo.proxima_aula() is None
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    assert "lista_sem_bater" not in cursos_robo.mapa_para_o_claude()["cursos"]["4"]
     ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, abertos={0}, total=19), "lista:4",
                                               pausa=lambda segundos: None)
     assert ok and texto.endswith(", o mesmo total do site") and len(cursos_robo.lista_do_curso(4)) == 19
