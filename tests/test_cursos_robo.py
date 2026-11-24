@@ -1600,6 +1600,25 @@ def test_o_texto_longo_da_aula_rola_ate_as_abas_sem_repetir(bm, monkeypatch, tmp
     assert cursos_robo.descrever_a_aula_guardada(info) == "2 tela(s), 3 linha(s), 0 link(s), sem documento"
 
 
+def test_a_tela_seguinte_que_comeca_com_o_titulo_preso_no_alto_nao_repete_o_texto():
+    # A 2ª tela da página começa com o título da aula, preso no alto, e a parte em comum só vem depois dele (o teste de
+    # dia de 23/11/2026): o texto entra uma vez, sem o título de novo.
+    titulo = "Aula de exemplo: o produto certo"
+    primeira = [titulo, "Parágrafo um", "Parágrafo dois", "Parágrafo três", "Parágrafo quatro"]
+    segunda = [titulo, "Parágrafo dois", "Parágrafo três", "Parágrafo quatro", "Parágrafo cinco"]
+    assert cursos_robo.juntar_os_textos(primeira, segunda) == primeira + ["Parágrafo cinco"]
+    # Duas linhas presas no alto (o caminho e o título).
+    alto = ["Módulo de exemplo", titulo]
+    assert cursos_robo.juntar_os_textos(alto + ["a", "b", "c", "d"], alto + ["b", "c", "d", "e"]) == (
+        alto + ["a", "b", "c", "d", "e"])
+    # Sem nada preso no alto, como sempre: a parte em comum logo no começo da tela nova.
+    assert cursos_robo.juntar_os_textos(["a", "b", "c"], ["b", "c", "d"]) == ["a", "b", "c", "d"]
+    # Um "•" solto igual não vale como a parte em comum depois de linhas puladas: nada do texto novo some.
+    assert cursos_robo.juntar_os_textos(["a", "b", "•"], ["x", "•", "c", "d"]) == ["a", "b", "•", "x", "•", "c", "d"]
+    # Nada em comum: a tela nova inteira.
+    assert cursos_robo.juntar_os_textos(["a", "b"], ["c", "d"]) == ["a", "b", "c", "d"]
+
+
 def test_a_aula_sem_video_para_no_meio_quando_o_robo_pede_o_celular(bm, monkeypatch, tmp_path):
     # O robô da Shopee Vídeo tem a preferência (22/11): a aula pela metade sai da pasta e volta depois, inteira.
     monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))

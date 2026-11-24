@@ -2253,11 +2253,25 @@ def esperar_o_aviso_sair(d, pausa):
     return tela
 
 
+# A tela seguinte da página da aula pode começar com o título dela, preso no alto (o teste de dia de 23/11/2026), e a
+# parte em comum com a tela anterior só vem depois dele: até LINHAS_PRESAS_NO_ALTO linhas do começo da tela nova são
+# puladas na procura, e, com alguma pulada, a parte em comum precisa de MINIMO_EM_COMUM linhas (um "•" solto, igual em
+# muitos lugares da página, não vale como a parte em comum e não engole o texto novo).
+LINHAS_PRESAS_NO_ALTO = 2
+MINIMO_EM_COMUM = 3
+
+
 def juntar_os_textos(textos, novos):
-    """Os textos da tela seguinte depois dos da anterior, sem repetir o pedaço que as duas mostram."""
-    for tamanho in range(min(len(textos), len(novos)), 0, -1):
-        if textos[-tamanho:] == novos[:tamanho]:
-            return textos + novos[tamanho:]
+    """
+    Os textos da tela seguinte depois dos da anterior, sem repetir o pedaço que as duas mostram nem as linhas presas no
+    alto da página que a tela nova repete antes dele.
+    """
+    for pulados in range(min(LINHAS_PRESAS_NO_ALTO, len(novos)) + 1):
+        resto = novos[pulados:]
+        minimo = MINIMO_EM_COMUM if pulados else 1
+        for tamanho in range(min(len(textos), len(resto)), minimo - 1, -1):
+            if textos[-tamanho:] == resto[:tamanho]:
+                return textos + resto[tamanho:]
     return textos + novos
 
 
