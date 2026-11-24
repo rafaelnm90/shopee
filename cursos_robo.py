@@ -1293,6 +1293,16 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
         vistas, novo, abaixo = _uma_olhada_na_lista(itens, modulos)
         if modulos:
             modulos[-1]["aulas"] = _juntar_as_aulas(modulos[-1]["aulas"], vistas)
+        if (novo and novo["caixa"][1] < caixa[1] and novo["nome"] not in tocados
+                and not (abaixo and abaixo["tipo"] == "aula") and subidas < SUBIDAS_DA_LISTA):
+            # O botão do módulo seguinte passou por cima da caixa da lista: a rolagem por dentro dela anda mais que o
+            # dedo, e o que estava meio escondido embaixo da caixa pula por cima dela (o curso 7, em 24/11/2026). A
+            # caixa volta um pedaço, por dentro, até ele aparecer inteiro nela.
+            subidas += 1
+            _subir_na_lista(d, caixa)
+            pausa(ESPERA_DA_ROLAGEM)
+            antes = None
+            continue
         if novo:
             if abaixo and abaixo["tipo"] == "aula":
                 # Aberto: as aulas dele estão logo embaixo (a próxima olhada, na mesma tela, as lê).
