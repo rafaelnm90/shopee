@@ -47,7 +47,9 @@ permissions:
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # O explorar espera até 15 min o robô soltar o celular (ESPERA_DO_CELULAR), e a lista de um curso longo leva uns
+    # 12 min: os dois juntos passavam dos 25 min (24/11/2026).
+    timeout-minutes: 50
     steps:
       - name: Android virtual no servidor
         uses: appleboy/ssh-action@master
@@ -58,7 +60,7 @@ jobs:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
-          command_timeout: 25m
+          command_timeout: 45m
           envs: PASSOS,TS_KEY
           script: |
             cd ~/shopee
