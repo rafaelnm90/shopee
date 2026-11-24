@@ -2485,8 +2485,12 @@ def test_a_lista_pelo_explorar_fica_no_mapa_e_vai_ao_claude_sem_os_enderecos(bm,
         mapa = json.loads(pacote.read("mapa.json"))
     assert mapa["ordem"] == list(cursos_robo.ORDEM_DOS_CURSOS) and mapa["cursos"]["4"]["lista"] == LISTA_DO_CURSO
     assert "lessons" not in json.dumps(mapa)
-    # A lista que não chega ao fim não troca a do mapa.
+    # A lista que não chega ao fim não troca a do mapa, e a tela dela vai ao Claude pelos casos.
+    casos = []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo, resultado="", passo="": casos.append(
+        (motivo, resultado, passo)))
     ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, rolagem=2000), "lista:4",
                                               pausa=lambda segundos: None)
     assert not ok and texto == f"a lista do curso 4 não foi lida ({cursos_robo.LISTA_SEM_O_COMECO})"
+    assert casos == [(cursos_robo.LISTA_SEM_O_COMECO, "lista não lida", "ler a lista das aulas")]
     assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["lista"] == LISTA_DO_CURSO
