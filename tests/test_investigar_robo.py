@@ -107,8 +107,9 @@ def test_comissao_mostra_so_numeros(monkeypatch):
     monkeypatch.setattr(ir.assistente, "produtos_do_link", produtos_do_link)
     monkeypatch.setattr(ir.api_shopee, "buscar_ofertas_shopee", buscar)
     texto, achou = rodar(ir.comissao(LINK))
+    # Pela comissão do vídeo, como o robô (P297 1): os 8,5% da API são 7% no vídeo, 40% a mais que os 5% do do link.
     assert achou and texto == ("comissão: 3 na busca (1 sem a taxa), 1 parecido(s) mais barato(s), 1 parecido(s) "
-                               "pagando mais por venda (o melhor: +70% por venda)")
+                               "pagando mais por venda (o melhor: +40% por venda)")
     assert "Copo" not in texto and "shopee.com" not in texto and "R$" not in texto
     # Sem o preço do produto do link, não há com o que comparar.
     precos["preco"] = 0.0

@@ -158,7 +158,7 @@ def testar():
 # com a chave dele em cada jeito de pedir a lista: sem palavra de busca (os em alta, os de maior comissão, os mais
 # vendidos, a 2ª página, 100 por página) e com a 1ª palavra-chave dos primeiros nichos dos Achadinhos. Só
 # contagens e rótulos fixos: nenhum nome, link, palavra de busca ou preço de produto vai ao log, que é público.
-CAMPOS_DA_SONDA = "itemId productName priceMin commissionRate ratingStar sales imageUrl productLink"
+CAMPOS_DA_SONDA = "itemId productName priceMin ratingStar sales imageUrl productLink " + api_shopee.CAMPOS_DA_COMISSAO
 PAGINA_DA_SONDA = " pageInfo { page limit hasNextPage }"
 # (o rótulo fixo da lista, os argumentos do productOfferV2, o que pedir além dos produtos)
 LISTAS_DA_SONDA = (
@@ -220,7 +220,8 @@ def contagens_da_lista(produtos, ja_postados, valor_por_venda, minimo):
     """
     As linhas de uma lista da sonda, só com números e rótulos fixos: quantos têm a nota, quantos pagam o
     mínimo por venda, quantos passam nas duas coisas (e, desses, quantos ainda não foram postados), a foto, o
-    link de produto, as medianas das vendas e da nota e as faixas do preço e do que pagam por venda.
+    link de produto, as medianas das vendas e da nota, as faixas do preço e do que pagam por venda e a linha da
+    comissão (contagens_da_comissao). O que pagam por venda é pela comissão do vídeo, como no robô (P297 1).
     """
     precos = {rotulo: 0 for _, rotulo in FAIXAS_DE_PRECO}
     por_venda = {rotulo: 0 for _, rotulo in FAIXAS_POR_VENDA}
@@ -228,7 +229,7 @@ def contagens_da_lista(produtos, ja_postados, valor_por_venda, minimo):
     com_nota = pagam = as_duas = novos = com_foto = com_link = 0
     for produto in produtos:
         preco = assistente._numero(produto.get("priceMin"))
-        valor = valor_por_venda(preco, assistente._numero(produto.get("commissionRate")) * 100)
+        valor = valor_por_venda(preco, api_shopee.porcento_no_video(produto))
         nota = assistente._numero(produto.get("ratingStar"))
         notas.append(nota)
         vendas.append(int(assistente._numero(produto.get("sales"))))
@@ -249,7 +250,29 @@ def contagens_da_lista(produtos, ja_postados, valor_por_venda, minimo):
         f"{int(statistics.median(vendas)) if vendas else '-'} | nota (mediana): {nota_do_meio}",
         "   preço: " + " | ".join(f"{rotulo}: {n}" for rotulo, n in precos.items()),
         "   por venda, entre os das duas coisas: " + " | ".join(f"{rotulo}: {n}" for rotulo, n in por_venda.items()),
+        contagens_da_comissao(produtos),
     ]
+
+
+def contagens_da_comissao(produtos):
+    """
+    A linha da comissão de uma lista da sonda (P297 1), só contagens: quantos produtos trazem a parte da Shopee e a do
+    vendedor, em quantos a da Shopee é a das redes sociais (COMISSAO_DA_SHOPEE_NAS_REDES), quantos têm a extra do
+    vendedor e em quantos a commissionRate é a soma das duas, que é a conta da api_shopee.comissao_no_video.
+    """
+    com_as_partes = nas_redes = com_extra = soma = 0
+    for produto in produtos:
+        total = api_shopee._taxa(produto.get("commissionRate"))
+        vendedor = api_shopee._taxa(produto.get("sellerCommissionRate"))
+        da_shopee = api_shopee._taxa(produto.get("shopeeCommissionRate"))
+        if vendedor is None or da_shopee is None:
+            continue
+        com_as_partes += 1
+        nas_redes += abs(da_shopee - api_shopee.COMISSAO_DA_SHOPEE_NAS_REDES) < 1e-9
+        com_extra += vendedor > 0
+        soma += total is not None and abs(total - (da_shopee + vendedor)) < 1e-6
+    return (f"   comissão: com as duas partes: {com_as_partes} de {len(produtos)} | a da Shopee em 3%: {nas_redes} | "
+            f"com a extra do vendedor: {com_extra} | a da API é a soma das duas: {soma}")
 
 
 def palavras_dos_nichos():

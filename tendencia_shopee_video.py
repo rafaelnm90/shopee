@@ -124,7 +124,7 @@ async def _oferta(loja, item):
         return None
     no = nos[0]
     return {"vendas": int(assistente._numero(no.get("sales"))), "nota": assistente._numero(no.get("ratingStar")),
-            "comissao": assistente._numero(no.get("commissionRate")), "preco": assistente._numero(no.get("priceMin"))}
+            "comissao": api_shopee.comissao_no_video(no), "preco": assistente._numero(no.get("priceMin"))}
 
 
 def _do_espiao(agora):

@@ -260,3 +260,35 @@ def test_comparacao_mostra_o_crescimento_por_faixa_e_o_que_vendeu_pelos_nossos_l
     assert "| 1/10 | 2 | 20.0 | 180 | 2 | 2 | 12.0% | R$ 60,00 | R$ 7,20 | 1 (R$ 7,20; viral) | 2 (1200) |" in texto
     assert "## Os que o robô postou" in texto and "| 1/10 | 2 (1200) | 20.0 | 2 | 2 | R$ 7,20 | 1 |" in texto
     assert "## Os que venderam pelos nossos links" in texto and "| 1/10 | 1 | R$ 7,20 | viral | 20.0 | 2 | 2 |" in texto
+
+
+def test_a_tendencia_anota_a_comissao_do_video(monkeypatch):
+    # Escolha do Rafael (24/11/2026, P297 1): a comissão anotada é a do vídeo da Shopee Vídeo (1,5% da Shopee mais a
+    # extra do vendedor), a mesma que o robô usa na escolha: os 13% da API (10% de extra) dão 11,5%.
+    class Resposta:
+        async def json(self, content_type=None):
+            return {"data": {"productOfferV2": {"nodes": [
+                {"sales": "1500", "ratingStar": "4.8", "commissionRate": "0.13", "priceMin": "30"}]}}}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Sessao:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, data=None):
+            return Resposta()
+
+    monkeypatch.setattr(tv.aiohttp, "ClientSession", Sessao)
+    oferta = rodar(tv._oferta("11", "22"))
+    assert oferta == {"vendas": 1500, "nota": 4.8, "comissao": 0.115, "preco": 30.0}

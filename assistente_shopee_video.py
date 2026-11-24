@@ -492,7 +492,7 @@ async def _consultar_produto(loja, item):
         return None
     no = nos[0]
     return {"nome": no.get("productName") or "", "preco": _numero(no.get("priceMin")),
-            "comissao": _numero(no.get("commissionRate")) * 100, "imagem": no.get("imageUrl") or ""}
+            "comissao": api_shopee.porcento_no_video(no), "imagem": no.get("imageUrl") or ""}
 
 
 def _numero(valor):
@@ -906,9 +906,14 @@ def _reais(valor):
     return f"R$ {valor:.2f}".replace(".", ",")
 
 
+def _porcento(valor):
+    """A taxa em %, como se escreve: 1,5%, 3% ou 12,5%."""
+    return f"{valor:.1f}".replace(".0", "").replace(".", ",") + "%"
+
+
 def _linha_do_produto(produto):
-    return (f"{html.escape(produto['nome'])}: {_reais(produto['preco'])}, "
-            f"comissão {produto['comissao']:.1f}%").replace(".0%", "%")
+    # A comissão do vídeo da Shopee Vídeo, a da Shopee mais a extra do vendedor (P297 1: api_shopee.comissao_no_video).
+    return f"{html.escape(produto['nome'])}: {_reais(produto['preco'])}, comissão {_porcento(produto['comissao'])}"
 
 
 def _passo_do_nome(produtos, nomes):

@@ -3640,7 +3640,7 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
             continue
         contagem["nota"] += 1
         preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
-        valor = valor_por_venda(preco, assistente._numero(oferta.get("commissionRate")) * 100)
+        valor = valor_por_venda(preco, api_shopee.porcento_no_video(oferta))
         if valor < MINIMO_POR_VENDA:
             continue
         contagem["minimo"] += 1
@@ -5046,7 +5046,7 @@ def candidatos_da_troca(original, ofertas):
         if ps.parecido_entre([nome], original["nome"])[0] < PARECIDO_NA_BUSCA:
             continue
         vistos.add(item or link)
-        comissao = assistente._numero(oferta.get("commissionRate")) * 100
+        comissao = api_shopee.porcento_no_video(oferta)
         candidatos.append({"nome": nome, "link": link, "comissao": comissao, "preco": preco,
                            "valor": valor_por_venda(preco, comissao),
                            "vendas": int(assistente._numero(oferta.get("sales"))),
@@ -5200,7 +5200,7 @@ def candidatos_do_achado(ofertas, fora=""):
         item = str(oferta.get("itemId") or "") or (numero.group(1) if numero else "")
         if not nome or not link or not preco or (fora and item == fora):
             continue
-        comissao = assistente._numero(oferta.get("commissionRate")) * 100
+        comissao = api_shopee.porcento_no_video(oferta)
         candidatos.append({"nome": nome, "link": link, "comissao": comissao, "preco": preco,
                            "valor": valor_por_venda(preco, comissao),
                            "vendas": int(assistente._numero(oferta.get("sales"))),
@@ -5272,7 +5272,7 @@ PROCESSO_DA_TROCA_DO_VER_PRODUTOS = "ver produtos: o mesmo produto que paga mais
 def _valor_da_oferta(oferta):
     """O que o Rafael recebe numa venda pela oferta da API (o preço "a partir de" vezes a comissão); 0 sem ela."""
     preco = assistente._numero((oferta or {}).get("priceMin")) or assistente._numero((oferta or {}).get("price"))
-    return valor_por_venda(preco, assistente._numero((oferta or {}).get("commissionRate")) * 100)
+    return valor_por_venda(preco, api_shopee.porcento_no_video(oferta))
 
 
 def trocar_os_do_ver_produtos(d, video, nomes, fotos, vistos, curtidos, prazo, de_outra_cor=()):
@@ -5330,7 +5330,7 @@ def _trocar_um_do_ver_produtos(d, video, produto, oferta, foto, vistos, curtidos
         anotar("mantido - sem a foto da página do produto")
         return None
     original = {"nome": produto["nome"], "preco": preco, "item": produto.get("item") or "",
-                "comissao": assistente._numero(oferta.get("commissionRate")) * 100}
+                "comissao": api_shopee.porcento_no_video(oferta)}
     try:
         candidatos, porque = opcoes_na_faixa(video, original, foto)
         if not candidatos:
@@ -5521,7 +5521,7 @@ def candidatos_da_foto(original, item_do_rascunho, achados, fora=None):
         item = str(oferta.get("itemId") or "")
         endereco = oferta.get("productLink") or ""
         preco = assistente._numero(oferta.get("priceMin")) or assistente._numero(oferta.get("price"))
-        comissao = assistente._numero(oferta.get("commissionRate")) * 100
+        comissao = api_shopee.porcento_no_video(oferta)
         if not item or not endereco or not preco:
             contar("sem dados")
             continue

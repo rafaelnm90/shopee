@@ -132,3 +132,20 @@ def test_a_sonda_dos_produtos_so_mostra_contagens_no_log(monkeypatch, capsys):
     assert any('keyword: "organizador secreto", sortType: 2, limit: 50' == argumentos for argumentos, _ in pedidos)
     for privado in ("organizador", "coleira", "Garrafa", "shopee.com.br", "img.exemplo", "Casa", "Pet"):
         assert privado not in saida
+
+
+def test_a_linha_da_comissao_da_sonda():
+    # P297 1: a sonda conta como a API divide a comissão (a parte da Shopee e a do vendedor), só em números, para
+    # conferir a conta da comissão do vídeo (api_shopee.comissao_no_video).
+    produtos = [{**_produto(1, 30, 0.13, 4.8), "sellerCommissionRate": "0.1", "shopeeCommissionRate": "0.03"},
+                {**_produto(2, 30, 0.03, 4.8), "sellerCommissionRate": "0", "shopeeCommissionRate": "0.03"},
+                {**_produto(3, 30, 0.07, 4.8), "sellerCommissionRate": "0.03", "shopeeCommissionRate": "0.025"},
+                _produto(4, 30, 0.05, 4.8)]                          # sem as partes
+    assert video_ia.contagens_da_comissao(produtos) == (
+        "   comissão: com as duas partes: 3 de 4 | a da Shopee em 3%: 2 | com a extra do vendedor: 2 | "
+        "a da API é a soma das duas: 2")
+    # Na lista da sonda, é a última linha, e o que pagam por venda é pela comissão do vídeo (R$ 3,45 no 1º).
+    linhas = video_ia.contagens_da_lista(produtos[:1], set(), lambda preco, comissao: preco * comissao / 100, 2.0)
+    assert linhas[-1].startswith("   comissão: com as duas partes: 1 de 1")
+    assert linhas[3] == ("   por venda, entre os das duas coisas: de R$ 2 a R$ 5: 1 | de R$ 5 a R$ 15: 0 | "
+                         "acima de R$ 15: 0")
