@@ -1103,14 +1103,23 @@ MODULO_DA_LISTA = re.compile(r"(?:\d{1,3}%\s+)?(?P<nome>.*\S)")
 ALTURA_DO_BOTAO = 60
 # Embaixo do módulo aberto vem a 1ª aula dele: sem esse espaço à vista, a lista rola antes de saber se ele está aberto.
 ESPACO_DA_AULA = 160
-# O curso mais longo da turma tem centenas de aulas (362 no curso 2, pelo progresso da página em 24/11/2026): a lista
-# inteira leva dezenas de rolagens e de toques nos módulos.
-VOLTAS_DA_LISTA = 600
+# O curso mais longo da turma tem centenas de aulas (402 no curso 7, pelo progresso da página em 24/11/2026): a lista
+# inteira leva centenas de leituras da tela, entre rolagens, toques nos módulos e voltas da caixa (cerca de 410 num
+# curso de mentira do mesmo tamanho).
+VOLTAS_DA_LISTA = 1000
 ESPERA_DO_MODULO = 1.5
-# A duração da linha da aula aparece um instante depois da linha: a tela com aula ainda sem ela é lida de novo até
-# essas vezes, com essa espera (s), antes de a leitura seguir.
+# A duração da linha da aula só aparece com a linha dentro da caixa da lista: o site a põe quando a linha passa pela
+# parte da caixa que se vê (às vezes um instante depois), e ela fica com o módulo aberto. A linha fora da caixa, por
+# cima ou por baixo, vem sem a duração que tem (em 24/11/2026, aberto um módulo do curso 4, o site rolou a caixa até a
+# aula aberta, e a 1ª aula do módulo, um vídeo, ficou por cima da caixa sem passar por dentro dela, e a lista a
+# guardou sem a duração). Só a linha lida dentro da caixa diz que a aula não tem duração: a tela com uma dessas é lida
+# de novo até essas vezes, com essa espera (s), antes de a leitura seguir. A linha sem a duração por cima da caixa, que
+# não passou por dentro dela, faz a caixa voltar, por dentro, até ela; sem avanço em VOLTAS_SEM_AVANCO voltas
+# seguidas, a aula fica sem a duração conferida (sem_conferir), e o log do explorar diz quantas.
 RELEITURAS_DA_DURACAO = 2
 ESPERA_DA_DURACAO = 1.0
+VOLTAS_SEM_AVANCO = 3
+POR_CIMA, POR_BAIXO = "por cima", "por baixo"
 SEM_A_LISTA = "a aba Módulos não apareceu na tela"
 LISTA_SEM_O_COMECO = "o começo da lista ficou fora da tela"
 LISTA_PELA_METADE = "a lista das aulas não chegou ao fim"
@@ -1200,6 +1209,15 @@ def _escondida_por_cima(itens, janela):
     return any(item["caixa"][1] < janela[1] for item in itens)
 
 
+def _fora_da_caixa(itens, janela):
+    """
+    As linhas de aula à vista fora da caixa da lista (janela: a parte dela que se vê), pela chave de cada uma (o número
+    da aula no site ou, sem ele, o nome, como em _chave_da_aula): POR_CIMA ou POR_BAIXO dela.
+    """
+    return {(item.get("aula") or item["nome"]): POR_CIMA if item["caixa"][1] < janela[1] else POR_BAIXO
+            for item in itens if item["tipo"] == "aula" and not _na_janela(janela, item["caixa"])}
+
+
 def _subir_na_lista(d, janela):
     """A lista um pedaço para cima: o dedo para baixo por dentro da caixa dela, longe do Próximo e da bolha do chat."""
     inicio = janela[1] + 60
@@ -1218,14 +1236,27 @@ def _juntar_as_aulas(lidas, vistas):
     reconhecido pelo número da aula no site ou, sem ele, pelo nome: logo depois do toque no módulo, a linha da aula pode
     vir ainda sem a duração, que aparece na leitura seguinte (o curso 1, em 24/11/2026, ficou com 13 aulas repetidas).
     A linha nova vale quando traz a duração: o nome que termina como uma hora ("Mentoria 20:00"), sem a duração, é
-    lido como "Mentoria" e 20 min. Sem ela, fica a de antes.
+    lido como "Mentoria" e 20 min. Sem ela, fica a de antes. Com a caixa da lista voltando atrás de uma aula sem a
+    duração, a tela mostra um pedaço já lido (do meio, ou com linhas de antes das lidas): ele só traz a duração que
+    faltava.
     """
+    chaves, novas = [_chave_da_aula(aula) for aula in lidas], [_chave_da_aula(aula) for aula in vistas]
+
+    def com_a_duracao(velhas, iguais):
+        return [vista if vista[1] is not None else velha[:2] + vista[2:] for velha, vista in zip(velhas, iguais)]
+
     for tamanho in range(min(len(lidas), len(vistas)), 0, -1):
-        if [_chave_da_aula(aula) for aula in lidas[-tamanho:]] == [_chave_da_aula(aula) for aula in vistas[:tamanho]]:
+        if chaves[-tamanho:] == novas[:tamanho]:
             comeco = len(lidas) - tamanho
-            iguais = [vista if vista[1] is not None else velha[:2] + vista[2:]
-                      for velha, vista in zip(lidas[comeco:], vistas[:tamanho])]
-            return lidas[:comeco] + iguais + vistas[tamanho:]
+            return lidas[:comeco] + com_a_duracao(lidas[comeco:], vistas[:tamanho]) + vistas[tamanho:]
+    for comeco in range(len(lidas) - len(vistas) + 1):
+        if chaves[comeco:comeco + len(vistas)] == novas:
+            fim = comeco + len(vistas)
+            return lidas[:comeco] + com_a_duracao(lidas[comeco:fim], vistas) + lidas[fim:]
+    for tamanho in range(min(len(lidas), len(vistas)), 0, -1):
+        if novas[-tamanho:] == chaves[:tamanho]:
+            antes = len(vistas) - tamanho
+            return vistas[:antes] + com_a_duracao(lidas[:tamanho], vistas[antes:]) + lidas[tamanho:]
     return lidas + vistas
 
 
@@ -1254,11 +1285,16 @@ def _uma_olhada_na_lista(itens, modulos):
     return vistas, None, None
 
 
-def _aula_da_lista(modulo, aula):
-    """A aula lida (nome, segundos[, número]) como linha da lista: o número da aula no site só quando a linha o traz."""
+def _aula_da_lista(modulo, aula, conferida=True):
+    """
+    A aula lida (nome, segundos[, número]) como linha da lista: o número da aula no site só quando a linha o traz; a
+    aula sem a duração cuja linha não foi lida dentro da caixa, marcada (sem_conferir).
+    """
     entrada = {"modulo": modulo, "nome": aula[0], "segundos": aula[1]}
     if len(aula) > 2 and aula[2]:
         entrada["aula"] = aula[2]
+    if not conferida:
+        entrada["sem_conferir"] = True
     return entrada
 
 
@@ -1267,15 +1303,20 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
     A lista das aulas do curso aberto no Chrome, pela aba Módulos: ([{"modulo", "nome", "segundos"}], "") com os
     módulos na ordem e as aulas na ordem de cada um, ou (None, o porquê). Cada módulo fechado é aberto pelo botão dele
     (um toque só: o que não mostra aula nenhuma fica vazio), e a página rola só para baixo, até o fim dela; só a caixa
-    da lista volta para cima, por dentro, quando o site a rola sozinho (SUBIDA_NA_LISTA). ao_comecar é chamado uma vez,
-    com o começo da lista na tela (o explorar guarda essa tela para o Claude).
+    da lista volta para cima, por dentro, quando o site a rola sozinho (SUBIDA_NA_LISTA) e atrás da aula por cima dela
+    sem a duração (RELEITURAS_DA_DURACAO): a falta da duração só vale lida com a linha dentro da caixa, e a aula sem ela
+    cuja linha não passou por dentro vem marcada (sem_conferir). ao_comecar é chamado uma vez, com o começo da lista na
+    tela (o explorar guarda essa tela para o Claude).
     """
     pausa = pausa or time.sleep
     modulos, tocados, antes, sem_a_lista, aba_tocada = [], set(), None, 0, False
     # esperado: o módulo tocado por último, até o botão dele voltar à leitura da tela.
     esperado, subidas = None, 0
-    # relidas: as aulas sem a duração que já tiveram as releituras da tela (a aula sem vídeo não tem duração nenhuma).
-    relidas, releituras = set(), 0
+    # relidas: as aulas lidas sem a duração dentro da caixa, que já tiveram as releituras da tela (a aula sem vídeo não
+    # tem duração nenhuma); desistidas: as por cima da caixa que as voltas dela não trouxeram para dentro.
+    relidas, releituras, desistidas = set(), 0, set()
+    # faltavam: as aulas por cima da caixa na última volta dela; sem_avanco: as voltas seguidas sem trazer nenhuma.
+    faltavam, sem_avanco = None, 0
     for _ in range(VOLTAS_DA_LISTA):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         achado = itens_da_lista(tela)
@@ -1313,16 +1354,30 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
         if modulos:
             modulos[-1]["aulas"] = _juntar_as_aulas(modulos[-1]["aulas"], vistas)
             juntas = {_chave_da_aula(aula): aula[1] for aula in modulos[-1]["aulas"]}
-            sem_duracao = {_chave_da_aula(aula) for aula in vistas if juntas.get(_chave_da_aula(aula)) is None}
+            fora = _fora_da_caixa(itens, caixa)
+            faltam = {_chave_da_aula(aula) for aula in vistas if juntas.get(_chave_da_aula(aula)) is None}
+            sem_duracao = faltam - set(fora)
             if sem_duracao - relidas and releituras < RELEITURAS_DA_DURACAO:
-                # A linha da aula que acabou de aparecer, logo depois do toque no módulo, pode vir ainda sem a
-                # duração, que o site põe um instante depois; rolada a página (ou fechado o módulo de antes, que faz
-                # a página pular), ela sai da tela sem a duração, e a noite não confere se gravou o vídeo inteiro (os
-                # cursos 3 e 4, na 2ª leitura de 24/11/2026). A mesma tela é lida de novo antes de seguir.
+                # A linha que acabou de entrar na caixa pode vir ainda sem a duração, que o site põe um instante
+                # depois (sem ela, a noite não confere se gravou o vídeo inteiro): a mesma tela é lida de novo antes
+                # de seguir. A linha fora da caixa vem sem ela de todo jeito, e ler de novo não muda nada.
                 releituras += 1
                 pausa(ESPERA_DA_DURACAO)
                 continue
             relidas |= sem_duracao
+            por_cima = {chave for chave in faltam if fora.get(chave) == POR_CIMA} - relidas - desistidas
+            if por_cima:
+                # A linha sem a duração por cima da caixa, sem ter passado por dentro dela (o site rola a caixa
+                # sozinho até a aula aberta, e a rolagem por dentro dela anda mais que o dedo): a caixa volta, por
+                # dentro, até ela entrar, e a duração é lida.
+                sem_avanco = 0 if faltavam is None or faltavam - por_cima else sem_avanco + 1
+                if sem_avanco < VOLTAS_SEM_AVANCO:
+                    faltavam, releituras, antes = por_cima, 0, None
+                    _subir_na_lista(d, caixa)
+                    pausa(ESPERA_DA_ROLAGEM)
+                    continue
+                desistidas |= por_cima
+            faltavam, sem_avanco = None, 0
         releituras = 0
         if (novo and novo["caixa"][1] < caixa[1] and novo["nome"] not in tocados
                 and not (abaixo and abaixo["tipo"] == "aula") and subidas < SUBIDAS_DA_LISTA):
@@ -1369,7 +1424,8 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
                 continue
             if novo:
                 return None, MODULO_SEM_TOQUE
-            aulas = [_aula_da_lista(modulo["nome"], aula) for modulo in modulos for aula in modulo["aulas"]]
+            aulas = [_aula_da_lista(modulo["nome"], aula, aula[1] is not None or _chave_da_aula(aula) in relidas)
+                     for modulo in modulos for aula in modulo["aulas"]]
             return (aulas, "") if aulas else (None, LISTA_PELA_METADE)
         antes = marca
         rolar_a_pagina(d)
@@ -1397,23 +1453,30 @@ def guardar_a_lista(posicao, lista, agora=None):
     """
     A lista das aulas do curso dessa posição, lida da aba Módulos, no mapa (só no banco do servidor). As marcas de cada
     aula (gravada, guardada sem vídeo, conferida pelo Claude) passam para a lista nova pelo módulo e pelo nome: ler a
-    lista de novo não faz a noite gravar outra vez o que já foi gravado.
+    lista de novo não faz a noite gravar outra vez o que já foi gravado. A aula sem a duração conferida (sem_conferir:
+    a linha não passou por dentro da caixa da lista) fica com a duração da leitura anterior da mesma aula, pelo número
+    dela no site (sem ele, pelo módulo e pelo nome): essa leitura não viu se a aula tem duração.
     """
     momento = _texto(_agora(agora))
 
     def mudar(curso):
-        antigas = {}
+        antigas, por_numero = {}, {}
         for aula in curso.get("lista") or []:
             antigas.setdefault((aula.get("modulo"), aula.get("nome")), []).append(aula)
+            if aula.get("aula"):
+                por_numero[aula["aula"]] = aula
         nova = []
         for aula in lista:
             entrada = {"modulo": aula["modulo"], "nome": aula["nome"], "segundos": aula["segundos"]}
             if aula.get("aula"):
                 entrada["aula"] = aula["aula"]
             iguais = antigas.get((aula["modulo"], aula["nome"]))
-            if iguais:
-                velha = iguais.pop(0)
+            velha = iguais.pop(0) if iguais else None
+            if velha:
                 entrada.update({chave: velha[chave] for chave in MARCAS_DA_AULA if velha.get(chave)})
+            anterior = por_numero.get(aula["aula"]) if aula.get("aula") else velha
+            if entrada["segundos"] is None and aula.get("sem_conferir") and anterior and anterior.get("segundos"):
+                entrada["segundos"] = anterior["segundos"]
             nova.append(entrada)
         curso["lista"] = nova
         curso["lista_em"] = momento
@@ -1438,8 +1501,10 @@ def descrever_a_lista(posicao, lista):
     """A lista lida, só em números (o log do explorar é público)."""
     modulos = len({aula["modulo"] for aula in lista})
     com = [aula["segundos"] for aula in lista if aula["segundos"]]
+    sem_conferir = sum(1 for aula in lista if aula.get("sem_conferir"))
     return (f"lista do curso {posicao}: {modulos} módulo(s) com aula, {len(lista)} aula(s), {len(com)} com a duração "
-            f"({sum(com) // 60} min de vídeo) e {len(lista) - len(com)} sem")
+            f"({sum(com) // 60} min de vídeo) e {len(lista) - len(com)} sem"
+            + (f" ({sem_conferir} sem a linha lida dentro da caixa)" if sem_conferir else ""))
 
 
 # A aula aberta pelo toque no nome dela na lista (o caminho que a noite vai seguir: pedido do Rafael de 24/11/2026, de
