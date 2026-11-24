@@ -958,13 +958,29 @@ def proxima_aula(mapa=None, pular=()):
     da 1ª à última, curso por curso): (posição, número) da 1ª aula da lista que a noite ainda não guardou nem o Claude
     conferiu. A guardada espera a conferência do Claude, que a marca como vista (o check) ou manda refazer (inteira, do
     início: P295 1). As de `pular` ((posição, número), as que não foram guardadas nesta noite) ficam para a noite
-    seguinte: nenhuma aula é pulada. O curso sem a lista (curso:lista:N) ainda não é gravado. None sem nada a gravar.
+    seguinte: nenhuma aula é pulada. A noite para no curso da vez que ainda não tem a lista (curso:lista:N), sem passar
+    ao seguinte (curso por curso, na ordem). None sem nada a gravar.
     """
     mapa = mapa or mapa_das_aulas()
     for posicao in ORDEM_DOS_CURSOS:
-        for numero, aula in enumerate(lista_do_curso(posicao, mapa), 1):
+        lista = lista_do_curso(posicao, mapa)
+        if not lista:
+            return None
+        for numero, aula in enumerate(lista, 1):
             if not aula.get("gravada_em") and not aula.get("vista_em") and (posicao, numero) not in pular:
                 return posicao, numero
+    return None
+
+
+def curso_sem_a_lista(mapa=None):
+    """O curso em que a noite para por não ter a lista das aulas (os de antes dele todos gravados), ou None."""
+    mapa = mapa or mapa_das_aulas()
+    for posicao in ORDEM_DOS_CURSOS:
+        lista = lista_do_curso(posicao, mapa)
+        if not lista:
+            return posicao
+        if any(not aula.get("gravada_em") and not aula.get("vista_em") for aula in lista):
+            return None
     return None
 
 
@@ -1082,6 +1098,15 @@ SEM_A_LISTA = "a aba Módulos não apareceu na tela"
 LISTA_SEM_O_COMECO = "o começo da lista ficou fora da tela"
 LISTA_PELA_METADE = "a lista das aulas não chegou ao fim"
 MODULO_SEM_TOQUE = "o botão de um módulo ficou fora do alcance"
+# A lista das aulas rola por dentro de uma caixa só dela (a altura tem limite). Na leitura da tela, as linhas que
+# rolaram para fora da caixa continuam lá, com o lugar que teriam, por cima das abas e do player (o curso 4, em
+# 24/11/2026): só a linha inteira dentro da caixa é tocada. Aberto um módulo, o site rola a caixa sozinho até a aula
+# aberta na página, e o botão dele e as primeiras aulas saem por cima: a lista lia as aulas seguintes como do módulo de
+# antes, sem as primeiras. A caixa volta arrastada para baixo por dentro dela (o dedo para baixo sem sair da caixa), só
+# enquanto há linha escondida por cima dela, e a página não se mexe.
+SUBIDA_NA_LISTA = 400
+SUBIDAS_DA_LISTA = 200
+MODULO_FORA_DA_TELA = "o módulo aberto saiu da lista e não voltou"
 
 
 # O alto da página da aula diz o andamento do curso ("12% concluído · 3/28 aulas"): o total confere a lista lida.
@@ -1148,6 +1173,23 @@ def _tocavel(tela, caixa):
             and _livre_para_tocar(tela, _centro(caixa)))
 
 
+def _na_janela(janela, caixa):
+    """A linha está inteira na parte da lista que se vê (janela: a caixa da lista na tela)?"""
+    return janela[1] <= caixa[1] and caixa[3] <= janela[3]
+
+
+def _escondida_por_cima(itens, janela):
+    """Alguma linha rolou para fora da caixa da lista, por cima? Só então a caixa volta sem mexer na página."""
+    return any(item["caixa"][1] < janela[1] for item in itens)
+
+
+def _subir_na_lista(d, janela):
+    """A lista um pedaço para cima: o dedo para baixo por dentro da caixa dela, longe do Próximo e da bolha do chat."""
+    inicio = janela[1] + 60
+    fim = max(inicio + 100, min(inicio + SUBIDA_NA_LISTA, janela[3] - 20, BOLHA_DO_CHAT[1] - 20))
+    d.swipe(540, inicio, 540, fim, 0.4)
+
+
 def _chave_da_aula(aula):
     """A identidade da linha lida, (nome, segundos[, número]): o número da aula no site, ou o nome sem ele."""
     return aula[2] if len(aula) > 2 and aula[2] else aula[0]
@@ -1207,11 +1249,14 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
     """
     A lista das aulas do curso aberto no Chrome, pela aba Módulos: ([{"modulo", "nome", "segundos"}], "") com os
     módulos na ordem e as aulas na ordem de cada um, ou (None, o porquê). Cada módulo fechado é aberto pelo botão dele
-    (um toque só: o que não mostra aula nenhuma fica vazio), e a página rola só para baixo, até o fim dela. ao_comecar
-    é chamado uma vez, com o começo da lista na tela (o explorar guarda essa tela para o Claude).
+    (um toque só: o que não mostra aula nenhuma fica vazio), e a página rola só para baixo, até o fim dela; só a caixa
+    da lista volta para cima, por dentro, quando o site a rola sozinho (SUBIDA_NA_LISTA). ao_comecar é chamado uma vez,
+    com o começo da lista na tela (o explorar guarda essa tela para o Claude).
     """
     pausa = pausa or time.sleep
     modulos, tocados, antes, sem_a_lista, aba_tocada = [], set(), None, 0, False
+    # esperado: o módulo tocado por último, até o botão dele voltar à leitura da tela.
+    esperado, subidas = None, 0
     for _ in range(VOLTAS_DA_LISTA):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         achado = itens_da_lista(tela)
@@ -1226,6 +1271,18 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
             pausa(ESPERA_DA_ROLAGEM)
             continue
         caixa, itens = achado
+        if (not modulos or esperado) and subidas < SUBIDAS_DA_LISTA and _escondida_por_cima(itens, caixa) and not any(
+                item["tipo"] == "módulo" and item["nome"] == esperado for item in itens):
+            # O começo da lista, ou o botão do módulo que acabou de abrir, rolou por cima da caixa dela: o site rola a
+            # caixa sozinho até a aula aberta na página. As linhas à vista não entram antes de o botão voltar.
+            subidas += 1
+            _subir_na_lista(d, caixa)
+            pausa(ESPERA_DA_ROLAGEM)
+            antes = None
+            continue
+        if esperado and not any(item["tipo"] == "módulo" and item["nome"] == esperado for item in itens):
+            return None, MODULO_FORA_DA_TELA
+        esperado = None
         topo = next((no["caixa"][1] for no in _nos(tela) if no["classe"] == "WebView"), 0)
         if not modulos and (itens[0]["tipo"] != "módulo" or caixa[1] <= topo):
             # A lista que já começa cortada no alto da página: o começo dela passou, e a página não volta para cima.
@@ -1246,9 +1303,10 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
                 # Tocado e sem aula nenhuma embaixo: um módulo vazio.
                 modulos.append({"nome": novo["nome"], "aulas": []})
                 continue
-            if espaco and _tocavel(tela, novo["caixa"]):
+            if espaco and _tocavel(tela, novo["caixa"]) and _na_janela(caixa, novo["caixa"]):
                 d.click(*_centro(novo["caixa"]))
                 tocados.add(novo["nome"])
+                esperado, subidas = novo["nome"], 0
                 pausa(ESPERA_DO_MODULO)
                 continue
         marca = [(item["tipo"], item["nome"], item["caixa"]) for item in itens]
@@ -1259,11 +1317,12 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
                 modulos.append({"nome": novo["nome"], "aulas": []})
                 antes = None
                 continue
-            if novo and _tocavel(tela, novo["caixa"]):
+            if novo and _tocavel(tela, novo["caixa"]) and _na_janela(caixa, novo["caixa"]):
                 # O último módulo, no fim da página, sem lugar embaixo para as aulas (o curso 6, em 24/11/2026): sem
                 # aula à vista, ele está fechado (aberto, as aulas dele alongariam a página) e é tocado uma vez.
                 d.click(*_centro(novo["caixa"]))
                 tocados.add(novo["nome"])
+                esperado, subidas = novo["nome"], 0
                 pausa(ESPERA_DO_MODULO)
                 antes = None
                 continue
@@ -1376,9 +1435,32 @@ def _linha_na_tela(itens, alvo, dentro):
             abaixo = itens[numero + 1] if numero + 1 < len(itens) else None
             if dentro and not (abaixo and abaixo["tipo"] == "aula"):
                 fechado = item
-        elif dentro and linha is None and _a_mesma_aula(item, alvo):
+        elif linha is None and (dentro or _pelo_numero(item, alvo)) and _a_mesma_aula(item, alvo):
+            # Com o número da aula no site, a linha é dela também sem o botão do módulo à vista (o site rola a lista
+            # sozinho quando o módulo abre, e o botão sai por cima).
             linha = item
     return linha, fechado, dentro
+
+
+def _pelo_numero(item, alvo):
+    """A linha da tela e a aula da lista trazem o número da aula no site (a identidade dela no curso)?"""
+    return bool(item.get("aula") and alvo.get("aula"))
+
+
+def _onde_esta_a_aula(itens, lista, numero, linha, janela):
+    """
+    Para que lado da caixa da lista está a aula `numero`: "acima", "abaixo" ou "" (à vista, ou sem como saber). A linha
+    lida fora da caixa diz o lado; sem ela, as aulas à vista dizem, pela ordem da lista (pelo número da aula no site).
+    """
+    if linha:
+        return "acima" if linha["caixa"][1] < janela[1] else "abaixo" if linha["caixa"][3] > janela[3] else ""
+    lugares = {aula["aula"]: indice for indice, aula in enumerate(lista, 1) if aula.get("aula")}
+    vistas = [lugares[item["aula"]] for item in itens if item["tipo"] == "aula" and item.get("aula") in lugares]
+    if vistas and min(vistas) > numero:
+        return "acima"
+    if vistas and max(vistas) < numero:
+        return "abaixo"
+    return ""
 
 
 def _a_mesma_aula(item, alvo):
@@ -1419,7 +1501,7 @@ def abrir_pela_lista(d, posicao, numero, pausa=None, no_curso=False, vigiar=None
 def _tocar_na_lista(d, lista, numero, pausa, vigiar):
     """A linha da aula `numero` achada na aba Módulos, rolando a página para baixo, e tocada. (ok, porque)."""
     alvo = lista[numero - 1]
-    dentro, tocado, antes, sem_a_lista, aba_tocada = False, False, None, 0, False
+    dentro, tocado, antes, sem_a_lista, aba_tocada, subidas = False, False, None, 0, False, 0
     for _ in range(VOLTAS_DA_LISTA):
         parar = vigiar()
         if parar:
@@ -1436,20 +1518,31 @@ def _tocar_na_lista(d, lista, numero, pausa, vigiar):
             rolar_a_pagina(d)
             pausa(ESPERA_DA_ROLAGEM)
             continue
-        itens = achado[1]
+        janela, itens = achado
         linha, fechado, fim_dentro = _linha_na_tela(itens, alvo, dentro)
-        if linha and _tocavel(tela, linha["caixa"]):
+        if linha and _tocavel(tela, linha["caixa"]) and _na_janela(janela, linha["caixa"]):
             d.click(*_centro(linha["caixa"]))
             return _conferir_a_aula_tocada(d, lista, numero, pausa)
+        if _onde_esta_a_aula(itens, lista, numero, linha, janela) == "acima":
+            # A aula rolou por cima da caixa da lista (o site rola a caixa sozinho até a aula aberta na página): a
+            # caixa volta, por dentro, só enquanto há linha escondida por cima dela.
+            if subidas >= SUBIDAS_DA_LISTA or not _escondida_por_cima(itens, janela):
+                return False, SEM_A_AULA_NA_LISTA
+            subidas += 1
+            _subir_na_lista(d, janela)
+            pausa(ESPERA_DA_ROLAGEM)
+            antes = None
+            continue
         if fechado and not tocado:
             espaco = fechado["caixa"][3] + ESPACO_DA_AULA < _topo_do_proximo(tela)
-            if espaco and _tocavel(tela, fechado["caixa"]):
+            if espaco and _tocavel(tela, fechado["caixa"]) and _na_janela(janela, fechado["caixa"]):
                 d.click(*_centro(fechado["caixa"]))
                 tocado = True
                 pausa(ESPERA_DO_MODULO)
                 continue
         marca = [(item["tipo"], item["nome"], item["caixa"]) for item in itens]
-        if marca == antes and fechado and not tocado and _tocavel(tela, fechado["caixa"]):
+        if (marca == antes and fechado and not tocado and _tocavel(tela, fechado["caixa"])
+                and _na_janela(janela, fechado["caixa"])):
             # O módulo da aula no fim da página, sem lugar embaixo para as aulas: fechado, é tocado uma vez.
             d.click(*_centro(fechado["caixa"]))
             tocado, antes = True, None
@@ -2930,7 +3023,8 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                 break
             da_vez = proxima_aula(pular=pular)
             if not da_vez:
-                motivo = "nenhuma aula por gravar"
+                sem_lista = curso_sem_a_lista()
+                motivo = f"o curso {sem_lista} sem a lista das aulas" if sem_lista else "nenhuma aula por gravar"
                 break
             if not conectado():
                 motivo = "o celular desconectado"
