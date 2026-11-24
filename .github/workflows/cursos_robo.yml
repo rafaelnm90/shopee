@@ -6,8 +6,12 @@ name: Aulas do curso (gravadas pelo celular do robô, cifradas)
 #   exportar  leva as aulas mais velhas, cifradas pelo servidor, ao ramo aulas-curso (um
 #             commit só, trocado a cada exportação), num pacote de até 40 MB, com o mapa
 #             das aulas (a lista de cada curso, sem os endereços);
-#   apagar    depois de lido: apaga do servidor as aulas que foram no pacote, e o ramo.
-# Pedido do Rafael: o servidor não pode lotar, e nada do curso fica acumulado.
+#   apagar    depois de lido: apaga do servidor as aulas que foram no pacote, e o ramo;
+#   conferir  o check do Claude: as aulas de "aulas" (os números da lista de cada curso,
+#             ex.: 4:15,16;5:2-35) vistas inteiras, conferidas e com algo aprendido;
+#   refazer   as aulas de "aulas" voltam para a noite gravar de novo, inteiras.
+# Pedido do Rafael: o servidor não pode lotar, e nada do curso fica acumulado; o check de
+# cada aula só depois de o Claude conferir que viu a aula certa inteira (24/11/2026).
 #
 # O repositório e os logs do Actions são públicos: o arquivo só abre com a chave do
 # servidor, e aqui não sai nada do conteúdo, só quantas aulas.
@@ -17,8 +21,12 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [exportar, apagar]
+        options: [exportar, apagar, conferir, refazer]
         default: exportar
+      aulas:
+        description: "Conferir ou refazer: CURSO:AULAS (ex.: 4:15,16;5:2-35), só números"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -39,6 +47,7 @@ jobs:
           TOKEN: ${{ github.token }}
           REPOSITORIO: ${{ github.repository }}
           ACAO: ${{ inputs.acao }}
+          AULAS: ${{ inputs.aulas }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
@@ -48,6 +57,18 @@ jobs:
             ssh -i ~/.ssh/servidor -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
               -o LogLevel=ERROR "$USUARIO@$HOST" "cd ~/shopee && venv/bin/python3 cursos_robo.py aulas $1"
           }
+
+          if [ "$ACAO" = "conferir" ] || [ "$ACAO" = "refazer" ]; then
+            # Só números e os separadores vão ao servidor (e ao log).
+            NUMEROS=$(printf '%s' "$AULAS" | tr -dc '0-9:;,-')
+            if [ -z "$NUMEROS" ]; then
+              echo "❌ Faltam as aulas (ex.: 4:15,16;5:2-35)."
+              exit 1
+            fi
+            if [ "$ACAO" = "conferir" ]; then PEDIDO=vistas; else PEDIDO=refazer; fi
+            servidor "$PEDIDO '$NUMEROS'"
+            exit 0
+          fi
 
           git init -q ramo
           cd ramo

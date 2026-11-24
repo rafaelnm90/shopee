@@ -727,12 +727,13 @@ def _sessao_do_chrome(estado, posicao_s):
 class AulaNoCelular(CelularDoVolume):
     """
     O celular de mentira com a aula no Chrome: a página abre como em abre (o tipo e o porquê de ir_para_o_endereco),
-    toca no play e para sozinha aos `dura` s.
+    toca no play e para sozinha aos `dura` s do vídeo; comeca_em: o segundo do vídeo em que o play começa (o site
+    lembra onde a pessoa parou).
     """
 
-    def __init__(self, relogio, dura=60, carrega=False, abre=("com vídeo", ""), **opcoes):
+    def __init__(self, relogio, dura=60, carrega=False, abre=("com vídeo", ""), comeca_em=0, **opcoes):
         super().__init__(**opcoes)
-        self.relogio, self.dura, self.carrega, self.abre = relogio, dura, carrega, abre
+        self.relogio, self.dura, self.carrega, self.abre, self.comeca_em = relogio, dura, carrega, abre, comeca_em
         self.comeco, self.pausada, self.eventos = None, False, []
 
     def tocar(self, d):
@@ -753,12 +754,12 @@ class AulaNoCelular(CelularDoVolume):
     def _midia(self):
         if self.comeco is None:
             return SEM_SESSOES
-        tocou = self.relogio() - self.comeco
-        if self.pausada or tocou >= self.dura:
-            return _sessao_do_chrome(2, min(tocou, self.dura))
-        if self.carrega and tocou >= 20:
+        posicao = self.comeca_em + self.relogio() - self.comeco
+        if self.pausada or posicao >= self.dura:
+            return _sessao_do_chrome(2, min(posicao, self.dura))
+        if self.carrega and posicao >= 20:
             return _sessao_do_chrome(6, 20)
-        return _sessao_do_chrome(3, tocou)
+        return _sessao_do_chrome(3, posicao)
 
 
 def _gravar_a_aula(celular, tmp_path, tempo, quando=None, madrugada=lambda: True, gravador_vivo=True, **opcoes):
@@ -892,6 +893,54 @@ def test_a_pagina_que_nao_abre_ou_sem_video_nao_toca_e_o_volume_volta(bm, tmp_pa
                     else (True, False, "sem vídeo"))
         assert feito == esperado
         assert celular.eventos == ["volume 8", "abriu gravando", "volume 2", "gravador parou"]
+
+
+def test_o_video_conferido_pela_duracao_da_lista_do_inicio_ao_fim(bm, tmp_path):
+    # Pedido do Rafael de 24/11/2026: nunca achar que viu a aula sem tê-la visto. Com a duração da lista, o vídeo que
+    # começa adiantado (o site lembra onde a pessoa parou) para na 1ª olhada, e o que para antes do fim fica pela
+    # metade.
+    tempo = [0.0]
+    celular = AulaNoCelular(lambda: tempo[0], dura=600, comeca_em=200, volume=2)
+    feito, _, _ = _gravar_a_aula(celular, tmp_path, tempo, duracao=600)
+    assert feito == (True, False, "o vídeo não começou do início (em 203 s de 600 s)") and tempo[0] < 20
+    assert celular.eventos[-3:] == ["pausa", "volume 2", "gravador parou"]
+    # O vídeo que começou sozinho com a página tocou só o tempo desde que ela começou a abrir: vale.
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    celular = AulaNoCelular(lambda: tempo[0], dura=300, volume=2)
+
+    def abre_devagar(d):
+        tempo[0] += 30                     # a página levou 30 s para abrir, com o vídeo tocando desde o começo
+        celular.comeca_em = 30
+        return "com vídeo", ""
+    celular.abre = None
+    destino = str(tmp_path / "devagar.mkv")
+    feito = cursos_robo.gravar_a_aula(celular, "celular:5555", destino, abre_devagar, celular.tocar,
+                                      pausa=lambda s: tempo.__setitem__(0, tempo[0] + s), relogio=lambda: tempo[0],
+                                      abrir=lambda comando, **opcoes: ProcessoDoGravador(comando, **opcoes),
+                                      madrugada=lambda: True, duracao=300)
+    assert feito == (True, True, "o vídeo parou")
+    # Parado antes do fim da duração da lista: pela metade; dentro da folga do fim: inteiro.
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    feito, _, _ = _gravar_a_aula(AulaNoCelular(lambda: tempo[0], dura=300, volume=2), tmp_path, tempo, duracao=600)
+    assert feito[:2] == (True, False) and feito[2].startswith(cursos_robo.ANTES_DO_FIM)
+    assert feito[2].endswith("s de 600 s)") and cursos_robo.no_video_pela_metade(feito[2])
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    feito, _, _ = _gravar_a_aula(AulaNoCelular(lambda: tempo[0], dura=590, volume=2), tmp_path, tempo, duracao=600)
+    assert feito == (True, True, "o vídeo parou")
+    # A página que não é mais a da aula com o vídeo tocando: a gravação para ali.
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    feito, _, _ = _gravar_a_aula(AulaNoCelular(lambda: tempo[0], dura=300, volume=2), tmp_path, tempo, duracao=300,
+                                 na_aula_certa=lambda d: False)
+    assert feito == (True, False, "a página não é a da aula da vez")
+    # Sem a duração (a aula sem ela na lista), nada disso é conferido.
+    tempo = [0.0]
+    cursos_robo._anotar(volume_antes=None)
+    feito, _, _ = _gravar_a_aula(AulaNoCelular(lambda: tempo[0], dura=600, comeca_em=200, volume=2), tmp_path, tempo)
+    assert feito == (True, True, "o vídeo parou")
 
 
 CHROME = "com.android.chrome"
@@ -1327,62 +1376,6 @@ def test_o_play_da_aula_conferido_pela_sessao_de_midia():
     assert not cursos_robo.tocar_pelo_play(parado, **SEM_ESPERA) and parado.toques == [(539, 793)]
 
 
-def test_o_mapa_das_aulas_segue_a_ordem_dos_cursos_e_o_proximo_do_site(bm):
-    # P293 1: os cursos pela posição na lista de Turmas (os de Shopee Vídeo primeiro, o dos encontros ao vivo por
-    # último). A 1ª aula de cada um vem do Claude, com o endereço; as outras, do "Próximo" do site, pelo número,
-    # porque o site troca a aula sem trocar o endereço (23/11/2026).
-    um, dois, tres = (aula[2] for aula in AULAS_DO_SITE)
-    assert cursos_robo.proxima_aula() is None
-    assert not cursos_robo.guardar_a_primeira_aula(9, um) and not cursos_robo.guardar_a_primeira_aula(4, "x/y")
-    assert cursos_robo.guardar_a_primeira_aula(5, tres) and cursos_robo.guardar_a_primeira_aula(4, um)
-    assert cursos_robo.proxima_aula() == (4, 1)
-    # Gravada a 1ª, a seguinte vem pelo Próximo dela; a que ficou pela metade volta inteira (P295 1).
-    cursos_robo.anotar_a_aula_gravada(4, 1, _br("2026-11-24 00:30"))
-    assert cursos_robo.proxima_aula() == (4, 2)
-    cursos_robo.anotar_a_aula_seguinte(4, 2, "Aula dois")
-    cursos_robo.anotar_a_aula_seguinte(4, 2, "Outro nome")
-    cursos_robo.anotar_a_aula_seguinte(4, 9, "Fora da ordem")
-    aulas = cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]
-    assert aulas[1] == {"endereco": "", "nome": "Aula dois", "gravada_em": ""} and len(aulas) == 2
-    assert cursos_robo.proxima_aula() == (4, 2)
-    # A que não ficou guardada nesta noite fica para a seguinte, e a noite segue pelo Próximo dela.
-    assert cursos_robo.proxima_aula(pular={(4, 2)}) == (4, 3)
-    # Depois de uma aula gravada, a 1ª do curso não muda mais; antes, o Claude pode corrigir.
-    assert not cursos_robo.guardar_a_primeira_aula(4, tres)
-    assert cursos_robo.guardar_a_primeira_aula(5, dois) and cursos_robo.mapa_das_aulas()["cursos"]["5"]["aulas"] == [
-        {"endereco": dois, "nome": "", "gravada_em": ""}]
-    # Terminado o curso (a última aula, sem o Próximo), a que ficou para trás ainda volta; depois, vem o seguinte da
-    # ordem.
-    cursos_robo.anotar_o_fim_do_curso(4)
-    assert cursos_robo.proxima_aula() == (4, 2) and cursos_robo.proxima_aula(pular={(4, 2)}) == (5, 1)
-    cursos_robo.anotar_a_aula_gravada(4, 2, sem_video=True)
-    assert cursos_robo.proxima_aula() == (5, 1)
-    assert cursos_robo.resumo_do_mapa().startswith("curso 4: terminado (2 aulas, 1 sem vídeo); curso 5: 0 de 1")
-    # A gravada que não serviu (preta ou muda) volta a ficar por gravar.
-    cursos_robo.desmarcar_a_aula(4, 1)
-    assert cursos_robo.proxima_aula() == (4, 1)
-
-
-def test_o_claude_guarda_a_primeira_aula_de_cada_curso_pelo_explorar(bm):
-    # O passo curso:primeira:N lê o endereço na barra do Chrome e o guarda no banco; o log diz só números.
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=1)
-    assert cursos_robo.curso_no_explorar(site, "primeira:4") == (True, "1ª aula do curso 4 guardada")
-    assert cursos_robo.proxima_aula() == (4, 1)
-    assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"][0]["endereco"] == AULAS_DO_SITE[1][2]
-    assert cursos_robo.curso_no_explorar(site, "primeira:9") == (
-        False, "o curso vai de 1 a 7 (a posição na lista de Turmas)")
-    assert not cursos_robo.curso_no_explorar(site, "primeira:x")[0]
-    assert not cursos_robo.curso_no_explorar(site, "segunda:4")[0]
-    fora = SiteDoCurso([("Cursos", 0, "https://escola.exemplo.pro/m/courses")])
-    assert cursos_robo.curso_no_explorar(fora, "primeira:5") == (False, "a tela não é a de uma aula do curso")
-    ok, resumo = cursos_robo.curso_no_explorar(site, "")
-    assert ok and resumo.startswith("curso 4: 0 de 1 aula(s) conhecida(s) gravada(s); curso 5: sem a 1ª aula")
-    assert "escola" not in resumo and "Aula" not in resumo
-    cursos_robo.anotar_a_aula_gravada(4, 1)
-    assert cursos_robo.curso_no_explorar(site, "primeira:4") == (
-        False, "o curso 4 já tem aula gravada: a 1ª dele não muda")
-
-
 def test_o_explorar_abre_a_aula_como_a_noite_sem_mudar_o_mapa(bm):
     # O teste de dia, com o celular mudo (23/11/2026): curso:abrir:N abre a 1ª aula do curso N pela barra, como a
     # noite, e curso:proximo, a seguinte pelo Próximo (o endereço da barra não muda); o log diz só o tipo da aula, o
@@ -1429,290 +1422,6 @@ class AjudanteNaHora:
         pass
 
 
-@pytest.fixture
-def noite_do_curso(bm, monkeypatch, tmp_path):
-    """A madrugada do curso com o celular livre, o disco folgado e a gravação de mentira (gravar(numero) diz o fim)."""
-    import contextlib
-    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
-    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
-    monkeypatch.setattr(cursos_robo, "disco_usado", lambda caminho=None: 20)
-    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
-    gravadas, casos = [], []
-    monkeypatch.setattr(cursos_robo, "guardar_o_caso",
-                        lambda d, motivo, resultado="não abriu": casos.append((motivo, resultado)), raising=False)
-
-    def rodar(site, ajudante, fim_da=lambda nome: (True, "o vídeo parou")):
-        def gravar(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, **_):
-            # Na ordem da gravação de verdade: o gravador (que deixa o alto-falante mudo), o volume, a página e o play.
-            d.gravando = True
-            try:
-                cursos_robo.subir_o_volume(d)
-                tipo, porque = ir_para_a_aula(d)
-                if not tipo:
-                    return False, False, f"a aula não abriu ({porque})"
-                if tipo == cursos_robo.SEM_VIDEO:
-                    return True, False, tipo
-                assert tocar(d)
-                gravadas.append(d.aulas[d.aberta][0])
-                with open(destino, "wb") as arquivo:
-                    arquivo.write(b"aula")
-                return (True,) + tuple(fim_da(gravadas[-1]))
-            finally:
-                cursos_robo.pausar_o_que_toca(d, pausa)
-                cursos_robo.devolver_o_volume(d, pausa)
-                d.gravando = False
-
-        monkeypatch.setattr(cursos_robo, "gravar_a_aula", gravar, raising=False)
-
-        @contextlib.contextmanager
-        def trava():
-            yield True
-        return cursos_robo.noite(conectar=lambda: site, pausa=lambda s: None, ajudante=ajudante, trava=trava,
-                                 conectado=lambda: True)
-    rodar.gravadas, rodar.casos = gravadas, casos
-    return rodar
-
-
-def test_a_noite_grava_o_curso_inteiro_pelo_proximo_do_site(noite_do_curso):
-    # P289 1 a P293 1: da 1ª aula guardada pelo Claude, a noite segue o Próximo do site até a última, e o curso termina.
-    # O Próximo troca a aula sem trocar o endereço da barra (o teste de 23/11/2026, às 10:49): a noite segue pelo nome
-    # no Próximo, e cada aula abre pelo Próximo da de antes, com o gravador já gravando.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site, ajudante = SiteDoCurso(AULAS_DO_SITE, aberta=2), AjudanteNaHora()
-    resumo = noite_do_curso(site, ajudante)
-    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: nenhuma "
-                      "aula por gravar")
-    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula três"]
-    assert ajudante.lidas == [(4, 1, "o vídeo parou"), (4, 2, "o vídeo parou"), (4, 3, "o vídeo parou")]
-    assert site.endereco_na_barra == AULAS_DO_SITE[0][2]
-    curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
-    assert curso["fim"] and [aula["nome"] for aula in curso["aulas"]] == ["", "Aula dois", "Aula três"]
-    assert all(aula["gravada_em"] for aula in curso["aulas"]) and not cursos_robo.gravando()
-    import registro_processos
-    assert registro_processos.sequencia("curso", "noite do curso", "2000-01-01 00:00:00")
-
-
-def test_a_noite_que_comeca_com_a_shopee_na_frente_grava_a_aula_da_vez(noite_do_curso):
-    # A rodada do robô deixa a Shopee no Eu, e a noite começa com ela na frente: o Chrome vem antes da 1ª aula.
-    um = AULAS_DO_SITE[0][2]
-    cursos_robo.guardar_a_primeira_aula(4, um)
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, na_frente="com.shopee.br")
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo.startswith("3 aula(s) gravada(s)") and noite_do_curso.gravadas[0] == "Aula um"
-    assert site.abertos == [CHROME]
-
-
-def test_a_aula_que_nao_abre_fica_no_registro_com_o_porque(noite_do_curso):
-    # O porquê de a aula não abrir vai ao registro de cada aula, para o relatório da manhã; 2 seguidas param a noite.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, na_frente="com.android.systemui", abre_o_chrome=False)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: a aula não "
-                      "abriu (o Chrome não veio para a frente)")
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [
-        ("não abriu", "curso 4, aula 1: a aula não abriu (o Chrome não veio para a frente)")] * 2
-    # A tela da 1ª que não abriu fica guardada para o Claude achar o porquê (só uma por noite).
-    assert noite_do_curso.casos == [("a aula não abriu (o Chrome não veio para a frente)", "não abriu")]
-
-
-def test_a_aula_so_abre_muda_ou_com_o_gravador_gravando(noite_do_curso):
-    # O vídeo pode começar a tocar sozinho quando a página da aula abre, e o celular fica no quarto do Rafael (pedido
-    # dele, 22/11): a aula aberta antes da gravação (pela barra ou pelo Próximo) abre com o volume de mídia em 0; a da
-    # gravação abre com o volume da aula só com o gravador gravando (o som vai só ao servidor). O de antes fica
-    # guardado, e a próxima rodada do robô o devolve.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6, autoplay=True)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo.startswith("3 aula(s) gravada(s)")
-    assert all(volume == 0 or gravando for volume, gravando in site.aberturas)
-    assert (0, False) in site.aberturas and (8, True) in site.aberturas
-    assert cursos_robo.estado_da_noite()["volume_antes"] == 6
-
-
-def test_a_noite_entra_no_site_muda_antes_de_ligar_o_gravador(noite_do_curso, monkeypatch):
-    # Com a sessão do site vencida, a aula abre antes, muda e sem o gravador, e o login fica fora da gravação (a tela do
-    # login nunca vai às folhas de quadros); depois, a aula abre de novo, do começo, gravando.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, volume=6, sessao_vencida=True)
-    monkeypatch.setattr(cursos_robo, "_entrar", _login_de_mentira(), raising=False)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo.startswith("3 aula(s) gravada(s)")
-    assert site.logins == [(0, False)]
-
-
-def test_a_aula_que_toca_sozinha_e_gravada_sem_tocar_no_play(noite_do_curso):
-    # A aula que começa a tocar com a página é gravada do começo, com o gravador ligado antes de ela abrir, e o play
-    # não é tocado (seria a pausa).
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, autoplay=True)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo.startswith("3 aula(s) gravada(s)") and noite_do_curso.gravadas == [aula[0] for aula in AULAS_DO_SITE]
-    assert (539, 793) not in site.toques
-
-
-def test_a_aula_sem_video_e_guardada_com_a_pagina_e_o_documento(noite_do_curso):
-    # O vídeo do Rafael das 08:22 e as mensagens das 08:44 e das 09:12 de 23/11/2026: há aulas que são um documento ou
-    # um texto, e o Claude, no papel de aluno, vê tudo. A noite guarda a aula sem vídeo com o texto, as telas e o
-    # documento pelo Baixar do próprio site, e a seguinte vem pelo Próximo dela.
-    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
-    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
-    site = SiteDoCurso(aulas)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo == ("2 aula(s) gravada(s), 2 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
-                      "aula por gravar")
-    assert noite_do_curso.gravadas == ["Aula um", "Aula dois"]
-    documento = cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"][1]
-    assert documento["nome"] == "Dia 01" and documento["sem_video"] and documento["gravada_em"]
-    (pasta,) = os.listdir(cursos_robo.PASTA_DAS_AULAS)
-    assert pasta.endswith("-c04-a002")
-    assert sorted(os.listdir(os.path.join(cursos_robo.PASTA_DAS_AULAS, pasta))) == [
-        "aula.json", "documento_1.pdf", "tela_01.jpg", "texto.txt"]
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [
-        ("guardada sem vídeo", "curso 4, aula 2: 1 tela(s), 5 linha(s), 1 link(s), documento de 2 KB")]
-    # O documento saiu do celular, e nenhum link foi tocado (entrar num grupo é com o Rafael).
-    assert site.baixados == [] and (464, 1942) not in site.toques
-    assert cursos_robo.resumo_do_mapa().startswith("curso 4: terminado (3 aulas, 1 sem vídeo)")
-
-
-def test_a_aula_sem_video_que_nao_fica_guardada_volta_e_a_noite_segue(noite_do_curso):
-    # Nenhuma aula é pulada (23/11/2026): o documento que não vem deixa a aula para a noite seguinte, que começa por
-    # ela; nesta, a noite segue pelo Próximo dela.
-    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
-    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
-    resumo = noite_do_curso(SiteDoCurso(aulas, baixa=False), AjudanteNaHora())
-    assert resumo.startswith("2 aula(s) gravada(s), 2 guardada(s), 0 pela metade, 0 sem vídeo guardada(s)")
-    assert os.listdir(cursos_robo.PASTA_DAS_AULAS) == []
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [
-        ("não guardada", "curso 4, aula 2: o documento não apareceu no celular")]
-    assert noite_do_curso.casos == [("o documento não apareceu no celular", "não guardada")]
-    assert cursos_robo.proxima_aula() == (4, 2)
-
-
-def test_a_aula_conhecida_sem_o_proximo_antes_dela_nao_prende_a_noite(noite_do_curso):
-    # O mapa com uma aula que o site não mostra mais depois da de antes: a noite não marca o curso como terminado (a
-    # aula ainda não foi guardada) e para depois de 2 tentativas, sem ficar em volta.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    for numero, nome in ((2, "Aula dois"), (3, "Aula três")):
-        cursos_robo.anotar_a_aula_seguinte(4, numero, nome)
-    cursos_robo.anotar_a_aula_gravada(4, 1)
-    cursos_robo.anotar_a_aula_gravada(4, 2)
-    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE[:2]), AjudanteNaHora())
-    assert resumo.endswith("parou: a aula não abriu (sem o Próximo na aula de antes)")
-    assert not cursos_robo.mapa_das_aulas()["cursos"]["4"]["fim"]
-
-
-def test_sem_a_leitura_do_volume_a_aula_nao_abre(noite_do_curso):
-    # Sem a certeza de o celular estar mudo, a aula não abre: nada é tocado, e a noite para.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    surdo = SiteDoCurso(AULAS_DO_SITE, responde=False)
-    resumo = noite_do_curso(surdo, AjudanteNaHora())
-    assert resumo.endswith("parou: o celular não ficou mudo antes de abrir a aula") and surdo.toques == []
-
-
-def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_curso):
-    # O robô da Shopee Vídeo tem a preferência (22/11): a aula fica pela metade, o vídeo dela sai, e ela volta depois,
-    # inteira, do início (P295 1).
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    ajudante = AjudanteNaHora()
-    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE), ajudante,
-                            fim_da=lambda nome: (True, "o vídeo parou") if nome == "Aula um"
-                            else (False, "o robô pediu o celular"))
-    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 1 pela metade, 0 sem vídeo guardada(s); parou: o robô "
-                      "pediu o celular")
-    assert cursos_robo.proxima_aula() == (4, 2)
-    assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"][1]["nome"] == "Aula dois"
-    assert os.listdir(cursos_robo.PASTA_DAS_GRAVACOES) == []
-    # O registro diz qual aula ficou pela metade e por quê, só com números (o relatório da manhã, pedido de 23/11).
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [("pela metade", "curso 4, aula 2: o robô pediu o celular")]
-
-
-def test_a_noite_guarda_tambem_a_pagina_de_cada_videoaula(noite_do_curso):
-    # Pedidos do Rafael de 23/11 (08:44 e 09:12): tudo o que está nas aulas vai ao Claude, também o texto e os links
-    # embaixo de cada videoaula. Gravada a aula inteira, a página dela é guardada à parte, com o celular mudo e sem
-    # tocar em nada, e a noite segue para a seguinte pelo Próximo.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site, ajudante = SiteDoCurso(AULAS_DO_SITE, aberta=2, texto_na_videoaula=True), AjudanteNaHora()
-    resumo = noite_do_curso(site, ajudante)
-    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: nenhuma "
-                      "aula por gravar")
-    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula três"]
-    paginas = sorted(os.listdir(cursos_robo.PASTA_DAS_AULAS))
-    assert [nome[-8:] for nome in paginas] == ["c04-a001", "c04-a002", "c04-a003"]
-    for nome in paginas:
-        pasta = os.path.join(cursos_robo.PASTA_DAS_AULAS, nome)
-        with open(os.path.join(pasta, "aula.json"), encoding="utf-8") as arquivo:
-            info = json.load(arquivo)
-        assert (info["tipo"], info["linhas"], info["links"], info["documento"]) == (
-            cursos_robo.PAGINA_DA_VIDEOAULA, 2, 1, None)
-        with open(os.path.join(pasta, "texto.txt"), encoding="utf-8") as arquivo:
-            assert "Tarefa da aula" in arquivo.read()
-    assert site.volumes_das_telas == [0, 0, 0]
-    # Só a barra de endereço (a 1ª aula), o play e o Próximo: nada no texto ou no link da página.
-    assert all(y <= 267 or y >= 2175 or (x, y) == (539, 793) for x, y in site.toques)
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [
-        ("página guardada", f"curso 4, aula {numero}: 1 tela(s), 2 linha(s), 1 link(s), sem documento")
-        for numero in (1, 2, 3)]
-
-
-def test_o_robo_que_pede_o_celular_na_pagina_da_videoaula_para_a_noite_com_a_aula_gravada(noite_do_curso, monkeypatch):
-    # O robô tem a preferência (22/11): pedido o celular enquanto a página é lida, a noite para, e a aula gravada
-    # inteira vale (a página pela metade sai).
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    ajudante, gravou = AjudanteNaHora(), []
-    monkeypatch.setattr(cursos_robo, "pediram_o_celular", lambda inicio: bool(gravou))
-
-    def fim_da(nome):
-        gravou.append(nome)
-        return True, "o vídeo parou"
-    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE, texto_na_videoaula=True), ajudante, fim_da=fim_da)
-    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: o robô "
-                      "pediu o celular")
-    assert ajudante.lidas == [(4, 1, "o vídeo parou")] and cursos_robo.proxima_aula() == (4, 2)
-    assert os.listdir(cursos_robo.PASTA_DAS_AULAS) == []
-
-
-def test_a_pagina_de_outra_aula_nao_e_guardada_como_a_da_videoaula(bm, monkeypatch, tmp_path):
-    # A página que voltou para a aula de antes (o Próximo com o nome da própria aula gravada) não é guardada como a
-    # dela: o registro diz o porquê, e a aula gravada vale do mesmo jeito.
-    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    cursos_robo.anotar_a_aula_seguinte(4, 2, "Aula dois")
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=0, no_alto=True, texto_na_videoaula=True)
-    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ""
-    assert not os.path.exists(tmp_path / "aulas") and site.toques == []
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [
-        ("página não guardada", "curso 4, aula 2: a página não é a da aula gravada")]
-    # Na aula certa, a mesma página é guardada; a videoaula sem nada embaixo do vídeo não vai ao registro.
-    site._abrir(1)
-    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ""
-    (pasta,) = os.listdir(tmp_path / "aulas")
-    assert pasta.endswith("-c04-a002")
-    site.texto_na_videoaula = False
-    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ""
-    assert len(registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")) == 2
-
-
-def test_a_gravacao_preta_para_a_noite_e_a_aula_volta_a_ficar_por_gravar(noite_do_curso):
-    # P288 3: preta ou muda, o player não deixa gravar, e a gravação para.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    ajudante = AjudanteNaHora(problema_na=1)
-    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE), ajudante)
-    assert resumo.endswith("parou: a imagem saiu preta") and noite_do_curso.gravadas == ["Aula um"]
-    assert cursos_robo.proxima_aula() == (4, 1)
-
-
 def test_o_proximo_troca_a_aula_sem_trocar_o_endereco_da_barra():
     # 23/11/2026, 10:49: o Próximo do site abriu a aula seguinte (um documento), e o endereço da barra continuou o da
     # aula de antes; o explorar esperava o endereço novo ("o Próximo não abriu a aula seguinte"). A troca é conferida
@@ -1727,31 +1436,6 @@ def test_o_proximo_troca_a_aula_sem_trocar_o_endereco_da_barra():
     toques = list(site.toques)
     assert cursos_robo.passar_para_a_seguinte(site, **SEM_ESPERA) == (None, "o curso terminou", "")
     assert site.toques == toques
-
-
-def test_chegar_na_aula_pelo_comeco_do_curso_mudo_e_sem_o_gravador(bm):
-    # A aula N do curso: a 1ª pelo endereço guardado e as outras pelo Próximo, com o celular mudo e sem o gravador; os
-    # nomes vão ao mapa.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=0)
-    assert cursos_robo.chegar_na_aula(site, 4, 3, **SEM_ESPERA) == ("com vídeo", "")
-    assert site.aberta == 2 and site.aberturas == [(0, False)] * 3
-    assert [aula["nome"] for aula in cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]] == [
-        "", "Aula dois", "Aula três"]
-    assert cursos_robo.chegar_na_aula(site, 5, 1, **SEM_ESPERA) == (None, "o curso 5 ainda não tem a 1ª aula no mapa")
-
-
-def test_o_caminho_ate_a_aula_renova_o_sinal_e_solta_o_celular_quando_o_robo_pede(bm):
-    # O robô da Shopee Vídeo tem a preferência (22/11): o caminho até uma aula do fim do curso leva minutos, e a cada
-    # aula a noite renova o sinal ao robô e para na hora em que ele pede o celular.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    site, vistas = SiteDoCurso(AULAS_DO_SITE, aberta=2), []
-
-    def vigiar():
-        vistas.append(site.aberta)
-        return "o robô pediu o celular" if len(vistas) == 2 else ""
-    assert cursos_robo.chegar_na_aula(site, 4, 3, vigiar=vigiar, **SEM_ESPERA) == (None, "o robô pediu o celular")
-    assert vistas == [0, 1] and site.aberta == 1
 
 
 def test_o_proximo_espera_o_aviso_do_chrome_sair_e_nunca_toca_com_ele_na_tela():
@@ -1884,229 +1568,6 @@ def test_o_explorar_guarda_a_pagina_da_videoaula_sem_tocar_no_play(bm, monkeypat
     assert pasta.endswith("-c00-a000") and com_texto.toques == [] and not com_texto._tocando()
     with open(os.path.join(tmp_path / "aulas", pasta, "aula.json"), encoding="utf-8") as arquivo:
         assert json.load(arquivo)["tipo"] == cursos_robo.PAGINA_DA_VIDEOAULA
-
-
-@pytest.fixture
-def teste_de_dia(bm, monkeypatch, tmp_path):
-    """
-    O passo curso:gravar:N de dia, com a gravação de mentira na ordem da de verdade: fim(site) diz como a aula acabou
-    (com o arquivo gravado). Anota o máximo e a madrugada de cada gravação e o que foi lido de cada uma.
-    """
-    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
-    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: False)
-    gravacoes, lidas = [], []
-
-    def rodar(site, passo="gravar:5", fim=lambda site: (True, "o vídeo parou")):
-        def gravar(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, madrugada=None, maximo=None, **_):
-            gravacoes.append((maximo, madrugada()))
-            d.gravando = True
-            try:
-                cursos_robo.subir_o_volume(d)
-                tipo, porque = ir_para_a_aula(d)
-                if not tipo:
-                    return False, False, f"a aula não abriu ({porque})"
-                assert tocar(d)
-                with open(destino, "wb") as arquivo:
-                    arquivo.write(b"aula")
-                return (True,) + tuple(fim(d))
-            finally:
-                cursos_robo.pausar_o_que_toca(d, pausa)
-                cursos_robo.devolver_o_volume(d, pausa)
-                d.gravando = False
-
-        def guardar(arquivo, curso, aula, como_acabou, agora=None):
-            lidas.append((os.path.exists(arquivo), curso, aula, como_acabou))
-            os.remove(arquivo)
-            return "pasta", {"segundos": 95, "som": -21.4, "palavras": 230, "folhas": 2, "problema": ""}
-
-        monkeypatch.setattr(cursos_robo, "gravar_a_aula", gravar, raising=False)
-        monkeypatch.setattr(cursos_robo, "guardar_a_aula", guardar, raising=False)
-        # O explorar deixa o celular mudo antes dos passos que tocam uma aula, e o volume volta no fim dele.
-        assert cursos_robo.toca_aula("curso", passo) and cursos_robo.calar_o_celular(site)[0] == 0
-        return cursos_robo.curso_no_explorar(site, passo, **SEM_ESPERA)
-    rodar.gravacoes, rodar.lidas, rodar.brutas = gravacoes, lidas, tmp_path / "brutas"
-    return rodar
-
-
-def test_o_teste_de_dia_grava_a_primeira_aula_como_a_noite(teste_de_dia):
-    # O teste de dia da gravação da noite (23/11/2026): a 1ª aula do curso abre antes, muda e sem o gravador, e de novo
-    # pela barra com o gravador gravando; o play só com o vídeo parado; a gravação tem no máximo 10 min e é lida como a
-    # aula 0 do curso 0. Depois, o celular fica mudo até o explorar devolver o volume; o log diz só números.
-    cursos_robo.guardar_a_primeira_aula(5, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6)
-    assert teste_de_dia(site) == (
-        True, "aula gravada inteira (o vídeo parou): 95 s, som -21.4 LUFS, 230 palavra(s), 2 folha(s) de quadros, sem "
-              "problema; para ler: cursos_robo.yml exportar")
-    assert teste_de_dia.gravacoes == [(cursos_robo.GRAVACAO_DO_TESTE, True)]
-    assert teste_de_dia.lidas == [(True, 0, 0, "o vídeo parou")] and not os.listdir(teste_de_dia.brutas)
-    assert site.aberturas == [(0, False), (8, True)] and site.aberta == 0 and site.toques[-1] == (539, 793)
-    assert site.volume == 0 and cursos_robo.estado_da_noite()["volume_antes"] == 6
-    # O mapa não muda: a aula do teste não conta como gravada.
-    assert cursos_robo.proxima_aula() == (5, 1)
-
-
-def test_o_teste_de_dia_recusa_a_madrugada_o_curso_sem_mapa_e_a_aula_sem_video(teste_de_dia, monkeypatch):
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2)
-    assert teste_de_dia(site) == (False, "o curso 5 ainda não tem a 1ª aula no mapa")
-    cursos_robo.guardar_a_primeira_aula(5, AULA_DE_DOCUMENTO[2])
-    documento = SiteDoCurso([AULA_DE_DOCUMENTO, AULAS_DO_SITE[0]], aberta=1)
-    assert teste_de_dia(documento) == (False, "a 1ª aula do curso 5 não tem vídeo")
-    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
-    assert teste_de_dia(site) == (False, "de madrugada, quem grava as aulas é a noite")
-    assert site.toques == [] and teste_de_dia.gravacoes == [] and teste_de_dia.lidas == []
-    assert not cursos_robo.curso_no_explorar(site, "gravar:9", **SEM_ESPERA)[0]
-
-
-def test_o_robo_que_pede_o_celular_no_teste_de_dia_tem_o_celular_na_hora(teste_de_dia):
-    # O robô da Shopee Vídeo tem a preferência também no teste: a gravação para e sai sem ser lida (a leitura da fala
-    # seguraria o celular), e o celular fica mudo.
-    cursos_robo.guardar_a_primeira_aula(5, AULAS_DO_SITE[0][2])
-    site = SiteDoCurso(AULAS_DO_SITE, aberta=2, volume=6)
-    assert teste_de_dia(site, fim=lambda d: (False, "o robô pediu o celular")) == (
-        False, "a gravação parou (o robô pediu o celular) e saiu sem ser lida")
-    assert teste_de_dia.lidas == [] and not os.listdir(teste_de_dia.brutas) and site.volume == 0
-    # A aula que não começou a tocar também não tem o que ler.
-    assert teste_de_dia(site, fim=lambda d: (False, cursos_robo.NAO_TOCOU)) == (
-        False, "a gravação parou (a aula não começou a tocar) e saiu sem ser lida")
-    assert teste_de_dia.lidas == [] and not os.listdir(teste_de_dia.brutas)
-
-
-def test_a_pagina_que_ainda_carrega_nao_passa_por_a_ultima_aula(noite_do_curso):
-    # O Próximo pode demorar a aparecer na página da aula: sem a conferência, a noite tomaria a aula pela última e daria
-    # o curso por terminado.
-    carregando = SiteDoCurso(AULAS_DO_SITE, no_alto=True)
-    carregando.sem_o_proximo = 2
-    assert cursos_robo.passar_para_a_seguinte(carregando, **SEM_ESPERA) == ("com vídeo", "", "Aula dois")
-    # Na noite, com o Próximo demorando a cada aula aberta, o curso inteiro é gravado e só então termina.
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    resumo = noite_do_curso(SiteDoCurso(AULAS_DO_SITE, atraso_do_proximo=2), AjudanteNaHora())
-    assert resumo.startswith("3 aula(s) gravada(s)")
-    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula três"]
-    assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["fim"]
-    # Fora da página da aula (sem as abas), a falta do Próximo não é o fim do curso.
-    fora = SiteDoCurso(AULAS_DO_SITE)
-    fora.pagina = "documento"
-    assert cursos_robo.passar_para_a_seguinte(fora, **SEM_ESPERA) == (None, "a página da aula não está na tela", "")
-
-
-def test_o_baixar_que_tira_a_pagina_da_tela_nao_guarda_a_aula_e_a_noite_volta_pelo_comeco(noite_do_curso):
-    # O documento aberto no lugar da página da aula: a aula não fica guardada (volta na noite seguinte), e a seguinte é
-    # achada pelo começo do curso, sem dar o curso por terminado.
-    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
-    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
-    site = SiteDoCurso(aulas, baixar_sai=True)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo.startswith("2 aula(s) gravada(s), 2 guardada(s), 0 pela metade, 0 sem vídeo guardada(s)")
-    assert noite_do_curso.gravadas == ["Aula um", "Aula dois"]
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [
-        ("não guardada", "curso 4, aula 2: a página da aula saiu da tela depois do Baixar")]
-    assert cursos_robo.proxima_aula() == (4, 2) and cursos_robo.mapa_das_aulas()["cursos"]["4"]["fim"]
-
-
-def test_a_pagina_que_volta_para_uma_aula_de_antes_nao_e_gravada_como_a_seguinte(noite_do_curso, monkeypatch):
-    # 23/11/2026, 12:00: a página recarregou o endereço da barra (o da 1ª aula) logo depois do Próximo. Sem a
-    # conferência pelo nome no Próximo, a noite gravaria a 1ª aula de novo, como se fosse cada uma das seguintes, a
-    # noite toda.
-    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
-    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
-    site = SiteDoCurso(aulas)
-    original = cursos_robo._tipo_da_pagina
-
-    def tipo_e_recarrega(d, tela, pausa):
-        feito = original(d, tela, pausa)
-        if d.aberta == 1:
-            d._abrir(0)                      # o Chrome recarregou o endereço da barra: a 1ª aula
-        return feito
-    monkeypatch.setattr(cursos_robo, "_tipo_da_pagina", tipo_e_recarrega)
-    resumo = noite_do_curso(site, AjudanteNaHora())
-    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: a aula não "
-                      "abriu (a página voltou para uma aula de antes)")
-    assert noite_do_curso.gravadas == ["Aula um"]
-    assert len(cursos_robo.mapa_das_aulas()["cursos"]["4"]["aulas"]) == 1
-    # A página de uma aula de antes, mais longe (a 1ª, quando a da vez é a 3ª): o nome no Próximo dela é o de uma aula
-    # do mapa.
-    cursos_robo.anotar_a_aula_seguinte(4, 2, "Dia 01")
-    na_primeira = SiteDoCurso(aulas)
-    assert not cursos_robo.na_aula_certa(na_primeira, 4, 3, "Aula dois")
-    assert cursos_robo.na_aula_certa(SiteDoCurso(aulas, aberta=2), 4, 3, "Aula dois")
-    monkeypatch.setattr(cursos_robo, "_tipo_da_pagina", original)
-    # Nenhuma noite gira sem fim: passado o limite de voltas, ela para.
-    monkeypatch.setattr(cursos_robo, "VOLTAS_DA_NOITE", 0)
-    assert noite_do_curso(SiteDoCurso(aulas), AjudanteNaHora()).endswith("parou: a noite passou de 0 voltas")
-
-
-@pytest.mark.parametrize("autoplay, fim", [(False, "o vídeo parou"), (True, "outro vídeo começou")])
-def test_o_site_que_passa_sozinho_para_a_aula_seguinte_nao_faz_a_noite_pular_uma_aula(noite_do_curso, autoplay, fim):
-    # O teste de dia de 23/11/2026, às 23:06: acabado o vídeo da 1ª aula do curso 5, o site abriu sozinho a 2ª (um
-    # documento). A noite que se achasse ainda na 1ª guardaria a página da 2ª como a da 1ª e tocaria no Próximo da 2ª: a
-    # 3ª seria gravada com o número da 2ª, e o documento ficaria fora do mapa. Pelo nome no Próximo, a noite vê que saiu
-    # da aula gravada, e a seguinte vem pelo começo do curso, cada aula com o número dela.
-    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
-    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
-    site = SiteDoCurso(aulas, texto_na_videoaula=True, autoplay=autoplay)
-
-    def fim_passando_para_a_seguinte(nome):
-        if site.aberta + 1 < len(site.aulas):
-            site._abrir(site.aberta + 1)          # o site abre a aula seguinte sozinho, no fim do vídeo
-            return True, fim
-        return True, "o vídeo parou"
-    resumo = noite_do_curso(site, AjudanteNaHora(), fim_da=fim_passando_para_a_seguinte)
-    assert resumo == ("2 aula(s) gravada(s), 2 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
-                      "aula por gravar")
-    assert noite_do_curso.gravadas == ["Aula um", "Aula dois"]
-    curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
-    assert [aula["nome"] for aula in curso["aulas"]] == ["", "Dia 01", "Aula dois"] and curso["fim"]
-    assert [bool(aula.get("sem_video")) for aula in curso["aulas"]] == [False, True, False]
-    import registro_processos
-    linhas = [(linha[2], linha[3]) for linha in
-              registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")]
-    # A página da 1ª não é guardada (a da tela era a da 2ª); a 2ª é guardada como o documento que ela é, com o número
-    # dela; a da 3ª, a última do curso, fica na tela no fim do vídeo e é guardada.
-    assert ("página não guardada", f"curso 4, aula 1: {cursos_robo.SAIU_DA_AULA}") in linhas
-    assert [linha[0] for linha in linhas if linha[1].startswith("curso 4, aula 1:")] == ["página não guardada"]
-    assert [linha[0] for linha in linhas if linha[1].startswith("curso 4, aula 2:")] == ["guardada sem vídeo"]
-    assert [linha[0] for linha in linhas if linha[1].startswith("curso 4, aula 3:")] == ["página guardada"]
-    # A 2ª abriu pelo Próximo da 1ª, achada de novo pelo começo do curso (muda e sem o gravador), já com o gravador
-    # gravando; a 3ª, pelo Próximo da 2ª, que ficou na tela.
-    assert [gravando for _volume, gravando in site.aberturas] == [False, True, False, True, True]
-
-
-def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, monkeypatch, tmp_path):
-    brutas = tmp_path / "brutas"
-    brutas.mkdir()
-    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(brutas))
-    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
-    cursos_robo.anotar_a_aula_seguinte(4, 2, "Aula dois")
-    for numero in (1, 2):
-        cursos_robo.anotar_a_aula_gravada(4, numero)
-    lidas = []
-
-    def guardar(arquivo, posicao, numero, fim):
-        lidas.append((posicao, numero))
-        return None, {"problema": "o som saiu mudo" if numero == 2 else ""}
-
-    # A gravação que ficou na fila de uma noite parada no meio (o .json ao lado) é lida na seguinte.
-    sobra = brutas / "20261124-010000.mkv"
-    sobra.write_bytes(b"aula")
-    (brutas / "20261124-010000.mkv.json").write_text(
-        '{"posicao": 4, "numero": 1, "fim": "o vídeo parou"}')
-    ajudante = cursos_robo.Ajudante(guardar=guardar)
-    assert ajudante.mandar_as_que_ficaram() == 1
-    nova = brutas / "20261124-012000.mkv"
-    nova.write_bytes(b"aula")
-    ajudante.mandar(str(nova), 4, 2, "o vídeo parou")
-    ajudante.acabar()
-    assert lidas == [(4, 1), (4, 2)] and ajudante.guardadas == 1 and ajudante.problema == "o som saiu mudo"
-    assert os.listdir(brutas) == []
-    # A muda volta a ficar por gravar; a outra continua gravada.
-    assert cursos_robo.proxima_aula() == (4, 2)
-    # O registro diz qual aula foi guardada e qual não serviu, e por quê, só com números (pedido de 23/11).
-    import registro_processos
-    linhas = registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")
-    assert [(linha[2], linha[3]) for linha in linhas] == [("guardada", "curso 4, aula 1"),
-                                                         ("não serviu", "curso 4, aula 2: o som saiu mudo")]
 
 
 def test_quadros_da_aula_um_a_cada_20_s_de_40_a_120():
@@ -2566,3 +2027,693 @@ def test_o_explorar_abre_a_aula_pela_lista_e_guarda_a_tela_para_o_claude(bm, mon
     assert cursos_robo.curso_no_explorar(site, "tocar:4:30", pausa=lambda s: None) == (
         False, f"a aula 30 do curso 4 não abriu pela lista ({cursos_robo.FORA_DA_LISTA})")
     assert not cursos_robo.curso_no_explorar(site, "tocar:9:1", pausa=lambda s: None)[0]
+
+
+class CursoComLista(SiteDoCurso):
+    """
+    O site do curso com a aba Módulos embaixo da aula (24/11/2026): as aulas do SiteDoCurso, na ordem, nos módulos
+    [(nome, quantas aulas)]. A página rola (rolagem: quanto ela desceu; 0 no alto, com a tela do SiteDoCurso e o
+    player): o arrasto com o dedo para cima a desce, o com o dedo para baixo a sobe e, começado com ela no alto,
+    recarrega o endereço da barra (recarregadas). Rolada, a tela mostra a lista: o botão de cada módulo ("N% Nome")
+    abre e fecha as aulas dele embaixo, e o módulo da aula aberta fica aberto; o toque no nome de uma aula a abre sem
+    mudar a rolagem (a página fica na lista; tocadas), e o Próximo e o Enter abrem a aula do alto. passa_no_fim: no fim
+    do vídeo (fim_do_video), o site abre sozinho a aula seguinte, do alto, e o vídeo dela começa.
+    """
+    COMECO, TOPO, ALTURA = 2300, 267, 2127
+
+    def __init__(self, aulas, modulos=None, passa_no_fim=False, **opcoes):
+        super().__init__(aulas, **opcoes)
+        self.modulos = modulos or [("Módulo único", len(aulas))]
+        self.rolagem, self.recarregadas, self.tocadas, self.passa_no_fim = 0, 0, [], passa_no_fim
+        self.modulos_abertos = {self._modulo_de(self.aberta)}
+
+    def _modulo_de(self, numero):
+        fim = 0
+        for indice, (_nome, quantas) in enumerate(self.modulos):
+            fim += quantas
+            if numero < fim:
+                return indice
+        return len(self.modulos) - 1
+
+    def _abrir(self, numero, do_alto=True):
+        super()._abrir(numero)
+        if do_alto:
+            self.rolagem = 0
+        self.no_alto = not self.rolagem
+        self.modulos_abertos = getattr(self, "modulos_abertos", set()) | {self._modulo_de(numero)}
+
+    def fim_do_video(self):
+        if self.passa_no_fim and self.aberta + 1 < len(self.aulas):
+            self.aberturas.append((self.volume, self.gravando))
+            self._abrir(self.aberta + 1)
+            if self._com_video(self.aberta):
+                self.midia = _sessao_do_chrome(3, 0)
+
+    def _itens(self):
+        itens, y, numero = [], self.COMECO, 0
+        for indice, (nome, quantas) in enumerate(self.modulos):
+            itens.append(("módulo", indice, f"{10 * indice}% {nome}", 42, 1010, y, y + 124))
+            y += 192
+            for _ in range(quantas):
+                if indice in self.modulos_abertos:
+                    aula, segundos = self.aulas[numero][0], self.aulas[numero][1]
+                    texto = f"{aula} {segundos // 60}:{segundos % 60:02d}" if segundos else aula
+                    itens.append(("aula", numero, texto, 178, 942, y, y + 86))
+                    y += 150
+                numero += 1
+        return itens, y + 400
+
+    def _na_tela(self, y1, y2):
+        return max(y1 - self.rolagem + self.TOPO, self.TOPO), min(y2 - self.rolagem + self.TOPO, 2394)
+
+    def dump_hierarchy(self):
+        tela = super().dump_hierarchy()
+        if not self.rolagem or self.na_frente != CHROME or self.pagina or self.nova_guia or self.barra_em_foco:
+            return tela
+        itens, fim = self._itens()
+        botoes = []
+        for tipo, chave, texto, x1, x2, y1, y2 in itens:
+            topo, baixo = self._na_tela(y1, y2)
+            if baixo > topo:
+                ident = f"radix-_r_{chave}_" if tipo == "módulo" else ""
+                botoes.append(f'<node class="android.widget.Button" resource-id="{ident}" clickable="true" '
+                              f'text="{texto}" content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
+        nos = []
+        topo, baixo = self._na_tela(self.COMECO, fim - 400)
+        if baixo > topo:
+            nos.append('<node class="android.view.View" resource-id="radix-_r_m_-content-modules" clickable="false" '
+                       f'text="" content-desc="" bounds="[42,{topo}][1039,{baixo}]">' + "".join(botoes) + "</node>")
+        if self.aberta + 1 < len(self.aulas):
+            nos.append('<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
+                       f'text="Próximo: {self.aulas[self.aberta + 1][0]} Próxima aula:" '
+                       'bounds="[0,2175][1080,2394]" />')
+        barra = ('<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
+                 f'text="{self.endereco_na_barra.removeprefix("https://")}" content-desc="" '
+                 'bounds="[211,120][691,267]" />')
+        return ('<hierarchy rotation="0">' + barra + '<node class="android.webkit.WebView" resource-id="" text="" '
+                'content-desc="" bounds="[0,267][1080,2394]">' + "".join(nos) + "</node></hierarchy>")
+
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        if self.pagina or self.nova_guia or self.barra_escondida:
+            return super().swipe(x1, y1, x2, y2, duracao)
+        self.rolagens.append((x1, y1, x2, y2))
+        if y2 > y1 and not self.rolagem:
+            # No alto da página, o arrasto para baixo é o "puxar para atualizar": ela recarrega o endereço da barra.
+            self.recarregadas += 1
+            self._abrir(next(n for n, aula in enumerate(self.aulas) if aula[2] == self.endereco_na_barra))
+            return
+        _itens, fim = self._itens()
+        self.rolagem = max(0, min(fim - self.ALTURA, self.rolagem + y1 - y2))
+        self.no_alto = not self.rolagem
+
+    def click(self, x, y):
+        if not self.rolagem or y >= 2175 or y <= 267 or self.pagina:
+            return super().click(x, y)
+        self.toques.append((x, y))
+        itens, _fim = self._itens()
+        for tipo, chave, _texto, x1, x2, y1, y2 in itens:
+            topo, baixo = self._na_tela(y1, y2)
+            if x1 <= x <= x2 and topo <= y <= baixo:
+                if tipo == "aula":
+                    self.tocadas.append(chave)
+                    self.aberturas.append((self.volume, self.gravando))
+                    self._abrir(chave, do_alto=False)
+                else:
+                    self.modulos_abertos ^= {chave}
+                return
+
+
+# O curso da noite: 2 módulos, a 3ª aula um documento; o endereço guardado abre a 4ª (onde o site parou).
+AULAS_DA_LISTA = [("Aula um", 300, "https://escola.exemplo.pro/m/lessons/aaa111"),
+                  ("Aula dois", 600, "https://escola.exemplo.pro/m/lessons/bbb222"),
+                  AULA_DE_DOCUMENTO,
+                  ("Aula quatro", 120, "https://escola.exemplo.pro/m/lessons/ddd444")]
+MODULOS_DA_LISTA = [("Comece por aqui", 2), ("Prática", 2)]
+
+
+def _lista_no_mapa(posicao, aulas=AULAS_DA_LISTA, modulos=MODULOS_DA_LISTA, retomada=3):
+    """O curso com o endereço guardado (o da aula `retomada`, onde o site parou) e a lista das aulas no mapa."""
+    assert cursos_robo.guardar_a_primeira_aula(posicao, aulas[retomada][2])
+    nomes = [nome for nome, quantas in modulos for _ in range(quantas)]
+    cursos_robo.guardar_a_lista(posicao, [{"modulo": modulo, "nome": aula[0], "segundos": aula[1] or None}
+                                          for modulo, aula in zip(nomes, aulas)])
+
+
+def _curso_da_noite(aulas=AULAS_DA_LISTA, modulos=MODULOS_DA_LISTA, retomada=3, **opcoes):
+    """O site com o endereço guardado aberto antes numa aula qualquer do curso (a da retomada, sem o login)."""
+    return CursoComLista(aulas, modulos, aberta=retomada, **opcoes)
+
+
+def _registro_das_aulas():
+    import registro_processos
+    return [(linha[2], linha[3]) for linha in
+            registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")]
+
+
+def test_o_mapa_das_aulas_pela_lista_na_ordem_e_o_check_do_claude(bm):
+    # Pedidos do Rafael de 24/11/2026: aula por aula, da 1ª à última de cada curso, curso por curso (P293 1), e o check
+    # de cada aula só depois de o Claude conferir que ela foi vista inteira e que algo foi aprendido.
+    assert cursos_robo.proxima_aula() is None
+    assert not cursos_robo.guardar_a_primeira_aula(9, AULAS_DA_LISTA[0][2])
+    assert not cursos_robo.guardar_a_primeira_aula(4, "x/y")
+    _lista_no_mapa(5)
+    _lista_no_mapa(4)
+    assert cursos_robo.proxima_aula() == (4, 1)
+    # O endereço guardado só leva ao curso; ele pode ser trocado a qualquer hora, e a lista fica.
+    assert cursos_robo.guardar_a_primeira_aula(4, AULAS_DA_LISTA[1][2])
+    assert cursos_robo.endereco_do_curso(4) == AULAS_DA_LISTA[1][2] and len(cursos_robo.lista_do_curso(4)) == 4
+    # Guardada pela noite, a aula espera a conferência, e a noite segue para a seguinte; a que não ficou guardada nesta
+    # noite fica para a seguinte.
+    cursos_robo.anotar_a_aula_gravada(4, 1, _br("2026-11-25 00:30"))
+    assert cursos_robo.proxima_aula() == (4, 2) and cursos_robo.proxima_aula(pular={(4, 2)}) == (4, 3)
+    cursos_robo.anotar_a_aula_gravada(4, 3, sem_video=True)
+    assert cursos_robo.lista_do_curso(4)[2]["sem_video"]
+    assert cursos_robo.resumo_do_mapa().startswith(
+        "curso 4: 0 de 4 aula(s) vista(s), 2 esperando a conferência; curso 5: 0 de 4 aula(s) vista(s)")
+    # O check do Claude; a que não serviu volta inteira para a noite (P295 1).
+    assert cursos_robo.conferir_as_aulas(4, {1, 3}) == 2
+    assert cursos_robo.conferir_as_aulas(4, {3}, vistas=False) == 1
+    lista = cursos_robo.lista_do_curso(4)
+    assert lista[0]["vista_em"] and not {"gravada_em", "sem_video", "vista_em"} & set(lista[2])
+    assert cursos_robo.proxima_aula() == (4, 2)
+    assert cursos_robo.resumo_do_mapa().startswith("curso 4: 1 de 4 aula(s) vista(s), 0 esperando a conferência")
+    # A gravada que não serviu (preta ou muda) volta a ficar por gravar; o curso todo visto passa ao seguinte.
+    cursos_robo.anotar_a_aula_gravada(4, 2)
+    cursos_robo.desmarcar_a_aula(4, 2)
+    assert cursos_robo.proxima_aula() == (4, 2)
+    cursos_robo.conferir_as_aulas(4, range(1, 5))
+    assert cursos_robo.proxima_aula() == (5, 1)
+    assert "curso 1: sem a lista das aulas" in cursos_robo.resumo_do_mapa()
+
+
+def test_os_numeros_da_conferencia_so_em_numeros():
+    assert cursos_robo.numeros_das_aulas("4:15,16;5:2-4") == {4: {15, 16}, 5: {2, 3, 4}}
+    assert cursos_robo.numeros_das_aulas(" 1: 3 - 5 , 9 ; ") == {1: {3, 4, 5, 9}}
+    assert cursos_robo.numeros_das_aulas("") == {}
+    for errado in ("4", "9:1", "4:a", "4:5-2", "4:0", "Aula um"):
+        with pytest.raises(ValueError):
+            cursos_robo.numeros_das_aulas(errado)
+
+
+def test_a_conferencia_pelo_workflow_marca_as_vistas_e_manda_refazer(bm, capsys):
+    _lista_no_mapa(4)
+    assert cursos_robo.main(["aulas", "vistas", "4:1-2"]) == 0
+    saida = capsys.readouterr().out
+    assert saida.startswith("curso 4: 2 aula(s) marcada(s) como vista(s)\ncurso 4: 2 de 4 aula(s) vista(s)")
+    assert cursos_robo.main(["aulas", "refazer", "4:2"]) == 0
+    assert capsys.readouterr().out.startswith("curso 4: 1 aula(s) para a noite gravar de novo")
+    assert cursos_robo.proxima_aula() == (4, 2)
+    # Fora da lista ou fora do formato, nada muda.
+    assert cursos_robo.main(["aulas", "vistas", "4:9"]) == 2
+    assert "a 9 não existe. Nada mudou." in capsys.readouterr().out
+    assert cursos_robo.main(["aulas", "vistas", "Aula um"]) == 2
+    assert [bool(aula.get("vista_em")) for aula in cursos_robo.lista_do_curso(4)] == [True, False, False, False]
+    # O workflow manda ao servidor só os números e os separadores.
+    with open(os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "cursos_robo.yml"),
+              encoding="utf-8") as arquivo:
+        workflow = arquivo.read()
+    assert "tr -dc '0-9:;,-'" in workflow and "servidor \"$PEDIDO '$NUMEROS'\"" in workflow
+
+
+def test_o_claude_guarda_o_endereco_de_cada_curso_pelo_explorar(bm):
+    # O passo curso:primeira:N lê o endereço na barra do Chrome e o guarda no banco; o log diz só números.
+    site = SiteDoCurso(AULAS_DO_SITE, aberta=1)
+    assert cursos_robo.curso_no_explorar(site, "primeira:4") == (True, "endereço do curso 4 guardado")
+    assert cursos_robo.endereco_do_curso(4) == AULAS_DO_SITE[1][2]
+    assert cursos_robo.curso_no_explorar(site, "primeira:9") == (
+        False, "o curso vai de 1 a 7 (a posição na lista de Turmas)")
+    assert not cursos_robo.curso_no_explorar(site, "primeira:x")[0]
+    assert not cursos_robo.curso_no_explorar(site, "segunda:4")[0]
+    fora = SiteDoCurso([("Cursos", 0, "https://escola.exemplo.pro/m/courses")])
+    assert cursos_robo.curso_no_explorar(fora, "primeira:5") == (False, "a tela não é a de uma aula do curso")
+    ok, resumo = cursos_robo.curso_no_explorar(site, "")
+    assert ok and resumo.startswith("curso 4: sem a lista das aulas; curso 5: sem a lista das aulas")
+    assert "escola" not in resumo and "Aula" not in resumo
+
+
+@pytest.fixture
+def noite_do_curso(bm, monkeypatch, tmp_path):
+    """
+    A madrugada do curso com o celular livre, o disco folgado e a gravação de mentira, na ordem da de verdade (o
+    gravador, o volume, a página, o play e a conferência da aula): fim_da(nome) diz como o vídeo acabou; no fim dele,
+    o site pode passar sozinho para a aula seguinte. Anota as aulas gravadas e a duração que cada uma levou.
+    """
+    import contextlib
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    monkeypatch.setattr(cursos_robo, "disco_usado", lambda caminho=None: 20)
+    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
+    gravadas, duracoes, casos = [], [], []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso",
+                        lambda d, motivo, resultado="não abriu", passo="": casos.append((motivo, resultado)),
+                        raising=False)
+
+    def rodar(site, ajudante, fim_da=lambda nome: (True, "o vídeo parou")):
+        def gravar(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, duracao=None, na_aula_certa=None, **_):
+            d.gravando = True
+            try:
+                cursos_robo.subir_o_volume(d)
+                tipo, porque = ir_para_a_aula(d)
+                if not tipo:
+                    return False, False, (porque if porque in cursos_robo.PARADAS_DA_AULA
+                                          else f"a aula não abriu ({porque})")
+                if tipo == cursos_robo.SEM_VIDEO:
+                    return True, False, tipo
+                assert tocar(d)
+                if na_aula_certa and not na_aula_certa(d):
+                    return True, False, cursos_robo.OUTRA_PAGINA
+                gravadas.append(d.aulas[d.aberta][0])
+                duracoes.append(duracao)
+                with open(destino, "wb") as arquivo:
+                    arquivo.write(b"aula")
+                feito = (True,) + tuple(fim_da(gravadas[-1]))
+                if feito[2] in ("o vídeo parou", "outro vídeo começou"):
+                    d.fim_do_video()
+                return feito
+            finally:
+                cursos_robo.pausar_o_que_toca(d, pausa)
+                cursos_robo.devolver_o_volume(d, pausa)
+                d.gravando = False
+
+        monkeypatch.setattr(cursos_robo, "gravar_a_aula", gravar, raising=False)
+
+        @contextlib.contextmanager
+        def trava():
+            yield True
+        return cursos_robo.noite(conectar=lambda: site, pausa=lambda s: None, ajudante=ajudante, trava=trava,
+                                 conectado=lambda: True)
+    rodar.gravadas, rodar.duracoes, rodar.casos = gravadas, duracoes, casos
+    return rodar
+
+
+def test_a_noite_grava_as_aulas_na_ordem_da_lista_e_nao_pula_nenhuma(noite_do_curso):
+    # Vídeo do Rafael de 24/11/2026, 00:17: o endereço guardado abre a aula em que o site parou, e a noite pulava
+    # aulas. A 1ª do curso abre pela lista (o toque no nome dela, com o gravador gravando), e cada uma das outras pelo
+    # Próximo da de antes, conferida pelo nome dela na lista; o documento é guardado com a página, e a página nunca é
+    # arrastada para baixo no alto (o Chrome a recarregaria).
+    _lista_no_mapa(4)
+    site, ajudante = _curso_da_noite(), AjudanteNaHora()
+    resumo = noite_do_curso(site, ajudante)
+    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
+                      "aula por gravar")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
+    assert noite_do_curso.duracoes == [300, 600, 120]
+    assert ajudante.lidas == [(4, 1, "o vídeo parou"), (4, 2, "o vídeo parou"), (4, 4, "o vídeo parou")]
+    assert site.tocadas == [0] and site.recarregadas == 0
+    lista = cursos_robo.lista_do_curso(4)
+    assert all(aula["gravada_em"] for aula in lista) and [bool(aula.get("sem_video")) for aula in lista] == [
+        False, False, True, False]
+    assert not any(aula.get("vista_em") for aula in lista)
+    assert _registro_das_aulas() == [("guardada sem vídeo",
+                                      "curso 4, aula 3: 1 tela(s), 5 linha(s), 1 link(s), documento de 2 KB")]
+    (pasta,) = os.listdir(cursos_robo.PASTA_DAS_AULAS)
+    assert pasta.endswith("-c04-a003") and not cursos_robo.gravando()
+    # O documento saiu do celular, e nenhum link foi tocado.
+    assert site.baixados == [] and (464, 1942) not in site.toques
+
+
+def test_a_noite_que_comeca_com_a_shopee_na_frente_e_a_sessao_vencida(noite_do_curso, monkeypatch):
+    # A rodada do robô deixa a Shopee no Eu: o Chrome vem antes da 1ª aula. Com a sessão do site vencida, o login fica
+    # fora da gravação (o curso abre antes, mudo e sem o gravador).
+    _lista_no_mapa(4)
+    monkeypatch.setattr(cursos_robo, "_entrar", _login_de_mentira(), raising=False)
+    site = _curso_da_noite(na_frente="com.shopee.br", sessao_vencida=True, volume=6)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)") and noite_do_curso.gravadas[0] == "Aula um"
+    assert site.abertos == [CHROME] and site.logins == [(0, False)]
+
+
+def test_a_aula_so_abre_muda_ou_com_o_gravador_gravando(noite_do_curso):
+    # O vídeo pode começar a tocar sozinho quando a página da aula abre, e o celular fica no quarto do Rafael (pedido
+    # dele, 22/11): cada aula aberta antes da gravação abre com o volume de mídia em 0; a da gravação, com o volume da
+    # aula só com o gravador gravando (o som vai só ao servidor). O de antes fica guardado, e o robô o devolve.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(volume=6, autoplay=True)
+    assert noite_do_curso(site, AjudanteNaHora()).startswith("3 aula(s) gravada(s)")
+    assert all(volume == 0 or gravando for volume, gravando in site.aberturas)
+    assert (0, False) in site.aberturas and (8, True) in site.aberturas
+    assert cursos_robo.estado_da_noite()["volume_antes"] == 6
+    # O vídeo que começou sozinho não leva o toque no play (seria a pausa): só a 1ª aula, pausada enquanto a página
+    # subia da lista, volta pelo play.
+    assert site.toques.count((539, 793)) == 1 and site.recarregadas == 0
+
+
+def test_a_aula_que_nao_abre_fica_no_registro_com_o_porque(noite_do_curso):
+    # O porquê de a aula não abrir vai ao registro de cada aula, para o relatório da manhã; 2 seguidas param a noite.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(na_frente="com.android.systemui", abre_o_chrome=False)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: a aula não "
+                      "abriu (o Chrome não veio para a frente)")
+    assert _registro_das_aulas() == [
+        ("não abriu", "curso 4, aula 1: a aula não abriu (o Chrome não veio para a frente)")] * 2
+    # A tela da 1ª que não abriu fica guardada para o Claude achar o porquê (só uma por noite).
+    assert noite_do_curso.casos == [("a aula não abriu (o Chrome não veio para a frente)", "não abriu")]
+
+
+def test_sem_a_leitura_do_volume_a_aula_nao_abre(noite_do_curso):
+    # Sem a certeza de o celular estar mudo, a aula não abre: nada é tocado, e a noite para.
+    _lista_no_mapa(4)
+    surdo = _curso_da_noite(responde=False)
+    resumo = noite_do_curso(surdo, AjudanteNaHora())
+    assert resumo.endswith("parou: o celular não ficou mudo antes de abrir a aula") and surdo.toques == []
+
+
+def test_a_aula_sem_video_que_nao_fica_guardada_volta_e_a_noite_segue(noite_do_curso):
+    # Nenhuma aula é pulada (23/11/2026): o documento que não vem deixa a aula para a noite seguinte, e nesta a noite
+    # segue pelo Próximo dela, que volta pela lista (muda e sem o gravador).
+    _lista_no_mapa(4)
+    site = _curso_da_noite(baixa=False)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 0 sem vídeo guardada(s)")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
+    assert _registro_das_aulas() == [("não guardada", "curso 4, aula 3: o documento não apareceu no celular")]
+    assert noite_do_curso.casos == [("o documento não apareceu no celular", "não guardada")]
+    assert cursos_robo.proxima_aula() == (4, 3) and site.tocadas == [0, 2] and site.recarregadas == 0
+
+
+def test_o_robo_que_pede_o_celular_deixa_a_aula_para_a_noite_seguinte(noite_do_curso):
+    # O robô da Shopee Vídeo tem a preferência (22/11): a aula fica pela metade, o vídeo dela sai, e ela volta depois,
+    # inteira, do início (P295 1).
+    _lista_no_mapa(4)
+    resumo = noite_do_curso(_curso_da_noite(), AjudanteNaHora(),
+                            fim_da=lambda nome: (True, "o vídeo parou") if nome == "Aula um"
+                            else (False, "o robô pediu o celular"))
+    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 1 pela metade, 0 sem vídeo guardada(s); parou: o robô "
+                      "pediu o celular")
+    assert cursos_robo.proxima_aula() == (4, 2) and os.listdir(cursos_robo.PASTA_DAS_GRAVACOES) == []
+    # O registro diz qual aula ficou pela metade e por quê, só com números (o relatório da manhã, pedido de 23/11).
+    assert _registro_das_aulas() == [("pela metade", "curso 4, aula 2: o robô pediu o celular")]
+
+
+def test_o_robo_que_pede_o_celular_no_caminho_pela_lista_tem_o_celular_logo(noite_do_curso, monkeypatch):
+    # A lista do curso de centenas de aulas leva minutos: a cada tela dela, a noite renova o sinal ao robô e para na
+    # hora em que ele pede o celular.
+    _lista_no_mapa(4)
+    sinais = []
+    monkeypatch.setattr(cursos_robo, "anotar_o_sinal", lambda agora=None: sinais.append(1))
+    monkeypatch.setattr(cursos_robo, "pediram_o_celular", lambda inicio: len(sinais) > 2)
+    site = _curso_da_noite()
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.endswith("parou: o robô pediu o celular") and noite_do_curso.gravadas == []
+    assert site.tocadas == [] and cursos_robo.proxima_aula() == (4, 1)
+
+
+def test_a_noite_guarda_tambem_a_pagina_de_cada_videoaula(noite_do_curso):
+    # Pedidos do Rafael de 23/11 (08:44 e 09:12): tudo o que está nas aulas vai ao Claude, também o texto e os links
+    # embaixo de cada videoaula. Gravada a aula inteira, a página dela é guardada à parte, com o celular mudo e sem
+    # tocar em nada, e a noite segue para a seguinte pelo Próximo.
+    aulas = [aula for aula in AULAS_DA_LISTA if aula is not AULA_DE_DOCUMENTO]
+    _lista_no_mapa(4, aulas, [("Comece por aqui", 3)], retomada=2)
+    site = _curso_da_noite(aulas, [("Comece por aqui", 3)], retomada=2, texto_na_videoaula=True)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 0 sem vídeo guardada(s)")
+    paginas = sorted(os.listdir(cursos_robo.PASTA_DAS_AULAS))
+    assert [nome[-8:] for nome in paginas] == ["c04-a001", "c04-a002", "c04-a003"]
+    for nome in paginas:
+        with open(os.path.join(cursos_robo.PASTA_DAS_AULAS, nome, "aula.json"), encoding="utf-8") as arquivo:
+            info = json.load(arquivo)
+        assert (info["tipo"], info["linhas"], info["links"], info["documento"]) == (
+            cursos_robo.PAGINA_DA_VIDEOAULA, 2, 1, None)
+    assert site.volumes_das_telas == [0, 0, 0]
+    assert _registro_das_aulas() == [
+        ("página guardada", f"curso 4, aula {numero}: 1 tela(s), 2 linha(s), 1 link(s), sem documento")
+        for numero in (1, 2, 3)]
+
+
+def test_o_robo_que_pede_o_celular_na_pagina_da_videoaula_para_a_noite_com_a_aula_gravada(noite_do_curso, monkeypatch):
+    # Pedido o celular enquanto a página é lida, a noite para, e a aula gravada inteira vale (a página pela metade sai).
+    _lista_no_mapa(4)
+    ajudante, gravou = AjudanteNaHora(), []
+    monkeypatch.setattr(cursos_robo, "pediram_o_celular", lambda inicio: bool(gravou))
+
+    def fim_da(nome):
+        gravou.append(nome)
+        return True, "o vídeo parou"
+    resumo = noite_do_curso(_curso_da_noite(texto_na_videoaula=True), ajudante, fim_da=fim_da)
+    assert resumo == ("1 aula(s) gravada(s), 1 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: o robô "
+                      "pediu o celular")
+    assert ajudante.lidas == [(4, 1, "o vídeo parou")] and cursos_robo.proxima_aula() == (4, 2)
+    assert os.listdir(cursos_robo.PASTA_DAS_AULAS) == []
+
+
+@pytest.mark.parametrize("autoplay, fim", [(False, "o vídeo parou"), (True, "outro vídeo começou")])
+def test_o_site_que_passa_sozinho_para_a_seguinte_nao_faz_a_noite_pular_uma_aula(noite_do_curso, autoplay, fim):
+    # Na noite de 24/11/2026, o site passou sozinho para a aula seguinte no fim de quase todas as videoaulas. A página
+    # da aula gravada volta pela lista (muda e pausada) e é guardada; a seguinte vem pelo Próximo dela, cada aula com o
+    # número dela, e nenhuma fica de fora.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(texto_na_videoaula=True, autoplay=autoplay, passa_no_fim=True)
+    resumo = noite_do_curso(site, AjudanteNaHora(), fim_da=lambda nome: (True, fim))
+    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
+                      "aula por gravar")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
+    linhas = _registro_das_aulas()
+    assert [linha[0] for linha in linhas] == ["página guardada", "página guardada", "guardada sem vídeo",
+                                              "página guardada"]
+    assert [linha[1].split(":")[0] for linha in linhas] == [f"curso 4, aula {numero}" for numero in (1, 2, 3, 4)]
+    # A 1ª e a 2ª voltam pela lista para guardar a página (a 4ª, a última, fica na tela); a página nunca recarrega.
+    assert site.tocadas == [0, 0, 1] and site.recarregadas == 0
+
+
+def test_a_pagina_que_nao_volta_pela_lista_nao_e_guardada_e_a_aula_gravada_vale(bm, monkeypatch, tmp_path):
+    # A página de outra aula não é guardada como a da videoaula: sem voltar à aula gravada, o registro diz o porquê.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    _lista_no_mapa(4)
+    site = _curso_da_noite(retomada=2, texto_na_videoaula=True)
+    monkeypatch.setattr(cursos_robo, "_tocar_na_lista", lambda d, lista, numero, pausa, vigiar: (
+        False, cursos_robo.SEM_A_AULA_NA_LISTA))
+    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ("", None)
+    assert not os.path.exists(tmp_path / "aulas")
+    assert _registro_das_aulas() == [
+        ("página não guardada", f"curso 4, aula 2: {cursos_robo.SAIU_DA_AULA} (a aula não apareceu na lista)")]
+    # Na aula certa, a mesma página é guardada; a videoaula sem nada embaixo do vídeo não vai ao registro.
+    site._abrir(1)
+    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ("", (4, 2))
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    assert pasta.endswith("-c04-a002")
+    site.texto_na_videoaula = False
+    assert cursos_robo._guardar_a_pagina_da_videoaula(site, 4, 2, lambda s: None, lambda: "") == ("", (4, 2))
+    assert len(_registro_das_aulas()) == 2
+
+
+def test_a_gravacao_preta_para_a_noite_e_a_aula_volta_a_ficar_por_gravar(noite_do_curso):
+    # P288 3: preta ou muda, o player não deixa gravar, e a gravação para.
+    _lista_no_mapa(4)
+    resumo = noite_do_curso(_curso_da_noite(), AjudanteNaHora(problema_na=1))
+    assert resumo.endswith("parou: a imagem saiu preta") and noite_do_curso.gravadas == ["Aula um"]
+    assert cursos_robo.proxima_aula() == (4, 1)
+
+
+def test_o_video_que_nao_toca_do_inicio_ao_fim_volta_numa_noite_seguinte(noite_do_curso):
+    # Pedido do Rafael de 24/11/2026: nunca achar que viu a aula sem tê-la visto. O vídeo que começou adiantado (o site
+    # lembra onde a pessoa parou, nas aulas que o Rafael viu à mão) não é falha do caminho: a noite segue, e a aula
+    # volta numa noite seguinte. O que parou antes do fim da duração da lista conta como falha.
+    _lista_no_mapa(4)
+
+    def fim_da(nome):
+        if nome == "Aula um":
+            return False, f"{cursos_robo.NAO_DO_INICIO} (em 200 s de 300 s)"
+        if nome == "Aula dois":
+            return False, f"{cursos_robo.NAO_DO_INICIO} (em 90 s de 600 s)"
+        return False, f"{cursos_robo.ANTES_DO_FIM} (em 60 s de 120 s)"
+    resumo = noite_do_curso(_curso_da_noite(), AjudanteNaHora(), fim_da=fim_da)
+    assert resumo.startswith("0 aula(s) gravada(s), 0 guardada(s), 3 pela metade, 1 sem vídeo guardada(s)")
+    assert [linha for linha in _registro_das_aulas() if linha[0] == "pela metade"] == [
+        ("pela metade", "curso 4, aula 1: o vídeo não começou do início (em 200 s de 300 s)"),
+        ("pela metade", "curso 4, aula 2: o vídeo não começou do início (em 90 s de 600 s)"),
+        ("pela metade", "curso 4, aula 4: o vídeo parou antes do fim (em 60 s de 120 s)")]
+    assert cursos_robo.proxima_aula() == (4, 1) and os.listdir(cursos_robo.PASTA_DAS_GRAVACOES) == []
+
+
+def test_a_pagina_de_outra_aula_com_o_video_tocando_nao_e_gravada_como_a_da_vez(noite_do_curso, monkeypatch):
+    # A página que, com o vídeo já tocando, não é a da aula da vez (o Próximo dela não mostra a seguinte da lista) não
+    # vira a gravação dessa aula: ela fica para a noite seguinte, e 2 seguidas param a noite.
+    _lista_no_mapa(4)
+    monkeypatch.setattr(cursos_robo, "na_aula", lambda d, posicao, numero, pausa: numero != 1 or d.aberta != 0)
+    resumo = noite_do_curso(_curso_da_noite(), AjudanteNaHora())
+    assert noite_do_curso.gravadas[:1] != ["Aula um"]
+    assert ("pela metade", "curso 4, aula 1: a página não é a da aula da vez") in _registro_das_aulas()
+    assert cursos_robo.proxima_aula() == (4, 1) and "parou" in resumo
+
+
+def test_nenhuma_noite_gira_sem_fim(noite_do_curso, monkeypatch):
+    _lista_no_mapa(4)
+    monkeypatch.setattr(cursos_robo, "VOLTAS_DA_NOITE", 0)
+    assert noite_do_curso(_curso_da_noite(), AjudanteNaHora()).endswith("parou: a noite passou de 0 voltas")
+
+
+def test_a_pagina_que_ainda_carrega_nao_passa_por_a_ultima_aula():
+    # O Próximo pode demorar a aparecer na página da aula: sem a conferência, a noite tomaria a aula pela última.
+    carregando = SiteDoCurso(AULAS_DO_SITE, no_alto=True)
+    carregando.sem_o_proximo = 2
+    assert cursos_robo.passar_para_a_seguinte(carregando, **SEM_ESPERA) == ("com vídeo", "", "Aula dois")
+    # Fora da página da aula (sem as abas), a falta do Próximo não é o fim do curso.
+    fora = SiteDoCurso(AULAS_DO_SITE)
+    fora.pagina = "documento"
+    assert cursos_robo.passar_para_a_seguinte(fora, **SEM_ESPERA) == (None, "a página da aula não está na tela", "")
+
+
+def test_a_ultima_aula_conferida_com_a_pagina_rolada_na_lista(bm):
+    # A última aula do curso não tem o Próximo: tocada lá embaixo da lista, com as abas fora da tela, a página dela é
+    # reconhecida pela lista à vista; sem página de aula nenhuma, não.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(retomada=0)
+    assert cursos_robo.abrir_pela_lista(site, 4, 4, **SEM_ESPERA) == (True, "")
+    assert site.aberta == 3 and site.rolagem and cursos_robo.na_aula(site, 4, 4, lambda s: None)
+    assert not cursos_robo._mostra_a_seguinte('<hierarchy rotation="0"></hierarchy>', "")
+
+
+def test_a_pagina_sobe_ate_o_player_inteiro_sem_recarregar(bm):
+    # A aula aberta pela lista fica com a página lá embaixo: ela sobe meia tela por vez até o player inteiro à vista
+    # (o play do meio dele a meia altura do player do alto da página) e nunca é arrastada para baixo no alto.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(retomada=0)
+    assert cursos_robo.abrir_pela_lista(site, 4, 2, **SEM_ESPERA) == (True, "")
+    assert site.rolagem > 0 and not cursos_robo.botao_do_play(site.dump_hierarchy())
+    aula = cursos_robo.lista_do_curso(4)[1]
+    assert cursos_robo.subir_ate_o_alto(site, aula, lambda s: None)
+    assert site.rolagem == 0 and site.recarregadas == 0 and cursos_robo.botao_do_play(site.dump_hierarchy())
+    # Já no alto, nada é arrastado.
+    rolagens = len(site.rolagens)
+    assert cursos_robo.subir_ate_o_alto(site, aula, lambda s: None) and len(site.rolagens) == rolagens
+    # O play cortado no alto da tela ainda não é o alto; o player tocando (sem o play) para a subida ali.
+    cortado = ('<hierarchy rotation="0"><node class="android.webkit.WebView" bounds="[0,267][1080,2394]">'
+               '<node class="android.widget.ToggleButton" clickable="true" text="" content-desc="Tocar vídeo" '
+               'bounds="[475,300][603,428]" /></node></hierarchy>')
+    assert not cursos_robo.alto_da_aula(cortado, "Aula dois")
+    tocando = cortado.replace('class="android.widget.ToggleButton" clickable="true" text="" content-desc="Tocar '
+                              'vídeo"', 'class="android.widget.SeekBar" resource-id="plyr-seek-1" clickable="true" '
+                              'text="" content-desc=""')
+    assert cursos_robo.alto_da_aula(tocando, "Aula dois")
+    # Na aula sem vídeo, o nome dela no alto basta; na videoaula, não.
+    titulo = ('<hierarchy rotation="0"><node class="android.webkit.WebView" bounds="[0,267][1080,2394]">'
+              '<node class="android.widget.TextView" text="Dia 01" bounds="[42,500][1000,560]" /></node></hierarchy>')
+    assert cursos_robo.alto_da_aula(titulo, "Dia 01", com_video=False)
+    assert not cursos_robo.alto_da_aula(titulo, "Dia 01", com_video=True)
+
+
+@pytest.fixture
+def teste_de_dia(bm, monkeypatch, tmp_path):
+    """
+    O passo curso:gravar:N[:K] de dia, com a gravação de mentira na ordem da de verdade: fim(site) diz como a aula
+    acabou (com o arquivo gravado). Anota o máximo, a madrugada e a duração de cada gravação e o que foi lido de cada
+    uma.
+    """
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(tmp_path / "brutas"))
+    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: False)
+    gravacoes, lidas, casos = [], [], []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso",
+                        lambda d, motivo, resultado="", passo="": casos.append((motivo, resultado)), raising=False)
+
+    def rodar(site, passo="gravar:4", fim=lambda site: (True, "o vídeo parou")):
+        def gravar(d, alvo, destino, ir_para_a_aula, tocar, pausa=None, madrugada=None, maximo=None, duracao=None,
+                   na_aula_certa=None, **_):
+            gravacoes.append((maximo, madrugada(), duracao))
+            d.gravando = True
+            try:
+                cursos_robo.subir_o_volume(d)
+                tipo, porque = ir_para_a_aula(d)
+                if not tipo:
+                    return False, False, f"a aula não abriu ({porque})"
+                if tipo == cursos_robo.SEM_VIDEO:
+                    return True, False, tipo
+                assert tocar(d) and na_aula_certa(d)
+                with open(destino, "wb") as arquivo:
+                    arquivo.write(b"aula")
+                return (True,) + tuple(fim(d))
+            finally:
+                cursos_robo.pausar_o_que_toca(d, pausa)
+                cursos_robo.devolver_o_volume(d, pausa)
+                d.gravando = False
+
+        def guardar(arquivo, curso, aula, como_acabou, agora=None):
+            lidas.append((os.path.exists(arquivo), curso, aula, como_acabou))
+            os.remove(arquivo)
+            return "pasta", {"segundos": 95, "som": -21.4, "palavras": 230, "folhas": 2, "problema": ""}
+
+        monkeypatch.setattr(cursos_robo, "gravar_a_aula", gravar, raising=False)
+        monkeypatch.setattr(cursos_robo, "guardar_a_aula", guardar, raising=False)
+        # O explorar deixa o celular mudo antes dos passos que tocam uma aula, e o volume volta no fim dele.
+        assert cursos_robo.toca_aula("curso", passo) and cursos_robo.calar_o_celular(site)[0] == 0
+        return cursos_robo.curso_no_explorar(site, passo, **SEM_ESPERA)
+    rodar.gravacoes, rodar.lidas, rodar.casos, rodar.brutas = gravacoes, lidas, casos, tmp_path / "brutas"
+    return rodar
+
+
+def test_o_teste_de_dia_grava_uma_aula_da_lista_como_a_noite(teste_de_dia):
+    # O teste de dia da gravação da noite: a 1ª aula do curso pela lista, com o curso aberto antes, mudo e sem o
+    # gravador; a 2ª pelo Próximo da 1ª, que vem antes pela lista. A gravação tem no máximo 10 min, leva a duração da
+    # lista e é lida como a aula 0 do curso 0; depois, o celular fica mudo até o explorar devolver o volume.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(volume=6)
+    assert teste_de_dia(site) == (
+        True, "aula 1 do curso 4 gravada inteira (o vídeo parou): 95 s, som -21.4 LUFS, 230 palavra(s), 2 folha(s) de "
+              "quadros, sem problema; para ler: cursos_robo.yml exportar")
+    assert teste_de_dia.gravacoes == [(cursos_robo.GRAVACAO_DO_TESTE, True, 300)]
+    assert teste_de_dia.lidas == [(True, 0, 0, "o vídeo parou")] and not os.listdir(teste_de_dia.brutas)
+    assert site.aberturas == [(0, False), (8, True)] and site.aberta == 0 and site.tocadas == [0]
+    assert site.volume == 0 and cursos_robo.estado_da_noite()["volume_antes"] == 6
+    site = _curso_da_noite(volume=6)
+    assert teste_de_dia(site, "gravar:4:2")[1].startswith("aula 2 do curso 4 gravada inteira")
+    assert site.aberturas == [(0, False), (0, False), (8, True)] and site.aberta == 1 and site.tocadas == [0]
+    # O mapa não muda: a aula do teste não conta como gravada.
+    assert cursos_robo.proxima_aula() == (4, 1)
+
+
+def test_o_teste_de_dia_recusa_a_madrugada_o_curso_sem_lista_e_a_aula_sem_video(teste_de_dia, monkeypatch):
+    site = _curso_da_noite()
+    assert teste_de_dia(site) == (False, "o curso 4 ainda não tem a lista das aulas (curso:lista:4)")
+    _lista_no_mapa(4)
+    assert teste_de_dia(site, "gravar:4:9") == (False, "a lista do curso 4 tem 4 aula(s)")
+    assert teste_de_dia(_curso_da_noite(), "gravar:4:3") == (False, "a aula 3 do curso 4 não tem vídeo")
+    assert teste_de_dia.casos == [(cursos_robo.SEM_VIDEO, "teste da gravação")]
+    monkeypatch.setattr(cursos_robo, "_madrugada_agora", lambda: True)
+    assert teste_de_dia(site) == (False, "de madrugada, quem grava as aulas é a noite")
+    assert not cursos_robo.curso_no_explorar(site, "gravar:9", **SEM_ESPERA)[0]
+    assert not cursos_robo.curso_no_explorar(site, "gravar:9:1", **SEM_ESPERA)[0]
+
+
+def test_o_robo_que_pede_o_celular_no_teste_de_dia_tem_o_celular_na_hora(teste_de_dia):
+    # O robô da Shopee Vídeo tem a preferência também no teste: a gravação para e sai sem ser lida (a leitura da fala
+    # seguraria o celular), e o celular fica mudo.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(volume=6)
+    assert teste_de_dia(site, fim=lambda d: (False, "o robô pediu o celular")) == (
+        False, "a gravação parou (o robô pediu o celular) e saiu sem ser lida")
+    assert teste_de_dia.lidas == [] and not os.listdir(teste_de_dia.brutas) and site.volume == 0
+    # A aula que não começou a tocar também não tem o que ler, e a tela dela vai ao Claude.
+    assert teste_de_dia(_curso_da_noite(), fim=lambda d: (False, cursos_robo.NAO_TOCOU)) == (
+        False, "a gravação parou (a aula não começou a tocar) e saiu sem ser lida")
+    assert teste_de_dia.lidas == [] and teste_de_dia.casos == [(cursos_robo.NAO_TOCOU, "teste da gravação")]
+
+
+def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, monkeypatch, tmp_path):
+    brutas = tmp_path / "brutas"
+    brutas.mkdir()
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_GRAVACOES", str(brutas))
+    _lista_no_mapa(4)
+    for numero in (1, 2):
+        cursos_robo.anotar_a_aula_gravada(4, numero)
+    lidas = []
+
+    def guardar(arquivo, posicao, numero, fim):
+        lidas.append((posicao, numero))
+        return None, {"problema": "o som saiu mudo" if numero == 2 else ""}
+
+    # A gravação que ficou na fila de uma noite parada no meio (o .json ao lado) é lida na seguinte.
+    sobra = brutas / "20261124-010000.mkv"
+    sobra.write_bytes(b"aula")
+    (brutas / "20261124-010000.mkv.json").write_text('{"posicao": 4, "numero": 1, "fim": "o vídeo parou"}')
+    ajudante = cursos_robo.Ajudante(guardar=guardar)
+    assert ajudante.mandar_as_que_ficaram() == 1
+    nova = brutas / "20261124-012000.mkv"
+    nova.write_bytes(b"aula")
+    ajudante.mandar(str(nova), 4, 2, "o vídeo parou")
+    ajudante.acabar()
+    assert lidas == [(4, 1), (4, 2)] and ajudante.guardadas == 1 and ajudante.problema == "o som saiu mudo"
+    assert os.listdir(brutas) == []
+    # A muda volta a ficar por gravar; a outra continua gravada.
+    assert cursos_robo.proxima_aula() == (4, 2)
+    assert _registro_das_aulas() == [("guardada", "curso 4, aula 1"),
+                                     ("não serviu", "curso 4, aula 2: o som saiu mudo")]
