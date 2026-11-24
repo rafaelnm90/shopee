@@ -22,6 +22,14 @@ AGORA = datetime(2026, 11, 21, 10, 0, tzinfo=fuso_horario)
 FILTRO = "Lives, Vídeos e Prêmios"
 
 
+@pytest.fixture(autouse=True)
+def registro_sem_prazo(monkeypatch):
+    # Os testes anotam no registro com a hora AGORA, fixa, e o robô anota também com a hora de verdade, que apaga o que
+    # passou dos 3 dias do registro: a partir de 24/11/2026, o anotado com AGORA sumia no meio do teste. Aqui o
+    # registro não perde nada pela data do dia em que os testes rodam.
+    monkeypatch.setattr(robo.registro_processos, "DIAS_DO_REGISTRO", 100 * 365)
+
+
 def _el(texto="", desc="", ident="", classe="TextView", caixa=(0, 0, 10, 10), clicavel=False):
     x1, y1, x2, y2 = caixa
     clicar = "true" if clicavel else "false"
