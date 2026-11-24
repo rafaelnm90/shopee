@@ -1282,8 +1282,9 @@ def test_video_que_o_robo_pega_no_meio_do_preparo_nao_vai_ao_amigo(monkeypatch):
     assert [e["chat"] for e in bot.envios] == [-1001, -1001]
 
 
-def _sessao_da_api(monkeypatch, nos):
-    """aiohttp.ClientSession falso: o POST da API de afiliado responde com estes produtos (nodes)."""
+def _sessao_da_api(monkeypatch, nos, pedidos=None):
+    """aiohttp.ClientSession falso: o POST da API de afiliado responde com estes produtos (nodes); pedidos (lista),
+    quando vem, guarda o corpo de cada POST."""
     class Resposta:
         async def json(self, content_type=None):
             return {"data": {"productOfferV2": {"nodes": nos}}}
@@ -1305,6 +1306,8 @@ def _sessao_da_api(monkeypatch, nos):
             return False
 
         def post(self, url, headers=None, data=None):
+            if pedidos is not None:
+                pedidos.append(data)
             return Resposta()
 
     monkeypatch.setattr(asv.aiohttp, "ClientSession", Sessao)
@@ -1324,3 +1327,14 @@ def test_produto_da_api_e_a_mensagem_dizem_a_comissao_do_video(monkeypatch):
     produto = rodar(asv._consultar_produto("11", "23"))
     assert produto["comissao"] == 1.5
     assert "Copo: R$ 18,00, comissão 1,5%" in asv.montar_mensagem(TEXTOS, [produto], "https://s.shopee.com.br/abc")
+
+
+def test_o_produto_da_api_pede_a_parte_do_vendedor(monkeypatch):
+    # P297 1: a consulta pede a parte da Shopee e a do vendedor (a sonda de 24/11/2026 achou as duas em todos os
+    # produtos), e a comissão do vídeo sai delas: 2% da Shopee e 5% do vendedor (7% na API) pagam 6,5% no vídeo.
+    pedidos = []
+    _sessao_da_api(monkeypatch, [{"productName": "Pote", "priceMin": "20", "commissionRate": "0.07",
+                                  "sellerCommissionRate": "0.05", "shopeeCommissionRate": "0.02"}], pedidos)
+    produto = rodar(asv._consultar_produto("11", "24"))
+    assert produto["comissao"] == 6.5
+    assert len(pedidos) == 1 and "sellerCommissionRate" in str(pedidos[0]) and "shopeeCommissionRate" in str(pedidos[0])

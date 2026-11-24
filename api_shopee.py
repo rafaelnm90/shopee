@@ -375,19 +375,20 @@ def _sem_ofertas(negada_levanta, motivo):
     return []
 
 
-# O que a busca de ofertas e a lista dos produtos em alta pedem de cada produto.
-CAMPOS_DA_OFERTA = ("itemId productName price priceMin priceMax priceDiscountRate ratingStar sales shopName "
-                    "imageUrl productLink commissionRate")
-
 # A comissão de um produto num vídeo da Shopee Vídeo. Desde 01/07/2026, a parte da Shopee no canal Shopee Video é de
 # 1,5% (Central de Ajuda do Afiliado, artigo 223989: "ajustada de 3% para 1.5%"); os 3% são das vendas pelas redes
 # sociais. A comissão extra do vendedor vale nos dois. A API de afiliado dá a das redes sociais: commissionRate, a
-# soma da parte da Shopee (shopeeCommissionRate) e da do vendedor (sellerCommissionRate). O robô e o modo assistente
-# da Shopee Vídeo mostram, escolhem e contam o mínimo por venda pela do vídeo. Escolha do Rafael (24/11/2026, P297 1):
+# soma da parte da Shopee (shopeeCommissionRate) e da do vendedor (sellerCommissionRate), que vêm separadas em todo
+# produto (a sonda do video_ia.yml produtos, em 24/11/2026). O robô e o modo assistente da Shopee Vídeo pedem as
+# três e mostram, escolhem e contam o mínimo por venda pela do vídeo. Escolha do Rafael (24/11/2026, P297 1):
 # DECISOES.md, Shopee Vídeo.
 COMISSAO_DA_SHOPEE_NO_VIDEO = 0.015
 COMISSAO_DA_SHOPEE_NAS_REDES = 0.03
 CAMPOS_DA_COMISSAO = "commissionRate sellerCommissionRate shopeeCommissionRate"
+
+# O que a busca de ofertas e a lista dos produtos em alta pedem de cada produto.
+CAMPOS_DA_OFERTA = ("itemId productName price priceMin priceMax priceDiscountRate ratingStar sales shopName "
+                    "imageUrl productLink " + CAMPOS_DA_COMISSAO)
 
 
 def _taxa(valor):
