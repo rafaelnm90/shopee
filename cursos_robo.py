@@ -1094,6 +1094,10 @@ ESPACO_DA_AULA = 160
 # inteira leva dezenas de rolagens e de toques nos módulos.
 VOLTAS_DA_LISTA = 600
 ESPERA_DO_MODULO = 1.5
+# A duração da linha da aula aparece um instante depois da linha: a tela com aula ainda sem ela é lida de novo até
+# essas vezes, com essa espera (s), antes de a leitura seguir.
+RELEITURAS_DA_DURACAO = 2
+ESPERA_DA_DURACAO = 1.0
 SEM_A_LISTA = "a aba Módulos não apareceu na tela"
 LISTA_SEM_O_COMECO = "o começo da lista ficou fora da tela"
 LISTA_PELA_METADE = "a lista das aulas não chegou ao fim"
@@ -1257,6 +1261,8 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
     modulos, tocados, antes, sem_a_lista, aba_tocada = [], set(), None, 0, False
     # esperado: o módulo tocado por último, até o botão dele voltar à leitura da tela.
     esperado, subidas = None, 0
+    # relidas: as aulas sem a duração que já tiveram as releituras da tela (a aula sem vídeo não tem duração nenhuma).
+    relidas, releituras = set(), 0
     for _ in range(VOLTAS_DA_LISTA):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         achado = itens_da_lista(tela)
@@ -1293,6 +1299,18 @@ def ler_a_lista(d, pausa=None, ao_comecar=None):
         vistas, novo, abaixo = _uma_olhada_na_lista(itens, modulos)
         if modulos:
             modulos[-1]["aulas"] = _juntar_as_aulas(modulos[-1]["aulas"], vistas)
+            juntas = {_chave_da_aula(aula): aula[1] for aula in modulos[-1]["aulas"]}
+            sem_duracao = {_chave_da_aula(aula) for aula in vistas if juntas.get(_chave_da_aula(aula)) is None}
+            if sem_duracao - relidas and releituras < RELEITURAS_DA_DURACAO:
+                # A linha da aula que acabou de aparecer, logo depois do toque no módulo, pode vir ainda sem a
+                # duração, que o site põe um instante depois; rolada a página (ou fechado o módulo de antes, que faz
+                # a página pular), ela sai da tela sem a duração, e a noite não confere se gravou o vídeo inteiro (os
+                # cursos 3 e 4, na 2ª leitura de 24/11/2026). A mesma tela é lida de novo antes de seguir.
+                releituras += 1
+                pausa(ESPERA_DA_DURACAO)
+                continue
+            relidas |= sem_duracao
+        releituras = 0
         if (novo and novo["caixa"][1] < caixa[1] and novo["nome"] not in tocados
                 and not (abaixo and abaixo["tipo"] == "aula") and subidas < SUBIDAS_DA_LISTA):
             # O botão do módulo seguinte passou por cima da caixa da lista: a rolagem por dentro dela anda mais que o
