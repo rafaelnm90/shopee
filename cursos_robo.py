@@ -1062,7 +1062,9 @@ MODULO_DA_LISTA = re.compile(r"\d{1,3}%\s+(?P<nome>.*\S)")
 ALTURA_DO_BOTAO = 60
 # Embaixo do módulo aberto vem a 1ª aula dele: sem esse espaço à vista, a lista rola antes de saber se ele está aberto.
 ESPACO_DA_AULA = 160
-VOLTAS_DA_LISTA = 150
+# O curso mais longo da turma tem centenas de aulas (362 no curso 2, pelo progresso da página em 24/11/2026): a lista
+# inteira leva dezenas de rolagens e de toques nos módulos.
+VOLTAS_DA_LISTA = 600
 ESPERA_DO_MODULO = 1.5
 SEM_A_LISTA = "a aba Módulos não apareceu na tela"
 LISTA_SEM_O_COMECO = "o começo da lista ficou fora da tela"
