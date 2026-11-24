@@ -1810,23 +1810,29 @@ class ListaDoSite:
     aula dela. sem_andamento: os módulos que vêm sem o "N%" na frente do nome (o 1º do curso 5, em 24/11/2026).
     numeros: cada linha de aula dentro do bloco com o número da aula no site (o id só de algarismos); atrasadas: as
     aulas cuja linha vem sem a duração nas duas primeiras telas em que aparece. margem: quanto de página sobra
-    embaixo do último item da lista.
+    embaixo do último item da lista. altura_da_lista: a lista rola por dentro de uma caixa dessa altura (no curso 4, em
+    24/11/2026), e as linhas fora dela continuam na leitura da tela, com o lugar que teriam; o toque fora da caixa cai
+    no que está embaixo dela ("fora da lista"); o arrasto para baixo dentro da caixa, com linha escondida por cima,
+    volta a caixa (subidas), e o resto fica em puxados. vai_a_aberta: aberto o módulo da aula aberta, o site rola a
+    caixa sozinho até ela.
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
     def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
-                 total=None, sem_andamento=(), numeros=False, atrasadas=(), margem=400):
+                 total=None, sem_andamento=(), numeros=False, atrasadas=(), margem=400, altura_da_lista=None,
+                 vai_a_aberta=False):
         # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
         self.total, self.sem_andamento = total, set(sem_andamento)
         self.numeros, self.atrasadas, self.vezes, self.margem = numeros, set(atrasadas), {}, margem
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
         self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
-        self.toques, self.puxados, self.teclas = [], [], []
+        self.altura_da_lista, self.vai_a_aberta, self.dentro = altura_da_lista, vai_a_aberta, 0
+        self.toques, self.puxados, self.teclas, self.subidas = [], [], [], []
         self.todas = [aula for _modulo, aulas in modulos for aula, _tempo in aulas]
 
-    def _itens(self):
-        """(tipo, chave, texto, x1, x2, y1, y2 na página) de cada botão da lista, e o fim da página."""
-        itens, y = [], self.comeco
+    def _conteudo(self):
+        """(tipo, chave, texto, x1, x2, y1, y2 dentro da lista) de cada botão, e a altura da lista inteira."""
+        itens, y = [], 0
         for numero, (nome, aulas) in enumerate(self.modulos):
             texto = nome if numero in self.sem_andamento else f"{10 * numero}% {nome}"
             itens.append(("módulo", numero, texto, 42, 1010, y, y + 124))
@@ -1835,7 +1841,26 @@ class ListaDoSite:
                 for aula, tempo in aulas:
                     itens.append(("aula", aula, f"{aula} {tempo}" if tempo else aula, 178, 942, y, y + 86))
                     y += 150
-        return itens, y + self.margem
+        return itens, y
+
+    def _caixa(self):
+        """A altura da caixa da lista (a lista inteira, até o limite dela) e o quanto ela rola por dentro, no máximo."""
+        _itens, altura = self._conteudo()
+        caixa = min(altura, self.altura_da_lista) if self.altura_da_lista else altura
+        return caixa, altura - caixa
+
+    def _itens(self):
+        """(tipo, chave, texto, x1, x2, y1, y2 na página) de cada botão da lista, e o fim da página."""
+        conteudo, _altura = self._conteudo()
+        caixa, maximo = self._caixa()
+        self.dentro = max(0, min(self.dentro, maximo))
+        itens = [(tipo, chave, texto, x1, x2, self.comeco + y1 - self.dentro, self.comeco + y2 - self.dentro)
+                 for tipo, chave, texto, x1, x2, y1, y2 in conteudo]
+        return itens, self.comeco + caixa + self.margem
+
+    def _janela(self):
+        """A caixa da lista na tela (de cima, de baixo)."""
+        return self._na_tela(self.comeco, self.comeco + self._caixa()[0])
 
     def _na_tela(self, y1, y2):
         y1, y2 = y1 - self.rolagem + self.TOPO, y2 - self.rolagem + self.TOPO
@@ -1853,7 +1878,7 @@ class ListaDoSite:
         if aba[1] > aba[0]:
             nos.append('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
                        f'text="Módulos" content-desc="" bounds="[60,{aba[0]}][336,{aba[1]}]" />')
-        lista = self._na_tela(self.comeco, fim - 400)
+        lista = self._janela()
         if self.aba_aberta and lista[1] > lista[0]:
             dentro = []
             for tipo, chave, texto, x1, x2, y1, y2 in itens:
@@ -1894,9 +1919,13 @@ class ListaDoSite:
             self.toques.append("a bolha do chat")
             return
         itens, _fim = self._itens()
+        janela = self._janela()
         for tipo, chave, _texto, x1, x2, y1, y2 in itens:
             topo, baixo = self._na_tela(y1, y2)
             if x1 <= x <= x2 and topo <= y <= baixo:
+                if not janela[0] <= y <= janela[1]:
+                    self.toques.append("fora da lista")
+                    return
                 self.toques.append(f"{tipo} {chave}")
                 if tipo == "aula":
                     self.aberta = self.todas.index(chave)
@@ -1905,6 +1934,7 @@ class ListaDoSite:
                         self.abertos.discard(chave)
                     else:
                         self.abertos = ({chave} if self.um_aberto else self.abertos | {chave})
+                        self._ir_a_aberta(chave)
                 return
         aba = self._na_tela(self.comeco - 250, self.comeco - 60)
         if 60 <= x <= 336 and aba[0] <= y <= aba[1]:
@@ -1913,9 +1943,29 @@ class ListaDoSite:
             return
         self.toques.append("nada")
 
+    def _ir_a_aberta(self, modulo):
+        """Aberto o módulo da aula aberta, o site rola a caixa da lista até ela (vai_a_aberta)."""
+        if not self.vai_a_aberta or not self.altura_da_lista:
+            return
+        aberta = self.todas[self.aberta]
+        conteudo, _altura = self._conteudo()
+        linha = next((item for item in conteudo if item[0] == "aula" and item[1] == aberta), None)
+        if linha and any(aula == aberta for aula, _tempo in self.modulos[modulo][1]):
+            self.dentro = max(0, min(linha[6] + 150 - self._caixa()[0], self._caixa()[1]))
+
     def swipe(self, x1, y1, x2, y2, duracao=None):
+        janela = self._janela()
+        na_caixa = bool(self.altura_da_lista) and janela[0] <= y1 <= janela[1]
+        _caixa, maximo = self._caixa()
         if y2 > y1:
-            self.puxados.append((x1, y1, x2, y2))
+            if na_caixa and self.dentro > 0:
+                self.subidas.append((x1, y1, x2, y2))
+                self.dentro = max(0, self.dentro - (y2 - y1))
+            else:
+                self.puxados.append((x1, y1, x2, y2))
+            return
+        if na_caixa and self.dentro < maximo:
+            self.dentro = min(maximo, self.dentro + (y1 - y2))
             return
         _itens, fim = self._itens()
         self.rolagem = max(0, min(fim - (self.FIM - self.TOPO), self.rolagem + (y1 - y2)))
@@ -2095,6 +2145,55 @@ def test_o_ultimo_modulo_no_fim_da_pagina_e_aberto_na_lista_e_pela_noite(bm, mon
     assert cursos_robo.abrir_pela_lista(site, 4, ultima + 1, pausa=lambda segundos: None) == (True, "")
     assert site.toques == ["módulo 4", "aula Encontro gravado"] and site.puxados == []
 
+
+# O curso 4, em 24/11/2026: 2 módulos, um aberto de cada vez, e a lista rolando por dentro da caixa dela.
+MODULOS_QUE_PULAM = [("Módulo de abertura", [(f"Abertura {numero}", "1:07") for numero in range(1, 4)]),
+                     ("Módulo do método", [(f"Aula {numero:02d}", "4:54" if numero > 5 else None)
+                                           for numero in range(1, 17)])]
+
+
+def _lista_que_pula():
+    todas = [(modulo, aula, tempo) for modulo, aulas in MODULOS_QUE_PULAM for aula, tempo in aulas]
+    return [{"modulo": modulo, "nome": aula, "segundos": cursos_robo.segundos_do_tempo(tempo) if tempo else None,
+             "aula": str(4000 + indice)} for indice, (modulo, aula, tempo) in enumerate(todas)]
+
+
+def test_a_lista_que_rola_por_dentro_e_pula_sozinha_ate_a_aula_aberta():
+    # 24/11/2026, curso 4: a lista rola por dentro de uma caixa, e o site abre um módulo de cada vez; aberto o 2º, ele
+    # rolou a caixa sozinho até a aula aberta na página, perto do fim do módulo: o botão dele e as primeiras aulas
+    # saíram por cima, e a lista vinha com 14 das 19 aulas, todas no 1º módulo. A caixa volta, por dentro, até o botão
+    # do módulo aberto, e nenhum toque cai fora dela.
+    site = ListaDoSite(MODULOS_QUE_PULAM, um_aberto=True, altura_da_lista=963, vai_a_aberta=True, aberta=17,
+                       numeros=True)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
+    assert (lista, porque) == (_lista_que_pula(), "")
+    assert site.toques == ["módulo 0", "módulo 1"] and site.subidas and site.puxados == []
+
+
+def test_a_noite_acha_a_aula_que_rolou_por_cima_da_caixa_da_lista(bm, monkeypatch):
+    # A noite abre a 2ª aula do 2º módulo com a página na aula em que o site parou (a 15ª dele): aberto o módulo, o site
+    # rola a caixa da lista sozinho até ela, e a aula da vez fica por cima da caixa, na leitura da tela, por cima das
+    # abas (o toque ali cairia nelas). Pela ordem da lista (o número da aula no site), a caixa volta até ela, por
+    # dentro, e só a linha dentro da caixa é tocada.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    cursos_robo.guardar_a_lista(4, _lista_que_pula())
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    site = ListaDoSite(MODULOS_QUE_PULAM, um_aberto=True, altura_da_lista=963, vai_a_aberta=True, aberta=17,
+                       numeros=True)
+    assert cursos_robo.abrir_pela_lista(site, 4, 5, pausa=lambda segundos: None) == (True, "")
+    assert site.toques == ["módulo 1", "aula Aula 02"] and site.subidas and site.puxados == []
+
+
+def test_a_noite_nao_passa_ao_curso_seguinte_sem_a_lista_do_curso_da_vez(bm):
+    # Pedido do Rafael de 24/11/2026: curso por curso, na ordem. Sem a lista do curso da vez (o 4, o 1º da ordem), a
+    # noite para nele, em vez de gravar as aulas do curso seguinte.
+    cursos_robo.guardar_a_lista(5, LISTA_DO_CURSO)
+    assert cursos_robo.proxima_aula() is None and cursos_robo.curso_sem_a_lista() == 4
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO[:1])
+    assert cursos_robo.proxima_aula() == (4, 1) and cursos_robo.curso_sem_a_lista() is None
+    cursos_robo.anotar_a_aula_gravada(4, 1)
+    assert cursos_robo.proxima_aula() == (5, 1)
 
 def test_a_aula_da_noite_achada_pelo_numero_dela():
     # Com o número da aula na lista e na tela, a linha certa é a do número, também com duas aulas de mesmo nome; sem
@@ -2511,8 +2610,9 @@ def test_a_noite_grava_as_aulas_na_ordem_da_lista_e_nao_pula_nenhuma(noite_do_cu
     _lista_no_mapa(4)
     site, ajudante = _curso_da_noite(), AjudanteNaHora()
     resumo = noite_do_curso(site, ajudante)
-    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
-                      "aula por gravar")
+    # Só o curso 4 tem a lista: a noite para no 5, o da vez, sem passar ao seguinte.
+    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: o curso 5 "
+                      "sem a lista das aulas")
     assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
     assert noite_do_curso.duracoes == [300, 600, 120]
     assert ajudante.lidas == [(4, 1, "o vídeo parou"), (4, 2, "o vídeo parou"), (4, 4, "o vídeo parou")]
@@ -2662,8 +2762,9 @@ def test_o_site_que_passa_sozinho_para_a_seguinte_nao_faz_a_noite_pular_uma_aula
     _lista_no_mapa(4)
     site = _curso_da_noite(texto_na_videoaula=True, autoplay=autoplay, passa_no_fim=True)
     resumo = noite_do_curso(site, AjudanteNaHora(), fim_da=lambda nome: (True, fim))
-    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
-                      "aula por gravar")
+    # Só o curso 4 tem a lista: a noite para no 5, o da vez, sem passar ao seguinte.
+    assert resumo == ("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: o curso 5 "
+                      "sem a lista das aulas")
     assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
     linhas = _registro_das_aulas()
     assert [linha[0] for linha in linhas] == ["página guardada", "página guardada", "guardada sem vídeo",
