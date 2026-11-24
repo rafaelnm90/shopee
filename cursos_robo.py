@@ -2159,6 +2159,33 @@ def _abrir_a_seguinte(d, posicao, numero, pausa):
     return tipo, porque
 
 
+# No fim do vídeo, o site pode passar sozinho para a aula seguinte (o teste de dia de 23/11/2026, às 23:06: acabada a 1ª
+# aula do curso 5, a página já era a da 2ª). Sem conferir, a noite guardaria a página da seguinte como a da gravada e
+# tocaria no Próximo dela, gravando a aula de depois com o número da seguinte: uma aula pulada e as outras com o número
+# trocado. A aula aberta anota o nome no Próximo dela (o da aula seguinte), e a noite confere se ele é o mesmo depois
+# do vídeo; não sendo, a página saiu da aula gravada, e a seguinte vem pelo começo do curso (nenhuma aula é pulada).
+SAIU_DA_AULA = "o site passou sozinho para outra aula no fim do vídeo"
+
+
+def _abrir_anotando_o_proximo(abrir, anotado, pausa):
+    """abrir(d) que, com a aula aberta, anota em anotado["proximo"] o nome no Próximo dela ("" na última do curso)."""
+    def abrir_e_anotar(d):
+        tipo, porque = abrir(d)
+        if tipo:
+            tela, _ponto = proximo_na_tela(d, pausa)
+            anotado["proximo"] = nome_no_proximo(tela)
+        return tipo, porque
+    return abrir_e_anotar
+
+
+def ainda_na_aula(d, anotado, pausa):
+    """A página ainda é a da aula aberta: o Próximo tem o mesmo nome de quando ela abriu (_abrir_anotando_o_proximo)?"""
+    if "proximo" not in anotado:
+        return False
+    tela, _ponto = proximo_na_tela(d, pausa)
+    return nome_no_proximo(tela) == anotado["proximo"]
+
+
 OUTRA_PAGINA = "a página não é a da aula gravada"
 
 
@@ -2294,15 +2321,23 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                         abrir = (lambda celular: ir_para_o_endereco(celular, endereco, pausa))
                     else:
                         abrir = (lambda celular: _abrir_a_seguinte(celular, posicao, numero, pausa))
+                    na_abertura = {}
                     aberta_na_gravacao, inteira, fim = gravar_a_aula(
-                        d, getattr(d, "serial", ""), destino, abrir, lambda celular: tocar_pelo_play(celular, pausa),
-                        pausa=pausa)
-                    # O site que passa sozinho para a aula seguinte no fim do vídeo deixa na tela outra aula: a próxima
-                    # vez, a noite chega à da vez pelo começo do curso.
-                    aberta = (posicao, numero) if aberta_na_gravacao and fim != "outro vídeo começou" else None
+                        d, getattr(d, "serial", ""), destino, _abrir_anotando_o_proximo(abrir, na_abertura, pausa),
+                        lambda celular: tocar_pelo_play(celular, pausa), pausa=pausa)
+                    # O site que passa sozinho para a aula seguinte no fim do vídeo (e começa o vídeo dela ou não) deixa
+                    # na tela outra aula: a próxima vez, a noite chega à da vez pelo começo do curso (SAIU_DA_AULA).
+                    no_lugar = (aberta_na_gravacao and fim not in PARADAS_DA_AULA + ("outro vídeo começou",)
+                                and ainda_na_aula(d, na_abertura, pausa))
+                    aberta = (posicao, numero) if no_lugar else None
                     if inteira and aberta and calar_o_celular(d):
                         # A página da videoaula (o texto, os links e o documento), com o vídeo já pausado e mudo.
                         parar_depois = _guardar_a_pagina_da_videoaula(d, posicao, numero, pausa, vigiar)
+                        if not parar_depois and not ainda_na_aula(d, na_abertura, pausa):
+                            aberta = None
+                    elif inteira and not aberta:
+                        registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_AULA, "página não guardada",
+                                                     f"{qual_aula(posicao, numero)}: {SAIU_DA_AULA}", ok=None)
                     if fim == SEM_VIDEO and not calar_o_celular(d):
                         fim = SEM_O_MUDO
                     elif fim == SEM_VIDEO:

@@ -2037,6 +2037,42 @@ def test_a_pagina_que_volta_para_uma_aula_de_antes_nao_e_gravada_como_a_seguinte
     assert noite_do_curso(SiteDoCurso(aulas), AjudanteNaHora()).endswith("parou: a noite passou de 0 voltas")
 
 
+@pytest.mark.parametrize("autoplay, fim", [(False, "o vídeo parou"), (True, "outro vídeo começou")])
+def test_o_site_que_passa_sozinho_para_a_aula_seguinte_nao_faz_a_noite_pular_uma_aula(noite_do_curso, autoplay, fim):
+    # O teste de dia de 23/11/2026, às 23:06: acabado o vídeo da 1ª aula do curso 5, o site abriu sozinho a 2ª (um
+    # documento). A noite que se achasse ainda na 1ª guardaria a página da 2ª como a da 1ª e tocaria no Próximo da 2ª: a
+    # 3ª seria gravada com o número da 2ª, e o documento ficaria fora do mapa. Pelo nome no Próximo, a noite vê que saiu
+    # da aula gravada, e a seguinte vem pelo começo do curso, cada aula com o número dela.
+    aulas = [AULAS_DO_SITE[0], AULA_DE_DOCUMENTO, AULAS_DO_SITE[1]]
+    cursos_robo.guardar_a_primeira_aula(4, aulas[0][2])
+    site = SiteDoCurso(aulas, texto_na_videoaula=True, autoplay=autoplay)
+
+    def fim_passando_para_a_seguinte(nome):
+        if site.aberta + 1 < len(site.aulas):
+            site._abrir(site.aberta + 1)          # o site abre a aula seguinte sozinho, no fim do vídeo
+            return True, fim
+        return True, "o vídeo parou"
+    resumo = noite_do_curso(site, AjudanteNaHora(), fim_da=fim_passando_para_a_seguinte)
+    assert resumo == ("2 aula(s) gravada(s), 2 guardada(s), 0 pela metade, 1 sem vídeo guardada(s); parou: nenhuma "
+                      "aula por gravar")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois"]
+    curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
+    assert [aula["nome"] for aula in curso["aulas"]] == ["", "Dia 01", "Aula dois"] and curso["fim"]
+    assert [bool(aula.get("sem_video")) for aula in curso["aulas"]] == [False, True, False]
+    import registro_processos
+    linhas = [(linha[2], linha[3]) for linha in
+              registro_processos.sequencia("curso", "aula do curso", "2000-01-01 00:00:00")]
+    # A página da 1ª não é guardada (a da tela era a da 2ª); a 2ª é guardada como o documento que ela é, com o número
+    # dela; a da 3ª, a última do curso, fica na tela no fim do vídeo e é guardada.
+    assert ("página não guardada", f"curso 4, aula 1: {cursos_robo.SAIU_DA_AULA}") in linhas
+    assert [linha[0] for linha in linhas if linha[1].startswith("curso 4, aula 1:")] == ["página não guardada"]
+    assert [linha[0] for linha in linhas if linha[1].startswith("curso 4, aula 2:")] == ["guardada sem vídeo"]
+    assert [linha[0] for linha in linhas if linha[1].startswith("curso 4, aula 3:")] == ["página guardada"]
+    # A 2ª abriu pelo Próximo da 1ª, achada de novo pelo começo do curso (muda e sem o gravador), já com o gravador
+    # gravando; a 3ª, pelo Próximo da 2ª, que ficou na tela.
+    assert [gravando for _volume, gravando in site.aberturas] == [False, True, False, True, True]
+
+
 def test_o_ajudante_le_as_aulas_a_parte_e_as_que_ficaram_da_noite_anterior(bm, monkeypatch, tmp_path):
     brutas = tmp_path / "brutas"
     brutas.mkdir()
