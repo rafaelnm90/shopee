@@ -64,8 +64,8 @@ PROCESSO_DO_PAINEL = "grupo dos amigos: painel"
 # Quem toca sem estar liberado: o aviso no privado do Rafael sai no máximo uma vez neste tempo, por pessoa (os toques
 # seguintes só respondem no próprio botão).
 ESPERA_DO_AVISO = 6 * 3600
-# A estimativa da mensagem do pedido (pedido do Rafael, 22/11): a mediana do preparo dos últimos PREPAROS_GUARDADOS
-# pedidos feitos, vezes a posição na fila; sem nenhum feito ainda, PREPARO_PADRAO segundos por pedido.
+# A estimativa da mensagem do pedido (pedido do Rafael, 22/11): o preparo mais demorado dos últimos
+# PREPAROS_GUARDADOS pedidos feitos, nunca menos que PREPARO_PADRAO segundos, vezes a posição na fila.
 PREPARO_PADRAO = 180
 PREPAROS_GUARDADOS = 10
 
@@ -257,11 +257,13 @@ def anotar_preparo(segundos):
 
 def minutos_estimados(config, posicao):
     """
-    Em quantos minutos fica pronto o pedido nesta posição da fila (1: o primeiro): a mediana do preparo dos últimos
-    pedidos feitos, vezes a posição, arredondada para cima.
+    Em quantos minutos fica pronto o pedido nesta posição da fila (1: o primeiro): o preparo mais demorado dos últimos
+    pedidos feitos, nunca menos que PREPARO_PADRAO, vezes a posição, arredondado para cima. A mediana prometia pouco:
+    em 24/11/2026, o pedido de um amigo ouviu "cerca de 1 min", e o vídeo chegou 13 min depois
+    (DECISOES.md, Shopee Vídeo).
     """
-    preparos = sorted(config.get("preparos") or []) or [PREPARO_PADRAO]
-    return max(1, math.ceil(preparos[len(preparos) // 2] * max(1, posicao) / 60))
+    segundos = max([PREPARO_PADRAO] + [float(preparo) for preparo in config.get("preparos") or []])
+    return max(1, math.ceil(segundos * max(1, posicao) / 60))
 
 
 # --- O botão no grupo ---
