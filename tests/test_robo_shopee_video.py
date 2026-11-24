@@ -10831,20 +10831,23 @@ class JanelaDoProduto:
     o aviso de nome curto (menos de 10 letras), o de emoji (recusa_emoji: o nome com emoji, como nos rascunhos de
     22/11 às 10:05 e às 10:25), o Selecionar Cupom, que abre a tela dos cupons (cupom_com_erro: a tela do Erro de
     Carregamento, como no rascunho de 22/11 às 11:25), e o Feito. O voltar fecha o teclado, sai da tela dos cupons
-    ou, sem nenhum dos dois, fecha a janela.
+    ou, sem nenhum dos dois, fecha a janela. escritas_curtas: quantas das 1ªs escritas do nome deixam só a 1ª letra no
+    campo, e apagar_falha, quantos dos 1ºs apagar não tiram nada (24/11 às 06:54); teclado_no_foco: com o teclado
+    aberto, o d(focused=True) sem a classe acha o nó em foco da janela do teclado, onde o set_text não escreve.
     """
     CAMPO = (58, 1924, 1049, 1971)
     SELECIONAR = (718, 2159, 1049, 2210)
     CRIAR_CUPOM = (40, 2200, 1040, 2300)
 
     def __init__(self, escreve=True, cupom_vazio=True, voltar_fecha=False, recusa_emoji=False, aceitos=(),
-                 cupom_com_erro=False):
+                 cupom_com_erro=False, escritas_curtas=0, apagar_falha=0, teclado_no_foco=False):
         self.tela, self.campo, self.teclado, self.foco = "janela", "", False, False
+        self.escritas_curtas, self.apagar_falha, self.teclado_no_foco = escritas_curtas, apagar_falha, teclado_no_foco
         self.escreve, self.cupom_vazio, self.voltar_fecha = escreve, cupom_vazio, voltar_fecha
         self.cupom_com_erro = cupom_com_erro
         # recusa_emoji: o app recusa os emojis, menos os de aceitos (em 22/11, 🪑 e 🪞 passaram e ✨ não).
         self.recusa_emoji, self.aceitos = recusa_emoji, set(aceitos)
-        self.toques, self.teclas, self.escritos = [], [], []
+        self.toques, self.teclas, self.escritos, self.no_teclado = [], [], [], []
 
     def dump_hierarchy(self):
         if self.tela == "cupons":
@@ -10892,12 +10895,26 @@ class JanelaDoProduto:
     def __call__(self, **seletor):
         janela = self
 
+        class DoTeclado:
+            exists = True
+
+            def set_text(self, texto):
+                janela.no_teclado.append(texto)
+
+        if janela.teclado_no_foco and janela.teclado and "className" not in seletor:
+            return DoTeclado()
+
         class Campo:
             exists = janela.foco
 
             def set_text(self, texto):
                 janela.escritos.append(texto)
-                if janela.escreve or not texto:
+                if texto and janela.escritas_curtas:
+                    janela.escritas_curtas -= 1
+                    janela.campo = texto[:1]
+                elif not texto and janela.apagar_falha:
+                    janela.apagar_falha -= 1
+                elif janela.escreve or not texto:
                     janela.campo = texto
         return Campo()
 
@@ -10938,11 +10955,52 @@ def test_nome_da_ia_fica_no_campo_do_produto():
 
 
 def test_nome_da_ia_que_nao_fica_deixa_o_do_anuncio():
-    # O campo que não aceita o texto fica vazio: vazio, vai o nome do anúncio, como antes, e o produto segue.
+    # O campo que não aceita o texto fica vazio: vazio, vai o nome do anúncio, como antes, e o produto segue. O nome
+    # vai 2 vezes (ESCRITAS_NO_CAMPO), e o registro diz as letras que ficaram.
     janela = JanelaDoProduto(escreve=False)
     assert robo._trocar_o_nome(janela, NOME_DA_IA) == ""
     assert janela.campo == "" and janela.tela == "janela"
-    assert _registro_do_nome() == [("ficou o do anúncio", "o nome da IA não ficou: o campo vazio")]
+    assert janela.escritos == [NOME_DA_IA, NOME_DA_IA, ""]
+    assert _registro_do_nome() == [
+        (robo.ESCRITA_QUE_NAO_FICOU, f"0 de {len(NOME_DA_IA)} letras no campo, em 2 escritas"),
+        ("ficou o do anúncio", "o nome da IA não ficou: o campo vazio")]
+
+
+def test_nome_que_deixa_uma_letra_no_campo_vai_de_novo():
+    # 24/11 às 06:54 (Motorola): o nome da IA escrito com o teclado abrindo deixou 1 letra só no campo, e o rascunho
+    # parou. O robô confere o campo e escreve de novo; o registro diz que só a 2ª deu certo.
+    janela = JanelaDoProduto(escritas_curtas=1)
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == NOME_DA_IA
+    assert janela.escritos == [NOME_DA_IA, NOME_DA_IA] and janela.campo == NOME_DA_IA
+    assert _registro_do_nome() == [
+        (robo.ESCRITO_NA_2A_VEZ, f"1 de {len(NOME_DA_IA)} letras na 1ª"),
+        ("nome da IA no produto", f"{robo.assistente.tamanho_no_app(NOME_DA_IA)} letras")]
+
+
+def test_apagar_que_nao_tira_a_letra_vai_de_novo_sem_parar_o_rascunho():
+    # O apagar, às 06:54 de 24/11, também não tirou a letra que ficou, e o rascunho parou: o robô apaga de novo, e,
+    # vazio o campo, o produto segue com o nome do anúncio.
+    janela = JanelaDoProduto(escreve=False, apagar_falha=1)
+    janela.campo = "g"
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == ""
+    assert janela.campo == "" and janela.escritos[-2:] == ["", ""]
+    assert _registro_do_nome()[-2:] == [(robo.ESCRITO_NA_2A_VEZ, "apagar: 1 letra(s) ficaram na 1ª"),
+                                        ("ficou o do anúncio", "o nome da IA não ficou: com o aviso de nome curto")]
+    # O apagar que não tira nem na 2ª vez para o rascunho, como antes: o nome errado não vai ao post.
+    janela = JanelaDoProduto(escreve=False, apagar_falha=2)
+    janela.campo = "g"
+    with pytest.raises(robo.Parada) as erro:
+        robo._trocar_o_nome(janela, NOME_DA_IA)
+    assert erro.value.motivo == robo.MOTIVO_DO_CAMPO_DO_NOME
+    assert _registro_do_nome()[-1] == (robo.ESCRITA_QUE_NAO_FICOU, "apagar: 1 letra(s) ficaram, em 2 vezes")
+
+
+def test_nome_vai_no_campo_e_nao_no_no_em_foco_do_teclado():
+    # Com o teclado aberto, a tela de 24/11 às 06:54 tem dois nós em foco: o do teclado e o campo. O nome vai no
+    # campo (o EditText em foco).
+    janela = JanelaDoProduto(teclado_no_foco=True)
+    assert robo._trocar_o_nome(janela, NOME_DA_IA) == NOME_DA_IA
+    assert janela.no_teclado == [] and janela.campo == NOME_DA_IA
 
 
 def test_nome_curto_volta_ao_do_anuncio():

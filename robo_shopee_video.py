@@ -6373,12 +6373,75 @@ def nomes_para_tentar(novo):
     return tentativas
 
 
-def _escrever_no_campo(d, campo, texto):
-    """Toca no campo do nome, escreve o texto ("" apaga) e fecha o teclado, que cobre metade da janela."""
+# Em 24/11/2026, às 06:54 (Motorola), o nome da IA escrito logo depois do toque no campo, com o teclado ainda abrindo,
+# deixou 1 letra só no campo, e o apagar, do mesmo jeito, não tirou a letra: o rascunho parou. O robô espera o teclado
+# abrir (até ESPERA_DO_TECLADO s), escreve no EditText em foco (com o teclado aberto, a janela dele também tem um nó em
+# foco), confere o campo na tela e escreve de novo quando ele não mostra o texto, até ESCRITAS_NO_CAMPO vezes, como no
+# campo de comentar (22/11). O registro diz quando só a 2ª deu certo e, quando nem ela, as letras que ficaram.
+ESPERA_DO_TECLADO = 4
+ESCRITA_QUE_NAO_FICOU = "a escrita não ficou no campo"
+
+
+def _esperar_o_teclado(d):
+    """Espera o teclado abrir depois do toque no campo, até ESPERA_DO_TECLADO s. True quando ele abriu."""
+    for _ in range(ESPERA_DO_TECLADO):
+        if interacoes.teclado_aberto(tela(d)):
+            return True
+        pausa(1)
+    return False
+
+
+def _escrever_no_editavel(d, texto):
+    """
+    O set_text (troca o texto todo; "" apaga) no EditText em foco: com o teclado aberto, o nó em foco da janela do
+    teclado também casa com o d(focused=True). Sem EditText em foco, o ps.escrever, como antes.
+    """
+    campo = d(focused=True, className="android.widget.EditText")
+    if campo.exists:
+        campo.set_text(texto)
+    else:
+        ps.escrever(d, texto)
+
+
+def _como_pedido(escrito, texto, anuncio=""):
+    """O campo mostra o texto pedido? Para "" (apagar), vazio ou com o nome do anúncio em cinza (anuncio)."""
+    if texto:
+        return ps.mesmo_nome(escrito, texto)
+    return not (escrito or "").strip() or bool(anuncio and ps.nome_na_pagina(escrito, anuncio))
+
+
+def _escrever_no_campo(d, campo, texto, anuncio=""):
+    """
+    Toca no campo do nome, espera o teclado, escreve o texto ("" apaga; anuncio: o nome do anúncio, que o campo vazio
+    pode mostrar em cinza), confere o campo na tela e, quando ele não mostra o texto, escreve de novo, até
+    ESCRITAS_NO_CAMPO vezes. Fecha o teclado, que cobre metade da janela. A janela que fecha no meio fica para quem
+    chamou (sem escrever de novo: o texto iria a outro lugar).
+    """
     d.click(*ps._centro(campo))
     pausa(1)
-    ps.escrever(d, texto)
-    pausa(1)
+    _esperar_o_teclado(d)
+    primeira, escrito = None, ""
+    for _ in range(ESCRITAS_NO_CAMPO):
+        _escrever_no_editavel(d, texto)
+        pausa(2)
+        lista = ps.elementos(tela(d))
+        na_tela = ps.campo_do_nome(lista)
+        escrito = na_tela["texto"] if na_tela else ""
+        if _como_pedido(escrito, texto, anuncio):
+            if primeira is not None:
+                registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, ESCRITO_NA_2A_VEZ,
+                                             f"{primeira} de {len(texto)} letras na 1ª" if texto
+                                             else f"apagar: {primeira} letra(s) ficaram na 1ª", ok=None)
+            break
+        if primeira is None:
+            primeira = len(escrito)
+        if not ps.janela_de_editar_aberta(lista):
+            break
+    else:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_NOME, ESCRITA_QUE_NAO_FICOU,
+                                     f"{len(escrito)} de {len(texto)} letras no campo, em {ESCRITAS_NO_CAMPO} escritas"
+                                     if texto else f"apagar: {len(escrito)} letra(s) ficaram, em {ESCRITAS_NO_CAMPO} "
+                                     "vezes", ok=False)
     _fechar_teclado(d)
 
 
@@ -6418,7 +6481,7 @@ def _trocar_o_nome(d, novo, anuncio=""):
         # O emoji recusado fica anotado e não volta; vai o próximo nome (com outro emoji ou sem emoji).
         anotar_o_emoji(emoji, False)
     if campo:
-        _escrever_no_campo(d, campo, "")
+        _escrever_no_campo(d, campo, "", anuncio)
         lista = ps.elementos(tela(d))
         if not ps.janela_de_editar_aberta(lista):
             raise Parada(MOTIVO_DA_JANELA_DO_NOME)
