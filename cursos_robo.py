@@ -1056,14 +1056,18 @@ def resumo_do_mapa(mapa=None):
 # --- A lista das aulas, pela aba Módulos (pedido do Rafael de 24/11/2026, às 00:17) ---
 # O endereço guardado de cada curso abre a aula em que o site parou (a 1ª ainda não vista), e não a 1ª do curso: na
 # noite de 24/11/2026, o curso 4 abriu na 15ª aula (as de antes o Rafael viu à mão) e o 5 na 2ª (a 1ª, o teste de dia
-# viu). A lista inteira, na ordem, vem da aba Módulos: cada módulo é um botão ("N% Nome do módulo"), e o aberto mostra
-# embaixo uma linha por aula, mais à direita ("Nome 7:28"; a aula sem vídeo pode vir sem a duração). O Claude a lê de
-# dia, com o celular mudo, pelo passo curso:lista:N do explorar, e ela fica no mapa (só no banco do servidor), com os
-# módulos na ordem e as aulas na ordem de cada um: é a lista das aulas com o check de cada uma que o Rafael pediu. Só
-# os botões dos módulos são tocados, e a página só rola para baixo (o dedo para cima): no alto dela, o arrasto para
-# baixo recarregaria a página.
+# viu). A lista inteira, na ordem, vem da aba Módulos: cada módulo é um botão ("N% Nome do módulo", às vezes sem o
+# andamento), e o aberto mostra embaixo uma linha por aula, mais à direita ("Nome 7:28"; a aula sem vídeo pode vir sem a
+# duração). O Claude a lê de dia, com o celular mudo, pelo passo curso:lista:N do explorar, e ela fica no mapa (só no
+# banco do servidor), com os módulos na ordem e as aulas na ordem de cada um: é a lista das aulas com o check de cada
+# uma que o Rafael pediu. Só os botões dos módulos são tocados, e a página só rola para baixo (o dedo para cima): no
+# alto dela, o arrasto para baixo recarregaria a página.
 ID_DA_LISTA = "-content-modules"
-MODULO_DA_LISTA = re.compile(r"\d{1,3}%\s+(?P<nome>.*\S)")
+# O módulo é o botão do acordeão, com o identificador que começa assim, e a aula, o botão sem identificador. O nome do
+# módulo pode vir sem o andamento na frente: o 1º módulo do curso 5 (em 24/11/2026) vem sem o "0%", e só o botão com
+# o andamento contava como módulo: ele nunca era aberto, e a aula dele ficava fora da lista.
+ID_DO_MODULO = "radix-"
+MODULO_DA_LISTA = re.compile(r"(?:\d{1,3}%\s+)?(?P<nome>.*\S)")
 # O botão baixo demais está cortado pela beira da tela (ou embaixo da barra do Próximo): não é tocado.
 ALTURA_DO_BOTAO = 60
 # Embaixo do módulo aberto vem a 1ª aula dele: sem esse espaço à vista, a lista rola antes de saber se ele está aberto.
@@ -1110,10 +1114,10 @@ def itens_da_lista(xml):
         texto = " ".join(no["texto"].split())
         if not no["clicavel"] or no["classe"] != "Button" or not texto or texto.startswith(ROTULO_DO_PROXIMO):
             continue
-        modulo = MODULO_DA_LISTA.fullmatch(texto)
-        if no["id"] and modulo:
-            itens.append({"tipo": "módulo", "nome": modulo["nome"], "segundos": None, "caixa": no["caixa"]})
-        elif not no["id"] and not modulo:
+        if no["id"].startswith(ID_DO_MODULO):
+            itens.append({"tipo": "módulo", "nome": MODULO_DA_LISTA.fullmatch(texto)["nome"], "segundos": None,
+                          "caixa": no["caixa"]})
+        elif not no["id"]:
             linha = LINHA_DA_AULA.fullmatch(texto)
             itens.append({"tipo": "aula", "nome": linha["nome"] if linha else texto,
                           "segundos": segundos_do_tempo(linha["tempo"]) if linha else None, "caixa": no["caixa"]})
