@@ -1807,14 +1807,14 @@ class ListaDoSite:
     Próximo e a bolha do chat ficam por cima da página, e cada toque fica anotado com o que estava embaixo dele.
     aba_aberta=False: outra aba (Comentários) aberta, sem a lista, até o toque na aba Módulos. aberta: a aula aberta,
     pela ordem da lista inteira (a barra do Próximo mostra a seguinte; na última, nenhuma); o toque numa linha abre a
-    aula dela.
+    aula dela. sem_andamento: os módulos que vêm sem o "N%" na frente do nome (o 1º do curso 5, em 24/11/2026).
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
     def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
-                 total=None):
+                 total=None, sem_andamento=()):
         # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
-        self.total = total
+        self.total, self.sem_andamento = total, set(sem_andamento)
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
         self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
         self.toques, self.puxados, self.teclas = [], [], []
@@ -1824,7 +1824,8 @@ class ListaDoSite:
         """(tipo, chave, texto, x1, x2, y1, y2 na página) de cada botão da lista, e o fim da página."""
         itens, y = [], self.comeco
         for numero, (nome, aulas) in enumerate(self.modulos):
-            itens.append(("módulo", numero, f"{10 * numero}% {nome}", 42, 1010, y, y + 124))
+            texto = nome if numero in self.sem_andamento else f"{10 * numero}% {nome}"
+            itens.append(("módulo", numero, texto, 42, 1010, y, y + 124))
             y += 192
             if numero in self.abertos:
                 for aula, tempo in aulas:
@@ -1933,6 +1934,19 @@ def test_a_lista_das_aulas_lida_pela_aba_modulos_na_ordem_sem_tocar_numa_aula(um
     assert site.toques == ["módulo 1", "módulo 2", "módulo 3", "módulo 4"]
     # A página só rolou para baixo (no alto, o arrasto para baixo recarregaria a 1ª aula).
     assert site.puxados == []
+
+
+@pytest.mark.parametrize("sem_andamento", [{0}, {3}])
+def test_o_modulo_sem_o_andamento_no_nome_tambem_e_aberto_e_lido(sem_andamento):
+    # O 1º módulo do curso 5 (em 24/11/2026) vem sem o "0%" na frente do nome, e a lista do curso ficava com uma aula
+    # a menos (a do curso 7 também, com 401 das 402): ele também é um módulo, aberto pelo botão dele. A aula cujo
+    # nome começa por um número com % continua uma aula.
+    modulos = MODULOS_DO_CURSO + [("Bônus", [("50% de desconto na loja", "4:00")])]
+    site = ListaDoSite(modulos, sem_andamento=sem_andamento)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
+    assert porque == "" and lista == LISTA_DO_CURSO + [
+        {"modulo": "Bônus", "nome": "50% de desconto na loja", "segundos": 240}]
+    assert site.toques == [f"módulo {numero}" for numero in range(len(modulos))] and site.puxados == []
 
 
 def test_a_lista_com_a_pagina_no_alto_e_a_aba_de_comentarios_aberta():
