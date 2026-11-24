@@ -141,9 +141,26 @@ def test_checagem_com_erro_guarda_o_motivo_e_nao_muda_o_estado(pc, monkeypatch):
     conta_a = pc.obter_conta("A")
     assert conta_a["status_grupo"] == pc.STATUS_DESCONHECIDO
     assert conta_a["ultimo_erro"] == "RuntimeError: rede caiu"
-    # O tipo do erro vai ao registro: o checkup só via a forma da linha do log (26/10, 6x).
+    # O tipo do erro vai ao registro, com o passo da checagem e a forma da mensagem: o checkup só via a forma da
+    # linha do log (26/10, 6x; 23/11, 12 ValueError sem dizer onde).
     linhas = pc.registro_processos.contagem("2000-01-01 00:00:00")
-    assert any(l[:4] == ("autorais", "checagem da conta", "erro", "RuntimeError") for l in linhas)
+    assert any(l[:4] == ("autorais", "checagem da conta", "erro",
+                         "RuntimeError em procurar o grupo nas conversas: outro texto") for l in linhas)
+
+
+def test_checagem_com_erro_inesperado_diz_o_passo_e_a_forma_da_mensagem(pc, monkeypatch):
+    # Só palavras fixas no registro: o texto do Telethon pode trazer ids e nomes.
+    class ContaQueFalha(SemCache):
+        async def get_me(self):
+            raise ValueError("Could not find the input entity for PeerUser(user_id=123)")
+
+    checar_sem_cache(pc, monkeypatch, ContaQueFalha())
+    linhas = pc.registro_processos.contagem("2000-01-01 00:00:00")
+    detalhes = [l[3] for l in linhas if l[:3] == ("autorais", "checagem da conta", "erro")]
+    assert detalhes == ["ValueError em ler a conta: entidade fora do cache"]
+    assert "123" not in detalhes[0]
+    assert pc.forma_do_erro(ValueError("Not a valid string")) == ": sessão inválida"
+    assert pc.forma_do_erro(ValueError("")) == ""
 
 
 def test_conta_sem_papel_tambem_tem_o_canal_conferido(pc, monkeypatch):
