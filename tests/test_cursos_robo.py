@@ -1917,13 +1917,15 @@ class ListaDoSite:
     toque fora da caixa cai no que está embaixo dela ("fora da lista"); o arrasto para baixo dentro da caixa, com
     linha escondida por cima, volta a caixa (subidas), e o resto fica em puxados. vai_a_aberta: aberto o módulo da aula
     aberta, o site rola a caixa sozinho até ela. impulso: a rolagem por dentro da caixa anda essa vez o arrasto do dedo
-    (o embalo da página).
+    (o embalo da página). carrega_na_caixa: a duração de cada linha só aparece depois de uma leitura da tela com ela
+    dentro da caixa (o site a põe quando a linha passa por ali, em 24/11/2026), e fica.
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
     def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
                  total=None, sem_andamento=(), numeros=False, atrasadas=(), margem=400, altura_da_lista=None,
-                 vai_a_aberta=False, impulso=1.0, atraso=2):
+                 vai_a_aberta=False, impulso=1.0, atraso=2, carrega_na_caixa=False):
+        self.carrega_na_caixa, self.carregadas = carrega_na_caixa, set()
         # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
         self.total, self.sem_andamento = total, set(sem_andamento)
         self.numeros, self.atrasadas, self.vezes, self.margem = numeros, set(atrasadas), {}, margem
@@ -1984,7 +1986,7 @@ class ListaDoSite:
                        f'text="Módulos" content-desc="" bounds="[60,{aba[0]}][336,{aba[1]}]" />')
         lista = self._janela()
         if self.aba_aberta and lista[1] > lista[0]:
-            dentro = []
+            dentro, na_caixa = [], set()
             for tipo, chave, texto, x1, x2, y1, y2 in itens:
                 topo, baixo = self._na_tela(y1, y2)
                 if baixo <= topo:
@@ -1996,6 +1998,10 @@ class ListaDoSite:
                 if tipo == "aula" and chave in self.atrasadas:
                     self.vezes[chave] = self.vezes.get(chave, 0) + 1
                     texto = chave if self.vezes[chave] <= self.atraso else texto
+                if tipo == "aula" and self.carrega_na_caixa:
+                    if topo < lista[1] and baixo > lista[0]:
+                        na_caixa.add(chave)
+                    texto = texto if chave in self.carregadas else chave
                 botao = (f'<node class="android.widget.Button" resource-id="{ident}" clickable="true" '
                          f'text="{texto}" content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
                 if tipo == "aula" and self.numeros:
@@ -2003,6 +2009,7 @@ class ListaDoSite:
                              f'clickable="false" text="" content-desc="" bounds="[110,{topo}][{x2},{baixo}]">'
                              + botao + "</node>")
                 dentro.append(botao)
+            self.carregadas |= na_caixa
             nos.append('<node class="android.view.View" resource-id="radix-_r_m_-content-modules" clickable="false" '
                        f'text="" content-desc="" bounds="[42,{lista[0]}][1039,{lista[1]}]">' + "".join(dentro)
                        + "</node>")
@@ -3172,3 +3179,73 @@ def test_a_duracao_que_aparece_depois_da_linha_e_lida_antes_de_seguir():
     lista, porque = cursos_robo.ler_a_lista(ListaDoSite(sem_video, abertos={0}, numeros=True), pausa=esperas.append)
     assert porque == "" and [aula["segundos"] for aula in lista] == [None] * 12
     assert 1 <= esperas.count(cursos_robo.ESPERA_DA_DURACAO) <= 3 * cursos_robo.RELEITURAS_DA_DURACAO
+
+
+# Três módulos como os do curso 4 (24/11/2026), com a duração de cada linha só depois de ela passar pela caixa.
+MODULOS_COM_DURACAO = [("Módulo de abertura", [(f"Abertura {n}", "1:07") for n in range(1, 4)]),
+                       ("Módulo do método", [(f"Aula {n:02d}", "2:01") for n in range(1, 17)]),
+                       ("Módulo final", [(f"Final {n}", "0:58") for n in range(1, 9)])]
+
+
+@pytest.mark.parametrize("impulso", [1.0, 1.6])
+def test_a_aula_por_cima_da_caixa_sem_passar_por_dentro_dela_e_lida_com_a_duracao(impulso):
+    # 24/11/2026, cursos 3, 4 e 7: a duração da linha só aparece depois de a linha passar por dentro da caixa da lista
+    # (a 4ª aula do curso 4, de 2:01, nas leituras das 10:45 e das 12:09). Aberto o 2º módulo, o site rolou a caixa
+    # até a aula aberta, e as primeiras aulas do módulo ficaram por cima da caixa sem passar por dentro dela; e a
+    # rolagem por dentro da caixa, que anda mais que o dedo, passou linhas por cima dela (a 1ª aula de um módulo do
+    # curso 7). A lista as guardava sem a duração. A caixa volta, por dentro, até cada uma, e a duração é lida; nenhum
+    # toque cai fora da caixa, e a página não é puxada.
+    site = ListaDoSite(MODULOS_COM_DURACAO, um_aberto=True, altura_da_lista=963, vai_a_aberta=True, aberta=17,
+                       numeros=True, carrega_na_caixa=True, impulso=impulso)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda s: None)
+    assert porque == ""
+    assert [aula["segundos"] for aula in lista] == [67] * 3 + [121] * 16 + [58] * 8
+    assert not any(aula.get("sem_conferir") for aula in lista)
+    assert site.subidas and "fora da lista" not in site.toques and site.puxados == []
+    assert [toque for toque in site.toques if toque.startswith("módulo")] == ["módulo 0", "módulo 1", "módulo 2"]
+
+
+def test_a_aula_que_a_caixa_nao_traz_para_dentro_fica_com_a_duracao_da_leitura_anterior(bm, monkeypatch):
+    # A caixa que não volta (o arrasto por dentro dela não a mexe) e a rolagem que passa linhas por cima dela: depois de
+    # VOLTAS_SEM_AVANCO voltas seguidas sem trazer a aula para dentro, a leitura segue, e a aula vem sem a duração
+    # conferida. Guardada, a lista fica com a duração da leitura anterior da mesma aula (pelo número dela no site), e o
+    # log do explorar diz quantas ficaram assim.
+    class CaixaPresa(ListaDoSite):
+        def swipe(self, x1, y1, x2, y2, duracao=None):
+            if y2 > y1:
+                self.subidas.append((x1, y1, x2, y2))
+                return
+            super().swipe(x1, y1, x2, y2, duracao)
+
+    def site():
+        return CaixaPresa([MODULOS_COM_DURACAO[1]], abertos={0}, altura_da_lista=963, numeros=True,
+                          carrega_na_caixa=True, impulso=2.0)
+
+    caixa = site()
+    lista, porque = cursos_robo.ler_a_lista(caixa, pausa=lambda s: None)
+    presas = [indice for indice, aula in enumerate(lista) if aula.get("sem_conferir")]
+    assert porque == "" and len(lista) == 16 and presas
+    assert all(aula["segundos"] == (None if indice in presas else 121) for indice, aula in enumerate(lista))
+    assert len(caixa.subidas) == cursos_robo.VOLTAS_SEM_AVANCO and caixa.puxados == []
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    cursos_robo.guardar_a_lista(4, [{"modulo": MODULOS_COM_DURACAO[1][0], "nome": aula, "segundos": 121,
+                                     "aula": str(4000 + indice)}
+                                    for indice, (aula, _tempo) in enumerate(MODULOS_COM_DURACAO[1][1])])
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda *a, **k: None)
+    ok, texto = cursos_robo.curso_no_explorar(site(), "lista:4", pausa=lambda s: None)
+    assert ok and texto.endswith(f" ({len(presas)} sem a linha lida dentro da caixa), sem o total do site")
+    guardada = cursos_robo.lista_do_curso(4)
+    assert [aula["segundos"] for aula in guardada] == [121] * 16
+    assert not any("sem_conferir" in aula for aula in guardada)
+
+
+def test_a_falta_da_duracao_lida_dentro_da_caixa_vale_na_lista_guardada(bm):
+    # A aula lida sem a duração dentro da caixa (o vídeo trocado por um texto, por exemplo) fica sem ela, também com a
+    # duração na leitura anterior; só a não conferida fica com a de antes, também sem o número da aula no site.
+    cursos_robo.guardar_a_lista(4, [{"modulo": "Módulo", "nome": "Aula", "segundos": 121, "aula": "3156"},
+                                    {"modulo": "Módulo", "nome": "Outra", "segundos": 90}])
+    cursos_robo.guardar_a_lista(4, [{"modulo": "Módulo", "nome": "Aula", "segundos": None, "aula": "3156"},
+                                    {"modulo": "Módulo", "nome": "Outra", "segundos": None, "sem_conferir": True}])
+    assert [aula["segundos"] for aula in cursos_robo.lista_do_curso(4)] == [None, 90]
