@@ -1811,7 +1811,10 @@ class ListaDoSite:
     """
     TOPO, FIM, PROXIMO = 267, 2394, 2175
 
-    def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0):
+    def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True, aberta=0,
+                 total=None):
+        # total: o andamento no alto da página ("0% concluído · 0/T aulas"), que o site mostra com o total do curso.
+        self.total = total
         self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
         self.comeco, self.rolagem, self.aba_aberta, self.aberta = comeco, rolagem, aba_aberta, aberta
         self.toques, self.puxados, self.teclas = [], [], []
@@ -1836,6 +1839,11 @@ class ListaDoSite:
     def dump_hierarchy(self):
         itens, fim = self._itens()
         nos = []
+        andamento = self._na_tela(80, 130)
+        if self.total and andamento[1] > andamento[0]:
+            nos.append('<node class="android.widget.TextView" resource-id="" clickable="false" '
+                       f'text="0% concluído · 0/{self.total} aulas" content-desc="" '
+                       f'bounds="[200,{andamento[0]}][840,{andamento[1]}]" />')
         aba = self._na_tela(self.comeco - 250, self.comeco - 60)
         if aba[1] > aba[0]:
             nos.append('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
@@ -1981,13 +1989,19 @@ def test_a_lista_pelo_explorar_fica_no_mapa_e_vai_ao_claude_sem_os_enderecos(bm,
     monkeypatch.setattr(cursos_robo, "ir_para_o_endereco",
                         lambda d, endereco, pausa=None: abertos.append(endereco) or (cursos_robo.COM_VIDEO, ""))
     monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    casos = []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo, resultado="", passo="": casos.append(
+        (motivo, resultado, passo)))
     # O passo toca a aula (o endereço abre a aula em que o site parou): o celular fica mudo, também de dia.
     assert cursos_robo.toca_aula("curso", "lista:4")
     site = ListaDoSite(MODULOS_DO_CURSO, abertos={0})
     ok, texto = cursos_robo.curso_no_explorar(site, "lista:4", pausa=lambda segundos: None)
     assert ok and abertos == [AULAS_DO_SITE[0][2]]
     # Só números no log público: nem os nomes dos módulos, nem os das aulas.
-    assert texto == "lista do curso 4: 4 módulo(s) com aula, 19 aula(s), 4 com a duração (84 min de vídeo) e 15 sem"
+    assert texto == ("lista do curso 4: 4 módulo(s) com aula, 19 aula(s), 4 com a duração (84 min de vídeo) e 15 sem, "
+                     "sem o total do site")
+    # O começo da lista vai ao Claude pelos casos (o print e a forma da tela, cifrados).
+    assert casos == [("o começo da lista", "lista das aulas", "ler a lista das aulas")]
     assert not any(modulo in texto for modulo, _aulas in MODULOS_DO_CURSO)
     curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
     assert curso["lista"] == LISTA_DO_CURSO and curso["lista_em"]
@@ -2000,14 +2014,58 @@ def test_a_lista_pelo_explorar_fica_no_mapa_e_vai_ao_claude_sem_os_enderecos(bm,
     assert mapa["ordem"] == list(cursos_robo.ORDEM_DOS_CURSOS) and mapa["cursos"]["4"]["lista"] == LISTA_DO_CURSO
     assert "lessons" not in json.dumps(mapa)
     # A lista que não chega ao fim não troca a do mapa, e a tela dela vai ao Claude pelos casos.
-    casos = []
-    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo, resultado="", passo="": casos.append(
-        (motivo, resultado, passo)))
+    casos.clear()
     ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, rolagem=2000), "lista:4",
                                               pausa=lambda segundos: None)
     assert not ok and texto == f"a lista do curso 4 não foi lida ({cursos_robo.LISTA_SEM_O_COMECO})"
     assert casos == [(cursos_robo.LISTA_SEM_O_COMECO, "lista não lida", "ler a lista das aulas")]
     assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["lista"] == LISTA_DO_CURSO
+
+
+def test_a_aula_que_ganha_a_duracao_na_leitura_seguinte_nao_se_repete():
+    # 24/11/2026, curso 1: logo depois do toque no módulo, as últimas linhas vieram sem a duração, e a tela seguinte
+    # mostrou o módulo inteiro de novo, já com ela: 13 aulas repetidas. O pedaço repetido é reconhecido pelos nomes, e
+    # a duração que faltava vem da leitura nova.
+    lidas = [("Aula 01", 330), ("Aula 02", 1167), ("Aula 07", None), ("Aula 08", None)]
+    vistas = [("Aula 01", 330), ("Aula 02", 1167), ("Aula 07", 277), ("Aula 08", 302), ("Aula 09", 7389)]
+    assert cursos_robo._juntar_as_aulas(lidas, vistas) == vistas
+    # A aula sem vídeo, que nenhuma leitura mostra com a duração, continua sem ela.
+    assert cursos_robo._juntar_as_aulas([("Dia 01", None)], [("Dia 01", None), ("Dia 02", None)]) == [
+        ("Dia 01", None), ("Dia 02", None)]
+
+
+def test_ler_a_lista_de_novo_mantem_as_marcas_das_aulas(bm):
+    # Ler a lista de novo (para consertar uma lista errada, como as de 24/11/2026) não apaga o que a noite gravou nem o
+    # check do Claude: as marcas passam para a lista nova pelo módulo e pelo nome, também com uma aula nova no meio.
+    cursos_robo.guardar_a_lista(4, LISTA_DO_CURSO)
+    cursos_robo.anotar_a_aula_gravada(4, 2)
+    cursos_robo.anotar_a_aula_gravada(4, 3, sem_video=True)
+    cursos_robo.conferir_as_aulas(4, [3])
+    nova = LISTA_DO_CURSO[:1] + [{"modulo": LISTA_DO_CURSO[0]["modulo"], "nome": "Aula nova", "segundos": 60}]
+    cursos_robo.guardar_a_lista(4, nova + LISTA_DO_CURSO[1:])
+    lista = cursos_robo.lista_do_curso(4)
+    assert [aula["nome"] for aula in lista] == [aula["nome"] for aula in nova + LISTA_DO_CURSO[1:]]
+    assert not lista[0].get("gravada_em") and not lista[1].get("gravada_em")
+    assert lista[2].get("gravada_em") and not lista[2].get("vista_em")
+    assert lista[3].get("gravada_em") and lista[3].get("sem_video") and lista[3].get("vista_em")
+
+
+def test_a_lista_que_nao_bate_com_o_total_do_site_nao_e_guardada(bm, monkeypatch):
+    # O alto da página diz o total de aulas do curso ("0% concluído · 0/T aulas"): a lista lida tem de bater com ele.
+    # Em 24/11/2026, a do curso 1 veio com 41 linhas para 28 aulas, e a do curso 5, com 34 para 35.
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco", lambda d, endereco, pausa=None: (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    casos = []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda d, motivo, resultado="", passo="": casos.append(
+        resultado))
+    ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, abertos={0}, total=20), "lista:4",
+                                              pausa=lambda segundos: None)
+    assert not ok and texto == "a lista do curso 4 tem 19 aula(s), e o site diz 20: a lista não foi guardada"
+    assert casos == ["lista das aulas", "lista não bate"] and not cursos_robo.lista_do_curso(4)
+    ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, abertos={0}, total=19), "lista:4",
+                                              pausa=lambda segundos: None)
+    assert ok and texto.endswith(", o mesmo total do site") and len(cursos_robo.lista_do_curso(4)) == 19
 
 
 @pytest.mark.parametrize("numero, toques", [
