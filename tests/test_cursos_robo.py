@@ -2299,3 +2299,194 @@ def test_o_texto_da_pagina_sem_a_barra_e_os_botoes_do_chrome():
     so_o_app = "<hierarchy><node class='android.widget.TextView' text='Eu' /></hierarchy>"
     assert cursos_robo.textos_da_pagina(so_o_app) == []
     assert cursos_robo.textos_da_pagina("") == []
+
+
+class ListaDoSite:
+    """
+    O Chrome de mentira com a aba Módulos de uma aula aberta (24/11/2026): módulos [(nome, [(aula, "7:28" ou None)])],
+    cada um um botão "N% Nome" que abre e fecha as aulas dele embaixo; um_aberto: abrir um fecha os outros, como um
+    acordeão de um só; abertos: os módulos abertos no começo (o da aula aberta). A lista começa em `comeco` da página,
+    embaixo das abas; rolagem: quanto a página já rolou para baixo. O arrasto com o dedo para cima rola a página para
+    baixo (até o fim dela); o para baixo fica anotado em puxados (no alto, o Chrome recarregaria a página). A barra do
+    Próximo e a bolha do chat ficam por cima da página, e cada toque fica anotado com o que estava embaixo dele.
+    aba_aberta=False: outra aba (Comentários) aberta, sem a lista, até o toque na aba Módulos.
+    """
+    TOPO, FIM, PROXIMO = 267, 2394, 2175
+
+    def __init__(self, modulos, abertos=(), um_aberto=False, comeco=1500, rolagem=0, aba_aberta=True):
+        self.modulos, self.abertos, self.um_aberto = modulos, set(abertos), um_aberto
+        self.comeco, self.rolagem, self.aba_aberta = comeco, rolagem, aba_aberta
+        self.toques, self.puxados, self.teclas = [], [], []
+
+    def _itens(self):
+        """(tipo, chave, texto, x1, x2, y1, y2 na página) de cada botão da lista, e o fim da página."""
+        itens, y = [], self.comeco
+        for numero, (nome, aulas) in enumerate(self.modulos):
+            itens.append(("módulo", numero, f"{10 * numero}% {nome}", 42, 1010, y, y + 124))
+            y += 192
+            if numero in self.abertos:
+                for aula, tempo in aulas:
+                    itens.append(("aula", aula, f"{aula} {tempo}" if tempo else aula, 178, 942, y, y + 86))
+                    y += 150
+        return itens, y + 400
+
+    def _na_tela(self, y1, y2):
+        y1, y2 = y1 - self.rolagem + self.TOPO, y2 - self.rolagem + self.TOPO
+        return max(y1, self.TOPO), min(y2, self.FIM)
+
+    def dump_hierarchy(self):
+        itens, fim = self._itens()
+        nos = []
+        aba = self._na_tela(self.comeco - 250, self.comeco - 60)
+        if aba[1] > aba[0]:
+            nos.append('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
+                       f'text="Módulos" content-desc="" bounds="[60,{aba[0]}][336,{aba[1]}]" />')
+        lista = self._na_tela(self.comeco, fim - 400)
+        if self.aba_aberta and lista[1] > lista[0]:
+            dentro = []
+            for tipo, chave, texto, x1, x2, y1, y2 in itens:
+                topo, baixo = self._na_tela(y1, y2)
+                if baixo <= topo:
+                    continue
+                ident = f"radix-_r_{chave}_" if tipo == "módulo" else ""
+                if tipo == "módulo":
+                    dentro.append(f'<node class="android.view.View" resource-id="" clickable="false" text="{texto}" '
+                                  f'content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
+                dentro.append(f'<node class="android.widget.Button" resource-id="{ident}" clickable="true" '
+                              f'text="{texto}" content-desc="" bounds="[{x1},{topo}][{x2},{baixo}]" />')
+            nos.append('<node class="android.view.View" resource-id="radix-_r_m_-content-modules" clickable="false" '
+                       f'text="" content-desc="" bounds="[42,{lista[0]}][1039,{lista[1]}]">' + "".join(dentro)
+                       + "</node>")
+        pagina = ('<node class="android.webkit.WebView" resource-id="" text="" content-desc="" '
+                  f'bounds="[0,{self.TOPO}][1080,{self.FIM}]">' + "".join(nos) + "</node>")
+        return ('<hierarchy rotation="0">' + pagina
+                + '<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
+                  'text="Próximo: Aula seguinte Próxima aula:" bounds="[0,2175][1080,2394]" />'
+                  '<node class="android.widget.Button" resource-id="" clickable="true" text="" content-desc="" '
+                  'bounds="[884,1999][1039,2157]" /></hierarchy>')
+
+    def click(self, x, y):
+        if y >= self.PROXIMO:
+            self.toques.append("o Próximo")
+            return
+        if 884 <= x <= 1039 and 1999 <= y <= 2157:
+            self.toques.append("a bolha do chat")
+            return
+        itens, _fim = self._itens()
+        for tipo, chave, _texto, x1, x2, y1, y2 in itens:
+            topo, baixo = self._na_tela(y1, y2)
+            if x1 <= x <= x2 and topo <= y <= baixo:
+                self.toques.append(f"{tipo} {chave}")
+                if tipo == "módulo":
+                    if chave in self.abertos:
+                        self.abertos.discard(chave)
+                    else:
+                        self.abertos = ({chave} if self.um_aberto else self.abertos | {chave})
+                return
+        aba = self._na_tela(self.comeco - 250, self.comeco - 60)
+        if 60 <= x <= 336 and aba[0] <= y <= aba[1]:
+            self.toques.append("a aba Módulos")
+            self.aba_aberta = True
+            return
+        self.toques.append("nada")
+
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        if y2 > y1:
+            self.puxados.append((x1, y1, x2, y2))
+            return
+        _itens, fim = self._itens()
+        self.rolagem = max(0, min(fim - (self.FIM - self.TOPO), self.rolagem + (y1 - y2)))
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+
+MODULOS_DO_CURSO = [
+    ("Comece por aqui", [("Boas vindas", "7:28")]),
+    ("Primeiros passos", [("Sobre o suporte", None), ("Como escolher o produto", "12:05"), ("Regras", "3:10")]),
+    ("Módulo sem aula", []),
+    ("Semana 01", [(f"Dia {numero:02d}", None) for numero in range(1, 15)]),
+    ("Encontros ao vivo", [("Encontro gravado", "1:02:03")]),
+]
+LISTA_DO_CURSO = [{"modulo": modulo, "nome": aula, "segundos": cursos_robo.segundos_do_tempo(tempo) if tempo else None}
+                  for modulo, aulas in MODULOS_DO_CURSO for aula, tempo in aulas]
+
+
+@pytest.mark.parametrize("um_aberto", [False, True])
+def test_a_lista_das_aulas_lida_pela_aba_modulos_na_ordem_sem_tocar_numa_aula(um_aberto):
+    # Pedido do Rafael de 24/11/2026 (00:17): os nomes de todas as aulas, na ordem, para o check de cada uma. O módulo
+    # da aula aberta já vem aberto; os outros abrem pelo botão; o vazio fica sem aula; o comprido passa de uma tela.
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={0}, um_aberto=um_aberto)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
+    assert (lista, porque) == (LISTA_DO_CURSO, "")
+    # Só os botões dos módulos fechados, um toque em cada; nenhuma aula, nem o Próximo, nem a bolha do chat.
+    assert site.toques == ["módulo 1", "módulo 2", "módulo 3", "módulo 4"]
+    # A página só rolou para baixo (no alto, o arrasto para baixo recarregaria a 1ª aula).
+    assert site.puxados == []
+
+
+def test_a_lista_com_a_pagina_no_alto_e_a_aba_de_comentarios_aberta():
+    # A página no alto (o player em cima): a lista aparece rolando para baixo; com outra aba aberta, a aba Módulos é
+    # tocada uma vez.
+    site = ListaDoSite(MODULOS_DO_CURSO[:2], comeco=2600, aba_aberta=False)
+    lista, porque = cursos_robo.ler_a_lista(site, pausa=lambda segundos: None)
+    assert (lista, porque) == (LISTA_DO_CURSO[:4], "")
+    assert site.toques == ["a aba Módulos", "módulo 0", "módulo 1"] and site.puxados == []
+
+
+def test_a_lista_que_comeca_cortada_no_alto_nao_vale():
+    # A página já rolada para o meio da lista: o começo dela ficou para trás, e a página não sobe (nada é guardado).
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={0, 1, 3}, rolagem=2000)
+    assert cursos_robo.ler_a_lista(site, pausa=lambda segundos: None) == (None, cursos_robo.LISTA_SEM_O_COMECO)
+    assert site.toques == [] and site.puxados == []
+
+
+def test_os_itens_da_lista_so_de_dentro_da_aba_modulos():
+    # Os botões do leitor de PDF ("100%"), o Próximo e a bolha do chat ficam fora da aba Módulos; o botão cortado pela
+    # beira da tela não é tocado.
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={1}, rolagem=500)
+    tela = site.dump_hierarchy().replace(
+        '<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules"',
+        '<node class="android.widget.Button" resource-id="" clickable="true" text="100%" content-desc="" '
+        'bounds="[322,400][435,450]" /><node class="android.view.View" resource-id="radix-_r_m_-trigger-modules"')
+    caixa, itens = cursos_robo.itens_da_lista(tela)
+    assert caixa[1] == 1267
+    assert [(item["tipo"], item["nome"], item["segundos"]) for item in itens] == [
+        ("módulo", "Comece por aqui", None), ("módulo", "Primeiros passos", None), ("aula", "Sobre o suporte", None),
+        ("aula", "Como escolher o produto", 725), ("aula", "Regras", 190), ("módulo", "Módulo sem aula", None),
+        ("módulo", "Semana 01", None)]
+    # Embaixo da barra do Próximo (e cortado pela beira da tela), nenhum botão é tocado.
+    assert [cursos_robo._tocavel(tela, item["caixa"]) for item in itens] == [True] * 5 + [False, False]
+    assert cursos_robo.itens_da_lista("<quebrado") is None
+    assert cursos_robo.itens_da_lista(tela.replace("-content-modules", "-content-coments")) is None
+
+
+def test_a_lista_pelo_explorar_fica_no_mapa_e_vai_ao_claude_sem_os_enderecos(bm, monkeypatch):
+    cursos_robo.guardar_a_primeira_aula(4, AULAS_DO_SITE[0][2])
+    abertos = []
+    monkeypatch.setattr(cursos_robo, "ir_para_o_endereco",
+                        lambda d, endereco, pausa=None: abertos.append(endereco) or (cursos_robo.COM_VIDEO, ""))
+    monkeypatch.setattr(cursos_robo, "pausar_o_que_toca", lambda d, pausa=None: True)
+    # O passo toca a aula (o endereço abre a aula em que o site parou): o celular fica mudo, também de dia.
+    assert cursos_robo.toca_aula("curso", "lista:4")
+    site = ListaDoSite(MODULOS_DO_CURSO, abertos={0})
+    ok, texto = cursos_robo.curso_no_explorar(site, "lista:4", pausa=lambda segundos: None)
+    assert ok and abertos == [AULAS_DO_SITE[0][2]]
+    # Só números no log público: nem os nomes dos módulos, nem os das aulas.
+    assert texto == "lista do curso 4: 4 módulo(s) com aula, 19 aula(s), 4 com a duração (84 min de vídeo) e 15 sem"
+    assert not any(modulo in texto for modulo, _aulas in MODULOS_DO_CURSO)
+    curso = cursos_robo.mapa_das_aulas()["cursos"]["4"]
+    assert curso["lista"] == LISTA_DO_CURSO and curso["lista_em"]
+    # O pacote do Claude leva o mapa sem os endereços, mesmo sem aula guardada.
+    assert cursos_robo.tem_lista()
+    import io, json, zipfile
+    with zipfile.ZipFile(io.BytesIO(cursos_robo.pacote_das_aulas())) as pacote:
+        assert pacote.namelist() == ["mapa.json"]
+        mapa = json.loads(pacote.read("mapa.json"))
+    assert mapa["ordem"] == list(cursos_robo.ORDEM_DOS_CURSOS) and mapa["cursos"]["4"]["lista"] == LISTA_DO_CURSO
+    assert "lessons" not in json.dumps(mapa)
+    # A lista que não chega ao fim não troca a do mapa.
+    ok, texto = cursos_robo.curso_no_explorar(ListaDoSite(MODULOS_DO_CURSO, rolagem=2000), "lista:4",
+                                              pausa=lambda segundos: None)
+    assert not ok and texto == f"a lista do curso 4 não foi lida ({cursos_robo.LISTA_SEM_O_COMECO})"
+    assert cursos_robo.mapa_das_aulas()["cursos"]["4"]["lista"] == LISTA_DO_CURSO
