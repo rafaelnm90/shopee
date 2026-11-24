@@ -1316,6 +1316,8 @@ def _lista_no_explorar(d, posicao, pausa):
     lista, porque = ler_a_lista(d, pausa)
     pausar_o_que_toca(d, pausa)
     if not lista:
+        # A tela de onde a lista não passou vai ao Claude pelos casos (o print e a forma dela, cifrados).
+        guardar_o_caso(d, porque, "lista não lida", passo="ler a lista das aulas")
         return False, f"a lista do curso {posicao} não foi lida ({porque})"
     guardar_a_lista(posicao, lista)
     return True, descrever_a_lista(posicao, lista)
@@ -2279,14 +2281,14 @@ PARADAS_DA_AULA = ("o robô pediu o celular", "a madrugada acabou")
 SEM_O_MUDO = "o celular não ficou mudo antes de abrir a aula"
 
 
-def guardar_o_caso(d, motivo, resultado="não abriu"):
+def guardar_o_caso(d, motivo, resultado="não abriu", passo="abrir a aula"):
     """
     A tela da 1ª aula da noite que não abriu (o print, a forma da tela e o log do Chrome), guardada para o Claude
     achar o porquê, e a da 1ª aula sem vídeo, para ele conferir que era mesmo um documento ou um texto (casos_robo:
-    cifrada no exportar, nunca no repositório).
+    cifrada no exportar, nunca no repositório); também a da lista das aulas que não foi lida (curso:lista:N).
     """
     import casos_robo
-    return casos_robo.guardar(d, "curso", resultado, motivo, passo="abrir a aula")
+    return casos_robo.guardar(d, "curso", resultado, motivo, passo=passo)
 
 
 def qual_aula(posicao, numero):
