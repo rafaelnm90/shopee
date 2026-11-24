@@ -1172,7 +1172,8 @@ def test_links_a_mais_buscam_o_mesmo_produto_e_a_ia_confere_pela_foto(monkeypatc
     assert conferidos == [["Garrafa Térmica Inox 500ml Azul Loja B", "Garrafa Térmica Inox 500ml Azul Rosa",
                            "Garrafa Térmica Inox 500ml Azul Loja A"]]
     assert [m["item"] for m in mais] == ["3", "2"]
-    assert mais[0] == {"nome": "Garrafa Térmica Inox 500ml Azul Loja B", "preco": 52.0, "comissao": 30.0,
+    # A comissão é a do vídeo (P297 1): os 30% da API são 1,5% da Shopee e 27% do vendedor.
+    assert mais[0] == {"nome": "Garrafa Térmica Inox 500ml Azul Loja B", "preco": 52.0, "comissao": 28.5,
                        "endereco": "https://shopee.com.br/product/9/3", "item": "3"}
     # Nos vídeos do Rafael, sem os produtos a mais do robô (desligados ou pelos pontos), nenhum; os do amigo seguem.
     monkeypatch.setattr(robo, "sem_os_a_mais", lambda: ("nenhum - desligados", ""))
@@ -1279,3 +1280,47 @@ def test_video_que_o_robo_pega_no_meio_do_preparo_nao_vai_ao_amigo(monkeypatch):
     assert consultar("SELECT status FROM shopee_video_enviados WHERE id_unico = 'novo'") == ("robo",)
     assert consultar("SELECT amigo FROM shopee_video_enviados WHERE id_unico = 'velho'") == ("7",)
     assert [e["chat"] for e in bot.envios] == [-1001, -1001]
+
+
+def _sessao_da_api(monkeypatch, nos):
+    """aiohttp.ClientSession falso: o POST da API de afiliado responde com estes produtos (nodes)."""
+    class Resposta:
+        async def json(self, content_type=None):
+            return {"data": {"productOfferV2": {"nodes": nos}}}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Sessao:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, data=None):
+            return Resposta()
+
+    monkeypatch.setattr(asv.aiohttp, "ClientSession", Sessao)
+
+
+def test_produto_da_api_e_a_mensagem_dizem_a_comissao_do_video(monkeypatch):
+    # Escolha do Rafael (24/11/2026, P297 1): a comissão é a dos vídeos da Shopee Vídeo, 1,5% da Shopee mais a extra do
+    # vendedor, e não os 3% das redes sociais que a API dá. O de R$ 30 a 13% na API (10% de extra) paga 11,5% no vídeo.
+    _sessao_da_api(monkeypatch, [{"productName": "Garrafa", "priceMin": "30", "priceMax": "30",
+                                  "commissionRate": "0.13", "imageUrl": "foto"}])
+    produto = rodar(asv._consultar_produto("11", "22"))
+    assert produto["comissao"] == 11.5 and produto["preco"] == 30.0
+    texto = asv.montar_mensagem(TEXTOS, [produto], "https://s.shopee.com.br/abc")
+    assert "Garrafa: R$ 30,00, comissão 11,5%" in texto
+    # Sem extra do vendedor, 1,5%, escrito com a vírgula.
+    _sessao_da_api(monkeypatch, [{"productName": "Copo", "priceMin": "18", "commissionRate": "0.03"}])
+    produto = rodar(asv._consultar_produto("11", "23"))
+    assert produto["comissao"] == 1.5
+    assert "Copo: R$ 18,00, comissão 1,5%" in asv.montar_mensagem(TEXTOS, [produto], "https://s.shopee.com.br/abc")

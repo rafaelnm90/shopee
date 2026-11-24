@@ -379,6 +379,48 @@ def _sem_ofertas(negada_levanta, motivo):
 CAMPOS_DA_OFERTA = ("itemId productName price priceMin priceMax priceDiscountRate ratingStar sales shopName "
                     "imageUrl productLink commissionRate")
 
+# A comissão de um produto num vídeo da Shopee Vídeo. Desde 01/07/2026, a parte da Shopee no canal Shopee Video é de
+# 1,5% (Central de Ajuda do Afiliado, artigo 223989: "ajustada de 3% para 1.5%"); os 3% são das vendas pelas redes
+# sociais. A comissão extra do vendedor vale nos dois. A API de afiliado dá a das redes sociais: commissionRate, a
+# soma da parte da Shopee (shopeeCommissionRate) e da do vendedor (sellerCommissionRate). O robô e o modo assistente
+# da Shopee Vídeo mostram, escolhem e contam o mínimo por venda pela do vídeo. Escolha do Rafael (24/11/2026, P297 1):
+# DECISOES.md, Shopee Vídeo.
+COMISSAO_DA_SHOPEE_NO_VIDEO = 0.015
+COMISSAO_DA_SHOPEE_NAS_REDES = 0.03
+CAMPOS_DA_COMISSAO = "commissionRate sellerCommissionRate shopeeCommissionRate"
+
+
+def _taxa(valor):
+    """A taxa da API (texto ou número, de 0 a 1) como número; None quando ela não veio ou não é número."""
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return None
+
+
+def comissao_no_video(oferta):
+    """
+    A taxa (de 0 a 1) que o produto da oferta da API paga num vídeo da Shopee Vídeo: COMISSAO_DA_SHOPEE_NO_VIDEO mais
+    a extra do vendedor. A extra é a sellerCommissionRate; sem ela na oferta, o que a commissionRate passa da parte da
+    Shopee (a shopeeCommissionRate ou, sem ela, COMISSAO_DA_SHOPEE_NAS_REDES). O produto sem comissão na API
+    (commissionRate vazia ou zero) não paga nada.
+    """
+    oferta = oferta or {}
+    total = _taxa(oferta.get("commissionRate"))
+    if not total:
+        return 0.0
+    vendedor = _taxa(oferta.get("sellerCommissionRate"))
+    if vendedor is None:
+        da_shopee = _taxa(oferta.get("shopeeCommissionRate"))
+        vendedor = total - (COMISSAO_DA_SHOPEE_NAS_REDES if da_shopee is None else da_shopee)
+    # Arredondado: 0.035 - 0.03 dá 0.0050000000000000044, e a taxa igual tem de ser igual.
+    return round(COMISSAO_DA_SHOPEE_NO_VIDEO + max(0.0, vendedor), 6)
+
+
+def porcento_no_video(oferta):
+    """A comissao_no_video em % (1.5 para 1,5%), arredondada: 0.035 * 100 dá 3.5000000000000004."""
+    return round(comissao_no_video(oferta) * 100, 4)
+
 
 async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None, sort_type=2,
                                 negada_levanta=False):

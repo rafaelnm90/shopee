@@ -805,3 +805,27 @@ def test_inventario_conta_pendentes_do_espelhador_de_antes_do_conserto(capsys, f
     inventario.fila_do_espelhador()
     saida = capsys.readouterr().out
     assert "pendentes: 2, capturados antes do conserto do link de produto: 1, sem o link original guardado: 1" in saida
+
+
+def test_comissao_no_video_e_a_da_shopee_video_mais_a_extra_do_vendedor():
+    # Escolha do Rafael (24/11/2026, P297 1): desde 01/07/2026, a Shopee paga 1,5% nos vídeos da Shopee Vídeo (os 3%
+    # da API são os das redes sociais), mais a comissão extra do vendedor.
+    partes = {"commissionRate": "0.38", "sellerCommissionRate": "0.35", "shopeeCommissionRate": "0.03"}
+    assert api_shopee.comissao_no_video(partes) == 0.365
+    # Sem as partes na oferta, a extra do vendedor é o que passa dos 3% da Shopee nas redes sociais.
+    assert api_shopee.comissao_no_video({"commissionRate": "0.13"}) == 0.115
+    assert api_shopee.comissao_no_video({"commissionRate": 0.03}) == 0.015
+    assert api_shopee.comissao_no_video({"commissionRate": "0.02"}) == 0.015
+    # Com a parte da Shopee e sem a do vendedor, a extra é o que passa dela.
+    assert api_shopee.comissao_no_video({"commissionRate": "0.10", "shopeeCommissionRate": "0.05"}) == 0.065
+    # O produto sem comissão na API não paga nada.
+    assert api_shopee.comissao_no_video({"commissionRate": "0"}) == 0.0
+    assert api_shopee.comissao_no_video({}) == api_shopee.comissao_no_video(None) == 0.0
+    # Os exemplos da pergunta: o de R$ 18 sem extra paga R$ 0,27 (não R$ 0,54); o de R$ 100 sem extra, R$ 1,50, abaixo
+    # do mínimo de R$ 2; o de R$ 30 com 10% de extra, R$ 3,45. Em %, sem o resto do ponto flutuante.
+    sem_extra = {"commissionRate": "0.03"}
+    assert 18 * api_shopee.porcento_no_video(sem_extra) / 100 == pytest.approx(0.27)
+    assert 100 * api_shopee.porcento_no_video(sem_extra) / 100 == pytest.approx(1.5)
+    com_extra = {"commissionRate": "0.13", "sellerCommissionRate": "0.1", "shopeeCommissionRate": "0.03"}
+    assert 30 * api_shopee.porcento_no_video(com_extra) / 100 == pytest.approx(3.45)
+    assert api_shopee.porcento_no_video({"commissionRate": "0.05"}) == 3.5
