@@ -244,8 +244,9 @@ def test_o_rafael_pede_sem_se_liberar_e_o_pedido_vai_como_o_enviar_1_agora(am, b
 
 
 def test_a_mensagem_do_pedido_diz_em_quanto_tempo_o_video_fica_pronto(am, monkeypatch):
-    # Pedido do Rafael (22/11): a estimativa de tempo depois do toque, pela mediana do preparo dos últimos pedidos
-    # feitos, vezes a posição na fila (sem nenhum feito ainda, 3 min por pedido).
+    # Pedido do Rafael (22/11): a estimativa de tempo depois do toque, pelo preparo dos últimos pedidos feitos, vezes a
+    # posição na fila (sem nenhum feito ainda, 3 min por pedido). Em 24/11, a mediana prometeu "cerca de 1 min" a um
+    # amigo, e o vídeo chegou 13 min depois: vale o preparo mais demorado dos últimos, nunca menos de 3 min.
     _grupo(am, liberados={"7": {"nome": "Ana"}})
     _sem_atender_na_hora(am, monkeypatch)
     bot = am.bot_instance
@@ -255,12 +256,13 @@ def test_a_mensagem_do_pedido_diz_em_quanto_tempo_o_video_fica_pronto(am, monkey
     for segundos in (100, 110, 600):
         am.anotar_preparo(segundos)
     rodar(am.quero_um_video(Toque(am.CALLBACK_QUERO, ana)))
-    # 2º da fila, com a mediana de 110 s: 220 s, cerca de 4 min.
-    assert "(2º da fila). Fica pronto em cerca de 4 min." in bot.envios[-1]["texto"]
+    # 2º da fila, com o mais demorado de 600 s: 1200 s, cerca de 20 min.
+    assert "(2º da fila). Fica pronto em cerca de 20 min." in bot.envios[-1]["texto"]
     for _ in range(20):
         am.anotar_preparo(60)
     assert am.ler()["preparos"] == [60] * am.PREPAROS_GUARDADOS
-    assert am.minutos_estimados(am.ler(), 1) == 1 and am.minutos_estimados({"preparos": []}, 2) == 6
+    # Preparos rápidos não fazem a promessa cair abaixo dos 3 min.
+    assert am.minutos_estimados(am.ler(), 1) == 3 and am.minutos_estimados({"preparos": []}, 2) == 6
 
 
 def test_desligado_o_botao_avisa_e_a_fila_espera(am, monkeypatch):

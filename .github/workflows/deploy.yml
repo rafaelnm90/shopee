@@ -23,6 +23,9 @@ jobs:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
+          # O padrão (10 min) não cabe a espera do pedido do grupo dos amigos (até 10 min) e a conferência
+          # dos robôs 3 min depois.
+          command_timeout: 20m
           script: |
             # Acessa a pasta exata onde o bot está no servidor
             cd ~/shopee
@@ -63,6 +66,18 @@ jobs:
             REINICIADOS=""
             for SERVICO in $SERVICOS; do
               if echo "$MUDARAM" | grep -qx "$SERVICO" || ! systemctl is-active --quiet "$SERVICO.service"; then
+                if [ "$SERVICO" = "bot_mestre_bot" ] && systemctl is-active --quiet "$SERVICO.service"; then
+                  # O pedido do grupo dos amigos em preparo não é cortado no meio (em 24/11/2026, o reinício
+                  # das 07:29 cortou o das 07:27, e o vídeo chegou 13 min depois): o reinício espera a fila
+                  # do grupo esvaziar, até 10 min. Só o número de pedidos vai ao log.
+                  for VEZ in $(seq 1 40); do
+                    PEDIDOS=$(python3 -c "import db; print(len((db.ler_config('grupo_dos_amigos', {}) or {}).get('fila') or []))" 2>/dev/null | tail -1)
+                    PEDIDOS=${PEDIDOS:-0}
+                    [ "$PEDIDOS" = "0" ] && break
+                    if [ "$VEZ" = "1" ]; then echo "⏳ grupo dos amigos: $PEDIDOS pedido(s) em preparo; o reinício espera (até 10 min)"; fi
+                    sleep 15
+                  done
+                fi
                 echo "🔄 Reiniciando $SERVICO..."
                 sudo systemctl stop "$SERVICO.service" || true
                 sudo systemctl kill -s SIGKILL "$SERVICO.service" || true
