@@ -469,6 +469,8 @@ def test_video_com_10_curtidas_entra_no_lugar_do_fixado_de_menos_visualizacoes(a
     assert _registro(robo.PROCESSO_DO_COMENTARIO_FIXADO) == [("comentado", "")]
     assert _registro() == [("desfixado", "o de menos visualizações"),
                            ("trocado", "no lugar do fixado de menos visualizações")]
+    # O que saiu fica guardado: ele volta no lugar vazio sem vídeo curtido para ele (P299 1).
+    assert robo._o_tirado()["link"] == "https://s.shopee.com.br/T2"
     # Uma troca por leitura: a continuação da mesma leitura não troca de novo.
     assert robo.fixar_o_que_viraliza(app, AGORA) == ""
 
@@ -512,6 +514,7 @@ def test_com_lugar_entre_os_fixados_so_fixa(avisos):
 
 
 def test_menos_de_10_curtidas_nao_mexe_nos_fixados(avisos):
+    # Com os 3 fixados no Perfil, nenhum sai pelo vídeo com menos de 10 curtidas (o lugar vazio, P299 1, mais abaixo).
     app = CelularDasCurtidas(_curtidas("A", 9) + [TOPO])
     _leitura(app)
     assert robo.fixar_o_que_viraliza(app, AGORA) == ""
@@ -544,6 +547,7 @@ def test_fixar_que_para_depois_do_desfixar_devolve_o_que_saiu_e_avisa_com_os_doi
     assert _registro() == [("desfixado", "o de menos visualizações"),
                            ("devolvido", "o desfixado, depois do fixar que parou"),
                            ("parou", "a curtida do vídeo não está mais nas Notificações")]
+    assert robo._o_tirado() is None
 
 
 def _verificacao_ao_abrir_pelo_link(monkeypatch):
@@ -569,6 +573,7 @@ def test_volta_do_desfixado_que_para_na_verificacao_avisa_com_os_dois_links(avis
                       "https://s.shopee.com.br/T2\n📌 O que ia entrar: https://s.shopee.com.br/A"]
     assert _registro() == [("desfixado", "o de menos visualizações"),
                            ("não devolvido", "o desfixado, depois do fixar que parou")]
+    assert robo._o_tirado()["link"] == "https://s.shopee.com.br/T2"
 
 
 def test_aviso_do_limite_de_fixados_para_sem_mais_toques(avisos):
@@ -974,3 +979,160 @@ def test_anotacoes_dos_fixados_uma_por_dia_e_so_os_ultimos_30_dias():
     notas = robo.db.ler_config(robo.CHAVE_DOS_FIXADOS, {})["notas"]
     assert sorted((n["marca"], n["vistas"]) for n in notas) == sorted(
         [(MARCAS[1], v) for v in (263800, 264000, 264100, 264200)] + [(MARCAS[2], 900), (MARCAS[2], 1000), (outro, 60)])
+
+# --- O lugar vazio entre os fixados (P299 1) ---
+
+def test_lugar_vazio_recebe_o_mais_curtido_em_24_h_mesmo_com_menos_de_10(avisos, comentarios):
+    # Resposta do Rafael (25/11/2026, P299 1): com um lugar vazio entre os 3 fixados, entra o vídeo dele com mais
+    # curtidas nas últimas 24 h que não está fixado, mesmo com menos de 10, com o aviso e o comentário, como no fixar.
+    app = CelularDasCurtidas(_curtidas("A", 6) + _curtidas("B", 2, desde=8) + [TOPO], fixados=("T1", "T3"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: fixei no lugar vazio o mais curtido em 24 h; "
+                                                     "comentei nele")
+    assert app.fixados == ["A", "T1", "T3"] and "Desfixar" not in app.toques
+    assert app.abertos == ["A", "T1", "T3", "A"]
+    assert avisos == ["📌 Robô da Shopee Vídeo: havia um lugar vazio entre os 3 fixados do seu Perfil, e fixei nele o "
+                      "seu vídeo com mais curtidas nas últimas 24 h que não estava fixado (6 curtidas nas "
+                      "Notificações, menos de 10).\n\n📌 Fixado agora: https://s.shopee.com.br/A",
+                      _aviso_do_comentario(1, "A")]
+    assert _registro() == [("nenhum vídeo para fixar", "o mais curtido com 6 em 24 h"),
+                           ("fixado", "no lugar vazio: o mais curtido em 24 h")]
+    # Um por leitura.
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ""
+
+
+def test_lugar_vazio_com_o_mais_curtido_ja_fixado_recebe_o_seguinte(avisos, comentarios):
+    # O mais curtido do dia já é um dos fixados: fica como está, sem o comentário (o do já fixado é do vídeo que
+    # viraliza, pedido de 21/11/2026), e o seguinte entra no lugar vazio.
+    app = CelularDasCurtidas(_curtidas("A", 5) + _curtidas("B", 3, desde=8) + [TOPO], fixados=("T1", "A"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: fixei no lugar vazio o mais curtido em 24 h; "
+                                                     "comentei nele")
+    assert app.fixados == ["B", "T1", "A"]
+    assert [c["aberto"] for c in comentarios["chamadas"]] == ["B"]
+    assert "(3 curtidas nas Notificações, menos de 10)" in avisos[0]
+    assert _registro() == [("nenhum vídeo para fixar", "o mais curtido com 5 em 24 h"), ("já fixado", "no lugar vazio"),
+                           ("fixado", "no lugar vazio: o mais curtido em 24 h")]
+
+
+class CelularComFixadoAMao(CelularDasCurtidas):
+    """O Rafael fixa o T2 à mão logo depois de o robô abrir pelas Notificações o vídeo das curtidas."""
+
+    def _abrir(self, de_onde):
+        super()._abrir(de_onde)
+        if de_onde == "lista" and "T2" not in self.fixados:
+            self.fixados.insert(0, "T2")
+
+
+def test_lugar_vazio_ocupado_no_meio_da_leitura_nao_tira_nenhum_fixado(avisos, comentarios):
+    app = CelularComFixadoAMao(_curtidas("A", 6) + [TOPO], fixados=("T1", "T3"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o lugar vazio entre os fixados foi ocupado no "
+                                                     "meio da leitura")
+    assert app.fixados == ["T2", "T1", "T3"] and not {"Fixar", "Desfixar"} & set(app.toques)
+    assert not avisos and not comentarios["chamadas"]
+    assert _registro()[-1] == ("lugar ocupado", "no meio da leitura")
+
+
+def test_lugar_vazio_sem_curtida_fixa_de_novo_o_ultimo_que_o_robo_tirou(avisos, comentarios, monkeypatch):
+    # P299 1: sem curtida nenhuma nas últimas 24 h, volta o último vídeo que o robô tirou dos fixados, aberto pelo link
+    # copiado antes do Desafixar, com o aviso e o comentário.
+    abertos = _abrir_pelo_link(monkeypatch)
+    robo._anotar_o_tirado("https://s.shopee.com.br/T2", MARCAS[1], AGORA - timedelta(days=1))
+    app = CelularDasCurtidas([TOPO], fixados=("T1", "T3"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: fixei de novo, no lugar vazio, o último que eu "
+                                                     "tinha tirado; comentei nele")
+    assert app.fixados == ["T2", "T1", "T3"] and abertos == ["https://s.shopee.com.br/T2"]
+    assert avisos == ["📌 Robô da Shopee Vídeo: o seu Perfil estava com 2 de 3 fixados, e nenhum vídeo seu com "
+                      "curtidas nas últimas 24 h ficou para o lugar vazio: fixei de novo o último vídeo que eu tinha "
+                      "tirado dos fixados (tirado em 20/11).\n\n📌 Fixado agora: https://s.shopee.com.br/T2",
+                      _aviso_do_comentario(1, "T2")]
+    assert _registro() == [("nenhum vídeo para fixar", "o mais curtido com 0 em 24 h"),
+                           ("fixado", "no lugar vazio: o último que o robô tirou")]
+    assert robo._o_tirado() is None
+
+
+def test_o_que_saiu_na_troca_volta_quando_um_fixado_sai_a_mao_e_ninguem_mais_curtiu(avisos, comentarios, monkeypatch):
+    # A troca guarda o que saiu (o T2); o Rafael tira o T3 à mão; na leitura seguinte, com as curtidas só no A (fixado
+    # pelo robô, fora da conta por 24 h), o T2 volta ao lugar vazio.
+    abertos = _abrir_pelo_link(monkeypatch)
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO])
+    _leitura(app)
+    robo.fixar_o_que_viraliza(app, AGORA)
+    assert app.fixados == ["A", "T1", "T3"]
+    app.fixados.remove("T3")
+    depois = AGORA + timedelta(hours=3)
+    robo.contar_leitura(depois)
+    assert robo.fixar_o_que_viraliza(app, depois).startswith("fixar no perfil: fixei de novo, no lugar vazio, ")
+    assert app.fixados == ["T2", "A", "T1"] and abertos == ["https://s.shopee.com.br/T2"]
+    assert _registro()[-2:] == [("nenhum vídeo para fixar", "o mais curtido com 10 em 24 h, já visto"),
+                                ("fixado", "no lugar vazio: o último que o robô tirou")]
+
+
+def test_lugar_vazio_com_curtidas_so_nos_fixados_fixa_de_novo_o_ultimo_tirado(avisos, comentarios, monkeypatch):
+    # Com curtidas só nos vídeos que já estão fixados, nenhum curtido fica para o lugar vazio: volta o último tirado,
+    # mesmo tirado há mais tempo.
+    abertos = _abrir_pelo_link(monkeypatch)
+    robo._anotar_o_tirado("https://s.shopee.com.br/T2", None, AGORA - timedelta(days=40))
+    app = CelularDasCurtidas(_curtidas("A", 4) + [TOPO], fixados=("T1", "A"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA).startswith("fixar no perfil: fixei de novo, no lugar vazio, ")
+    assert app.fixados == ["T2", "T1", "A"] and abertos == ["https://s.shopee.com.br/T2"]
+    assert _registro()[1:] == [("já fixado", "no lugar vazio"), ("fixado", "no lugar vazio: o último que o robô tirou")]
+    assert [c["aberto"] for c in comentarios["chamadas"]] == ["T2"]
+
+
+def test_ultimo_tirado_que_ja_voltou_aos_fixados_sai_do_estado(avisos, monkeypatch):
+    _abrir_pelo_link(monkeypatch)
+    robo._anotar_o_tirado("https://s.shopee.com.br/T2", None, AGORA - timedelta(days=1))
+    app = CelularDasCurtidas([TOPO], fixados=("T1", "T2"))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ""
+    assert app.fixados == ["T1", "T2"] and not avisos and robo._o_tirado() is None
+    assert _registro()[-1] == ("já fixado", "o último tirado pelo robô")
+
+
+def test_ultimo_tirado_que_nao_abre_em_3_leituras_sai(avisos, comentarios, monkeypatch):
+    def nao_abre(d, link):
+        raise robo.Parada(robo.MOTIVO_DO_POST_REMOVIDO)
+
+    monkeypatch.setattr(robo, "_abrir_o_video_do_post", nao_abre)
+    robo._anotar_o_tirado("https://s.shopee.com.br/T2", None, AGORA - timedelta(days=1))
+    app = CelularDasCurtidas([TOPO], fixados=("T1", "T3"))
+    _leitura(app)
+    for leitura in range(robo.TENTATIVAS_DO_TIRADO):
+        momento = AGORA + timedelta(hours=3 * leitura)
+        if leitura:
+            robo.contar_leitura(momento)
+        assert robo.fixar_o_que_viraliza(app, momento) == "fixar no perfil: parou (o vídeo do post foi removido)"
+    assert robo._o_tirado() is None and len(comentarios["casos"]) == robo.TENTATIVAS_DO_TIRADO
+    # Sem o tirado, o lugar fica vazio, e o registro diz por quê.
+    robo.contar_leitura(AGORA + timedelta(hours=9))
+    assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=9)) == ""
+    assert _registro()[-1] == ("lugar vazio", "sem vídeo curtido para fixar e sem vídeo tirado pelo robô")
+    assert app.fixados == ["T1", "T3"] and not avisos
+
+
+def test_ultimo_tirado_que_para_no_fixar_em_3_leituras_sai(avisos, monkeypatch):
+    # Também o que abre, mas não fica fixado (aqui, o app no limite dos fixados): na 3ª leitura, ele é esquecido.
+    _abrir_pelo_link(monkeypatch)
+    robo._anotar_o_tirado("https://s.shopee.com.br/T2", None, AGORA - timedelta(days=1))
+    app = CelularDasCurtidas([TOPO], fixados=("T1", "T3"), limite=2)
+    _leitura(app)
+    for leitura in range(robo.TENTATIVAS_DO_TIRADO):
+        momento = AGORA + timedelta(hours=3 * leitura)
+        if leitura:
+            robo.contar_leitura(momento)
+        assert robo.fixar_o_que_viraliza(app, momento) == ("fixar no perfil: parou (o app disse que o limite de "
+                                                           "fixados acabou)")
+        assert (robo._o_tirado() is None) == (leitura == robo.TENTATIVAS_DO_TIRADO - 1)
+    assert app.fixados == ["T1", "T3"] and not avisos
+
+
+def test_ultimo_tirado_sem_o_link_nao_e_guardado():
+    robo._anotar_o_tirado("https://s.shopee.com.br/T3", MARCAS[0], AGORA)
+    # Sem o link (o Copiar link não saiu), não há como abrir: fica o de antes.
+    robo._anotar_o_tirado("", MARCAS[1], AGORA + timedelta(hours=1))
+    assert robo._o_tirado() == {"link": "https://s.shopee.com.br/T3", "marca": MARCAS[0], "em": robo._momento(AGORA),
+                                "falhas": 0}
