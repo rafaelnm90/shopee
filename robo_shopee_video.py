@@ -1296,6 +1296,10 @@ PASSOS = (
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
     ("não devolveu o título", "título da IA"),
+    # A janela do produto (P265 1), antes do "a IA": a parada das 06:54 de 24/11/2026 no nome da IA saiu no checkup
+    # como "conferência da IA".
+    ("nome da IA", "nome do produto"),
+    ("lista de cupons", "lista de cupons"),
     ("a IA", "conferência da IA"),
     ("Ver Produtos", "Ver Produtos"),
     ("foi removido", "vídeo removido"),
