@@ -119,3 +119,51 @@ def test_docker_e_android_so_tipos_e_tamanhos(capsys, monkeypatch):
     monkeypatch.setattr(inventario, "_comando", lambda *partes: None)
     inventario.docker_e_android()
     assert "Docker: não deu para medir" in capsys.readouterr().out
+
+
+def test_pastas_da_shopee_video_so_os_nomes_do_codigo_e_numeros(capsys, monkeypatch, tmp_path):
+    # Pergunta do Rafael (25/11): o que o robô apaga sai mesmo do servidor? Cada pasta de trabalho
+    # da Shopee Vídeo aparece com o tamanho e os arquivos, sem o nome de nenhum arquivo dentro dela.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    aula = tmp_path / "shopee_video" / "aulas" / "20990101-000000-c01-a001"
+    aula.mkdir(parents=True)
+    (aula / "fala.txt").write_text("a fala da aula inventada", encoding="utf-8")
+    (tmp_path / "shopee_video" / "aulas_brutas").mkdir()
+    (tmp_path / "shopee_video" / "tela.log").write_text("x" * 10, encoding="utf-8")
+    inventario.pastas_da_shopee_video()
+    saida = capsys.readouterr().out
+    linhas = {linha.split()[0]: linha for linha in saida.splitlines()}
+    assert "1 arquivo(s)" in linhas["~/shopee_video/aulas/"]
+    assert "0 arquivo(s)" in linhas["~/shopee_video/aulas_brutas/"]
+    assert "1 arquivo(s)" in linhas["~/shopee_video/"] and "(soltos)" in linhas["~/shopee_video/"]
+    assert "20990101" not in saida and "fala" not in saida and "tela.log" not in saida
+
+
+def test_apagados_ainda_abertos_conta_o_que_um_programa_segura_sem_o_nome(capsys, monkeypatch, tmp_path):
+    # No Linux não há lixeira: o espaço do arquivo apagado volta ao disco na hora, a não ser que um
+    # programa ainda o segure aberto. O /proc de mentira imita o de verdade: cada fd é um link para o
+    # arquivo aberto, com " (deleted)" no fim quando ele já foi apagado.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    apagado = tmp_path / "aula_inventada.mkv (deleted)"
+    apagado.write_bytes(b"0" * 5000)
+    normal = tmp_path / "aberto.log"
+    normal.write_text("x", encoding="utf-8")
+    gravador = tmp_path / "proc" / "123"
+    (gravador / "fd").mkdir(parents=True)
+    (gravador / "comm").write_text("scrcpy\n", encoding="utf-8")
+    (gravador / "fd" / "3").symlink_to(apagado)
+    (gravador / "fd" / "4").symlink_to(apagado)                 # o mesmo arquivo, aberto duas vezes, conta uma
+    (gravador / "fd" / "5").symlink_to(normal)                  # aberto e não apagado: não conta
+    (gravador / "fd" / "6").symlink_to("/memfd:jit (deleted)")  # na memória, não no disco: não conta
+    inventario.apagados_ainda_abertos(proc=str(tmp_path / "proc"))
+    saida = capsys.readouterr().out
+    assert "apagados ainda abertos no disco: 1 arquivo(s), 4.9 KB" in saida
+    assert any(linha.split()[:3] == ["scrcpy", "1", "arquivo(s)"] for linha in saida.splitlines())
+    assert "aula_inventada" not in saida and "aberto.log" not in saida
+    assert "MB livre" in saida and "% em uso" in saida
+
+    # Sem nada apagado e aberto, o zero aparece, que é a prova de que o espaço voltou ao disco.
+    (gravador / "fd" / "3").unlink()
+    (gravador / "fd" / "4").unlink()
+    inventario.apagados_ainda_abertos(proc=str(tmp_path / "proc"))
+    assert "apagados ainda abertos no disco: 0 arquivo(s), 0 B" in capsys.readouterr().out

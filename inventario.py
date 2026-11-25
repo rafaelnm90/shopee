@@ -11,8 +11,9 @@ filas ou do banco; ids de parceiro também não.
 Seções: pastas do projeto, arquivos soltos, banco, erros por origem e tipo, filas
 em arquivo, captura dos parceiros, contas dos Autorais (só estados), onde os links do
 Espião levam (só o tipo de cada página), journal (com as linhas de log que mais se repetem e de onde vêm no
-código), o Baixador hora a hora (só contagens), versões das bibliotecas, fora do projeto e se o servidor aguenta um
-Android virtual (para o robô da Shopee Vídeo).
+código), o Baixador hora a hora (só contagens), versões das bibliotecas, fora do projeto (com as pastas de
+trabalho da Shopee Vídeo, os arquivos apagados que um programa ainda segura abertos e o disco em MB) e se o
+servidor aguenta um Android virtual (para o robô da Shopee Vídeo).
 
 Com --link-de-teste, em vez do inventário, gera os links de afiliado do vídeo e do
 produto mais recentes do Espião e manda no privado do Rafael, para ele conferir se
@@ -25,6 +26,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -810,6 +812,8 @@ def fora_do_projeto():
         t, q, _i = medir(caminho) if os.path.isdir(caminho) else (os.path.getsize(caminho), 1, 0)
         total, qtd = total + t, qtd + q
     print(f"/tmp (do usuário)        {tamanho_legivel(total):>9} | {qtd:6} arquivo(s)")
+    pastas_da_shopee_video()
+    apagados_ainda_abertos()
     docker_e_android()
     print("Memória de cada robô:")
     for servico in SERVICOS:
@@ -817,6 +821,63 @@ def fora_do_projeto():
                            capture_output=True, text=True)
         valor = r.stdout.strip()
         print(f"   {servico:32} {tamanho_legivel(int(valor)) if valor.isdigit() else valor:>9}")
+
+
+def pastas_da_shopee_video():
+    """
+    As pastas de trabalho do robô da Shopee Vídeo (os casos, as aulas do curso, as gravações, os rascunhos e as cópias
+    do Canal Afiliados), cada uma com o tamanho, os arquivos e a idade do mais antigo: o que o robô apaga tem de sair
+    daqui. Só os nomes das pastas, que são os do código; os arquivos soltos, só em número.
+    """
+    raiz = os.path.expanduser("~/shopee_video")
+    if not os.path.isdir(raiz):
+        print("~/shopee_video/: não existe")
+        return
+    soltos, soma = 0, 0
+    for nome in sorted(os.listdir(raiz)):
+        caminho = os.path.join(raiz, nome)
+        if os.path.isdir(caminho):
+            total, qtd, idade = medir(caminho)
+            print(f"~/shopee_video/{nome + '/':15} {tamanho_legivel(total):>9} | {qtd:6} arquivo(s) | "
+                  f"mais antigo: {idade:.0f} dia(s)")
+        elif os.path.isfile(caminho):
+            soltos, soma = soltos + 1, soma + os.path.getsize(caminho)
+    print(f"~/shopee_video/ (soltos)       {tamanho_legivel(soma):>9} | {soltos:6} arquivo(s)")
+
+
+def apagados_ainda_abertos(proc="/proc"):
+    """
+    Os arquivos já apagados do disco que um programa ainda segura abertos: no Linux não há lixeira, e o espaço de um
+    arquivo apagado volta ao disco na hora, a não ser que um programa ainda o tenha aberto (aí volta quando ele fecha).
+    Quantos são e quanto ocupam, por programa, sem o nome de nenhum arquivo. Só os do disco da pasta de casa (a
+    memória do sistema, como os "/memfd:", não conta) e só dos programas que este usuário pode ler.
+    """
+    disco = os.stat(os.path.expanduser("~")).st_dev
+    vistos, por_programa = set(), {}
+    for fd in glob.glob(os.path.join(proc, "[0-9]*", "fd", "*")):
+        try:
+            if not os.readlink(fd).endswith(" (deleted)"):
+                continue
+            st = os.stat(fd)
+        except OSError:
+            continue
+        if st.st_dev != disco or not stat.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) in vistos:
+            continue
+        vistos.add((st.st_dev, st.st_ino))
+        try:
+            with open(os.path.join(os.path.dirname(os.path.dirname(fd)), "comm")) as arquivo:
+                programa = arquivo.read().strip() or "?"
+        except OSError:
+            programa = "?"
+        qtd, soma = por_programa.get(programa, (0, 0))
+        por_programa[programa] = (qtd + 1, soma + st.st_size)
+    total = sum(soma for _qtd, soma in por_programa.values())
+    print(f"apagados ainda abertos no disco: {len(vistos)} arquivo(s), {tamanho_legivel(total)}")
+    for programa, (qtd, soma) in sorted(por_programa.items(), key=lambda x: -x[1][1]):
+        print(f"   {programa:24} {qtd:4} arquivo(s) {tamanho_legivel(soma):>9}")
+    livre = shutil.disk_usage(os.path.expanduser("~"))
+    print(f"disco: {livre.used / 2 ** 20:.0f} MB em uso, {livre.free / 2 ** 20:.0f} MB livre "
+          f"({100 * livre.used / livre.total:.1f}% em uso)")
 
 
 def _comando(*partes):
