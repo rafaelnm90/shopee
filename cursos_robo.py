@@ -558,7 +558,7 @@ def _no(no):
         return None
     return {"texto": no.get("text", ""), "descricao": no.get("content-desc", ""),
             "id": no.get("resource-id", "").split(":id/")[-1], "classe": no.get("class", "").rsplit(".", 1)[-1],
-            "caixa": (x1, y1, x2, y2), "clicavel": no.get("clickable") == "true"}
+            "caixa": (x1, y1, x2, y2), "clicavel": no.get("clickable") == "true", "foco": no.get("focused") == "true"}
 
 
 def _nos(xml):
@@ -681,7 +681,15 @@ SEM_VIDEO = "sem vídeo"
 SEM_O_CHROME = "o Chrome não veio para a frente"
 SEM_A_BARRA = "sem a barra de endereço do Chrome"
 SEM_A_ESCRITA = "o endereço não ficou escrito na barra"
+SEM_A_EDICAO = "a barra de endereço não ficou em edição"
 SEM_O_ENDERECO = "o endereço da aula não ficou na barra"
+# Depois do toque na barra, o Chrome abre a edição dela (o foco nela, com o teclado) em até ESPERA_DA_EDICAO s. Fora da
+# edição, o foco é da página, e as teclas iriam a ela: ao player, que tem teclas próprias (a do mudo, a de pular), ou a
+# um campo da página (a caixa de comentário da aula, que nunca é tocada). A edição sai pela tecla voltar, uma vez para o
+# teclado e outra para a edição (o teste de 25/11/2026, à 01:30), até VOLTAS_DA_EDICAO vezes e só com ela aberta: fora
+# dela, voltar volta a página.
+ESPERA_DA_EDICAO = 5
+VOLTAS_DA_EDICAO = 2
 SEM_O_PLAYER = "a página não mostrou o player"
 EM_BRANCO = "a página da aula ficou em branco"
 # Depois do Enter, a guia pode ficar sem nada da página, só com o quadro do Chrome, mesmo com o endereço da aula na
@@ -708,20 +716,48 @@ def trazer_o_chrome(d, pausa=None):
     (pausa or time.sleep)(ESPERA_DO_CHROME)
 
 
+def barra_em_edicao(xml):
+    """A barra de endereço do Chrome em edição (o foco nela, com o teclado): só nela o endereço pode ser escrito."""
+    return any(no["id"] == "url_bar" and no["foco"] for no in _nos(xml))
+
+
+def como_ficou_a_barra(texto, endereco):
+    """
+    O que a barra mostrava quando o endereço não ficou, só em números (o registro da noite é lido no checkup): as letras
+    dela, o começo igual ao do endereço e as letras dele.
+    """
+    atual, alvo = _sem_o_https(texto), _sem_o_https(endereco)
+    iguais = next((n for n, (a, b) in enumerate(zip(atual, alvo)) if a != b), min(len(atual), len(alvo)))
+    return f"a barra com {len(atual)} letras, igual nas primeiras {iguais} de {len(alvo)}"
+
+
+# Na noite de 25/11/2026, depois da 1ª aula, o endereço não ficou escrito na barra em 5 tentativas seguidas, com a barra
+# lida uma vez só, 1 s depois da escrita: a barra é lida de novo, de segundo em segundo, por até ESPERA_DA_ESCRITA s, e
+# o pedaço que o Chrome completa sozinho depois sai com a tecla de apagar à frente.
+ESPERA_DA_ESCRITA = 5
+
+
 def escrever_na_barra(d, endereco, pausa=None):
     """
-    O endereço escrito na barra de endereço do Chrome (já tocada, com o de antes marcado) tecla por tecla, pelo adb,
-    como num teclado. O texto posto pela acessibilidade, o jeito dos campos da Shopee, aparecia na barra, mas o Chrome
-    não o tomava como escrito, e o Enter abria outra página (a do Gemini, às 03:00, 03:15 e 03:30 de 23/11/2026). O
-    pedaço que o Chrome completa sozinho depois do escrito fica marcado e sai com a tecla de apagar à frente. True com
-    a barra mostrando o endereço.
+    O endereço escrito na barra de endereço do Chrome (já tocada e em edição) tecla por tecla, pelo adb, como num
+    teclado. O texto posto pela acessibilidade, o jeito dos campos da Shopee, aparecia na barra, mas o Chrome não o
+    tomava como escrito, e o Enter abria outra página (a do Gemini, às 03:00, 03:15 e 03:30 de 23/11/2026). O pedaço
+    que o Chrome completa sozinho depois do escrito fica marcado e sai com a tecla de apagar à frente. (True, "") com a
+    barra mostrando o endereço; (False, como_ficou_a_barra) sem ele.
     """
     pausa = pausa or time.sleep
     _saida(d, ["input", "text", endereco])
     pausa(1)
     _saida(d, ["input", "keyevent", "KEYCODE_FORWARD_DEL"])
-    pausa(1)
-    return _sem_o_https(texto_da_barra(d.dump_hierarchy())) == _sem_o_https(endereco)
+    texto = ""
+    for _ in range(ESPERA_DA_ESCRITA):
+        pausa(1)
+        texto = texto_da_barra(d.dump_hierarchy()) or ""
+        if _sem_o_https(texto) == _sem_o_https(endereco):
+            return True, ""
+        if _sem_o_https(texto).startswith(_sem_o_https(endereco)):
+            _saida(d, ["input", "keyevent", "KEYCODE_FORWARD_DEL"])
+    return False, como_ficou_a_barra(texto, endereco)
 
 
 def _tocando_ou_carregando(midia):
@@ -736,6 +772,16 @@ def pagina_em_branco(xml):
         return False
     pagina = next((no for no in raiz.iter("node") if no.get("class") == "android.webkit.WebView"), None)
     return pagina is None or len(_nos(ET.tostring(pagina, encoding="unicode"))) <= 1
+
+
+def sair_da_edicao(d, pausa):
+    """A barra de endereço fora da edição pela tecla voltar, só enquanto ela está em edição. True fora dela."""
+    for _ in range(VOLTAS_DA_EDICAO):
+        if not barra_em_edicao(d.dump_hierarchy()):
+            return True
+        d.press("back")
+        pausa(1)
+    return not barra_em_edicao(d.dump_hierarchy())
 
 
 def _sair_e_voltar_ao_chrome(d, pausa):
@@ -759,12 +805,27 @@ def _abrir_pela_barra(d, endereco, pausa):
     if not barra:
         return None, SEM_A_BARRA if app_da_frente(d) == PACOTE_DO_CHROME else SEM_O_CHROME, tela
     pausar_o_que_toca(d, pausa)
+    if barra_em_edicao(tela):
+        # A edição que ficou aberta (com o que já estava escrito) sai antes: o toque abre uma nova, vazia.
+        if not sair_da_edicao(d, pausa):
+            return None, SEM_A_EDICAO, tela
+        tela = d.dump_hierarchy()
+        barra = barra_na_tela(tela)
+        if not barra:
+            return None, SEM_A_BARRA, tela
     d.click(*_centro(barra["caixa"]))
-    pausa(1)
-    if not escrever_na_barra(d, endereco, pausa):
+    # Só com a barra em edição o endereço vai pelo adb (ESPERA_DA_EDICAO). Sem a edição, nada é escrito nem voltado.
+    for _ in range(ESPERA_DA_EDICAO):
+        pausa(1)
+        if barra_em_edicao(d.dump_hierarchy()):
+            break
+    else:
+        return None, SEM_A_EDICAO, tela
+    escrito, como_ficou = escrever_na_barra(d, endereco, pausa)
+    if not escrito:
         # Sem o Enter: a barra sai da edição, e a página de antes fica como estava.
-        d.press("back")
-        return None, SEM_A_ESCRITA, tela
+        sair_da_edicao(d, pausa)
+        return None, f"{SEM_A_ESCRITA} ({como_ficou})", tela
     _saida(d, ["input", "keyevent", "KEYCODE_ENTER"])
     tela, fora_da_frente = "", 0
     for volta in range(1, ESPERA_DA_PAGINA_EM_BRANCO // PASSO_DA_ESPERA + 1):
@@ -823,10 +884,15 @@ def ir_para_o_endereco(d, endereco, pausa=None, entrar=None):
     """
     pausa = pausa or time.sleep
     entrar = entrar or _entrar
-    logado = False
+    logado, porque = False, SEM_O_ENDERECO
     for _ in range(VEZES_NA_BARRA):
         tipo, porque, tela = _abrir_pela_barra(d, endereco, pausa)
-        if tipo or porque != SEM_O_ENDERECO:
+        if tipo:
+            return tipo, porque
+        if porque == SEM_A_EDICAO or porque.startswith(SEM_A_ESCRITA):
+            # A barra não abriu a edição ou não mostrou o endereço: com a página de antes como estava, de novo.
+            continue
+        if porque != SEM_O_ENDERECO:
             return tipo, porque
         if campos_do_login(tela):
             if logado or not entrar(d, pausa)[0]:
@@ -834,7 +900,7 @@ def ir_para_o_endereco(d, endereco, pausa=None, entrar=None):
             logado = True
         elif not _mesmo_site(texto_da_barra(tela), endereco):
             return None, SEM_O_ENDERECO
-    return None, SEM_O_ENDERECO
+    return None, porque
 
 
 # O "Próximo" do site troca a aula na mesma página, sem trocar o endereço da barra (o teste de 23/11/2026, às 10:49): a
@@ -1708,12 +1774,19 @@ def na_aula(d, posicao, numero, pausa):
 # página; na aula sem vídeo, o leitor do documento, o carrossel ou o nome dela. O arrasto nunca começa com o alto à
 # vista, porque no alto da página o Chrome o toma por "puxar para atualizar" e recarrega a página (o teste de
 # 23/11/2026, às 12:00): com o player à vista sem o play (o vídeo tocando), a subida para ali.
+# Tocada na lista a aula que já está aberta (a 1ª do curso, aberta antes pelo endereço), o site recarrega a página, que
+# volta sozinha ao alto (o teste de 25/11/2026, à 01:23): enquanto ela vem, o Chrome mostra a barra de andamento, e o
+# lugar do player ("video-player-container") chega antes do play. Na noite de 25/11/2026, cada arrasto no alto, com o
+# player ainda sem o play, recarregou a página de novo, e a subida acabou sem o alto. Com a página vindo, a subida
+# espera em vez de arrastar, e, na videoaula, o lugar do player inteiro na tela já é o alto.
 SUBIDA_DA_PAGINA = (540, 900, 540, 1400)
 VEZES_DA_SUBIDA = 16
 # O player ocupa a largura da tela, em 16:9: o play do meio fica a meia altura dele (1080 * 9 / 16 / 2).
 METADE_DO_PLAYER = 300
 TOPO_DA_PAGINA = 267
 SEM_O_ALTO = "o alto da aula não apareceu"
+ID_DO_LUGAR_DO_PLAYER = "video-player-container"
+IDS_DO_ANDAMENTO = ("toolbar_progress_bar", "progress_bar_animating_view")
 
 
 def _topo_da_pagina(tela):
@@ -1721,43 +1794,67 @@ def _topo_da_pagina(tela):
     return next((no["caixa"][1] for no in _nos(tela) if no["classe"] == "WebView"), TOPO_DA_PAGINA)
 
 
+def lugar_do_player_na_tela(tela):
+    """O lugar do player inteiro na tela, abaixo do alto da página, mesmo antes de o player chegar a ele?"""
+    topo = _topo_da_pagina(tela)
+    return any(no["id"] == ID_DO_LUGAR_DO_PLAYER and no["caixa"][1] >= topo and no["caixa"][3] <= BAIXO_DA_TELA
+               and no["caixa"][3] - no["caixa"][1] >= 2 * METADE_DO_PLAYER - 20 for no in _nos(tela))
+
+
+def pagina_vindo(tela):
+    """A página ainda vem: a barra de andamento do Chrome no alto ou a guia sem nada da página (pagina_em_branco)."""
+    return any(no["id"] in IDS_DO_ANDAMENTO for no in _nos(tela)) or pagina_em_branco(tela)
+
+
 def alto_da_aula(tela, nome="", com_video=True):
     """
     O alto da página da aula está à vista? Com o play do player, só com o player inteiro na tela; sem o play, o player
-    (o vídeo tocando: dali a subida não passa), o leitor do documento, o carrossel ou, na aula sem vídeo, o nome dela.
+    (o vídeo tocando: dali a subida não passa), o leitor do documento, o carrossel, na videoaula o lugar do player
+    inteiro na tela ou, na aula sem vídeo, o nome dela.
     """
     play = botao_do_play(tela)
     if play:
         return play[1] - METADE_DO_PLAYER >= _topo_da_pagina(tela)
     if tem_player(tela) or botao_de_baixar(tela) or carrossel_na_tela(tela)[0]:
         return True
-    return not com_video and bool(nome) and any(" ".join(no["texto"].split()) == nome for no in _nos_da_aula(tela))
+    if com_video:
+        return lugar_do_player_na_tela(tela)
+    return bool(nome) and any(" ".join(no["texto"].split()) == nome for no in _nos_da_aula(tela))
 
 
 def subir_ate_o_alto(d, aula, pausa):
-    """A página da aula aberta pela lista (aula: a da lista) de volta ao alto (alto_da_aula). True com ele à vista."""
+    """
+    A página da aula aberta pela lista (aula: a da lista) de volta ao alto (alto_da_aula). True com ele à vista. Com a
+    página vindo (pagina_vindo), a subida espera, sem arrasto.
+    """
     com_video = bool(aula.get("segundos"))
     for _ in range(VEZES_DA_SUBIDA):
         tela = _fechar_a_folha_do_chrome(d, pausa)
         if alto_da_aula(tela, aula["nome"], com_video):
             return True
+        if pagina_vindo(tela):
+            pausa(PASSO_DA_ESPERA)
+            continue
         d.swipe(*SUBIDA_DA_PAGINA, 0.3)
         pausa(ESPERA_DA_ROLAGEM)
     return alto_da_aula(d.dump_hierarchy(), aula["nome"], com_video)
 
 
-def _tipo_no_alto(d, pausa):
+def _tipo_no_alto(d, pausa, com_video=False):
     """
     O tipo da aula aberta pela lista, com a página no alto: (COM_VIDEO, "") com o play à vista ou o vídeo tocando; sem
-    player nenhum, nem depois de mais um tempo, (SEM_VIDEO, ""); o player sem o play, (None, o porquê).
+    player nenhum, nem depois de mais um tempo, (SEM_VIDEO, ""); o player sem o play, (None, o porquê). Na videoaula
+    (com_video: a da lista com a duração), o play é esperado por até ESPERA_DO_PLAY s, e ela nunca é tomada por uma
+    aula sem vídeo: sem ele, (None, o porquê).
     """
+    espera = ESPERA_DO_PLAY if com_video else ESPERA_SEM_O_PLAYER
     tela = d.dump_hierarchy()
-    for _ in range(ESPERA_SEM_O_PLAYER // PASSO_DA_ESPERA + 1):
+    for _ in range(espera // PASSO_DA_ESPERA + 1):
         if botao_do_play(tela) or _tocando_ou_carregando(midia_do_chrome(d)):
             return COM_VIDEO, ""
         pausa(PASSO_DA_ESPERA)
         tela = d.dump_hierarchy()
-    if tem_player(tela):
+    if com_video or tem_player(tela):
         return None, f"{SEM_O_PLAYER}; {descrever_a_midia(midia_do_chrome(d))}"
     return SEM_VIDEO, ""
 
@@ -1781,7 +1878,7 @@ def abrir_a_aula_da_vez(d, posicao, numero, pausa, vigiar=None):
         pausar_o_que_toca(d, pausa)
         if not subir_ate_o_alto(d, aula, pausa):
             return None, SEM_O_ALTO
-        return _tipo_no_alto(d, pausa)
+        return _tipo_no_alto(d, pausa, com_video=bool(aula.get("segundos")))
     tela, _ponto = proximo_na_tela(d, pausa)
     if nome_no_proximo(tela) != aula["nome"]:
         return None, OUTRA_PAGINA

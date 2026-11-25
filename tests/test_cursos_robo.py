@@ -1062,6 +1062,11 @@ class SiteDoCurso(CelularDoVolume):
     do download do Chrome fica nela. texto_na_videoaula: a página da videoaula tem, embaixo do vídeo, um texto e um
     link. volumes_das_telas: o volume de mídia em cada print da tela. A aula de tipo "slides" é um carrossel de
     imagens (slides: quantas), com o Anterior e o Próximo dele; carrossel_volta: o Próximo do último volta ao 1º.
+    A barra tocada entra em edição (o foco nela, com o teclado, como no Chrome de 25/11/2026): edicao_lenta, depois de
+    quantas leituras da tela; abre_a_edicao=False, nunca. Fora da edição, o que vai pelo adb chega à página
+    (na_pagina). Tocada já em edição, a barra fica com o que estava escrito, e a escrita vai depois dele; edicao_aberta:
+    a barra começa em edição, com esse texto. escrita_lenta: em quantas leituras da tela a barra mostra só a metade do
+    escrito. A tecla voltar tira o teclado, depois a edição e, fora dela, volta a página (voltas_da_pagina).
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
@@ -1069,8 +1074,10 @@ class SiteDoCurso(CelularDoVolume):
                  barra_escondida=False, rolagem_funciona=True, sessao_vencida=False, inicio_na_guia_nova=False,
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
                  texto_na_videoaula=False, slides=4, carrossel_volta=False, em_branco=0, branco_ate_voltar=False,
-                 **opcoes):
+                 edicao_lenta=0, abre_a_edicao=True, edicao_aberta=None, escrita_lenta=0, **opcoes):
         super().__init__(**opcoes)
+        self.edicao_lenta, self.abre_a_edicao, self.escrita_lenta = edicao_lenta, abre_a_edicao, escrita_lenta
+        self.abrindo, self.faltam_letras, self.na_pagina, self.voltas_da_pagina = 0, 0, [], 0
         # A guia em branco depois do Enter (24/11/2026): em_branco leituras da tela sem nada da página, ou, com
         # branco_ate_voltar, até o Chrome sair da frente e voltar.
         self.em_branco, self.branco_ate_voltar, self.brancos, self.preso = em_branco, branco_ate_voltar, 0, False
@@ -1082,7 +1089,8 @@ class SiteDoCurso(CelularDoVolume):
         self.rolagens = []
         self.aulas, self.aberta, self.no_alto, self.play_toca = aulas, aberta, no_alto, play_toca
         self.endereco_na_barra = aulas[aberta][2]
-        self.escrito, self.barra_em_foco, self.toques = None, False, []
+        self.escrito, self.barra_em_foco, self.toques = edicao_aberta, edicao_aberta is not None, []
+        self.teclado = self.barra_em_foco
         self.na_frente, self.abre_o_chrome, self.abertos = na_frente, abre_o_chrome, []
         self.autoplay, self.escreve, self.completa, self.rotulo_no_texto = autoplay, escreve, completa, rotulo_no_texto
         self.aberturas, self.gravando, self.teclas = [], False, []
@@ -1180,6 +1188,10 @@ class SiteDoCurso(CelularDoVolume):
         if self.na_frente != CHROME:
             return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="true" '
                     'text="Eu" content-desc="" bounds="[880,2250][1080,2394]" /></hierarchy>')
+        if self.abrindo:
+            self.abrindo -= 1
+            if not self.abrindo:
+                self.barra_em_foco, self.teclado, self.escrito = True, True, None
         if self.nova_guia and not self.barra_em_foco:
             return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
                     'resource-id="com.android.chrome:id/search_box_text" clickable="true" text="" content-desc="" '
@@ -1199,9 +1211,13 @@ class SiteDoCurso(CelularDoVolume):
                     'clickable="false" text="" content-desc="Guia" bounds="[0,267][1080,2394]" /></hierarchy>')
         if self.barra_em_foco and self.escrito is not None:
             barra = self.escrito
+            if self.faltam_letras:
+                self.faltam_letras -= 1
+                barra = self.escrito[:len(self.escrito) // 2]
+        foco = "true" if self.barra_em_foco else "false"
         fora = [] if self.barra_escondida and not self.barra_em_foco else [
             '<node class="android.widget.EditText" resource-id="com.android.chrome:id/url_bar" clickable="true" '
-            f'text="{barra}" content-desc="" bounds="[211,120][691,267]" />']
+            f'focused="{foco}" text="{barra}" content-desc="" bounds="[211,120][691,267]" />']
         nos = self._player() if self.no_alto else []
         abas = "[60,1466][336,1658]"
         if not self._com_video(self.aberta):
@@ -1255,12 +1271,20 @@ class SiteDoCurso(CelularDoVolume):
         self.sem_o_proximo = self.atraso_do_proximo
         self.midia = _sessao_do_chrome(3, 0) if self.autoplay and self._com_video(numero) else SEM_SESSOES
 
+    def _tocar_na_barra(self):
+        if self.barra_em_foco or not self.abre_a_edicao:
+            return
+        if self.edicao_lenta:
+            self.abrindo = self.edicao_lenta
+            return
+        self.barra_em_foco, self.teclado, self.escrito = True, True, None
+
     def click(self, x, y):
         self.toques.append((x, y))
         if self.nova_guia and 100 <= x <= 840 and 540 <= y <= 626 and not self.barra_em_foco:
-            self.barra_em_foco, self.escrito = True, None
-        elif 211 <= x <= 691 and 120 <= y <= 267 and not self.barra_escondida:
-            self.barra_em_foco, self.escrito = True, None
+            self._tocar_na_barra()
+        elif 211 <= x <= 691 and 120 <= y <= 267 and (not self.barra_escondida or self.barra_em_foco):
+            self._tocar_na_barra()
         elif (x, y) == (539, 793) and self.no_alto and self.play_toca and self._com_video(self.aberta):
             self.midia = _sessao_do_chrome(3, 1)
         elif (x, y) == (632, 1472) and self._tipo(self.aberta) == "documento" and self.baixa:
@@ -1281,10 +1305,14 @@ class SiteDoCurso(CelularDoVolume):
 
     def press(self, tecla):
         self.teclas.append(tecla)
-        if tecla == "back":
+        if tecla == "back" and self.barra_em_foco and self.teclado:
+            self.teclado = False
+        elif tecla == "back" and self.barra_em_foco:
             self.barra_em_foco = False
+        elif tecla == "back":
+            self.voltas_da_pagina += 1
         if tecla == "home":
-            self.na_frente, self.barra_em_foco = "com.android.launcher", False
+            self.na_frente, self.barra_em_foco, self.teclado = "com.android.launcher", False, False
 
     def pull(self, remoto, local):
         self.puxados.append(remoto)
@@ -1293,8 +1321,11 @@ class SiteDoCurso(CelularDoVolume):
 
     def shell(self, partes):
         import types
-        if partes[:2] == ["input", "text"] and self.barra_em_foco and self.escreve:
-            self.escrito = partes[2] + self.completa
+        if partes[:2] == ["input", "text"] and not self.barra_em_foco:
+            self.na_pagina.append(partes[2])
+        elif partes[:2] == ["input", "text"] and self.escreve:
+            self.escrito = (self.escrito or "") + partes[2] + self.completa
+            self.faltam_letras = self.escrita_lenta
         if partes == ["input", "keyevent", "KEYCODE_FORWARD_DEL"]:
             if self.barra_em_foco and self.completa and (self.escrito or "").endswith(self.completa):
                 self.escrito = self.escrito[:-len(self.completa)]
@@ -1381,12 +1412,39 @@ def test_o_endereco_vai_a_barra_como_num_teclado_e_o_enter_so_com_ele_la():
     completado = SiteDoCurso(AULAS_DO_SITE, completa="-outra")
     assert cursos_robo.ir_para_o_endereco(completado, endereco, **SEM_ESPERA) == ("com vídeo", "")
     assert completado.aberta == 1
-    # O que não chega à barra: sem o Enter, a barra sai da edição, e a página de antes fica como estava.
+    # O que não chega à barra: sem o Enter, a barra sai da edição (o voltar tira o teclado e depois a edição, sem
+    # voltar a página), e a página de antes fica como estava; o porquê leva o que a barra mostrava, só em números.
     surdo = SiteDoCurso(AULAS_DO_SITE, escreve=False)
     assert cursos_robo.ir_para_o_endereco(surdo, endereco, **SEM_ESPERA) == (
-        None, "o endereço não ficou escrito na barra")
-    assert ["input", "keyevent", "KEYCODE_ENTER"] not in surdo.comandos and surdo.teclas == ["back"]
-    assert surdo.aberta == 0
+        None, "o endereço não ficou escrito na barra (a barra com 35 letras, igual nas primeiras 29 de 35)")
+    assert ["input", "keyevent", "KEYCODE_ENTER"] not in surdo.comandos
+    assert surdo.teclas == ["back", "back"] * cursos_robo.VEZES_NA_BARRA and surdo.voltas_da_pagina == 0
+    assert surdo.aberta == 0 and not surdo.barra_em_foco
+
+
+def test_o_endereco_so_vai_a_barra_em_edicao_e_a_escrita_lenta_e_esperada():
+    # Na noite de 25/11/2026, depois da 1ª aula, o endereço não ficou escrito na barra em 5 tentativas seguidas: o
+    # toque na barra pode demorar a abrir a edição, e as teclas iam à página (ao player, que tem teclas próprias). O
+    # endereço só vai com a barra em edição (o foco nela), conferida depois do toque.
+    endereco = AULAS_DO_SITE[1][2]
+    lenta = SiteDoCurso(AULAS_DO_SITE, edicao_lenta=2)
+    assert cursos_robo.ir_para_o_endereco(lenta, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    assert lenta.na_pagina == [] and lenta.aberta == 1
+    # A barra que nunca entra em edição: nada é escrito nem voltado, e o toque é tentado de novo.
+    nunca = SiteDoCurso(AULAS_DO_SITE, abre_a_edicao=False)
+    assert cursos_robo.ir_para_o_endereco(nunca, endereco, **SEM_ESPERA) == (None, cursos_robo.SEM_A_EDICAO)
+    assert not any(comando[:2] == ["input", "text"] for comando in nunca.comandos) and nunca.na_pagina == []
+    assert nunca.teclas == [] and len(nunca.toques) == cursos_robo.VEZES_NA_BARRA and nunca.aberta == 0
+    # A edição que ficou aberta, com o que já estava escrito: ela sai antes, e o toque abre uma nova, vazia.
+    aberta = SiteDoCurso(AULAS_DO_SITE, edicao_aberta="escola.exemplo.pro/m/les")
+    assert cursos_robo.ir_para_o_endereco(aberta, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    assert aberta.teclas == ["back", "back"] and aberta.voltas_da_pagina == 0 and aberta.aberta == 1
+    # A barra que demora a mostrar o escrito é lida de novo antes do Enter.
+    devagar = SiteDoCurso(AULAS_DO_SITE, escrita_lenta=3)
+    assert cursos_robo.ir_para_o_endereco(devagar, endereco, **SEM_ESPERA) == ("com vídeo", "")
+    assert len(devagar.toques) == 1 and devagar.aberta == 1
+    assert cursos_robo.como_ficou_a_barra("escola.exemplo.pro/m/les", endereco) == (
+        "a barra com 24 letras, igual nas primeiras 24 de 35")
 
 
 def test_a_aula_abre_pela_caixa_da_nova_guia_e_com_a_barra_escondida():
@@ -2463,14 +2521,17 @@ class CursoComLista(SiteDoCurso):
     recarrega o endereço da barra (recarregadas). Rolada, a tela mostra a lista: o botão de cada módulo ("N% Nome")
     abre e fecha as aulas dele embaixo, e o módulo da aula aberta fica aberto; o toque no nome de uma aula a abre sem
     mudar a rolagem (a página fica na lista; tocadas), e o Próximo e o Enter abrem a aula do alto. passa_no_fim: no fim
-    do vídeo (fim_do_video), o site abre sozinho a aula seguinte, do alto, e o vídeo dela começa.
+    do vídeo (fim_do_video), o site abre sozinho a aula seguinte, do alto, e o vídeo dela começa. recarga_no_toque: o
+    toque na lista recarrega a página, do alto (a noite de 25/11/2026), e em tantas leituras da tela ela vem sem o
+    player, só com o lugar dele, as abas e o Próximo; o "puxar para atualizar" a recarrega do mesmo jeito.
     """
     COMECO, TOPO, ALTURA = 2300, 267, 2127
 
-    def __init__(self, aulas, modulos=None, passa_no_fim=False, **opcoes):
+    def __init__(self, aulas, modulos=None, passa_no_fim=False, recarga_no_toque=0, **opcoes):
         super().__init__(aulas, **opcoes)
         self.modulos = modulos or [("Módulo único", len(aulas))]
         self.rolagem, self.recarregadas, self.tocadas, self.passa_no_fim = 0, 0, [], passa_no_fim
+        self.recarga_no_toque, self.carregando = recarga_no_toque, 0
         self.modulos_abertos = {self._modulo_de(self.aberta)}
 
     def _modulo_de(self, numero):
@@ -2512,9 +2573,30 @@ class CursoComLista(SiteDoCurso):
     def _na_tela(self, y1, y2):
         return max(y1 - self.rolagem + self.TOPO, self.TOPO), min(y2 - self.rolagem + self.TOPO, 2394)
 
+    def _vindo(self):
+        """A página recarregada, ainda sem o player: o lugar dele, as abas e o Próximo (o teste de 25/11, à 01:24)."""
+        self.carregando -= 1
+        nos = ['<node class="android.view.View" resource-id="video-player-container" clickable="false" text="" '
+               'content-desc="" bounds="[0,487][1080,1096]" />',
+               '<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
+               'text="Módulos" content-desc="" bounds="[60,1466][336,1658]" />']
+        if self.aberta + 1 < len(self.aulas):
+            nos.append('<node class="android.widget.Button" resource-id="" clickable="true" content-desc="" '
+                       f'text="Próximo: {self.aulas[self.aberta + 1][0]} Próxima aula:" '
+                       'bounds="[0,2175][1080,2394]" />')
+        return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
+                'resource-id="com.android.chrome:id/url_bar" clickable="true" focused="false" '
+                f'text="{self.endereco_na_barra.removeprefix("https://")}" content-desc="" '
+                'bounds="[211,120][691,267]" /><node class="android.webkit.WebView" resource-id="" text="" '
+                'content-desc="" bounds="[0,267][1080,2394]">' + "".join(nos) + "</node></hierarchy>")
+
     def dump_hierarchy(self):
         tela = super().dump_hierarchy()
-        if not self.rolagem or self.na_frente != CHROME or self.pagina or self.nova_guia or self.barra_em_foco:
+        if self.na_frente != CHROME or self.pagina or self.nova_guia or self.barra_em_foco:
+            return tela
+        if self.carregando and not self.rolagem:
+            return self._vindo()
+        if not self.rolagem:
             return tela
         itens, fim = self._itens()
         botoes = []
@@ -2547,6 +2629,7 @@ class CursoComLista(SiteDoCurso):
             # No alto da página, o arrasto para baixo é o "puxar para atualizar": ela recarrega o endereço da barra.
             self.recarregadas += 1
             self._abrir(next(n for n, aula in enumerate(self.aulas) if aula[2] == self.endereco_na_barra))
+            self.carregando = self.recarga_no_toque
             return
         _itens, fim = self._itens()
         self.rolagem = max(0, min(fim - self.ALTURA, self.rolagem + y1 - y2))
@@ -2563,7 +2646,8 @@ class CursoComLista(SiteDoCurso):
                 if tipo == "aula":
                     self.tocadas.append(chave)
                     self.aberturas.append((self.volume, self.gravando))
-                    self._abrir(chave, do_alto=False)
+                    self._abrir(chave, do_alto=bool(self.recarga_no_toque))
+                    self.carregando = self.recarga_no_toque
                 else:
                     self.modulos_abertos ^= {chave}
                 return
@@ -3036,6 +3120,79 @@ def test_a_pagina_sobe_ate_o_player_inteiro_sem_recarregar(bm):
               '<node class="android.widget.TextView" text="Dia 01" bounds="[42,500][1000,560]" /></node></hierarchy>')
     assert cursos_robo.alto_da_aula(titulo, "Dia 01", com_video=False)
     assert not cursos_robo.alto_da_aula(titulo, "Dia 01", com_video=True)
+
+
+class TelasEmSequencia:
+    """O celular de mentira que mostra as telas em sequência (a última fica) e anota os arrastos."""
+
+    def __init__(self, telas):
+        self.telas, self.rolagens = list(telas), []
+
+    def dump_hierarchy(self):
+        return self.telas.pop(0) if len(self.telas) > 1 else self.telas[0]
+
+    def swipe(self, *arrasto):
+        self.rolagens.append(arrasto[:4])
+
+    def press(self, tecla):
+        pass
+
+    def shell(self, partes):
+        import types
+        return types.SimpleNamespace(output="", exit_code=0)
+
+
+def _pagina(*nos, andamento=False):
+    """A tela do Chrome com a página (os nós dela) e, com andamento, a barra de andamento no alto."""
+    barra = ('<node class="android.widget.ProgressBar" resource-id="com.android.chrome:id/toolbar_progress_bar" '
+             'bounds="[0,268][1080,273]" />') if andamento else ""
+    return ('<hierarchy rotation="0">' + barra + '<node class="android.webkit.WebView" bounds="[0,267][1080,2394]">'
+            + "".join(nos) + "</node></hierarchy>")
+
+
+LUGAR_DO_PLAYER = ('<node class="android.view.View" resource-id="video-player-container" '
+                   'bounds="[0,487][1080,1096]" />')
+PLAY_DO_MEIO = ('<node class="android.widget.ToggleButton" clickable="true" text="" content-desc="Tocar vídeo" '
+                'bounds="[475,729][603,857]" />')
+ABA_MODULOS = ('<node class="android.view.View" resource-id="radix-_r_m_-trigger-modules" clickable="true" '
+               'text="Módulos" bounds="[60,1466][336,1658]" />')
+
+
+def test_a_pagina_recarregada_no_alto_com_o_lugar_do_player_nao_e_arrastada():
+    # Noite de 25/11/2026: tocada na lista, a 1ª aula do curso (já aberta pelo endereço) recarregou a página, que voltou
+    # sozinha ao alto com o lugar do player antes do play; a subida arrastava a página no alto, o Chrome a recarregava
+    # de novo, e a aula não abriu (o alto da aula não apareceu). Na videoaula, o lugar do player inteiro já é o alto, e,
+    # com a página vindo (a barra de andamento ou a guia sem nada), a subida espera, sem arrastar.
+    aula = {"nome": "Aula um", "segundos": 300}
+    assert cursos_robo.alto_da_aula(_pagina(LUGAR_DO_PLAYER, ABA_MODULOS), "Aula um")
+    assert not cursos_robo.alto_da_aula(_pagina(LUGAR_DO_PLAYER, ABA_MODULOS), "Aula um", com_video=False)
+    cortado = LUGAR_DO_PLAYER.replace("[0,487][1080,1096]", "[0,120][1080,729]")
+    assert not cursos_robo.alto_da_aula(_pagina(cortado, ABA_MODULOS), "Aula um")
+    pequeno = LUGAR_DO_PLAYER.replace("[0,487][1080,1096]", "[0,487][1080,700]")
+    assert not cursos_robo.alto_da_aula(_pagina(pequeno, ABA_MODULOS), "Aula um")
+    vindo = TelasEmSequencia([_pagina(andamento=True), _pagina(ABA_MODULOS, andamento=True),
+                              _pagina(PLAY_DO_MEIO, LUGAR_DO_PLAYER, ABA_MODULOS)])
+    assert cursos_robo.subir_ate_o_alto(vindo, aula, lambda s: None) and vindo.rolagens == []
+    # Na videoaula, o play que ainda não chegou ao lugar do player é esperado, e a página nunca passa por uma aula sem
+    # vídeo.
+    sem_play = TelasEmSequencia([_pagina(LUGAR_DO_PLAYER, ABA_MODULOS)])
+    assert cursos_robo._tipo_no_alto(sem_play, lambda s: None, com_video=True) == (
+        None, "a página não mostrou o player; sem vídeo no Chrome")
+    assert cursos_robo._tipo_no_alto(sem_play, lambda s: None) == (cursos_robo.SEM_VIDEO, "")
+    chega = TelasEmSequencia([_pagina(LUGAR_DO_PLAYER, ABA_MODULOS)] * 8
+                             + [_pagina(PLAY_DO_MEIO, LUGAR_DO_PLAYER, ABA_MODULOS)])
+    assert cursos_robo._tipo_no_alto(chega, lambda s: None, com_video=True) == (cursos_robo.COM_VIDEO, "")
+
+
+def test_a_1a_aula_que_recarrega_ao_ser_tocada_na_lista_e_gravada(noite_do_curso):
+    # A noite de 25/11/2026 com a página que recarrega do alto ao toque na 1ª aula da lista: ela é gravada, e nenhum
+    # arrasto no alto recarrega a página de novo.
+    _lista_no_mapa(4)
+    site = _curso_da_noite(recarga_no_toque=4)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s)")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
+    assert site.tocadas == [0] and site.recarregadas == 0
 
 
 @pytest.fixture
