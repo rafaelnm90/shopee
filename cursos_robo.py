@@ -1774,11 +1774,12 @@ def na_aula(d, posicao, numero, pausa):
 # página; na aula sem vídeo, o leitor do documento, o carrossel ou o nome dela. O arrasto nunca começa com o alto à
 # vista, porque no alto da página o Chrome o toma por "puxar para atualizar" e recarrega a página (o teste de
 # 23/11/2026, às 12:00): com o player à vista sem o play (o vídeo tocando), a subida para ali.
-# Tocada na lista a aula que já está aberta (a 1ª do curso, aberta antes pelo endereço), o site recarrega a página, que
-# volta sozinha ao alto (o teste de 25/11/2026, à 01:23): enquanto ela vem, o Chrome mostra a barra de andamento, e o
-# lugar do player ("video-player-container") chega antes do play. Na noite de 25/11/2026, cada arrasto no alto, com o
-# player ainda sem o play, recarregou a página de novo, e a subida acabou sem o alto. Com a página vindo, a subida
-# espera em vez de arrastar, e, na videoaula, o lugar do player inteiro na tela já é o alto.
+# A 1ª aula do curso, tocada na lista da aula em que o site parou (a que o endereço guardado abre), abre do alto da
+# página, e o lugar do player ("video-player-container") chega antes do play (os testes de 25/11/2026, à 01:23 e às
+# 04:08). O arrasto no alto recarrega o endereço da barra, que volta à aula em que o site parou, e não à tocada: na
+# noite de 25/11/2026, cada arrasto no alto, com o player ainda sem o play, voltou a ela, com o player em branco, e a
+# subida acabou sem o alto. Com a página vindo (a barra de andamento do Chrome), a subida espera em vez de arrastar, e,
+# na videoaula, o lugar do player inteiro na tela já é o alto.
 SUBIDA_DA_PAGINA = (540, 900, 540, 1400)
 VEZES_DA_SUBIDA = 16
 # O player ocupa a largura da tela, em 16:9: o play do meio fica a meia altura dele (1080 * 9 / 16 / 2).
