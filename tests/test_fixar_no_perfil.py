@@ -74,6 +74,11 @@ def _desenho(semente, tamanho=105):
     return pequeno.resize((tamanho, tamanho), Image.NEAREST).convert("RGB")
 
 
+def _capa_na_grade(video):
+    """A capa do vídeo no quadro da grade do Perfil (358 x 476): outra imagem, e não a capa pequena das Notificações."""
+    return _desenho(f"capa {video}").resize((358, 476), Image.NEAREST)
+
+
 def _notificacoes(*linhas):
     return _xml(*CHIPS, *[no for i, (texto, hora, direita) in enumerate(linhas)
                           for no in _linha(texto, hora, PRIMEIRA_LINHA + ALTURA_DA_LINHA * i, direita)], *BARRA)
@@ -237,15 +242,17 @@ class CelularDasCurtidas:
     da 1ª vez que ele abre. folha_atrasada: a folha do vídeo aberto pelas Notificações mostra o Fixar no vídeo já
     fixado até o app carregar o Perfil ("perfil"; Motorola, 25/11/2026, às 08:03) ou até um Desfixar ("desfixar").
     sem_legenda: de onde ("lista", as Notificações, ou "perfil", a grade) o vídeo aberto mostra o player sem a legenda.
+    capas: o print da grade mostra a capa de cada vídeo (sem elas, as capas não carregaram, e o robô não tem a marca
+    delas).
     """
 
     def __init__(self, curtidas, fixados=("T1", "T2", "T3"), no_coracao=None, some_depois=None, limite=3,
-                 rotulos=DO_RAFAEL, folha_atrasada=None, sem_legenda=()):
+                 rotulos=DO_RAFAEL, folha_atrasada=None, sem_legenda=(), capas=False):
         self.curtidas, self.fixados, self.rotulos = list(curtidas), list(fixados), rotulos
         self.no_coracao = no_coracao or {}
         self.some_depois, self.limite = some_depois, limite
         self.folha_atrasada, self.perfil_visto, self.desfixou = folha_atrasada, False, False
-        self.sem_legenda = sem_legenda
+        self.sem_legenda, self.capas = sem_legenda, capas
         self.atual, self.aberto, self.de_onde, self.inicio_da_lista = "inicio", None, None, 0
         self.clipboard, self.toques, self.abertos = "https://s.shopee.com.br/linkAntigo", [], []
 
@@ -299,6 +306,10 @@ class CelularDasCurtidas:
                     imagem.paste(_desenho(video), (944, y))
                 else:
                     imagem.paste(_desenho(video), (32, y))
+        if self.atual == "perfil" and self.capas:
+            for i, (video, _fixado) in enumerate(self._grade()[1][:6]):
+                if video != "rascunhos":
+                    imagem.paste(_capa_na_grade(video), (361 * (i % 3), 1205 + 478 * (i // 3)))
         return imagem
 
     # Os toques
@@ -840,3 +851,126 @@ def test_rodada_das_respostas_fixa_depois_de_responder(monkeypatch):
     resultado = robo._agir(object(), "responder", None, False, dict(robo.PADRAO), AGORA)
     assert resultado == "respostas: ok; fixar no perfil: x"
     assert feitos == ["respostas", "fixar"]
+
+
+# --- O fixado que sai na troca: o que esfriou (P300 1) ---
+
+# Três capas da grade bem diferentes (32 bits ou mais entre elas).
+MARCAS = ("f0f0f0f0f0f0f0f0", "0f0f0f0f0f0f0f0f", "ff00ff00ff00ff00")
+
+
+def _fixados(*vistas):
+    """Os quadros dos fixados na grade, com as visualizações de cada um (None: o número não aparece)."""
+    return [{"caixa": (361 * i, 1205, 361 * i + 358, 1681), "fixado": True, "vistas": v} for i, v in enumerate(vistas)]
+
+
+def _notas(*anotacoes):
+    """As anotações dos fixados, gravadas como o robô as guarda: (marca, vistas, quando)."""
+    robo.db.salvar_config(robo.CHAVE_DOS_FIXADOS, {"notas": [
+        {"marca": marca, "vistas": vistas, "em": robo._momento(quando)} for marca, vistas, quando in anotacoes]})
+
+
+def test_sai_o_fixado_que_menos_cresceu_e_nao_o_de_menos_visualizacoes(avisos, comentarios, monkeypatch):
+    # Resposta do Rafael (25/11/2026, P300 1, com 30 dias): sai o fixado que ganhou menos visualizações por dia, e não o
+    # de menos visualizações, que pode ser um vídeo novo começando a crescer (aqui, o T2: 1,2 mil, mas 100 por dia).
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], capas=True)
+    # Dez dias antes, a leitura da grade anotou os 3 fixados.
+    for video, antes in (("T1", "235,0mil"), ("T2", "200"), ("T3", "250,0mil")):
+        monkeypatch.setitem(VISTAS, video, antes)
+    robo.anotar_os_fixados(app, AGORA - timedelta(days=10))
+    for video, agora in (("T1", "235,2mil"), ("T2", "1,2 mil"), ("T3", "263,8mil")):
+        monkeypatch.setitem(VISTAS, video, agora)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado que menos cresceu pelo vídeo "
+                                                     "que viraliza; comentei nele")
+    # O T1 ganhou 200 em 10 dias (20 por dia), o T2 1.000 (100 por dia) e o T3 13.800 (1.380 por dia).
+    assert app.fixados == ["A", "T2", "T3"]
+    assert app.abertos == ["A", "T1", "T2", "T3", "T1", "A"]
+    assert avisos[0] == ("📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que está viralizando (10 curtidas nas "
+                         "últimas 24 h, nas Notificações).\n\n📌 Fixado agora: https://s.shopee.com.br/A\n📤 Saiu dos "
+                         "fixados (o que menos cresceu: 20 visualizações por dia em 10 dias; 235.200 no total): "
+                         "https://s.shopee.com.br/T1")
+    assert _registro() == [("desfixado", "o que menos cresceu"), ("trocado", "no lugar do fixado que menos cresceu")]
+    # O A, que entrou, começa a contar o dia dele logo depois do Fixar, e o T1, que saiu, perde as anotações: fixado de
+    # novo, ele conta do zero, como o recém-fixado.
+    notas = robo._notas_dos_fixados(AGORA)
+    assert [n["vistas"] for n in notas] == [200, 250000, 1200, 263800, 240100]
+    assert [n["em"] == robo._momento(AGORA) for n in notas] == [False, False, True, True, True]
+    marca_do_t1 = vz.marca_da_capa(_capa_na_grade("T1"), (0, 0, 358, 476))
+    assert not any(vz.diferenca(n["marca"], marca_do_t1) <= vz.MARCA_PARECIDA for n in notas)
+    assert [r for r, _d in _registro(robo.PROCESSO_DOS_FIXADOS)] == ["anotados"] * 3
+
+
+def test_o_recem_fixado_fica_e_sai_o_que_menos_cresceu_entre_os_outros():
+    # P300 1: o fixado com menos de 1 dia de anotação (o recém-fixado) não sai, mesmo com menos visualizações; entre
+    # os outros, sai o que ganhou menos por dia (o 2º: 300 em 10 dias), e não o de menos visualizações (o 1º).
+    dez_dias = AGORA - timedelta(days=10)
+    _notas((MARCAS[0], 230000, dez_dias), (MARCAS[1], 263500, dez_dias), (MARCAS[2], 900, AGORA - timedelta(hours=5)))
+    fixados = _fixados(235200, 263800, 1000)
+    alvo, ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA)
+    assert alvo is fixados[1] and ritmo == {"ritmo": 30, "dias": 10} and porque == "o que menos cresceu"
+
+
+def test_so_contam_as_anotacoes_dos_ultimos_30_dias():
+    # Resposta do Rafael (25/11/2026): o crescimento dos últimos 30 dias. Com as anotações de 40 dias atrás, sairia o 2º
+    # (800 em 40 dias); nos 30 dias, quem menos cresceu foi o 1º (100 em 2 dias).
+    quarenta, dois = AGORA - timedelta(days=40), AGORA - timedelta(days=2)
+    _notas((MARCAS[0], 0, quarenta), (MARCAS[1], 263000, quarenta), (MARCAS[2], 200000, quarenta),
+           (MARCAS[0], 235100, dois), (MARCAS[1], 263000, dois), (MARCAS[2], 263500, dois))
+    fixados = _fixados(235200, 263800, 263800)
+    alvo, ritmo, _porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA)
+    assert alvo is fixados[0] and ritmo == {"ritmo": 50, "dias": 2}
+
+
+def test_no_empate_sai_o_de_menos_curtidas_no_coracao():
+    # P300 1: as curtidas desempatam (as do coração de cada fixado, lidas quando o robô os abre para conferir).
+    cinco_dias = AGORA - timedelta(days=5)
+    _notas(*[(marca, vistas, cinco_dias) for marca, vistas in zip(MARCAS, (235200, 263800, 50000))])
+    fixados = _fixados(235200, 263800, 50000)
+    # Nenhum cresceu: o empate em 0 por dia.
+    alvo, ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA, curtidas=[40, 12, 30])
+    assert alvo is fixados[1] and ritmo == {"ritmo": 0, "dias": 5}
+    assert porque == "o que menos cresceu; no empate, o de menos curtidas"
+    # Sem o número do coração de um dos empatados, sai o de menos visualizações entre eles.
+    alvo, _ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA, curtidas=[40, None, 30])
+    assert alvo is fixados[2] and porque == "o que menos cresceu"
+
+
+def test_sem_1_dia_de_anotacoes_sai_o_de_menos_visualizacoes_menos_o_fixado_depois():
+    # Nos primeiros dias das anotações, nenhum fixado tem 1 dia delas: sai o de menos visualizações, como antes, menos o
+    # que apareceu nos fixados depois dos outros (o recém-fixado, que não sai).
+    seis_horas = AGORA - timedelta(hours=6)
+    _notas((MARCAS[0], 235000, seis_horas), (MARCAS[1], 263000, seis_horas),
+           (MARCAS[2], 900, AGORA - timedelta(hours=2)))
+    fixados = _fixados(235200, 263800, 1000)
+    alvo, ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA)
+    assert alvo is fixados[0] and ritmo is None and porque == "o de menos visualizações"
+    # Sem as capas (nenhuma marca), o de menos visualizações de todos.
+    assert robo._o_que_esfriou(fixados, [None] * 3, AGORA)[0] is fixados[2]
+    # Sem o número de nenhum na grade, nenhum.
+    assert robo._o_que_esfriou(_fixados(None, None), [None, None], AGORA) == (None, None, "")
+
+
+def test_anotacoes_dos_fixados_uma_por_dia_e_so_os_ultimos_30_dias():
+    _notas((MARCAS[0], 100, AGORA - timedelta(days=31)))
+    robo._guardar_os_fixados(_fixados(235200, 263800, None), list(MARCAS), AGORA)
+    # A mesma capa (ou uma parecida) no mesmo dia não entra de novo; a de 31 dias saiu.
+    parecida = f"{int(MARCAS[0], 16) ^ 0b111:016x}"
+    robo._guardar_os_fixados(_fixados(235300, 263900), [parecida, None], AGORA + timedelta(hours=3))
+    notas = robo.db.ler_config(robo.CHAVE_DOS_FIXADOS, {})["notas"]
+    assert [(n["marca"], n["vistas"]) for n in notas] == [(MARCAS[0], 235200), (MARCAS[1], 263800)]
+    assert _registro(robo.PROCESSO_DOS_FIXADOS) == [("anotados", "2 nova(s); 2 de 3 fixado(s) com a capa e o número"),
+                                                     ("anotados", "0 nova(s); 1 de 2 fixado(s) com a capa e o número")]
+    # No dia seguinte, entram de novo.
+    robo._guardar_os_fixados(_fixados(236000, 264000), list(MARCAS[:2]), AGORA + timedelta(days=1))
+    assert len(robo.db.ler_config(robo.CHAVE_DOS_FIXADOS, {})["notas"]) == 4
+    # O 1º saiu dos fixados e entrou outro. Na leitura dos 3 fixados com a capa de todos, o que não está mais entre
+    # eles perde as anotações: fixado de novo, ele conta do zero, como o recém-fixado. Sem a capa de algum (ou com
+    # menos de 3 na tela, um deles cortado), nenhuma sai.
+    outro = "00ff00ff00ff00ff"
+    robo._guardar_os_fixados(_fixados(264100, 900, 50), [MARCAS[1], MARCAS[2], None], AGORA + timedelta(days=2))
+    assert len(robo.db.ler_config(robo.CHAVE_DOS_FIXADOS, {})["notas"]) == 6
+    robo._guardar_os_fixados(_fixados(264200, 1000, 60), [MARCAS[1], MARCAS[2], outro], AGORA + timedelta(days=3))
+    notas = robo.db.ler_config(robo.CHAVE_DOS_FIXADOS, {})["notas"]
+    assert sorted((n["marca"], n["vistas"]) for n in notas) == sorted(
+        [(MARCAS[1], v) for v in (263800, 264000, 264100, 264200)] + [(MARCAS[2], 900), (MARCAS[2], 1000), (outro, 60)])
