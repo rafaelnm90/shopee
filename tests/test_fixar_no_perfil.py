@@ -236,14 +236,16 @@ class CelularDasCurtidas:
     cada vídeo mostra. Depois do Copiar link a folha fecha. some_depois: o vídeo cujas curtidas saem da lista depois
     da 1ª vez que ele abre. folha_atrasada: a folha do vídeo aberto pelas Notificações mostra o Fixar no vídeo já
     fixado até o app carregar o Perfil ("perfil"; Motorola, 25/11/2026, às 08:03) ou até um Desfixar ("desfixar").
+    sem_legenda: de onde ("lista", as Notificações, ou "perfil", a grade) o vídeo aberto mostra o player sem a legenda.
     """
 
     def __init__(self, curtidas, fixados=("T1", "T2", "T3"), no_coracao=None, some_depois=None, limite=3,
-                 rotulos=DO_RAFAEL, folha_atrasada=None):
+                 rotulos=DO_RAFAEL, folha_atrasada=None, sem_legenda=()):
         self.curtidas, self.fixados, self.rotulos = list(curtidas), list(fixados), rotulos
         self.no_coracao = no_coracao or {}
         self.some_depois, self.limite = some_depois, limite
         self.folha_atrasada, self.perfil_visto, self.desfixou = folha_atrasada, False, False
+        self.sem_legenda = sem_legenda
         self.atual, self.aberto, self.de_onde, self.inicio_da_lista = "inicio", None, None, 0
         self.clipboard, self.toques, self.abertos = "https://s.shopee.com.br/linkAntigo", [], []
 
@@ -270,7 +272,8 @@ class CelularDasCurtidas:
         if self.atual == "lista":
             return _notificacoes(*[(t, h, d) for t, h, _v, d in self._visiveis()])
         if self.atual == "player":
-            return _player(f"Legenda do {self.aberto}", self.no_coracao.get(self.aberto, 57))
+            legenda = "" if self.de_onde in self.sem_legenda else f"Legenda do {self.aberto}"
+            return _player(legenda, self.no_coracao.get(self.aberto, 57))
         if self.atual == "folha":
             fixado = self.aberto in self.fixados
             if fixado and self.de_onde == "lista" and (
@@ -440,9 +443,10 @@ def test_video_com_10_curtidas_entra_no_lugar_do_fixado_de_menos_visualizacoes(a
     assert _registro(robo.PROCESSO_DAS_CURTIDAS) == [("lidas", "12 nova(s); o vídeo mais curtido com 10 em 24 h")]
     assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado de menos visualizações pelo "
                                                      "vídeo que viraliza; comentei nele")
-    # O de menos visualizações (o T2, com 1,2 mil) saiu, e o A entrou no topo dos fixados.
+    # O de menos visualizações (o T2, com 1,2 mil) saiu, e o A entrou no topo dos fixados. Antes do Desafixar, o robô
+    # conferiu que o A não é um dos 3 fixados, abertos pela grade (pedido do Rafael, 25/11/2026).
     assert app.fixados == ["A", "T1", "T3"]
-    assert app.abertos == ["A", "T2", "A"]
+    assert app.abertos == ["A", "T1", "T2", "T3", "T2", "A"]
     # Pedido do Rafael (21/11): logo depois do Fixar, o robô comenta no vídeo fixado, que está no player, e o
     # aviso do comentário vem com o texto e o link.
     assert comentarios["chamadas"] == [{"aberto": "A", "tela": "player", "onde": robo.ONDE_DO_FIXADO, "produto": "",
@@ -512,19 +516,48 @@ def test_coracao_com_menos_curtidas_que_a_conta_nao_fixa(avisos):
     assert _registro() == [("pulado", "o coração do vídeo com menos curtidas")]
 
 
-def test_fixar_que_para_depois_do_desfixar_avisa_com_os_dois_links(avisos):
+def test_fixar_que_para_depois_do_desfixar_devolve_o_que_saiu_e_avisa_com_os_dois_links(avisos, monkeypatch):
+    # Pedido do Rafael (25/11/2026): o Perfil sempre com os 3 fixados. O novo que não fica faz o que saiu voltar,
+    # aberto pelo link copiado antes do Desafixar; a leitura seguinte tenta de novo.
+    abertos = _abrir_pelo_link(monkeypatch)
     app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], some_depois="A")
     _leitura(app)
     assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: parou (a curtida do vídeo não está mais nas "
                                                      "Notificações)")
+    assert app.fixados == ["T2", "T1", "T3"] and abertos == ["https://s.shopee.com.br/T2"]
+    assert avisos == ["⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações, para "
+                      "dar lugar ao que está viralizando (10 curtidas nas últimas 24 h), mas não consegui fixar o "
+                      "novo (a curtida do vídeo não está mais nas Notificações). Pus de volta o que tinha tirado, e o "
+                      "seu Perfil continua com os 3 fixados. Tento de novo na próxima leitura das Notificações."
+                      "\n\n📤 Saiu: https://s.shopee.com.br/T2\n📌 O que ia entrar: https://s.shopee.com.br/A"]
+    assert _registro() == [("desfixado", "o de menos visualizações"),
+                           ("devolvido", "o desfixado, depois do fixar que parou"),
+                           ("parou", "a curtida do vídeo não está mais nas Notificações")]
+
+
+def _verificacao_ao_abrir_pelo_link(monkeypatch):
+    """A Verificação da Shopee no meio da volta do que saiu, ao abrir o vídeo pelo link."""
+    def abrir(d, link):
+        raise robo.Verificacao("a Shopee abriu a Verificação")
+
+    monkeypatch.setattr(robo, "_abrir_o_video_do_post", abrir)
+
+
+def test_volta_do_desfixado_que_para_na_verificacao_avisa_com_os_dois_links(avisos, monkeypatch):
+    # O aviso sai mesmo quando a volta do que saiu para no meio, e a Verificação segue adiante: só o Rafael a resolve.
+    _verificacao_ao_abrir_pelo_link(monkeypatch)
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], some_depois="A")
+    _leitura(app)
+    with pytest.raises(robo.Verificacao):
+        robo.fixar_o_que_viraliza(app, AGORA)
     assert app.fixados == ["T1", "T3"]
     assert avisos == ["⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações, para "
                       "dar lugar ao que está viralizando (10 curtidas nas últimas 24 h), mas não consegui fixar o "
-                      "novo (a curtida do vídeo não está mais nas Notificações). Tento de novo na próxima leitura das "
-                      "Notificações.\n\n📤 Saiu: https://s.shopee.com.br/T2\n📌 O que ia entrar: "
-                      "https://s.shopee.com.br/A"]
+                      "novo (a curtida do vídeo não está mais nas Notificações). E não consegui pôr de volta o que "
+                      "tirei: se quiser, fixe-o à mão, para o Perfil voltar a ter os 3 fixados.\n\n📤 Saiu: "
+                      "https://s.shopee.com.br/T2\n📌 O que ia entrar: https://s.shopee.com.br/A"]
     assert _registro() == [("desfixado", "o de menos visualizações"),
-                           ("parou", "a curtida do vídeo não está mais nas Notificações")]
+                           ("não devolvido", "o desfixado, depois do fixar que parou")]
 
 
 def test_aviso_do_limite_de_fixados_para_sem_mais_toques(avisos):
@@ -559,14 +592,43 @@ def test_video_ja_fixado_que_so_se_mostra_fixado_depois_do_perfil_nao_tira_nenhu
     assert avisos == [_aviso_do_comentario(1, "A")]
 
 
-def test_video_que_so_se_mostra_fixado_depois_do_desfixar_devolve_o_que_saiu(avisos, comentarios, monkeypatch):
-    # Se, mesmo depois do Perfil, o vídeo das Notificações só se mostrar fixado depois do Desafixar de outro, ele já
-    # estava fixado e a troca não devia ter acontecido: o que saiu volta aos fixados, aberto pelo link copiado antes do
-    # Desafixar, nenhum aviso diz que fixou, e o vídeo que viraliza só ganha o comentário, aberto pelo link dele
-    # (P263 1).
-    abertos = _abrir_pelo_link(monkeypatch)
+def test_video_ja_fixado_que_a_folha_mostra_sem_fixar_e_conferido_nos_fixados_sem_tirar_nenhum(avisos, comentarios):
+    # Pedido do Rafael (25/11/2026): conferir se o vídeo já está fixado antes de tirar qualquer fixado. Mesmo com a
+    # folha das Notificações mostrando o Afixar, o robô abre os fixados pela grade e acha o A entre eles pela legenda:
+    # nenhum sai, e o A só ganha o comentário, no player em que ficou.
     app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="desfixar",
                              rotulos=DO_MOTOROLA)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
+                                                     "comentei nele")
+    assert app.fixados == ["T1", "A", "T2"] and "Desafixar" not in app.toques and "Afixar" not in app.toques
+    assert app.abertos == ["A", "T1", "A"]
+    assert _registro() == [("já fixado", "conferido nos fixados do Perfil")]
+    assert comentarios["chamadas"] == [{"aberto": "A", "tela": "player", "onde": robo.ONDE_DO_FIXADO, "produto": "",
+                                        "titulo": "Legenda do A"}]
+    assert avisos == [_aviso_do_comentario(1, "A")]
+
+
+def test_video_sem_a_legenda_no_player_para_sem_tirar_nenhum_fixado(avisos, comentarios):
+    # Sem a legenda do vídeo que viraliza, a conferência nos fixados não o distingue de nenhum: nenhum sai, e a
+    # leitura seguinte tenta de novo (pedido do Rafael, 25/11/2026: conferir antes de tirar).
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], sem_legenda=("lista",))
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: parou (sem a legenda do vídeo para conferir "
+                                                     "nos fixados)")
+    assert app.fixados == ["T1", "T2", "T3"] and "Desfixar" not in app.toques and "Fixar" not in app.toques
+    assert _registro() == [("parou", "sem a legenda do vídeo para conferir nos fixados")]
+    assert avisos == [] and comentarios["chamadas"] == []
+
+
+def test_video_que_so_se_mostra_fixado_depois_do_desfixar_devolve_o_que_saiu(avisos, comentarios, monkeypatch):
+    # Se a conferência nos fixados não achar o vídeo (aqui, o player aberto pela grade sem a legenda) e ele só se
+    # mostrar fixado depois do Desafixar de outro, ele já estava fixado e a troca não devia ter acontecido: o que saiu
+    # volta aos fixados, aberto pelo link copiado antes do Desafixar, nenhum aviso diz que fixou, e o vídeo que viraliza
+    # só ganha o comentário, aberto pelo link dele (P263 1).
+    abertos = _abrir_pelo_link(monkeypatch)
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="desfixar",
+                             rotulos=DO_MOTOROLA, sem_legenda=("perfil",))
     _leitura(app)
     assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
                                                      "comentei nele")
@@ -581,7 +643,7 @@ def test_desfixado_que_nao_volta_vai_ao_rafael_com_o_link(avisos, comentarios, m
     # Sem conseguir fixar de novo o que tirou (aqui, o app no limite dos fixados), o Rafael recebe o link dele.
     _abrir_pelo_link(monkeypatch)
     app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="desfixar",
-                             rotulos=DO_MOTOROLA, limite=2)
+                             rotulos=DO_MOTOROLA, limite=2, sem_legenda=("perfil",))
     _leitura(app)
     assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
                                                      "comentei nele")
@@ -590,7 +652,24 @@ def test_desfixado_que_nao_volta_vai_ao_rafael_com_o_link(avisos, comentarios, m
                            ("já fixado", "depois do desfixar; o desfixado não voltou")]
     assert avisos[0] == ("⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações para "
                          "dar lugar ao que está viralizando, mas ele já estava fixado, e não consegui fixar de novo o "
-                         "que tirei. Se quiser, fixe-o à mão.\n\n📤 Saiu: https://s.shopee.com.br/T2")
+                         "que tirei. Se quiser, fixe-o à mão, para o Perfil voltar a ter os 3 fixados.\n\n📤 Saiu: "
+                         "https://s.shopee.com.br/T2")
+
+
+def test_volta_que_para_na_verificacao_depois_do_ja_fixado_avisa_com_o_link(avisos, comentarios, monkeypatch):
+    # Também no vídeo que só se mostrou fixado depois do Desafixar: a volta que para na Verificação avisa o link do que
+    # saiu, sem o comentário.
+    _verificacao_ao_abrir_pelo_link(monkeypatch)
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="desfixar",
+                             rotulos=DO_MOTOROLA, sem_legenda=("perfil",))
+    _leitura(app)
+    with pytest.raises(robo.Verificacao):
+        robo.fixar_o_que_viraliza(app, AGORA)
+    assert app.fixados == ["T1", "A"] and comentarios["chamadas"] == []
+    assert avisos == ["⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações para "
+                      "dar lugar ao que está viralizando, mas ele já estava fixado, e não consegui fixar de novo o "
+                      "que tirei. Se quiser, fixe-o à mão, para o Perfil voltar a ter os 3 fixados.\n\n📤 Saiu: "
+                      "https://s.shopee.com.br/T2"]
 
 
 def test_aviso_do_limite_de_fixados_no_motorola_para_sem_mais_toques(avisos):
