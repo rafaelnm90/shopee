@@ -1052,6 +1052,14 @@ def test_tela_apagada_fora_do_carregador_para_antes_de_escolher_e_avisa_uma_vez(
     assert robo.passo_do_motivo(robo.TELA_APAGADA) == "tela do celular apagada"
 
 
+def test_o_passo_das_paradas_na_janela_do_produto():
+    # A parada das 06:54 de 24/11/2026, no nome da IA (P265 1), saiu no checkup como "conferência da IA".
+    assert robo.passo_do_motivo(robo.MOTIVO_DA_JANELA_DO_NOME) == "nome do produto"
+    assert robo.passo_do_motivo(robo.MOTIVO_DO_CAMPO_DO_NOME) == "nome do produto"
+    assert robo.passo_do_motivo(robo.MOTIVO_DA_JANELA_DOS_CUPONS) == "lista de cupons"
+    assert robo.passo_do_motivo("a IA não confirmou o produto do vídeo") == "conferência da IA"
+
+
 def test_tela_apagada_sem_a_carga_lida_nao_acende(monkeypatch, avisos):
     ativar(robo_inicio=0, robo_fim=24)
     acendeu = _tela(monkeypatch, False)
