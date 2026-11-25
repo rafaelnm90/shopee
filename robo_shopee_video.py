@@ -9076,15 +9076,22 @@ def _fixar_um(d, agora):
     return "fixar no perfil: nenhum dos vídeos com as curtidas em alta ficou para fixar"
 
 
+# A folha do compartilhar do vídeo aberto pelas Notificações só diz se ele está fixado depois de o app carregar o
+# Perfil: em 25/11/2026, às 08:03, com o app aberto havia 22 min, o vídeo que viralizava, já fixado, mostrou o Afixar,
+# e o robô tirou dos fixados o de menos visualizações; aberto de novo, depois do Perfil, o mesmo vídeo mostrou o
+# Desafixar, e o lugar ficou vazio. O robô passa pelo Perfil antes de olhar a folha e, se mesmo assim o vídeo só se
+# mostra fixado depois do Desafixar, fixa de novo o que tirou (_devolver_o_desfixado): o já fixado só ganha o
+# comentário (P263 1).
 def _fixar_no_perfil(d, candidato, agora):
     """
-    O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: abre pela linha da curtida,
-    confere no coração que ele tem as curtidas e, na folha do compartilhar, que não está fixado; copia o link,
-    tira do Perfil o fixado de menos visualizações quando os FIXADOS_NO_PERFIL estão ocupados, abre o vídeo de
-    novo e o fixa, conferindo cada passo, e comenta nele (_comentar_no_fixado); o já fixado só ganha o comentário,
-    se ainda não tem o do robô. Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado e comentado, ou com
-    menos curtidas no coração), para olhar o seguinte. O fixar que para depois do desfixar avisa o Rafael.
+    O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: passa pelo Perfil, abre o vídeo
+    pela linha da curtida, confere no coração que ele tem as curtidas e, na folha do compartilhar, que não está
+    fixado; copia o link, tira do Perfil o fixado de menos visualizações quando os FIXADOS_NO_PERFIL estão ocupados,
+    abre o vídeo de novo e o fixa, conferindo cada passo, e comenta nele (_comentar_no_fixado); o já fixado só ganha o
+    comentário, se ainda não tem o do robô. Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado e comentado,
+    ou com menos curtidas no coração), para olhar o seguinte. O fixar que para depois do desfixar avisa o Rafael.
     """
+    _fixados_do_perfil(d)
     xml = _abrir_pela_curtida(d, candidato["video"])
     video = interacoes.video_do_feed(xml)
     no_coracao = interacoes.curtidas_do_video(xml)
@@ -9117,7 +9124,7 @@ def _fixar_no_perfil(d, candidato, agora):
     fixados = _fixados_do_perfil(d)
     saiu = _desfixar_o_de_menos_vistas(d, fixados, agora) if len(fixados) >= FIXADOS_NO_PERFIL else None
     try:
-        _fixar_o_video(d, candidato["video"], legenda)
+        fixou = _fixar_o_video(d, candidato["video"], legenda)
     except Parada as e:
         if saiu:
             avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações, para "
@@ -9126,6 +9133,8 @@ def _fixar_no_perfil(d, candidato, agora):
                    f"leitura das Notificações.\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}"
                    f"\n📌 O que ia entrar: {link or SEM_O_LINK}")
         raise
+    if not fixou:
+        return _ja_fixado_depois(d, candidato, link, saiu, agora)
     _anotar_visto(candidato["video"], agora)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "trocado" if saiu else "fixado",
                                  "no lugar do fixado de menos visualizações" if saiu
@@ -9304,16 +9313,25 @@ def _mesmo_video(legenda, outra):
 
 def _fixar_o_video(d, video, legenda):
     """
-    Abre de novo o vídeo das curtidas pela linha dele (o mesmo vídeo: a legenda confere) e toca no Fixar da folha
-    do compartilhar; confere com a folha aberta de novo (o Desfixar no lugar). O aviso do limite de fixados
-    ("Você só pode fixar até 3 vídeos") para. Já fixado (pelo Rafael, no meio), fica como está.
+    Abre de novo o vídeo das curtidas pela linha dele (o mesmo vídeo: a legenda confere) e o fixa
+    (_tocar_no_fixar). True quando fixou; False, sem tocar em nada, quando a folha já mostra o Desfixar (o vídeo já
+    estava fixado: o app só mostrou agora, ou o Rafael o fixou no meio).
     """
     xml = _abrir_pela_curtida(d, video)
     if not _mesmo_video(legenda, interacoes.video_do_feed(xml)["legenda"]):
         raise Parada(MOTIVO_DO_FIXAR + "outro vídeo abriu pela curtida")
     if interacoes.estado_do_fixar(_abrir_a_folha(d)) == "desfixar":
         _fechar_a_folha(d)
-        return
+        return False
+    _tocar_no_fixar(d)
+    return True
+
+
+def _tocar_no_fixar(d):
+    """
+    Toca no Fixar da folha do compartilhar aberta e confere com a folha aberta de novo (o Desfixar no lugar). O aviso
+    do limite de fixados ("Você só pode fixar até 3 vídeos") para.
+    """
     _tocar_exato(d, interacoes.FIXAR)
     if interacoes.limite_de_fixados(tela(d)):
         raise Parada(MOTIVO_DO_FIXAR + "o app disse que o limite de fixados acabou")
@@ -9321,6 +9339,53 @@ def _fixar_o_video(d, video, legenda):
     if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
         raise Parada(MOTIVO_DO_FIXAR + "o Fixar não ficou")
     _fechar_a_folha(d)
+
+
+def _devolver_o_desfixado(d, saiu):
+    """
+    Fixa de novo o vídeo que saiu dos fixados (saiu: {"link", "vistas"}), aberto pelo link copiado antes do Desfixar.
+    True quando ele voltou (ou já estava fixado); False sem o link ou quando o Fixar não ficou.
+    """
+    if not saiu.get("link"):
+        return False
+    try:
+        _abrir_o_video_do_post(d, saiu["link"])
+        if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "desfixar":
+            _tocar_no_fixar(d)
+        _fechar_a_folha(d)
+        return True
+    except Parada as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O fixado tirado por engano não voltou: {e.motivo}")
+        return False
+
+
+def _ja_fixado_depois(d, candidato, link, saiu, agora):
+    """
+    O vídeo que viraliza que só se mostrou fixado quando abriu de novo para o Fixar: já estava fixado, e a troca não
+    devia ter acontecido. O que saiu dos fixados volta (_devolver_o_desfixado); sem voltar, o Rafael recebe o link dele
+    para fixar à mão. Depois, como no já fixado: o comentário, se o robô ainda não comentou nele. Devolve o que fez,
+    ou "" quando ele já tem o comentário do robô, para olhar o vídeo seguinte.
+    """
+    _anotar_visto(candidato["video"], agora)
+    detalhe = "ao abrir de novo"
+    if saiu:
+        voltou = _devolver_o_desfixado(d, saiu)
+        detalhe = "depois do desfixar; o desfixado " + ("voltou" if voltou else "não voltou")
+        if not voltou:
+            avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações para dar "
+                   f"lugar ao que está viralizando, mas ele já estava fixado, e não consegui fixar de novo o que "
+                   f"tirei. Se quiser, fixe-o à mão.\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}")
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "já fixado", detalhe, ok=None, agora=agora)
+    if _do_mesmo_video(_comentarios_dos_fixados(ler_estado(), agora), candidato["video"]) is not None:
+        return ""
+
+    def abrir():
+        if link:
+            return _abrir_o_video_do_post(d, link)
+        return interacoes.video_do_feed(_abrir_pela_curtida(d, candidato["video"]))
+
+    return (MOTIVO_DO_FIXAR + "o vídeo que viraliza já estava fixado; "
+            + _comentar_no_fixado(d, candidato["video"], link, agora, abrir=abrir))
 
 
 def _comentarios_dos_fixados(dados, agora=None):

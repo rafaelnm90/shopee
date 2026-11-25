@@ -225,7 +225,7 @@ def test_curtidas_do_video_le_o_numero_dentro_do_coracao():
 # --- A troca no celular ---
 
 # A grade do Perfil (3 quadros por linha, como no Motorola): o "Rascunhos: N" e os fixados primeiro.
-VISTAS = {"T1": "235,2mil", "T2": "1,2 mil", "T3": "263,8mil", "N1": "50", "N2": "70"}
+VISTAS = {"T1": "235,2mil", "T2": "1,2 mil", "T3": "263,8mil", "A": "240,1mil", "N1": "50", "N2": "70"}
 
 
 class CelularDasCurtidas:
@@ -234,14 +234,16 @@ class CelularDasCurtidas:
     vídeo aberto (pela curtida ou pela grade), a folha do compartilhar e a grade do Perfil. curtidas: [(texto, hora,
     vídeo, capa à direita)]; fixados: os vídeos fixados, na ordem da grade; no_coracao: as curtidas que o coração de
     cada vídeo mostra. Depois do Copiar link a folha fecha. some_depois: o vídeo cujas curtidas saem da lista depois
-    da 1ª vez que ele abre.
+    da 1ª vez que ele abre. folha_atrasada: a folha do vídeo aberto pelas Notificações mostra o Fixar no vídeo já
+    fixado até o app carregar o Perfil ("perfil"; Motorola, 25/11/2026, às 08:03) ou até um Desfixar ("desfixar").
     """
 
     def __init__(self, curtidas, fixados=("T1", "T2", "T3"), no_coracao=None, some_depois=None, limite=3,
-                 rotulos=DO_RAFAEL):
+                 rotulos=DO_RAFAEL, folha_atrasada=None):
         self.curtidas, self.fixados, self.rotulos = list(curtidas), list(fixados), rotulos
         self.no_coracao = no_coracao or {}
         self.some_depois, self.limite = some_depois, limite
+        self.folha_atrasada, self.perfil_visto, self.desfixou = folha_atrasada, False, False
         self.atual, self.aberto, self.de_onde, self.inicio_da_lista = "inicio", None, None, 0
         self.clipboard, self.toques, self.abertos = "https://s.shopee.com.br/linkAntigo", [], []
 
@@ -270,11 +272,17 @@ class CelularDasCurtidas:
         if self.atual == "player":
             return _player(f"Legenda do {self.aberto}", self.no_coracao.get(self.aberto, 57))
         if self.atual == "folha":
-            return _folha(self.aberto in self.fixados, self.rotulos)
+            fixado = self.aberto in self.fixados
+            if fixado and self.de_onde == "lista" and (
+                    (self.folha_atrasada == "perfil" and not self.perfil_visto)
+                    or (self.folha_atrasada == "desfixar" and not self.desfixou)):
+                fixado = False
+            return _folha(fixado, self.rotulos)
         if self.atual == "limite":
             aviso = f"Você só pode {self.rotulos[0].lower()} até 3 vídeos"
             return _xml(_el(aviso, caixa=(200, 1100, 880, 1180)), *BARRA)
         if self.atual == "perfil":
+            self.perfil_visto = True
             return _xml(*self._grade()[0], *BARRA)
         return _xml(*BARRA)
 
@@ -313,9 +321,11 @@ class CelularDasCurtidas:
                 self.clipboard, self.atual = f"https://s.shopee.com.br/{self.aberto}", "player"
             elif self.rotulos[1] in textos:
                 self.fixados.remove(self.aberto)
-                self.atual = "player"
+                self.atual, self.desfixou = "player", True
             elif self.rotulos[0] in textos:
-                if len(self.fixados) >= self.limite:
+                if self.aberto in self.fixados:
+                    self.atual = "player"
+                elif len(self.fixados) >= self.limite:
                     self.atual = "limite"
                 else:
                     self.fixados.insert(0, self.aberto)
@@ -532,6 +542,55 @@ def test_troca_dos_fixados_no_motorola_com_o_afixar_e_o_desafixar(avisos, coment
                                                      "vídeo que viraliza; comentei nele")
     assert app.fixados == ["A", "T1", "T3"]
     assert "Desafixar" in app.toques and "Afixar" in app.toques
+
+
+def test_video_ja_fixado_que_so_se_mostra_fixado_depois_do_perfil_nao_tira_nenhum_fixado(avisos, comentarios):
+    # 25/11/2026, às 08:03 (Motorola, o app aberto havia 22 min): o vídeo que viralizava, já fixado, mostrou o Afixar
+    # na folha aberta pelas Notificações, antes de o app carregar o Perfil. O robô tirou dos fixados o de menos
+    # visualizações e, aberto de novo, o vídeo mostrou o Desafixar: o lugar ficou vazio, e o aviso disse "fixei". O robô
+    # passa pelo Perfil antes de olhar a folha: o já fixado só ganha o comentário, e nenhum fixado sai.
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="perfil",
+                             rotulos=DO_MOTOROLA)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
+                                                     "comentei nele")
+    assert app.fixados == ["T1", "A", "T2"] and "Desafixar" not in app.toques and "Afixar" not in app.toques
+    assert _registro() == [("já fixado", "")]
+    assert avisos == [_aviso_do_comentario(1, "A")]
+
+
+def test_video_que_so_se_mostra_fixado_depois_do_desfixar_devolve_o_que_saiu(avisos, comentarios, monkeypatch):
+    # Se, mesmo depois do Perfil, o vídeo das Notificações só se mostrar fixado depois do Desafixar de outro, ele já
+    # estava fixado e a troca não devia ter acontecido: o que saiu volta aos fixados, aberto pelo link copiado antes do
+    # Desafixar, nenhum aviso diz que fixou, e o vídeo que viraliza só ganha o comentário, aberto pelo link dele
+    # (P263 1).
+    abertos = _abrir_pelo_link(monkeypatch)
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="desfixar",
+                             rotulos=DO_MOTOROLA)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
+                                                     "comentei nele")
+    assert sorted(app.fixados) == ["A", "T1", "T2"] and app.toques.count("Afixar") == 1
+    assert _registro() == [("desfixado", "o de menos visualizações"),
+                           ("já fixado", "depois do desfixar; o desfixado voltou")]
+    assert avisos == [_aviso_do_comentario(1, "A")]
+    assert abertos == ["https://s.shopee.com.br/T2", "https://s.shopee.com.br/A"]
+
+
+def test_desfixado_que_nao_volta_vai_ao_rafael_com_o_link(avisos, comentarios, monkeypatch):
+    # Sem conseguir fixar de novo o que tirou (aqui, o app no limite dos fixados), o Rafael recebe o link dele.
+    _abrir_pelo_link(monkeypatch)
+    app = CelularDasCurtidas(_curtidas("A", 11) + [TOPO], fixados=("T1", "A", "T2"), folha_atrasada="desfixar",
+                             rotulos=DO_MOTOROLA, limite=2)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: o vídeo que viraliza já estava fixado; "
+                                                     "comentei nele")
+    assert app.fixados == ["T1", "A"]
+    assert _registro() == [("desfixado", "o de menos visualizações"),
+                           ("já fixado", "depois do desfixar; o desfixado não voltou")]
+    assert avisos[0] == ("⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações para "
+                         "dar lugar ao que está viralizando, mas ele já estava fixado, e não consegui fixar de novo o "
+                         "que tirei. Se quiser, fixe-o à mão.\n\n📤 Saiu: https://s.shopee.com.br/T2")
 
 
 def test_aviso_do_limite_de_fixados_no_motorola_para_sem_mais_toques(avisos):
