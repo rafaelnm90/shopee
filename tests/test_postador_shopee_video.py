@@ -1582,19 +1582,25 @@ def test_passos_colar_e_legenda_com_texto_comparam_com_o_texto_dado():
 
 
 def test_escrever_poe_o_texto_inteiro_no_campo_em_foco_com_os_emojis():
-    # O texto vai inteiro pelo set_text do campo em foco, com os emojis.
+    # O texto vai inteiro pelo set_text do EditText em foco, com os emojis. Com o teclado aberto, a janela dele também
+    # tem um nó em foco (25/11/2026, às 04:22 e às 08:03): o set_text nele toca no meio do teclado e não escreve.
     class Campo:
         exists, texto = True, None
 
         def set_text(self, texto):
             Campo.texto = texto
 
+    class NoDoTeclado:
+        exists = True
+
+        def set_text(self, texto):
+            raise AssertionError("escreveu no nó em foco da janela do teclado")
+
     class Celular:
         teclado = []
 
         def __call__(self, **seletor):
-            assert seletor == {"focused": True}
-            return Campo()
+            return Campo() if seletor == {"focused": True, "className": "android.widget.EditText"} else NoDoTeclado()
 
         def send_keys(self, texto):
             Celular.teclado.append(texto)

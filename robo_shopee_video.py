@@ -6383,9 +6383,10 @@ def nomes_para_tentar(novo):
 
 # Em 24/11/2026, às 06:54 (Motorola), o nome da IA escrito logo depois do toque no campo, com o teclado ainda abrindo,
 # deixou 1 letra só no campo, e o apagar, do mesmo jeito, não tirou a letra: o rascunho parou. O robô espera o teclado
-# abrir (até ESPERA_DO_TECLADO s), escreve no EditText em foco (com o teclado aberto, a janela dele também tem um nó em
-# foco), confere o campo na tela e escreve de novo quando ele não mostra o texto, até ESCRITAS_NO_CAMPO vezes, como no
-# campo de comentar (22/11). O registro diz quando só a 2ª deu certo e, quando nem ela, as letras que ficaram.
+# abrir (até ESPERA_DO_TECLADO s), escreve no EditText em foco (ps.escrever: com o teclado aberto, a janela dele também
+# tem um nó em foco), confere o campo na tela e escreve de novo quando ele não mostra o texto, até ESCRITAS_NO_CAMPO
+# vezes, como no campo de comentar (22/11). O registro diz quando só a 2ª deu certo e, quando nem ela, as letras que
+# ficaram.
 ESPERA_DO_TECLADO = 4
 ESCRITA_QUE_NAO_FICOU = "a escrita não ficou no campo"
 
@@ -6397,18 +6398,6 @@ def _esperar_o_teclado(d):
             return True
         pausa(1)
     return False
-
-
-def _escrever_no_editavel(d, texto):
-    """
-    O set_text (troca o texto todo; "" apaga) no EditText em foco: com o teclado aberto, o nó em foco da janela do
-    teclado também casa com o d(focused=True). Sem EditText em foco, o ps.escrever, como antes.
-    """
-    campo = d(focused=True, className="android.widget.EditText")
-    if campo.exists:
-        campo.set_text(texto)
-    else:
-        ps.escrever(d, texto)
 
 
 def _como_pedido(escrito, texto, anuncio=""):
@@ -6430,7 +6419,7 @@ def _escrever_no_campo(d, campo, texto, anuncio=""):
     _esperar_o_teclado(d)
     primeira, escrito = None, ""
     for _ in range(ESCRITAS_NO_CAMPO):
-        _escrever_no_editavel(d, texto)
+        ps.escrever(d, texto)
         pausa(2)
         lista = ps.elementos(tela(d))
         na_tela = ps.campo_do_nome(lista)
@@ -9624,7 +9613,9 @@ def _esperar_o_envio(d, texto):
 
 # Logo depois de o campo abrir, o texto escrito às vezes não fica inteiro (Motorola, 22/11/2026, 16:39: no campo de
 # comentar do feed ficou só a 1ª letra, com o teclado aberto). O robô escreve de novo uma vez antes de desistir; o
-# registro diz quando só a 2ª deu certo, e o motivo da parada, quantas letras ficaram no campo.
+# registro diz quando só a 2ª deu certo, e o motivo da parada, quantas letras ficaram no campo. A escrita e a
+# conferência vão só no EditText em foco (ps.editavel_em_foco): em 25/11/2026, às 04:22 e às 08:03, com o teclado já
+# aberto, o nó em foco achado era o da janela do teclado, e o comentário parou com "gg" no campo.
 ESCRITAS_NO_CAMPO = 2
 
 
@@ -9641,7 +9632,7 @@ def _escrever_e_conferir(d, texto):
     for _ in range(ESCRITAS_NO_CAMPO):
         ps.escrever(d, texto)
         pausa(2)
-        campo = d(focused=True)
+        campo = ps.editavel_em_foco(d)
         escrito = (campo.get_text() if campo.exists else "") or ""
         if ps._normal(escrito) == ps._normal(texto):
             return True, len(escrito), "" if primeira is None else f"{primeira} de {len(texto)} letras na 1ª"
