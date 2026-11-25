@@ -113,6 +113,9 @@ HORA_DO_DESCURTIR_SV = 4
 # A rodada da hora do descurtir que não chegou à limpeza, com o porquê (o mesmo do
 # robo_shopee_video.PROCESSO_SEM_LIMPEZA; o tests/test_checkup.py confere).
 PROCESSO_SEM_LIMPEZA_SV = "hora do descurtir: rodada sem a limpeza"
+# A rodada que achou o celular com o explorar e não rodou (o mesmo do robo_shopee_video.PROCESSO_SEM_O_CELULAR; o
+# tests/test_checkup.py confere): contada no meio do atraso de um post aprovado.
+PROCESSO_SEM_O_CELULAR_SV = "rodada sem o celular"
 # Cada rodada que o bot põe no celular (o painel_shopee_video anota o início) e o mais que uma dura: o
 # robo_shopee_video.MAXIMO_DA_RODADA e o minuto a mais do systemd (o tests/test_checkup.py confere).
 PROCESSO_DA_RODADA_SV = "rodada fora do bot"
@@ -447,7 +450,7 @@ SEM_META = {
     ("shopee_video", "rascunho recusado"), ("shopee_video", "aprovação dos rascunhos"),
     ("shopee_video", "curtidas nas notificações"), ("shopee_video", "fixar no perfil"),
     ("shopee_video", "vídeo fixado: "), ("shopee_video", "live: "), ("shopee_video", "comentários por dia"),
-    ("shopee_video", PROCESSO_SEM_LIMPEZA_SV),
+    ("shopee_video", PROCESSO_SEM_LIMPEZA_SV), ("shopee_video", PROCESSO_SEM_O_CELULAR_SV),
 }
 
 
@@ -1419,8 +1422,9 @@ def aprovados_postados(agora=None):
 def no_meio_do_atraso(previsto, postado):
     """
     O que o robô fez entre o previsto e o postado de um aprovado atrasado: as tentativas por
-    ação e os pedidos do Preparar 1 Agora (09/11: um post saiu 36 min depois, e o checkup não
-    dizia o que segurou o celular). Só ações e contagens; "" sem nada no meio.
+    ação, os pedidos do Preparar 1 Agora (09/11: um post saiu 36 min depois, e o checkup não
+    dizia o que segurou o celular) e as rodadas que acharam o celular com o explorar (24/11). Só
+    ações e contagens; "" sem nada no meio.
     """
     try:
         with db.conexao() as conexao:
@@ -1431,9 +1435,13 @@ def no_meio_do_atraso(previsto, postado):
         acoes = []
     pedidos = sum(1 for momento, *_ in registro_processos.sequencia("shopee_video", PROCESSO_DO_BOTAO, previsto, "pedido")
                   if momento < postado)
+    sem_o_celular = sum(1 for momento, *_ in registro_processos.sequencia("shopee_video", PROCESSO_SEM_O_CELULAR_SV,
+                                                                          previsto) if momento < postado)
     partes = [", ".join(f"{acao} {qtd}" for acao, qtd in acoes)] if acoes else []
     if pedidos:
         partes.append(f"Preparar 1 Agora {pedidos}")
+    if sem_o_celular:
+        partes.append(f"rodada sem o celular (o explorar com ele) {sem_o_celular}")
     return f"no meio: {'; '.join(partes)}" if partes else ""
 
 
