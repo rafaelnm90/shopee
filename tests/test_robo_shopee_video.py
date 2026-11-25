@@ -643,6 +643,9 @@ def test_com_o_explorar_no_celular_a_rodada_nao_toca(monkeypatch, avisos):
         with robo.celular_robo.trava() as outra:
             assert not outra
         assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 10:00")) == "o explorar está tocando no celular"
+    # A rodada que não rodou fica no registro: o checkup a conta no meio do atraso de um post (24/11/2026).
+    assert [(linha[0][11:16], linha[2]) for linha in robo.registro_processos.sequencia(
+        "shopee_video", robo.PROCESSO_SEM_O_CELULAR, "2000-01-01 00:00:00")] == [("10:00", "o celular com o explorar")]
 
 
 def test_a_aula_do_curso_solta_o_celular_antes_da_rodada(monkeypatch, avisos):

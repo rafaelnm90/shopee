@@ -401,6 +401,10 @@ def anotar_limpeza_sem_celular(agora=None, resultado="celular fora na suspensão
 # como a do robô pausado (anotar_limpeza_sem_celular): o checkup diz por que a limpeza não rodou
 # na hora. Só o motivo fixo do código.
 PROCESSO_SEM_LIMPEZA = "hora do descurtir: rodada sem a limpeza"
+# A rodada que acha o celular com o explorar (o Claude mapeando uma tela) não roda: fica no registro, e o checkup a
+# conta no meio do atraso de um post aprovado (24/11/2026: os explorar seguidos das 10:20 às 10:46 seguraram um post
+# por 34 min, e o checkup não dizia por quê).
+PROCESSO_SEM_O_CELULAR = "rodada sem o celular"
 
 
 def anotar_rodada_sem_limpeza(motivo, agora=None):
@@ -11021,6 +11025,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False, postar
         if not livre:
             if not na_hora:
                 anotar_rodada_sem_limpeza("o celular com o explorar", agora)
+            registro_processos.registrar(REGISTRO, PROCESSO_SEM_O_CELULAR, "o celular com o explorar", ok=None,
+                                         agora=agora)
             return _resposta(preparar, "o explorar está tocando no celular", pedido_de_post)
         # Dentro da trava, nenhum preparo está rodando: o "preparando" antigo é de uma rodada morta.
         soltar_preparos_interrompidos(agora)

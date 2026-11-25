@@ -182,6 +182,33 @@ def test_explorar_no_celular_pede_o_celular_a_aula_do_curso(monkeypatch, capsys)
     assert "fora do horário das rodadas" in capsys.readouterr().out
 
 
+def test_explorar_no_celular_solta_o_celular_quando_o_robo_pede(monkeypatch, capsys):
+    # 24/11/2026: os explorar seguidos das 10:20 às 10:46 seguraram um post aprovado por 34 min. No celular, o explorar
+    # renova o sinal a cada passo, como a gravação do curso, e para antes do passo seguinte quando o robô pede.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    feitos, com_o_sinal, quem_pede = [], [], ["robô"]
+
+    def passo(d, nome, argumento):
+        feitos.append(argumento)
+        com_o_sinal.append(ps.cursos_robo.gravando())
+        if argumento == "A":
+            ps.cursos_robo.pedir_o_celular(quem_pede[0])
+        return True, "feito"
+    monkeypatch.setattr(ps, "fazer_passo", passo)
+    monkeypatch.setattr(ps.time, "sleep", lambda segundos: None)
+    assert ps.explorar("tocar:A; tocar:B; tocar:C", Aparelho(), celular=True) is False
+    assert feitos == ["A"] and com_o_sinal == [True] and not ps.cursos_robo.gravando()
+    assert "== passo 2: tocar → o robô pediu o celular: o explorar parou aqui" in capsys.readouterr().out
+    # O pedido de outro explorar não conta (ele espera a vez dele), e o sinal sai no fim.
+    quem_pede[0], feitos[:], com_o_sinal[:] = "explorar", [], []
+    ps.cursos_robo.pedir_o_celular("explorar")
+    assert ps.explorar("tocar:A; tocar:B; tocar:C", Aparelho(), celular=True) is True
+    assert feitos == ["A", "B", "C"] and com_o_sinal == [True] * 3 and not ps.cursos_robo.gravando()
+    # Fora do celular (o Android virtual), nada de sinal.
+    feitos[:], com_o_sinal[:] = [], []
+    assert ps.explorar("tocar:B", Aparelho()) is True and com_o_sinal == [False]
+
+
 def test_explorar_toca_e_descreve_cada_tela(capsys):
     aparelho = Aparelho()
     assert ps.explorar("abrir; tocar:Postar vídeo; voltar", aparelho)

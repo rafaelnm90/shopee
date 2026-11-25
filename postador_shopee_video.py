@@ -3079,7 +3079,26 @@ def _explorar(texto, d, celular):
 
 
 def _fazer_os_passos(d, passos, celular, da_madrugada=False):
+    # No celular, o explorar cede o celular ao robô da Shopee Vídeo, como a gravação do curso: o sinal renovado a cada
+    # passo diz que ele está com o celular, a rodada do robô (ou o botão do painel) o pede (liberar_para_o_robo), e o
+    # explorar para antes do passo seguinte, sem tocar em mais nada. Em 24/11/2026, os explorar seguidos das 10:20 às
+    # 10:46 seguraram um post aprovado por 34 min. O robô nunca para por causa do Claude (pedido do Rafael de
+    # 22/11/2026: DECISOES.md, Trabalho com o Claude).
+    inicio = cursos_robo.agora_em_texto()
+    try:
+        return _os_passos(d, passos, celular, da_madrugada, inicio)
+    finally:
+        if celular:
+            cursos_robo.soltar_o_sinal()
+
+
+def _os_passos(d, passos, celular, da_madrugada, inicio):
     for numero, (nome, argumento) in enumerate(passos, 1):
+        if celular and cursos_robo.pediram_o_celular(inicio, menos_de="explorar"):
+            print(f"\n== passo {numero}: {nome} → o robô pediu o celular: o explorar parou aqui, sem tocar em nada")
+            return False
+        if celular:
+            cursos_robo.anotar_o_sinal()
         if da_madrugada and mexe_na_tela(nome, argumento) and not chrome_na_frente(d):
             print(f"\n== passo {numero}: {nome} → o Chrome não está na frente: de madrugada, nada mais é tocado")
             return False

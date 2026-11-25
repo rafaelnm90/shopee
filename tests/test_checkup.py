@@ -493,9 +493,16 @@ def test_aprovados_postados_mostram_o_atraso_sobre_o_previsto():
     for horas in (2.45, 2.25):
         registro_processos.registrar("shopee_video", checkup.PROCESSO_DO_BOTAO, "pedido", ok=None,
                                      agora=AGORA - timedelta(hours=horas))
+    # 24/11: os explorar seguidos das 10:20 às 10:46 seguraram um post por 34 min: as rodadas que acharam o celular com
+    # o explorar também vêm no meio.
+    assert checkup.PROCESSO_SEM_O_CELULAR_SV == robo.PROCESSO_SEM_O_CELULAR
+    for horas in (2.3, 2.05, 0.5):                                                     # a última, depois do post
+        registro_processos.registrar("shopee_video", robo.PROCESSO_SEM_O_CELULAR, "o celular com o explorar", ok=None,
+                                     agora=AGORA - timedelta(hours=horas))
     r = checkup.robo_da_shopee_video(AGORA)
     assert [p[3] for p in r["postados"]] == [6, 60]
-    assert [p[4] for p in r["postados"]] == ["", "no meio: rascunho 3, feed 1; Preparar 1 Agora 2"]
+    assert [p[4] for p in r["postados"]] == [
+        "", "no meio: rascunho 3, feed 1; Preparar 1 Agora 2; rodada sem o celular (o explorar com ele) 2"]
     pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
     assert "Robô da Shopee Vídeo: 1 aprovado(s) foram ao ar com mais de 30 min de atraso (o maior: 60 min)" in pontos
 

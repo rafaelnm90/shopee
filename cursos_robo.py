@@ -2712,9 +2712,18 @@ def pedir_o_celular(quem, agora=None):
     _anotar(pedido_em=_texto(_agora(agora)), pedido_por=quem)
 
 
-def pediram_o_celular(desde):
-    """Alguém pediu o celular depois desse momento (o começo da aula, em texto)?"""
-    return (estado_da_noite().get("pedido_em") or "") >= desde
+def agora_em_texto(agora=None):
+    """O momento no formato do sinal e do pedido: o começo de quem fica com o celular, para pediram_o_celular."""
+    return _texto(_agora(agora))
+
+
+def pediram_o_celular(desde, menos_de=""):
+    """
+    Alguém pediu o celular depois desse momento (o começo da aula, em texto)? menos_de: quem pediu e não conta (o
+    explorar não cede o celular ao pedido de outro explorar, que espera a vez dele).
+    """
+    estado = estado_da_noite()
+    return (estado.get("pedido_em") or "") >= desde and not (menos_de and estado.get("pedido_por") == menos_de)
 
 
 def liberar_para_o_robo(quem="robô", espera=ESPERA_PELO_CELULAR, pausa=time.sleep, ocupado=None):
