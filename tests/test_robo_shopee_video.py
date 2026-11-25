@@ -8707,6 +8707,8 @@ def test_visualizacoes_achadas_pela_marca_na_grade_rolando_ate_o_fim(monkeypatch
     assert app.roladas == 1
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DAS_VISUALIZACOES) == ("lidas", "4 de 4 vídeo(s)", 1)
+    # Na primeira tela, as visualizações do fixado entram nas anotações dos fixados, sem toque a mais (P300 1).
+    assert robo._notas_dos_fixados(agora) == [{"marca": _marca(10), "vistas": 3400, "em": momento_da_leitura}]
     # A medição separa os com a chamada dos de antes (o de 10 dias ainda entra na comparação).
     medicao = robo.medicao_da_capa(agora)
     assert (medicao["com"]["videos"], medicao["sem"]["videos"], medicao["sem_marca"]) == (1, 4, 1)

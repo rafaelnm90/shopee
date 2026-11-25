@@ -8229,8 +8229,8 @@ def anotar_visualizacoes(d, agora=None):
     """
     No Perfil, acha na grade, pela marca, cada vídeo que o robô postou nos últimos
     DIAS_DAS_VISUALIZACOES dias e anota as visualizações dele no rascunho (vistas). Rola a
-    grade até ROLADAS_DA_GRADE vezes, até achar todos ou chegar ao fim. Devolve (achados,
-    procurados).
+    grade até ROLADAS_DA_GRADE vezes, até achar todos ou chegar ao fim. Na primeira tela, anota
+    também as dos fixados (P300 1). Devolve (achados, procurados).
     """
     limite = _momento(agora_br(agora) - timedelta(days=DIAS_DAS_VISUALIZACOES))
     procurados = sorted((r for r in listar("postado") if r.get("marca") and (r["postado_em"] or "") >= limite),
@@ -8253,6 +8253,9 @@ def anotar_visualizacoes(d, agora=None):
             quadros = [(visualizacoes.marca_da_capa(imagem, q["caixa"]), q["vistas"]) for q in caixas]
             if not quadros or any(marca for marca, _vistas in quadros):
                 break
+        if not rolada:
+            # Os fixados ficam no começo da grade (P300 1).
+            _anotar_os_fixados_da_grade(d, caixas, [marca for marca, _vistas in quadros], agora)
         # O quadro que já apareceu antes da rolada não conta de novo.
         novos = [q for q in quadros if q not in vistos]
         vistos.update(quadros)
@@ -8902,9 +8905,9 @@ def _abrir_notificacao(d, texto):
 
 # --- O vídeo que viraliza nos fixados do Perfil (P263 1) ---
 # Escolha do Rafael (20/11/2026, P263 1): nas leituras das Notificações do dia (as das respostas, das 8h às 22h),
-# o vídeo dele com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas 24 h entra no lugar do fixado com menos
-# visualizações (o app deixa FIXADOS_NO_PERFIL: "Você só pode fixar até 3 vídeos"), e o aviso no privado traz os
-# 2 links. As curtidas de cada vídeo saem das linhas "curtiu seu vídeo." (interacoes); o vídeo abre pela linha da
+# o vídeo dele com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas 24 h entra no lugar do fixado que esfriou (P300 1,
+# abaixo; o app deixa FIXADOS_NO_PERFIL: "Você só pode fixar até 3 vídeos"), e o aviso no privado traz os 2 links.
+# As curtidas de cada vídeo saem das linhas "curtiu seu vídeo." (interacoes); o vídeo abre pela linha da
 # curtida, e o Fixar e o Desfixar ficam na folha do compartilhar dele, ao lado do Copiar link e do Promover, que o
 # robô nunca toca (ps.TEXTOS_PROIBIDOS). Uma troca por leitura, conferida com a folha aberta de novo (o Fixar vira
 # Desfixar, e o contrário). O vídeo que o robô fixou, ou achou já fixado, sai da conta por ESPERA_DO_JA_VISTO: sem
@@ -8929,6 +8932,20 @@ SEM_O_LINK = "o link não saiu"
 TENTATIVAS_DO_COMENTARIO_FIXADO = 3
 PROCESSO_DO_COMENTARIO_FIXADO = "vídeo fixado: comentar"
 NO_VIDEO_FIXADO = "no vídeo que fixei no seu Perfil"
+# O fixado que sai na troca (resposta do Rafael, 25/11/2026, P300 1, com 30 dias no lugar dos 3 da pergunta): o que
+# esfriou, e não o de menos visualizações, que pode ser um vídeo novo começando a crescer. O robô anota as
+# visualizações de cada fixado (o número embaixo do quadro na grade, pela marca da capa, como na medição da P76): uma
+# vez por dia, na leitura da grade depois da Saúde do Vídeo, sem toque a mais, e também na troca e logo depois de
+# fixar um. Sai o que ganhou menos visualizações por dia desde a anotação mais velha dele nos últimos
+# DIAS_DO_RITMO_DOS_FIXADOS dias; no empate, o de menos curtidas no coração (lidas quando o robô abre cada fixado para
+# conferir, _entre_os_fixados: as curtidas das Notificações não se ligam à capa da grade). O fixado com menos de
+# HORAS_PARA_O_RITMO horas de anotação (o recém-fixado) não sai; sem essas horas de nenhum, sai o de menos
+# visualizações, menos o que apareceu nos fixados depois dos outros. Com menos de FIXADOS_NO_PERFIL fixados, nenhum
+# sai (pedido do Rafael, 25/11/2026). DECISOES.md, Shopee Vídeo.
+DIAS_DO_RITMO_DOS_FIXADOS = 30
+HORAS_PARA_O_RITMO = 24
+CHAVE_DOS_FIXADOS = "shopee_video_fixados"
+PROCESSO_DOS_FIXADOS = "fixados: visualizações anotadas"
 
 
 def _juntar_curtidas(d, xml, curtidas, agora=None):
@@ -9025,7 +9042,7 @@ def fixar_o_que_viraliza(d, agora=None):
     Depois das respostas de cada leitura das Notificações: o comentário no vídeo fixado que não saiu na leitura
     de antes volta (_comentar_de_novo_no_fixado), o pedido de uma vez do comentário no 1º fixado do Perfil sai
     (_comentar_no_1o_fixado), e o vídeo com MINIMO_DE_CURTIDAS curtidas ou mais nas últimas 24 h que não está
-    fixado entra no lugar do fixado com menos visualizações e ganha o comentário; o já fixado, só o comentário
+    fixado entra no lugar do fixado que esfriou (P300 1) e ganha o comentário; o já fixado, só o comentário
     (_fixar_no_perfil), até CANDIDATOS_POR_LEITURA vídeos olhados. Uma vez por leitura: a continuação dela
     (respostas_continuar) não troca de novo. Devolve o que fez, para a rodada, ou "". O que para fica no registro,
     com o caso para o checkup do Claude; a Verificação segue adiante, como nas respostas.
@@ -9085,15 +9102,17 @@ def _fixar_um(d, agora):
 # volta quando o novo não fica (_devolver_o_desfixado). DECISOES.md, Shopee Vídeo.
 def _fixar_no_perfil(d, candidato, agora):
     """
-    O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: passa pelo Perfil, abre o vídeo
-    pela linha da curtida, confere no coração que ele tem as curtidas e, na folha do compartilhar, que não está
-    fixado; copia o link e confere de novo, nos fixados da grade, que ele não é um deles; tira do Perfil o fixado de
-    menos visualizações quando os FIXADOS_NO_PERFIL estão ocupados, abre o vídeo de novo e o fixa, conferindo cada
-    passo, e comenta nele (_comentar_no_fixado); o já fixado só ganha o comentário, se ainda não tem o do robô
-    (_ja_fixado). Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado e comentado, ou com menos curtidas
-    no coração), para olhar o seguinte. O fixar que para depois do desfixar devolve o que saiu e avisa o Rafael.
+    O vídeo das curtidas (candidato: {"video", "curtidas"}) nos fixados do Perfil: passa pelo Perfil (anotando as
+    visualizações dos fixados, P300 1), abre o vídeo pela linha da curtida, confere no coração que ele tem as curtidas
+    e, na folha do compartilhar, que não está fixado; copia o link e confere de novo, nos fixados da grade, que ele não
+    é um deles; tira do Perfil o fixado que esfriou (_desfixar_o_que_esfriou) quando os FIXADOS_NO_PERFIL estão
+    ocupados, abre o vídeo de novo e o fixa, conferindo cada passo, comenta nele (_comentar_no_fixado) e anota os
+    fixados de novo, para o novo começar a contar o dia dele; o já fixado só ganha o comentário, se ainda não tem o do
+    robô (_ja_fixado). Devolve o que fez, ou "" quando o vídeo fica de fora (já fixado e comentado, ou com menos
+    curtidas no coração), para olhar o seguinte. O fixar que para depois do desfixar devolve o que saiu e avisa o
+    Rafael.
     """
-    _fixados_do_perfil(d)
+    anotar_os_fixados(d, agora)
     xml = _abrir_pela_curtida(d, candidato["video"])
     video = interacoes.video_do_feed(xml)
     no_coracao = interacoes.curtidas_do_video(xml)
@@ -9118,11 +9137,13 @@ def _fixar_no_perfil(d, candidato, agora):
         raise Parada(MOTIVO_DO_FIXAR + "sem o Fixar na folha do compartilhar")
     link = _copiar_link_da_folha(d)
     _fechar_a_folha(d)
-    if _entre_os_fixados(d, legenda):
+    curtidas = []
+    if _entre_os_fixados(d, legenda, curtidas):
         # O player ficou no fixado de mesma legenda: o comentário sai nele.
         return _ja_fixado(d, candidato, link, agora, "conferido nos fixados do Perfil")
     fixados = _fixados_do_perfil(d)
-    saiu = _desfixar_o_de_menos_vistas(d, fixados, agora) if len(fixados) >= FIXADOS_NO_PERFIL else None
+    # Com 1 ou 2 fixados, nenhum sai: o vídeo que viraliza só entra (pedido do Rafael, 25/11/2026).
+    saiu = _desfixar_o_que_esfriou(d, fixados, agora, curtidas) if len(fixados) >= FIXADOS_NO_PERFIL else None
     try:
         fixou = _fixar_o_video(d, candidato["video"], legenda)
     except Parada as e:
@@ -9134,7 +9155,7 @@ def _fixar_no_perfil(d, candidato, agora):
             finally:
                 registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "devolvido" if voltou else "não devolvido",
                                              "o desfixado, depois do fixar que parou", ok=voltou, agora=agora)
-                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações, "
+                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil {_qual_saiu(saiu)}, "
                        f"para dar lugar ao que está viralizando ({candidato['curtidas']} curtidas nas últimas 24 h), "
                        f"mas não consegui fixar o novo ({e.motivo.removeprefix(MOTIVO_DO_FIXAR)}). "
                        + ("Pus de volta o que tinha tirado, e o seu Perfil continua com os "
@@ -9146,28 +9167,48 @@ def _fixar_no_perfil(d, candidato, agora):
     if not fixou:
         return _ja_fixado_depois(d, candidato, link, saiu, agora)
     _anotar_visto(candidato["video"], agora)
+    esfriou = bool(saiu) and saiu["ritmo"] is not None
     registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "trocado" if saiu else "fixado",
-                                 "no lugar do fixado de menos visualizações" if saiu
+                                 ("no lugar do fixado que menos cresceu" if esfriou
+                                  else "no lugar do fixado de menos visualizações") if saiu
                                  else f"com menos de {FIXADOS_NO_PERFIL} fixados no Perfil", ok=True, agora=agora)
     aviso = (f"📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que está viralizando ({candidato['curtidas']} "
              f"curtidas nas últimas 24 h, nas Notificações).\n\n📌 Fixado agora: {link or SEM_O_LINK}")
-    if saiu:
-        vistas = f"{saiu['vistas']:,}".replace(",", ".")
-        aviso += f"\n📤 Saiu dos fixados (o de menos visualizações, {vistas}): {saiu['link'] or SEM_O_LINK}"
+    if esfriou:
+        dias = f"{saiu['dias']} dia" + ("s" if saiu["dias"] != 1 else "")
+        aviso += (f"\n📤 Saiu dos fixados (o que menos cresceu: {_com_pontos(saiu['ritmo'])} visualizações por dia "
+                  f"em {dias}; {_com_pontos(saiu['vistas'])} no total): {saiu['link'] or SEM_O_LINK}")
+    elif saiu:
+        aviso += (f"\n📤 Saiu dos fixados (o de menos visualizações, {_com_pontos(saiu['vistas'])}): "
+                  f"{saiu['link'] or SEM_O_LINK}")
     else:
         aviso += f"\n\nAinda havia lugar entre os {FIXADOS_NO_PERFIL} fixados: nenhum saiu."
     avisar(aviso)
     comentario = _comentar_no_fixado(d, candidato["video"], link, agora)
-    return "fixar no perfil: " + ("troquei o fixado de menos visualizações pelo vídeo que viraliza" if saiu
-                                  else "fixei o vídeo que viraliza") + f"; {comentario}"
+    # O vídeo que entrou começa a contar o dia dele agora (P300 1).
+    _anotar_os_fixados_junto(d, agora)
+    qual = "que menos cresceu" if esfriou else "de menos visualizações"
+    feito = f"troquei o fixado {qual} pelo vídeo que viraliza" if saiu else "fixei o vídeo que viraliza"
+    return f"fixar no perfil: {feito}; {comentario}"
 
 
-def _entre_os_fixados(d, legenda):
+def _com_pontos(numero):
+    """O número com o ponto dos milhares, como o Rafael lê (1.200)."""
+    return f"{numero:,}".replace(",", ".")
+
+
+def _qual_saiu(saiu):
+    """O fixado que saiu, nos avisos: o que menos cresceu (P300 1) ou, sem o ritmo dele, o de menos visualizações."""
+    return "o vídeo que menos cresceu" if saiu.get("ritmo") is not None else "o vídeo de menos visualizações"
+
+
+def _entre_os_fixados(d, legenda, curtidas=None):
     """
     O vídeo da legenda é um dos fixados do Perfil? Abre cada fixado pela grade (aberto por ela, o app sabe que ele está
     fixado) e compara a legenda do player com a do vídeo que viraliza (_mesmo_video). True deixa o player no fixado de
     mesma legenda; False, no último aberto. Sem a legenda do vídeo que viraliza, nenhum fixado se distingue dele: para
-    antes de tirar algum.
+    antes de tirar algum. curtidas (uma lista): recebe as curtidas do coração de cada fixado aberto, na ordem da grade
+    (None no que não mostra o número), o desempate da troca (P300 1).
     """
     if not _comeco_da_legenda(legenda):
         raise Parada(MOTIVO_DO_FIXAR + "sem a legenda do vídeo para conferir nos fixados")
@@ -9180,7 +9221,10 @@ def _entre_os_fixados(d, legenda):
             raise Parada(ps.RECUSA)
         d.click(*ponto)
         pausa(6)
-        if _mesmo_video(legenda, interacoes.video_do_feed(_esperar_o_player(d))["legenda"]):
+        xml = _esperar_o_player(d)
+        if curtidas is not None:
+            curtidas.append(interacoes.curtidas_do_video(xml))
+        if _mesmo_video(legenda, interacoes.video_do_feed(xml)["legenda"]):
             return True
     return False
 
@@ -9314,16 +9358,162 @@ def _fixados_do_perfil(d):
     raise Parada(MOTIVO_DO_FIXAR + "a grade do Perfil não carregou")
 
 
-def _desfixar_o_de_menos_vistas(d, fixados, agora):
+def _marcas_dos_fixados(d, fixados):
     """
-    Tira dos fixados o de menos visualizações (o número embaixo do quadro na grade): abre o vídeo, confere o
-    Desfixar na folha do compartilhar, copia o link, toca no Desfixar e confere com a folha aberta de novo (o
-    Fixar no lugar). Devolve {"link", "vistas"}.
+    As marcas das capas dos fixados (os quadros da grade na tela), na ordem deles: None na capa que não carregou
+    depois de TENTATIVAS_DA_MARCA prints, com a pausa entre eles.
     """
-    com_numero = [q for q in fixados if q["vistas"] is not None]
-    if not com_numero:
+    marcas = [None] * len(fixados)
+    for tentativa in range(TENTATIVAS_DA_MARCA):
+        if tentativa:
+            pausa(PAUSA_DA_MARCA)
+        imagem = d.screenshot()
+        marcas = [marca or visualizacoes.marca_da_capa(imagem, q["caixa"]) for marca, q in zip(marcas, fixados)]
+        if all(marcas):
+            break
+    return marcas
+
+
+def _mesma_capa(marca, outra):
+    return bool(marca and outra) and visualizacoes.diferenca(marca, outra) <= visualizacoes.MARCA_PARECIDA
+
+
+def _notas_dos_fixados(agora=None):
+    """
+    As visualizações anotadas dos fixados (P300 1) nos últimos DIAS_DO_RITMO_DOS_FIXADOS dias: [{"marca", "vistas",
+    "em"}], a marca a da capa na grade do Perfil.
+    """
+    limite = _momento(agora_br(agora) - timedelta(days=DIAS_DO_RITMO_DOS_FIXADOS))
+    return [n for n in (db.ler_config(CHAVE_DOS_FIXADOS, {}) or {}).get("notas") or [] if (n.get("em") or "") >= limite]
+
+
+def _guardar_os_fixados(fixados, marcas, agora=None):
+    """
+    Anota as visualizações de cada fixado com a capa e o número na grade (P300 1), uma vez por dia cada um, e registra
+    quantos entraram; as anotações de mais de DIAS_DO_RITMO_DOS_FIXADOS dias saem. Com os FIXADOS_NO_PERFIL na grade,
+    todos com a capa, as do vídeo que não está mais entre eles também saem: fixado de novo, ele conta do zero, como o
+    recém-fixado (um quadro cortado ou sem a capa nunca apaga as de um fixado). Sem fixado na grade, nada muda.
+    """
+    if not fixados:
+        return
+    momento = _momento(agora)
+    limite = _momento(agora_br(agora) - timedelta(days=DIAS_DO_RITMO_DOS_FIXADOS))
+    lidos = [(marca, q["vistas"]) for q, marca in zip(fixados, marcas) if marca and q["vistas"] is not None]
+    todas = len(fixados) >= FIXADOS_NO_PERFIL and len(marcas) == len(fixados) and all(marcas)
+
+    def anotar(dados):
+        notas = [n for n in dados.get("notas") or [] if (n.get("em") or "") >= limite
+                 and (not todas or any(_mesma_capa(n["marca"], marca) for marca in marcas))]
+        novas = 0
+        for marca, vistas in lidos:
+            if not any(n["em"][:10] == momento[:10] and _mesma_capa(n["marca"], marca) for n in notas):
+                notas.append({"marca": marca, "vistas": vistas, "em": momento})
+                novas += 1
+        dados["notas"] = notas
+        return novas
+
+    novas = db.atualizar_config(CHAVE_DOS_FIXADOS, anotar) or 0
+    registro_processos.registrar(REGISTRO, PROCESSO_DOS_FIXADOS, "anotados",
+                                 f"{novas} nova(s); {len(lidos)} de {len(fixados)} fixado(s) com a capa e o número",
+                                 ok=bool(lidos), agora=agora)
+
+
+def anotar_os_fixados(d, agora=None):
+    """Os fixados da grade do Perfil (_fixados_do_perfil), com as visualizações anotadas (P300 1): (fixados, marcas)."""
+    fixados = _fixados_do_perfil(d)
+    marcas = _marcas_dos_fixados(d, fixados)
+    _guardar_os_fixados(fixados, marcas, agora)
+    return fixados, marcas
+
+
+def _anotar_os_fixados_junto(d, agora=None):
+    """As visualizações dos fixados anotadas no meio de outra coisa (P300 1): só a Verificação segue adiante."""
+    try:
+        anotar_os_fixados(d, agora)
+    except Verificacao:
+        raise
+    except Parada as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não anotei os fixados: {ps.mascarar(e.motivo)}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_FIXADOS, "parou", e.motivo.removeprefix(MOTIVO_DO_FIXAR),
+                                     ok=False, agora=agora)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao anotar os fixados: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DOS_FIXADOS, "erro", type(e).__name__, ok=False, agora=agora)
+
+
+def _anotar_os_fixados_da_grade(d, quadros, marcas, agora=None):
+    """
+    Os fixados da tela da grade lida para as visualizações dos posts (anotar_visualizacoes): as visualizações deles
+    entram nas anotações do dia (P300 1), sem toque a mais; a capa de fixado que ainda não carregou ganha mais prints
+    (_marcas_dos_fixados). Erro aqui não segura a leitura.
+    """
+    try:
+        fixados = [q for q in quadros if q["fixado"]]
+        marcas = [marca for q, marca in zip(quadros, marcas) if q["fixado"]]
+        if not all(marcas):
+            marcas = _marcas_dos_fixados(d, fixados)
+        _guardar_os_fixados(fixados, marcas, agora)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao anotar os fixados da grade: {type(e).__name__}")
+
+
+def _ritmo_do_fixado(notas, marca, vistas, agora=None):
+    """
+    O ritmo do fixado de capa marca, com vistas visualizações agora: {"ritmo", "dias", "primeira"}. primeira: o momento
+    da anotação mais velha dele nas notas (None sem nenhuma, ou sem a marca); ritmo: as visualizações por dia desde ela
+    (None quando ela tem menos de HORAS_PARA_O_RITMO horas); dias: os dias desde ela, para o aviso.
+    """
+    dele = [n for n in notas if _mesma_capa(n["marca"], marca)]
+    if not dele:
+        return {"ritmo": None, "dias": 0, "primeira": None}
+    primeira = min(dele, key=lambda n: n["em"])
+    horas = (datetime.strptime(_momento(agora), "%Y-%m-%d %H:%M:%S")
+             - datetime.strptime(primeira["em"], "%Y-%m-%d %H:%M:%S")).total_seconds() / 3600
+    ritmo = round((vistas - primeira["vistas"]) * 24 / horas) if horas >= HORAS_PARA_O_RITMO else None
+    return {"ritmo": ritmo, "dias": max(1, round(horas / 24)), "primeira": primeira["em"]}
+
+
+def _o_que_esfriou(fixados, marcas, agora=None, curtidas=None):
+    """
+    O fixado que sai na troca (P300 1), entre os que mostram o número na grade: (quadro, ritmo, porque), ritmo o
+    {"ritmo", "dias"} dele. Sai o de menor ritmo (_ritmo_do_fixado); no empate, o de menos curtidas no coração
+    (curtidas: as de cada fixado, na ordem deles, lidas em _entre_os_fixados; sem o número de algum, não desempatam) e
+    depois o de menos visualizações. O fixado sem o ritmo (o recém-fixado) fica. Sem o ritmo de nenhum, sai o de menos
+    visualizações, menos o que tem a 1ª anotação mais nova que a dos outros (fixado depois deles), e o ritmo vai None.
+    (None, None, "") sem o número de nenhum.
+    """
+    notas = _notas_dos_fixados(agora)
+    curtidas = list(curtidas or [])
+    lidos = []
+    for i, (quadro, marca) in enumerate(zip(fixados, marcas)):
+        if quadro["vistas"] is not None:
+            ritmo = _ritmo_do_fixado(notas, marca, quadro["vistas"], agora)
+            lidos.append({"quadro": quadro, "coracao": curtidas[i] if i < len(curtidas) else None, **ritmo})
+    if not lidos:
+        return None, None, ""
+    com_ritmo = [f for f in lidos if f["ritmo"] is not None]
+    if not com_ritmo:
+        mais_velha = min((f["primeira"] for f in lidos if f["primeira"]), default=None)
+        antigos = [f for f in lidos if f["primeira"] in (None, mais_velha)]
+        return min(antigos, key=lambda f: f["quadro"]["vistas"])["quadro"], None, "o de menos visualizações"
+    menor = min(f["ritmo"] for f in com_ritmo)
+    empatados = [f for f in com_ritmo if f["ritmo"] == menor]
+    pelo_coracao = (len({f["coracao"] for f in empatados}) > 1
+                    and all(f["coracao"] is not None for f in empatados))
+    alvo = min(empatados, key=lambda f: ((f["coracao"] if pelo_coracao else 0), f["quadro"]["vistas"]))
+    porque = "o que menos cresceu" + ("; no empate, o de menos curtidas" if pelo_coracao else "")
+    return alvo["quadro"], {"ritmo": alvo["ritmo"], "dias": alvo["dias"]}, porque
+
+
+def _desfixar_o_que_esfriou(d, fixados, agora, curtidas=None):
+    """
+    Tira dos fixados o que esfriou (_o_que_esfriou, P300 1), pelas capas na tela da grade: abre o vídeo, confere o
+    Desfixar na folha do compartilhar, copia o link, toca no Desfixar e confere com a folha aberta de novo (o Fixar no
+    lugar). Devolve {"link", "vistas", "ritmo", "dias"}, o ritmo None quando saiu o de menos visualizações.
+    """
+    alvo, ritmo, porque = _o_que_esfriou(fixados, _marcas_dos_fixados(d, fixados), agora, curtidas)
+    if not alvo:
         raise Parada(MOTIVO_DO_FIXAR + "sem as visualizações dos fixados na grade")
-    alvo = min(com_numero, key=lambda q: q["vistas"])
     xml, ponto = tela(d), ps._centro(alvo)
     if ps.proibido_no_ponto(xml, *ponto):
         raise Parada(ps.RECUSA)
@@ -9341,9 +9531,8 @@ def _desfixar_o_de_menos_vistas(d, fixados, agora):
     if interacoes.estado_do_fixar(_abrir_a_folha(d)) != "fixar":
         raise Parada(MOTIVO_DO_FIXAR + "o Desfixar não ficou")
     _fechar_a_folha(d)
-    registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "desfixado", "o de menos visualizações", ok=True,
-                                 agora=agora)
-    return {"link": link, "vistas": alvo["vistas"]}
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "desfixado", porque, ok=True, agora=agora)
+    return {"link": link, "vistas": alvo["vistas"], **(ritmo or {"ritmo": None, "dias": 0})}
 
 
 def _mesmo_video(legenda, outra):
@@ -9426,7 +9615,7 @@ def _ja_fixado_depois(d, candidato, link, saiu, agora):
             voltou = _devolver_o_desfixado(d, saiu)
         finally:
             if not voltou:
-                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil o vídeo de menos visualizações para "
+                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil {_qual_saiu(saiu)} para "
                        f"dar lugar ao que está viralizando, mas ele já estava fixado, e não consegui fixar de novo o "
                        f"que tirei. Se quiser, fixe-o à mão, para o Perfil voltar a ter os {FIXADOS_NO_PERFIL} "
                        f"fixados.\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}")

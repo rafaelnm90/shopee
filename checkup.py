@@ -449,7 +449,8 @@ SEM_META = {
     ("shopee_video", "vídeo de IA do dia"), ("shopee_video", "amostra do vídeo de IA"),
     ("shopee_video", "rascunho recusado"), ("shopee_video", "aprovação dos rascunhos"),
     ("shopee_video", "curtidas nas notificações"), ("shopee_video", "fixar no perfil"),
-    ("shopee_video", "vídeo fixado: "), ("shopee_video", "live: "), ("shopee_video", "comentários por dia"),
+    ("shopee_video", "vídeo fixado: "), ("shopee_video", "fixados: "), ("shopee_video", "live: "),
+    ("shopee_video", "comentários por dia"),
     ("shopee_video", PROCESSO_SEM_LIMPEZA_SV), ("shopee_video", PROCESSO_SEM_O_CELULAR_SV),
 }
 
