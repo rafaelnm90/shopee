@@ -664,13 +664,25 @@ def video_do_teste(novo=False, de_video=False):
     return video
 
 
+# O campo de escrever é o EditText em foco. Com o teclado aberto, a janela dele também tem um nó em foco, e o
+# d(focused=True) sem a classe pode achá-lo antes do campo: o set_text do uiautomator2 toca no meio dele (a tecla
+# "g" do teclado do Motorola) e não escreve nada. Foi o que parou os comentários de 25/11/2026, às 04:22 e às 08:03
+# ("gg" no campo e nada do texto); o nome do produto já escrevia só no EditText desde 24/11.
+CLASSE_DO_CAMPO = "android.widget.EditText"
+
+
+def editavel_em_foco(d):
+    """O campo de escrever em foco (o EditText), nunca o nó em foco da janela do teclado."""
+    return d(focused=True, className=CLASSE_DO_CAMPO)
+
+
 def escrever(d, texto):
     """
-    Escreve no campo com o cursor pela acessibilidade do Android (o set_text do campo em
-    foco): o texto entra inteiro, com os emojis, no lugar do que havia no campo. Sem campo
-    em foco, cai no send_keys.
+    Escreve no campo com o cursor pela acessibilidade do Android (o set_text do EditText em
+    foco, editavel_em_foco): o texto entra inteiro, com os emojis, no lugar do que havia no
+    campo. Sem campo em foco, cai no send_keys.
     """
-    campo = d(focused=True)
+    campo = editavel_em_foco(d)
     if campo.exists:
         campo.set_text(texto)
     else:

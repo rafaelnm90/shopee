@@ -1050,6 +1050,43 @@ def test_comentario_que_nao_fica_inteiro_nem_na_2a_escrita_para_sem_enviar(aviso
     assert not app.comentarios and app.escritas == 2
 
 
+class CelularDoFeedComOTecladoNoFoco(CelularDoFeed):
+    """
+    Com o teclado aberto, a janela dele também tem um nó em foco, e o d(focused=True) sem a classe o acha antes do
+    campo (Motorola, 25/11/2026, às 04:22 e às 08:03). O set_text do uiautomator2 toca no meio dele (a tecla "g") e não
+    escreve nada; o get_text dele é vazio.
+    """
+
+    def __init__(self, **k):
+        super().__init__(**k)
+        self.no_teclado = 0
+
+    def __call__(self, **seletor):
+        app = self
+        if self.em_foco and seletor.get("className") != "android.widget.EditText":
+            class NoDoTeclado:
+                exists = True
+
+                def set_text(self, texto):
+                    app.no_teclado += 1
+                    app.escrito += "g"
+
+                def get_text(self):
+                    return ""
+
+            return NoDoTeclado()
+        return Campo(self)
+
+
+def test_comentario_vai_ao_campo_e_nunca_ao_no_em_foco_do_teclado(avisos, ia_do_feed):
+    # Em 25/11/2026, às 04:22 e às 08:03, o comentário parou com "gg" no campo: o robô escrevia e conferia no nó em
+    # foco da janela do teclado. A escrita e a conferência vão ao EditText em foco: o comentário sai inteiro.
+    app = CelularDoFeedComOTecladoNoFoco(videos=[("Loja da Bia", "Mini saia linda")])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {0: ["Que achado! 0"]} and app.no_teclado == 0
+    assert not robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_ENVIO, "")
+
+
 def test_feed_que_para_guarda_o_caso_com_a_tela_da_hora(monkeypatch, avisos, ia_do_feed):
     # O caso tem de mostrar a tela em que parou (o painel), e não a de depois de sair dela.
     class PainelQueNaoAbre(CelularDoFeed):
