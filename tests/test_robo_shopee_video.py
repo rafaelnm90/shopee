@@ -5729,6 +5729,15 @@ def test_cupom_do_video_lido_em_meus_cupons_so_lendo_e_guardado_com_a_janela(mon
                      robo.PROCESSO_DA_LEITURA_DOS_CUPONS) == (
         "com o cupom do vídeo valendo", "5 cupom(ns) na lista; 4 exclusivo(s) para vídeo; "
         "2 lote(s) do frete grátis sem valor mínimo", 1)
+    # O que foi lido fica guardado mesmo quando a volta ao Eu para (a rodada seguinte volta do início).
+
+    def volta_que_para(d, ate, vezes=15):
+        raise robo.Parada("não consegui voltar até Eu")
+
+    monkeypatch.setattr(robo, "voltar", volta_que_para)
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO, {})
+    robo._ler_o_cupom_do_dia_junto(CelularDosCupons(_lista_dos_cupons()), momento("2026-11-27 05:00"))
+    assert len(robo.db.ler_config(robo.CHAVE_DO_CUPOM_DO_VIDEO)["lotes"]) == 2
 
 
 def test_cupom_do_dia_que_para_fica_no_registro_e_a_leitura_de_antes_vale(monkeypatch):
@@ -5736,7 +5745,7 @@ def test_cupom_do_dia_que_para_fica_no_registro_e_a_leitura_de_antes_vale(monkey
     robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO, {"lido_em": "2026-11-25 05:00:00", "lotes": [
         {"de": "2026-11-25 05:00:00", "ate": "2026-11-29 23:59:59"}]})
 
-    def sem_a_lista(d, agora=None):
+    def sem_a_lista(d):
         raise robo.Parada(robo.MOTIVO_SEM_MEUS_CUPONS)
 
     monkeypatch.setattr(robo, "ler_meus_cupons", sem_a_lista)
@@ -5748,11 +5757,11 @@ def test_cupom_do_dia_que_para_fica_no_registro_e_a_leitura_de_antes_vale(monkey
     assert not robo.cupom_do_dia_pendente(momento("2026-11-26 10:00"))
     assert robo.cupom_do_video(momento("2026-11-26 10:00")) == robo.CUPOM_DO_VIDEO
     # Lido hoje, não lê de novo.
-    monkeypatch.setattr(robo, "ler_meus_cupons", lambda d, agora=None: pytest.fail("leu duas vezes no dia"))
+    monkeypatch.setattr(robo, "ler_meus_cupons", lambda d: pytest.fail("leu duas vezes no dia"))
     robo._ler_o_cupom_do_dia_junto(object(), momento("2026-11-26 11:00"))
     # A Verificação na tela para a rodada, como sempre.
 
-    def verificacao(d, agora=None):
+    def verificacao(d):
         raise robo.Verificacao()
 
     monkeypatch.setattr(robo, "ler_meus_cupons", verificacao)

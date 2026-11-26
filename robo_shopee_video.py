@@ -8714,11 +8714,11 @@ def _esperar_os_cartoes(d):
     return xml
 
 
-def ler_meus_cupons(d, agora=None):
+def ler_meus_cupons(d):
     """
-    Lê a lista de Meus Cupons, só lendo: abre pelo CAMINHO_DE_MEUS_CUPONS, rola até o fim (até ROLADAS_EM_MEUS_CUPONS
-    vezes, parando quando a tela não traz cartão nem pedaço novo) e volta ao Eu. Devolve os cartões lidos
-    ({N: pedaços}, ps.cartoes_de_cupom). Sem a lista na tela, para (Parada).
+    Lê a lista de Meus Cupons, só lendo: abre pelo CAMINHO_DE_MEUS_CUPONS e rola até o fim (até ROLADAS_EM_MEUS_CUPONS
+    vezes, parando quando a tela não traz cartão nem pedaço novo). Devolve os cartões lidos ({N: pedaços},
+    ps.cartoes_de_cupom). Sem a lista na tela, para (Parada).
     """
     ir_ao_inicio(d)
     seguir(d, CAMINHO_DE_MEUS_CUPONS)
@@ -8737,7 +8737,6 @@ def ler_meus_cupons(d, agora=None):
         ps.rolar(d)
         pausa(2)
         xml = tela(d)
-    voltar(d, "Eu")
     return cartoes
 
 
@@ -8758,13 +8757,14 @@ def lotes_do_cupom_do_video(cartoes, lido_em):
 
 def ler_o_cupom_do_dia(d, agora=None):
     """
-    A leitura do dia de Meus Cupons (P313 1): guarda os lotes do cupom do vídeo (CHAVE_DO_CUPOM_DO_VIDEO) e anota no
-    registro só números: os cupons lidos, os do vídeo, os do frete grátis sem valor mínimo e se algum vale agora. A
-    tentativa conta como a do dia mesmo quando para: a leitura de antes fica valendo até a do dia seguinte.
+    A leitura do dia de Meus Cupons (P313 1): guarda os lotes do cupom do vídeo (CHAVE_DO_CUPOM_DO_VIDEO), anota no
+    registro só números (os cupons lidos, os do vídeo, os do frete grátis sem valor mínimo e se algum vale agora) e
+    volta ao Eu. A tentativa conta como a do dia mesmo quando para: a leitura de antes fica valendo até a do dia
+    seguinte; o que é lido fica guardado mesmo se a volta ao Eu parar.
     """
     momento = agora_br(agora)
     db.atualizar_config(CHAVE_DO_CUPOM_DO_VIDEO, lambda dados: dados.update(tentado_em=_momento(momento)))
-    cartoes = ler_meus_cupons(d, agora)
+    cartoes = ler_meus_cupons(d)
     lotes = lotes_do_cupom_do_video(cartoes, momento)
     db.atualizar_config(CHAVE_DO_CUPOM_DO_VIDEO, lambda dados: dados.update(lido_em=_momento(momento), lotes=lotes))
     do_video = sum(cartao.get("selo") == ps.SELO_DO_VIDEO for cartao in cartoes.values())
@@ -8773,6 +8773,7 @@ def ler_o_cupom_do_dia(d, agora=None):
                                  "com o cupom do vídeo valendo" if valendo else "sem o cupom do vídeo valendo",
                                  f"{len(cartoes)} cupom(ns) na lista; {do_video} exclusivo(s) para vídeo; "
                                  f"{len(lotes)} lote(s) do frete grátis sem valor mínimo", ok=True, agora=momento)
+    voltar(d, "Eu")
     return lotes
 
 
