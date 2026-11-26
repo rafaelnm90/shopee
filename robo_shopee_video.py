@@ -11362,8 +11362,8 @@ def _comentar_no_aberto(d, video, onde, produto, titulo, feitos=(), agora=None, 
         raise Parada("a IA não escreveu o comentário do post")
     if cupom:
         registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM_NO_COMENTARIO,
-                                     "com o cupom" if interacoes.fala_do_cupom(texto) else "sem o cupom",
-                                     "" if interacoes.fala_do_cupom(texto) else "a IA não falou do cupom", ok=None,
+                                     "com o cupom" if ps.fala_do_cupom(texto) else "sem o cupom",
+                                     "" if ps.fala_do_cupom(texto) else "a IA não falou do cupom", ok=None,
                                      agora=agora)
     _abrir_o_campo_do_post(d, xml)
     _escrever_e_enviar(d, texto)

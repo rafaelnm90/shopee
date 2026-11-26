@@ -3128,6 +3128,12 @@ def test_meus_cupons_le_cada_cartao_pelos_pedacos_soltos_e_os_botoes_nunca_se_to
     assert not ps.na_tela_de_meus_cupons(ps.elementos(_no_do_cupom("Cupons", (0, 0, 10, 10))))
 
 
+def test_a_ia_falou_do_cupom_do_video_pelo_cupom_ou_pelo_frete():
+    # P313 1 e P314 1: o registro conta se a chamada e os comentários (do robô e do assistente) falaram do cupom.
+    assert ps.fala_do_cupom("Frete grátis pelo vídeo") and ps.fala_do_cupom("Use o CUPOM de hoje")
+    assert not ps.fala_do_cupom("Copo sempre gelado") and not ps.fala_do_cupom(None)
+
+
 def test_janela_do_cupom_pela_validade_do_cartao():
     from datetime import datetime
     from fuso import fuso_horario

@@ -1015,8 +1015,6 @@ CUPOM_NO_PROPRIO = """
 - hoje quem compra pelo vídeo pode usar {cupom}: fale desse cupom no comentário, chamando para comprar pelo \
 vídeo, sem prometer mais do que ele diz (sem dizer que o frete é grátis para tudo, sempre ou para todos, e sem \
 valor, desconto, prazo ou estoque); só neste ponto o frete pode aparecer."""
-# O texto fala do cupom (para o registro, que conta se a IA usou o cupom pedido).
-PALAVRAS_DO_CUPOM = ("cupom", "frete")
 
 
 def texto_simples(texto, limite):
@@ -1081,12 +1079,6 @@ async def gerar_mensagem_da_live(imagem, anteriores=()):
     """
     prompt = PROMPT_DA_LIVE.format(anteriores="; ".join(anteriores) or "nenhuma", limite=TAMANHO_DO_COMENTARIO)
     return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")])
-
-
-def fala_do_cupom(texto):
-    """O texto fala do cupom do vídeo (uma das PALAVRAS_DO_CUPOM)?"""
-    normal = str(texto or "").casefold()
-    return any(palavra in normal for palavra in PALAVRAS_DO_CUPOM)
 
 
 async def gerar_proprio(produto="", titulo="", anteriores=(), cupom=""):
