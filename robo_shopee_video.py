@@ -151,6 +151,8 @@ SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliad
 # o mesmo vídeo, nunca (MESMO_VIDEO). Escolha do Rafael (26/11/2026, P307, no lugar da P166 1): DECISOES.md,
 # Shopee Vídeo.
 DIAS_ENTRE_O_MESMO_PRODUTO = 7
+# O produto do vídeo de IA, nos avisos: sem post e sem vídeo de IA nesses dias (P307 e P312 1).
+SEM_POST_NEM_VIDEO_DE_IA = f"sem post nem vídeo de IA nos últimos {DIAS_ENTRE_O_MESMO_PRODUTO} dias"
 PRODUTO_JA_POSTADO = "o produto deste vídeo já foi postado há menos de 7 dias (pelo robô ou pelo assistente)"
 # O vídeo que o robô ou o modo assistente já usou (o mesmo vídeo noutro arquivo também, pela assinatura da imagem:
 # videos.assinatura_do_video) fica de lado, e vai o próximo da fonte (video_ja_usado; P307).
@@ -1229,7 +1231,7 @@ def onde_os_produtos_foram(agora=None):
     do modo assistente marcados com Postei ✅ nesses dias. Os produtos a mais não contam. onde é o rótulo do lugar mais
     adiantado: o post do robô vale mais que o Postei ✅, que vale mais que o aprovado e o rascunho. (P166 1 e P307)
     """
-    desde = (agora_br(agora) - timedelta(days=DIAS_ENTRE_O_MESMO_PRODUTO)).strftime("%Y-%m-%d %H:%M:%S")
+    desde = inicio_do_prazo(agora)
     rascunhos = listar("rascunho", "aprovado", "refazer", "postado")
 
     def do_robo(estado):
@@ -1244,6 +1246,14 @@ def onde_os_produtos_foram(agora=None):
     lugares = [do_robo("rascunho"), do_robo("aprovado"), (POSTEI_NO_ASSISTENTE, assistente.itens_postados(desde)),
                do_robo("postado")]
     return {str(item): onde for onde, itens in lugares for item in itens if item}
+
+
+def inicio_do_prazo(agora=None):
+    """
+    A hora de DIAS_ENTRE_O_MESMO_PRODUTO dias atrás ("AAAA-MM-DD HH:MM:SS"): o produto que foi ao ar depois dela, ou
+    que teve um vídeo de IA gerado depois dela, ainda não volta (P307 e P312 1).
+    """
+    return (agora_br(agora) - timedelta(days=DIAS_ENTRE_O_MESMO_PRODUTO)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _itens_do_post(rascunho):
@@ -3311,15 +3321,16 @@ def de_onde_veio_o_video(video, fonte):
     """A linha do aviso do começo do rascunho que diz qual vídeo da fonte o robô pegou (P194 1)."""
     nome_da_fonte = assistente.FONTES.get(fonte, fonte)
     if video.get("video_ia"):
-        # A lista de onde o produto veio (P234 1), quando o andamento do vídeo a diz.
+        # A lista de onde o produto veio (P234 1), quando o andamento do vídeo a diz, e a época (P311 1).
         origem = video["video_ia"].get("origem")
+        epoca = frase_da_epoca(video["video_ia"]["epoca"], "P311 1") if video["video_ia"].get("epoca") else ""
         return (f"Vídeo: o vídeo de IA do dia, feito no Google Flow com o produto que paga mais por venda "
-                f"({assistente._reais(video.get('valor') or 0)}){f' entre {origem}' if origem else ''}, ainda não "
-                f"postado (P232 1 e P234 1).\n{flow.legenda_da_producao(video['video_ia'])}")
+                f"({assistente._reais(video.get('valor') or 0)}){f' entre {origem}' if origem else ''}, "
+                f"{SEM_POST_NEM_VIDEO_DE_IA} (P232 1, P234 1 e P312 1).{epoca}\n"
+                f"{flow.legenda_da_producao(video['video_ia'])}")
     if video.get("valor") is not None:
         vendas, nota = video.get("vendas") or 0, video.get("nota") or 0
-        epoca = (f" Combina com a época de {video['epoca']}: conta como se pagasse "
-                 f"{round((BONUS_DA_EPOCA - 1) * 100)}% a mais (P310 1)." if video.get("epoca") else "")
+        epoca = frase_da_epoca(video["epoca"], "P310 1") if video.get("epoca") else ""
         return (f"Vídeo: o de maior valor pelas vendas entre os próximos {VIDEOS_NA_ESCOLHA} de {nome_da_fonte} ainda "
                 f"não usados: {assistente._reais(video['valor'])} por venda, {_milhar(vendas)} vendidos (vale "
                 f"{peso_dos_vendidos(vendas)}x) e {_a_nota(nota)} (P194 1 e P308 1).{epoca}")
@@ -3353,15 +3364,16 @@ def _deixar_de_lado_no_dia(ids, config, agora=None):
 
 # --- A época (P310 1) ---
 
-# A próxima data do comércio, a até DIAS_DA_EPOCA dias: a IA diz, num pedido só, quais produtos da escolha do vídeo
-# combinam com ela (o tema da data ou o presente típico dela; o produto comum, que serve de presente em qualquer época,
-# não), e o que combina conta como se pagasse BONUS_DA_EPOCA vezes mais. As datas de promoção geral (Black Friday,
-# 11.11, Dia do Consumidor) ficam de fora: nelas todo produto vende. Sem data no prazo ou sem a resposta da IA, a
-# escolha fica como antes. A resposta de cada produto (o número dele e se combina, nunca o nome) vale até a data passar
-# (CHAVE_DA_EPOCA). O cupom do dia vem depois: o Claude mapeia onde o app mostra os cupons do dia e pergunta. Escolha
-# do Rafael (26/11/2026, P310 1): DECISOES.md, Shopee Vídeo.
+# A próxima data do comércio, a até DIAS_DA_EPOCA dias: a IA diz quais produtos da escolha do vídeo (os próximos da
+# fonte, P310 1, e os da lista do vídeo de IA, P311 1) combinam com ela (o tema da data ou o presente típico dela; o
+# produto comum, que serve de presente em qualquer época, não), EPOCA_POR_PEDIDO por pedido, e o que combina conta
+# como se pagasse BONUS_DA_EPOCA vezes mais. As datas de promoção geral (Black Friday, 11.11, Dia do Consumidor) ficam
+# de fora: nelas todo produto vende. Sem data no prazo ou sem a resposta da IA, a escolha fica como antes. A resposta
+# de cada produto (o número dele e se combina, nunca o nome) vale até a data passar (CHAVE_DA_EPOCA). O cupom do dia
+# vem depois (a P313). Escolha do Rafael (26/11/2026, P310 1 e P311 1): DECISOES.md, Shopee Vídeo.
 DIAS_DA_EPOCA = 30
 BONUS_DA_EPOCA = 1.5
+EPOCA_POR_PEDIDO = 20
 CHAVE_DA_EPOCA = "shopee_video_epoca"
 PROCESSO_DA_EPOCA = "escolha pela época"
 PROMPT_DA_EPOCA = """Hoje é {hoje}. A próxima data do comércio no Brasil é {nome}, em {data}. Para cada produto da \
@@ -3374,6 +3386,12 @@ um com "n" (o número do produto) e "combina" (true ou false).
 
 Produtos:
 {produtos}"""
+
+
+def frase_da_epoca(nome, pergunta):
+    """A frase do aviso que diz que o produto combina com a época (P310 1 e P311 1), com o espaço na frente."""
+    return (f" Combina com a época de {nome}: conta como se pagasse {round((BONUS_DA_EPOCA - 1) * 100)}% a mais "
+            f"({pergunta}).")
 
 
 def _pascoa(ano):
@@ -3437,11 +3455,26 @@ def ler_a_epoca(resposta, quantos):
     return [combinam[n] for n in range(1, quantos + 1)]
 
 
+def _pedir_a_epoca(parte, epoca, agora=None):
+    """[combina, ...] dos produtos da parte ([{item, nome}]) pela IA (PROMPT_DA_EPOCA), ou None sem a resposta dela."""
+    data, nome = epoca
+    lista = "\n".join(f"{n}. {p['nome']}" for n, p in enumerate(parte, 1))
+    prompt = PROMPT_DA_EPOCA.format(hoje=agora_br(agora).strftime("%d/%m/%Y"), nome=nome,
+                                    data=data.strftime("%d/%m/%Y"), produtos=lista)
+    try:
+        resposta = asyncio.run(ps.api_gemini.gerar_texto_gemini(prompt))
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A IA da época não respondeu: {type(e).__name__}")
+        resposta = None
+    return ler_a_epoca(resposta, len(parte))
+
+
 def combinam_com_a_epoca(produtos, agora=None):
     """
     ({item: combina}, a época) dos produtos ([{item, nome}]) pela próxima data do comércio (proxima_epoca): a IA
-    pergunta, num pedido só, pelos que ainda não têm a resposta guardada nesta época. ({}, None) sem data no prazo ou
-    sem resposta nenhuma; sem a resposta da IA, valem só os já guardados (o que falta não combina). (P310 1)
+    pergunta pelos que ainda não têm a resposta guardada nesta época, EPOCA_POR_PEDIDO por pedido. ({}, None) sem data
+    no prazo ou sem resposta nenhuma; sem a resposta da IA, valem só os já guardados (o que falta não combina).
+    (P310 1 e P311 1)
     """
     epoca = proxima_epoca(agora)
     if not epoca or not produtos:
@@ -3451,22 +3484,25 @@ def combinam_com_a_epoca(produtos, agora=None):
     guardado = db.ler_config(CHAVE_DA_EPOCA, {}) or {}
     itens = dict(guardado.get("itens") or {}) if guardado.get("epoca") == marca else {}
     faltam = list({str(p["item"]): p for p in produtos if str(p["item"]) not in itens}.values())
-    if faltam:
-        lista = "\n".join(f"{n}. {p['nome']}" for n, p in enumerate(faltam, 1))
-        prompt = PROMPT_DA_EPOCA.format(hoje=agora_br(agora).strftime("%d/%m/%Y"), nome=nome,
-                                        data=data.strftime("%d/%m/%Y"), produtos=lista)
-        try:
-            resposta = asyncio.run(ps.api_gemini.gerar_texto_gemini(prompt))
-        except Exception as e:
-            logger.warning(f"⚠️ [Robô Shopee Vídeo] A IA da época não respondeu: {type(e).__name__}")
-            resposta = None
-        lidos = ler_a_epoca(resposta, len(faltam))
+    novos = {}
+    for comeco in range(0, len(faltam), EPOCA_POR_PEDIDO):
+        parte = faltam[comeco:comeco + EPOCA_POR_PEDIDO]
+        lidos = _pedir_a_epoca(parte, epoca, agora)
         if lidos is None:
             registro_processos.registrar(REGISTRO, PROCESSO_DA_EPOCA, "sem a resposta da IA",
-                                         f"{len(faltam)} produto(s)", ok=None)
+                                         f"{len(parte)} produto(s)", ok=None, agora=agora)
         else:
-            itens.update({str(p["item"]): combina for p, combina in zip(faltam, lidos)})
-            db.salvar_config(CHAVE_DA_EPOCA, {"epoca": marca, "itens": itens})
+            novos.update({str(p["item"]): combina for p, combina in zip(parte, lidos)})
+    if novos:
+        itens.update(novos)
+
+        def guardar(dados):
+            # A escolha dos vídeos da fonte e a do vídeo de IA gravam a mesma chave: cada uma junta as suas.
+            if dados.get("epoca") != marca:
+                dados.clear()
+                dados["epoca"] = marca
+            dados["itens"] = {**(dados.get("itens") or {}), **novos}
+        db.atualizar_config(CHAVE_DA_EPOCA, guardar)
     if not any(str(p["item"]) in itens for p in produtos):
         # Sem nenhuma resposta, a época não entra na escolha nem no registro dela.
         return {}, None
@@ -3696,10 +3732,11 @@ ROTULO_DO_VIDEO_DE_IA = "o vídeo foi feito por IA no Google Flow (o vídeo de I
 # alta (ofertas_para_o_video_de_ia: os 100 primeiros); fica com os de nota NOTA_MINIMA_DO_VIDEO_DE_IA ou mais, que
 # pagam pelo menos MINIMO_POR_VENDA por venda e não foram postados nos últimos 7 dias (P307), e vai do que paga mais
 # por venda para o que paga menos, até a IA achar a foto do anúncio boa para o vídeo. Sem a lista dos produtos em alta
-# (a API nega, ou ela vem vazia), os mais vendidos das palavras-chave dos nichos dos Achadinhos. O produto que já teve
-# um vídeo gerado e o de foto que a IA recusou não voltam à escolha (flow.itens_gerados e flow.fotos_recusadas): a
-# lista muda pouco de um dia para o outro, e sem isso o mesmo produto seria o 1º todo dia.
-# Escolha do Rafael (15/11/2026, P234 1): DECISOES.md, Shopee Vídeo.
+# (a API nega, ou ela vem vazia), os mais vendidos das palavras-chave dos nichos dos Achadinhos. O produto que teve
+# um vídeo gerado só ganha outro, novo, 7 dias depois do último (do post ou, sem post, do Gerar: flow.itens_gerados
+# com inicio_do_prazo, P312 1), e o de foto que a IA recusou não volta (flow.fotos_recusadas): a lista muda pouco de
+# um dia para o outro, e sem isso o mesmo produto seria o 1º todo dia.
+# Escolha do Rafael (15/11/2026, P234 1, e 26/11/2026, P312 1): DECISOES.md, Shopee Vídeo.
 NOTA_MINIMA_DO_VIDEO_DE_IA = 4.5
 ORIGEM_EM_ALTA = "os produtos em alta da Shopee"
 ORIGEM_DOS_NICHOS = "os mais vendidos dos nichos dos Achadinhos"
@@ -3889,10 +3926,10 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
     """
     (os produtos das ofertas que servem para o vídeo de IA, as contagens da peneira) (P234 1). Servem os de nota
     NOTA_MINIMA_DO_VIDEO_DE_IA ou mais, que pagam pelo menos MINIMO_POR_VENDA por venda (o preço "a partir de" vezes a
-    comissão), não postados nos últimos 7 dias (ja_postados, P307) e fora dos que já tiveram um vídeo gerado ou a foto
-    recusada (fora): [{item, link, nome, imagem, valor, vendas}], do que paga mais por venda para o que paga menos (no
-    empate, o que vende mais). As contagens ({"lista", "nota", "minimo", "novos"}, cada uma dentro da anterior) vão ao
-    registro.
+    comissão), não postados nos últimos 7 dias (ja_postados, P307) e fora dos que tiveram um vídeo gerado nesses dias
+    ou a foto recusada (fora, P312 1): [{item, link, nome, imagem, valor, vendas}], do que paga mais por venda para o
+    que paga menos (no empate, o que vende mais). As contagens ({"lista", "nota", "minimo", "novos"}, cada uma dentro
+    da anterior) vão ao registro.
     """
     fora = set(ja_postados) | set(fora)
     vistos, bons = set(), []
@@ -3920,6 +3957,19 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
         bons.append({"item": item, "link": link, "nome": nome, "imagem": imagem, "valor": valor,
                      "vendas": int(assistente._numero(oferta.get("sales"))), "preco": preco})
     return sorted(bons, key=lambda bom: (-bom["valor"], -bom["vendas"])), contagem
+
+
+def pela_epoca(bons, agora=None):
+    """
+    (os candidatos do vídeo de IA na ordem com a época, a época ou None) (P311 1): o que combina com a próxima data do
+    comércio (combinam_com_a_epoca) conta como se pagasse BONUS_DA_EPOCA vezes mais por venda, como nos vídeos da
+    fonte (P310 1), do que vale mais para o que vale menos (no empate, o que vende mais), cada um com "epoca" (o nome
+    da data, ou ""). Com um só, sem a data no prazo ou sem a resposta da IA, a ordem fica a mesma.
+    """
+    combinam, epoca = combinam_com_a_epoca(bons, agora) if len(bons) > 1 else ({}, None)
+    marcados = [dict(bom, epoca=epoca[1] if epoca and combinam.get(bom["item"]) else "") for bom in bons]
+    return sorted(marcados, key=lambda bom: (-bom["valor"] * (BONUS_DA_EPOCA if bom["epoca"] else 1),
+                                             -bom["vendas"])), epoca
 
 
 def filtros_do_video_de_ia(config=None):
@@ -3976,11 +4026,12 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     """
     (o pedido do vídeo de IA do dia, de onde veio a lista, se ainda há produto por olhar) (P234 1). Dos candidatos da
     lista da API de afiliado (candidatos_do_video_de_ia), primeiro os do 2º nível (P252 1, pelos_dois_niveis) e depois
-    os outros, cada grupo do que paga mais por venda para o que paga menos, o 1º, até FOTOS_PARA_A_IA, cuja foto do
-    anúncio a IA acha boa para o vídeo, com o pedido dela (flow.pedido_para_o_anuncio), o link curto que o celular
-    abre, "id" (o nome do vídeo de IA entre os vídeos do robô), "item", "valor", "posicao", "origem", "nivel" (2 ou 1)
-    e os "filtros" do 2º nível. Sem nenhum, o pedido é None; a foto que a IA recusou fica lembrada, e o produto não
-    volta, como o que a IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à parte no registro.
+    os outros, cada grupo do que paga mais por venda para o que paga menos (o da época valendo BONUS_DA_EPOCA vezes
+    mais, P311 1), o 1º, até FOTOS_PARA_A_IA, cuja foto do anúncio a IA acha boa para o vídeo, com o pedido dela
+    (flow.pedido_para_o_anuncio), o link curto que o celular abre, "id" (o nome do vídeo de IA entre os vídeos do
+    robô), "item", "valor", "posicao", "origem", "nivel" (2 ou 1), os "filtros" do 2º nível e a "epoca" (o nome da
+    data com que ele combina, ou ""). Sem nenhum, o pedido é None; a foto que a IA recusou fica lembrada, e o produto
+    não volta, como o que a IA de vídeo costuma mudar (flow.MUDA_NA_IA, P245 1), que conta à parte no registro.
     api_shopee.BuscaNegada quando a API não deu a lista. fora: mais produtos que ficam de fora (os das amostras já
     feitas); amostra=True: a escolha de uma amostra (P236 1), no registro dela. longo: o pedido do vídeo de 16 s com
     uma pessoa vendendo o produto (P246 1), o padrão do vídeo de IA desde a P247 1; longo=False, o de 8 s, num estilo
@@ -3993,15 +4044,22 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     TV (P268 1), a amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
+    # O produto que teve um vídeo de IA ganha outro, novo, 7 dias depois do último: do post (produtos_ja_postados) ou,
+    # sem post, do Gerar (itens_gerados); a foto que a IA recusou fica de fora sempre (P312 1).
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(agora),
-                                               flow.itens_gerados() + flow.fotos_recusadas() + list(fora))
+                                               flow.itens_gerados(inicio_do_prazo(agora)) + flow.fotos_recusadas()
+                                               + list(fora))
+    # O que combina com a próxima data do comércio vale BONUS_DA_EPOCA vezes mais; os 2 níveis da P252 1 continuam,
+    # cada um nessa ordem (P311 1).
+    bons, epoca = pela_epoca(bons, agora)
     filtros = filtros_do_video_de_ia()
     canais, sem_seguir = _canais_do_espiao(agora) if bons else ({}, 0)
     bons, no_segundo = pelos_dois_niveis(bons, canais or {}, filtros)
     peneira = (f"{origem}: {contagem['lista']} da lista; {contagem['nota']} com a nota; {contagem['minimo']} pagam o "
                f"mínimo; {contagem['novos']} novos; {no_segundo} no 2º nível"
                + (" (sem a contagem do Espião)" if canais is None else "")
-               + (f" ({sem_seguir} link(s) do Espião sem seguir)" if sem_seguir else ""))
+               + (f" ({sem_seguir} link(s) do Espião sem seguir)" if sem_seguir else "")
+               + (f"; época: {sum(1 for bom in bons if bom['epoca'])} de {len(bons)}" if epoca else ""))
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
     # O unboxing (P256 2) é mais um formato, nunca o único: fora das amostras e do vídeo logo depois de um unboxing. A
     # comédia (P251 1), no máximo 1 a cada 3 vídeos de IA e só com a foto aprovada de um personagem dela.
@@ -4033,13 +4091,13 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
             # parte. A duração que a IA escolheu (P262) vai junto.
             formato = pedido.get("formato")
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
-                              f"estilo {pedido['estilo']}"
+                              + ("da época; " if bom["epoca"] else "") + f"estilo {pedido['estilo']}"
                               + (f"; formato {formato}" if formato and formato != pedido["estilo"] else "")
                               + (f"; {pedido['duracao_pedida']} s" if pedido.get("duracao_pedida") else "")
                               + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)
             return (dict(pedido, id=f"ia:{agora_br(agora).strftime('%Y-%m-%d')}", item=bom["item"],
                          valor=bom["valor"], posicao=posicao, origem=origem, nivel=bom["nivel"],
-                         filtros=filtros), origem, True)
+                         filtros=filtros, epoca=bom["epoca"]), origem, True)
         if serve is False:
             recusadas += 1
             flow.lembrar_foto_recusada(bom["item"])
@@ -4217,18 +4275,19 @@ def _anotar_a_imagem(agora=None):
 def de_onde_veio_o_produto_do_video_de_ia(atual):
     """
     A linha do aviso do vídeo de IA pronto que diz a escolha do produto (P234 1), com o nível em que ele entrou (P252
-    1); "" sem a lista de onde veio.
+    1) e a época, quando ele combina com ela (P311 1); "" sem a lista de onde veio.
     """
     if not atual.get("origem"):
         return ""
     valor = assistente._reais(atual.get("valor") or 0)
+    epoca = frase_da_epoca(atual["epoca"], "P311 1") if atual.get("epoca") else ""
     if atual.get("nivel") == 2 and atual.get("filtros"):
         return (f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']} que "
-                f"{texto_dos_filtros(atual['filtros'])}, ainda não postado.\n")
+                f"{texto_dos_filtros(atual['filtros'])}, {SEM_POST_NEM_VIDEO_DE_IA}.{epoca}\n")
     if atual.get("nivel") == 1:
-        return (f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']}, ainda não postado, pelo 1º "
-                "nível (nenhum produto do 2º nível serviu).\n")
-    return f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']}, ainda não postado.\n"
+        return (f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']}, {SEM_POST_NEM_VIDEO_DE_IA}, "
+                f"pelo 1º nível (nenhum produto do 2º nível serviu).{epoca}\n")
+    return f"Escolha: o que paga mais por venda ({valor}) entre {atual['origem']}, {SEM_POST_NEM_VIDEO_DE_IA}.{epoca}\n"
 
 
 # O vídeo gerado que não chega ao servidor em tantas rodadas é dado por perdido (o crédito já foi).

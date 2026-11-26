@@ -326,7 +326,8 @@ def sondar_produtos():
 def escolha_do_robo(robo, ja_postados):
     """
     O que a escolha do produto do vídeo de IA acharia agora (P234 1 e P252 1), sem a IA e sem mudar nada: de que
-    lista viriam os produtos, as contagens da peneira do robô (com os que já tiveram vídeo ou a foto recusada de fora)
+    lista viriam os produtos, as contagens da peneira do robô (com os que tiveram vídeo nos últimos 7 dias ou a foto
+    recusada de fora, P312 1)
     e, dos novos, quantos passam em cada corte do 2º nível e nos três, pelos links do Espião já seguidos (os outros
     ficam sem seguir aqui, e a conta diz quantos).
     """
@@ -335,7 +336,7 @@ def escolha_do_robo(robo, ja_postados):
     except api_shopee.BuscaNegada as e:
         return f"a API negou a lista ({e})"
     bons, contagem = robo.candidatos_do_video_de_ia(
-        ofertas, ja_postados, robo.flow.itens_gerados() + robo.flow.fotos_recusadas())
+        ofertas, ja_postados, robo.flow.itens_gerados(robo.inicio_do_prazo()) + robo.flow.fotos_recusadas())
     canais, sem_seguir = asyncio.run(robo.tendencia.canais_do_espiao(seguir=False))
     filtros = robo.filtros_do_video_de_ia()
     _ordem, no_segundo = robo.pelos_dois_niveis(bons, canais, filtros)
