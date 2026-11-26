@@ -2316,10 +2316,13 @@ def test_capa_do_video_aberto_com_a_faixa_de_cima_e_a_foto_inteira_logo_abaixo()
     for x in (esquerda, 360, direita - 1):
         assert _cor_de(capa, (x, cima + lado), edicao_video.LARANJA_DA_SHOPEE), x
         assert _cor_de(capa, (x, cima + lado + fio - 1), edicao_video.LARANJA_DA_SHOPEE), x
-    # Preto fora do que o app mostra, nos lados da foto e embaixo do fio (onde fica o cartão do produto).
+    # Preto só fora do que o app mostra: nos lados da foto, a cor, e embaixo do fio (onde fica o cartão do produto),
+    # a cor escurecendo até o pé da tela (P303 1).
     assert _pretos(capa, (0, 0, esquerda, 1280), passo=2) and _pretos(capa, (direita, 0, 720, 1280), passo=2)
-    assert _pretos(capa, (esquerda, cima, inicio, cima + lado), passo=2)
-    assert _pretos(capa, (0, cima + lado + fio, 720, 1280), passo=2)
+    laranja = edicao_video.LARANJA_DA_SHOPEE
+    assert all(_cor_de(capa, (x, y), laranja) for x in range(esquerda, inicio, 5) for y in range(cima, cima + lado, 9))
+    assert _cor_de(capa, (360, cima + lado + fio), laranja)
+    assert _cor_de(capa, (360, 1279), tuple(round(canal * edicao_video.ESCURO_NO_PE) for canal in laranja))
     # A frase só na faixa de cima.
     assert _claros(capa, (esquerda, 0, direita, cima)) > 50 and _claros(capa, (0, cima, 720, 1280)) == 0
     # O exemplo do painel mostra o que o app mostra do vídeo aberto: a faixa de um lado ao outro.
@@ -2328,6 +2331,32 @@ def test_capa_do_video_aberto_com_a_faixa_de_cima_e_a_foto_inteira_logo_abaixo()
     assert recorte.size == (direita - esquerda, 1280)
     assert _cor_de(recorte, (0, 0), edicao_video.LARANJA_DA_SHOPEE)
     assert _cor_de(recorte, (recorte.width - 1, 0), edicao_video.LARANJA_DA_SHOPEE)
+def test_video_aberto_com_a_cor_do_produto_em_volta_da_foto_escurecendo_ate_embaixo():
+    # Escolha do Rafael (26/11, P303 1, do vídeo dele das 07:12): o vão preto embaixo e dos lados da foto, no começo
+    # do vídeo aberto, vai na cor do produto, escurecendo até o pé da tela, onde o app escreve o @ da loja e o título
+    # em branco; fora do que o app mostra, o preto continua (por ele, a grade diz qual das capas mostra).
+    import io
+
+    from PIL import Image
+    esquerda, direita = edicao_video.VISIVEL_NO_APP
+    x1, cima, x2, baixo = edicao_video.lugar_da_foto(True)
+    pe = cima + min(x2 - x1, baixo - cima) + edicao_video.FIO_DA_CAPA
+    for nome in ("bege", "azul", "branco", "rosa", "amarelo"):
+        cor = edicao_video.cor_da_faixa(_foto_jpg(), edicao_video.CORES_DO_PRODUTO[nome])
+        capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(_foto_jpg(), "Leve", no_video=True,
+                                                                   cor=cor))).convert("RGB")
+        assert _pretos(capa, (0, 0, esquerda, 1280), passo=3) and _pretos(capa, (direita, 0, 720, 1280), passo=3), nome
+        # Dos lados da foto e no começo do vão embaixo, a cor inteira.
+        assert _cor_de(capa, (esquerda + 3, cima + 100), cor) and _cor_de(capa, (direita - 3, pe - 3), cor), nome
+        # Do fio para baixo, cada vez mais escura, até ESCURO_NO_PE dela no pé da tela.
+        somas = [sum(capa.getpixel((360, y))) for y in range(pe, 1280, 16)]
+        assert all(a >= b for a, b in zip(somas, somas[1:])) and somas[0] > somas[-1], nome
+        assert _cor_de(capa, (360, 1279), tuple(round(canal * edicao_video.ESCURO_NO_PE) for canal in cor)), nome
+        # Onde o app escreve em branco, a letra branca contrasta também com as cores claras.
+        assert all(edicao_video.letra_que_contrasta(capa.getpixel((x, y))) == edicao_video.LETRA_BRANCA
+                   for x in (esquerda + 10, 360) for y in range(1150, 1280, 10)), nome
+
+
 def test_faixa_nos_lados_diz_qual_capa_a_grade_mostrou():
     # No post, a grade mostra o 1º quadro (a capa da grade, a faixa de lado a lado) ou outro quadro
     # da abertura (a do vídeo aberto, a faixa só no meio, P129); sem a faixa, não dá para dizer.
@@ -3991,8 +4020,13 @@ def test_faixa_que_some_no_fundo_da_foto_vai_na_2a_cor_do_produto():
                                                                    segunda=azul))).convert("RGB")
     esquerda, direita = edicao_video.VISIVEL_NO_APP
     assert _cor_de(no_video, (esquerda + 2, 3), azul) and _cor_de(no_video, (direita - 2, cima - 3), azul)
-    pe_do_fio = max(y for y in range(1280) if max(no_video.getpixel((360, y))) > 60) + 1
-    assert all(_cor_de(no_video, (360, y), azul) for y in range(pe_do_fio - edicao_video.FIO_DA_CAPA, pe_do_fio))
+    # O fio logo abaixo da foto (quadrada) fica dentro do vão em volta dela, na mesma cor, que escurece até o pé da
+    # tela (P303 1).
+    x1, cima_da_foto, x2, baixo_da_foto = edicao_video.lugar_da_foto(True)
+    pe_da_foto = cima_da_foto + min(x2 - x1, baixo_da_foto - cima_da_foto)
+    assert all(_cor_de(no_video, (360, y), azul) for y in range(pe_da_foto, pe_da_foto + edicao_video.FIO_DA_CAPA))
+    assert _cor_de(no_video, (esquerda + 2, pe_da_foto - 10), azul)
+    assert _cor_de(no_video, (360, 1279), tuple(round(canal * edicao_video.ESCURO_NO_PE) for canal in azul))
     # Sem a 2ª cor, o cinza-claro (o tom mais escuro do branco), com a letra preta, e o post o confere
     # pelo #rrggbb que o rascunho guarda; no fundo laranja, um laranja mais claro, nas duas.
     capa = Image.open(io.BytesIO(edicao_video.capa_com_chamada(fundo_branco, frase, cor=branco))).convert("RGB")

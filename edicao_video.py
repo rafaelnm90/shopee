@@ -584,9 +584,10 @@ ESCALA_NA_MINIATURA = 0.5
 # No vídeo aberto, que corta mais dos lados (VISIVEL_NO_APP), a faixa de cima vai de um lado ao outro
 # do que o app mostra, e a foto, inteira, fica logo abaixo dela, no maior tamanho que cabe acima do
 # cartão do produto que o app põe por cima do vídeo (CARTAO_NO_VIDEO_ABERTO), com o fio (FIO_DA_CAPA)
-# logo abaixo do pé dela. Nas duas capas, a foto colada num quadrado branco perde antes as faixas
-# brancas de enchimento (sem_faixas_brancas). Pedidos do Rafael (P139 2, P168, P169 1, P171, o print
-# de 07/11 às 02:49, P188 2, P189 B, P196 1, P198 1, P206 1 e P207 1): DECISOES.md, Shopee Vídeo.
+# logo abaixo do pé dela, e o vão em volta dela na cor, escurecendo até o pé da tela (P303 1). Nas duas
+# capas, a foto colada num quadrado branco perde antes as faixas brancas de enchimento
+# (sem_faixas_brancas). Pedidos do Rafael (P139 2, P168, P169 1, P171, o print
+# de 07/11 às 02:49, P188 2, P189 B, P196 1, P198 1, P206 1, P207 1 e P303 1): DECISOES.md, Shopee Vídeo.
 FIO_DA_CAPA = 8
 # O que a grade do perfil mostra no Motorola do Rafael (print de 06/11, 21:09): o quadro em 3:4 com
 # a largura toda. Com a foto menor que isso, a grade mostra o preto em volta dela (P168).
@@ -1057,6 +1058,28 @@ def lugar_das_letras_na_grade():
             direita, PE_DA_FAIXA_DE_CIMA - FOLGA_DA_FAIXA)
 
 
+# No vídeo aberto, o vão em volta da foto (dos lados dela e embaixo, no que o app mostra) vai na cor da faixa e, do
+# fio para baixo, escurece até o pé da tela, onde o app escreve o @ da loja e o título em branco: no pé, fica
+# ESCURO_NO_PE da cor, e o escuro anda um pouco mais depressa no começo (CURVA_DO_ESCURO, menos que 1). Fora do que o
+# app mostra, o preto continua: por ele, no print da grade, se sabe qual das duas capas ela mostra (faixa_nos_lados).
+# Escolha do Rafael (26/11, P303 1): DECISOES.md, Shopee Vídeo.
+ESCURO_NO_PE = 0.22
+CURVA_DO_ESCURO = 0.9
+
+
+def _cor_em_volta_da_foto(desenho, cor, esquerda, direita, inicio):
+    """
+    O vão da capa do vídeo aberto, de esquerda a direita, do pé da faixa de cima ao pé da tela: a cor até inicio (o
+    lado da foto e o fio) e, dali, escurecendo até ESCURO_NO_PE dela.
+    """
+    escura = tuple(round(canal * ESCURO_NO_PE) for canal in cor)
+    desenho.rectangle((esquerda, PE_DA_FAIXA_DE_CIMA, direita - 1, inicio - 1), fill=tuple(cor))
+    altura = max(1, TELA[1] - 1 - inicio)
+    for y in range(inicio, TELA[1]):
+        parte = ((y - inicio) / altura) ** CURVA_DO_ESCURO
+        desenho.line((esquerda, y, direita - 1, y), fill=tuple(round(a + (b - a) * parte) for a, b in zip(cor, escura)))
+
+
 def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
     """
     A capa com chamada (PNG, bytes, 720x1280): a faixa de cima, do alto do quadro até
@@ -1069,9 +1092,10 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
     (_foto_que_tampa_esticando, P169 1), e, embaixo dela, só o fio fino, como no vídeo aberto (a cor
     vai do pé da foto ao fim do quadro, e a grade mostra FIO_NA_GRADE dela, P196 1), com o número de
     visualizações em cima da foto; a faixa e o fio vão de uma beirada à outra. Com no_video=True, a do resto da
-    abertura (P129), no fundo preto: a mesma faixa de cima, de um lado ao outro do que o app mostra, e
-    a foto inteira logo abaixo dela, acima do cartão do produto, com o fio logo abaixo do pé dela (P189
-    B). A faixa e o fio vão na cor do produto (P159 2; sem ela, o laranja da Shopee) ou, quando ela some
+    abertura (P129): a mesma faixa de cima, de um lado ao outro do que o app mostra, e a foto inteira logo
+    abaixo dela, acima do cartão do produto, com o fio logo abaixo do pé dela (P189 B), e o vão em volta
+    dela na mesma cor, escurecendo do fio até o pé da tela (_cor_em_volta_da_foto, P303 1); fora do que o app
+    mostra, o preto. A faixa e o fio vão na cor do produto (P159 2; sem ela, o laranja da Shopee) ou, quando ela some
     no fundo da foto, na 2ª cor do produto (segunda, RGB) ou num tom da cor (cor_da_faixa, P173 e P174
     3), com a letra que contrasta. Nada da foto fica coberto (P139 2). Nas duas capas, a foto colada num
     quadrado branco entra sem as faixas brancas de enchimento (sem_faixas_brancas, P206 1 e P207 1).
@@ -1103,16 +1127,17 @@ def capa_com_chamada(foto, chamada, no_video=False, cor=None, segunda=None):
     esquerda, direita = lados_da_capa(no_video)
     capa = Image.new("RGB", TELA, "black")
     desenho = ImageDraw.Draw(capa)
+    if no_video:
+        # O vão em volta da foto, na cor, e do fio para baixo escurecendo até o pé da tela (P303 1); o fio logo
+        # abaixo do pé da foto (P189 B) fica dentro da cor.
+        _cor_em_volta_da_foto(desenho, cor, esquerda, direita, cima + imagem.height + FIO_DA_CAPA)
     # A faixa de cima, com a frase no meio do retângulo dela: igual nas duas capas.
     desenho.rectangle((esquerda, 0, direita - 1, PE_DA_FAIXA_DE_CIMA - 1), fill=cor)
     capa.paste(letras, (round((x1_das_letras + x2_das_letras - letras.width) / 2),
                         round((y1_das_letras + y2_das_letras - letras.height) / 2)), letras)
     # A foto logo abaixo da faixa, no meio da largura do lugar dela.
     capa.paste(imagem, (x1 + (x2 - x1 - imagem.width) // 2, cima))
-    if no_video:
-        pe = cima + imagem.height
-        desenho.rectangle((esquerda, pe, direita - 1, pe + FIO_DA_CAPA - 1), fill=cor)
-    else:
+    if not no_video:
         # O fio de baixo: a cor vai do pé da foto ao fim do quadro, e a grade mostra só FIO_NA_GRADE dela (P196 1).
         desenho.rectangle((esquerda, baixo, direita - 1, TELA[1] - 1), fill=cor)
     return _png(capa)
