@@ -3151,6 +3151,65 @@ def test_escolha_pesa_os_vendidos_e_a_nota_do_anuncio(monkeypatch, avisos):
                      robo.PROCESSO_DA_ESCOLHA) == ("o de maior valor pelos vendidos, sem nota boa",)
 
 
+def test_datas_do_comercio_e_a_proxima_epoca():
+    # Escolha do Rafael (26/11/2026, P310 1): as datas do comércio com produtos próprios, com as que mudam de dia (a
+    # Páscoa, o Carnaval, o Dia das Mães e o dos Pais), e a próxima de amanhã até 30 dias.
+    from datetime import date
+    datas = {nome: data for data, nome in robo.datas_do_comercio(2026)}
+    assert datas["Páscoa"] == date(2026, 4, 5) and datas["Carnaval"] == date(2026, 2, 17)
+    assert datas["Dia das Mães"] == date(2026, 5, 10) and datas["Dia dos Pais"] == date(2026, 8, 9)
+    assert datas["Volta às Aulas"] == date(2026, 2, 2) and datas["Natal"] == date(2026, 12, 25)
+    assert robo._pascoa(2027) == date(2027, 3, 28) and robo._pascoa(2028) == date(2028, 4, 16)
+    assert robo.proxima_epoca(momento("2026-11-26 12:00")) == (date(2026, 12, 25), "Natal")
+    assert robo.proxima_epoca(momento("2026-11-20 12:00")) is None              # o Natal a 35 dias
+    assert robo.proxima_epoca(momento("2026-12-25 12:00")) == (date(2027, 1, 1), "Ano Novo")
+    # A resposta da IA só vale com a lista inteira, na ordem.
+    assert robo.ler_a_epoca('ok [{"n": 2, "combina": true}, {"n": 1, "combina": false}]', 2) == [False, True]
+    assert robo.ler_a_epoca('[{"n": 1, "combina": true}]', 2) is None and robo.ler_a_epoca(None, 1) is None
+    assert robo.ler_a_epoca("sem json", 1) is None
+
+
+def test_epoca_conta_como_se_pagasse_50_por_cento_a_mais(monkeypatch, avisos):
+    # P310 1, o exemplo da pergunta: em 01/12, a luz de Natal paga R$ 3 por venda e o fone, R$ 4; a luz conta como
+    # R$ 4,50 e vai. A IA responde num pedido só, e a resposta fica guardada até a data passar.
+    _fonte(monkeypatch)
+    _videos_com_valor(monkeypatch, [4.0, 3.0], anuncios={0: (50, 4.8), 1: (50, 4.8)})
+    pedidos, respostas = [], {"natal": True}
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append(prompt)
+        if not respostas["natal"]:
+            return None
+        linhas = prompt.split("Produtos:\n", 1)[1].splitlines()
+        return json.dumps([{"n": n, "combina": n == 2} for n in range(1, len(linhas) + 1)])
+
+    monkeypatch.setattr(robo.ps.api_gemini, "gerar_texto_gemini", gerar)
+    config = {**robo.PADRAO, "fonte": "autorais"}
+    dia = momento("2026-12-01 12:00")
+    video, _ = robo.escolher_o_video(config, robo.evitar_hoje(config, dia), dia)
+    assert (video["id"], video["valor"], video["epoca"]) == ("v1", 3.0, "Natal")
+    assert len(pedidos) == 1 and "Natal, em 25/12/2026" in pedidos[0]
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY id DESC",
+                     robo.PROCESSO_DA_ESCOLHA) == ("o de maior valor pelos vendidos, da época",
+                                                   "o 2º de 3; 0 abaixo do mínimo; vale 1x; época: 1 de 3")
+    assert "Combina com a época de Natal: conta como se pagasse 50% a mais" in robo.de_onde_veio_o_video(video,
+                                                                                                         "autorais")
+    # A 2ª escolha usa a resposta guardada, sem outro pedido à IA.
+    video, _ = robo.escolher_o_video(config, robo.evitar_hoje(config, dia), dia)
+    assert video["id"] == "v1" and len(pedidos) == 1
+    # Sem data no prazo, a IA nem é chamada e vai o que paga mais.
+    longe = momento("2026-11-20 12:00")
+    video, _ = robo.escolher_o_video(config, robo.evitar_hoje(config, longe), longe)
+    assert (video["id"], video["epoca"]) == ("v0", "") and len(pedidos) == 1
+    # Noutra época, sem a resposta da IA, nada muda, e o registro diz.
+    respostas["natal"] = False
+    aulas = momento("2027-01-20 12:00")
+    video, _ = robo.escolher_o_video(config, robo.evitar_hoje(config, aulas), aulas)
+    assert video["id"] == "v0" and len(pedidos) == 2 and "Volta às Aulas" in pedidos[1]
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?", robo.PROCESSO_DA_EPOCA) == (
+        "sem a resposta da IA",)
+
+
 def test_so_videos_abaixo_do_minimo_por_venda_param_sem_tocar_no_celular(monkeypatch, avisos):
     # P194 1: com todos os próximos pagando menos de R$ 2 por venda, nenhum vira rascunho (nem fica
     # pulado: no dia seguinte eles são vistos de novo), e o celular nem é tocado.
