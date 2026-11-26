@@ -109,7 +109,7 @@ import time
 import unicodedata
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import android_virtual as av
 import api_gemini
@@ -582,10 +582,12 @@ AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a 
 # Rafael de 28/10/2026), no lugar do Compre Agora: no compartilhar, o robô só toca no Copiar link (o do
 # post e o dos vídeos que ele comenta) e no Fixar e no Desfixar do próprio vídeo (P263 1). E o Promover,
 # ao lado deles na folha do compartilhar do próprio vídeo, que pode cobrar (visto no Motorola em 20/11/2026).
-# Postar: DECISOES.md, Shopee Vídeo.
+# E os botões de Meus Cupons (Usar, Usar depois, Inserir código e Ganhe mais cupons): a lista do cupom do dia só é lida
+# (P313 1). Postar: DECISOES.md, Shopee Vídeo.
 # O Adicionar Cupom da tela dos cupons cria um cupom (P265 1): o robô só escolhe um cupom que já está na lista.
 TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho",
-                              "compartilhe para ganhar", "promover", "adicionar cupom"})
+                              "compartilhe para ganhar", "promover", "adicionar cupom",
+                              "usar", "usar depois", "inserir código", "ganhe mais cupons"})
 COMECOS_PROIBIDOS = ("comprar", "compre")
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
 RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar (nem no Compartilhe para Ganhar)"
@@ -1406,6 +1408,87 @@ def na_lista_de_cupons(lista):
 def sem_cupom_para_escolher(lista):
     """A tela dos cupons só convida a criar um (nenhum cupom na lista)?"""
     return any(SEM_CUPOM_PARA_ESCOLHER in _normal(el["texto"]) for el in lista)
+
+
+# --- Meus Cupons: o cupom do dia exclusivo para vídeo (P313 1) ---
+# A tela Meus Cupons (Eu → Minha carteira → Cupons), mapeada no Motorola em 26/11/2026, só lendo, na aba Todos: cada
+# cupom é um cartão (sectionVoucherCard_N, com N o número do cupom), com o selo no alto ("EXCLUSIVO PARA VÍDEO" no que
+# só vale na compra feita pelo vídeo; "TODAS AS LOJAS" nos outros), o título (labelVoucherDiscountMainHeader_N:
+# "Cupom de Frete Grátis", "R$N de desconto"), a regra (labelVoucherDiscountSubHeader_N: "Sem valor mínimo",
+# "Compras acima de R$N") e, embaixo, a validade: "Válido em: N horas" no lote que ainda não começou
+# (labelVoucherStart_N), "Termina em: N horas" e "Válido até DD/MM/AAAA" no que já vale. Os pedaços vêm soltos na
+# leitura da tela, ao lado do cartão: o que não tem o número no id é do cartão em que está, pela caixa. A tela só é
+# lida: Usar, Usar depois, Inserir código e Ganhe mais cupons nunca se tocam (TEXTOS_PROIBIDOS), e o Histórico do
+# alto também não.
+TITULO_DE_MEUS_CUPONS = "meus cupons"
+CARTAO_DO_CUPOM = "sectionVoucherCard_"
+PEDACOS_DO_CUPOM = (("labelVoucherDiscountMainHeader_", "titulo"), ("labelVoucherDiscountSubHeader_", "regra"),
+                    ("labelVoucherStart_", "validade"))
+SELO_DO_VIDEO = "exclusivo para vídeo"
+TITULO_DO_FRETE_GRATIS = "cupom de frete grátis"
+SEM_VALOR_MINIMO = "sem valor mínimo"
+VALIDADE_DO_CUPOM = re.compile(r"(?:(válido em|termina em):\s*(\d+)\s*(minuto|hora|dia)s?"
+                               r"|válido até\s*(\d{1,2})/(\d{1,2})/(\d{4}))")
+# O app arredonda para baixo o tempo que falta (em 26/11, o mesmo lote dizia "Válido em: 10 horas" às 13:06 e "8 horas"
+# às 15:16): o lote que não começou conta a partir de uma unidade a mais, e o que termina, só até o tempo dito. Do lote
+# que não começou, o fim ainda não aparece: ele conta por DURACAO_SEM_O_FIM depois do começo, até a leitura do dia
+# seguinte dizer o fim.
+DURACAO_SEM_O_FIM = timedelta(hours=12)
+UNIDADES_DA_VALIDADE = {"minuto": timedelta(minutes=1), "hora": timedelta(hours=1), "dia": timedelta(days=1)}
+
+
+def na_tela_de_meus_cupons(lista):
+    """A tela é a Meus Cupons (o título dela no alto)."""
+    return any(_normal(el["texto"]) == TITULO_DE_MEUS_CUPONS for el in lista)
+
+
+def cartoes_de_cupom(lista):
+    """
+    Os cartões de cupom na tela, {N: {"selo", "titulo", "regra", "validade"}} (N, o número do cupom; os textos em
+    minúsculas, como o _normal), só com os pedaços que aparecem: o cartão cortado na borda da tela vem pela metade, e a
+    leitura depois de rolar completa.
+    """
+    caixas = {el["id"][len(CARTAO_DO_CUPOM):]: el["caixa"] for el in lista if el["id"].startswith(CARTAO_DO_CUPOM)}
+    cartoes = {numero: {} for numero in caixas}
+    for el in lista:
+        texto = _normal(el["texto"])
+        if not texto:
+            continue
+        do_id = next(((campo, el["id"][len(prefixo):]) for prefixo, campo in PEDACOS_DO_CUPOM
+                      if el["id"].startswith(prefixo)), None)
+        if do_id:
+            campo, numero = do_id
+        else:
+            numero = next((n for n, caixa in caixas.items() if _dentro(_centro(el), caixa)), None)
+            campo = "selo" if texto == SELO_DO_VIDEO else "validade" if VALIDADE_DO_CUPOM.fullmatch(texto) else None
+        if campo and numero in cartoes:
+            cartoes[numero].setdefault(campo, texto)
+    return cartoes
+
+
+def janela_do_cupom(validade, lido_em):
+    """
+    (de, até), em datetime, em que o cupom vale, pela validade do cartão (cartoes_de_cupom) lida em lido_em: "válido
+    em: N horas" começa daqui a N horas e mais uma e conta por DURACAO_SEM_O_FIM; "termina em: N horas" vale de agora
+    até daqui a N horas; "válido até DD/MM/AAAA", de agora até o fim desse dia. None com a validade que o robô não
+    conhece.
+    """
+    achado = VALIDADE_DO_CUPOM.fullmatch(_normal(validade))
+    if not achado:
+        return None
+    tipo, quantos, unidade, dia, mes, ano = achado.groups()
+    if tipo:
+        tempo = int(quantos) * UNIDADES_DA_VALIDADE[unidade]
+        if tipo == "termina em":
+            return lido_em, lido_em + tempo
+        comeco = lido_em + tempo + UNIDADES_DA_VALIDADE[unidade]
+        return comeco, comeco + DURACAO_SEM_O_FIM
+    try:
+        fim = lido_em.replace(year=int(ano), month=int(mes), day=int(dia), hour=23, minute=59, second=59,
+                              microsecond=0)
+    except ValueError:
+        return None
+    return (lido_em, fim) if fim >= lido_em else None
 
 
 def conferir_janela(d, nome, ponto):

@@ -3068,3 +3068,78 @@ def test_tela_dos_cupons_sem_cupom_e_o_criar_cupom_proibido():
     assert ps.na_lista_de_cupons(lista) and ps.sem_cupom_para_escolher(lista)
     # O botão de baixo cria cupom: o robô nunca toca nele (nem o explorar).
     assert ps.proibido_no_ponto(vazia, 540, 2250) and ps.eh_alvo_proibido("Adicionar Cupom")
+
+
+def _no_do_cupom(texto, caixa, ident="", clicavel=False):
+    x1, y1, x2, y2 = caixa
+    rid = f' resource-id="com.shopee.br:id/{ident}"' if ident else ""
+    return (f'<node text="{texto}" class="android.widget.TextView" package="com.shopee.br"{rid} '
+            f'clickable="{"true" if clicavel else "false"}" bounds="[{x1},{y1}][{x2},{y2}]"/>')
+
+
+def _cartao_do_cupom(numero, topo, selo, titulo, regra, validade, validade_com_id=False, botao="Usar"):
+    """Um cartão de Meus Cupons como no Motorola (26/11/2026): os pedaços soltos ao lado do cartão, na leitura."""
+    return "".join([
+        _no_do_cupom("", (21, topo, 1059, topo + 390), f"sectionVoucherCard_{numero}"),
+        _no_do_cupom(selo, (234, topo + 69, 1035, topo + 101)),
+        _no_do_cupom(titulo, (234, topo + 112, 1035, topo + 154), f"labelVoucherDiscountMainHeader_{numero}"),
+        _no_do_cupom(regra, (234, topo + 165, 501, topo + 196), f"labelVoucherDiscountSubHeader_{numero}"),
+        _no_do_cupom(validade, (45, topo + 300, 287, topo + 332),
+                     f"labelVoucherStart_{numero}" if validade_com_id else ""),
+        _no_do_cupom("Condições", (316, topo + 300, 433, topo + 332)),
+        _no_do_cupom(botao, (853, topo + 297, 1010, topo + 334))])
+
+
+def _meus_cupons(*cartoes):
+    raiz = '<node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">'
+    alto = (_no_do_cupom("Meus Cupons", (126, 156, 463, 224))
+            + _no_do_cupom("Histórico", (889, 148, 1070, 232), clicavel=True)
+            + _no_do_cupom("Todos (9)", (32, 302, 192, 344))
+            + _no_do_cupom("Inserir código", (26, 410, 539, 536), "buttonInserirCódigo", clicavel=True)
+            + _no_do_cupom("Ganhe mais cupons", (540, 410, 1053, 536), "buttonGanheMaisCupons", clicavel=True))
+    return f'<hierarchy>{raiz}{alto}{"".join(cartoes)}</node></hierarchy>'
+
+
+def test_meus_cupons_le_cada_cartao_pelos_pedacos_soltos_e_os_botoes_nunca_se_tocam():
+    # Escolha do Rafael (26/11, P313 1): o robô só lê a lista de Meus Cupons, uma vez por dia, e nunca toca em Usar,
+    # Usar depois, Inserir código nem Ganhe mais cupons.
+    xml = _meus_cupons(
+        _cartao_do_cupom("111", 580, "TODAS AS LOJAS", "Cupom de Frete Grátis", "Compras acima de R$10",
+                         "Válido em: 4 horas", validade_com_id=True, botao="Usar depois"),
+        _cartao_do_cupom("222", 980, "EXCLUSIVO PARA VÍDEO", "Cupom de Frete Grátis", "Sem valor mínimo",
+                         "Válido até 29/11/2026"),
+        _cartao_do_cupom("333", 1380, "TODAS AS LOJAS", "R$100 de desconto", "Compras acima de R$749",
+                         "Termina em: 8 horas"))
+    lista = ps.elementos(xml)
+    assert ps.na_tela_de_meus_cupons(lista)
+    assert ps.cartoes_de_cupom(lista) == {
+        "111": {"titulo": "cupom de frete grátis", "regra": "compras acima de r$10", "validade": "válido em: 4 horas"},
+        "222": {"selo": "exclusivo para vídeo", "titulo": "cupom de frete grátis", "regra": "sem valor mínimo",
+                "validade": "válido até 29/11/2026"},
+        "333": {"titulo": "r$100 de desconto", "regra": "compras acima de r$749", "validade": "termina em: 8 horas"}}
+    for botao in ("Usar", "Usar depois", "Inserir código", "Ganhe mais cupons"):
+        assert ps.eh_alvo_proibido(botao)
+    assert ps.proibido_no_ponto(xml, 930, 1295) and ps.proibido_no_ponto(xml, 280, 470)
+    assert ps.proibido_no_ponto(xml, 800, 470) and ps.proibido_no_ponto(xml, 930, 895)
+    # O cartão cortado na borda de baixo vem só com o que aparece.
+    cortado = _meus_cupons(_no_do_cupom("", (21, 2200, 1059, 2400), "sectionVoucherCard_444"),
+                           _no_do_cupom("EXCLUSIVO PARA VÍDEO", (234, 2269, 1035, 2301)))
+    assert ps.cartoes_de_cupom(ps.elementos(cortado)) == {"444": {"selo": "exclusivo para vídeo"}}
+    assert not ps.na_tela_de_meus_cupons(ps.elementos(_no_do_cupom("Cupons", (0, 0, 10, 10))))
+
+
+def test_janela_do_cupom_pela_validade_do_cartao():
+    from datetime import datetime
+    from fuso import fuso_horario
+    lido = datetime(2026, 11, 26, 15, 16, tzinfo=fuso_horario)
+    # O app arredonda para baixo: o "Válido em: 8 horas" das 15:16 começa até as 00:16, e conta a partir daí.
+    de, ate = ps.janela_do_cupom("Válido em: 8 horas", lido)
+    assert (de.strftime("%d/%m %H:%M"), ate.strftime("%d/%m %H:%M")) == ("27/11 00:16", "27/11 12:16")
+    de, ate = ps.janela_do_cupom("Termina em: 8 horas", lido)
+    assert (de, ate.strftime("%d/%m %H:%M")) == (lido, "26/11 23:16")
+    de, ate = ps.janela_do_cupom("Válido até 29/11/2026", lido)
+    assert (de, ate.strftime("%d/%m/%Y %H:%M:%S")) == (lido, "29/11/2026 23:59:59")
+    assert ps.janela_do_cupom("termina em: 30 minutos", lido)[1].strftime("%H:%M") == "15:46"
+    assert ps.janela_do_cupom("Válido em: 2 dias", lido)[0].strftime("%d/%m %H:%M") == "29/11 15:16"
+    for estranha in ("", "Válido até 31/02/2026", "Válido até 20/11/2026", "Expira logo"):
+        assert ps.janela_do_cupom(estranha, lido) is None
