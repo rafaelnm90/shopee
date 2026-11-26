@@ -2506,6 +2506,55 @@ def textos_da_tela(xml):
     return textos
 
 
+# P305 1 (26/11/2026): na página do link, o robô fecha só o que tampa a página: a propaganda do app do site, pelo
+# Fechar dela, e o aviso de cookies, pelo Aceitar (pedido do Rafael: "pode aceitar os cookies"). Só dentro da página,
+# só esses rótulos e, o de aceitar, só com a palavra cookie na página; nada mais é tocado nem escrito.
+ROTULOS_DO_FECHAR = ("Fechar", "Close", "×", "✕", "✖")
+ROTULOS_DO_ACEITAR = ("Aceitar todos", "Aceitar tudo", "Aceitar cookies", "Aceitar todos os cookies", "Accept all",
+                      "Accept all cookies", "Allow all", "Permitir todos")
+AVISOS_POR_LINK = 3
+
+
+def avisos_que_tampam(xml):
+    """
+    Os avisos que tampam a página do link, com o ponto de fechar cada um (P305 1): [(rótulo, ponto)], só os botões de
+    dentro da página do Chrome; o Aceitar só com a palavra cookie na página. [] sem a página na tela.
+    """
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return []
+    pagina = next((no for no in raiz.iter("node") if no.get("class") == "android.webkit.WebView"), None)
+    if pagina is None:
+        return []
+    nos = [dados for dados in map(_no, pagina.iter("node")) if dados]
+    com_cookie = any("cookie" in f"{no['texto']} {no['descricao']}".lower() for no in nos)
+    avisos = []
+    for no in nos:
+        rotulo = " ".join((no["texto"] or no["descricao"]).split())
+        if not (no["clicavel"] or no["classe"] == "Button"):
+            continue
+        if rotulo in ROTULOS_DO_FECHAR or (com_cookie and rotulo in ROTULOS_DO_ACEITAR):
+            avisos.append((rotulo, _centro(no["caixa"])))
+    return avisos
+
+
+def _fechar_os_avisos(d, tela, pausa):
+    """
+    O Fechar e o Aceitar dos avisos que tampam a página do link, um por vez, até AVISOS_POR_LINK. (a tela, quantos).
+    """
+    fechados = 0
+    for _ in range(AVISOS_POR_LINK):
+        avisos = avisos_que_tampam(tela)
+        if not avisos:
+            break
+        d.click(*avisos[0][1])
+        fechados += 1
+        pausa(PASSO_DA_ESPERA)
+        tela = d.dump_hierarchy()
+    return tela, fechados
+
+
 def _textos_do_link(tela, app):
     """No Chrome, só o que é da página (sem a barra do próprio Chrome); em outro app, a tela dele."""
     if app == PACOTE_DO_CHROME:
@@ -2555,16 +2604,18 @@ def abrir_o_link(d, endereco, pasta, numero, pausa, vigiar):
     """
     A página do link aberta numa guia nova do Chrome, pelo Android (o endereço nunca é escrito na barra da aula), e
     guardada para o Claude: as telas (link_NN_tela_MM.jpg) e os textos (link_NN.txt), rolando até TELAS_DO_LINK telas.
-    Nada da página é tocado nem escrito (pedido do Rafael de 26/11/2026: nunca dados de cartão ou pessoais, nunca a
-    compra). O link que abre outro app (o Telegram, o YouTube) fica com uma tela dele, sem rolar. O que tocar é
-    pausado, e o arquivo que o link baixar vem ao servidor, como o documento da aula. {"telas", "linhas", "app",
-    "documento", "voltou", "problema"}.
+    Na página, só o Fechar e o Aceitar dos avisos que a tampam são tocados (P305 1), e nada é escrito (pedido do
+    Rafael de 26/11/2026: nunca dados de cartão ou pessoais, nunca a compra). O link que abre outro app (o Telegram, o
+    YouTube) fica com uma tela dele, sem rolar e sem toque. O que tocar é pausado, e o arquivo que o link baixar vem ao
+    servidor, como o documento da aula. {"telas", "linhas", "app", "avisos", "documento", "voltou", "problema"}.
     """
-    info = {"telas": 0, "linhas": 0, "app": "", "documento": None, "voltou": False, "problema": ""}
+    info = {"telas": 0, "linhas": 0, "app": "", "avisos": 0, "documento": None, "voltou": False, "problema": ""}
     marcar_antes_de_baixar(d)
     _saida(d, ["am", "start", "-a", "android.intent.action.VIEW", "-d", endereco, "-p", PACOTE_DO_CHROME])
     tela, app = _pagina_do_link_pronta(d, pausa)
     info["app"] = "chrome" if app == PACOTE_DO_CHROME else "outro app"
+    if app == PACOTE_DO_CHROME:
+        tela, info["avisos"] = _fechar_os_avisos(d, tela, pausa)
     textos, anterior = [], None
     for tela_numero in range(1, (TELAS_DO_LINK if app == PACOTE_DO_CHROME else 1) + 1):
         porque = vigiar()
@@ -2608,6 +2659,8 @@ def resumo_do_link(item):
     partes = [f"{item.get('telas', 0)} tela(s)", f"{item.get('linhas', 0)} linha(s)"]
     if item.get("app") == "outro app":
         partes.append("abriu outro app")
+    if item.get("avisos"):
+        partes.append(f"{item['avisos']} aviso(s) fechado(s)")
     if item.get("documento"):
         partes.append(f"arquivo de {item['documento'].get('bytes', 0) // 1024} KB")
     if item.get("problema"):

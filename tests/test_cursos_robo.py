@@ -1064,6 +1064,23 @@ BARRA_DE_STATUS = ('<node package="com.android.systemui" class="android.widget.F
                    'bounds="[900,10][1060,90]" /></node>')
 
 
+# Os avisos que tampam a página de um link (P305 1): a propaganda do app do site, com o Baixar e o Fechar, o aviso de
+# cookies, com o Rejeitar e o Aceitar, e, nos termos, um Aceitar sem a palavra cookie na página.
+NOS_DOS_AVISOS = {
+    "propaganda": [("TextView", "É melhor com o aplicativo.", "[100,600][980,680]"),
+                   ("Button", "Baixar", "[300,1500][780,1580]"), ("Button", "Fechar", "[940,320][1020,400]")],
+    "cookies": [("TextView", "Usamos cookies para fins de marketing.", "[60,2000][1020,2080]"),
+                ("Button", "Rejeitar todos", "[60,2150][520,2250]"),
+                ("Button", "Aceitar todos", "[560,2150][1020,2250]")],
+    "termos": [("TextView", "Leia os termos de uso.", "[60,2000][1020,2080]"),
+               ("Button", "Aceitar todos", "[560,2150][1020,2250]")],
+}
+FECHAR_OS_AVISOS = {"propaganda": ("Fechar", (940, 320, 1020, 400)),
+                    "cookies": ("Aceitar todos", (560, 2150, 1020, 2250)),
+                    "termos": ("Aceitar todos", (560, 2150, 1020, 2250))}
+AVISOS_DO_LINK = {"cookies": ("propaganda", "cookies"), "termos": ("termos",)}
+
+
 class SiteDoCurso(CelularDoVolume):
     """
     O Chrome de mentira com o site do curso: as aulas em ordem [(nome, segundos, endereço[, tipo])], a barra de
@@ -1091,7 +1108,9 @@ class SiteDoCurso(CelularDoVolume):
     endereço aberto pelo Android (am start) abre a página do link numa guia nova (em duas telas: a 2ª depois de rolar),
     ou o app do Telegram (o link do t.me, com app_do_telegram), e a tecla voltar fecha a guia (o Chrome sai da frente)
     ou sai do app (links_abertos: os endereços abertos; toques_longos: onde o dedo foi segurado). carregando: em
-    quantas leituras da tela a página do link mostra só a tela de carregamento do site.
+    quantas leituras da tela a página do link mostra só a tela de carregamento do site. avisos_no_link: a página do
+    link abre tampada pela propaganda do app e pelo aviso de cookies ("cookies") ou por um Aceitar sem cookie
+    ("termos"); o Fechar e o Aceitar tirados ficam em avisos_fechados.
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
@@ -1100,11 +1119,12 @@ class SiteDoCurso(CelularDoVolume):
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
                  texto_na_videoaula=False, slides=4, carrossel_volta=False, em_branco=0, branco_ate_voltar=False,
                  edicao_lenta=0, abre_a_edicao=True, edicao_aberta=None, escrita_lenta=0, enderecos=None,
-                 sem_a_copia=False, app_do_telegram=False, carregando=0, **opcoes):
+                 sem_a_copia=False, app_do_telegram=False, carregando=0, avisos_no_link=None, **opcoes):
         super().__init__(**opcoes)
         self.enderecos = dict(ENDERECOS_DOS_LINKS if enderecos is None else enderecos)
         self.sem_a_copia, self.app_do_telegram = sem_a_copia, app_do_telegram
         self.carregando, self.leituras_carregando = carregando, 0
+        self.avisos_no_link, self.avisos_abertos, self.avisos_fechados = avisos_no_link, set(), []
         self.menu_do_link, self.copiado, self.pagina_do_link, self.tela_do_link = None, "", None, 0
         self.links_abertos, self.toques_longos, self.toques_fora = [], [], []
         self.tempos_dos_toques_longos = []
@@ -1255,8 +1275,15 @@ class SiteDoCurso(CelularDoVolume):
         if self.leituras_carregando:
             self.leituras_carregando -= 1
             partes = ["Carregando o mapa…"]
+        elif self.avisos_abertos:
+            partes = []
         nos = "".join(f'<node class="android.widget.TextView" resource-id="" text="{texto}" content-desc="" '
                       f'bounds="[42,{400 + 100 * n}][1021,{480 + 100 * n}]" />' for n, texto in enumerate(partes))
+        for aviso in sorted(self.avisos_abertos):
+            for classe, texto, caixa in NOS_DOS_AVISOS[aviso]:
+                toque = "true" if classe == "Button" else "false"
+                nos += (f'<node class="android.widget.{classe}" resource-id="" clickable="{toque}" text="{texto}" '
+                        f'content-desc="" bounds="{caixa}" />')
         return ('<hierarchy rotation="0">' + BARRA_DE_STATUS + '<node class="android.widget.EditText" '
                 f'resource-id="com.android.chrome:id/url_bar" clickable="true" text="{barra}" content-desc="" '
                 'bounds="[211,120][691,267]" /><node class="android.webkit.WebView" resource-id="" text="" '
@@ -1383,8 +1410,15 @@ class SiteDoCurso(CelularDoVolume):
                 self.copiado = self.enderecos.get(self.menu_do_link, "")
             self.menu_do_link = None
             return
+        if self.pagina_do_link and self.avisos_abertos:
+            for aviso, (rotulo, (x1, y1, x2, y2)) in FECHAR_OS_AVISOS.items():
+                if aviso in self.avisos_abertos and x1 <= x <= x2 and y1 <= y <= y2:
+                    self.avisos_abertos.discard(aviso)
+                    self.avisos_fechados.append(rotulo)
+                    return
         if self.na_frente == TELEGRAM or self.pagina_do_link:
-            # Nada se toca nas páginas dos links nem no app que eles abrem: o toque fica em toques_fora, e o teste vê.
+            # Nas páginas dos links, só o Fechar e o Aceitar dos avisos que a tampam (P305 1); nada no app que elas
+            # abrem: o outro toque fica em toques_fora, e o teste vê.
             self.toques_fora.append((x, y))
             return
         if self.nova_guia and 100 <= x <= 840 and 540 <= y <= 626 and not self.barra_em_foco:
@@ -1445,6 +1479,7 @@ class SiteDoCurso(CelularDoVolume):
             else:
                 self.na_frente, self.pagina_do_link, self.tela_do_link = CHROME, endereco, 0
                 self.leituras_carregando = self.carregando
+                self.avisos_abertos = set(AVISOS_DO_LINK.get(self.avisos_no_link, ()))
             return types.SimpleNamespace(output="", exit_code=0)
         if partes[:2] == ["input", "text"] and not self.barra_em_foco:
             self.na_pagina.append(partes[2])
@@ -1992,6 +2027,45 @@ def test_o_carregamento_mais_longo_que_a_espera_nao_perde_a_pagina(bm, monkeypat
     # e a página que chega depois é guardada (do ponto em que a rolagem estava), em vez de só o "carregando".
     texto = _texto_do_link_com_carregamento(monkeypatch, tmp_path, 4)
     assert "Rodapé da página" in texto
+
+
+def test_os_avisos_que_tampam_a_pagina_do_link_sao_fechados_e_nada_mais(bm, monkeypatch, tmp_path):
+    # P305 1 (26/11/2026, "mas pode aceitar os cookies"): a página do mapa mental veio tampada pela propaganda do app
+    # do site e pelo aviso de cookies. O robô toca só no Fechar da propaganda e no Aceitar dos cookies, e a página
+    # aparece; o Baixar do app, o Rejeitar e o resto da página ficam sem toque.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True, avisos_no_link="cookies")
+    ok, resumo = cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA)
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    with open(os.path.join(tmp_path / "aulas", pasta, "link_01.txt"), encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    with open(os.path.join(tmp_path / "aulas", pasta, "links.json"), encoding="utf-8") as arquivo:
+        (link,) = json.load(arquivo)
+    assert ok and sorted(site.avisos_fechados) == ["Aceitar todos", "Fechar"] and site.toques_fora == []
+    assert "Texto do começo da página" in texto and "Rodapé da página" in texto and link["avisos"] == 2
+    with open(os.path.join(tmp_path / "aulas", pasta, "texto.txt"), encoding="utf-8") as arquivo:
+        assert "2 aviso(s) fechado(s)" in arquivo.read()
+
+
+def test_so_os_botoes_dos_avisos_de_dentro_da_pagina_e_o_aceitar_so_com_cookie():
+    # O Aceitar sem a palavra cookie na página (uns termos, uma compra) nunca é tocado, nem o Fechar fora da página do
+    # Chrome (a barra, o sistema); só o rótulo inteiro conta ("Fechar pedido" não é o Fechar de um aviso).
+    def tela(*nos, cookie=True):
+        aviso = ('<node class="android.widget.TextView" text="Usamos cookies." content-desc="" '
+                 'bounds="[60,2000][1020,2080]" />' if cookie else "")
+        botoes = "".join(f'<node class="android.widget.Button" clickable="true" text="{texto}" content-desc="" '
+                         f'bounds="{caixa}" />' for texto, caixa in nos)
+        return ('<hierarchy><node class="android.widget.ImageButton" clickable="true" text="" content-desc="Fechar" '
+                'bounds="[0,120][120,267]" /><node class="android.webkit.WebView" text="" content-desc="" '
+                f'bounds="[0,267][1080,2394]">{aviso}{botoes}</node></hierarchy>')
+    com_cookie = tela(("Aceitar todos", "[560,2150][1020,2250]"), ("Rejeitar todos", "[60,2150][520,2250]"),
+                      ("Fechar pedido", "[60,900][520,980]"))
+    assert cursos_robo.avisos_que_tampam(com_cookie) == [("Aceitar todos", (790, 2200))]
+    sem_cookie = tela(("Aceitar todos", "[560,2150][1020,2250]"), cookie=False)
+    assert cursos_robo.avisos_que_tampam(sem_cookie) == []
+    so_o_fechar = tela(("Fechar", "[940,320][1020,400]"), cookie=False)
+    assert cursos_robo.avisos_que_tampam(so_o_fechar) == [("Fechar", (980, 360))]
+    assert cursos_robo.avisos_que_tampam("") == []
 
 
 def test_o_link_que_nao_e_pagina_da_internet_so_fica_anotado(bm, monkeypatch, tmp_path):
