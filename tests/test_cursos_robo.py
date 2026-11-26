@@ -1054,6 +1054,16 @@ def test_o_reiniciar_do_player_volta_o_video_ao_comeco_sem_tocar_no_mudo(bm):
 CHROME = "com.android.chrome"
 
 
+# A barra de status do Android, que a leitura da tela traz junto do app da frente (o pacote do sistema), com uma
+# notificação inventada.
+BARRA_DE_STATUS = ('<node package="com.android.systemui" class="android.widget.FrameLayout" resource-id="" text="" '
+                   'content-desc="" bounds="[0,0][1080,100]"><node package="com.android.systemui" '
+                   'class="android.widget.ImageView" resource-id="" text="" content-desc="Notificação do Exemplo: '
+                   '3 mensagens novas" bounds="[20,10][80,90]" /><node package="com.android.systemui" '
+                   'class="android.widget.TextView" resource-id="" text="Bateria em 50 porcento." content-desc="" '
+                   'bounds="[900,10][1060,90]" /></node>')
+
+
 class SiteDoCurso(CelularDoVolume):
     """
     O Chrome de mentira com o site do curso: as aulas em ordem [(nome, segundos, endereço[, tipo])], a barra de
@@ -1080,7 +1090,8 @@ class SiteDoCurso(CelularDoVolume):
     o põe na área de transferência (enderecos: o endereço de cada link pelo texto; sem_a_copia: o menu sem a cópia). O
     endereço aberto pelo Android (am start) abre a página do link numa guia nova (em duas telas: a 2ª depois de rolar),
     ou o app do Telegram (o link do t.me, com app_do_telegram), e a tecla voltar fecha a guia (o Chrome sai da frente)
-    ou sai do app (links_abertos: os endereços abertos; toques_longos: onde o dedo foi segurado).
+    ou sai do app (links_abertos: os endereços abertos; toques_longos: onde o dedo foi segurado). carregando: em
+    quantas leituras da tela a página do link mostra só a tela de carregamento do site.
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
@@ -1089,10 +1100,11 @@ class SiteDoCurso(CelularDoVolume):
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
                  texto_na_videoaula=False, slides=4, carrossel_volta=False, em_branco=0, branco_ate_voltar=False,
                  edicao_lenta=0, abre_a_edicao=True, edicao_aberta=None, escrita_lenta=0, enderecos=None,
-                 sem_a_copia=False, app_do_telegram=False, **opcoes):
+                 sem_a_copia=False, app_do_telegram=False, carregando=0, **opcoes):
         super().__init__(**opcoes)
         self.enderecos = dict(ENDERECOS_DOS_LINKS if enderecos is None else enderecos)
         self.sem_a_copia, self.app_do_telegram = sem_a_copia, app_do_telegram
+        self.carregando, self.leituras_carregando = carregando, 0
         self.menu_do_link, self.copiado, self.pagina_do_link, self.tela_do_link = None, "", None, 0
         self.links_abertos, self.toques_longos, self.toques_fora = [], [], []
         self.tempos_dos_toques_longos = []
@@ -1240,9 +1252,12 @@ class SiteDoCurso(CelularDoVolume):
         barra = self.pagina_do_link.removeprefix("https://")
         partes = (["Página do link", "Texto do começo da página"] if self.tela_do_link == 0
                   else ["Texto do fim da página", "Rodapé da página"])
+        if self.leituras_carregando:
+            self.leituras_carregando -= 1
+            partes = ["Carregando o mapa…"]
         nos = "".join(f'<node class="android.widget.TextView" resource-id="" text="{texto}" content-desc="" '
                       f'bounds="[42,{400 + 100 * n}][1021,{480 + 100 * n}]" />' for n, texto in enumerate(partes))
-        return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
+        return ('<hierarchy rotation="0">' + BARRA_DE_STATUS + '<node class="android.widget.EditText" '
                 f'resource-id="com.android.chrome:id/url_bar" clickable="true" text="{barra}" content-desc="" '
                 'bounds="[211,120][691,267]" /><node class="android.webkit.WebView" resource-id="" text="" '
                 f'content-desc="" bounds="[0,267][1080,2394]">{nos}</node></hierarchy>')
@@ -1256,7 +1271,8 @@ class SiteDoCurso(CelularDoVolume):
 
     def dump_hierarchy(self):
         if self.na_frente == TELEGRAM:
-            return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="false" '
+            return ('<hierarchy rotation="0">' + BARRA_DE_STATUS + '<node class="android.widget.TextView" '
+                    'resource-id="" clickable="false" '
                     'text="Grupo de teste" content-desc="" bounds="[100,500][980,580]" /><node '
                     'class="android.widget.TextView" resource-id="" clickable="true" text="ENTRAR NO GRUPO" '
                     'content-desc="" bounds="[100,2200][980,2300]" /></hierarchy>')
@@ -1428,6 +1444,7 @@ class SiteDoCurso(CelularDoVolume):
                 self.na_frente = TELEGRAM
             else:
                 self.na_frente, self.pagina_do_link, self.tela_do_link = CHROME, endereco, 0
+                self.leituras_carregando = self.carregando
             return types.SimpleNamespace(output="", exit_code=0)
         if partes[:2] == ["input", "text"] and not self.barra_em_foco:
             self.na_pagina.append(partes[2])
@@ -1923,6 +1940,9 @@ def test_a_pagina_do_link_e_guardada_sem_tocar_em_nada_e_a_aula_volta(bm, monkey
         texto = arquivo.read()
     assert texto.startswith("https://t.me/+grupoDeTeste\n")
     assert "Texto do começo da página" in texto and "Rodapé da página" in texto
+    # Só o que é da página: sem as notificações e a barra de status do celular, nem a barra do Chrome.
+    pagina = texto.split("\n\n", 1)[1]
+    assert "Notificação" not in pagina and "Bateria" not in pagina and "t.me/+grupoDeTeste" not in pagina
     assert {"link_01_tela_01.jpg", "link_01_tela_02.jpg"} <= set(os.listdir(pasta))
     with open(os.path.join(pasta, "links.json"), encoding="utf-8") as arquivo:
         (link,) = json.load(arquivo)
@@ -1943,6 +1963,35 @@ def test_o_link_que_abre_o_telegram_fica_com_uma_tela_dele_sem_nenhum_toque(bm, 
         (link,) = json.load(arquivo)
     assert ok and (link["app"], link["telas"], link["voltou"]) == ("outro app", 1, True)
     assert site.toques_fora == [] and site.na_frente == CHROME
+    with open(os.path.join(tmp_path / "aulas", pasta, "link_01.txt"), encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert "Grupo de teste" in texto and "Notificação" not in texto and "Bateria" not in texto
+
+
+def _texto_do_link_com_carregamento(monkeypatch, tmp_path, leituras):
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True, carregando=leituras)
+    ok, _resumo = cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA)
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    with open(os.path.join(tmp_path / "aulas", pasta, "link_01.txt"), encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert ok and site.toques_fora == [] and site.na_frente == CHROME
+    return texto
+
+
+def test_a_pagina_do_link_e_lida_so_depois_de_parar_de_mudar(bm, monkeypatch, tmp_path):
+    # O site que abre com uma tela de carregamento troca de texto alguns segundos depois de aparecer: lida logo, a
+    # página ficava só com o "carregando", e a rolagem, sem nada mudar, parava ali.
+    texto = _texto_do_link_com_carregamento(monkeypatch, tmp_path, 2)
+    assert "Carregando" not in texto
+    assert "Texto do começo da página" in texto and "Rodapé da página" in texto
+
+
+def test_o_carregamento_mais_longo_que_a_espera_nao_perde_a_pagina(bm, monkeypatch, tmp_path):
+    # O carregamento que passa da espera do começo: a rolagem que não muda nada lê a tela mais uma vez antes de parar,
+    # e a página que chega depois é guardada (do ponto em que a rolagem estava), em vez de só o "carregando".
+    texto = _texto_do_link_com_carregamento(monkeypatch, tmp_path, 4)
+    assert "Rodapé da página" in texto
 
 
 def test_o_link_que_nao_e_pagina_da_internet_so_fica_anotado(bm, monkeypatch, tmp_path):

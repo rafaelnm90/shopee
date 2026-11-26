@@ -2422,6 +2422,7 @@ TOQUES_LONGOS_POR_AULA = 40
 LINKS_POR_AULA = 20
 TELAS_DO_LINK = 6
 ESPERA_DO_LINK = 20
+ESPERA_MINIMA_DO_LINK = 6
 VOLTAS_DO_LINK = 3
 ESQUEMAS_ABERTOS = ("http://", "https://")
 SEM_O_MENU = "o menu do link não abriu"
@@ -2481,30 +2482,57 @@ def endereco_do_link(d, ponto, pausa, ao_falhar=None):
     return endereco
 
 
+# A barra de status e as notificações do Android vêm na leitura da tela junto do app da frente: não são do link e
+# trazem o que chega no celular (a conta de e-mails, os avisos dos apps).
+PACOTE_DO_SISTEMA = "com.android.systemui"
+
+
 def textos_da_tela(xml):
-    """Todos os textos da tela, na ordem (a página de um link ou o app que ele abriu), sem repetir o vizinho igual."""
+    """
+    Todos os textos da tela, na ordem (o app que o link abriu), sem repetir o vizinho igual e sem a barra de status nem
+    as notificações do celular.
+    """
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return []
     textos = []
-    for no in _nos(xml):
-        for valor in (no["texto"], no["descricao"]):
+    for no in raiz.iter("node"):
+        dados = _no(no) if no.get("package") != PACOTE_DO_SISTEMA else None
+        for valor in (dados["texto"], dados["descricao"]) if dados else ():
             valor = " ".join(valor.split())
             if valor and (not textos or textos[-1] != valor):
                 textos.append(valor)
     return textos
 
 
+def _textos_do_link(tela, app):
+    """No Chrome, só o que é da página (sem a barra do próprio Chrome); em outro app, a tela dele."""
+    if app == PACOTE_DO_CHROME:
+        return textos_da_pagina(tela) or textos_da_tela(tela)
+    return textos_da_tela(tela)
+
+
 def _pagina_do_link_pronta(d, pausa):
     """
-    Espera a página do link: o Chrome com uma página que não é a da aula (sem as abas do curso), já com algo dela, ou
-    outro app na frente. (a tela, o app).
+    Espera a página do link: outro app na frente, ou o Chrome com uma página que não é a da aula (sem as abas do curso)
+    e que parou de mudar, o mesmo texto em duas leituras seguidas, depois de ESPERA_MINIMA_DO_LINK s. O site que abre
+    com uma tela de carregamento troca de texto alguns segundos depois de aparecer; a página sem texto nenhum (um
+    desenho) espera até ESPERA_DO_LINK s. (a tela, o app).
     """
-    tela, app = "", PACOTE_DO_CHROME
-    for _ in range(max(1, ESPERA_DO_LINK // PASSO_DA_ESPERA)):
+    tela, app, antes = "", PACOTE_DO_CHROME, None
+    for passo in range(1, max(1, ESPERA_DO_LINK // PASSO_DA_ESPERA) + 1):
         pausa(PASSO_DA_ESPERA)
         tela, app = d.dump_hierarchy(), app_da_frente(d)
         if app and app != PACOTE_DO_CHROME:
             break
-        if not pagina_da_aula_pronta(tela) and not pagina_em_branco(tela):
+        if pagina_da_aula_pronta(tela) or pagina_em_branco(tela):
+            antes = None
+            continue
+        agora = textos_da_pagina(tela)
+        if agora and agora == antes and passo * PASSO_DA_ESPERA >= ESPERA_MINIMA_DO_LINK:
             break
+        antes = agora
     return tela, app
 
 
@@ -2543,9 +2571,14 @@ def abrir_o_link(d, endereco, pasta, numero, pausa, vigiar):
         if porque:
             info["problema"] = porque
             break
-        atuais = textos_da_tela(tela)
+        atuais = _textos_do_link(tela, app)
         if atuais == anterior:
-            break
+            # A rolagem não mudou nada: o fim da página ou o site ainda carregando; uma leitura a mais decide.
+            pausa(PASSO_DA_ESPERA)
+            tela = d.dump_hierarchy()
+            atuais = _textos_do_link(tela, app)
+            if atuais == anterior:
+                break
         textos = juntar_os_textos(textos, atuais)
         guardar_a_tela(d, os.path.join(pasta, f"link_{numero:02d}_tela_{tela_numero:02d}.jpg"))
         info["telas"] += 1
