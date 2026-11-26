@@ -709,11 +709,79 @@ def app_da_frente(d):
 
 
 def trazer_o_chrome(d, pausa=None):
-    """O Chrome na frente do celular (o robô deixa a Shopee no Eu no fim de cada rodada que mexe no celular)."""
-    if app_da_frente(d) == PACOTE_DO_CHROME:
-        return
-    d.app_start(PACOTE_DO_CHROME, wait=True)
-    (pausa or time.sleep)(ESPERA_DO_CHROME)
+    """
+    O Chrome na frente do celular (o robô deixa a Shopee no Eu no fim de cada rodada que mexe no celular), sempre com
+    a tela em pé. Devolve o que o chrome_em_pe fez ("" com a tela já em pé).
+    """
+    pausa = pausa or time.sleep
+    if app_da_frente(d) != PACOTE_DO_CHROME:
+        d.app_start(PACOTE_DO_CHROME, wait=True)
+        pausa(ESPERA_DO_CHROME)
+    return chrome_em_pe(d, pausa)
+
+
+# A tela em pé com o Chrome na frente (26/11/2026): a noite inteira e o teste da manhã tiveram o Chrome deitado (na
+# horizontal), e a página da aula não mostrava a lista das aulas, mesmo com a rotação automática desligada e a tela
+# posta em pé (P301 2). O registro do Android mostrou a tela girando a cada vez que o Chrome vinha para a frente: o
+# pedido da tela deitada vinha do próprio Chrome (o app da Shopee sempre pede a tela em pé, por isso o robô de dia não
+# sente). Deitada, a tela é travada em pé pelo comando do Android e, se o Chrome insistir, ele é fechado e aberto de
+# novo: as guias voltam, e a aula é aberta pelo caminho de sempre. Cada vez vai ao registro com o que o Android diz (o
+# que o app pede e as duas rotações), para o Claude achar quando e por que o Chrome pede a tela deitada.
+TELA_DEITADA = (1, 3)
+TRAVAR_EM_PE = ["cmd", "window", "user-rotation", "lock", "0"]
+CHROME_POSTO_EM_PE = "chrome posto em pé"
+CHROME_REABERTO = "chrome fechado e aberto de novo"
+CHROME_DEITADO = "chrome continuou deitado"
+
+
+def rotacao_da_tela(d):
+    """A rotação da tela agora, pelo uiautomator2 (0 em pé; 1 e 3 deitada); None sem a leitura."""
+    try:
+        return int((d.info or {}).get("displayRotation"))
+    except Exception:
+        return None
+
+
+def porque_deitada(d):
+    """
+    O que o Android diz da tela deitada, só em palavras fixas dele e números: a orientação que o app da frente pede
+    (dumpsys window) e a rotação automática e a do usuário (as configurações da P301 2).
+    """
+    pedido = re.search(r"mCurrentAppOrientation=(?:SCREEN_ORIENTATION_)?([A-Z_]+|-?\d+)",
+                       _saida(d, ["dumpsys", "window", "displays"]))
+    rotacoes = [_saida(d, ["settings", "get", "system", nome]).strip()
+                for nome in ("accelerometer_rotation", "user_rotation")]
+    automatica, do_usuario = (valor if re.fullmatch(r"\d+", valor) else "?" for valor in rotacoes)
+    return (f"o app pede {pedido.group(1).lower() if pedido else '? (sem a leitura)'}, "
+            f"rotação automática {automatica}, rotação do usuário {do_usuario}")
+
+
+def chrome_em_pe(d, pausa):
+    """
+    O Chrome da frente com a tela em pé. Em pé, sem a leitura da rotação ou com outro app na frente, nada muda e
+    devolve "". Deitada, a tela é travada em pé (TRAVAR_EM_PE) e, ainda deitada, o Chrome é fechado e aberto de novo;
+    devolve o que deu (CHROME_POSTO_EM_PE, CHROME_REABERTO ou CHROME_DEITADO), que também vai ao registro, e a tela do
+    Chrome que continua deitado vai aos casos.
+    """
+    antes = rotacao_da_tela(d)
+    if antes not in TELA_DEITADA or app_da_frente(d) != PACOTE_DO_CHROME:
+        return ""
+    porque = porque_deitada(d)
+    _saida(d, TRAVAR_EM_PE)
+    pausa(ESPERA_DA_TELA_EM_PE)
+    if rotacao_da_tela(d) not in TELA_DEITADA:
+        resultado = CHROME_POSTO_EM_PE
+    else:
+        d.app_stop(PACOTE_DO_CHROME)
+        pausa(ESPERA_DO_CHROME)
+        d.app_start(PACOTE_DO_CHROME, wait=True)
+        pausa(ESPERA_DO_CHROME)
+        resultado = CHROME_REABERTO if rotacao_da_tela(d) not in TELA_DEITADA else CHROME_DEITADO
+    registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_TELA, resultado,
+                                 f"a rotação da tela era {antes}; {porque}", ok=resultado != CHROME_DEITADO)
+    if resultado == CHROME_DEITADO:
+        guardar_o_caso(d, f"{CHROME_DEITADO} ({porque})", "tela deitada", passo="pôr o chrome em pé")
+    return resultado
 
 
 def barra_em_edicao(xml):
@@ -793,7 +861,8 @@ def _sair_e_voltar_ao_chrome(d, pausa):
 
 def _abrir_pela_barra(d, endereco, pausa):
     """Uma vez: o endereço escrito na barra da guia da frente e a página nova esperada. (tipo, porque, a tela)."""
-    trazer_o_chrome(d, pausa)
+    if trazer_o_chrome(d, pausa) == CHROME_DEITADO:
+        return None, CHROME_DEITADO, ""
     tela = _fechar_a_folha_do_chrome(d, pausa)
     barra = barra_na_tela(tela)
     if not barra and app_da_frente(d) == PACOTE_DO_CHROME:
@@ -1660,6 +1729,8 @@ def abrir_pela_lista(d, posicao, numero, pausa=None, no_curso=False, vigiar=None
     lista = lista_do_curso(posicao)
     if not 1 <= int(numero) <= len(lista):
         return False, FORA_DA_LISTA
+    if no_curso and chrome_em_pe(d, pausa) == CHROME_DEITADO:
+        return False, CHROME_DEITADO
     ok, porque = False, SEM_A_AULA_NA_LISTA
     pausar_o_que_toca(d, pausa)
     for pelo_endereco in ((False, True) if no_curso else (True,)):
@@ -2064,11 +2135,21 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
     dia a aula K da lista do curso N (sem o K, a 1ª) como a noite grava (o teste); curso:lista:N lê da aba Módulos a
     lista das aulas do curso N, na ordem, e a guarda no mapa (com o celular mudo); curso:tocar:N:K abre a aula K dessa
     lista pelo toque no nome dela, como a noite abre, e guarda a tela para o Claude (casos); curso sozinho diz o mapa
-    em números. O endereço e os nomes ficam no banco, e o log diz só números e palavras fixas.
+    em números. O endereço e os nomes ficam no banco, e o log diz só números e palavras fixas. Antes de cada passo, o
+    Chrome da frente fica em pé, como na noite (chrome_em_pe), e o que mudou vai no fim do log.
     """
     partes = [parte.strip() for parte in argumento.split(":")] if argumento else []
     if not partes:
         return True, resumo_do_mapa()
+    em_pe = chrome_em_pe(d, pausa)
+    if em_pe == CHROME_DEITADO:
+        return False, CHROME_DEITADO
+    ok, texto = _passo_do_curso(d, partes, pausa)
+    return ok, (f"{texto} ({em_pe})" if em_pe else texto)
+
+
+def _passo_do_curso(d, partes, pausa):
+    """O passo curso:... do explorar (curso_no_explorar), já com o Chrome da frente em pé."""
     if partes == ["proximo"]:
         return _proxima_no_explorar(d, pausa)
     if partes == ["guardar"]:
@@ -3535,8 +3616,10 @@ def _guardar_a_pagina_da_videoaula(d, posicao, numero, pausa, vigiar):
     documento que ela tiver (pedidos do Rafael de 23/11/2026, às 08:44 e às 09:12). A página que o site deixou volta
     pela lista (_voltar_para_a_aula). Sem ela, a aula gravada vale do mesmo jeito, e o registro diz o porquê (a
     videoaula sem nada escrito embaixo do vídeo não vai ao registro). Devolve (o porquê de a noite parar, "o robô pediu
-    o celular" ou "a madrugada acabou", ou "", a aula na tela agora ou None).
+    o celular" ou "a madrugada acabou", ou "", a aula na tela agora ou None). O Chrome fica em pé antes (chrome_em_pe):
+    o aberto de novo recarrega a guia, e a aula na tela é conferida do mesmo jeito.
     """
+    chrome_em_pe(d, pausa)
     if not na_aula(d, posicao, numero, pausa):
         ok, porque = _voltar_para_a_aula(d, posicao, numero, pausa, vigiar)
         if porque in PARADAS_DA_AULA:
@@ -3652,6 +3735,14 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                     registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_TELA, "posta em pé",
                                                  "rotação automática desligada", ok=True)
                     pausa(ESPERA_DA_TELA_EM_PE)
+                chrome = chrome_em_pe(d, pausa)
+                if chrome == CHROME_DEITADO:
+                    motivo = CHROME_DEITADO
+                    break
+                if chrome == CHROME_REABERTO:
+                    # O Chrome aberto de novo recarrega a guia, e o site abre a aula em que parou: a aula na tela é
+                    # conferida de novo, pelo caminho de sempre.
+                    aberta = None
                 # O vídeo da aula pode começar a tocar sozinho quando a página abre: o celular fica mudo até o gravador
                 # ligar, e então o som vai só ao servidor (o celular fica no quarto do Rafael, pedido dele de
                 # 22/11/2026: DECISOES.md, Trabalho com o Claude).

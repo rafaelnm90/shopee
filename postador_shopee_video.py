@@ -2766,7 +2766,11 @@ def fazer_passo(d, nome, argumento):
             return False, ("abrir abre a Shopee (abrir), o Google Flow (abrir:flow), o Chrome (abrir:chrome) "
                            "ou o curso (abrir:curso)")
         d.app_start(pacote, wait=True)
-        return True, "app aberto"
+        if pacote != cursos_robo.PACOTE_DO_CHROME:
+            return True, "app aberto"
+        # O Chrome sempre em pé, como na noite do curso (cursos_robo.chrome_em_pe).
+        em_pe = cursos_robo.chrome_em_pe(d, time.sleep)
+        return em_pe != cursos_robo.CHROME_DEITADO, (f"app aberto ({em_pe})" if em_pe else "app aberto")
     if nome == "fechar":
         d.app_stop(PACOTE)
         return True, "app fechado"

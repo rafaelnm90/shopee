@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 import cursos_robo
+from conftest import consultar
 
 
 class Feito:
@@ -3158,6 +3159,184 @@ def test_a_tela_que_nao_fica_em_pe_para_a_noite_sem_tocar_em_nada(noite_do_curso
     assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: a tela do "
                       "celular não ficou em pé")
     assert teimoso.toques == [] and not cursos_robo.lista_do_curso(4)[0].get("gravada_em")
+
+
+class ChromeQueGira:
+    """
+    O Motorola de mentira com o Chrome na frente (26/11/2026): a rotação da tela pelo uiautomator2, a de cada leitura
+    (a última fica), o que o Android diz (o pedido do app no dumpsys window e as duas rotações das configurações), a
+    trava em pé (comandos) e o Chrome fechado e aberto de novo (apps). A tela não é a de uma aula.
+    """
+
+    def __init__(self, *rotacoes, na_frente=CHROME):
+        self.rotacoes, self.na_frente, self.comandos, self.apps = list(rotacoes), na_frente, [], []
+
+    @property
+    def info(self):
+        return {"displayRotation": self.rotacoes.pop(0) if len(self.rotacoes) > 1 else self.rotacoes[0]}
+
+    def app_current(self):
+        return {"package": self.na_frente, "activity": ""}
+
+    def dump_hierarchy(self):
+        return '<hierarchy rotation="1"></hierarchy>'
+
+    def shell(self, partes):
+        import types
+        self.comandos.append(partes)
+        saida = ""
+        if partes == ["dumpsys", "window", "displays"]:
+            saida = "  DisplayRotation\n    mCurrentAppOrientation=SCREEN_ORIENTATION_SENSOR_LANDSCAPE\n"
+        elif partes[:3] == ["settings", "get", "system"]:
+            saida = "0\n"
+        return types.SimpleNamespace(output=saida)
+
+    def app_stop(self, pacote):
+        self.apps.append(("fechado", pacote))
+
+    def app_start(self, pacote, wait=False):
+        self.apps.append(("aberto", pacote))
+        self.na_frente = pacote
+
+
+def _registro_da_tela():
+    """(resultado, detalhe, ok) da última linha da tela do celular no registro; None sem ela."""
+    import registro_processos
+    if not registro_processos.sequencia("curso", "tela do celular", "2000-01-01 00:00:00"):
+        return None
+    return consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE robo = 'curso' "
+                     "AND processo = 'tela do celular' ORDER BY id DESC")
+
+
+PORQUE_DO_CHROME_DEITADO = "o app pede sensor_landscape, rotação automática 0, rotação do usuário 0"
+
+
+def test_o_chrome_em_pe_fica_como_esta(bm):
+    # Em pé, sem a leitura da rotação ou com outro app na frente, nada é mexido nem vai ao registro.
+    for celular in (ChromeQueGira(0), ChromeQueGira(1, na_frente="com.shopee.br"), Chrome("<hierarchy/>")):
+        assert cursos_robo.chrome_em_pe(celular, lambda s: None) == ""
+        assert celular.comandos == [] and getattr(celular, "apps", []) == []
+    assert _registro_da_tela() is None
+
+
+def test_o_chrome_deitado_fica_em_pe_pela_trava_do_android(bm):
+    # 26/11/2026: o Chrome deitado com a rotação em pé pelas configurações (P301 2). A trava em pé do Android vem
+    # primeiro, e o registro guarda o que o Android disse (o pedido do app e as duas rotações).
+    celular = ChromeQueGira(1, 0)
+    assert cursos_robo.chrome_em_pe(celular, lambda s: None) == cursos_robo.CHROME_POSTO_EM_PE
+    assert cursos_robo.TRAVAR_EM_PE in celular.comandos and celular.apps == []
+    assert _registro_da_tela() == ("chrome posto em pé", f"a rotação da tela era 1; {PORQUE_DO_CHROME_DEITADO}", 1)
+
+
+def test_o_chrome_que_insiste_em_ficar_deitado_e_fechado_e_aberto_de_novo(bm):
+    celular = ChromeQueGira(3, 3, 0)
+    assert cursos_robo.chrome_em_pe(celular, lambda s: None) == cursos_robo.CHROME_REABERTO
+    assert celular.apps == [("fechado", CHROME), ("aberto", CHROME)]
+    assert _registro_da_tela() == ("chrome fechado e aberto de novo",
+                                   f"a rotação da tela era 3; {PORQUE_DO_CHROME_DEITADO}", 1)
+
+
+def test_o_chrome_que_continua_deitado_vai_ao_registro_e_aos_casos(bm, monkeypatch):
+    casos = []
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso",
+                        lambda d, motivo, resultado="não abriu", passo="": casos.append((motivo, resultado, passo)))
+    celular = ChromeQueGira(1)
+    assert cursos_robo.chrome_em_pe(celular, lambda s: None) == cursos_robo.CHROME_DEITADO
+    assert _registro_da_tela() == ("chrome continuou deitado", f"a rotação da tela era 1; {PORQUE_DO_CHROME_DEITADO}",
+                                   0)
+    assert casos == [(f"chrome continuou deitado ({PORQUE_DO_CHROME_DEITADO})", "tela deitada", "pôr o chrome em pé")]
+
+
+def test_o_chrome_trazido_para_a_frente_vem_em_pe(bm):
+    # A rodada do robô deixa a Shopee no Eu: o Chrome vem para a frente e, deitado, fica em pé.
+    celular = ChromeQueGira(1, 0, na_frente="com.shopee.br")
+    assert cursos_robo.trazer_o_chrome(celular, lambda s: None) == cursos_robo.CHROME_POSTO_EM_PE
+    assert celular.apps == [("aberto", CHROME)] and celular.na_frente == CHROME
+
+
+def test_o_chrome_que_continua_deitado_nao_escreve_o_endereco_nem_procura_a_lista(bm, monkeypatch):
+    # Deitado, a página da aula não mostra a lista (26/11/2026): nada é escrito na barra nem tocado, e o porquê volta.
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda *args, **kwargs: None)
+    celular = ChromeQueGira(1)
+    assert cursos_robo.ir_para_o_endereco(celular, AULAS_DA_LISTA[0][2], lambda s: None) == (
+        None, cursos_robo.CHROME_DEITADO)
+    _lista_no_mapa(4)
+    assert cursos_robo.abrir_pela_lista(celular, 4, 2, lambda s: None, no_curso=True) == (
+        False, cursos_robo.CHROME_DEITADO)
+    assert not [comando for comando in celular.comandos if comando[:1] == ["input"]]
+
+
+def test_o_passo_curso_do_explorar_poe_o_chrome_em_pe_antes(bm, monkeypatch):
+    # O teste de dia da manhã de 26/11/2026 parou com o Chrome deitado: cada passo curso:... endireita o Chrome antes,
+    # e o log diz o que mudou; o curso sozinho (o mapa em números) não mexe no celular.
+    monkeypatch.setattr(cursos_robo, "guardar_o_caso", lambda *args, **kwargs: None)
+    celular = ChromeQueGira(1, 0)
+    assert cursos_robo.curso_no_explorar(celular, "guardar", lambda s: None) == (
+        False, "a tela não é a de uma aula do curso (chrome posto em pé)")
+    assert cursos_robo.curso_no_explorar(ChromeQueGira(1), "guardar", lambda s: None) == (
+        False, cursos_robo.CHROME_DEITADO)
+    parado = ChromeQueGira(1)
+    cursos_robo.curso_no_explorar(parado, "", lambda s: None)
+    assert parado.comandos == []
+
+
+class CursoComOChromeDeitado(CursoComLista):
+    """
+    O site da noite com o Chrome deitado na frente (26/11/2026), com a tela em pé pelas configurações (P301 2): o
+    Chrome pede a tela deitada, e a trava em pé do Android não o endireita; fechado e aberto de novo, ele volta em pé
+    (endireita=False: continua deitado).
+    """
+
+    def __init__(self, *args, endireita=True, **opcoes):
+        super().__init__(*args, rotacao={"accelerometer_rotation": "0", "user_rotation": "0"}, **opcoes)
+        self.deitado, self.endireita, self.fechados = True, endireita, []
+
+    @property
+    def info(self):
+        return {"displayRotation": 1 if self.deitado and self.na_frente == CHROME else 0}
+
+    def shell(self, partes):
+        if partes == ["dumpsys", "window", "displays"]:
+            import types
+            self.comandos.append(partes)
+            return types.SimpleNamespace(output="    mCurrentAppOrientation=SCREEN_ORIENTATION_LANDSCAPE\n")
+        return super().shell(partes)
+
+    def dump_hierarchy(self):
+        # Deitado, a página não mostra o que a noite procura (a barra, a lista das aulas, o Próximo), como na noite de
+        # 26/11/2026.
+        if self.deitado and self.na_frente == CHROME:
+            return '<hierarchy rotation="1"></hierarchy>'
+        return super().dump_hierarchy()
+
+    def app_stop(self, pacote):
+        self.fechados.append(pacote)
+        if pacote == CHROME:
+            self.na_frente, self.deitado = "com.motorola.launcher3", not self.endireita
+
+
+def test_a_noite_poe_o_chrome_deitado_em_pe_e_grava_as_aulas(noite_do_curso):
+    # A noite de 26/11/2026 inteira teve o Chrome deitado, e nenhuma aula abriu: o Chrome deitado é fechado e aberto de
+    # novo antes da aula, e a noite segue pelo caminho de sempre.
+    _lista_no_mapa(4)
+    site = CursoComOChromeDeitado(AULAS_DA_LISTA, MODULOS_DA_LISTA, aberta=3)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"] and site.fechados == [CHROME]
+    assert _registro_da_tela() == (
+        "chrome fechado e aberto de novo",
+        "a rotação da tela era 1; o app pede landscape, rotação automática 0, rotação do usuário 0", 1)
+
+
+def test_o_chrome_que_continua_deitado_para_a_noite_sem_tocar_em_nada(noite_do_curso):
+    _lista_no_mapa(4)
+    site = CursoComOChromeDeitado(AULAS_DA_LISTA, MODULOS_DA_LISTA, aberta=3, endireita=False)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: chrome "
+                      "continuou deitado")
+    assert site.toques == [] and not cursos_robo.lista_do_curso(4)[0].get("gravada_em")
+    assert noite_do_curso.casos == [("chrome continuou deitado (o app pede landscape, rotação automática 0, rotação do "
+                                     "usuário 0)", "tela deitada")]
 
 
 def test_a_aula_sem_video_que_nao_fica_guardada_volta_e_a_noite_segue(noite_do_curso):
