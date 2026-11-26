@@ -3011,10 +3011,11 @@ def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, a
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
 
 
-def _videos_com_valor(monkeypatch, valores, padrao=5.99):
+def _videos_com_valor(monkeypatch, valores, padrao=5.99, anuncios=None):
     """
     Vídeos da fonte mais novos que o a1, do mais novo para o mais velho, cada um com o produto do link que
-    paga valores[i] reais por venda (o preço 100 e a comissão valores[i]%); o do a1 paga padrao.
+    paga valores[i] reais por venda (o preço 100 e a comissão valores[i]%); o do a1 paga padrao. anuncios:
+    {i: (vendidos, nota)} do anúncio de cada um (P308 1); sem ele, 0 vendidos e sem nota.
     """
     for i, _valor in enumerate(valores):
         with open(f"archive/v{i}.mp4", "wb") as f:
@@ -3025,7 +3026,9 @@ def _videos_com_valor(monkeypatch, valores, padrao=5.99):
     async def produtos_do_link(link):
         for i, valor in enumerate(valores):
             if link.endswith(f"/valor{i}"):
-                return [{"nome": VESTIDO, "preco": 100.0, "comissao": valor, "item": f"9{i}"}], link
+                vendas, nota = (anuncios or {}).get(i, (0, 0.0))
+                return [{"nome": VESTIDO, "preco": 100.0, "comissao": valor, "item": f"9{i}", "vendas": vendas,
+                         "nota": nota}], link
         return [{"nome": VESTIDO, "preco": 100.0, "comissao": padrao, "item": "2"}], link
 
     monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
@@ -3047,11 +3050,48 @@ def test_robo_escolhe_entre_os_proximos_o_produto_que_paga_mais_por_venda(monkey
     assert robo.listar("pulado") == []
     assert robo.estado_do_dia(robo.ler_config(), agora)["abaixo_do_minimo"] == ["v0"]
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
-                     robo.PROCESSO_DA_ESCOLHA) == ("o que paga mais", "o 3º de 5; 1 abaixo do mínimo", 1)
-    assert any("Vídeo: o que paga mais por venda (R$ 9,00) entre os próximos 10 de" in str(a) for a in avisos)
+                     robo.PROCESSO_DA_ESCOLHA) == ("o de maior valor pelos vendidos, sem nota boa",
+                                                    "o 3º de 5; 1 abaixo do mínimo; vale 1x", 1)
+    assert any("Vídeo: o de maior valor pelas vendas entre os próximos 10 de" in str(a)
+               and "R$ 9,00 por venda, 0 vendidos (vale 1x) e sem nota" in str(a) for a in avisos)
     assert robo.proximo_video(robo.ler_config(), robo.evitar_hoje(robo.ler_config(), agora), agora)["id"] == "v1"
     # No dia seguinte, o de baixo é visto de novo (o preço e a comissão mudam).
     assert "v0" not in robo.evitar_hoje(robo.ler_config(), momento("2026-10-23 12:00"))
+
+
+def test_escolha_pesa_os_vendidos_e_a_nota_do_anuncio(monkeypatch, avisos):
+    # Escolha do Rafael (26/11/2026, P308 1): o valor por venda vale vezes 1 (menos de 100 vendidos), 2 (de 100 a
+    # 999) ou 3 (1.000 ou mais), e a nota abaixo de 4,5 só entra sem outro. O que paga R$ 6 com 80 vendidos (vale 6)
+    # perde para o de R$ 3,50 com 12 mil vendidos (vale 10,50); o de R$ 9 com 5 mil vendidos tem nota 4,1 e fica
+    # atrás dos de nota boa. O mínimo de R$ 2 continua no valor de verdade, e o rascunho guarda o valor por venda.
+    _fonte(monkeypatch)
+    _videos_com_valor(monkeypatch, [6.0, 3.5, 9.0, 1.9], anuncios={0: (80, 4.9), 1: (12000, 4.8), 2: (5000, 4.1),
+                                                                   3: (90000, 5.0)})
+    config = {**robo.PADRAO, "fonte": "autorais"}
+    hoje = momento("2026-10-22 12:00")
+    video, porque = robo.escolher_o_video(config, robo.evitar_hoje(config, hoje), hoje)
+    assert (video["id"], video["valor"], video["vendas"], video["nota"], porque) == ("v1", 3.5, 12000, 4.8, "")
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY id DESC",
+                     robo.PROCESSO_DA_ESCOLHA) == ("o de maior valor pelos vendidos", "o 2º de 5; 1 abaixo do mínimo; "
+                                                   "vale 3x")
+    assert robo.estado_do_dia(robo.ler_config(), hoje)["abaixo_do_minimo"] == ["v3"]
+    linha = robo.de_onde_veio_o_video(video, "autorais")
+    assert "R$ 3,50 por venda, 12.000 vendidos (vale 3x) e nota 4,8" in linha
+    # Os pesos e a nota que ninguém tem: sem nenhum de nota boa, vale o de maior valor entre os outros.
+    assert [robo.peso_dos_vendidos(v) for v in (0, 99, 100, 999, 1000, None)] == [1, 1, 2, 2, 3, 1]
+    anuncios = {"valor0": (6.0, 80, 4.0), "valor1": (3.5, 120, 0.0), "valor2": (9.0, 5000, 4.1)}
+
+    async def sem_nota_boa(link):
+        comissao, vendas, nota = anuncios.get(link.rsplit("/", 1)[-1], (1.0, 0, 0.0))
+        return [{"nome": VESTIDO, "preco": 100.0, "comissao": comissao, "item": link[-1], "vendas": vendas,
+                 "nota": nota}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", sem_nota_boa)
+    amanha = momento("2026-10-23 12:00")
+    video, _ = robo.escolher_o_video(config, robo.evitar_hoje(config, amanha), amanha)
+    assert video["id"] == "v2"
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ? ORDER BY id DESC",
+                     robo.PROCESSO_DA_ESCOLHA) == ("o de maior valor pelos vendidos, sem nota boa",)
 
 
 def test_so_videos_abaixo_do_minimo_por_venda_param_sem_tocar_no_celular(monkeypatch, avisos):

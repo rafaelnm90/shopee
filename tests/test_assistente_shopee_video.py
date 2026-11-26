@@ -1398,3 +1398,10 @@ def test_o_produto_da_api_pede_a_parte_do_vendedor(monkeypatch):
     produto = rodar(asv._consultar_produto("11", "24"))
     assert produto["comissao"] == 6.5
     assert len(pedidos) == 1 and "sellerCommissionRate" in str(pedidos[0]) and "shopeeCommissionRate" in str(pedidos[0])
+    # P308 1: os vendidos e a nota do anúncio vêm junto, para a escolha do vídeo do robô; sem eles, 0.
+    assert "sales" in str(pedidos[0]) and "ratingStar" in str(pedidos[0])
+    assert (produto["vendas"], produto["nota"]) == (0, 0.0)
+    _sessao_da_api(monkeypatch, [{"productName": "Pote", "priceMin": "20", "commissionRate": "0.07", "sales": 1520,
+                                  "ratingStar": "4.85"}])
+    produto = rodar(asv._consultar_produto("11", "25"))
+    assert (produto["vendas"], produto["nota"]) == (1520, 4.85)
