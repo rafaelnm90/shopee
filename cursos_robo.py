@@ -2108,11 +2108,12 @@ def curso_no_explorar(d, argumento, pausa=time.sleep):
 
 def toca_aula(nome, argumento):
     """
-    O passo do explorar pode fazer o vídeo de uma aula tocar (abrir uma aula ou tocar o vídeo do Chrome)? Com ele,
-    também de dia, o celular fica mudo: ele fica no quarto do Rafael (pedido dele, 22/11/2026).
+    O passo do explorar pode fazer o vídeo de uma aula tocar (abrir uma aula, tocar o vídeo do Chrome ou abrir os
+    links da página, no guardar)? Com ele, também de dia, o celular fica mudo: ele fica no quarto do Rafael (pedido
+    dele, 22/11/2026).
     """
     acao = (argumento or "").split(":")[0].strip().lower()
-    return ((nome == "curso" and acao in ("abrir", "proximo", "gravar", "lista", "tocar"))
+    return ((nome == "curso" and acao in ("abrir", "proximo", "gravar", "lista", "tocar", "guardar"))
             or (nome == "midia" and acao == "tocar"))
 
 
@@ -2263,8 +2264,8 @@ def trazer_o_baixado(d, pasta, numero=1, pausa=None, espera=ESPERA_DO_DOCUMENTO)
 # A aula sem vídeo guardada como as gravadas, na pasta das aulas (o Claude no papel de aluno: pedidos do Rafael de
 # 23/11/2026, às 08:44 e às 09:12): as telas da página, do alto até as abas (tela_NN.jpg, para as imagens e a forma), o
 # texto da aula até as abas (texto.txt, com o "Ver mais" aberto) e o documento pelo Baixar do leitor de PDF da própria
-# página (documento_1.ext). Os links da aula ficam só anotados no texto, sem abrir: entrar num grupo ou preencher uma
-# ficha é com o Rafael. Nenhum toque cai no Próximo, na bolha do chat (BOLHA_DO_CHAT) ou na barra do Chrome
+# página (documento_1.ext). Os links da aula são abertos e guardados (abrir_o_link), sem nada tocado nem escrito nas
+# páginas deles. Nenhum toque cai no Próximo, na bolha do chat (BOLHA_DO_CHAT) ou na barra do Chrome
 # (_livre_para_tocar), e o Próximo só é tocado sem um aviso do Chrome em cima dele (o do download, AVISOS_DO_CHROME).
 ROTULO_DO_BAIXAR = "Baixar"
 ROTULO_DO_VER_MAIS = "Ver mais"
@@ -2313,9 +2314,216 @@ def textos_da_aula(xml):
 
 
 def links_da_aula(xml):
-    """Os links da aula (o texto de cada um), só anotados: o endereço fica no site, e nenhum é aberto."""
-    return [no["descricao"] for no in _nos_da_aula(xml)
+    """Os links da aula à vista (o texto de cada um), como a página os mostra (o endereço fica no site)."""
+    return [texto for texto, _ponto in links_na_tela(xml)]
+
+
+def links_na_tela(xml):
+    """Os links da aula à vista, [(texto, centro)], na ordem da página (o mesmo nome pode levar a outros endereços)."""
+    return [(no["descricao"], _centro(no["caixa"])) for no in _nos_da_aula(xml)
             if no["clicavel"] and no["classe"] == "View" and no["descricao"] and not no["id"]]
+
+
+# Os links das aulas (pedidos do Rafael de 23/11/2026, às 08:44, e de 26/11/2026, de manhã: "sempre analisar os
+# links"): todo link da aula é aberto e a página dele guardada para o Claude ler, também o de compra ou de cadastro, só
+# para ver do que se trata. Nas páginas dos links nada é tocado nem escrito (nunca dados de cartão ou pessoais, nunca a
+# compra): só a tela é guardada e rolada. O endereço vem antes, sem abrir: o dedo segurado no link abre o menu do
+# Chrome, e o "Copiar endereço do link" o põe na área de transferência. A página abre numa guia nova, pelo Android (o
+# endereço nunca é escrito na barra da aula), e sai pela tecla voltar, que fecha a guia e devolve a aula.
+ROTULOS_DA_COPIA = ("Copiar endereço do link", "Copiar link")
+ROTULOS_DO_MENU_DO_LINK = ROTULOS_DA_COPIA + ("Abrir em nova guia", "Abrir em uma nova guia", "Abrir em guia anônima",
+                                              "Copiar texto do link", "Compartilhar link", "Fazer o download do link")
+ROTULOS_DA_SELECAO = ("Selecionar tudo",)
+TOQUES_LONGOS_POR_AULA = 40
+LINKS_POR_AULA = 20
+TELAS_DO_LINK = 6
+ESPERA_DO_LINK = 20
+VOLTAS_DO_LINK = 3
+ESQUEMAS_ABERTOS = ("http://", "https://")
+SEM_O_MENU = "o menu do link não abriu"
+NAO_E_PAGINA = "não é uma página da internet"
+NAO_VOLTOU = "a aula não voltou depois do link"
+
+
+def _rotulos_na_tela(xml):
+    return {" ".join((no["texto"] or no["descricao"]).split()) for no in _nos(xml)}
+
+
+def opcao_de_copiar(xml):
+    """O centro do "Copiar endereço do link" do menu que o Chrome abre com o dedo segurado num link; None sem ele."""
+    for no in _nos(xml):
+        if " ".join((no["texto"] or no["descricao"]).split()) in ROTULOS_DA_COPIA:
+            return _centro(no["caixa"])
+    return None
+
+
+def menu_do_link_aberto(xml):
+    """O menu do link (ou a seleção de texto que o dedo segurado abre) está na tela? Só com ele a tecla voltar fecha
+    algo; sem ele, ela voltaria a página."""
+    rotulos = _rotulos_na_tela(xml)
+    return any(rotulo in rotulos for rotulo in ROTULOS_DO_MENU_DO_LINK + ROTULOS_DA_SELECAO)
+
+
+def endereco_do_link(d, ponto, pausa, ao_falhar=None):
+    """
+    O endereço do link no ponto, sem abrir a página: o dedo segurado nele, o "Copiar endereço do link" do menu do
+    Chrome e a área de transferência, limpa antes. O menu que fica aberto sai pela tecla voltar, só com ele na tela.
+    Sem a cópia no menu, ao_falhar() é chamado antes de o menu sair (para guardar a tela num caso). O endereço ou "".
+    """
+    try:
+        d.set_clipboard("")
+    except Exception:
+        pass
+    d.long_click(*ponto)
+    pausa(1)
+    tela = d.dump_hierarchy()
+    copiar = opcao_de_copiar(tela)
+    if not copiar:
+        if ao_falhar:
+            ao_falhar()
+        if menu_do_link_aberto(tela):
+            d.press("back")
+            pausa(1)
+        return ""
+    d.click(*copiar)
+    pausa(1)
+    try:
+        endereco = (d.clipboard or "").strip()
+    except Exception:
+        endereco = ""
+    if menu_do_link_aberto(d.dump_hierarchy()):
+        d.press("back")
+        pausa(1)
+    return endereco
+
+
+def textos_da_tela(xml):
+    """Todos os textos da tela, na ordem (a página de um link ou o app que ele abriu), sem repetir o vizinho igual."""
+    textos = []
+    for no in _nos(xml):
+        for valor in (no["texto"], no["descricao"]):
+            valor = " ".join(valor.split())
+            if valor and (not textos or textos[-1] != valor):
+                textos.append(valor)
+    return textos
+
+
+def _pagina_do_link_pronta(d, pausa):
+    """
+    Espera a página do link: o Chrome com uma página que não é a da aula (sem as abas do curso), já com algo dela, ou
+    outro app na frente. (a tela, o app).
+    """
+    tela, app = "", PACOTE_DO_CHROME
+    for _ in range(max(1, ESPERA_DO_LINK // PASSO_DA_ESPERA)):
+        pausa(PASSO_DA_ESPERA)
+        tela, app = d.dump_hierarchy(), app_da_frente(d)
+        if app and app != PACOTE_DO_CHROME:
+            break
+        if not pagina_da_aula_pronta(tela) and not pagina_em_branco(tela):
+            break
+    return tela, app
+
+
+def _voltar_da_pagina_do_link(d, pausa):
+    """
+    A aula de volta na frente: a tecla voltar fecha a guia do link (ou sai do app que ele abriu), até VOLTAS_DO_LINK
+    vezes, conferindo a tela a cada uma, e o Chrome volta à frente. True com a página da aula (as abas do curso).
+    """
+    for _ in range(VOLTAS_DO_LINK):
+        d.press("back")
+        pausa(ESPERA_DO_CHROME)
+        if app_da_frente(d) != PACOTE_DO_CHROME:
+            trazer_o_chrome(d, pausa)
+        if app_da_frente(d) == PACOTE_DO_CHROME and pagina_da_aula_pronta(d.dump_hierarchy()):
+            return True
+    return False
+
+
+def abrir_o_link(d, endereco, pasta, numero, pausa, vigiar):
+    """
+    A página do link aberta numa guia nova do Chrome, pelo Android (o endereço nunca é escrito na barra da aula), e
+    guardada para o Claude: as telas (link_NN_tela_MM.jpg) e os textos (link_NN.txt), rolando até TELAS_DO_LINK telas.
+    Nada da página é tocado nem escrito (pedido do Rafael de 26/11/2026: nunca dados de cartão ou pessoais, nunca a
+    compra). O link que abre outro app (o Telegram, o YouTube) fica com uma tela dele, sem rolar. O que tocar é
+    pausado, e o arquivo que o link baixar vem ao servidor, como o documento da aula. {"telas", "linhas", "app",
+    "documento", "voltou", "problema"}.
+    """
+    info = {"telas": 0, "linhas": 0, "app": "", "documento": None, "voltou": False, "problema": ""}
+    marcar_antes_de_baixar(d)
+    _saida(d, ["am", "start", "-a", "android.intent.action.VIEW", "-d", endereco, "-p", PACOTE_DO_CHROME])
+    tela, app = _pagina_do_link_pronta(d, pausa)
+    info["app"] = "chrome" if app == PACOTE_DO_CHROME else "outro app"
+    textos, anterior = [], None
+    for tela_numero in range(1, (TELAS_DO_LINK if app == PACOTE_DO_CHROME else 1) + 1):
+        porque = vigiar()
+        if porque:
+            info["problema"] = porque
+            break
+        atuais = textos_da_tela(tela)
+        if atuais == anterior:
+            break
+        textos = juntar_os_textos(textos, atuais)
+        guardar_a_tela(d, os.path.join(pasta, f"link_{numero:02d}_tela_{tela_numero:02d}.jpg"))
+        info["telas"] += 1
+        anterior = atuais
+        if app != PACOTE_DO_CHROME:
+            break
+        rolar_a_pagina(d)
+        pausa(ESPERA_DA_ROLAGEM)
+        tela = d.dump_hierarchy()
+    pausar_o_que_toca(d, pausa)
+    with open(os.path.join(pasta, f"link_{numero:02d}.txt"), "w", encoding="utf-8") as saida:
+        saida.write(endereco + "\n\n" + "\n".join(textos) + "\n")
+    info["linhas"] = len(textos)
+    if baixados_depois_da_marca(d):
+        nome, tamanho, _porque = trazer_o_baixado(d, pasta, f"link_{numero:02d}", pausa)
+        info["documento"] = {"nome": nome or "", "bytes": tamanho}
+    info["voltou"] = _voltar_da_pagina_do_link(d, pausa)
+    if not info["voltou"] and not info["problema"]:
+        info["problema"] = NAO_VOLTOU
+    return info
+
+
+def resumo_do_link(item):
+    """O que o link deu, em palavras fixas e números (o texto da aula e o registro)."""
+    if item.get("problema") in (SEM_O_MENU, NAO_E_PAGINA):
+        return item["problema"]
+    partes = [f"{item.get('telas', 0)} tela(s)", f"{item.get('linhas', 0)} linha(s)"]
+    if item.get("app") == "outro app":
+        partes.append("abriu outro app")
+    if item.get("documento"):
+        partes.append(f"arquivo de {item['documento'].get('bytes', 0) // 1024} KB")
+    if item.get("problema"):
+        partes.append(item["problema"])
+    return ", ".join(partes)
+
+
+def _abrir_os_links(d, pasta, achados, pausa, vigiar):
+    """
+    Cada endereço achado na aula aberto uma vez (abrir_o_link), na ordem da página, até LINKS_POR_AULA; o que não é
+    uma página da internet (um e-mail, um telefone) só fica anotado. A aula que não volta depois de um link não para os
+    outros (cada um abre pelo endereço; a noite abre a aula de novo pela lista). Para quando vigiar() diz o porquê. (os
+    links com o que cada um deu, o porquê de parar ou "").
+    """
+    vistos, resultado = set(), []
+    for texto, endereco in achados:
+        if endereco in vistos or len(resultado) >= LINKS_POR_AULA:
+            continue
+        vistos.add(endereco)
+        porque = vigiar()
+        if porque:
+            return resultado, porque
+        item = {"texto": texto, "endereco": endereco}
+        if not endereco:
+            item["problema"] = SEM_O_MENU
+        elif not endereco.lower().startswith(ESQUEMAS_ABERTOS):
+            item["problema"] = NAO_E_PAGINA
+        else:
+            item.update(abrir_o_link(d, endereco, pasta, len(resultado) + 1, pausa, vigiar))
+        resultado.append(item)
+        if item.get("problema") in PARADAS_DA_AULA:
+            return resultado, item["problema"]
+    return resultado, ""
 
 
 def _botao_da_aula(xml, rotulo):
@@ -2497,6 +2705,13 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
     parar ou "").
     """
     textos, links, telas, ver_mais, documento, anterior, slides = [], [], 0, 0, None, None, None
+    achados, toques, com_caso = [], 0, []
+
+    def guardar_o_caso_do_menu():
+        # Uma vez por aula: a tela com o que o dedo segurado abriu, para o Claude ver por que a cópia não veio.
+        if not com_caso:
+            com_caso.append(True)
+            guardar_o_caso(d, SEM_O_MENU, "link sem o endereço", "ler o endereço do link")
     for numero in range(1, TELAS_DA_AULA + 1):
         porque = vigiar()
         if porque:
@@ -2531,6 +2746,13 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
         links += [link for link in links_da_aula(tela) if link not in links]
         guardar_a_tela(d, os.path.join(pasta, f"tela_{numero:02d}.jpg"))
         telas += 1
+        # O endereço de cada link à vista, depois do print da tela (o menu do Chrome não fica nele). O mesmo link visto
+        # em duas telas seguidas é lido de novo e sai depois, pelo endereço.
+        for texto, ponto in links_na_tela(tela):
+            if toques >= TOQUES_LONGOS_POR_AULA or not _livre_para_tocar(tela, ponto):
+                continue
+            toques += 1
+            achados.append((texto, endereco_do_link(d, ponto, pausa, guardar_o_caso_do_menu)))
         if abas_na_tela(tela):
             break
         anterior = atuais
@@ -2538,11 +2760,23 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
         pausa(ESPERA_DA_ROLAGEM)
     if not textos and not documento and not slides:
         return {}, PAGINA_VAZIA
+    abertos, porque = _abrir_os_links(d, pasta, achados, pausa, vigiar)
+    if porque:
+        return {}, porque
     with open(os.path.join(pasta, "texto.txt"), "w", encoding="utf-8") as saida:
         saida.write("\n".join(textos) + "\n")
         if links:
-            saida.write("\nLinks da aula (anotados, sem abrir):\n" + "".join(f"- {link}\n" for link in links))
+            saida.write("\nLinks da aula:\n" + "".join(f"- {link}\n" for link in links))
+        if abertos:
+            saida.write("\nO que cada link abriu (as telas em link_NN_tela_MM.jpg, os textos em link_NN.txt):\n")
+            saida.write("".join(f"- {item['texto']}: {item['endereco'] or '(sem o endereço)'}; {resumo_do_link(item)}\n"
+                                for item in abertos))
+    if abertos:
+        with open(os.path.join(pasta, "links.json"), "w", encoding="utf-8") as saida:
+            json.dump(abertos, saida, ensure_ascii=False, indent=1)
     return {"telas": telas, "slides": slides or 0, "linhas": len(textos), "links": len(links),
+            "links_abertos": sum(1 for item in abertos if item.get("telas")),
+            "links_sem_endereco": sum(1 for item in abertos if item.get("problema") == SEM_O_MENU),
             "documento": documento}, ""
 
 
@@ -2589,8 +2823,9 @@ def descrever_a_aula_guardada(info):
     else:
         doc = f"documento de {documento['bytes'] // 1024} KB"
     slides = f"{info['slides']} slide(s), " if info.get("slides") else ""
+    abertos = f" ({info['links_abertos']} aberto(s))" if info.get("links") else ""
     return (f"{info.get('telas', 0)} tela(s), {slides}{info.get('linhas', 0)} linha(s), {info.get('links', 0)} "
-            f"link(s), {doc}")
+            f"link(s){abertos}, {doc}")
 
 
 # --- A gravação da madrugada (P289 1 a P293 1, 22/11/2026, e P296 1, 23/11/2026) ---
