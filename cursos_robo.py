@@ -2541,18 +2541,183 @@ def avisos_que_tampam(xml):
 
 def _fechar_os_avisos(d, tela, pausa):
     """
-    O Fechar e o Aceitar dos avisos que tampam a página do link, um por vez, até AVISOS_POR_LINK. (a tela, quantos).
+    O Fechar e o Aceitar dos avisos que tampam a página do link, um por vez, até AVISOS_POR_LINK. (a tela, os rótulos
+    tocados, na ordem).
     """
-    fechados = 0
+    fechados = []
     for _ in range(AVISOS_POR_LINK):
         avisos = avisos_que_tampam(tela)
         if not avisos:
             break
         d.click(*avisos[0][1])
-        fechados += 1
+        fechados.append(avisos[0][0])
         pausa(PASSO_DA_ESPERA)
         tela = d.dump_hierarchy()
     return tela, fechados
+
+
+# P306 1 (26/11/2026): o mapa mental de um link é maior que a tela do celular (no da aula 4 do curso 4, só o título e
+# os números dos tópicos apareciam). Só nas páginas de mapa mental, o robô usa os botões do próprio mapa: a Vista do
+# mapa, para a vista em lista, com o texto dos tópicos na página; sem a lista, o menos do zoom e o arrasto do mapa, com
+# um print de cada parte. Nada mais é tocado nem escrito.
+ROTULOS_DA_VISTA_DO_MAPA = ("Vista do mapa", "Map view")
+ROTULOS_DO_MENOS_ZOOM = ("Diminuir zoom", "Zoom out")
+ROTULOS_DO_MAIS_ZOOM = ("Aumentar zoom", "Zoom in")
+# As palavras da opção da vista em texto, na ordem de preferência: a de tópicos em texto antes da lista desenhada.
+PALAVRAS_DA_LISTA = (("esboço", "esboco", "tópicos", "topicos", "estrutura", "texto", "outline"), ("lista", "list"))
+LINHAS_DA_LISTA = 3
+# Tantas linhas novas logo depois do toque na Vista do mapa já são os tópicos em texto (um menu não tem tantas opções):
+# a leitura segue sem outro toque.
+LINHAS_DA_LISTA_DIRETA = 8
+TELAS_DO_MAPA = 15
+ZOOM_DO_MAPA = 60
+ZOOMS_DO_MAPA = 4
+ZOOMS_SEM_O_NUMERO = 2
+LADO_DO_MAPA = 2400
+QUALIDADE_DO_MAPA = 90
+SEGUNDOS_DO_ARRASTO_DO_MAPA = 1.5
+# O arrasto pelo meio do mapa, longe do alto (o Conecte-se do site) e do pé (a Vista do mapa e o zoom): a parte da
+# direita, a da esquerda, a de baixo e a de cima, um print de cada uma, depois do print do meio. Cada arrasto é
+# (x1, y1, x2, y2), e o dedo anda devagar, para o mapa não seguir correndo depois de solto.
+ARRASTOS_DO_MAPA = (
+    ("direita", ((900, 1300, 200, 1300),)),
+    ("esquerda", ((200, 1300, 900, 1300), (200, 1300, 900, 1300))),
+    ("baixo", ((900, 1300, 200, 1300), (540, 1800, 540, 800))),
+    ("cima", ((540, 800, 540, 1800), (540, 800, 540, 1800))),
+)
+
+
+def _rotulos_da_pagina(xml):
+    """Os rótulos de dentro da página do Chrome, com o ponto de cada um: [(rótulo, ponto)], o texto ou a descrição."""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return []
+    pagina = next((no for no in raiz.iter("node") if no.get("class") == "android.webkit.WebView"), None)
+    if pagina is None:
+        return []
+    rotulos = []
+    for dados in filter(None, map(_no, pagina.iter("node"))):
+        rotulo = " ".join((dados["texto"] or dados["descricao"]).split())
+        if rotulo:
+            rotulos.append((rotulo, _centro(dados["caixa"])))
+    return rotulos
+
+
+def _ponto_na_pagina(xml, rotulos):
+    """O ponto do 1º rótulo da página igual, inteiro, a um dos rotulos; None sem ele."""
+    return next((ponto for rotulo, ponto in _rotulos_da_pagina(xml) if rotulo in rotulos), None)
+
+
+def mapa_mental_na_tela(xml):
+    """A página de mapa mental (P306 1): a Vista do mapa e o menos do zoom do próprio mapa, dentro da página."""
+    rotulos = {rotulo for rotulo, _ in _rotulos_da_pagina(xml)}
+    return bool(rotulos & set(ROTULOS_DA_VISTA_DO_MAPA)) and bool(rotulos & set(ROTULOS_DO_MENOS_ZOOM))
+
+
+def sem_os_botoes_do_mapa(textos):
+    """
+    Os textos da página do mapa sem os botões dele (a Vista do mapa, o zoom e o número do zoom), que ficam presos no
+    pé de toda tela: sem tirá-los, a junção das telas (juntar_os_textos) tomaria os tópicos novos por repetidos.
+    """
+    botoes = set(ROTULOS_DA_VISTA_DO_MAPA + ROTULOS_DO_MENOS_ZOOM + ROTULOS_DO_MAIS_ZOOM)
+    return [texto for texto in textos if texto not in botoes and not re.fullmatch(r"\d{1,3}\s*%", texto)]
+
+
+def zoom_do_mapa(xml):
+    """O zoom que o mapa mostra (o "100%" ao lado do menos), em número; None sem ele."""
+    for rotulo, _ in _rotulos_da_pagina(xml):
+        achado = re.fullmatch(r"(\d{1,3})\s*%", rotulo)
+        if achado:
+            return int(achado.group(1))
+    return None
+
+
+def opcao_da_lista(antes, depois):
+    """
+    A opção da vista em lista no menu da Vista do mapa: só entre os rótulos que o menu trouxe (os que não estavam na
+    página antes do toque), pela ordem de PALAVRAS_DA_LISTA. (rótulo, ponto) ou None.
+    """
+    ja_havia = {rotulo for rotulo, _ in antes}
+    novas = [(rotulo, ponto) for rotulo, ponto in depois
+             if rotulo not in ja_havia and rotulo not in ROTULOS_DA_VISTA_DO_MAPA]
+    for palavras in PALAVRAS_DA_LISTA:
+        for rotulo, ponto in novas:
+            if any(palavra in rotulo.lower() for palavra in palavras):
+                return rotulo, ponto
+    return None
+
+
+def _guardar_a_parte_do_mapa(d, caminho):
+    """A parte do mapa na tela em JPEG, no tamanho inteiro (as letras dos tópicos ficam pequenas com o zoom menor)."""
+    imagem = d.screenshot().convert("RGB")
+    imagem.thumbnail((LADO_DO_MAPA, LADO_DO_MAPA))
+    imagem.save(caminho, "JPEG", quality=QUALIDADE_DO_MAPA)
+
+
+def _ler_o_mapa_mental(d, tela, pasta, numero, pausa, vigiar):
+    """
+    O mapa mental maior que a tela (P306 1). O toque na Vista do mapa abre o menu dele (o print do menu fica em
+    link_NN_menu.jpg) e, com a opção da vista em lista (opcao_da_lista), ela é escolhida: com o texto dos tópicos na
+    página, a leitura segue rolando, como a de qualquer página. Sem a lista, o menu fecha pelo mesmo botão, o menos do
+    zoom vai até ZOOM_DO_MAPA (até ZOOMS_DO_MAPA toques), e o mapa é arrastado pelas partes de ARRASTOS_DO_MAPA, com um
+    print de cada parte no tamanho inteiro (link_NN_mapa_MM.jpg). (a tela, {"vista", "opcoes", "zoom", "partes"}):
+    vista "lista" ou "zoom", e as opções do menu, para o Claude ver o que o site oferece.
+    """
+    mapa = {"vista": "", "opcoes": [], "zoom": "", "partes": 0}
+    antes, linhas_antes = _rotulos_da_pagina(tela), set(textos_da_pagina(tela))
+    ponto = _ponto_na_pagina(tela, ROTULOS_DA_VISTA_DO_MAPA)
+    d.click(*ponto)
+    pausa(PASSO_DA_ESPERA)
+    tela = d.dump_hierarchy()
+    guardar_a_tela(d, os.path.join(pasta, f"link_{numero:02d}_menu.jpg"))
+    depois = _rotulos_da_pagina(tela)
+    ja_havia = {rotulo for rotulo, _ in antes}
+    mapa["opcoes"] = [rotulo for rotulo, _ in depois if rotulo not in ja_havia][:10]
+    if len([linha for linha in textos_da_pagina(tela) if linha not in linhas_antes]) >= LINHAS_DA_LISTA_DIRETA:
+        mapa["vista"], mapa["opcoes"] = "lista", []
+        return tela, mapa
+    escolha = opcao_da_lista(antes, depois)
+    if escolha:
+        d.click(*escolha[1])
+        pausa(PASSO_DA_ESPERA * 2)
+        tela = d.dump_hierarchy()
+        # A vista em lista vale com os tópicos em texto: pelo menos LINHAS_DA_LISTA linhas que a página não tinha.
+        if len([linha for linha in textos_da_pagina(tela) if linha not in linhas_antes]) >= LINHAS_DA_LISTA:
+            mapa["vista"] = "lista"
+            return tela, mapa
+    elif mapa["opcoes"]:
+        # O menu aberto sem a lista fecha pelo mesmo botão que o abriu.
+        ponto = _ponto_na_pagina(tela, ROTULOS_DA_VISTA_DO_MAPA)
+        if ponto:
+            d.click(*ponto)
+            pausa(PASSO_DA_ESPERA)
+            tela = d.dump_hierarchy()
+    mapa["vista"] = "zoom"
+    zoom = inicio = zoom_do_mapa(tela)
+    # Sem o número do zoom na tela, não dá para saber onde parar: só uns poucos toques no menos.
+    for _ in range(ZOOMS_DO_MAPA if inicio is not None else ZOOMS_SEM_O_NUMERO):
+        ponto = _ponto_na_pagina(tela, ROTULOS_DO_MENOS_ZOOM)
+        if not ponto or (zoom is not None and zoom <= ZOOM_DO_MAPA):
+            break
+        d.click(*ponto)
+        pausa(1)
+        tela = d.dump_hierarchy()
+        novo = zoom_do_mapa(tela)
+        if novo is not None and zoom is not None and novo >= zoom:
+            break
+        zoom = novo
+    mapa["zoom"] = f"{inicio}% → {zoom}%" if inicio is not None and zoom is not None else ""
+    partes = [("meio", ())] + list(ARRASTOS_DO_MAPA)
+    for parte, arrastos in partes:
+        if vigiar():
+            break
+        for x1, y1, x2, y2 in arrastos:
+            d.swipe(x1, y1, x2, y2, SEGUNDOS_DO_ARRASTO_DO_MAPA)
+            pausa(1)
+        mapa["partes"] += 1
+        _guardar_a_parte_do_mapa(d, os.path.join(pasta, f"link_{numero:02d}_mapa_{mapa['partes']:02d}.jpg"))
+    return d.dump_hierarchy(), mapa
 
 
 def _textos_do_link(tela, app):
@@ -2604,37 +2769,50 @@ def abrir_o_link(d, endereco, pasta, numero, pausa, vigiar):
     """
     A página do link aberta numa guia nova do Chrome, pelo Android (o endereço nunca é escrito na barra da aula), e
     guardada para o Claude: as telas (link_NN_tela_MM.jpg) e os textos (link_NN.txt), rolando até TELAS_DO_LINK telas.
-    Na página, só o Fechar e o Aceitar dos avisos que a tampam são tocados (P305 1), e nada é escrito (pedido do
-    Rafael de 26/11/2026: nunca dados de cartão ou pessoais, nunca a compra). O link que abre outro app (o Telegram, o
-    YouTube) fica com uma tela dele, sem rolar e sem toque. O que tocar é pausado, e o arquivo que o link baixar vem ao
-    servidor, como o documento da aula. {"telas", "linhas", "app", "avisos", "documento", "voltou", "problema"}.
+    Na página, só o Fechar e o Aceitar dos avisos que a tampam são tocados (P305 1) e, no mapa mental, os botões do
+    próprio mapa (_ler_o_mapa_mental, P306 1); nada é escrito (pedido do Rafael de 26/11/2026: nunca dados de cartão
+    ou pessoais, nunca a compra). O link que abre outro app (o Telegram, o YouTube) fica com uma tela dele, sem rolar e
+    sem toque. O que tocar é pausado, e o arquivo que o link baixar vem ao servidor, como o documento da aula.
+    {"telas", "linhas", "app", "avisos", "fechados", "mapa", "documento", "voltou", "problema"}: fechados, os rótulos
+    tocados nos avisos; mapa, o que o mapa mental deu (None sem ele).
     """
-    info = {"telas": 0, "linhas": 0, "app": "", "avisos": 0, "documento": None, "voltou": False, "problema": ""}
+    info = {"telas": 0, "linhas": 0, "app": "", "avisos": 0, "fechados": [], "mapa": None, "documento": None,
+            "voltou": False, "problema": ""}
     marcar_antes_de_baixar(d)
     _saida(d, ["am", "start", "-a", "android.intent.action.VIEW", "-d", endereco, "-p", PACOTE_DO_CHROME])
     tela, app = _pagina_do_link_pronta(d, pausa)
     info["app"] = "chrome" if app == PACOTE_DO_CHROME else "outro app"
+    telas = TELAS_DO_LINK if app == PACOTE_DO_CHROME else 1
     if app == PACOTE_DO_CHROME:
-        tela, info["avisos"] = _fechar_os_avisos(d, tela, pausa)
+        tela, info["fechados"] = _fechar_os_avisos(d, tela, pausa)
+        info["avisos"] = len(info["fechados"])
+        if mapa_mental_na_tela(tela) and not vigiar():
+            tela, info["mapa"] = _ler_o_mapa_mental(d, tela, pasta, numero, pausa, vigiar)
+            # Na lista, o texto dos tópicos é lido rolando; com o zoom, os prints das partes já são o mapa.
+            telas = TELAS_DO_MAPA if info["mapa"]["vista"] == "lista" else 1
     textos, anterior = [], None
-    for tela_numero in range(1, (TELAS_DO_LINK if app == PACOTE_DO_CHROME else 1) + 1):
+    for tela_numero in range(1, telas + 1):
         porque = vigiar()
         if porque:
             info["problema"] = porque
             break
         atuais = _textos_do_link(tela, app)
+        if info["mapa"]:
+            atuais = sem_os_botoes_do_mapa(atuais)
         if atuais == anterior:
             # A rolagem não mudou nada: o fim da página ou o site ainda carregando; uma leitura a mais decide.
             pausa(PASSO_DA_ESPERA)
             tela = d.dump_hierarchy()
             atuais = _textos_do_link(tela, app)
+            if info["mapa"]:
+                atuais = sem_os_botoes_do_mapa(atuais)
             if atuais == anterior:
                 break
         textos = juntar_os_textos(textos, atuais)
         guardar_a_tela(d, os.path.join(pasta, f"link_{numero:02d}_tela_{tela_numero:02d}.jpg"))
         info["telas"] += 1
         anterior = atuais
-        if app != PACOTE_DO_CHROME:
+        if app != PACOTE_DO_CHROME or tela_numero == telas:
             break
         rolar_a_pagina(d)
         pausa(ESPERA_DA_ROLAGEM)
@@ -2661,6 +2839,12 @@ def resumo_do_link(item):
         partes.append("abriu outro app")
     if item.get("avisos"):
         partes.append(f"{item['avisos']} aviso(s) fechado(s)")
+    mapa = item.get("mapa") or {}
+    if mapa.get("vista") == "lista":
+        partes.append("mapa mental na vista em lista")
+    elif mapa.get("vista") == "zoom":
+        partes.append(f"mapa mental em {mapa.get('partes', 0)} parte(s)"
+                      + (f", zoom {mapa['zoom']}" if mapa.get("zoom") else ""))
     if item.get("documento"):
         partes.append(f"arquivo de {item['documento'].get('bytes', 0) // 1024} KB")
     if item.get("problema"):
