@@ -477,7 +477,7 @@ def enviados_aos_amigos(agora=None):
 
 async def produtos_do_link(link):
     """
-    (produtos, destino): produtos = lista de {nome, preco, comissao, imagem, item} na ordem de
+    (produtos, destino): produtos = lista de {nome, preco, comissao, imagem, vendas, nota, item} na ordem de
     adicionar (menor preço; no empate, maior comissão), vazia quando o link é de um
     vídeo da Shopee Vídeo (os produtos ficam no próprio vídeo) ou a API não respondeu.
     destino = o endereço para o Rafael abrir.
@@ -496,7 +496,8 @@ async def produtos_do_link(link):
 async def _consultar_produto(loja, item):
     # Números direto na consulta: declarar a variável como Int64 dá "wrong type".
     consulta = (f"query {{ productOfferV2(shopId: {int(loja)}, itemId: {int(item)}, limit: 1) "
-                f"{{ nodes {{ productName priceMin priceMax {api_shopee.CAMPOS_DA_COMISSAO} imageUrl }} }} }}")
+                f"{{ nodes {{ productName priceMin priceMax {api_shopee.CAMPOS_DA_COMISSAO} imageUrl sales "
+                f"ratingStar }} }} }}")
     headers, corpo = api_shopee.gerar_headers_e_payload({"query": consulta})
     try:
         async with aiohttp.ClientSession() as sessao:
@@ -509,8 +510,10 @@ async def _consultar_produto(loja, item):
     if not nos:
         return None
     no = nos[0]
+    # Os vendidos e a nota do anúncio pesam na escolha do vídeo do robô (P308 1).
     return {"nome": no.get("productName") or "", "preco": _numero(no.get("priceMin")),
-            "comissao": api_shopee.porcento_no_video(no), "imagem": no.get("imageUrl") or ""}
+            "comissao": api_shopee.porcento_no_video(no), "imagem": no.get("imageUrl") or "",
+            "vendas": int(_numero(no.get("sales"))), "nota": _numero(no.get("ratingStar"))}
 
 
 def _numero(valor):

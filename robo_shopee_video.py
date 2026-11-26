@@ -3215,7 +3215,8 @@ def proximo_video(config, evitar=(), agora=None):
 # Escolha do Rafael (10/11, P194 1): de 25/09 a 09/11, 2 produtos deram 70% da comissão, e os posts
 # do robô ainda não tinham vendido. Entre os próximos VIDEOS_NA_ESCOLHA vídeos da fonte, o robô
 # escolhe o de produto que paga mais por venda (o preço vezes a comissão do produto do link, pela API
-# de afiliado) e deixa de lado, só no dia, o que paga menos de MINIMO_POR_VENDA reais (no dia
+# de afiliado; desde a P308 1, pesado pelos vendidos e com a nota boa na frente, PESOS_DOS_VENDIDOS
+# abaixo) e deixa de lado, só no dia, o que paga menos de MINIMO_POR_VENDA reais (no dia
 # seguinte ele é visto de novo: o preço e a comissão mudam). O vídeo de vários produtos (o link é de
 # um vídeo, e os produtos ficam no Ver Produtos, que só o celular lê), o de produto sem oferta e o de
 # produto já postado ficam na vez deles, como antes (o primeiro vira rascunho; os outros ficam de
@@ -3226,6 +3227,18 @@ def proximo_video(config, evitar=(), agora=None):
 VIDEOS_NA_ESCOLHA = 10
 MINIMO_POR_VENDA = 2.0
 PROCESSO_DA_ESCOLHA = "escolha pelo valor por venda"
+# O curso escolhe primeiro o que vende: o valor por venda de cada produto da escolha vale vezes o peso dos vendidos do
+# anúncio (PESOS_DOS_VENDIDOS: 3 com 1.000 ou mais, 2 de 100 a 999, 1 com menos de 100), e o de nota abaixo de
+# NOTA_DA_ESCOLHA (ou sem nota) só entra sem outro de nota boa. Ganha o de maior valor assim; o mínimo por venda
+# continua no valor de verdade, e o rascunho guarda o valor por venda (coluna valor). Escolha do Rafael (26/11/2026,
+# P308 1): DECISOES.md, Shopee Vídeo.
+PESOS_DOS_VENDIDOS = ((1000, 3), (100, 2), (0, 1))
+NOTA_DA_ESCOLHA = 4.5
+
+
+def peso_dos_vendidos(vendas):
+    """O peso dos vendidos do anúncio na escolha do vídeo (PESOS_DOS_VENDIDOS; P308 1)."""
+    return next(peso for minimo, peso in PESOS_DOS_VENDIDOS if (vendas or 0) >= minimo)
 # O vídeo de link de vídeo (Ver Produtos, com 1 produto ou vários) vai na vez dele e, aberto no celular,
 # com o valor por venda de cada produto da lista (os do criador e os trocados pela loja que paga mais,
 # trocar_os_do_ver_produtos), fica de lado só no dia se o que paga mais pagar menos de MINIMO_POR_VENDA,
@@ -3272,9 +3285,21 @@ def de_onde_veio_o_video(video, fonte):
                 f"({assistente._reais(video.get('valor') or 0)}){f' entre {origem}' if origem else ''}, ainda não "
                 f"postado (P232 1 e P234 1).\n{flow.legenda_da_producao(video['video_ia'])}")
     if video.get("valor") is not None:
-        return (f"Vídeo: o que paga mais por venda ({assistente._reais(video['valor'])}) entre os próximos "
-                f"{VIDEOS_NA_ESCOLHA} de {nome_da_fonte} ainda não usados.")
+        vendas, nota = video.get("vendas") or 0, video.get("nota") or 0
+        return (f"Vídeo: o de maior valor pelas vendas entre os próximos {VIDEOS_NA_ESCOLHA} de {nome_da_fonte} ainda "
+                f"não usados: {assistente._reais(video['valor'])} por venda, {_milhar(vendas)} vendidos (vale "
+                f"{peso_dos_vendidos(vendas)}x) e {_a_nota(nota)} (P194 1 e P308 1).")
     return f"Vídeo: o mais novo de {nome_da_fonte} ainda não usado."
+
+
+def _milhar(numero):
+    """O número com o ponto do milhar (1.234)."""
+    return f"{int(numero or 0):,}".replace(",", ".")
+
+
+def _a_nota(nota):
+    """A nota do anúncio no aviso (nota 4,8), ou "sem nota"."""
+    return f"nota {nota:.1f}".replace(".", ",") if nota else "sem nota"
 
 
 def evitar_hoje(config, agora=None):
@@ -3301,7 +3326,8 @@ def _produto_do_link_do_video(video):
 def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
     """
     (o vídeo do próximo rascunho, ""), ou (None, o porquê) sem nenhum (P194 1). O de produto ganha
-    "valor" (o que paga por venda) e "posicao" (na fila dos próximos VIDEOS_NA_ESCOLHA).
+    "valor" (o que paga por venda), "vendas" e "nota" (do anúncio) e "posicao" (na fila dos próximos
+    VIDEOS_NA_ESCOLHA). Entre os de produto, ganha o de maior valor pelos vendidos, com a nota boa na frente (P308 1).
     """
     candidatos = list(itertools.islice(_videos_da_fonte(config, evitar, agora), VIDEOS_NA_ESCOLHA))
     if not candidatos:
@@ -3317,7 +3343,10 @@ def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
                 if valor < MINIMO_POR_VENDA:
                     abaixo.append(video["id"])
                 else:
-                    melhores.append((valor, -posicao, posicao, video))
+                    vendas = int(assistente._numero(produto.get("vendas")))
+                    melhores.append({"pontos": valor * peso_dos_vendidos(vendas), "valor": valor, "vendas": vendas,
+                                     "nota": assistente._numero(produto.get("nota")), "posicao": posicao,
+                                     "video": video})
                 continue
         # O de vários produtos, o sem oferta e o já postado: na vez deles, se nenhum antes paga o mínimo.
         if melhores:
@@ -3334,11 +3363,15 @@ def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
         registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA, "todos abaixo do mínimo",
                                      f"{len(abaixo)} de {len(candidatos)}", ok=None)
         return None, f"os próximos {len(candidatos)} vídeos da fonte pagam menos que o mínimo por venda"
-    valor, _, posicao, video = max(melhores, key=lambda melhor: melhor[:2])
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA, "o que paga mais",
-                                 f"o {posicao}º de {len(candidatos)}; {len(abaixo)} abaixo do mínimo",
+    # A nota abaixo de NOTA_DA_ESCOLHA só entra sem outro de nota boa (P308 1); no empate, o mais novo da fonte.
+    de_nota_boa = [melhor for melhor in melhores if melhor["nota"] >= NOTA_DA_ESCOLHA]
+    escolhido = max(de_nota_boa or melhores, key=lambda melhor: (melhor["pontos"], -melhor["posicao"]))
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA,
+                                 "o de maior valor pelos vendidos" + ("" if de_nota_boa else ", sem nota boa"),
+                                 f"o {escolhido['posicao']}º de {len(candidatos)}; {len(abaixo)} abaixo do mínimo; "
+                                 f"vale {peso_dos_vendidos(escolhido['vendas'])}x",
                                  ok=True)
-    return dict(video, valor=valor, posicao=posicao), ""
+    return dict(escolhido["video"], **{campo: escolhido[campo] for campo in ("valor", "vendas", "nota", "posicao")}), ""
 
 
 # O Preparar 1 Agora ⚡ que cai num vídeo com problema próprio (em análise na Shopee, a foto do
