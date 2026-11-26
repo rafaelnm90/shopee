@@ -2518,6 +2518,23 @@ def test_preparar_1_agora_fica_no_registro(monkeypatch, avisos):
                      robo.PROCESSO_DO_BOTAO) == ("2026-10-22 23:59:00", "pedido")
 
 
+def test_comentario_do_gem_fala_do_cupom_do_video_enquanto_ele_vale(monkeypatch, avisos):
+    # P313 1 e P314 1: o comentário do Gem (o que vai ao Rafael quando o robô não comenta depois do post) também fala
+    # do cupom do vídeo enquanto ele vale; sem ele valendo, o pedido fica como antes.
+    pedidos = []
+
+    async def textos(arquivo, nome="", cupom=""):
+        pedidos.append(cupom)
+        return {"violacao": False, "motivo": "", "titulo": TITULO, "comentario": "Amei! #achadinhos"}
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    robo._textos_da_ia({"arquivo": "v.mp4", "nome": "Copo"})
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO,
+                          {"lotes": [{"de": "2000-01-01 00:00:00", "ate": "2999-12-31 23:59:59"}]})
+    robo._textos_da_ia({"arquivo": "v.mp4", "nome": "Copo"})
+    assert pedidos == ["", robo.CUPOM_DO_VIDEO]
+
+
 def test_titulo_vazio_da_ia_tenta_de_novo_e_anota_o_motivo(monkeypatch, avisos):
     # 24/10/2026 (Preparar 1 Agora, 12:48): a IA conferiu o produto, mas voltou vazia no
     # título em todos os modelos, e o robô desistiu na hora. A resposta vazia do Google muda

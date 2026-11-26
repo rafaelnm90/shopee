@@ -4841,10 +4841,14 @@ def _textos_da_ia(video, nomes=None):
     motivo, recusa = "", None
     comeco = time.monotonic()
     ps.api_gemini.zerar_tempos_da_ia()
+    # Enquanto o cupom do vídeo vale, o comentário do Gem (o que vai ao Rafael quando o robô não comenta depois do
+    # post, _comentar_a_mao) também fala dele, como o comentário do robô (P313 1 e P314 1).
+    cupom = cupom_do_video()
     try:
         for vez in range(TENTATIVAS_DO_TITULO):
             ps.api_gemini.ULTIMO_ERRO_IA, assistente.ULTIMA_RECUSA = None, None
-            textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
+            textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or "",
+                                                            **({"cupom": cupom} if cupom else {})))
             recusa = assistente.ULTIMA_RECUSA or recusa
             if textos and textos.get("violacao"):
                 # A IA viu violação das diretrizes, e o título costuma vir vazio: quem chama pula o
