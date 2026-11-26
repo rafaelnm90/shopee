@@ -1129,14 +1129,15 @@ def rotulo_produtos_a_mais(config, agora=None):
 def texto_produtos_a_mais(config):
     """
     A tela dos Produtos a Mais. Escolhas do Rafael (28/10, P59 e P66; 29/10, P73; 30/10, P102; 05/11,
-    P153 3): DECISOES.md, Shopee Vídeo.
+    P153 3; 22/11, P284 1; 26/11, P309 1): DECISOES.md, Shopee Vídeo.
     """
     return (
         "🛍️ <b>Produtos a Mais</b>\n"
         "Nos vídeos de link de produto, o robô procura o mesmo item em outras lojas pela busca pela foto do "
-        "app (Vendas Populares, os primeiros 20), fica com os até 20% mais caros que o produto do post, e a "
-        "IA confere com o vídeo quais são o mesmo item (a mesma marca, modelo e cor; a foto de capa pode ser "
-        "outra, porque cada loja usa a sua). Vão até 6 produtos no total, do que paga mais por venda para o que "
+        "app (Vendas Populares, os primeiros 20), fica com os anúncios de nota 4,5 ou mais e 100 vendidos ou mais "
+        "que cobram até 25% acima do mais barato do mesmo item, e a IA confere com o vídeo quais são o mesmo item "
+        "(a mesma marca, modelo e cor; a foto de capa pode ser outra, porque cada loja usa a sua). Vão até 6 "
+        "produtos no total, do que paga mais por venda para o que "
         "paga menos. Sem itens iguais, o rascunho vai só com o produto do link. Nos vídeos de vários produtos (Ver "
         "Produtos), eles enchem os espaços que sobram depois dos produtos do criador, com o mesmo item do 1º produto "
         "do post. No rascunho, você vê as fotos de capa de todos antes de aprovar, com a de outra foto que a do "

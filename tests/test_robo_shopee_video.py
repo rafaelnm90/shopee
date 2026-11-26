@@ -1428,11 +1428,11 @@ def test_treino_avisa_quando_o_giro_nao_fica(monkeypatch, avisos):
 FOLHAS = "Folhas Prontas Facial Depilsam Ouro 10 Pares"
 
 
-def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9, outros=()):
+def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9, outros=(), anuncio=None):
     """
     A API (produto do link a 5%, pelo preço dado, e as ofertas da busca), o link curto e a
     IA de mentira (a que confere de uma vez quais anúncios são o mesmo item recusa os de nome
-    em outros); devolve o que foi pedido.
+    em outros); devolve o que foi pedido. anuncio: (vendidos, nota) do produto do link (P309 1).
     """
     pedidos = {"busca": [], "ia": [], "capa": [], "iguais": []}
 
@@ -1441,7 +1441,10 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9, outros=())
         return [i for i, (n, _f) in enumerate(anuncios) if n not in outros], "o mesmo item"
 
     async def produtos_do_link(link):
-        return [{"nome": FOLHAS, "preco": preco, "comissao": 5.0, "imagem": "https://cf.shopee.com.br/capa"}], link
+        produto = {"nome": FOLHAS, "preco": preco, "comissao": 5.0, "imagem": "https://cf.shopee.com.br/capa"}
+        if anuncio:
+            produto.update(vendas=anuncio[0], nota=anuncio[1])
+        return [produto], link
 
     async def buscar(termo, limite=10, sort_type=2, negada_levanta=False):
         pedidos["busca"].append((termo, limite, sort_type))
@@ -1467,9 +1470,10 @@ def _busca_de_comissao(monkeypatch, ofertas, confirma=(), preco=10.9, outros=())
     return pedidos
 
 
-def _oferta(nome, comissao, item, preco=10.9):
+def _oferta(nome, comissao, item, preco=10.9, vendas=500, nota="4.8"):
+    # O anúncio de outra loja com a nota e os vendidos que entram na troca (P309 1), a não ser que o teste diga outros.
     return {"productName": nome, "commissionRate": str(comissao), "priceMin": str(preco),
-            "productLink": f"https://shopee.com.br/product/9/{item}", "sales": 10,
+            "productLink": f"https://shopee.com.br/product/9/{item}", "sales": vendas, "ratingStar": nota,
             "imageUrl": f"https://cf.shopee.com.br/anuncio/{item}"}
 
 
@@ -1605,6 +1609,59 @@ def test_troca_pela_faixa_vai_a_loja_que_vende_mesmo_abaixo_do_minimo(monkeypatc
     assert [(r[2], r[3]) for r in registro] == [("trocado", "pela faixa: 50% mais barato"),
                                                 ("mantido - os da faixa não pagam comissão", ""),
                                                 ("mantido - o do link é o que paga mais na faixa", "")]
+
+
+def test_troca_so_com_anuncio_de_nota_e_vendidos(monkeypatch):
+    # Escolha do Rafael (26/11/2026, P309 1): na troca, só entra o anúncio com nota 4,5 ou mais e 100 vendidos ou
+    # mais (o sem histórico pode ser golpe, e quem compra desiste); entre eles, o que paga mais, na faixa dos 25%.
+    original = {"nome": FOLHAS, "preco": 10.9, "comissao": 3.5, "item": "1"}
+    ofertas = [_oferta(FOLHAS + " Loja A", 0.20, 2, vendas=3, nota="0"),        # paga mais, sem histórico
+               _oferta(FOLHAS + " Loja B", 0.15, 3, vendas=5000, nota="4.2"),  # nota baixa
+               _oferta(FOLHAS + " Loja C", 0.12, 4, vendas=99, nota="4.9"),    # poucos vendidos
+               _oferta(FOLHAS + " Loja D", 0.10, 5, vendas=100, nota="4.5")]   # entra, no limite
+    fora = {}
+    assert [c["item"] for c in robo.candidatos_da_troca(original, ofertas, fora)] == ["5"]
+    assert fora == {"sem nota ou vendidos": 3}
+    assert robo.anuncio_bom(4.5, 100) and not robo.anuncio_bom(4.49, 5000) and not robo.anuncio_bom(5.0, 99)
+    # Só os sem histórico na busca: fica o do link, e o registro diz por quê.
+    _busca_de_comissao(monkeypatch, ofertas[:3], confirma=("https://s.shopee.com.br/2",))
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mantido - nenhum anúncio bom na busca"]
+
+
+def test_produto_do_link_sem_historico_da_lugar_ao_anuncio_bom_da_faixa(monkeypatch):
+    # P309 1, o exemplo da pergunta: o do link paga mais, mas tem 3 vendidos e nenhuma nota; o mesmo produto noutra
+    # loja da faixa, com 5 mil vendidos e nota 4,9, paga menos e vai no lugar. Com o do link bom, fica ele.
+    bom = _oferta(FOLHAS + " Original", 0.045, 2, preco=11.0, vendas=5000, nota="4.9")
+    pedidos = _busca_de_comissao(monkeypatch, [bom], confirma=("https://s.shopee.com.br/2",), anuncio=(3, 0.0))
+    troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
+    assert troca["link"] == "https://s.shopee.com.br/2" and troca["valor"] < troca["valor_antes"]
+    assert pedidos["ia"] == ["https://s.shopee.com.br/2"]
+    pedidos = _busca_de_comissao(monkeypatch, [bom], confirma=("https://s.shopee.com.br/2",), anuncio=(800, 4.7))
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
+    # O do link sem histórico e o bom fora da faixa (bem mais caro): fica o do link.
+    caro = _oferta(FOLHAS + " Original", 0.045, 3, preco=20.0, vendas=5000, nota="4.9")
+    pedidos = _busca_de_comissao(monkeypatch, [caro], confirma=("https://s.shopee.com.br/3",), anuncio=(3, 0.0))
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [(r[2], r[3]) for r in registro] == [("trocado", "pela nota e os vendidos do anúncio"),
+                                                ("mantido - o do link é o que paga mais na faixa", ""),
+                                                ("mantido - nenhum parecido na busca", "")]
+
+
+def test_ver_produtos_troca_o_do_criador_sem_historico_pelo_anuncio_bom(monkeypatch):
+    # P309 1 no Ver Produtos (P57): o produto do criador com 10 vendidos dá lugar ao mesmo item da loja boa da faixa,
+    # mesmo pagando menos; a loja sem histórico que paga mais não entra.
+    termo_a = robo.termo_da_busca(PRODUTO_A)
+    pelo_nome = {PRODUTO_A: _oferta(PRODUTO_A, 0.10, 1, preco=50.0, vendas=10, nota="4.9")}
+    busca = {termo_a: [_oferta(PRODUTO_A + " Envio Rápido", 0.20, 3, preco=55.0, vendas=2, nota="0"),
+                       _oferta(PRODUTO_A + " Loja Boa", 0.06, 4, preco=52.0, vendas=3000, nota="4.8")]}
+    pedidos = _troca_do_ver_produtos(monkeypatch, pelo_nome, busca, confirma=("https://s.shopee.com.br/4",))
+    produtos = TROCAR_OS_DO_VER_PRODUTOS(None, {"link": LINK_DE_VIDEO, "arquivo": "video.mp4", "de_video": True},
+                                         [PRODUTO_A], {PRODUTO_A: b"\xff\xd8a"}, [], [], time.monotonic() + 600)
+    assert [(p["link"], p["trocado"]) for p in produtos] == [("https://s.shopee.com.br/4", PRODUTO_A)]
+    assert pedidos["ia"] == [("https://s.shopee.com.br/4", b"\xff\xd8a")]
 
 
 def test_faixa_vai_ate_25_por_cento_acima_do_mais_barato():
@@ -6959,10 +7016,11 @@ def _registro_dos_espacos():
     return [r[2] for r in registro]
 
 
-def _oferta_da_foto(item, preco, comissao, link=True):
+def _oferta_da_foto(item, preco, comissao, link=True, vendas=500, nota="4.8"):
     return {"itemId": item, "productName": f"Garrafa Térmica Inox Loja {item}", "priceMin": str(preco),
             "commissionRate": str(comissao / 100), "imageUrl": f"https://img.exemplo/{item}.jpg",
-            "productLink": f"https://shopee.com.br/product/9/{item}" if link else ""}
+            "productLink": f"https://shopee.com.br/product/9/{item}" if link else "", "sales": vendas,
+            "ratingStar": nota}
 
 
 def test_candidatos_da_foto_ate_25_por_cento_mais_caros_do_que_paga_mais_para_o_que_paga_menos():
@@ -7032,6 +7090,19 @@ def test_oferta_do_cartao_e_o_anuncio_do_cartao_entre_lojas_de_titulo_copiado(mo
     assert robo.oferta_do_cartao(dict(cartao, preco=50.5))["itemId"] == 8
     # Sem a taxa no cartão, ficam o preço e a ordem da busca.
     assert robo.oferta_do_cartao(dict(cartao, comissao=0))["itemId"] == 7
+
+
+def test_candidatos_da_foto_so_com_anuncio_de_nota_e_vendidos():
+    # P309 1 nos produtos a mais (P59), nos espaços do Ver Produtos e nos links a mais do modo assistente: o anúncio
+    # sem a nota 4,5 ou os 100 vendidos fica de fora e conta à parte.
+    achados = [({}, _oferta_da_foto(1, 50, 30, vendas=20)),            # paga mais, poucos vendidos
+               ({}, _oferta_da_foto(2, 50, 20, nota="4.4")),           # nota baixa
+               ({}, _oferta_da_foto(3, 50, 10))]                       # entra
+    fora = {}
+    candidatos = robo.candidatos_da_foto({"preco": 50.0}, "7", achados, fora)
+    assert [c["item"] for c in candidatos] == ["3"] and (candidatos[0]["vendas"], candidatos[0]["nota"]) == (500, 4.8)
+    assert fora == {"sem nota ou vendidos": 2}
+    assert robo._fora_do_preco(fora) == " (sem nota ou vendidos 2)"
 
 
 def test_candidatos_da_foto_contam_por_que_cada_achado_ficou_de_fora():

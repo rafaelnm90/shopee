@@ -1179,9 +1179,10 @@ def test_sem_links_a_mais_a_mensagem_fica_como_antes(monkeypatch):
     assert "2️⃣ <b>Favorite o produto</b> ❤️\nGarrafa: R$ 19,90" in bot.mensagens[0][1]
 
 
-def _oferta(nome, preco, comissao, item):
+def _oferta(nome, preco, comissao, item, vendas=500, nota="4.8"):
     return {"productName": nome, "priceMin": str(preco), "commissionRate": str(comissao / 100),
-            "productLink": f"https://shopee.com.br/product/9/{item}", "itemId": item, "imageUrl": f"foto-{item}"}
+            "productLink": f"https://shopee.com.br/product/9/{item}", "itemId": item, "imageUrl": f"foto-{item}",
+            "sales": vendas, "ratingStar": nota}
 
 
 def test_links_a_mais_buscam_o_mesmo_produto_e_a_ia_confere_pela_foto(monkeypatch):
@@ -1229,6 +1230,33 @@ def test_links_a_mais_buscam_o_mesmo_produto_e_a_ia_confere_pela_foto(monkeypatc
     assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [{**original, "preco": 0}], do_rafael=False)) == []
     assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [], do_rafael=False)) == []
     assert len(conferidos) == 2
+
+
+def test_links_a_mais_so_com_anuncio_de_nota_e_vendidos(monkeypatch):
+    # Escolha do Rafael (26/11/2026, P309 1): nos links a mais, o anúncio sem a nota 4,5 ou os 100 vendidos nem vai
+    # à IA, mesmo pagando mais.
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+    original = {"nome": "Garrafa Térmica Inox 500ml Azul", "preco": 50.0, "comissao": 10.0, "imagem": "foto-1",
+                "item": "1"}
+    ofertas = [_oferta("Garrafa Térmica Inox 500ml Azul Loja A", 52.0, 40.0, "2", vendas=10),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja B", 52.0, 20.0, "3", nota="4.3"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja C", 52.0, 15.0, "4")]
+    conferidos = []
+
+    async def buscar(termo, limite=10, sort_type=2, **kw):
+        return ofertas
+
+    def conferir(video, nome, anuncios, **kw):
+        conferidos.append([n for n, _f in anuncios])
+        return list(range(len(anuncios))), ""
+
+    monkeypatch.setattr(robo, "foto_do_anuncio", lambda endereco: b"foto" if endereco else None)
+    monkeypatch.setattr(robo, "sem_os_a_mais", lambda: None)
+    monkeypatch.setattr(asv.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(ps, "ia_confere_iguais", conferir)
+    mais = rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original]))
+    assert conferidos == [["Garrafa Térmica Inox 500ml Azul Loja C"]] and [m["item"] for m in mais] == ["4"]
 
 
 def test_links_a_mais_so_com_os_da_faixa_do_mais_barato(monkeypatch):
