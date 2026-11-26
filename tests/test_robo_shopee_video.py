@@ -10334,7 +10334,11 @@ def test_produto_do_video_de_ia_volta_7_dias_depois_do_ultimo(monkeypatch):
     _lista_da_api(monkeypatch, ofertas)
     robo.flow.lembrar_item_gerado("50", "2026-11-20 09:00:00")
     assert robo.escolher_para_o_video_de_ia(momento("2026-11-27 08:59"))[0]["item"] == "51"
+    assert "de volta" not in _registro_do_video_de_ia()[-1][1]
     assert robo.escolher_para_o_video_de_ia(momento("2026-11-27 09:01"))[0]["item"] == "50"
+    # O registro conta os que voltam depois dos 7 dias e diz quando o escolhido é um deles (só números).
+    assert _registro_do_video_de_ia()[-1][1].endswith(
+        "2 novos; 0 no 2º nível; 1 de volta depois de 7 dias; o 1º; do 1º nível; de volta; estilo fala")
     # Postado depois do Gerar, os 7 dias contam do post.
     ident = robo.criar("outro", momento("2026-11-21 10:00"))
     robo.atualizar(ident, estado="postado", itens_do_video=["50"], postado_em="2026-11-22 11:00:00")
