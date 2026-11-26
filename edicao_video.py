@@ -1653,6 +1653,18 @@ _CAPA_NO_PROMPT = ("- \"capa\": para a capa do vídeo, uma frase curta que come�
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
+# Enquanto o cupom do vídeo vale (o frete grátis exclusivo para a compra feita pelo vídeo, sem valor mínimo, que o robô
+# lê uma vez por dia em Meus Cupons), a chamada fala dele, sem prometer mais do que ele diz. É a única exceção à regra
+# de não falar de promoção, e só na chamada. Escolha do Rafael (26/11/2026, P313 1): DECISOES.md, Shopee Vídeo.
+_CUPOM_NA_CHAMADA = (
+    "  Hoje quem compra pelo vídeo pode usar {cupom}: a \"chamada\" fala desse cupom, chamando para o produto "
+    "anexado aqui embaixo (ex.: \"Frete grátis pelo vídeo\", \"Use o cupom de frete grátis\"), sem prometer mais do "
+    "que o cupom diz: sem dizer que o frete é grátis para tudo, sempre ou para todos, e sem valor, desconto, prazo ou "
+    "estoque. Só a chamada fala do cupom, e é a única exceção à regra de não falar de promoção abaixo; o nome, a "
+    "vantagem e a capa seguem as regras.\n")
+# A chamada fala do cupom (para o registro, que conta se a IA usou o cupom pedido).
+PALAVRAS_DO_CUPOM = ("cupom", "frete")
+PROCESSO_DO_CUPOM_NA_CHAMADA = "edição do vídeo: cupom do vídeo na chamada"
 # A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO, e a IA diz o
 # tom mais parecido com o do produto (P304 1). No produto de várias cores, a que mais aparece nele, sem o
 # "colorido" (P179 1). E a 2ª cor que mais se destaca nele, de outra cor, para o fio e a faixa da capa quando a
@@ -1787,6 +1799,7 @@ PROMPT_DOS_TEXTOS = (
     f"até {MAXIMO_DA_VANTAGEM} caracteres;\n"
     + _CAPA_NO_PROMPT
     + _CHAMADA_NO_PROMPT
+    + "{cupom_na_chamada}"
     + _REGRAS_NO_PROMPT + _COR_NO_PROMPT + _MUSICA_NO_PROMPT + _O_QUE_FOI_FILMADO_NAO_CONTA + _LUGAR_NO_PROMPT
     + "{lugares_nos_momentos}" + _TEXTO_NO_VIDEO_NO_PROMPT + _POR_CIMA_NO_PROMPT + _CANTO_NO_PROMPT
     + _LEGENDAS_NO_PROMPT
@@ -2856,12 +2869,20 @@ def _momentos_no_prompt(momentos):
             "chave_dos_momentos": f"\"lugares_nos_momentos\": {exemplo}, "}
 
 
-def prompt_dos_textos(nome, lado=MINIATURA_A_DIREITA, momentos=()):
+def prompt_dos_textos(nome, lado=MINIATURA_A_DIREITA, momentos=(), cupom=""):
     """
     O pedido dos textos do vídeo que vai ao ar, com o canto do lado da miniatura (P192 1) e os momentos dos nossos
-    textos (momentos_dos_textos; sem eles, só os lugares do vídeo todo).
+    textos (momentos_dos_textos; sem eles, só os lugares do vídeo todo). Com o cupom (o cupom do vídeo que vale agora,
+    P313 1), a chamada fala dele (_CUPOM_NA_CHAMADA).
     """
-    return PROMPT_DOS_TEXTOS.format(nome=nome, **_lado_no_prompt(lado_olhado(lado)), **_momentos_no_prompt(momentos))
+    return PROMPT_DOS_TEXTOS.format(nome=nome, cupom_na_chamada=_CUPOM_NA_CHAMADA.format(cupom=cupom) if cupom else "",
+                                    **_lado_no_prompt(lado_olhado(lado)), **_momentos_no_prompt(momentos))
+
+
+def fala_do_cupom(texto):
+    """O texto fala do cupom do vídeo (uma das PALAVRAS_DO_CUPOM)?"""
+    normal = str(texto or "").casefold()
+    return any(palavra in normal for palavra in PALAVRAS_DO_CUPOM)
 
 
 def prompt_das_versoes(nome, lado=MINIATURA_A_DIREITA, momentos=()):
@@ -2874,18 +2895,24 @@ def lado_olhado(lado):
     return MINIATURA_A_ESQUERDA if lado == MINIATURA_A_ESQUERDA else MINIATURA_A_DIREITA
 
 
-def textos_da_tela(video, nome, lado=MINIATURA_A_DIREITA):
+def textos_da_tela(video, nome, lado=MINIATURA_A_DIREITA, cupom=""):
     """
     {"nome", "vantagem", "capa", "chamada", "lugares", "lugares_nos_momentos", "texto_no_video", "parte_com_texto",
     "canto_ocupado", "outro_canto_ocupado", "por_cima"} que a IA escreveu vendo o vídeo, só o que veio certo; {} sem
     resposta. Com a frase da capa pedida de novo, "capa_de_novo" (e, sem ela, "sem_a_capa") diz
     por quê (_com_a_frase_da_capa). A IA olha o canto do lado da miniatura (lado, escolha do painel,
-    P192 1), e "lado_olhado" guarda o da esquerda (sem ele, foi o da direita, o de sempre).
+    P192 1), e "lado_olhado" guarda o da esquerda (sem ele, foi o da direita, o de sempre). Com o cupom (o cupom do
+    vídeo que vale agora), a chamada fala dele, e o registro conta se ela falou (P313 1).
     """
     olhado = lado_olhado(lado)
     duracao = videos.duracao(video)
     momentos = momentos_dos_textos(duracao)
-    dados = _resposta_da_ia(video, prompt_dos_textos(nome, olhado, momentos))
+    dados = _resposta_da_ia(video, prompt_dos_textos(nome, olhado, momentos, cupom))
+    if cupom and dados:
+        usou = fala_do_cupom(dados.get("chamada"))
+        registro_processos.registrar("shopee_video", PROCESSO_DO_CUPOM_NA_CHAMADA,
+                                     "com o cupom" if usou else "sem o cupom",
+                                     "" if usou else "a IA não falou do cupom na chamada", ok=None)
     textos = _vantagem_e_chamada(dados, _nome_lugar_e_falas(dados, _duracao_dos_trechos(duracao, dados), momentos))
     # Só este pedido traz a frase da capa; sem resposta da IA, não há o que pedir de novo.
     if dados:
@@ -3693,7 +3720,7 @@ def _avisado(avisos, com_capa, musica, miniatura, outras_fotos, escolhas, cor, p
 
 
 def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fotos=(), rotulo_de_ia=False,
-                       anotar=None, escolhas=None, musica_no_lugar=False):
+                       anotar=None, escolhas=None, musica_no_lugar=False, cupom=""):
     """
     O vídeo que vai ao ar (o rascunho do robô e o vídeo do modo assistente) em destino: o
     vídeo original, sem cortes, com o Editor 2: o nome, a vantagem e a chamada para o produto
@@ -3729,8 +3756,9 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
     sempre no alto, ao lado da miniatura, e o que, na hora dele, cobriria o que o criador pôs por cima, o
     produto ou um rosto não aparece (P220 1). O som do vídeo vai ao volume das nossas músicas, sem estourar, e o
     registro anota quanto ele subiu ou desceu (P222 1). Com musica_no_lugar (o vídeo de IA de unboxing, sem fala,
-    P256 2), a música de fundo vai no lugar do som, mesmo com o som do vídeo, e sem a legenda da fala. Escolhas do
-    Rafael: DECISOES.md, Shopee Vídeo.
+    P256 2), a música de fundo vai no lugar do som, mesmo com o som do vídeo, e sem a legenda da fala. Com o cupom (o
+    cupom do vídeo que vale agora, no rascunho do robô), a chamada fala dele (P313 1). Escolhas do Rafael: DECISOES.md,
+    Shopee Vídeo.
     """
     escolhas = escolhas_certas(escolhas_do_painel() if escolhas is None else escolhas)
     if musica_no_lugar:
@@ -3740,7 +3768,7 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
         # Sem a foto do anúncio nenhum dos dois sai: o motivo é o do Editor 1, sem gastar a IA.
         return (editar(video, foto, destino, avisos, escolhas=escolhas),
                 SO_COM_O_EDITOR_1 + (COM_OS_AVISOS if avisos else ""), "")
-    textos = textos_da_tela(video, produto, lado) if produto else {}
+    textos = textos_da_tela(video, produto, lado, **({"cupom": cupom} if cupom else {})) if produto else {}
     # A música de fundo no vídeo sem som (P55) e no de som baixo demais em que ninguém fala (P237 1): a fala que a IA
     # ouviu evita perguntar ao reconhecimento de voz.
     som = {}

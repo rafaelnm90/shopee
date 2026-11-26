@@ -7623,11 +7623,14 @@ def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False, outras=(
     trocam = fotos_da_miniatura(video, anuncio["foto"], outras) if outras and anuncio.get("foto") else []
     # O vídeo de IA de unboxing vai sem fala, com a música de fundo no lugar do som (P256 2).
     unboxing = (video.get("video_ia") or {}).get("estilo") == flow.ESTILO_DO_UNBOXING
+    # Enquanto o cupom do vídeo vale, a chamada fala dele (P313 1).
+    cupom = cupom_do_video()
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], anuncio.get("foto"), copia,
                                                             anuncio.get("nome", ""), avisos=alcool,
                                                             outras_fotos=trocam, rotulo_de_ia=rotulo_de_ia,
                                                             anotar=edicao,
-                                                            **({"musica_no_lugar": True} if unboxing else {}))
+                                                            **({"musica_no_lugar": True} if unboxing else {}),
+                                                            **({"cupom": cupom} if cupom else {}))
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else como,
@@ -8662,6 +8665,133 @@ def _anotar_visualizacoes_junto(d, agora=None):
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao ler as visualizações: {type(e).__name__}")
         registro_processos.registrar(REGISTRO, PROCESSO_DAS_VISUALIZACOES, f"erro ({type(e).__name__})", ok=False)
+
+
+# --- O cupom do dia exclusivo para vídeo (P313 1) ---
+# A Shopee põe na carteira dos compradores cupons de frete grátis EXCLUSIVO PARA VÍDEO, sem valor mínimo, que só valem
+# na compra feita pelo vídeo, em lotes de alguns dias (em 26/11, um até 29/11 e outro que começava à noite). Uma
+# vez por dia, de passagem depois da Saúde do Vídeo, o robô lê a lista em Meus Cupons (Eu → Minha carteira → Cupons),
+# só lendo: rola até o fim e nunca toca em Usar, Usar depois, Inserir código, Ganhe mais cupons nem Histórico. Cada
+# lote do frete grátis exclusivo para vídeo e sem valor mínimo fica guardado com a janela em que vale
+# (CHAVE_DO_CUPOM_DO_VIDEO; ps.janela_do_cupom), e, enquanto um deles vale, a IA usa o cupom na chamada do vídeo (a
+# caixa vermelha) e no comentário de depois do post, sem prometer mais do que o cupom diz (cupom_do_video). Escolha do
+# Rafael (26/11/2026, P313 1): DECISOES.md, Shopee Vídeo.
+CAMINHO_DE_MEUS_CUPONS = [("Eu", 6, "Minha carteira"), ("Cupons", 6, "Meus Cupons")]
+CHAVE_DO_CUPOM_DO_VIDEO = "shopee_video_cupom_do_video"
+PROCESSO_DA_LEITURA_DOS_CUPONS = "cupom do vídeo: leitura de Meus Cupons"
+PROCESSO_DO_CUPOM_NO_COMENTARIO = "cupom do vídeo: comentário do post"
+ROLADAS_EM_MEUS_CUPONS = 25
+ESPERA_DE_MEUS_CUPONS = 12
+# O cupom como a IA o recebe: o que o cartão diz, sem nada a mais.
+CUPOM_DO_VIDEO = "o cupom de frete grátis da Shopee exclusivo para a compra feita pelo vídeo, sem valor mínimo"
+MOTIVO_SEM_MEUS_CUPONS = "a lista de Meus Cupons não apareceu na tela"
+
+
+def cupom_do_dia_pendente(agora=None):
+    """O robô ainda não tentou ler a lista de Meus Cupons hoje (uma vez por dia)?"""
+    tentado = (db.ler_config(CHAVE_DO_CUPOM_DO_VIDEO, {}) or {}).get("tentado_em") or ""
+    return not tentado.startswith(agora_br(agora).strftime("%Y-%m-%d"))
+
+
+def cupom_do_video(agora=None):
+    """
+    O cupom do vídeo para a IA (CUPOM_DO_VIDEO) quando um lote dele vale agora, pela última leitura de Meus Cupons;
+    "" sem ele.
+    """
+    momento = _momento(agora)
+    lotes = (db.ler_config(CHAVE_DO_CUPOM_DO_VIDEO, {}) or {}).get("lotes") or []
+    return CUPOM_DO_VIDEO if any((lote.get("de") or "") <= momento <= (lote.get("ate") or "") for lote in lotes) else ""
+
+
+def _esperar_os_cartoes(d):
+    """A tela de Meus Cupons com os cartões (a lista carrega pela rede): relê a cada 2 s, por ESPERA_DE_MEUS_CUPONS."""
+    xml = tela(d)
+    for _ in range(ESPERA_DE_MEUS_CUPONS // 2):
+        if ps.cartoes_de_cupom(ps.elementos(xml)):
+            break
+        pausa(2)
+        xml = tela(d)
+    return xml
+
+
+def ler_meus_cupons(d, agora=None):
+    """
+    Lê a lista de Meus Cupons, só lendo: abre pelo CAMINHO_DE_MEUS_CUPONS, rola até o fim (até ROLADAS_EM_MEUS_CUPONS
+    vezes, parando quando a tela não traz cartão nem pedaço novo) e volta ao Eu. Devolve os cartões lidos
+    ({N: pedaços}, ps.cartoes_de_cupom). Sem a lista na tela, para (Parada).
+    """
+    ir_ao_inicio(d)
+    seguir(d, CAMINHO_DE_MEUS_CUPONS)
+    xml = _esperar_os_cartoes(d)
+    cartoes = {}
+    for vez in range(ROLADAS_EM_MEUS_CUPONS + 1):
+        lista = ps.elementos(xml)
+        if not ps.na_tela_de_meus_cupons(lista):
+            raise Parada(MOTIVO_SEM_MEUS_CUPONS)
+        antes = json.dumps(cartoes, sort_keys=True)
+        for numero, pedacos in ps.cartoes_de_cupom(lista).items():
+            for campo, texto in pedacos.items():
+                cartoes.setdefault(numero, {}).setdefault(campo, texto)
+        if vez and json.dumps(cartoes, sort_keys=True) == antes:
+            break
+        ps.rolar(d)
+        pausa(2)
+        xml = tela(d)
+    voltar(d, "Eu")
+    return cartoes
+
+
+def lotes_do_cupom_do_video(cartoes, lido_em):
+    """
+    Os lotes do cupom do vídeo entre os cartões lidos ([{"de", "ate"}], em texto, do que começa antes ao que começa
+    depois): os de frete grátis exclusivos para vídeo e sem valor mínimo, com a validade que o robô conhece.
+    """
+    lotes = []
+    for cartao in cartoes.values():
+        if (cartao.get("selo") == ps.SELO_DO_VIDEO and cartao.get("titulo") == ps.TITULO_DO_FRETE_GRATIS
+                and cartao.get("regra") == ps.SEM_VALOR_MINIMO):
+            janela = ps.janela_do_cupom(cartao.get("validade", ""), lido_em)
+            if janela:
+                lotes.append({"de": _momento(janela[0]), "ate": _momento(janela[1])})
+    return sorted(lotes, key=lambda lote: lote["de"])
+
+
+def ler_o_cupom_do_dia(d, agora=None):
+    """
+    A leitura do dia de Meus Cupons (P313 1): guarda os lotes do cupom do vídeo (CHAVE_DO_CUPOM_DO_VIDEO) e anota no
+    registro só números: os cupons lidos, os do vídeo, os do frete grátis sem valor mínimo e se algum vale agora. A
+    tentativa conta como a do dia mesmo quando para: a leitura de antes fica valendo até a do dia seguinte.
+    """
+    momento = agora_br(agora)
+    db.atualizar_config(CHAVE_DO_CUPOM_DO_VIDEO, lambda dados: dados.update(tentado_em=_momento(momento)))
+    cartoes = ler_meus_cupons(d, agora)
+    lotes = lotes_do_cupom_do_video(cartoes, momento)
+    db.atualizar_config(CHAVE_DO_CUPOM_DO_VIDEO, lambda dados: dados.update(lido_em=_momento(momento), lotes=lotes))
+    do_video = sum(cartao.get("selo") == ps.SELO_DO_VIDEO for cartao in cartoes.values())
+    valendo = bool(cupom_do_video(momento))
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DOS_CUPONS,
+                                 "com o cupom do vídeo valendo" if valendo else "sem o cupom do vídeo valendo",
+                                 f"{len(cartoes)} cupom(ns) na lista; {do_video} exclusivo(s) para vídeo; "
+                                 f"{len(lotes)} lote(s) do frete grátis sem valor mínimo", ok=True, agora=momento)
+    return lotes
+
+
+def _ler_o_cupom_do_dia_junto(d, agora=None):
+    """A leitura do dia de Meus Cupons depois da Saúde do Vídeo, uma vez por dia: erro aqui não derruba a rodada."""
+    if not cupom_do_dia_pendente(agora):
+        return
+    try:
+        ler_o_cupom_do_dia(d, agora)
+    except (Parada, Verificacao) as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não li Meus Cupons: {ps.mascarar(getattr(e, 'motivo', ''))}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DOS_CUPONS, "parou",
+                                     getattr(e, "motivo", "") or "a Verificação na tela", ok=False, agora=agora)
+        if isinstance(e, Verificacao):
+            raise
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao ler Meus Cupons: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_LEITURA_DOS_CUPONS, f"erro ({type(e).__name__})", ok=False,
+                                     agora=agora)
 
 
 def medicao_da_capa(agora=None):
@@ -11223,9 +11353,17 @@ def _comentar_no_aberto(d, video, onde, produto, titulo, feitos=(), agora=None, 
     na_tela = [c["texto"] for c in interacoes.comentarios_do_painel(xml) if c["criador"] and c["texto"]]
     recentes = ler_estado().get("proprio_textos") or []
     anteriores = list(dict.fromkeys(na_tela + list(feitos) + recentes))
-    texto = asyncio.run(interacoes.gerar_proprio(produto, titulo, anteriores))
+    # Enquanto o cupom do vídeo vale, o comentário de depois do post fala dele (P313 1); o do post antigo e o do
+    # fixado, não.
+    cupom = cupom_do_video(agora) if onde == ONDE_DO_PROPRIO else ""
+    texto = asyncio.run(interacoes.gerar_proprio(produto, titulo, anteriores, **({"cupom": cupom} if cupom else {})))
     if not texto:
         raise Parada("a IA não escreveu o comentário do post")
+    if cupom:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CUPOM_NO_COMENTARIO,
+                                     "com o cupom" if interacoes.fala_do_cupom(texto) else "sem o cupom",
+                                     "" if interacoes.fala_do_cupom(texto) else "a IA não falou do cupom", ok=None,
+                                     agora=agora)
     _abrir_o_campo_do_post(d, xml)
     _escrever_e_enviar(d, texto)
     apareceu = _apareceu_no_painel(d, texto)
@@ -11961,8 +12099,10 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False, comeco=None, de
                        f"{novas} nova(s) para recorrer" + (" (o texto de cada uma chega aqui em seguida)." if novas
                                                              else ".")
                        + "\n\nTudo em Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺.")
-            # De passagem, as visualizações dos vídeos na grade do Perfil (P76).
+            # De passagem, as visualizações dos vídeos na grade do Perfil (P76) e, uma vez por dia, o cupom do
+            # vídeo em Meus Cupons (P313 1).
             _anotar_visualizacoes_junto(d, agora)
+            _ler_o_cupom_do_dia_junto(d, agora)
             return resultado
         if acao == "descurtir":
             # A lista só fica limpa se este descurtir chegar ao fim (P27).

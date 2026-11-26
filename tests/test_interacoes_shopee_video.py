@@ -1329,6 +1329,46 @@ def test_comentario_no_video_fixado_que_volta_pelo_link_e_o_de_depois_do_post(av
     assert robo.ler_estado()["proprio_textos"] == [texto]
 
 
+def test_comentario_de_depois_do_post_fala_do_cupom_do_video_enquanto_ele_vale(monkeypatch, avisos, pelo_link):
+    # Escolha do Rafael (26/11/2026, P313 1): enquanto o cupom de frete grátis exclusivo para vídeo vale, o comentário
+    # de depois do post fala dele; o do post antigo e o do vídeo fixado, não.
+    import api_gemini
+    gerar_proprio, pedidos = it.gerar_proprio, []
+
+    async def proprio(produto="", titulo="", anteriores=(), cupom=""):
+        pedidos.append(cupom)
+        return f"Use o cupom de frete grátis do vídeo! {len(pedidos)}" if cupom else f"Vale a pena! {len(pedidos)}"
+
+    monkeypatch.setattr(it, "gerar_proprio", proprio)
+    monkeypatch.setattr(robo.registro_processos, "DIAS_DO_REGISTRO", 3650)
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO, {"lotes": [
+        {"de": "2026-11-01 00:00:00", "ate": "2026-11-03 23:59:59"}]})
+    assert robo.comentar_depois_do_post(CelularDoPost(comentarios=[TITULO_DO_POST]), _postado(),
+                                        momento("2026-11-01 10:01")) == "comentado"
+    robo.comentar_no_post(CelularDoPost(comentarios=[TITULO_DO_POST]), robo.pegar(_postado()), antigo=True,
+                          agora=momento("2026-11-01 12:00"))
+    robo._anotar_o_comentario_do_fixado("0f0f0f0f0f0f0f0f", LINK_DO_POST, "falhou", momento("2026-11-01 13:00"))
+    robo._comentar_de_novo_no_fixado(CelularDoPost(comentarios=[TITULO_DO_POST]), momento("2026-11-01 13:30"))
+    # Depois do fim do lote, o comentário de depois do post vai sem o cupom.
+    robo.comentar_depois_do_post(CelularDoPost(comentarios=[TITULO_DO_POST]), _postado(), momento("2026-11-04 10:01"))
+    assert pedidos == [robo.CUPOM_DO_VIDEO, "", "", ""]
+    assert [(resultado, detalhe) for _m, _p, resultado, detalhe, _o in robo.registro_processos.sequencia(
+        "shopee_video", robo.PROCESSO_DO_CUPOM_NO_COMENTARIO, "2000-01-01 00:00:00")] == [("com o cupom", "")]
+    # O pedido à IA leva o cupom como ele é, com a regra de não prometer mais do que ele diz.
+    textos = []
+
+    async def gerar(prompt):
+        textos.append(prompt)
+        return "Aproveita o cupom de frete grátis do vídeo!"
+
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
+    assert asyncio.run(gerar_proprio("Meia", TITULO_DO_POST, [], cupom=robo.CUPOM_DO_VIDEO)) == (
+        "Aproveita o cupom de frete grátis do vídeo!")
+    assert robo.CUPOM_DO_VIDEO in textos[0] and "sem prometer mais do que ele diz" in textos[0]
+    asyncio.run(gerar_proprio("Meia", TITULO_DO_POST, []))
+    assert "cupom" not in textos[1]
+
+
 class CelularQueNaoCurteOComentario(CelularDoPost):
     """O coração do comentário não pega: o toque cai, e o comentário continua sem a curtida."""
 
