@@ -185,6 +185,38 @@ MAIS_CARO_QUE_O_MAIS_BARATO = 25
 ORDENS_DA_TROCA = (5, 2)
 CANDIDATOS_DA_FAIXA = 8
 MAIS_BARATOS_NA_IA = 3
+# Nos mesmos quatro lugares, só entra o anúncio com nota NOTA_DO_ANUNCIO ou mais e VENDIDOS_DO_ANUNCIO vendidos ou
+# mais: o anúncio sem histórico pode ser golpe, e quem compra desiste. Entre eles, o que paga mais, na faixa do mais
+# barato. O produto do link (ou o do criador no Ver Produtos) sem a nota ou os vendidos dá lugar ao anúncio bom da
+# faixa que paga alguma comissão, mesmo pagando menos que ele; sem nenhum bom, fica o dele. Escolha do Rafael
+# (26/11/2026, P309 1): DECISOES.md, Shopee Vídeo.
+NOTA_DO_ANUNCIO = 4.5
+VENDIDOS_DO_ANUNCIO = 100
+
+
+def anuncio_bom(nota, vendas):
+    """Se o anúncio tem a nota e os vendidos para entrar na troca, nos produtos a mais e nos links a mais (P309 1)."""
+    return (nota or 0) >= NOTA_DO_ANUNCIO and (vendas or 0) >= VENDIDOS_DO_ANUNCIO
+
+
+def anuncio_sem_historico(produto):
+    """
+    Se o produto do post ({nota, vendas}, da API) tem nota ou vendidos abaixo dos de anuncio_bom (P309 1). Sem os
+    dois números (quem chamou não os tem), não: o produto fica como antes.
+    """
+    if "nota" not in produto and "vendas" not in produto:
+        return False
+    return not anuncio_bom(produto.get("nota"), produto.get("vendas"))
+
+
+def _a_nota_minima():
+    """A nota mínima do anúncio escrita como no app (4,5)."""
+    return f"{NOTA_DO_ANUNCIO:.1f}".replace(".", ",")
+
+
+def nota_e_vendas(oferta):
+    """(a nota, os vendidos) de uma oferta da API de afiliado."""
+    return assistente._numero(oferta.get("ratingStar")), int(assistente._numero(oferta.get("sales")))
 # Na foto do Ver Produtos (P39), a oferta achada pelo nome tem de ser quase o mesmo nome do
 # produto anexado: a foto vai em tela cheia no começo do vídeo e na miniatura.
 PARECIDO_DA_FOTO = 80
@@ -5130,15 +5162,18 @@ def na_faixa(precos_do_post, produtos):
     return [produto for produto in produtos if produto.get("preco") and produto["preco"] <= teto]
 
 
-def candidatos_da_troca(original, ofertas):
+def candidatos_da_troca(original, ofertas, fora=None):
     """
     Das ofertas das buscas, as que podem ser o produto do link (original: {nome, preco,
     comissao, item}) em outra loja: nome parecido com o dele, com link e preço, até
     MAIS_CARO_QUE_O_MAIS_BARATO% mais caras que ele (acima disso, nunca cabem na faixa, P284 1),
-    sem o próprio produto do link nem o mesmo anúncio duas vezes: [{nome, link, comissao, preco,
-    valor, vendas, imagem, item}], do que paga mais por venda para o que paga menos. O preço é o
-    "a partir de" dos dois lados. Sem o preço do produto do link, nenhuma: não há com o que comparar.
+    com a nota e os vendidos de anuncio_bom (P309 1), sem o próprio produto do link nem o mesmo
+    anúncio duas vezes: [{nome, link, comissao, preco, valor, vendas, nota, imagem, item}], do que
+    paga mais por venda para o que paga menos. O preço é o "a partir de" dos dois lados. Sem o preço
+    do produto do link, nenhuma: não há com o que comparar. fora (dict), quando vem, conta os de nome
+    parecido que ficaram de fora pela nota ou pelos vendidos ("sem nota ou vendidos").
     """
+    fora = {} if fora is None else fora
     if not original.get("preco"):
         return []
     teto = teto_da_faixa([original["preco"]])
@@ -5154,11 +5189,14 @@ def candidatos_da_troca(original, ofertas):
             continue
         if ps.parecido_entre([nome], original["nome"])[0] < PARECIDO_NA_BUSCA:
             continue
+        nota, vendas = nota_e_vendas(oferta)
+        if not anuncio_bom(nota, vendas):
+            fora["sem nota ou vendidos"] = fora.get("sem nota ou vendidos", 0) + 1
+            continue
         vistos.add(item or link)
         comissao = api_shopee.porcento_no_video(oferta)
         candidatos.append({"nome": nome, "link": link, "comissao": comissao, "preco": preco,
-                           "valor": valor_por_venda(preco, comissao),
-                           "vendas": int(assistente._numero(oferta.get("sales"))),
+                           "valor": valor_por_venda(preco, comissao), "vendas": vendas, "nota": nota,
                            "imagem": oferta.get("imageUrl") or "", "item": item})
     return sorted(candidatos, key=lambda c: (-c["valor"], -c["vendas"]))
 
@@ -5169,17 +5207,20 @@ def opcoes_na_faixa(video, original, capa):
     (P33, P57 e P284 1): as buscas da API pelo nome (ORDENS_DA_TROCA), os candidatos_da_troca, e a
     IA confere de uma vez, pela foto de cada anúncio com a capa do post, quais são o mesmo item, da
     mesma cor. Dos confirmados, ficam os que cabem na faixa do mais barato deles e do produto do
-    link: os que pagam mais por venda que ele ou, com ele fora da faixa, todos os da faixa que pagam
-    alguma comissão, mesmo abaixo do mínimo por venda (P286 2: o da faixa é o que vende), do que
-    paga mais para o que paga menos. Devolve (opções, o resultado do registro quando não há
-    nenhuma, ou "").
+    link: os que pagam mais por venda que ele ou, com ele fora da faixa ou sem a nota e os vendidos
+    (anuncio_sem_historico, P309 1), todos os da faixa que pagam alguma comissão, mesmo abaixo do
+    mínimo por venda (P286 2: o da faixa é o que vende), do que paga mais para o que paga menos.
+    Devolve (opções, o resultado do registro quando não há nenhuma, ou "").
     """
     termo = termo_da_busca(original["nome"])
     ofertas = []
     for ordem in ORDENS_DA_TROCA:
         ofertas.extend(asyncio.run(api_shopee.buscar_ofertas_shopee(termo, limite=OFERTAS_NA_BUSCA, sort_type=ordem)))
-    candidatos = candidatos_da_troca(original, ofertas)
+    fora = {}
+    candidatos = candidatos_da_troca(original, ofertas, fora)
     if not candidatos:
+        if fora.get("sem nota ou vendidos"):
+            return [], "mantido - nenhum anúncio bom na busca"
         return [], "mantido - nenhum parecido na busca" if ofertas else "mantido - a busca não trouxe nada"
     baratos = sorted((c for c in candidatos if c["preco"] < original["preco"]),
                      key=lambda c: c["preco"])[:MAIS_BARATOS_NA_IA]
@@ -5204,7 +5245,11 @@ def opcoes_na_faixa(video, original, capa):
         return [], "mantido - a IA não confirmou nenhum"
     teto = teto_da_faixa([original["preco"]] + [c["preco"] for c in confirmados])
     antes = valor_por_venda(original["preco"], original["comissao"])
-    if original["preco"] <= teto:
+    if anuncio_sem_historico(original):
+        # Escolha do Rafael (26/11/2026, P309 1): o do link sem a nota ou os vendidos dá lugar ao anúncio bom da faixa.
+        opcoes = [c for c in confirmados if c["preco"] <= teto and c["valor"] > 0]
+        porque = "mantido - nenhum anúncio bom na faixa"
+    elif original["preco"] <= teto:
         opcoes = [c for c in confirmados if c["preco"] <= teto and c["valor"] > antes]
         porque = "mantido - o do link é o que paga mais na faixa"
     else:
@@ -5220,6 +5265,8 @@ def como_trocou(original, candidato):
     antes = valor_por_venda(original["preco"], original["comissao"])
     if candidato["valor"] > antes:
         return f"mais {round((candidato['valor'] / antes - 1) * 100)}% por venda" if antes else ""
+    if anuncio_sem_historico(original):
+        return "pela nota e os vendidos do anúncio"
     return f"pela faixa: {round((1 - candidato['preco'] / original['preco']) * 100)}% mais barato"
 
 
@@ -5438,8 +5485,9 @@ def _trocar_um_do_ver_produtos(d, video, produto, oferta, foto, vistos, curtidos
     if not foto:
         anotar("mantido - sem a foto da página do produto")
         return None
+    nota, vendas = nota_e_vendas(oferta)
     original = {"nome": produto["nome"], "preco": preco, "item": produto.get("item") or "",
-                "comissao": api_shopee.porcento_no_video(oferta)}
+                "comissao": api_shopee.porcento_no_video(oferta), "nota": nota, "vendas": vendas}
     try:
         candidatos, porque = opcoes_na_faixa(video, original, foto)
         if not candidatos:
@@ -5608,12 +5656,12 @@ def candidatos_da_foto(original, item_do_rascunho, achados, fora=None):
     Populares), os que podem ir nos espaços livres, do que paga mais por venda para o que paga
     menos (no empate, o mais vendido): até MAIS_CARO_QUE_O_MAIS_BARATO% mais caros que o produto do
     link (acima disso, nunca cabem na faixa do mais barato, P284 1), nunca o produto que já está no
-    rascunho nem o mesmo item duas vezes.
-    [{nome, endereco, imagem, preco, comissao, valor, item}]. Sem o preço do produto do link, nenhum.
-    fora (dict), quando vem, conta por que cada achado ficou de fora, só números para o
+    rascunho nem o mesmo item duas vezes, e só com a nota e os vendidos de anuncio_bom (P309 1).
+    [{nome, endereco, imagem, preco, comissao, valor, vendas, nota, item}]. Sem o preço do produto do
+    link, nenhum. fora (dict), quando vem, conta por que cada achado ficou de fora, só números para o
     checkup: "sem o preço do post", "sem dados" (a API não deu o item, o link ou o preço),
-    "o do rascunho", "repetido" (o mesmo anúncio de outro cartão) e "mais caro", com "o mais
-    perto": quantos % acima do preço do post está o mais barato deles.
+    "o do rascunho", "repetido" (o mesmo anúncio de outro cartão), "sem nota ou vendidos" e "mais
+    caro", com "o mais perto": quantos % acima do preço do post está o mais barato deles.
     """
     fora = {} if fora is None else fora
 
@@ -5640,6 +5688,10 @@ def candidatos_da_foto(original, item_do_rascunho, achados, fora=None):
         if item in vistos:
             contar("repetido")
             continue
+        nota, vendas = nota_e_vendas(oferta)
+        if not anuncio_bom(nota, vendas):
+            contar("sem nota ou vendidos")
+            continue
         if preco > teto:
             contar("mais caro")
             # Para cima: o que passou do teto nunca aparece como os 25% dele.
@@ -5649,7 +5701,8 @@ def candidatos_da_foto(original, item_do_rascunho, achados, fora=None):
         vistos.add(item)
         candidatos.append({"nome": (oferta.get("productName") or "").strip(), "endereco": endereco,
                            "imagem": oferta.get("imageUrl") or "", "preco": preco, "comissao": comissao,
-                           "valor": valor_por_venda(preco, comissao), "item": item, "ordem": ordem})
+                           "valor": valor_por_venda(preco, comissao), "vendas": vendas, "nota": nota, "item": item,
+                           "ordem": ordem})
     return sorted(candidatos, key=lambda c: (-c["valor"], c["ordem"]))
 
 
@@ -5721,7 +5774,8 @@ def _fora_do_preco(fora):
     """Por que os achados na API ficaram de fora do preço (candidatos_da_foto), em texto curto, só números."""
     partes = [f"mais caros {fora['mais caro']}, o mais perto +{fora['o mais perto']}%"] if fora.get("mais caro") else []
     partes += [f"{rotulo} {fora[chave]}" for chave, rotulo in
-               (("o do rascunho", "o do rascunho"), ("repetido", "repetidos"), ("sem dados", "sem dados"))
+               (("o do rascunho", "o do rascunho"), ("repetido", "repetidos"), ("sem dados", "sem dados"),
+                ("sem nota ou vendidos", "sem nota ou vendidos"))
                if fora.get(chave)]
     if fora.get("sem o preço do post"):
         partes.append("sem o preço do post")
@@ -7041,7 +7095,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         if trocados:
             avisar(f"🤖 Robô da Shopee Vídeo: troquei {trocados} de {len(do_ver_produtos)} produto(s) do Ver "
                    "Produtos pelo mesmo item de outra loja (a que paga mais por venda entre as que cobram até "
-                   f"{MAIS_CARO_QUE_O_MAIS_BARATO}% acima da mais barata; conferido pela IA com o vídeo):\n"
+                   f"{MAIS_CARO_QUE_O_MAIS_BARATO}% acima da mais barata, com nota {_a_nota_minima()} e "
+                   f"{VENDIDOS_DO_ANUNCIO} vendidos ou mais; conferido pela IA com o vídeo):\n"
                    + "\n".join(f"• {p['nome']}: {p['comissao']:.1f}%, "
                                f"{assistente._reais(p['valor'])} por venda (o do criador pagava {p['antes']:.1f}%, "
                                f"{assistente._reais(p['valor_antes'])})" for p in do_ver_produtos if p["trocado"]))
@@ -7071,7 +7126,8 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                + (f"Comissão: {troca['comissao']:.1f}%, {assistente._reais(troca['valor'])} por venda (o produto do "
                   f"link pagava {troca['antes']:.1f}%, {assistente._reais(troca['valor_antes'])}: troquei pelo mesmo "
                   "produto de outra loja, a que paga mais por venda entre as que cobram até "
-                  f"{MAIS_CARO_QUE_O_MAIS_BARATO}% acima da mais barata, conferido pela IA com o vídeo)\n"
+                  f"{MAIS_CARO_QUE_O_MAIS_BARATO}% acima da mais barata, com nota {_a_nota_minima()} e "
+                  f"{VENDIDOS_DO_ANUNCIO} vendidos ou mais, conferido pela IA com o vídeo)\n"
                   if troca else "")
                + de_onde_veio_o_video(video, fonte))
         achado = None

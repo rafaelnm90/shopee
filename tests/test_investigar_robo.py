@@ -97,12 +97,13 @@ def test_comissao_mostra_so_numeros(monkeypatch):
 
     async def buscar(termo, limite=10, sort_type=2):
         assert sort_type == 5
+        # Com a nota e os vendidos que entram na troca (P309 1).
         return [{"productName": "Copo Térmico Inox 500ml Tampa Rosa", "commissionRate": "0.085", "priceMin": "10.0",
-                 "productLink": "https://shopee.com.br/product/1/2", "sales": 3},
+                 "productLink": "https://shopee.com.br/product/1/2", "sales": 300, "ratingStar": "4.7"},
                 {"productName": "Garrafa de Vidro", "commissionRate": "0.2", "priceMin": "10.0",
-                 "productLink": "https://shopee.com.br/product/1/3"},
+                 "productLink": "https://shopee.com.br/product/1/3", "sales": 300, "ratingStar": "4.7"},
                 {"productName": "Copo Térmico Inox 500ml", "priceMin": "8.0",
-                 "productLink": "https://shopee.com.br/product/1/4"}]
+                 "productLink": "https://shopee.com.br/product/1/4", "sales": 300, "ratingStar": "4.7"}]
 
     monkeypatch.setattr(ir.assistente, "produtos_do_link", produtos_do_link)
     monkeypatch.setattr(ir.api_shopee, "buscar_ofertas_shopee", buscar)
