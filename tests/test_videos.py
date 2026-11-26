@@ -484,3 +484,47 @@ def test_juntar_as_partes_do_video_de_ia_de_16_s(tmp_path):
     assert abs(videos.duracao(destino) - 4.0) < 0.3 and not videos.tem_audio(destino)
     # A pasta de trabalho do ffmpeg não fica para trás.
     assert {p.name for p in tmp_path.iterdir() if p.is_dir()} == pastas
+
+
+def test_desenho_dos_pontos_e_o_mesmo_video_pela_assinatura():
+    # P307: cada quadro vira um desenho de 64 bits (cada ponto comparado com o da direita); o quadro liso não tem.
+    degraus = [coluna * 20 for _linha in range(8) for coluna in range(9)]
+    assert videos.desenho_dos_pontos(degraus) == "0" * 16
+    assert videos.desenho_dos_pontos(degraus[::-1]) == "f" * 16
+    assert videos.desenho_dos_pontos([128] * 72) is None and videos.desenho_dos_pontos(degraus[:10]) is None
+    # O ruído da compressão (vizinhos quase iguais) não vira bit; o quadro de listras tem desenho, sem bit nenhum.
+    listras = [(200 if linha % 2 else 0) + (coluna % 2) * 2 for linha in range(8) for coluna in range(9)]
+    assert videos.desenho_dos_pontos(listras) == "0" * 16
+    quatro = "20.0;" + ";".join(["f0f0f0f0f0f0f0f0"] * 4)
+    assert videos.mesmo_video(quatro, "20.4;" + ";".join(["f0f0f0f0f0f0f0f1"] * 4))       # recomprimido
+    assert not videos.mesmo_video(quatro, "22.0;" + ";".join(["f0f0f0f0f0f0f0f0"] * 4))   # outra duração
+    um_diferente = "20.0;f0f0f0f0f0f0f0f0;f0f0f0f0f0f0f0f0;f0f0f0f0f0f0f0f0;0f0f0f0f0f0f0f0f"
+    dois_diferentes = "20.0;f0f0f0f0f0f0f0f0;f0f0f0f0f0f0f0f0;0f0f0f0f0f0f0f0f;0f0f0f0f0f0f0f0f"
+    assert videos.mesmo_video(quatro, um_diferente) and not videos.mesmo_video(quatro, dois_diferentes)
+    # Os quadros lisos ficam de fora; com menos de 2 para comparar, não é o mesmo.
+    assert videos.mesmo_video("20.0;f0f0f0f0f0f0f0f0;-;f0f0f0f0f0f0f0f0;-", quatro)
+    assert not videos.mesmo_video("20.0;f0f0f0f0f0f0f0f0;-;-;-", quatro)
+    assert not videos.mesmo_video("", quatro) and not videos.mesmo_video(None, quatro)
+    assert not videos.mesmo_video("x;y", quatro)
+
+
+def test_assinatura_reconhece_o_mesmo_video_noutro_arquivo(tmp_path):
+    # P307, com o ffmpeg de verdade: o mesmo vídeo recomprimido e noutro tamanho tem a mesma assinatura; outro vídeo
+    # (o mesmo desenho espelhado), não. O vídeo de uma cor só não tem assinatura.
+    import shutil
+    import subprocess
+    assert videos.assinatura_do_video(str(tmp_path / "nao_existe.mp4")) is None
+    if not shutil.which("ffmpeg"):
+        return
+
+    def gravar(nome, *filtro, origem="testsrc=duration=6:size=320x568:rate=10"):
+        caminho = str(tmp_path / nome)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", origem, *filtro, caminho], check=True)
+        return caminho
+
+    original = videos.assinatura_do_video(gravar("original.mp4"))
+    copia = videos.assinatura_do_video(gravar("copia.mp4", "-vf", "scale=160:284", "-crf", "35"))
+    espelhado = videos.assinatura_do_video(gravar("espelhado.mp4", "-vf", "hflip"))
+    assert original and copia and espelhado
+    assert videos.mesmo_video(original, copia) and not videos.mesmo_video(original, espelhado)
+    assert videos.assinatura_do_video(gravar("liso.mp4", origem="color=c=blue:size=64x64:rate=10:duration=3")) is None

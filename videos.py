@@ -11,7 +11,9 @@ câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 d
 do som (volume_do_som) leva o som de cada vídeo ao das músicas de fundo. O vídeo
 sem som nenhum (mudo) ganha uma música da Shopee na hora de postar (assistente_shopee_video).
 As partes de um vídeo, uma depois da outra (juntar), são o vídeo de IA de 16 s
-(flow_shopee_video, P246 1).
+(flow_shopee_video, P246 1). A assinatura da imagem (assinatura_do_video, mesmo_video) reconhece o
+mesmo vídeo também noutro arquivo, recomprimido ou baixado de novo: o robô e o modo assistente da
+Shopee Vídeo nunca usam o mesmo vídeo duas vezes (P307).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
@@ -776,3 +778,79 @@ def calcular_hash_video(caminho_arquivo):
     except Exception as e:
         logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
         return None
+
+
+# A assinatura da imagem do vídeo: a duração e o desenho de PONTOS_DA_ASSINATURA quadros espalhados (cada quadro em 9x8
+# pontos de cinza, cada ponto comparado com o vizinho da direita: um dHash de 64 bits). O SHA-256 muda quando o mesmo
+# vídeo vem noutro arquivo (baixado de novo, recomprimido, noutro tamanho); a assinatura quase não muda. O robô e o
+# modo assistente da Shopee Vídeo a guardam de cada vídeo usado e deixam de lado o que tem a mesma: o mesmo produto
+# pode voltar em outro vídeo, mas o mesmo vídeo nunca. Escolha do Rafael (26/11/2026, P307): DECISOES.md, Shopee Vídeo.
+PONTOS_DA_ASSINATURA = (0.2, 0.4, 0.6, 0.8)
+# Diferença de cinza (0 a 255) entre vizinhos que não vira bit, para o ruído da compressão não mudar o desenho.
+MARGEM_DA_ASSINATURA = 3
+# Quadro de uma cor só (o desvio dos 72 pontos abaixo disto) não tem desenho e fica de fora da comparação.
+QUADRO_LISO = 4
+# Até quantos bits diferentes (de 64) dois quadros são o mesmo, e a diferença de duração (s) do mesmo vídeo.
+BITS_DO_MESMO_QUADRO = 10
+FOLGA_DA_DURACAO = 1.0
+
+
+def desenho_dos_pontos(pontos):
+    """O dHash (16 dígitos hexadecimais) de 72 pontos de cinza (8 linhas de 9), ou None num quadro liso."""
+    pontos = list(pontos)[:72]
+    if len(pontos) < 72:
+        return None
+    media = sum(pontos) / 72
+    if (sum((ponto - media) ** 2 for ponto in pontos) / 72) ** 0.5 < QUADRO_LISO:
+        return None
+    bits = 0
+    for linha in range(8):
+        for coluna in range(8):
+            esquerda, direita = pontos[linha * 9 + coluna], pontos[linha * 9 + coluna + 1]
+            bits = bits << 1 | (esquerda > direita + MARGEM_DA_ASSINATURA)
+    return f"{bits:016x}"
+
+
+def _desenho_do_quadro(caminho, segundos, timeout=20):
+    """O desenho (desenho_dos_pontos) do quadro do vídeo nesse segundo; None no quadro liso ou que não sai."""
+    try:
+        feito = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, segundos):.2f}", "-i", caminho,
+                                "-frames:v", "1", "-vf", "scale=9:8:flags=area,format=gray", "-f", "rawvideo", "-"],
+                               capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if getattr(feito, "returncode", 1) != 0:
+        return None
+    return desenho_dos_pontos(getattr(feito, "stdout", b"") or b"")
+
+
+def assinatura_do_video(caminho):
+    """
+    A assinatura do vídeo, "duração;desenho;desenho;desenho;desenho" (o quadro liso fica "-"), ou None quando o vídeo
+    não abre ou nenhum quadro tem desenho.
+    """
+    total = duracao(caminho)
+    if total <= 0:
+        return None
+    desenhos = [_desenho_do_quadro(caminho, total * ponto) for ponto in PONTOS_DA_ASSINATURA]
+    if not any(desenhos):
+        return None
+    return ";".join([f"{total:.1f}"] + [desenho or "-" for desenho in desenhos])
+
+
+def mesmo_video(uma, outra):
+    """
+    True quando as duas assinaturas são do mesmo vídeo: as durações a até FOLGA_DA_DURACAO s e, dos quadros com
+    desenho nas duas, pelo menos 2 iguais (até BITS_DO_MESMO_QUADRO bits diferentes) e no máximo 1 diferente.
+    """
+    try:
+        duracao_uma, *desenhos_uma = uma.split(";")
+        duracao_outra, *desenhos_outra = outra.split(";")
+        if abs(float(duracao_uma) - float(duracao_outra)) > FOLGA_DA_DURACAO:
+            return False
+        pares = [(int(a, 16), int(b, 16)) for a, b in zip(desenhos_uma, desenhos_outra) if a != "-" and b != "-"]
+    except (AttributeError, ValueError):
+        return False
+    iguais = sum(bin(a ^ b).count("1") <= BITS_DO_MESMO_QUADRO for a, b in pares)
+    return iguais >= 2 and iguais >= len(pares) - 1
+
