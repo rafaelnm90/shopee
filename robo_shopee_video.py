@@ -4045,10 +4045,12 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
     # O produto que teve um vídeo de IA ganha outro, novo, 7 dias depois do último: do post (produtos_ja_postados) ou,
-    # sem post, do Gerar (itens_gerados); a foto que a IA recusou fica de fora sempre (P312 1).
+    # sem post, do Gerar (itens_gerados); a foto que a IA recusou fica de fora sempre (P312 1). O registro conta os
+    # que voltam assim (os de vídeo de IA mais antigo), para a conferência pelos números.
+    recentes = flow.itens_gerados(inicio_do_prazo(agora))
+    de_volta = set(flow.itens_gerados()) - set(recentes)
     bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(agora),
-                                               flow.itens_gerados(inicio_do_prazo(agora)) + flow.fotos_recusadas()
-                                               + list(fora))
+                                               recentes + flow.fotos_recusadas() + list(fora))
     # O que combina com a próxima data do comércio vale BONUS_DA_EPOCA vezes mais; os 2 níveis da P252 1 continuam,
     # cada um nessa ordem (P311 1).
     bons, epoca = pela_epoca(bons, agora)
@@ -4059,7 +4061,9 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
                f"mínimo; {contagem['novos']} novos; {no_segundo} no 2º nível"
                + (" (sem a contagem do Espião)" if canais is None else "")
                + (f" ({sem_seguir} link(s) do Espião sem seguir)" if sem_seguir else "")
-               + (f"; época: {sum(1 for bom in bons if bom['epoca'])} de {len(bons)}" if epoca else ""))
+               + (f"; época: {sum(1 for bom in bons if bom['epoca'])} de {len(bons)}" if epoca else "")
+               + (f"; {sum(1 for bom in bons if bom['item'] in de_volta)} de volta depois de 7 dias"
+                  if any(bom["item"] in de_volta for bom in bons) else ""))
     evitar = flow.evitar_os_recentes(flow.estilos_recentes())
     # O unboxing (P256 2) é mais um formato, nunca o único: fora das amostras e do vídeo logo depois de um unboxing. A
     # comédia (P251 1), no máximo 1 a cada 3 vídeos de IA e só com a foto aprovada de um personagem dela.
@@ -4091,7 +4095,8 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
             # parte. A duração que a IA escolheu (P262) vai junto.
             formato = pedido.get("formato")
             _anotar_a_escolha(amostra, "produto escolhido", f"{peneira}; o {posicao}º; do {bom['nivel']}º nível; "
-                              + ("da época; " if bom["epoca"] else "") + f"estilo {pedido['estilo']}"
+                              + ("da época; " if bom["epoca"] else "")
+                              + ("de volta; " if bom["item"] in de_volta else "") + f"estilo {pedido['estilo']}"
                               + (f"; formato {formato}" if formato and formato != pedido["estilo"] else "")
                               + (f"; {pedido['duracao_pedida']} s" if pedido.get("duracao_pedida") else "")
                               + (f"; {mudam} pulado(s) pelo que a IA de vídeo muda" if mudam else ""), agora)
