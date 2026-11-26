@@ -601,6 +601,20 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
 Caminho alternativo, ainda não testado: a aba **Live e Vídeo** tem um ícone de
 postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
 
+## Meus Cupons (o cupom do dia, mapeado em 26/11/2026, só lendo)
+
+O caminho: **Eu** → **Minha carteira** → **Cupons** (com o número de cupons ao lado) abre a
+tela **Meus Cupons**; o Início também tem o atalho **Cupons**. No alto, as abas **Todos (N)**,
+**Loja**, **Compra Digital**, **Parceiro** e outras, que rolam para o lado. Cada cartão diz o
+tipo (o selo **Vídeo** e "EXCLUSIVO PARA VÍDEO" nos que só valem na compra feita pelo vídeo,
+como o "Cupom de Frete Grátis" "Sem valor mínimo"), a quantidade (x4) e a validade ("Válido
+em: N horas" no lote que ainda não começou, "Válido até DD/MM/AAAA" e "Termina em: N horas").
+Em 26/11, eram 2 lotes de 4 do frete grátis exclusivo para vídeo: um até 29/11 e outro que
+começava 10 h depois. O que o robô faz com eles é a P313. **Nunca se toca** em **Usar**,
+**Usar depois**, **Inserir código**, **Ganhe mais cupons** nem **Histórico**: a tela só é
+lida. Nas lives, a própria live mostra o cupom dela ("R$ N OFF ... para Lives"), com o botão
+de pegar (`btn_claim_state`), que também nunca se toca.
+
 ## Para voltar
 
 1. **Conta:** testar com um **perfil reserva**, nunca com a conta principal, até
