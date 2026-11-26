@@ -145,13 +145,19 @@ LENTIDAO_DA_IA = 120
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 VIDEOS_SEM_OFERTA_POR_RODADA = 5
 SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliado)"
-# O produto que já foi ao ar (ou vai) não se repete: o vídeo dele fica de lado antes do rascunho e o
-# robô passa ao próximo da fonte (produtos_ja_postados). Escolha do Rafael (06/11, P166 1):
-# DECISOES.md, Shopee Vídeo.
-PRODUTO_JA_POSTADO = "o produto deste vídeo já foi postado (pelo robô ou pelo assistente)"
+# O produto que foi ao ar há menos de DIAS_ENTRE_O_MESMO_PRODUTO dias, ou que vai (o rascunho esperando a aprovação
+# e o aprovado), ainda não volta: o vídeo dele fica de lado antes do rascunho e o robô passa ao próximo da fonte
+# (produtos_ja_postados). Passados os dias, o produto volta em outro vídeo, quantas vezes for, tenha vendido ou não;
+# o mesmo vídeo, nunca (MESMO_VIDEO). Escolha do Rafael (26/11/2026, P307, no lugar da P166 1): DECISOES.md,
+# Shopee Vídeo.
+DIAS_ENTRE_O_MESMO_PRODUTO = 7
+PRODUTO_JA_POSTADO = "o produto deste vídeo já foi postado há menos de 7 dias (pelo robô ou pelo assistente)"
+# O vídeo que o robô ou o modo assistente já usou (o mesmo vídeo noutro arquivo também, pela assinatura da imagem:
+# videos.assinatura_do_video) fica de lado, e vai o próximo da fonte (video_ja_usado; P307).
+MESMO_VIDEO = "o mesmo vídeo já foi usado (pelo robô ou pelo assistente), também noutro arquivo"
 # Onde estava o produto do vídeo que ficou de lado por já ter sido postado: o registro diz só o
 # rótulo fixo e quem deixou de lado, para o checkup conferir que o produto foi ou vai mesmo ao ar
-# (anotar_onde_ja_foi; P166 1 e P167 1).
+# (anotar_onde_ja_foi; P166 1, P167 1 e P307).
 PROCESSO_DO_JA_POSTADO = "produto do vídeo: já postado, onde estava"
 ONDE_JA_FOI = {"rascunho": "rascunho do robô esperando a aprovação", "aprovado": "aprovado no robô",
                "postado": "postado pelo robô"}
@@ -1017,7 +1023,8 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
            "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas", "links_dos_produtos",
            "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar", "trocado", "comentarios_proprios",
            "achado", "cor", "itens_do_video", "busca_do_link", "postar_agora_em", "letras", "valor", "edicao",
-           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto", "video_ia", "aprovado_por", "anuncios")
+           "nova_versao", "versao_de", "no_app_em", "segundos_da_foto", "video_ia", "aprovado_por", "anuncios",
+           "assinatura")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
 # rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
 # mais_produtos: os produtos anexados além do do link (P59), [{nome, link, endereco}], na ordem do post.
@@ -1048,7 +1055,7 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # produto (P159 2) ou, quando ela some no fundo da foto, o da 2ª cor (P173) ou o #rrggbb do tom
 # (P174 3); vazio com o laranja (as cores de sempre).
 # itens_do_video: os números (itemId) do produto do vídeo, o do link e o que foi ao post (o da troca ou
-# o achado pela IA), ou os do criador no Ver Produtos: o mesmo produto não se repete (P166 1).
+# o achado pela IA), ou os do criador no Ver Produtos: o mesmo produto só volta depois de 7 dias (P307).
 # busca_do_link: no post que ficou sem o link logo depois de postar, {"vezes": [momento de cada busca
 # que não deu certo], "fim": "" enquanto o robô tenta de novo, "copiado" ou "desistiu"}
 # (buscar_o_link_de_novo, P148 2).
@@ -1077,11 +1084,13 @@ COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", 
 # anuncios: o nome de cada produto como o anúncio o tem (o da lista de Minhas Curtidas), na ordem de produtos, que
 # guarda o nome que o post mostra: o da IA, quando ele ficou no cartão do produto (P265 1). Vazio nos de antes, em
 # que os dois são o mesmo (anuncios_do). O robô procura os produtos por ele (o refazer, o treino, os links).
+# assinatura: a assinatura da imagem do vídeo da fonte (videos.assinatura_do_video): o mesmo vídeo não volta, nem noutro
+# arquivo (P307). Vazia no vídeo de IA e nos de antes.
 COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia", "mais_produtos", "itens", "capas", "chamada", "marca", "vistas",
                  "links_dos_produtos", "falhas_ao_postar", "outras_capas", "recusadas", "outra_cor", "tirar",
                  "trocado", "comentarios_proprios", "achado", "cor", "itens_do_video", "busca_do_link",
                  "postar_agora_em", "letras", "valor", "edicao", "nova_versao", "versao_de", "no_app_em",
-                 "segundos_da_foto", "video_ia", "aprovado_por", "anuncios")
+                 "segundos_da_foto", "video_ia", "aprovado_por", "anuncios", "assinatura")
 
 
 def _criar_tabela(con):
@@ -1181,22 +1190,26 @@ def ids_usados(agora=None):
             if not (estado == "pulado" and motivo == MOTIVO_EM_ANALISE and (criado_em or "") < hoje)}
 
 
-def onde_os_produtos_foram():
+def onde_os_produtos_foram(agora=None):
     """
-    {itemId: onde} dos produtos que já foram ou vão ao ar: o produto do vídeo dos rascunhos do robô
-    esperando a aprovação, aprovados e postados (o do link e o que foi ao post) e os vídeos do modo
-    assistente marcados com Postei ✅. Os produtos a mais não contam. onde é o rótulo do lugar mais
-    adiantado: o post do robô vale mais que o Postei ✅, que vale mais que o aprovado e o rascunho. (P166 1)
+    {itemId: onde} dos produtos que ainda não voltam: o produto do vídeo dos rascunhos do robô esperando a aprovação e
+    aprovados, o dos postados há menos de DIAS_ENTRE_O_MESMO_PRODUTO dias (o do link e o que foi ao post) e o dos vídeos
+    do modo assistente marcados com Postei ✅ nesses dias. Os produtos a mais não contam. onde é o rótulo do lugar mais
+    adiantado: o post do robô vale mais que o Postei ✅, que vale mais que o aprovado e o rascunho. (P166 1 e P307)
     """
+    desde = (agora_br(agora) - timedelta(days=DIAS_ENTRE_O_MESMO_PRODUTO)).strftime("%Y-%m-%d %H:%M:%S")
     rascunhos = listar("rascunho", "aprovado", "refazer", "postado")
 
     def do_robo(estado):
-        # O editado que o robô refaz no app (P192 1) conta como aprovado.
+        # O editado que o robô refaz no app (P192 1) conta como aprovado. O postado conta pela hora do post (o de antes
+        # da coluna, pela do rascunho).
         estados = (estado, "refazer") if estado == "aprovado" else (estado,)
         return (ONDE_JA_FOI[estado], [item for rascunho in rascunhos if rascunho["estado"] in estados
+                                      and (estado != "postado"
+                                           or (rascunho["postado_em"] or rascunho["criado_em"] or "") >= desde)
                                       for item in _itens_do_post(rascunho)])
 
-    lugares = [do_robo("rascunho"), do_robo("aprovado"), (POSTEI_NO_ASSISTENTE, assistente.itens_postados()),
+    lugares = [do_robo("rascunho"), do_robo("aprovado"), (POSTEI_NO_ASSISTENTE, assistente.itens_postados(desde)),
                do_robo("postado")]
     return {str(item): onde for onde, itens in lugares for item in itens if item}
 
@@ -1206,22 +1219,52 @@ def _itens_do_post(rascunho):
     return list(rascunho["itens_do_video"]) + [item.get("item") for item in rascunho["itens"] if not item.get("a_mais")]
 
 
-def produtos_ja_postados():
-    """Os números (itemId) dos produtos que já foram ou vão ao ar (onde_os_produtos_foram). (P166 1)"""
-    return set(onde_os_produtos_foram())
+def produtos_ja_postados(agora=None):
+    """Os números (itemId) dos produtos que ainda não voltam (onde_os_produtos_foram). (P166 1 e P307)"""
+    return set(onde_os_produtos_foram(agora))
 
 
-def anotar_onde_ja_foi(item, quem):
+def anotar_onde_ja_foi(item, quem, agora=None):
     """
     Anota no registro onde estava o produto do vídeo que ficou de lado por já ter sido postado: só o
     rótulo fixo (ONDE_JA_FOI, o Postei ✅ do assistente ou "em nenhum") e quem deixou o vídeo de lado
     ("robô" ou "assistente"). Nada aqui segura o robô.
     """
     try:
-        onde = onde_os_produtos_foram().get(str(item or ""), EM_NENHUM)
+        onde = onde_os_produtos_foram(agora).get(str(item or ""), EM_NENHUM)
         registro_processos.registrar(REGISTRO, PROCESSO_DO_JA_POSTADO, onde, quem, ok=None)
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Onde estava o produto já postado não foi anotado: {type(e).__name__}")
+
+
+def assinaturas_usadas():
+    """
+    As assinaturas (videos.assinatura_do_video) dos vídeos que o robô e o modo assistente já usaram: os rascunhos do
+    robô, menos os pulados (o vídeo que ficou de lado não foi usado), e os vídeos mandados pelo assistente (P307).
+    """
+    with db.conexao() as con:
+        _criar_tabela(con)
+        do_robo = [linha[0] for linha in con.execute(
+            "SELECT assinatura FROM shopee_video_rascunhos "
+            "WHERE estado != 'pulado' AND COALESCE(assinatura, '') != ''")]
+    return do_robo + assistente.assinaturas_mandadas()
+
+
+def video_ja_usado(assinatura, usadas=None):
+    """Se o vídeo dessa assinatura é o de um vídeo que o robô ou o assistente já usou (videos.mesmo_video; P307)."""
+    if not assinatura:
+        return False
+    usadas = assinaturas_usadas() if usadas is None else usadas
+    return any(videos.mesmo_video(assinatura, outra) for outra in usadas)
+
+
+def assinatura_do(video):
+    """A assinatura da imagem do arquivo do vídeo, ou "" quando ela não sai (o vídeo segue, como antes; P307)."""
+    try:
+        return videos.assinatura_do_video(video["arquivo"]) or ""
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A assinatura do vídeo não saiu: {type(e).__name__}")
+        return ""
 
 
 def item_do_video(video):
@@ -1297,6 +1340,7 @@ PASSOS = (
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("menos que o mínimo por venda", "valor por venda"),
     ("já foi postado", "produto já postado"),
+    ("mesmo vídeo", "mesmo vídeo"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
     ("não devolveu o título", "título da IA"),
@@ -3262,7 +3306,7 @@ def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
     candidatos = list(itertools.islice(_videos_da_fonte(config, evitar, agora), VIDEOS_NA_ESCOLHA))
     if not candidatos:
         return None, SEM_VIDEO_NA_FONTE
-    ja_postados = produtos_ja_postados() if ja_postados is None else ja_postados
+    ja_postados = produtos_ja_postados(agora) if ja_postados is None else ja_postados
     melhores, abaixo = [], []
     for posicao, video in enumerate(candidatos, 1):
         if not video["de_video"]:
@@ -3448,11 +3492,11 @@ ROTULO_DO_VIDEO_DE_IA = "o vídeo foi feito por IA no Google Flow (o vídeo de I
 # O produto do vídeo de IA não depende dos vídeos da fonte (em 15/11, 9 dos próximos 10 do Viral eram de link de
 # vídeo, sem produto para escolher, e o dia ficou sem vídeo de IA). O robô pede à API de afiliado os produtos em
 # alta (ofertas_para_o_video_de_ia: os 100 primeiros); fica com os de nota NOTA_MINIMA_DO_VIDEO_DE_IA ou mais, que
-# pagam pelo menos MINIMO_POR_VENDA por venda e nunca postados (P166 1), e vai do que paga mais por venda para o que
-# paga menos, até a IA achar a foto do anúncio boa para o vídeo. Sem a lista dos produtos em alta (a API nega, ou
-# ela vem vazia), os mais vendidos das palavras-chave dos nichos dos Achadinhos. O produto que já teve um vídeo
-# gerado e o de foto que a IA recusou não voltam à escolha (flow.itens_gerados e flow.fotos_recusadas): a lista
-# muda pouco de um dia para o outro, e sem isso o mesmo produto seria o 1º todo dia.
+# pagam pelo menos MINIMO_POR_VENDA por venda e não foram postados nos últimos 7 dias (P307), e vai do que paga mais
+# por venda para o que paga menos, até a IA achar a foto do anúncio boa para o vídeo. Sem a lista dos produtos em alta
+# (a API nega, ou ela vem vazia), os mais vendidos das palavras-chave dos nichos dos Achadinhos. O produto que já teve
+# um vídeo gerado e o de foto que a IA recusou não voltam à escolha (flow.itens_gerados e flow.fotos_recusadas): a
+# lista muda pouco de um dia para o outro, e sem isso o mesmo produto seria o 1º todo dia.
 # Escolha do Rafael (15/11/2026, P234 1): DECISOES.md, Shopee Vídeo.
 NOTA_MINIMA_DO_VIDEO_DE_IA = 4.5
 ORIGEM_EM_ALTA = "os produtos em alta da Shopee"
@@ -3643,9 +3687,9 @@ def candidatos_do_video_de_ia(ofertas, ja_postados, fora=()):
     """
     (os produtos das ofertas que servem para o vídeo de IA, as contagens da peneira) (P234 1). Servem os de nota
     NOTA_MINIMA_DO_VIDEO_DE_IA ou mais, que pagam pelo menos MINIMO_POR_VENDA por venda (o preço "a partir de" vezes a
-    comissão), nunca postados (ja_postados, P166 1) e fora dos que já tiveram um vídeo gerado ou a foto recusada
-    (fora): [{item, link, nome, imagem, valor, vendas}], do que paga mais por venda para o que paga menos (no empate,
-    o que vende mais). As contagens ({"lista", "nota", "minimo", "novos"}, cada uma dentro da anterior) vão ao
+    comissão), não postados nos últimos 7 dias (ja_postados, P307) e fora dos que já tiveram um vídeo gerado ou a foto
+    recusada (fora): [{item, link, nome, imagem, valor, vendas}], do que paga mais por venda para o que paga menos (no
+    empate, o que vende mais). As contagens ({"lista", "nota", "minimo", "novos"}, cada uma dentro da anterior) vão ao
     registro.
     """
     fora = set(ja_postados) | set(fora)
@@ -3747,7 +3791,7 @@ def escolher_para_o_video_de_ia(agora=None, fora=(), amostra=False, longo=True, 
     TV (P268 1), a amostra.
     """
     ofertas, origem = ofertas_para_o_video_de_ia(agora)
-    bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(),
+    bons, contagem = candidatos_do_video_de_ia(ofertas, produtos_ja_postados(agora),
                                                flow.itens_gerados() + flow.fotos_recusadas() + list(fora))
     filtros = filtros_do_video_de_ia()
     canais, sem_seguir = _canais_do_espiao(agora) if bons else ({}, 0)
@@ -4102,7 +4146,7 @@ def video_de_ia_para_o_rascunho(evitar=(), ja_postados=None):
     """
     O vídeo de IA do dia pronto (P232 1) no jeito de um vídeo da fonte, para o preparar_rascunho: o arquivo é o do
     Flow, e o link, o do produto escolhido; "video_ia" leva o andamento. None sem ele, com ele de lado hoje (evitar:
-    as tentativas do horário acabaram) ou com o produto já postado (P166 1: ele sai).
+    as tentativas do horário acabaram) ou com o produto postado nos últimos 7 dias (P307: ele sai).
     """
     atual = flow.video_pronto()
     if not atual or atual.get("id_video") in set(evitar):
@@ -4206,7 +4250,7 @@ def preparar_rascunho(d, config, agora=None, de=None):
     de (o Preparar 1 Agora ⚡, P243): "fonte" fica só com os vídeos da fonte; "ia", só com o vídeo de IA pronto.
     """
     evitar = evitar_hoje(config, agora)
-    ja_postados = produtos_ja_postados()
+    ja_postados = produtos_ja_postados(agora)
     # Desligado no painel, o vídeo de IA pronto espera o Rafael ligar de novo; o De IA ✨ do botão o usa mesmo assim.
     usa_o_de_ia = de == "ia" or (de is None and video_de_ia_ligado(config))
     do_flow = video_de_ia_para_o_rascunho(evitar, ja_postados) if usa_o_de_ia else None
@@ -4221,27 +4265,35 @@ def preparar_rascunho(d, config, agora=None, de=None):
         if not video:
             registrar_tentativa("rascunho", "sem vídeo", sem_video, agora=agora)
             return sem_video
+        # O vídeo que o robô ou o assistente já usou não volta, nem noutro arquivo (P307).
+        video["assinatura"] = assinatura_do(video)
+        if video_ja_usado(video["assinatura"]):
+            motivo = MESMO_VIDEO
         # No link de vídeo, os produtos vêm do Ver Produtos, no celular.
-        if video["de_video"]:
+        elif video["de_video"]:
             break
-        motivo = SEM_OFERTA
-        if ps.nome_do_produto(video):
-            # O produto do link que já foi ao ar não se repete (P166 1).
-            video["item_do_link"] = item_do_video(video)
-            if video["item_do_link"] not in ja_postados:
-                break
-            motivo = PRODUTO_JA_POSTADO
-            anotar_onde_ja_foi(video["item_do_link"], "robô")
+        else:
+            motivo = SEM_OFERTA
+            if ps.nome_do_produto(video):
+                # O produto do link que foi ao ar há menos de 7 dias ainda não volta (P307).
+                video["item_do_link"] = item_do_video(video)
+                if video["item_do_link"] not in ja_postados:
+                    break
+                motivo = PRODUTO_JA_POSTADO
+                anotar_onde_ja_foi(video["item_do_link"], "robô", agora)
         atualizar(criar(video["id"], agora), estado="pulado", motivo=motivo)
         registrar_tentativa("rascunho", "pulado", motivo, agora=agora, video=video["id"])
     else:
         # Sem o vídeo de IA, as voltas acabaram sem nenhum vídeo bom da fonte.
         if not do_flow:
             resultado = (f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de "
-                         "afiliado ou já postados")
+                         "afiliado ou já postados, ou vídeos já usados")
             registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
             return resultado
     ident = criar(video["id"], agora)
+    if video.get("assinatura"):
+        # A assinatura da imagem do vídeo: o mesmo vídeo não volta, nem noutro arquivo (P307).
+        atualizar(ident, assinatura=video["assinatura"])
     if video.get("valor") is not None:
         # O que o produto do link paga por venda, para a medição da escolha (P194 1).
         atualizar(ident, valor=f"{video['valor']:.2f}")
@@ -6942,10 +6994,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         do_ver_produtos = trocar_os_do_ver_produtos(d, video, nomes, fotos_da_pagina, vistos, curtidos, prazo,
                                                     {nome for nome, _foto in variacoes})
         nomes = [p["nome"] for p in do_ver_produtos]
-        # O 1º produto (o que dá a foto da edição) que já foi ao ar não se repete (P166 1).
+        # O 1º produto (o que dá a foto da edição) que foi ao ar há menos de 7 dias ainda não volta (P307).
         atualizar(ident, itens_do_video=[p["item"] for p in do_ver_produtos if p.get("do_video") and p.get("item")])
-        if do_ver_produtos and do_ver_produtos[0].get("item") in produtos_ja_postados():
-            anotar_onde_ja_foi(do_ver_produtos[0]["item"], "robô")
+        if do_ver_produtos and do_ver_produtos[0].get("item") in produtos_ja_postados(agora):
+            anotar_onde_ja_foi(do_ver_produtos[0]["item"], "robô", agora)
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         # O mínimo por venda, que só o celular deixa ver no vídeo de link de vídeo (P200 1).
         conferir_o_minimo_do_ver_produtos(do_ver_produtos)
@@ -7025,10 +7077,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                      "comissao": troca["comissao"] if troca else original.get("comissao", 0)}
         principal["valor"] = valor_por_venda(principal["preco"], principal["comissao"])
         principal["item"] = item_do_link(video["link"])
-        # O produto que vai ao post (o da troca ou o achado pela IA) também não pode já ter ido (P166 1).
+        # O produto que vai ao post (o da troca ou o achado pela IA) também não pode ter ido há menos de 7 dias (P307).
         atualizar(ident, itens_do_video=[i for i in dict.fromkeys((video.get("item_do_link"), principal["item"])) if i])
-        if principal["item"] and principal["item"] in produtos_ja_postados():
-            anotar_onde_ja_foi(principal["item"], "robô")
+        if principal["item"] and principal["item"] in produtos_ja_postados(agora):
+            anotar_onde_ja_foi(principal["item"], "robô", agora)
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.

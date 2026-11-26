@@ -104,11 +104,15 @@ SEM_EDICAO = "vídeo de lado: a edição não saiu (só vídeo editado vai)"
 # celular, o assistente não tem a foto do anúncio para a edição. Fica de lado, como o que não
 # sai editado, mas não é falha: o robô, com o celular, acha os produtos do Ver Produtos.
 SEM_PRODUTO_NO_LINK = "vídeo de lado: o link não diz o produto (link de vídeo ou sem oferta), sem a foto para a edição"
-# O produto que já foi ao ar não se repete: o do vídeo, pelo número do anúncio, conferido como o
-# robô confere (os rascunhos dele que esperam a aprovação, os aprovados e os postados, e os vídeos
-# daqui marcados com Postei ✅). Fica de lado, sem gastar a edição nem a IA, e vai o próximo da
-# fonte. Escolha do Rafael (06/11, P167 1): DECISOES.md, Shopee Vídeo.
-JA_POSTADO = "vídeo de lado: o produto já foi postado (pelo robô ou marcado com Postei ✅)"
+# O produto que foi ao ar há menos de 7 dias, ou que vai, ainda não volta: o do vídeo, pelo número do anúncio,
+# conferido como o robô confere (os rascunhos dele que esperam a aprovação e os aprovados, os postados nos últimos 7
+# dias e os vídeos daqui marcados com Postei ✅ nesses dias). Fica de lado, sem gastar a edição nem a IA, e vai o
+# próximo da fonte. Passados os 7 dias, o produto volta em outro vídeo; o mesmo vídeo, nunca (MESMO_VIDEO). Escolhas
+# do Rafael (06/11, P167 1; 26/11/2026, P307): DECISOES.md, Shopee Vídeo.
+JA_POSTADO = "vídeo de lado: o produto já foi postado há menos de 7 dias (pelo robô ou marcado com Postei ✅)"
+# O vídeo que o robô ou o assistente já usou fica de lado, também noutro arquivo (a assinatura da imagem,
+# videos.assinatura_do_video), aqui e no grupo dos amigos (cada vídeo vai a uma pessoa só) (P307).
+MESMO_VIDEO = "vídeo de lado: o mesmo vídeo já foi usado (pelo robô ou pelo assistente)"
 SEM_TEXTO_DA_IA = "a IA não gerou o texto; o vídeo foi pulado"
 VIOLACAO = "vídeo pulado por possível violação das diretrizes"
 
@@ -229,9 +233,11 @@ def decidir_envio(config, agora=None):
 # As colunas que vieram depois entram na tabela que já existe no servidor. cobrindo: "1" no vídeo
 # mandado enquanto o robô estava pausado sozinho, sem o celular (o assistente cobrindo o robô);
 # postado_em: quando o Rafael tocou em Postei ✅ nele (P156 1). item: o número (itemId) do produto do
-# vídeo mandado: o robô não repete o produto que o Rafael postou (P166 1). amigo: o id do Telegram do amigo que
-# recebeu o vídeo no grupo dos amigos (P271 2): o produto não volta para ele (amigos_shopee_video).
-COLUNAS_NOVAS = ("cobrindo", "postado_em", "item", "amigo")
+# vídeo mandado: o robô não repete nos 7 dias o produto que o Rafael postou (P307). amigo: o id do Telegram do amigo
+# que recebeu o vídeo no grupo dos amigos (P271 2): o produto não volta para ele (amigos_shopee_video). assinatura: a
+# assinatura da imagem do vídeo mandado (videos.assinatura_do_video): o mesmo vídeo não volta, nem noutro arquivo
+# (P307).
+COLUNAS_NOVAS = ("cobrindo", "postado_em", "item", "amigo", "assinatura")
 
 
 def _criar_tabela(con):
@@ -337,13 +343,14 @@ def proximo_video(fonte=FONTE_PADRAO, pular=()):
     return None
 
 
-def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item="", amigo=""):
+def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item="", amigo="", assinatura=""):
     momento = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
     with db.conexao() as con:
         _criar_tabela(con)
         con.execute("INSERT OR REPLACE INTO shopee_video_enviados (id_unico, enviado_em, status, motivo, cobrindo, "
-                    "item, amigo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (id_unico, momento, status, motivo, "1" if cobrindo else "", item, str(amigo or "")))
+                    "item, amigo, assinatura) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (id_unico, momento, status, motivo, "1" if cobrindo else "", item, str(amigo or ""),
+                     assinatura or ""))
 
 
 def itens_do_amigo(amigo):
@@ -355,26 +362,37 @@ def itens_do_amigo(amigo):
             "AND COALESCE(item, '') != ''", (str(amigo),))}
 
 
-def produtos_ja_postados():
-    """Os números (itemId) dos produtos que já foram ao ar, os mesmos que o robô confere (P166 1 e P167 1)."""
+def produtos_ja_postados(agora=None):
+    """Os números (itemId) dos produtos que ainda não voltam, os mesmos que o robô confere (P167 1 e P307)."""
     # O robô importa este módulo: o import fica aqui dentro.
     import robo_shopee_video
-    return robo_shopee_video.produtos_ja_postados()
+    return robo_shopee_video.produtos_ja_postados(agora)
 
 
-def _anotar_onde_ja_foi(item):
+def _anotar_onde_ja_foi(item, agora=None):
     """O registro diz onde estava o produto do vídeo deixado de lado, como no robô (P167 1)."""
     import robo_shopee_video
-    robo_shopee_video.anotar_onde_ja_foi(item, "assistente")
+    robo_shopee_video.anotar_onde_ja_foi(item, "assistente", agora)
 
 
-def itens_postados():
-    """Os números (itemId) dos produtos dos vídeos mandados que o Rafael marcou com Postei ✅ (P166 1)."""
+def itens_postados(desde=""):
+    """
+    Os números (itemId) dos produtos dos vídeos mandados que o Rafael marcou com Postei ✅ (P166 1); com desde
+    (AAAA-MM-DD HH:MM:SS), só os marcados dali em diante (os 7 dias da P307).
+    """
     with db.conexao() as con:
         _criar_tabela(con)
         return [linha[0] for linha in con.execute(
             "SELECT item FROM shopee_video_enviados WHERE status = 'enviado' AND COALESCE(postado_em, '') != '' "
-            "AND COALESCE(item, '') != ''")]
+            "AND COALESCE(item, '') != '' AND postado_em >= ?", (desde or "",))]
+
+
+def assinaturas_mandadas():
+    """As assinaturas da imagem dos vídeos mandados, ao Rafael e aos amigos (P307)."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return [linha[0] for linha in con.execute(
+            "SELECT assinatura FROM shopee_video_enviados WHERE status = 'enviado' AND COALESCE(assinatura, '') != ''")]
 
 
 # O botão Postei ✅ de cada vídeo mandado: o Rafael toca depois de postar. O vídeo mandado com o
@@ -1034,12 +1052,12 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobri
             raise
         # As frases do resultado são fixas (_preparar_e_enviar).
         registro_processos.registrar("shopee_video", "assistente: envio", resultado,
-                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO)
+                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO, MESMO_VIDEO)
                                      else resultado == MANDADO_NO_PRIVADO)
-        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO):
+        if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO, MESMO_VIDEO):
             return resultado
-    return (f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos deu para mandar (só vai o vídeo editado e de produto que "
-            "ainda não foi ao ar); tento de novo no próximo horário")
+    return (f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos deu para mandar (só vai o vídeo editado, de produto que "
+            "não foi ao ar nos últimos 7 dias, e nunca um vídeo já usado); tento de novo no próximo horário")
 
 
 # O grupo dos amigos (amigos_shopee_video.py): cada vídeo vai a uma pessoa só, no grupo, em resposta ao pedido dela,
@@ -1056,7 +1074,7 @@ NENHUM_PARA_O_AMIGO = "nenhum dos próximos vídeos deu para mandar ao amigo"
 JA_RECEBIDOS_POR_PEDIDO = 30
 # O que fica de lado pelo próprio vídeo: o próximo vai no lugar, no mesmo pedido. A IA sem resposta para o pedido
 # (o próximo vídeo também ficaria sem o texto, e cada um que passa sai da fonte).
-DE_LADO = (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, VIOLACAO, JA_COM_OUTRO)
+DE_LADO = (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, VIOLACAO, JA_COM_OUTRO, MESMO_VIDEO)
 
 
 async def preparar_para_o_amigo(bot, admin_id, amigo, agora=None, fonte=FONTE_PADRAO):
@@ -1084,7 +1102,7 @@ async def preparar_para_o_amigo(bot, admin_id, amigo, agora=None, fonte=FONTE_PA
             continue
         tentativas += 1
         registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, resultado,
-                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA)
+                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, MESMO_VIDEO)
                                      else resultado == MANDADO_AO_AMIGO)
         if resultado not in DE_LADO:
             return resultado
@@ -1139,11 +1157,16 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         # O produto que o amigo já recebeu fica para os outros: o vídeo não é anotado e continua na fonte (P271 2).
         if item and item in itens_do_amigo(dono):
             return JA_RECEBIDO
-    elif item and item in produtos_ja_postados():
-        # O produto já postado fica de lado antes da edição e da IA (P167 1).
+    elif item and item in produtos_ja_postados(agora):
+        # O produto postado nos últimos 7 dias fica de lado antes da edição e da IA (P167 1 e P307).
         registrar(video["id"], "ja_postado", JA_POSTADO, agora, item=item)
-        _anotar_onde_ja_foi(item)
+        _anotar_onde_ja_foi(item, agora)
         return JA_POSTADO
+    # O vídeo que o robô ou o assistente já usou não volta, nem noutro arquivo, para ninguém (P307).
+    assinatura = await asyncio.to_thread(_assinatura_do, video)
+    if _video_ja_usado(assinatura):
+        registrar(video["id"], "mesmo_video", MESMO_VIDEO, agora, amigo=dono)
+        return MESMO_VIDEO
     arquivo = video["arquivo"]
     if pasta and _edicao_ligada(fonte):
         if not produtos:
@@ -1196,7 +1219,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
             return JA_COM_OUTRO
         await _mandar_ao_amigo(bot, amigo, arquivo, montar_mensagem(textos, produtos, do_grupo, mudo, nomes=nomes,
                                                                     amigo=amigo["mencao"], mais=mais_do_grupo))
-        registrar(video["id"], "enviado", "", agora, item=item, amigo=dono)
+        registrar(video["id"], "enviado", "", agora, item=item, amigo=dono, assinatura=assinatura)
         return MANDADO_AO_AMIGO
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
@@ -1204,7 +1227,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
                              mais=await com_os_links(mais, api_shopee.ETIQUETA_SHOPEE_VIDEO))
     await bot.send_message(admin_id, passos, parse_mode="HTML", disable_web_page_preview=True,
                            reply_markup=botao_postei(video["id"]))
-    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo, item=item)
+    registrar(video["id"], "enviado", "", agora, cobrindo=cobrindo, item=item, assinatura=assinatura)
     if no_grupo:
         # O pedido do Rafael no grupo dos amigos: o mesmo vídeo vai ao grupo, em resposta ao pedido, com os passos sem
         # o Postei ✅, que fica no privado (P281 1).
@@ -1228,6 +1251,18 @@ async def link_para_o_grupo(link):
     Pedido do Rafael (22/11): DECISOES.md, Shopee Vídeo.
     """
     return await api_shopee.converter_link_shopee(link, api_shopee.ETIQUETA_GRUPO_DOS_AMIGOS)
+
+
+def _assinatura_do(video):
+    """A assinatura da imagem do vídeo, como no robô (robo_shopee_video.assinatura_do; P307)."""
+    import robo_shopee_video
+    return robo_shopee_video.assinatura_do(video)
+
+
+def _video_ja_usado(assinatura):
+    """Se o vídeo é o de um que o robô ou o assistente já usou (robo_shopee_video.video_ja_usado; P307)."""
+    import robo_shopee_video
+    return robo_shopee_video.video_ja_usado(assinatura)
 
 
 def _ja_mandado(id_unico):

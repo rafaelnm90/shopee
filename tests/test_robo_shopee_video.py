@@ -1817,9 +1817,9 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
 
 
 def test_video_de_produto_ja_postado_fica_de_lado_e_o_proximo_vira_rascunho(monkeypatch, avisos):
-    # Escolha do Rafael (06/11, P166 1): o mesmo produto não se repete. O vídeo do produto que o robô
-    # (ou o assistente, com Postei) já postou fica de lado antes do rascunho, sem gastar a IA nem o
-    # celular, e o próximo da fonte vira rascunho.
+    # Escolha do Rafael (26/11/2026, P307, no lugar da P166 1): o produto postado há menos de 7 dias não volta ainda.
+    # O vídeo do produto que o robô (ou o assistente, com Postei) postou fica de lado antes do rascunho, sem gastar a
+    # IA nem o celular, e o próximo da fonte vira rascunho.
     _fonte(monkeypatch)
     with open("archive/copo.mp4", "wb") as f:
         f.write(b"video")
@@ -1865,29 +1865,99 @@ def test_produto_da_troca_ja_postado_deixa_o_video_de_lado(monkeypatch, avisos):
 
 
 def test_produtos_ja_postados_pelo_robo_e_pelo_assistente():
-    # Contam os rascunhos esperando, aprovados e postados (o produto do vídeo, nunca os a mais) e os
-    # vídeos do assistente marcados com Postei ✅.
+    # Contam os rascunhos esperando e aprovados, os postados nos últimos 7 dias (o produto do vídeo, nunca os a mais) e
+    # os vídeos do assistente marcados com Postei ✅ nesses dias (P307). O postado de antes da coluna postado_em conta
+    # pela hora do rascunho.
+    agora = momento("2026-11-06 12:00")
     _rascunho("rascunho", itens_do_video=["10", "11"])
     _rascunho("aprovado", itens=[{"item": "20", "a_mais": False}, {"item": "21", "a_mais": True}])
-    _rascunho("postado", itens=[{"item": "30", "a_mais": False}], itens_do_video=["31"])
+    _rascunho("postado", postado_em="2026-11-01 10:00:00", itens=[{"item": "30", "a_mais": False}],
+              itens_do_video=["31"])
+    _rascunho("postado", postado_em="2026-10-30 11:59:00", itens_do_video=["32"])      # há mais de 7 dias
+    _rascunho("postado", criado="2026-10-31 08:00:00", itens_do_video=["33"])          # sem a hora do post
+    _rascunho("postado", itens_do_video=["34"])                                        # rascunho de 22/10
     _rascunho("recusado", itens_do_video=["40"])
     _rascunho("pulado", itens_do_video=["50"])
     robo.assistente.registrar("v1", "enviado", "", agora=momento("2026-11-05 10:00"), item="60")
     assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v1"), momento("2026-11-05 11:00"))[0] == "marcado"
     robo.assistente.registrar("v2", "enviado", "", agora=momento("2026-11-05 10:00"), item="70")   # sem o Postei
-    assert robo.produtos_ja_postados() == {"10", "11", "20", "30", "31", "60"}
+    robo.assistente.registrar("v4", "enviado", "", agora=momento("2026-10-28 10:00"), item="61")
+    assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v4"), momento("2026-10-28 11:00"))[0] == "marcado"
+    assert robo.produtos_ja_postados(agora) == {"10", "11", "20", "30", "31", "33", "60"}
+    # Passados 7 dias do último post, o produto volta (em outro vídeo); o que espera a aprovação, nunca.
+    assert robo.produtos_ja_postados(momento("2026-11-12 12:00")) == {"10", "11", "20"}
     # Onde estava cada um: o lugar mais adiantado (o post do robô vale mais que o Postei ✅, que vale
     # mais que o aprovado e o rascunho).
-    _rascunho("postado", itens_do_video=["10"])
+    _rascunho("postado", postado_em="2026-11-02 10:00:00", itens_do_video=["10"])
     robo.assistente.registrar("v3", "enviado", "", agora=momento("2026-11-05 10:00"), item="20")
     assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v3"), momento("2026-11-05 11:00"))[0] == "marcado"
-    onde = robo.onde_os_produtos_foram()
+    onde = robo.onde_os_produtos_foram(agora)
     assert onde == {"10": robo.ONDE_JA_FOI["postado"], "11": robo.ONDE_JA_FOI["rascunho"],
                     "20": robo.POSTEI_NO_ASSISTENTE, "30": robo.ONDE_JA_FOI["postado"],
-                    "31": robo.ONDE_JA_FOI["postado"], "60": robo.POSTEI_NO_ASSISTENTE}
-    robo.anotar_onde_ja_foi("99", "robô")
+                    "31": robo.ONDE_JA_FOI["postado"], "33": robo.ONDE_JA_FOI["postado"],
+                    "60": robo.POSTEI_NO_ASSISTENTE}
+    robo.anotar_onde_ja_foi("99", "robô", agora)
     assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DO_JA_POSTADO) == (robo.EM_NENHUM,)
+
+
+def test_produto_postado_ha_7_dias_volta_em_outro_video(monkeypatch, avisos):
+    # P307: o produto que foi ao ar há 7 dias ou mais volta em outro vídeo, quantas vezes for; a 6 dias, ainda não.
+    _fonte(monkeypatch)
+    with open("archive/copo.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "b2", "archive/copo.mp4",
+            "Copo 🥤\nhttps://s.shopee.com.br/repetido", "2026-10-22 10:00:00")
+
+    async def produtos_do_link(link):
+        return [{"nome": VESTIDO, "preco": 59.9, "comissao": 10.0, "item": "555" if "repetido" in link else "2"}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    _rascunho("postado", postado_em="2026-10-16 10:00:00", itens=[{"item": "555", "a_mais": False}])
+    _rascunho("postado", postado_em="2026-10-10 09:00:00", itens=[{"item": "555", "a_mais": False}])
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+    # A 6 dias do último post, o vídeo do copo fica de lado.
+    assert "555" in robo.produtos_ja_postados(momento("2026-10-22 09:59"))
+    # A 7 dias, o vídeo do copo (o mais novo da fonte) vira o rascunho, sem nada de lado.
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-23 10:01")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["id_video"] == "b2" and robo.listar("pulado") == []
+
+
+def test_o_mesmo_video_nunca_volta_nem_noutro_arquivo(monkeypatch, avisos):
+    # P307: o mesmo produto pode voltar, mas o mesmo vídeo nunca. O vídeo que já virou rascunho (aqui, postado com
+    # outro id na fonte) fica de lado pela assinatura da imagem, mesmo noutro arquivo, e vai o próximo da fonte.
+    _fonte(monkeypatch)
+    with open("archive/copo.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "b2", "archive/copo.mp4",
+            "Copo 🥤\nhttps://s.shopee.com.br/copo", "2026-10-22 10:00:00")
+    copo, vestido = "12.0;" + ";".join(["f0f0f0f0f0f0f0f0"] * 4), "30.0;" + ";".join(["0f0f0f0f0f0f0f0f"] * 4)
+    assinaturas = {"copo.mp4": copo, "vestido.mp4": vestido}
+    monkeypatch.setattr(robo.videos, "assinatura_do_video", lambda arquivo: assinaturas[os.path.basename(arquivo)])
+    # O mesmo copo, já postado com outro arquivo (o desenho muda em poucos pontos), e um pulado que não conta.
+    _rascunho("postado", postado_em="2026-10-01 10:00:00", assinatura="12.4;" + ";".join(["f0f0f0f0f0f0f0f1"] * 4))
+    _rascunho("pulado", assinatura=vestido)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["id_video"] == "a1" and robo.pegar(rascunho["id"])["assinatura"] == vestido
+    pulado = [r for r in robo.listar("pulado") if r["id_video"] == "b2"]
+    assert [r["motivo"] for r in pulado] == [robo.MESMO_VIDEO]
+    assert robo.passo_do_motivo(robo.MESMO_VIDEO) == "mesmo vídeo"
+    assert not any("Copo" in str(a) for a in avisos)                 # o robô nem começou o do copo
+    # O vídeo do rascunho novo também não volta, nem pelo assistente.
+    assert robo.video_ja_usado(vestido) and not robo.video_ja_usado("") and not robo.video_ja_usado(None)
+
+
+def test_assinatura_que_nao_sai_deixa_o_video_seguir(monkeypatch):
+    # Sem a assinatura (o ffmpeg falhou), o vídeo segue como antes: nada fica de lado por ela.
+    def falha(arquivo):
+        raise OSError("sem ffmpeg")
+
+    monkeypatch.setattr(robo.videos, "assinatura_do_video", falha)
+    assert robo.assinatura_do({"arquivo": "x.mp4"}) == ""
+    monkeypatch.setattr(robo.videos, "assinatura_do_video", lambda arquivo: None)
+    assert robo.assinatura_do({"arquivo": "x.mp4"}) == ""
 
 
 def _editar_para_postar(chamadas, respostas=None, capa=None, rotulos=None, cor="", letras=None, refazer=None):
@@ -2936,7 +3006,8 @@ def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, a
     monkeypatch.setattr(robo, "VIDEOS_SEM_OFERTA_POR_RODADA", 1)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     resultado = robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
-    assert resultado == "os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado ou já postados"
+    assert resultado == ("os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado ou já postados, ou vídeos "
+                         "já usados")
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
 
 

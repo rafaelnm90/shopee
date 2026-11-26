@@ -559,6 +559,50 @@ def test_produto_ja_postado_fica_de_lado_e_vai_o_proximo_da_fonte(monkeypatch):
     assert asv.proximo_video() is None
 
 
+def test_produto_postado_ha_7_dias_volta_no_assistente(monkeypatch):
+    # P307: o produto marcado com Postei ✅ há 7 dias ou mais volta em outro vídeo; a 6 dias, ainda não.
+    from datetime import datetime
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+
+    async def produtos(link):
+        return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g",
+                 "item": "22"}], link
+
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    _fila(("repetido", LEGENDA, "archive/repetido.mp4", "2026-10-02 11:00"))
+    asv.registrar("antes", "enviado", "", datetime(2026, 11, 1, 10, 0, tzinfo=asv.fuso_horario), item="22")
+    asv.marcar_postado(asv.chave_do_envio("antes"), datetime(2026, 11, 1, 10, 0, tzinfo=asv.fuso_horario))
+    assert asv.produtos_ja_postados(datetime(2026, 11, 7, 10, 0, tzinfo=asv.fuso_horario)) == {"22"}
+    agora = datetime(2026, 11, 8, 10, 1, tzinfo=asv.fuso_horario)
+    assert rodar(asv.preparar_e_enviar(bot, 42, agora)) == "postagem mandada no seu privado"
+    assert set(ias) == {"archive/repetido.mp4"} and len(conteudos) == 1
+
+
+def test_o_mesmo_video_nunca_vai_de_novo_nem_noutro_arquivo(monkeypatch):
+    # P307: o vídeo que o robô ou o assistente já usou fica de lado pela assinatura da imagem, mesmo noutro arquivo e
+    # com outro id na fonte, e vai o próximo; o mandado guarda a dele.
+    import robo_shopee_video as robo
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+    copo, garrafa = "12.0;" + ";".join(["f0f0f0f0f0f0f0f0"] * 4), "30.0;" + ";".join(["0f0f0f0f0f0f0f0f"] * 4)
+    assinaturas = {"copia.mp4": copo, "novo.mp4": garrafa}
+    monkeypatch.setattr(robo.videos, "assinatura_do_video", lambda arquivo: assinaturas[os.path.basename(arquivo)])
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 09:00"),
+          ("copia", LEGENDA, "archive/copia.mp4", "2026-10-02 11:00"))
+    postado = robo.criar("video:9", None)
+    robo.atualizar(postado, estado="postado", assinatura=copo)
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert set(ias) == {"archive/novo.mp4"} and len(conteudos) == 1
+    assert consultar("SELECT status, motivo FROM shopee_video_enviados WHERE id_unico = 'copia'") == (
+        "mesmo_video", asv.MESMO_VIDEO)
+    assert consultar("SELECT assinatura FROM shopee_video_enviados WHERE id_unico = 'novo'") == (garrafa,)
+    assert consultar("SELECT COUNT(*), MAX(ok) FROM registro_processos WHERE processo = 'assistente: envio' "
+                     "AND resultado = ?", asv.MESMO_VIDEO) == (1, None)
+    # O mandado aqui também não volta para o robô.
+    assert asv.assinaturas_mandadas() == [garrafa] and robo.video_ja_usado(garrafa)
+
+
 def test_nenhum_editado_avisa_sem_mandar_nada(monkeypatch):
     conteudos, ias = [], []
     bot = _com_edicao(monkeypatch, conteudos, ias)
@@ -893,6 +937,8 @@ def test_video_mandado_guarda_o_produto_e_o_postei_o_conta_como_postado():
     assert asv.marcar_postado(asv.chave_do_envio("v1"), agora)[0] == asv.MARCADO
     assert asv.marcar_postado(asv.chave_do_envio("v3"), agora)[0] == asv.MARCADO
     assert asv.itens_postados() == ["123"]
+    # Com desde, só os marcados dali em diante: os 7 dias em que o produto não volta (P307).
+    assert asv.itens_postados("2026-11-05 10:00:00") == ["123"] and asv.itens_postados("2026-11-05 10:00:01") == []
 
 
 # --- O nome de cada produto no vídeo (P265 1) ---
@@ -1232,6 +1278,20 @@ def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):
     outro = {**AMIGO, "id": 8, "mencao": "@outro"}
     assert rodar(asv.preparar_para_o_amigo(BotDoGrupo(), 42, outro, _as("14:10"))) == asv.MANDADO_AO_AMIGO
     assert consultar("SELECT amigo FROM shopee_video_enviados WHERE id_unico = 'novo'") == ("8",)
+
+
+def test_o_mesmo_video_nao_vai_ao_amigo(monkeypatch):
+    # P307: cada vídeo vai a uma pessoa só, também noutro arquivo: o vídeo que o Rafael já recebeu fica de lado pela
+    # assinatura, e vai o próximo da fonte ao amigo, com a assinatura dele guardada.
+    import robo_shopee_video as robo
+    _preparar_do_amigo(monkeypatch)
+    usado, outro = "12.0;" + ";".join(["f0f0f0f0f0f0f0f0"] * 4), "30.0;" + ";".join(["0f0f0f0f0f0f0f0f"] * 4)
+    assinaturas = {"novo.mp4": usado, "velho.mp4": outro}
+    monkeypatch.setattr(robo.videos, "assinatura_do_video", lambda arquivo: assinaturas[os.path.basename(arquivo)])
+    asv.registrar("do_rafael", "enviado", "", _as("09:00"), item="99", assinatura=usado)
+    assert rodar(asv.preparar_para_o_amigo(BotDoGrupo(), 42, AMIGO, _as("14:00"))) == asv.MANDADO_AO_AMIGO
+    assert consultar("SELECT status FROM shopee_video_enviados WHERE id_unico = 'novo'") == ("mesmo_video",)
+    assert consultar("SELECT amigo, assinatura FROM shopee_video_enviados WHERE id_unico = 'velho'") == ("7", outro)
 
 
 def test_amigo_sem_video_na_fonte_e_com_a_ia_sem_resposta(monkeypatch):
