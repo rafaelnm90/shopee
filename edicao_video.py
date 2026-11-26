@@ -428,15 +428,23 @@ VERMELHO_DO_DESTAQUE = (214, 24, 38)
 # vermelho do destaque, e a mãozinha, amarela. No produto de várias cores, a principal é a que mais aparece
 # nele (P179 1). O produto vermelho (para a chamada final continuar se destacando) e o vídeo sem a
 # cor da IA ficam com as cores de sempre, como o "colorido", que a IA não deve mais dizer. Cada
-# nome tem um tom fixo, para o vídeo não sair com um tom estranho; o preto é um grafite, para a
-# faixa aparecer no fundo preto da capa. Escolhas do Rafael (06/11, P159 2, e 08/11, P179 1):
-# DECISOES.md, Shopee Vídeo.
+# nome tem um tom fixo, para o vídeo não sair com um tom estranho; o preto é um cinza bem escuro, para a
+# faixa aparecer no preto. São 35 tons, do claro ao escuro de cada cor (o rosa-bebê, o
+# rosa e o pink; o cinza-claro, o cinza e o grafite), e a IA diz o mais parecido com o do produto (P304 1);
+# os nomes de antes continuam com o tom de antes, como o rascunho os guarda (nome_da_cor). Escolhas do
+# Rafael (06/11, P159 2; 08/11, P179 1; 26/11, P304 1): DECISOES.md, Shopee Vídeo.
 CORES_DO_PRODUTO = {
-    "preto": (45, 45, 45), "branco": (245, 245, 245), "cinza": (120, 120, 120), "prata": (180, 184, 190),
-    "azul": (30, 90, 210), "azul-claro": (80, 170, 235), "azul-marinho": (25, 45, 105), "verde": (35, 150, 75),
-    "verde-claro": (130, 205, 95), "amarelo": (250, 205, 35), "dourado": (205, 165, 65),
-    "laranja": LARANJA_DA_SHOPEE, "rosa": (230, 90, 150), "roxo": (125, 65, 175), "lilás": (185, 145, 225),
-    "marrom": (115, 75, 45), "bege": (220, 195, 155),
+    "preto": (45, 45, 45), "grafite": (66, 68, 72), "cinza": (120, 120, 120), "prata": (180, 184, 190),
+    "cinza-claro": (205, 206, 209), "branco": (245, 245, 245), "creme": (240, 228, 200), "bege": (220, 195, 155),
+    "azul-marinho": (25, 45, 105), "azul-petróleo": (20, 85, 100), "azul": (30, 90, 210),
+    "azul-claro": (80, 170, 235), "azul-bebê": (160, 200, 235), "turquesa": (20, 170, 190),
+    "verde-água": (70, 195, 175), "verde-escuro": (25, 95, 55), "verde": (35, 150, 75),
+    "verde-claro": (130, 205, 95), "verde-oliva": (105, 125, 50), "amarelo": (250, 205, 35),
+    "amarelo-claro": (250, 228, 135), "mostarda": (190, 140, 20), "dourado": (205, 165, 65),
+    "laranja": LARANJA_DA_SHOPEE, "pêssego": (250, 175, 125), "salmão": (242, 128, 112),
+    "rosa-bebê": (244, 167, 198), "rosa": (230, 90, 150), "pink": (222, 36, 128), "vinho": (128, 24, 52),
+    "lilás": (185, 145, 225), "roxo": (125, 65, 175), "caramelo": (180, 110, 50), "marrom": (115, 75, 45),
+    "marrom-escuro": (85, 52, 30),
 }
 CORES_DE_SEMPRE = ("vermelho", "colorido")
 CONTRASTE_DA_LETRA_BRANCA = 3.0
@@ -1645,14 +1653,16 @@ _CAPA_NO_PROMPT = ("- \"capa\": para a capa do vídeo, uma frase curta que come�
 _CHAMADA_NO_PROMPT = ("- \"chamada\": uma frase curta para o fim do vídeo, com palavras suas, chamando para o "
                       f"produto anexado aqui embaixo, até {MAXIMO_DA_CHAMADA} caracteres, sem mandar para fora da "
                       "Shopee;\n")
-# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO.
-# No produto de várias cores, a que mais aparece nele, sem o "colorido" (P179 1). E a 2ª cor que mais
-# se destaca nele, para o fio e a faixa da capa quando a principal some no fundo da foto (P173).
-_COR_NO_PROMPT = ("Diga também \"cor\", a cor que mais aparece no produto que o vídeo mostra, uma destas: "
+# A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO, e a IA diz o
+# tom mais parecido com o do produto (P304 1). No produto de várias cores, a que mais aparece nele, sem o
+# "colorido" (P179 1). E a 2ª cor que mais se destaca nele, de outra cor, para o fio e a faixa da capa quando a
+# principal some no fundo da foto (P173).
+_COR_NO_PROMPT = ("Diga também \"cor\", a cor que mais aparece no produto que o vídeo mostra, no tom mais "
+                  "parecido com o dele, uma destas: "
                   + ", ".join(list(CORES_DO_PRODUTO) + list(CORES_DE_SEMPRE[:1]))
                   + "; mesmo quando ele tem várias cores, diga a que mais aparece nele. E \"cor_2\", a "
-                  "segunda cor que mais se destaca no produto, da mesma lista e diferente da \"cor\" (vazio "
-                  "quando ele é de uma cor só).\n")
+                  "segunda cor que mais se destaca no produto, da mesma lista, de outra cor (não um tom da mesma "
+                  "cor da \"cor\"; vazio quando ele é de uma cor só).\n")
 # A música de fundo que combina com o vídeo, se ele for ao ar sem o som dele (P241 1): uma das nossas, pelo clima.
 _MUSICA_NO_PROMPT = ("Diga também \"musica\", a música de fundo que combina com o vídeo se ele for ao ar sem o som "
                      "dele, uma destas: " + "; ".join(f"{nome} ({clima})" for nome, clima in CLIMA_DAS_MUSICAS.items())
