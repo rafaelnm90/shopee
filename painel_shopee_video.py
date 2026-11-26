@@ -1724,8 +1724,8 @@ SITUACOES_DO_VIDEO_DE_IA = {
     "parou": "parou antes do Gerar (nenhum crédito gasto); tenta de novo hoje",
     "sem foto": "a IA não achou boa a foto dos produtos que olhou (nenhum crédito gasto); tenta de novo hoje com os "
                 "próximos da lista",
-    "sem produto": "nenhum produto da lista da Shopee serviu (nota 4,5 ou mais, pagando o mínimo, ainda não postado "
-                   "e com a foto boa para o vídeo)",
+    "sem produto": "nenhum produto da lista da Shopee serviu (nota 4,5 ou mais, pagando o mínimo, sem post nem "
+                   "vídeo de IA nos últimos 7 dias e com a foto boa para o vídeo)",
     "gerando": "gerado no Flow; falta terminar e baixar, na próxima rodada",
     "estendendo": "os 8 s gerados e o Estender tocado no Flow; falta baixar os 16 s, na próxima rodada",
     "baixado": "baixado; falta a conferência da IA",

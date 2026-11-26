@@ -2420,9 +2420,14 @@ ESTADOS_DO_DIA_ACABADO = ("sem produto", "pronto", "descartado", "usado", "desis
 SEM_CREDITOS = "sem créditos"
 # A escolha do produto pela lista da API de afiliado (P234 1) vai sempre do que paga mais para o que paga menos:
 # sem uma memória, o produto que não deu certo num dia seria o 1º de novo no dia seguinte. Ficam de fora o produto
-# que já teve um vídeo gerado (itens_gerados: virou rascunho, foi recusado ou descartado) e o de foto que a IA não
-# achou boa para o vídeo (fotos_recusadas). Só os números dos produtos, os ITENS_LEMBRADOS mais novos de cada lista.
+# que teve um vídeo gerado nos últimos dias (itens_gerados com a hora do Gerar, gerados_em: virou rascunho, foi
+# recusado ou descartado; o robô passa o prazo, os 7 dias da P307, pela P312 1) e o de foto que a IA não achou boa
+# para o vídeo (fotos_recusadas, para sempre). Só os números dos produtos, os ITENS_LEMBRADOS mais novos de cada lista.
+# Escolha do Rafael (26/11/2026, P312 1): DECISOES.md, Shopee Vídeo.
 ITENS_LEMBRADOS = 600
+# O produto gerado antes de a hora do Gerar ser guardada (a P312 1, de 26/11/2026) conta como gerado no fim desse
+# dia: nenhum ganha outro vídeo antes dos 7 dias.
+GERADO_SEM_A_HORA = "2026-11-26 23:59:59"
 # O formato de cada vídeo de IA da produção gerado no Flow (o estilo dele), anotado no Gerar: o limite da comédia (1 a
 # cada VIDEOS_POR_COMEDIA, P251 1) olha os últimos. Só os FORMATOS_LEMBRADOS mais novos.
 FORMATOS_LEMBRADOS = 6
@@ -2494,9 +2499,17 @@ def recomecar_producao(dia, **campos):
     db.atualizar_config(CHAVE, lambda dados: dados.update(producao=novo))
 
 
-def itens_gerados():
-    """Os produtos que já tiveram um vídeo de IA gerado (os números deles): não ganham outro."""
-    return [str(item) for item in (db.ler_config(CHAVE, {}) or {}).get("itens_gerados") or []]
+def itens_gerados(desde=None):
+    """
+    Os produtos que já tiveram um vídeo de IA gerado (os números deles), os mais novos por último. Com desde
+    ("AAAA-MM-DD HH:MM:SS"), só os gerados depois dessa hora: esses ainda não ganham outro (P312 1).
+    """
+    dados = db.ler_config(CHAVE, {}) or {}
+    itens = [str(item) for item in dados.get("itens_gerados") or []]
+    if desde is None:
+        return itens
+    horas = dados.get("gerados_em") or {}
+    return [item for item in itens if (horas.get(item) or GERADO_SEM_A_HORA) > desde]
 
 
 def fotos_recusadas():
@@ -2505,7 +2518,7 @@ def fotos_recusadas():
 
 
 def _lembrar(lista, item):
-    """Põe o produto no fim da lista da chave do Flow (itens_gerados ou fotos_recusadas), sem repetir."""
+    """Põe o produto no fim da lista da chave do Flow (fotos_recusadas), sem repetir."""
     if not item:
         return
 
@@ -2514,9 +2527,21 @@ def _lembrar(lista, item):
     db.atualizar_config(CHAVE, alterar)
 
 
-def lembrar_item_gerado(item):
-    """O produto teve um vídeo gerado no Flow (o crédito foi gasto): fica de fora das próximas escolhas."""
-    _lembrar("itens_gerados", item)
+def lembrar_item_gerado(item, quando=None):
+    """
+    O produto teve um vídeo gerado no Flow (o crédito foi gasto), na hora quando (sem ela, agora): fica de fora das
+    escolhas até o prazo que o robô passa a itens_gerados (P312 1).
+    """
+    if not item:
+        return
+    item = str(item)
+
+    def alterar(dados):
+        lista = ([str(i) for i in dados.get("itens_gerados") or [] if str(i) != item] + [item])[-ITENS_LEMBRADOS:]
+        horas = dados.get("gerados_em") or {}
+        dados["itens_gerados"] = lista
+        dados["gerados_em"] = {**{i: horas[i] for i in lista if i in horas}, item: quando or agora()}
+    db.atualizar_config(CHAVE, alterar)
 
 
 def lembrar_foto_recusada(item):
@@ -2570,9 +2595,11 @@ def comecar_producao(dia, escolhido, tentativas_de_gerar, do_botao=False):
                      item=escolhido.get("item", ""), valor=escolhido.get("valor"), origem=escolhido.get("origem", ""),
                      foto=foto, estilo=escolhido["estilo"], prompt=escolhido["prompt"], cena=escolhido["cena"],
                      modelo=modelo, custo=custo, escolhido_em=agora(),
-                     # O nível da escolha em que o produto entrou e os números dele (P252 1), para o aviso.
+                     # O nível da escolha em que o produto entrou e os números dele (P252 1), para o aviso, e a
+                     # época com que ele combina (P311 1), para o aviso e o rascunho.
                      **({"nivel": escolhido["nivel"], "filtros": escolhido.get("filtros")}
                         if escolhido.get("nivel") else {}),
+                     **({"epoca": escolhido["epoca"]} if escolhido.get("epoca") else {}),
                      **({"longa": True, "continuacao": escolhido["continuacao"], "fala": escolhido.get("fala", "")}
                         if longa else {}),
                      **({"curta": True, "fala": escolhido.get("fala", "")} if curta else {}),
@@ -2618,7 +2645,8 @@ def producao_no_celular(d, atual):
 def _marcar_a_producao(**campos):
     """
     Guarda o andamento do vídeo do dia; no toque do Gerar ("gerado_em"), o produto entra nos que já tiveram um
-    vídeo gerado (itens_gerados), na mesma hora: a rodada que cai logo depois não deixa o produto voltar à escolha.
+    vídeo gerado (itens_gerados), na mesma hora e com ela (o prazo da P312 1 conta dela): a rodada que cai logo
+    depois não deixa o produto voltar à escolha.
     O Gerar conta também entre os do dia (gerados_no_dia, P243), e o formato do vídeo entra nos formatos_recentes (o
     limite da comédia, P251 1).
     """
@@ -2629,7 +2657,7 @@ def _marcar_a_producao(**campos):
         campos["gerados_no_dia"] = gerados_no_dia(atual.get("data"), atual) + (1 if primeiro_gerar else 0)
     guardar_producao(**campos)
     if campos.get("gerado_em"):
-        lembrar_item_gerado(producao().get("item"))
+        lembrar_item_gerado(producao().get("item"), campos["gerado_em"])
     if primeiro_gerar:
         lembrar_o_formato(producao().get("estilo"))
 
@@ -3857,7 +3885,7 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
         conferido = "não deu para conferir"
     custo = atual.get("custo", 0)
     paga = (f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
-            f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
+            f"{atual.get('origem') or 'a lista da Shopee'}, sem post nem vídeo de IA nos últimos 7 dias)")
     propaganda = atual.get("formato") == ESTILO_DA_PROPAGANDA
     if propaganda:
         com_personagem = atual.get("com_personagem")

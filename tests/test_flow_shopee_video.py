@@ -1256,6 +1256,29 @@ def test_produto_que_a_ia_de_video_muda_sai_da_escolha_mesmo_com_a_foto_boa(monk
     assert flow.pedido_para_o_anuncio(link, "", _jpeg()) == (None, None) and respostas == []
 
 
+def test_produto_gerado_guarda_a_hora_do_gerar_e_volta_depois_do_prazo(bm, monkeypatch):
+    # P312 1 (26/11): o produto que teve um vídeo de IA ganha outro, novo, depois do prazo que o robô passa (os 7 dias
+    # da P307), contado da hora do Gerar. O gerado antes de a hora ser guardada conta como do fim de 26/11: nenhum
+    # ganha outro vídeo antes dos 7 dias.
+    flow.lembrar_item_gerado("11", "2026-11-20 09:00:00")
+    flow.lembrar_item_gerado("22", "2026-11-25 10:00:00")
+    db.atualizar_config(flow.CHAVE, lambda dados: dados["itens_gerados"].insert(0, "33"))
+    assert flow.itens_gerados() == ["33", "11", "22"]
+    assert flow.itens_gerados("2026-11-19 12:00:00") == ["33", "11", "22"]
+    assert flow.itens_gerados("2026-11-20 09:00:00") == ["33", "22"]
+    assert flow.itens_gerados("2026-11-26 12:00:00") == ["33"]
+    assert flow.itens_gerados(flow.GERADO_SEM_A_HORA) == []
+    # Gerado de novo, ganha a hora nova e vai para o fim; a hora sai junto com o produto que sai da lista.
+    flow.lembrar_item_gerado("11", "2026-11-27 09:00:00")
+    assert flow.itens_gerados() == ["33", "22", "11"] and flow.itens_gerados("2026-11-26 12:00:00") == ["33", "11"]
+    monkeypatch.setattr(flow, "ITENS_LEMBRADOS", 2)
+    flow.lembrar_item_gerado("44")
+    dados = db.ler_config(flow.CHAVE)
+    assert dados["itens_gerados"] == ["11", "44"] and set(dados["gerados_em"]) == {"11", "44"}
+    # Sem a hora, vale a de agora ("AAAA-MM-DD HH:MM:SS").
+    assert dados["gerados_em"]["44"] == flow.agora() or len(dados["gerados_em"]["44"]) == 19
+
+
 def test_memoria_dos_produtos_que_nao_voltam_a_escolha(bm, monkeypatch):
     # P234 1: a lista da API muda pouco de um dia para o outro. O produto que já teve um vídeo gerado e o de foto
     # que a IA recusou ficam lembrados (só os números), sem repetir, os mais novos por último.

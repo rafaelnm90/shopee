@@ -10325,6 +10325,100 @@ def test_segundo_nivel_sem_a_contagem_do_espiao_ou_com_links_por_seguir(monkeypa
     assert robo.escolher_para_o_video_de_ia(momento("2026-10-22 08:30"))[0] is None and chamadas == []
 
 
+def test_produto_do_video_de_ia_volta_7_dias_depois_do_ultimo(monkeypatch):
+    # P312 1 (26/11), como na P307: o produto que já teve um vídeo de IA ganha outro, novo, 7 dias depois do último,
+    # contados do post (produtos_ja_postados) ou, sem post (o vídeo descartado ou recusado), do Gerar. A foto que a IA
+    # recusou continua fora.
+    ofertas = [_oferta_da_lista("50", comissao=0.09),      # R$ 7,50 por venda: o que paga mais
+               _oferta_da_lista("51", comissao=0.06)]      # R$ 4,50
+    _lista_da_api(monkeypatch, ofertas)
+    robo.flow.lembrar_item_gerado("50", "2026-11-20 09:00:00")
+    assert robo.escolher_para_o_video_de_ia(momento("2026-11-27 08:59"))[0]["item"] == "51"
+    assert robo.escolher_para_o_video_de_ia(momento("2026-11-27 09:01"))[0]["item"] == "50"
+    # Postado depois do Gerar, os 7 dias contam do post.
+    ident = robo.criar("outro", momento("2026-11-21 10:00"))
+    robo.atualizar(ident, estado="postado", itens_do_video=["50"], postado_em="2026-11-22 11:00:00")
+    assert robo.escolher_para_o_video_de_ia(momento("2026-11-29 10:59"))[0]["item"] == "51"
+    assert robo.escolher_para_o_video_de_ia(momento("2026-11-29 11:01"))[0]["item"] == "50"
+    # A foto que a IA recusou fica de fora sempre.
+    robo.flow.lembrar_foto_recusada("50")
+    assert robo.escolher_para_o_video_de_ia(momento("2027-02-01 10:00"))[0]["item"] == "51"
+
+
+def test_epoca_tambem_na_escolha_do_video_de_ia(monkeypatch, tmp_path):
+    # P311 1 (26/11), o exemplo da pergunta: em 01/12, na lista em alta, um pisca-pisca de Natal paga R$ 3 por venda e
+    # uma garrafa térmica, R$ 4; o pisca-pisca conta como R$ 4,50 e vai. Os 2 níveis da P252 1 continuam: o da época
+    # que só passa no 1º nível não vai à frente do 2º.
+    ofertas = [_oferta_da_lista("60", comissao=0.055, vendas=50),     # R$ 4,00: a garrafa
+               _oferta_da_lista("61", comissao=0.045, vendas=50)]     # R$ 3,00: o pisca-pisca, de Natal
+    foram = _lista_da_api(monkeypatch, ofertas)
+    pedidos = []
+
+    async def gerar(prompt, imagens=None):
+        pedidos.append(prompt)
+        linhas = prompt.split("Produtos:\n", 1)[1].splitlines()
+        return json.dumps([{"n": n, "combina": linha.endswith("Produto 61")} for n, linha in enumerate(linhas, 1)])
+
+    monkeypatch.setattr(robo.ps.api_gemini, "gerar_texto_gemini", gerar)
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-12-01 08:05"))
+    assert foram == ["61"] and (escolhido["item"], escolhido["epoca"], round(escolhido["valor"], 2)) == ("61", "Natal",
+                                                                                                         3.0)
+    assert len(pedidos) == 1 and "Natal, em 25/12/2026" in pedidos[0]
+    assert _registro_do_video_de_ia()[-1] == (
+        "produto escolhido", f"{EM_ALTA}: 2 da lista; 2 com a nota; 2 pagam o mínimo; 2 novos; 0 no 2º nível; época: 1 "
+        "de 2; o 1º; do 1º nível; da época; estilo fala")
+    # O aviso do vídeo pronto e o do começo do rascunho dizem a época.
+    monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
+    atual = robo.flow.comecar_producao("2026-12-01", escolhido, 1)
+    assert atual["epoca"] == "Natal"
+    frase = "Combina com a época de Natal: conta como se pagasse 50% a mais (P311 1)."
+    assert frase in robo.de_onde_veio_o_produto_do_video_de_ia(atual)
+    assert frase in robo.de_onde_veio_o_video({"video_ia": atual, "valor": 3.0}, "autorais")
+    # O do 2º nível vem antes do da época que só passa no 1º; a resposta guardada não volta à IA.
+    ofertas.append(_oferta_da_lista("62", comissao=0.05, vendas=5000))      # R$ 3,50, do 2º nível
+    foram.clear()
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-12-01 08:20"))
+    assert foram == ["62"] and (escolhido["item"], escolhido["nivel"], escolhido["epoca"]) == ("62", 2, "")
+    assert len(pedidos) == 2 and "Produto 62" in pedidos[1] and "Produto 61" not in pedidos[1]
+    # Sem data do comércio no prazo, a IA nem é chamada, e a escolha fica como antes.
+    foram.clear()
+    escolhido, _origem, _restam = robo.escolher_para_o_video_de_ia(momento("2026-11-20 08:05"))
+    assert escolhido["item"] == "62" and len(pedidos) == 2 and "época" not in _registro_do_video_de_ia()[-1][1]
+
+
+def test_epoca_pergunta_em_partes_e_junta_o_que_a_outra_escolha_gravou(monkeypatch):
+    # P311 1: a lista do vídeo de IA tem dezenas de produtos. A IA responde EPOCA_POR_PEDIDO por pedido, e a parte sem
+    # resposta volta na próxima escolha, com o registro dizendo quantos ficaram. A chave é a mesma da escolha dos
+    # vídeos da fonte: cada escolha junta as suas respostas às que a outra gravou no meio.
+    produtos = [{"item": str(n), "nome": f"Produto {n}"} for n in range(45)]
+    pedidos, outra = [], {"gravou": False}
+
+    async def gerar(prompt, imagens=None):
+        linhas = prompt.split("Produtos:\n", 1)[1].splitlines()
+        pedidos.append(len(linhas))
+        if not outra["gravou"]:
+            # A outra escolha grava a sua resposta enquanto esta espera a IA.
+            outra["gravou"] = True
+            robo.db.salvar_config(robo.CHAVE_DA_EPOCA, {"epoca": "2026-12-25 Natal", "itens": {"outro": True}})
+        if len(pedidos) == 2:
+            return None
+        return json.dumps([{"n": n, "combina": n == 1} for n in range(1, len(linhas) + 1)])
+
+    monkeypatch.setattr(robo.ps.api_gemini, "gerar_texto_gemini", gerar)
+    dia = momento("2026-12-01 08:05")
+    combinam, epoca = robo.combinam_com_a_epoca(produtos, dia)
+    assert pedidos == [20, 20, 5] and epoca[1] == "Natal"
+    assert combinam["0"] and combinam["40"] and not combinam["1"] and not combinam["20"]
+    guardado = robo.db.ler_config(robo.CHAVE_DA_EPOCA)
+    assert guardado["itens"]["outro"] is True and "20" not in guardado["itens"] and len(guardado["itens"]) == 26
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_EPOCA) == ("sem a resposta da IA", "20 produto(s)")
+    # Na próxima, só a parte que ficou sem resposta vai à IA.
+    pedidos.clear()
+    robo.combinam_com_a_epoca(produtos, dia)
+    assert pedidos == [20] and len(robo.db.ler_config(robo.CHAVE_DA_EPOCA)["itens"]) == 46
+
+
 def test_aviso_do_video_de_ia_pronto_diz_o_nivel_da_escolha(monkeypatch, tmp_path):
     # O aviso do vídeo de IA pronto (no privado) diz se o produto entrou pelo 2º nível (P252 1), com os números.
     monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
@@ -10335,17 +10429,18 @@ def test_aviso_do_video_de_ia_pronto_diz_o_nivel_da_escolha(monkeypatch, tmp_pat
     assert (atual["nivel"], atual["filtros"]["video_ia_canais_maximos"]) == (2, 1)
     assert robo.de_onde_veio_o_produto_do_video_de_ia(atual) == (
         "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee que já venderam 1.000 ou "
-        "mais, custam a partir de R$ 20,00 e apareceram em até 1 canal do Espião nos últimos 3 dias, ainda não "
-        "postado.\n")
+        "mais, custam a partir de R$ 20,00 e apareceram em até 1 canal do Espião nos últimos 3 dias, sem post nem "
+        "vídeo de IA nos últimos 7 dias.\n")
     atual = robo.flow.comecar_producao("2026-10-22", dict(escolhido, nivel=1), 1)
     assert robo.de_onde_veio_o_produto_do_video_de_ia(atual) == (
-        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee, ainda não postado, pelo 1º "
-        "nível (nenhum produto do 2º nível serviu).\n")
+        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee, sem post nem vídeo de IA "
+        "nos últimos 7 dias, pelo 1º nível (nenhum produto do 2º nível serviu).\n")
     # O vídeo escolhido antes do 2º nível (sem o nível) avisa como antes.
     sem_nivel = {chave: valor for chave, valor in escolhido.items() if chave not in ("nivel", "filtros")}
     atual = robo.flow.comecar_producao("2026-10-22", sem_nivel, 1)
     assert "nivel" not in atual and robo.de_onde_veio_o_produto_do_video_de_ia(atual) == (
-        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee, ainda não postado.\n")
+        "Escolha: o que paga mais por venda (R$ 6,40) entre os produtos em alta da Shopee, sem post nem vídeo de IA "
+        "nos últimos 7 dias.\n")
     assert robo.texto_dos_filtros({"video_ia_vendidos_minimos": 0, "video_ia_preco_minimo": 0,
                                    "video_ia_canais_maximos": 0}) == \
         "não apareceram em nenhum canal do Espião nos últimos 3 dias"
@@ -10570,7 +10665,8 @@ def test_video_de_ia_gera_confere_e_avisa_sem_gastar_video_da_fonte(monkeypatch,
     assert robo.proximo_video(robo.ler_config())["id"] == "a1"
     assert robo.assistente.proximo_video("autorais")["id"] == "a1"
     aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
-    assert "Escolha: o que paga mais por venda (R$ 5,99) entre os produtos em alta da Shopee, ainda não postado." in aviso
+    assert ("Escolha: o que paga mais por venda (R$ 5,99) entre os produtos em alta da Shopee, sem post nem vídeo de "
+            "IA nos últimos 7 dias." in aviso)
     assert "Rascunhos do Robô 📝" in aviso and "Omni 1.2 Flash (24 créditos de IA)" in aviso and VESTIDO in aviso
     assert consultar("SELECT acao, resultado FROM shopee_video_tentativas") == ("video_ia", "pronto")
 
@@ -10848,7 +10944,8 @@ def test_rascunho_do_horario_usa_o_video_de_ia_com_o_rotulo_ligado(monkeypatch, 
     assert robo.proximo_video(robo.ler_config())["id"] == "a1"
     # O aviso do começo e o texto do rascunho dizem que é o vídeo de IA do dia, e de que lista veio o produto.
     assert any("o vídeo de IA do dia, feito no Google Flow com o produto que paga mais por venda (R$ 5,99) entre os "
-               "produtos em alta da Shopee, ainda não postado" in a for a in avisos if isinstance(a, str))
+               "produtos em alta da Shopee, sem post nem vídeo de IA nos últimos 7 dias (P232 1, P234 1 e P312 1)" in a
+               for a in avisos if isinstance(a, str))
     import painel_shopee_video as sv
     texto = sv.texto_rascunho(rascunho, 1, 1)
     assert "Vídeo de IA do dia" in texto and "comédia" in texto and "Uma menina gira com o vestido." in texto
