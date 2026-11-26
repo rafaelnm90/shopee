@@ -135,7 +135,7 @@ impulsionar o vídeo (SEO e copy de vendas), com obrigatoriamente entre 400 e 45
 no total (texto + hashtags), terminando com um rodapé de 5 a 10 hashtags complementares \
 (cauda longa e sinônimos que não estão no título).
 
-É proibido usar, promover ou associar marcas registradas: nada de logotipos, nomes de \
+{cupom_no_comentario}É proibido usar, promover ou associar marcas registradas: nada de logotipos, nomes de \
 marcas (ex.: Stanley, Apple) ou identidades visuais em nenhuma parte (título, comentário, \
 hashtags). Para produto de marca famosa, use termos genéricos (ex.: "Copo Térmico de Inox" \
 e #copotermico em vez da marca).
@@ -159,6 +159,17 @@ diretrizes (menor de idade bebendo, incentivo ao consumo excessivo, glorificar a
 
 {produto}Diretrizes da Shopee Vídeo:
 {diretrizes}"""
+
+# Enquanto o cupom do vídeo vale (o frete grátis exclusivo para a compra feita pelo vídeo, sem valor mínimo, que o robô
+# lê uma vez por dia em Meus Cupons), o comentário para colar fala dele, sem prometer mais do que ele diz, como o
+# comentário de depois do post do robô (P313 1); a chamada do vídeo editado também (edicao_video, cupom). Vale para os
+# vídeos do Rafael e os do grupo dos amigos. Escolha do Rafael (26/11/2026, P314 1): DECISOES.md, Shopee Vídeo.
+CUPOM_NO_COMENTARIO = (
+    "Hoje quem compra pelo vídeo pode usar {cupom}: o \"comentario\" fala desse cupom, chamando para comprar pelo "
+    "vídeo, sem prometer mais do que ele diz (sem dizer que o frete é grátis para tudo, sempre ou para todos, e sem "
+    "valor, desconto, prazo ou estoque). Só o comentário fala do cupom; o título segue como acima.\n\n")
+PROCESSO_DO_CUPOM_NO_COMENTARIO = "cupom do vídeo: comentário do assistente"
+PROCESSO_DO_CUPOM_NO_GRUPO = "cupom do vídeo: comentário do grupo dos amigos"
 
 
 # --- Quando mandar ---
@@ -674,10 +685,34 @@ def ler_diretrizes(leves=False):
     return texto
 
 
-def montar_prompt(nome_produto="", leves=False):
+def montar_prompt(nome_produto="", leves=False, cupom=""):
+    """
+    O pedido do título e do comentário. Com o cupom (o cupom do vídeo que vale agora, cupom_do_video), o comentário
+    fala dele (CUPOM_NO_COMENTARIO, P314 1).
+    """
     produto = f"Nome do produto, segundo o post (pode ajudar a identificar): {nome_produto}\n\n" if nome_produto else ""
     return PROMPT.format(titulo_min=TITULO_MIN, titulo_max=TITULO_MAX, produto=produto,
+                         cupom_no_comentario=CUPOM_NO_COMENTARIO.format(cupom=cupom) if cupom else "",
                          diretrizes=ler_diretrizes(leves))
+
+
+def cupom_do_video(agora=None):
+    """
+    O cupom do vídeo que vale agora, pela leitura do dia do robô em Meus Cupons (robo_shopee_video.cupom_do_video); ""
+    sem ele (P314 1).
+    """
+    # O robô importa este módulo: o import fica aqui dentro.
+    import robo_shopee_video
+    return robo_shopee_video.cupom_do_video(agora)
+
+
+def anotar_o_cupom_no_comentario(textos, amigo=False):
+    """O registro diz se o comentário pedido com o cupom do vídeo falou dele (só a frase fixa, nunca o texto)."""
+    import postador_shopee_video as ps
+    falou = ps.fala_do_cupom((textos or {}).get("comentario"))
+    processo = PROCESSO_DO_CUPOM_NO_GRUPO if amigo else PROCESSO_DO_CUPOM_NO_COMENTARIO
+    registro_processos.registrar("shopee_video", processo, "com o cupom" if falou else "sem o cupom",
+                                 "" if falou else "a IA não falou do cupom", ok=None)
 
 
 # A recusa do Google no último textos_do_video, para o aviso ao Rafael (escolha dele, P29):
@@ -777,28 +812,30 @@ def titulo_com_avisos(titulo):
     return f"{encaixar_titulo(titulo, espaco)} {TEXTO_DOS_AVISOS}".strip()
 
 
-async def gerar_textos(arquivo, nome_produto="", leves=False):
-    return ler_resposta(await api_gemini.analisar_video_gemini(arquivo, montar_prompt(nome_produto, leves)))
+async def gerar_textos(arquivo, nome_produto="", leves=False, cupom=""):
+    return ler_resposta(await api_gemini.analisar_video_gemini(arquivo, montar_prompt(nome_produto, leves, cupom)))
 
 
-async def textos_do_video(arquivo, nome_produto=""):
+async def textos_do_video(arquivo, nome_produto="", cupom=""):
     """
     O texto da IA para o vídeo. Recusado pelo Google pelo conteúdo do pedido: pede mais uma
     vez com as regras em palavras leves (TROCAS_LEVES), e os textos dizem "regras_leves".
     Título abaixo de TITULO_MIN: pede mais uma vez e fica com o título mais longo; se
     continuar curto, vai assim mesmo, e a mensagem mostra o tamanho para o Rafael completar
-    se quiser. Violação na segunda resposta também vale.
+    se quiser. Violação na segunda resposta também vale. Com o cupom (o cupom do vídeo que vale agora), o
+    comentário fala dele, em todos os pedidos (P314 1).
     Decisões do Rafael (P28 e o título curto): DECISOES.md, Shopee Vídeo.
     """
     global ULTIMA_RECUSA
     api_gemini.ULTIMO_ERRO_IA = None
     ULTIMA_RECUSA, leves = None, False
-    textos = await gerar_textos(arquivo, nome_produto)
+    extra = {"cupom": cupom} if cupom else {}
+    textos = await gerar_textos(arquivo, nome_produto, **extra)
     if textos is None and recusado_pelo_conteudo():
         logger.info("🔁 [Shopee Vídeo] O Google recusou o pedido pelo conteúdo; pedindo de novo com as "
                     "regras em palavras leves.")
         recusa, leves = dict(api_gemini.ULTIMA_RECUSA or {}), True
-        textos = await gerar_textos(arquivo, nome_produto, leves=True)
+        textos = await gerar_textos(arquivo, nome_produto, leves=True, **extra)
         if textos:
             textos["regras_leves"] = True
         recusa["leves"] = "passou" if textos else "recusado de novo" if recusado_pelo_conteudo() else "sem resposta"
@@ -807,7 +844,7 @@ async def textos_do_video(arquivo, nome_produto=""):
         return textos
     logger.info(f"🔁 [Shopee Vídeo] Título com {tamanho_no_app(textos['titulo'])} caracteres "
                 f"(mínimo {TITULO_MIN}); pedindo de novo à IA.")
-    outra = await gerar_textos(arquivo, nome_produto, leves=leves)
+    outra = await gerar_textos(arquivo, nome_produto, leves=leves, **extra)
     if outra and leves:
         outra["regras_leves"] = True
     if outra and outra["titulo"] and (outra["violacao"]
@@ -1113,11 +1150,12 @@ async def preparar_para_o_amigo(bot, admin_id, amigo, agora=None, fonte=FONTE_PA
     return NENHUM_PARA_O_AMIGO
 
 
-def _editar(video, produtos, destino, avisos=False):
+def _editar(video, produtos, destino, avisos=False, cupom=""):
     """
     O vídeo editado em destino, com o Editor 2 (ou o Editor 1, se ele não sai) e a foto do
     anúncio do produto do link; com avisos=True, a capa dos avisos da bebida alcoólica no
-    lugar da foto. Anota no registro como saiu e devolve "" quando deu certo, ou o motivo
+    lugar da foto; com o cupom (o cupom do vídeo que vale agora), a chamada fala dele (P314 1).
+    Anota no registro como saiu e devolve "" quando deu certo, ou o motivo
     fixo. O edicao_video importa este módulo: o import fica aqui dentro.
     """
     import edicao_video
@@ -1129,7 +1167,7 @@ def _editar(video, produtos, destino, avisos=False):
         foto = None
     produto = produtos[0] if produtos else {}
     motivo, como, detalhe = edicao_video.editar_para_postar(video["arquivo"], foto, destino, produto.get("nome", ""),
-                                                            avisos=avisos)
+                                                            avisos=avisos, **({"cupom": cupom} if cupom else {}))
     # Com o Editor 1 o vídeo vai, mas conta como falha: o checkup mostra por que o Editor 2 não saiu.
     so_com_o_editor_1 = como.startswith(edicao_video.SO_COM_O_EDITOR_1)
     registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo else como,
@@ -1153,6 +1191,8 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
 
     # O amigo de cada vídeo anotado no registro dos mandados (o "" é o Rafael).
     dono = str(amigo["id"]) if amigo else ""
+    # Enquanto o cupom do vídeo vale, a chamada do vídeo e o comentário para colar falam dele (P314 1).
+    cupom = cupom_do_video(agora)
     # Com a edição ligada, o vídeo que não sai editado fica de lado antes de gastar a IA.
     produtos, link = await produtos_do_link(video["link"])
     item = str(produtos[0].get("item") or "") if produtos else ""
@@ -1176,11 +1216,11 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
             registrar(video["id"], "sem_edicao", SEM_PRODUTO_NO_LINK, agora, amigo=dono)
             return SEM_PRODUTO_NO_LINK
         arquivo = os.path.join(pasta, os.path.basename(video["arquivo"]))
-        motivo = await asyncio.to_thread(_editar, video, produtos, arquivo)
+        motivo = await asyncio.to_thread(_editar, video, produtos, arquivo, False, cupom)
         if motivo:
             registrar(video["id"], "sem_edicao", motivo, agora, amigo=dono)
             return SEM_EDICAO
-    textos = await textos_do_video(video["arquivo"], video["nome"])
+    textos = await textos_do_video(video["arquivo"], video["nome"], **({"cupom": cupom} if cupom else {}))
     if ULTIMA_RECUSA:
         # Escolha do Rafael (P29): cada vídeo recusado pelo Google chega no privado na hora.
         await bot.send_video(admin_id, video=FSInputFile(video["arquivo"]), supports_streaming=True,
@@ -1203,7 +1243,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     if textos.get("bebida_alcoolica"):
         motivo = SEM_AVISOS
         if pasta and _edicao_ligada(fonte):
-            motivo = await asyncio.to_thread(_editar, video, produtos, arquivo, True)
+            motivo = await asyncio.to_thread(_editar, video, produtos, arquivo, True, cupom)
         if motivo:
             registrar(video["id"], "sem_edicao", motivo, agora, amigo=dono)
             return SEM_AVISOS
@@ -1214,6 +1254,8 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     mais = await links_a_mais(video, produtos, do_rafael=not amigo)
     # O nome de cada produto no vídeo, para o Rafael colar no Adicionar (P265 1).
     nomes = await nomes_no_video([p["nome"] for p in produtos + mais]) if produtos else {}
+    if cupom:
+        anotar_o_cupom_no_comentario(textos, amigo=bool(amigo))
     if amigo:
         do_grupo = await link_para_o_grupo(link)
         mais_do_grupo = await com_os_links(mais, api_shopee.ETIQUETA_GRUPO_DOS_AMIGOS)

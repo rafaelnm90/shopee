@@ -1111,6 +1111,70 @@ def test_pedido_do_rafael_no_grupo_vai_ao_privado_com_o_postei_e_ao_grupo(monkey
     assert {envio["chat"] for envio in bot.envios} == {42}
 
 
+def test_comentario_para_colar_fala_do_cupom_do_video_so_com_ele():
+    # Escolha do Rafael (26/11, P314 1): com o cupom do vídeo valendo, o pedido do comentário diz o cupom e o que não
+    # prometer; sem ele, o pedido fica como antes.
+    import robo_shopee_video as robo
+    com = asv.montar_prompt("Garrafa", cupom=robo.CUPOM_DO_VIDEO)
+    assert "Hoje quem compra pelo vídeo pode usar " + robo.CUPOM_DO_VIDEO in com
+    assert "sem prometer mais do que ele diz" in com and "o título segue como acima" in com
+    assert "Hoje quem compra pelo vídeo" not in asv.montar_prompt("Garrafa")
+    assert asv.montar_prompt("Garrafa").count("É proibido usar") == 1
+
+
+def test_assistente_e_grupo_dos_amigos_com_o_cupom_do_video_na_chamada_e_no_comentario(monkeypatch):
+    # Escolha do Rafael (26/11, P314 1): enquanto o cupom do vídeo vale (a leitura do dia do robô em Meus Cupons), o
+    # vídeo editado do assistente e o do grupo dos amigos levam o cupom na chamada, o comentário para colar fala dele,
+    # e o registro diz se a IA falou; sem ele valendo, tudo como antes.
+    import db
+    import edicao_video
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+    db.salvar_config("shopee_video", {"edicao_ligada": True})
+    pedidos, edicoes = [], []
+
+    async def gerar(arquivo, nome="", leves=False, cupom=""):
+        pedidos.append(cupom)
+        return dict(TEXTOS, comentario="Frete grátis pelo vídeo #casa" if cupom else TEXTOS["comentario"])
+
+    async def produtos(link):
+        item = "11" if link.endswith("abc") else "22"
+        return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g",
+                 "item": item}], link
+
+    def editar_para_postar(video, foto, destino, produto="", avisos=False, cupom=""):
+        edicoes.append(cupom)
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return "", edicao_video.COM_LEGENDAS, ""
+
+    async def converter(link, etiqueta):
+        return f"https://s.shopee.com.br/rafa-{etiqueta}/{link.rsplit('/', 1)[-1]}"
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    monkeypatch.setattr(ps, "baixar_foto", lambda endereco: b"foto")
+    monkeypatch.setattr(edicao_video, "editar_para_postar", editar_para_postar)
+    monkeypatch.setattr(asv.api_shopee, "converter_link_shopee", converter)
+    db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO,
+                     {"lotes": [{"de": "2026-10-05 00:00:00", "ate": "2026-10-05 23:59:59"}]})
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"),
+          ("velho", LEGENDA_2, "archive/velho.mp4", "2026-10-01 10:00"))
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == asv.MANDADO_NO_PRIVADO
+    assert edicoes == [robo.CUPOM_DO_VIDEO] and pedidos and set(pedidos) == {robo.CUPOM_DO_VIDEO}
+    assert "Frete grátis pelo vídeo" in bot.envios[-1]["conteudo"]
+    assert consultar("SELECT resultado, detalhe FROM registro_processos "
+                     "WHERE processo = 'cupom do vídeo: comentário do assistente'") == ("com o cupom", "")
+    # O do grupo dos amigos também.
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:05"))) == asv.MANDADO_AO_AMIGO
+    assert edicoes == [robo.CUPOM_DO_VIDEO] * 2 and "Frete grátis pelo vídeo" in bot.envios[-1]["conteudo"]
+    assert consultar("SELECT resultado FROM registro_processos "
+                     "WHERE processo = 'cupom do vídeo: comentário do grupo dos amigos'") == ("com o cupom",)
+    # Com o lote vencido, nada do cupom: nem no vídeo nem no pedido do comentário.
+    assert asv.cupom_do_video(_as("14:05", dia=6)) == ""
+
+
 def test_link_que_vai_ao_grupo_dos_amigos_e_o_do_rafael_com_a_etiqueta_do_grupo(monkeypatch):
     # Pedido do Rafael (22/11): o link dos passos no grupo é o dele, convertido com a etiqueta do grupo, para a compra
     # de quem o abre, nos 7 dias da Shopee, dar a comissão a ele. No privado dele, o link continua o da fonte.
