@@ -1094,6 +1094,7 @@ class SiteDoCurso(CelularDoVolume):
         self.sem_a_copia, self.app_do_telegram = sem_a_copia, app_do_telegram
         self.menu_do_link, self.copiado, self.pagina_do_link, self.tela_do_link = None, "", None, 0
         self.links_abertos, self.toques_longos, self.toques_fora = [], [], []
+        self.tempos_dos_toques_longos = []
         self.edicao_lenta, self.abre_a_edicao, self.escrita_lenta = edicao_lenta, abre_a_edicao, escrita_lenta
         self.abrindo, self.faltam_letras, self.na_pagina, self.voltas_da_pagina = 0, 0, [], 0
         # A guia em branco depois do Enter (24/11/2026): em_branco leituras da tela sem nada da página, ou, com
@@ -1213,8 +1214,9 @@ class SiteDoCurso(CelularDoVolume):
             return [("Planilha de apoio", (42, 1300, 787, 1345))]
         return []
 
-    def long_click(self, x, y):
+    def long_click(self, x, y, duracao=0.5):
         self.toques_longos.append((x, y))
+        self.tempos_dos_toques_longos.append(duracao)
         for texto, (x1, y1, x2, y2) in self._links_da_pagina():
             if x1 <= x <= x2 and y1 <= y <= y2 and not self.pagina_do_link:
                 self.menu_do_link = texto
@@ -1888,6 +1890,9 @@ def test_o_endereco_do_link_vem_do_menu_do_chrome_sem_abrir_a_pagina():
     site.copiado = "o que estava copiado antes"
     assert cursos_robo.endereco_do_link(site, (414, 1942), SEM_ESPERA["pausa"]) == "https://t.me/+grupoDeTeste"
     assert site.menu_do_link is None and site.voltas_da_pagina == 0 and site.links_abertos == []
+    # O dedo fica mais que o toque longo mais lento da acessibilidade do Android (1,5 s): o padrão do uiautomator2,
+    # 0,5 s, não abriria o menu com ele.
+    assert site.tempos_dos_toques_longos == [cursos_robo.DEDO_SEGURADO] and cursos_robo.DEDO_SEGURADO > 1.5
 
 
 def test_o_menu_sem_a_copia_deixa_o_link_sem_o_endereco_e_a_aula_no_lugar():
