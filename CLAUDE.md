@@ -143,7 +143,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - `tests/conftest.py` dá a base dos testes:
   - monta um `.env` falso e roda cada teste numa pasta vazia, com banco novo;
   - fixtures dos módulos: `bm` (bot_mestre), `pc` (pool_contas) e `esp` (espelhador dos Autorais);
-  - fakes: `Msg` (mensagem do Telegram) e `Est` (estado do FSM);
+  - fakes: `Msg` (mensagem do Telegram) e `Est` (estado do FSM); a IA de verdade nunca é chamada (`sem_ia_de_verdade`: o pedido que chega ao cliente do Google falha na hora);
   - helpers: `rodar`, `inserir` e `consultar`.
 - Toda correção de bug ganha um teste que falha sem a correção.
 - `--relogio HH:MM` põe todos os testes naquela hora de Brasília; `relogio("15:00")` (fixture) fixa a hora de um teste só. Teste que só faz sentido numa certa hora usa `relogio(...)`, nunca `pytest.skip`.
