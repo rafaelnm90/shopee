@@ -1807,6 +1807,17 @@ def pagina_vindo(tela):
     return any(no["id"] in IDS_DO_ANDAMENTO for no in _nos(tela)) or pagina_em_branco(tela)
 
 
+def player_inteiro_na_tela(tela):
+    """
+    O player inteiro à vista, abaixo do alto da página: pelo play do meio dele (o vídeo pausado) ou pelo lugar dele
+    (o "video-player-container", com o vídeo tocando ou ainda vindo). Um pedaço do player no alto da tela não basta.
+    """
+    play = botao_do_play(tela)
+    if play and play[1] - METADE_DO_PLAYER >= _topo_da_pagina(tela):
+        return True
+    return lugar_do_player_na_tela(tela)
+
+
 def alto_da_aula(tela, nome="", com_video=True):
     """
     O alto da página da aula está à vista? Com o play do player, só com o player inteiro na tela; sem o play, o player
@@ -1863,9 +1874,10 @@ def _tipo_no_alto(d, pausa, com_video=False):
 def abrir_a_aula_da_vez(d, posicao, numero, pausa, vigiar=None):
     """
     A aula da vez aberta já com o gravador gravando (o vídeo pode começar a tocar sozinho): da 2ª em diante, pelo
-    Próximo da de antes, que tem de estar na tela (a página nova vem do alto, com o player), conferida pelo nome na
-    lista; a 1ª do curso, sem aula antes dela, pelo toque no nome dela na lista, e a página sobe até o alto. (tipo,
-    porque), como em _tipo_da_pagina; vigiar, como em abrir_pela_lista.
+    Próximo da de antes, que tem de estar na tela, conferida pelo nome na lista; a 1ª do curso, sem aula antes dela,
+    pelo toque no nome dela na lista, e a página sobe até o alto. A videoaula (a da lista com a duração) que o Próximo
+    abre sem o player inteiro na tela também sobe até ele, e nunca é tomada por uma aula sem vídeo. (tipo, porque),
+    como em _tipo_da_pagina; vigiar, como em abrir_pela_lista.
     """
     lista = lista_do_curso(posicao)
     aula = lista[int(numero) - 1]
@@ -1884,6 +1896,15 @@ def abrir_a_aula_da_vez(d, posicao, numero, pausa, vigiar=None):
     if nome_no_proximo(tela) != aula["nome"]:
         return None, OUTRA_PAGINA
     tipo, porque, _nome = passar_para_a_seguinte(d, pausa)
+    if tipo and aula.get("segundos") and not player_inteiro_na_tela(d.dump_hierarchy()):
+        # A página nova pode vir rolada para baixo, com a descrição da aula aberta (a que tem um link) e as abas à
+        # vista: na noite de 26/11/2026, as aulas 13 e 14 do curso 4 viraram aulas sem vídeo, e a 17 foi gravada com
+        # o player fora da tela. Como na 1ª aula do curso, o vídeo que começou sozinho pausa, e a página sobe até o
+        # player inteiro.
+        pausar_o_que_toca(d, pausa)
+        if not subir_ate_o_alto(d, aula, pausa):
+            return None, SEM_O_ALTO
+        tipo, porque = _tipo_no_alto(d, pausa, com_video=True)
     if tipo and not na_aula(d, posicao, numero, pausa):
         return None, OUTRA_PAGINA
     return tipo, porque
