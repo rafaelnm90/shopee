@@ -1175,6 +1175,71 @@ def test_assistente_e_grupo_dos_amigos_com_o_cupom_do_video_na_chamada_e_no_come
     assert asv.cupom_do_video(_as("14:05", dia=6)) == ""
 
 
+def test_comentario_para_colar_no_padrao_do_comentario_do_robo_depois_do_post(monkeypatch):
+    # Pedido do Rafael (vídeo de 26/11, 20:07): o comentário para colar do assistente e do grupo dos amigos sai no
+    # padrão do comentário que o robô faz no vídeo depois do post (curto, sem hashtag), pelo mesmo gerador, com o cupom
+    # enquanto ele vale e diferente dos últimos dos vídeos dele; o título continua o do Gem.
+    import db
+    import interacoes_shopee_video as interacoes
+    import robo_shopee_video as robo
+    _preparar_do_amigo(monkeypatch)
+    pedidos, respostas = [], ["Esse aqui vale muito a pena! Ele está nos produtos do vídeo", "Use o frete grátis!"]
+
+    async def gerar(arquivo, nome="", leves=False, cupom=""):
+        return TEXTOS
+
+    async def gerar_proprio(produto="", titulo="", anteriores=(), cupom=""):
+        pedidos.append((produto, titulo, list(anteriores), cupom))
+        return respostas.pop(0)
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    monkeypatch.setattr(interacoes, "gerar_proprio", gerar_proprio)
+    robo.gravar_estado(proprio_textos=["Feito pelo robô"])
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == asv.MANDADO_NO_PRIVADO
+    passos = bot.envios[-1]["conteudo"]
+    assert "4️⃣ <b>Depois de postar, comente</b> no vídeo (toque para copiar):\n" \
+           "<code>Esse aqui vale muito a pena! Ele está nos produtos do vídeo</code>" in passos
+    assert "Gelado &amp; bom #casa" not in passos and "<code>Copo &lt;Térmico&gt; 🧊 #copo</code>" in passos
+    assert pedidos == [("Garrafa", TEXTOS["titulo"], ["Feito pelo robô"], "")]
+    # O comentário do Gem que veio da IA fica como veio (o texto de cada envio é outro).
+    assert TEXTOS["comentario"] == "Gelado & bom #casa"
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos "
+                     "WHERE processo = 'assistente: comentário para colar'") == ("curto", "privado", 1)
+    # O do grupo dos amigos também, com o cupom que vale e diferente do de antes, que entrou na lista do robô.
+    db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO,
+                     {"lotes": [{"de": "2026-10-05 00:00:00", "ate": "2026-10-05 23:59:59"}]})
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:05"))) == asv.MANDADO_AO_AMIGO
+    assert "<code>Use o frete grátis!</code>" in bot.envios[-1]["conteudo"]
+    assert pedidos[1][2:] == (["Feito pelo robô", "Esse aqui vale muito a pena! Ele está nos produtos do vídeo"],
+                              robo.CUPOM_DO_VIDEO)
+    assert robo.ler_estado()["proprio_textos"][-1] == "Use o frete grátis!"
+    assert consultar("SELECT resultado, detalhe FROM registro_processos "
+                     "WHERE processo = 'assistente: comentário para colar' AND detalhe LIKE 'grupo%'") == (
+        "curto", "grupo dos amigos")
+    assert consultar("SELECT resultado FROM registro_processos "
+                     "WHERE processo = 'cupom do vídeo: comentário do grupo dos amigos'") == ("com o cupom",)
+
+
+def test_comentario_para_colar_sem_a_resposta_da_ia_vai_o_do_gem(monkeypatch):
+    # Sem o comentário curto (a IA não respondeu), vai o comentário do Gem, como antes, e o registro diz.
+    import interacoes_shopee_video as interacoes
+    import robo_shopee_video as robo
+    _preparar_do_amigo(monkeypatch)
+
+    async def sem_resposta(produto="", titulo="", anteriores=(), cupom=""):
+        return None
+
+    monkeypatch.setattr(interacoes, "gerar_proprio", sem_resposta)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == asv.MANDADO_NO_PRIVADO
+    assert "<code>Gelado &amp; bom #casa</code>" in bot.envios[-1]["conteudo"]
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos "
+                     "WHERE processo = 'assistente: comentário para colar'") == (
+        "o do Gem", "privado - sem a resposta da IA", 0)
+    assert not robo.ler_estado().get("proprio_textos")
+
+
 def test_link_que_vai_ao_grupo_dos_amigos_e_o_do_rafael_com_a_etiqueta_do_grupo(monkeypatch):
     # Pedido do Rafael (22/11): o link dos passos no grupo é o dele, convertido com a etiqueta do grupo, para a compra
     # de quem o abre, nos 7 dias da Shopee, dar a comissão a ele. No privado dele, o link continua o da fonte.

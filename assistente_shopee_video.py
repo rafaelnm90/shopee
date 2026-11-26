@@ -163,13 +163,20 @@ diretrizes (menor de idade bebendo, incentivo ao consumo excessivo, glorificar a
 # Enquanto o cupom do vídeo vale (o frete grátis exclusivo para a compra feita pelo vídeo, sem valor mínimo, que o robô
 # lê uma vez por dia em Meus Cupons), o comentário para colar fala dele, sem prometer mais do que ele diz, como o
 # comentário de depois do post do robô (P313 1); a chamada do vídeo editado também (edicao_video, cupom). Vale para os
-# vídeos do Rafael e os do grupo dos amigos. Escolha do Rafael (26/11/2026, P314 1): DECISOES.md, Shopee Vídeo.
+# vídeos do Rafael e os do grupo dos amigos: no comentário curto (comentario_curto) e no do Gem, que vai quando o curto
+# não sai. Escolha do Rafael (26/11/2026, P314 1): DECISOES.md, Shopee Vídeo.
 CUPOM_NO_COMENTARIO = (
     "Hoje quem compra pelo vídeo pode usar {cupom}: o \"comentario\" fala desse cupom, chamando para comprar pelo "
     "vídeo, sem prometer mais do que ele diz (sem dizer que o frete é grátis para tudo, sempre ou para todos, e sem "
     "valor, desconto, prazo ou estoque). Só o comentário fala do cupom; o título segue como acima.\n\n")
 PROCESSO_DO_CUPOM_NO_COMENTARIO = "cupom do vídeo: comentário do assistente"
 PROCESSO_DO_CUPOM_NO_GRUPO = "cupom do vídeo: comentário do grupo dos amigos"
+# O comentário para colar (o passo 4 da mensagem, no privado do Rafael e no grupo dos amigos) sai no padrão do
+# comentário que o robô faz no vídeo depois do post (interacoes.gerar_proprio, P148 2): curto, sem hashtag, chamando
+# para comprar, com o cupom do vídeo enquanto ele vale (P314 1) e diferente dos últimos comentários dos vídeos do Rafael
+# (os do robô e os daqui). Sem a resposta da IA, vai o comentário do Gem, como antes. O título continua o do Gem.
+# Pedido do Rafael (vídeo de 26/11/2026, 20:07): DECISOES.md, Shopee Vídeo.
+PROCESSO_DO_COMENTARIO = "assistente: comentário para colar"
 
 
 # --- Quando mandar ---
@@ -718,6 +725,32 @@ def anotar_o_cupom_no_comentario(textos, amigo=False):
         registro_processos.registrar("shopee_video", PROCESSO_DO_CUPOM_NO_COMENTARIO, resultado, detalhe, ok=None)
 
 
+async def comentario_curto(produto, titulo, cupom=""):
+    """
+    O comentário para colar no padrão do comentário do robô depois do post (interacoes.gerar_proprio), diferente dos
+    últimos dos vídeos do Rafael (a lista proprio_textos do robô), que passa a contar este também, para o seguinte não
+    sair igual. Com o cupom (o cupom do vídeo que vale agora), fala dele. None sem a resposta da IA.
+    """
+    # O robô importa este módulo: os imports ficam aqui dentro.
+    import interacoes_shopee_video as interacoes
+    import robo_shopee_video as robo
+    recentes = robo.ler_estado().get("proprio_textos") or []
+    texto = await interacoes.gerar_proprio(produto, titulo, recentes, **({"cupom": cupom} if cupom else {}))
+    if texto:
+        def juntar(dados):
+            textos = (dados.get("proprio_textos") or []) + [texto]
+            dados["proprio_textos"] = textos[-robo.TEXTOS_GUARDADOS_DO_PROPRIO:]
+        db.atualizar_config(robo.CHAVE_ESTADO, juntar)
+    return texto
+
+
+def anotar_o_comentario(curto, amigo=False):
+    """O registro diz se o comentário para colar saiu curto ou foi o do Gem (só frases fixas, nunca o texto)."""
+    onde = "grupo dos amigos" if amigo else "privado"
+    registro_processos.registrar("shopee_video", PROCESSO_DO_COMENTARIO, "curto" if curto else "o do Gem",
+                                 onde if curto else f"{onde} - sem a resposta da IA", ok=bool(curto))
+
+
 # A recusa do Google no último textos_do_video, para o aviso ao Rafael (escolha dele, P29):
 # o que o Google disse (api_gemini.ULTIMA_RECUSA) e "leves" = o que deu o pedido refeito
 # com as regras em palavras leves ("passou", "recusado de novo" ou "sem resposta"). None
@@ -1257,6 +1290,13 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
     mais = await links_a_mais(video, produtos, do_rafael=not amigo)
     # O nome de cada produto no vídeo, para o Rafael colar no Adicionar (P265 1).
     nomes = await nomes_no_video([p["nome"] for p in produtos + mais]) if produtos else {}
+    # O comentário para colar no padrão do comentário do robô depois do post; sem a resposta da IA, o do Gem (pedido do
+    # Rafael, 26/11).
+    nome_do_produto = (produtos[0].get("nome") if produtos else "") or video.get("nome") or ""
+    curto = await comentario_curto(nome_do_produto, textos["titulo"], cupom)
+    if curto:
+        textos = dict(textos, comentario=curto)
+    anotar_o_comentario(curto, amigo=bool(amigo))
     if cupom:
         anotar_o_cupom_no_comentario(textos, amigo=bool(amigo))
     if amigo:

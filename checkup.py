@@ -417,6 +417,7 @@ SEM_META = {
     ("shopee_video", "nome do produto no vídeo"), ("shopee_video", "cupom do produto"),
     ("shopee_video", "cupom do vídeo: "),
     ("shopee_video", "assistente: envio"), ("shopee_video", "assistente: links a mais"),
+    ("shopee_video", "assistente: comentário para colar"),
     ("shopee_video", "grupo dos amigos: "),
     ("shopee_video", "canal afiliados: "),
     ("shopee_video", "conferência da IA (produto × vídeo)"),
