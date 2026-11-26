@@ -2334,6 +2334,9 @@ ROTULOS_DA_COPIA = ("Copiar endereço do link", "Copiar link")
 ROTULOS_DO_MENU_DO_LINK = ROTULOS_DA_COPIA + ("Abrir em nova guia", "Abrir em uma nova guia", "Abrir em guia anônima",
                                               "Copiar texto do link", "Compartilhar link", "Fazer o download do link")
 ROTULOS_DA_SELECAO = ("Selecionar tudo",)
+# O dedo segurado por 2 s: o menu abre também com o toque longo mais lento que a acessibilidade do Android deixa
+# escolher (1,5 s).
+DEDO_SEGURADO = 2.0
 TOQUES_LONGOS_POR_AULA = 40
 LINKS_POR_AULA = 20
 TELAS_DO_LINK = 6
@@ -2374,7 +2377,7 @@ def endereco_do_link(d, ponto, pausa, ao_falhar=None):
         d.set_clipboard("")
     except Exception:
         pass
-    d.long_click(*ponto)
+    d.long_click(*ponto, DEDO_SEGURADO)
     pausa(1)
     tela = d.dump_hierarchy()
     copiar = opcao_de_copiar(tela)
