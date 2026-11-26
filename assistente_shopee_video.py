@@ -710,9 +710,12 @@ def anotar_o_cupom_no_comentario(textos, amigo=False):
     """O registro diz se o comentário pedido com o cupom do vídeo falou dele (só a frase fixa, nunca o texto)."""
     import postador_shopee_video as ps
     falou = ps.fala_do_cupom((textos or {}).get("comentario"))
-    processo = PROCESSO_DO_CUPOM_NO_GRUPO if amigo else PROCESSO_DO_CUPOM_NO_COMENTARIO
-    registro_processos.registrar("shopee_video", processo, "com o cupom" if falou else "sem o cupom",
-                                 "" if falou else "a IA não falou do cupom", ok=None)
+    resultado, detalhe = ("com o cupom", "") if falou else ("sem o cupom", "a IA não falou do cupom")
+    # Um registrar por processo, com o nome fixo: o checkup confere cada processo pelo nome no código.
+    if amigo:
+        registro_processos.registrar("shopee_video", PROCESSO_DO_CUPOM_NO_GRUPO, resultado, detalhe, ok=None)
+    else:
+        registro_processos.registrar("shopee_video", PROCESSO_DO_CUPOM_NO_COMENTARIO, resultado, detalhe, ok=None)
 
 
 # A recusa do Google no último textos_do_video, para o aviso ao Rafael (escolha dele, P29):
