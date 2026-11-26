@@ -166,6 +166,21 @@ def sem_reconhecimento_de_voz(monkeypatch):
     monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=SemModelo))
 
 
+@pytest.fixture(autouse=True)
+def sem_ia_de_verdade(monkeypatch):
+    """
+    Os testes rodam sem rede: o pedido que chega ao cliente do Google (o teste que não pôs a sua IA de mentira) falha
+    na hora, como a IA sem resposta, em vez de tentar a rede. O teste que quer a resposta põe o seu no lugar.
+    """
+    import api_gemini
+
+    class SemRede:
+        def __getattr__(self, nome):
+            raise RuntimeError("os testes não chamam a IA de verdade")
+
+    monkeypatch.setattr(api_gemini, "client_genai", SemRede())
+
+
 @pytest.fixture
 def bm(monkeypatch):
     """bot_mestre com banco novo, agendador novo e sem esperas (asyncio.sleep instantâneo)."""
