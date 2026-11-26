@@ -610,10 +610,25 @@ tipo (o selo **Vídeo** e "EXCLUSIVO PARA VÍDEO" nos que só valem na compra fe
 como o "Cupom de Frete Grátis" "Sem valor mínimo"), a quantidade (x4) e a validade ("Válido
 em: N horas" no lote que ainda não começou, "Válido até DD/MM/AAAA" e "Termina em: N horas").
 Em 26/11, eram 2 lotes de 4 do frete grátis exclusivo para vídeo: um até 29/11 e outro que
-começava 10 h depois. O que o robô faz com eles é a P313. **Nunca se toca** em **Usar**,
-**Usar depois**, **Inserir código**, **Ganhe mais cupons** nem **Histórico**: a tela só é
-lida. Nas lives, a própria live mostra o cupom dela ("R$ N OFF ... para Lives"), com o botão
-de pegar (`btn_claim_state`), que também nunca se toca.
+começava 10 h depois. **Nunca se toca** em **Usar**, **Usar depois**, **Inserir código**,
+**Ganhe mais cupons** nem **Histórico**: a tela só é lida (os quatro primeiros estão nos
+`TEXTOS_PROIBIDOS`).
+
+Na leitura da tela, cada cartão é o `sectionVoucherCard_N` (N, o número do cupom), e os
+pedaços vêm soltos ao lado dele: o título em `labelVoucherDiscountMainHeader_N` ("Cupom de
+Frete Grátis", "R$N de desconto"), a regra em `labelVoucherDiscountSubHeader_N` ("Sem valor
+mínimo", "Compras acima de R$N"), o "Válido em: N horas" em `labelVoucherStart_N`; o selo
+("EXCLUSIVO PARA VÍDEO", "TODAS AS LOJAS"), o "Termina em" e o "Válido até" vêm sem id e são do
+cartão em que estão, pela caixa (`ps.cartoes_de_cupom`). O app arredonda para baixo o tempo
+que falta (o mesmo lote estava em "Válido em: 10 horas" às 13:06 e em "8 horas" às 15:16: o
+começo fica entre as 23:16 e as 00:06). Uma rolada (`ps.rolar`) anda uns 3
+cartões; a lista de 26/11 tinha 41. O que o robô faz (P313 1): uma vez por dia, depois da Saúde
+do Vídeo, lê a lista até o fim e guarda a janela de cada lote do frete grátis exclusivo para
+vídeo e sem valor mínimo; enquanto um vale, a chamada do vídeo e o comentário de depois do
+post falam dele (`robo_shopee_video.cupom_do_video`).
+
+Nas lives, a própria live mostra o cupom dela ("R$ N OFF ... para Lives"), com o botão de
+pegar (`btn_claim_state`), que também nunca se toca.
 
 ## Para voltar
 
