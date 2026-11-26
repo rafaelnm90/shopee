@@ -3885,7 +3885,7 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
         conferido = "não deu para conferir"
     custo = atual.get("custo", 0)
     paga = (f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
-            f"{atual.get('origem') or 'a lista da Shopee'}, sem post nem vídeo de IA nos últimos 7 dias)")
+            f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
     propaganda = atual.get("formato") == ESTILO_DA_PROPAGANDA
     if propaganda:
         com_personagem = atual.get("com_personagem")
