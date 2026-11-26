@@ -1122,7 +1122,10 @@ class SiteDoCurso(CelularDoVolume):
     def _player(self):
         if not self._com_video(self.aberta):
             return []
-        nos = ['<node class="android.widget.SeekBar" resource-id="plyr-seek-1" clickable="true" text="" '
+        # O lugar do player inteiro, que o site mostra com ele, tocando ou não (os testes de 25/11/2026).
+        nos = ['<node class="android.view.View" resource-id="video-player-container" clickable="false" text="" '
+               'content-desc="" bounds="[0,487][1080,1096]" />',
+               '<node class="android.widget.SeekBar" resource-id="plyr-seek-1" clickable="true" text="" '
                'content-desc="" bounds="[380,1015][417,1067]" />']
         if self._tocando():
             return nos
@@ -1548,7 +1551,7 @@ def test_a_aula_sem_video_e_a_pagina_sem_o_play():
     # O player na página sem o play à vista e sem o vídeo tocando: o porquê leva o estado do vídeo.
     class SemPlay(SiteDoCurso):
         def _player(self):
-            return super()._player()[:1]
+            return super()._player()[:2]
 
     site = SemPlay(AULAS_DO_SITE, aberta=0)
     assert cursos_robo.ir_para_o_endereco(site, AULAS_DO_SITE[1][2], **SEM_ESPERA) == (
@@ -2532,14 +2535,18 @@ class CursoComLista(SiteDoCurso):
     do vídeo (fim_do_video), o site abre sozinho a aula seguinte, do alto, e o vídeo dela começa. recarga_no_toque: o
     toque na lista recarrega a página, do alto (a noite de 25/11/2026), e em tantas leituras da tela ela vem sem o
     player, só com o lugar dele, as abas e o Próximo; o "puxar para atualizar" a recarrega do mesmo jeito.
+    abre_descida: as aulas (pelo número na lista, do 0) que o Próximo e o fim do vídeo abrem com a página descida até a
+    descrição delas (a que tem um link) e as abas, sem o player na tela (a noite de 26/11/2026); o arrasto com o dedo
+    para baixo a sobe até o player inteiro, sem recarregar.
     """
     COMECO, TOPO, ALTURA = 2300, 267, 2127
 
-    def __init__(self, aulas, modulos=None, passa_no_fim=False, recarga_no_toque=0, **opcoes):
+    def __init__(self, aulas, modulos=None, passa_no_fim=False, recarga_no_toque=0, abre_descida=(), **opcoes):
         super().__init__(aulas, **opcoes)
         self.modulos = modulos or [("Módulo único", len(aulas))]
         self.rolagem, self.recarregadas, self.tocadas, self.passa_no_fim = 0, 0, [], passa_no_fim
         self.recarga_no_toque, self.carregando = recarga_no_toque, 0
+        self.abre_descida, self.descida = frozenset(abre_descida), False
         self.modulos_abertos = {self._modulo_de(self.aberta)}
 
     def _modulo_de(self, numero):
@@ -2554,7 +2561,8 @@ class CursoComLista(SiteDoCurso):
         super()._abrir(numero)
         if do_alto:
             self.rolagem = 0
-        self.no_alto = not self.rolagem
+        self.descida = do_alto and numero in getattr(self, "abre_descida", ())
+        self.no_alto = not self.rolagem and not self.descida
         self.modulos_abertos = getattr(self, "modulos_abertos", set()) | {self._modulo_de(numero)}
 
     def fim_do_video(self):
@@ -2633,6 +2641,10 @@ class CursoComLista(SiteDoCurso):
         if self.pagina or self.nova_guia or self.barra_escondida:
             return super().swipe(x1, y1, x2, y2, duracao)
         self.rolagens.append((x1, y1, x2, y2))
+        if y2 > y1 and self.descida and not self.rolagem:
+            # A página descida até a descrição sobe: o player volta inteiro à tela, sem recarregar.
+            self.descida, self.no_alto = False, True
+            return
         if y2 > y1 and not self.rolagem:
             # No alto da página, o arrasto para baixo é o "puxar para atualizar": ela recarrega o endereço da barra.
             self.recarregadas += 1
@@ -3231,6 +3243,53 @@ def test_a_1a_aula_que_recarrega_ao_ser_tocada_na_lista_e_gravada(noite_do_curso
     assert resumo.startswith("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s)")
     assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
     assert site.tocadas == [0] and site.recarregadas == 0
+
+
+def test_o_player_inteiro_na_tela_pelo_play_do_meio_ou_pelo_lugar_dele():
+    assert cursos_robo.player_inteiro_na_tela(_pagina(PLAY_DO_MEIO, LUGAR_DO_PLAYER, ABA_MODULOS))
+    # O vídeo tocando, sem o play: o lugar do player inteiro basta.
+    assert cursos_robo.player_inteiro_na_tela(_pagina(LUGAR_DO_PLAYER, ABA_MODULOS))
+    # Um pedaço do player no alto da tela (o play da barra dele à vista) não é o player inteiro, nem as abas sozinhas.
+    cortado = LUGAR_DO_PLAYER.replace("[0,487][1080,1096]", "[0,267][1080,400]")
+    play_da_barra = PLAY_DO_MEIO.replace("[475,729][603,857]", "[191,300][280,387]")
+    assert not cursos_robo.player_inteiro_na_tela(_pagina(cortado, play_da_barra, ABA_MODULOS))
+    assert not cursos_robo.player_inteiro_na_tela(_pagina(ABA_MODULOS))
+
+
+def _vendo_o_player(monkeypatch):
+    """Anota, a cada play da gravação, a aula e se o player dela estava inteiro na tela."""
+    vistas, tocar = [], cursos_robo.tocar_pelo_play
+
+    def tocar_vendo(d, pausa=None):
+        vistas.append((d.aulas[d.aberta][0], cursos_robo.player_inteiro_na_tela(d.dump_hierarchy())))
+        return tocar(d, pausa)
+    monkeypatch.setattr(cursos_robo, "tocar_pelo_play", tocar_vendo)
+    return vistas
+
+
+def test_a_videoaula_aberta_com_a_pagina_descida_nunca_vira_aula_sem_video(noite_do_curso, monkeypatch):
+    # A noite de 26/11/2026: o Próximo abriu as aulas 13 e 14 do curso 4 com a página descida até a descrição delas
+    # (que tem um link) e as abas, sem o player na tela, e a noite as guardou como aulas sem vídeo. A videoaula (a da
+    # lista com a duração) nunca vira aula sem vídeo: a página sobe até o player inteiro, sem recarregar, e é gravada.
+    _lista_no_mapa(4)
+    vistas = _vendo_o_player(monkeypatch)
+    site = _curso_da_noite(abre_descida={1})
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s)")
+    assert noite_do_curso.gravadas == ["Aula um", "Aula dois", "Aula quatro"]
+    assert vistas == [("Aula um", True), ("Aula dois", True), ("Aula quatro", True)] and site.recarregadas == 0
+
+
+def test_a_videoaula_que_comeca_sozinha_com_a_pagina_descida_e_gravada_com_o_player_inteiro(noite_do_curso,
+                                                                                            monkeypatch):
+    # A aula 17 do curso 4, na mesma noite: o vídeo começou sozinho com a página descida e foi gravado com o player
+    # fora da tela (o som inteiro, a imagem não). Ele pausa enquanto a página sobe, e o play o retoma já à vista.
+    _lista_no_mapa(4)
+    vistas = _vendo_o_player(monkeypatch)
+    site = _curso_da_noite(abre_descida={1, 3}, autoplay=True)
+    resumo = noite_do_curso(site, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s), 3 guardada(s), 0 pela metade, 1 sem vídeo guardada(s)")
+    assert vistas == [("Aula um", True), ("Aula dois", True), ("Aula quatro", True)] and site.recarregadas == 0
 
 
 @pytest.fixture
