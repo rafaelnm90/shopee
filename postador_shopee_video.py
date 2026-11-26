@@ -1491,6 +1491,17 @@ def janela_do_cupom(validade, lido_em):
     return (lido_em, fim) if fim >= lido_em else None
 
 
+# A IA falou do cupom do vídeo no texto que escreveu (a chamada do vídeo e os comentários, do robô e do modo
+# assistente)? O registro conta se ela usou o cupom pedido (P313 1 e P314 1).
+PALAVRAS_DO_CUPOM = ("cupom", "frete")
+
+
+def fala_do_cupom(texto):
+    """O texto fala do cupom do vídeo (uma das PALAVRAS_DO_CUPOM)?"""
+    normal = str(texto or "").casefold()
+    return any(palavra in normal for palavra in PALAVRAS_DO_CUPOM)
+
+
 def conferir_janela(d, nome, ponto):
     """
     A janela "Editar nome do produto" mostra o produto do vídeo? Depois do Adicionar

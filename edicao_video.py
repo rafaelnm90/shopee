@@ -1662,8 +1662,7 @@ _CUPOM_NA_CHAMADA = (
     "que o cupom diz: sem dizer que o frete é grátis para tudo, sempre ou para todos, e sem valor, desconto, prazo ou "
     "estoque. Só a chamada fala do cupom, e é a única exceção à regra de não falar de promoção abaixo; o nome, a "
     "vantagem e a capa seguem as regras.\n")
-# A chamada fala do cupom (para o registro, que conta se a IA usou o cupom pedido).
-PALAVRAS_DO_CUPOM = ("cupom", "frete")
+# O registro conta se a chamada falou do cupom pedido (ps.fala_do_cupom).
 PROCESSO_DO_CUPOM_NA_CHAMADA = "edição do vídeo: cupom do vídeo na chamada"
 # A cor principal do produto (P159 2), de uma lista fixa: cada nome tem um tom no CORES_DO_PRODUTO, e a IA diz o
 # tom mais parecido com o do produto (P304 1). No produto de várias cores, a que mais aparece nele, sem o
@@ -2879,12 +2878,6 @@ def prompt_dos_textos(nome, lado=MINIATURA_A_DIREITA, momentos=(), cupom=""):
                                     **_lado_no_prompt(lado_olhado(lado)), **_momentos_no_prompt(momentos))
 
 
-def fala_do_cupom(texto):
-    """O texto fala do cupom do vídeo (uma das PALAVRAS_DO_CUPOM)?"""
-    normal = str(texto or "").casefold()
-    return any(palavra in normal for palavra in PALAVRAS_DO_CUPOM)
-
-
 def prompt_das_versoes(nome, lado=MINIATURA_A_DIREITA, momentos=()):
     """O pedido dos textos do exemplo com as versões, com o canto do lado da miniatura (P192 1) e os momentos."""
     return PROMPT_DAS_VERSOES.format(nome=nome, **_lado_no_prompt(lado_olhado(lado)), **_momentos_no_prompt(momentos))
@@ -2909,7 +2902,7 @@ def textos_da_tela(video, nome, lado=MINIATURA_A_DIREITA, cupom=""):
     momentos = momentos_dos_textos(duracao)
     dados = _resposta_da_ia(video, prompt_dos_textos(nome, olhado, momentos, cupom))
     if cupom and dados:
-        usou = fala_do_cupom(dados.get("chamada"))
+        usou = ps.fala_do_cupom(dados.get("chamada"))
         registro_processos.registrar("shopee_video", PROCESSO_DO_CUPOM_NA_CHAMADA,
                                      "com o cupom" if usou else "sem o cupom",
                                      "" if usou else "a IA não falou do cupom na chamada", ok=None)
