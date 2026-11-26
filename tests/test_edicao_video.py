@@ -3816,6 +3816,32 @@ def test_cada_cor_do_produto_tem_um_tom_e_a_letra_que_contrasta():
         assert '"cor"' in prompt and all(nome in prompt for nome in edicao_video.CORES_DO_PRODUTO)
 
 
+def test_paleta_maior_com_o_tom_mais_parecido_com_o_do_produto():
+    # Escolha do Rafael (26/11, P304 1, do vídeo dele das 07:15): na grade, os rosas saíam todos no mesmo rosa e os
+    # cinzas no mesmo cinza. São 35 tons fixos, do claro ao escuro de cada cor, todos diferentes uns dos outros, e a
+    # IA diz o mais parecido com o do produto; os nomes de antes continuam com o tom de antes (o rascunho os guarda).
+    cores = edicao_video.CORES_DO_PRODUTO
+    assert len(cores) == 35 and len(set(cores.values())) == 35
+    assert all(nome == nome.lower() and " " not in nome for nome in cores)
+    assert all(sum(abs(a - b) for a, b in zip(tom, outro)) >= 40
+               for nome, tom in cores.items() for outro_nome, outro in cores.items() if nome < outro_nome)
+    antes = {"preto": (45, 45, 45), "branco": (245, 245, 245), "cinza": (120, 120, 120), "prata": (180, 184, 190),
+             "azul": (30, 90, 210), "azul-claro": (80, 170, 235), "azul-marinho": (25, 45, 105),
+             "verde": (35, 150, 75), "verde-claro": (130, 205, 95), "amarelo": (250, 205, 35),
+             "dourado": (205, 165, 65), "laranja": edicao_video.LARANJA_DA_SHOPEE, "rosa": (230, 90, 150),
+             "roxo": (125, 65, 175), "lilás": (185, 145, 225), "marrom": (115, 75, 45), "bege": (220, 195, 155)}
+    assert all(cores[nome] == tom for nome, tom in antes.items())
+    # O berço rosa-claro, a bicicleta pink e a colcha salmão (o exemplo da P304): cada um no seu tom.
+    tons = [edicao_video.cor_do_produto(nome) for nome in ("rosa-bebê", "pink", "salmão")]
+    assert None not in tons and len(set(tons)) == 3
+    textos = edicao_video._nome_lugar_e_falas({"cor": "Pink", "cor_2": "grafite"})
+    assert (textos["cor"], textos["cor_2"]) == ("pink", "grafite")
+    assert edicao_video.nome_da_cor(cores["verde-água"]) == "verde-água"
+    assert edicao_video.cor_guardada("verde-água") == cores["verde-água"]
+    for prompt in (edicao_video.PROMPT_DOS_TEXTOS, edicao_video.PROMPT_DAS_VERSOES):
+        assert "no tom mais parecido com o dele" in prompt and "não um tom da mesma cor" in prompt
+
+
 def test_produto_de_varias_cores_vai_na_cor_que_mais_aparece_nele():
     # Escolha do Rafael (08/11, P179 1): no produto de várias cores, a IA diz a cor da lista que mais
     # aparece nele, e o "colorido" (que deixava o vídeo no laranja de sempre) sai dos dois pedidos; o
