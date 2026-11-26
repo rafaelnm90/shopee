@@ -1249,6 +1249,20 @@ def de_madrugada(relogio, monkeypatch):
     return com
 
 
+def test_o_abrir_chrome_do_explorar_poe_o_chrome_deitado_em_pe(de_madrugada, capsys):
+    # 26/11/2026: o Chrome pedia a tela deitada mesmo com a rotação em pé (P301 2). O abrir:chrome o endireita como a
+    # noite do curso (cursos_robo.chrome_em_pe), e o log diz o que mudou.
+    class ChromeDeitado(AparelhoDoChrome):
+        @property
+        def info(self):
+            travado = ps.cursos_robo.TRAVAR_EM_PE in self.comandos
+            return {"displayRotation": 0 if travado or self.na_frente != ps.cursos_robo.PACOTE_DO_CHROME else 1}
+    aparelho = de_madrugada(ChromeDeitado())
+    assert ps.explorar("abrir:chrome", celular=True) is True
+    assert ps.cursos_robo.TRAVAR_EM_PE in aparelho.comandos
+    assert "app aberto (chrome posto em pé)" in capsys.readouterr().out
+
+
 def test_de_madrugada_o_explorar_mexe_so_no_chrome_do_curso_com_o_celular_mudo(de_madrugada, capsys):
     # P294 1 (22/11/2026): fora do Horário do Robô, só o Chrome do curso, e a Shopee nunca é aberta.
     aparelho = de_madrugada(AparelhoDoChrome())
