@@ -1110,7 +1110,12 @@ class SiteDoCurso(CelularDoVolume):
     ou sai do app (links_abertos: os endereços abertos; toques_longos: onde o dedo foi segurado). carregando: em
     quantas leituras da tela a página do link mostra só a tela de carregamento do site. avisos_no_link: a página do
     link abre tampada pela propaganda do app e pelo aviso de cookies ("cookies") ou por um Aceitar sem cookie
-    ("termos"); o Fechar e o Aceitar tirados ficam em avisos_fechados.
+    ("termos"); o Fechar e o Aceitar tirados ficam em avisos_fechados. mapa_no_link: a página do link é um mapa
+    mental maior que a tela (P306 1), com a Vista do mapa e o zoom no pé; "lista": o menu da Vista do mapa tem a
+    vista de esboço, com os tópicos em texto (em duas telas); "sem lista": o menu só tem o organograma; "direta": o
+    toque na Vista do mapa já mostra os tópicos em texto, sem menu; "sem número": sem a lista e sem o número do
+    zoom na tela. Os toques
+    no menos do zoom ficam em zooms (o zoom depois de cada um) e os arrastos do mapa em arrastos_do_mapa.
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
@@ -1119,12 +1124,15 @@ class SiteDoCurso(CelularDoVolume):
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
                  texto_na_videoaula=False, slides=4, carrossel_volta=False, em_branco=0, branco_ate_voltar=False,
                  edicao_lenta=0, abre_a_edicao=True, edicao_aberta=None, escrita_lenta=0, enderecos=None,
-                 sem_a_copia=False, app_do_telegram=False, carregando=0, avisos_no_link=None, **opcoes):
+                 sem_a_copia=False, app_do_telegram=False, carregando=0, avisos_no_link=None, mapa_no_link=None,
+                 **opcoes):
         super().__init__(**opcoes)
         self.enderecos = dict(ENDERECOS_DOS_LINKS if enderecos is None else enderecos)
         self.sem_a_copia, self.app_do_telegram = sem_a_copia, app_do_telegram
         self.carregando, self.leituras_carregando = carregando, 0
         self.avisos_no_link, self.avisos_abertos, self.avisos_fechados = avisos_no_link, set(), []
+        self.mapa_no_link, self.menu_do_mapa, self.vista_em_lista = mapa_no_link, False, False
+        self.zoom, self.zooms, self.arrastos_do_mapa = 100, [], []
         self.menu_do_link, self.copiado, self.pagina_do_link, self.tela_do_link = None, "", None, 0
         self.links_abertos, self.toques_longos, self.toques_fora = [], [], []
         self.tempos_dos_toques_longos = []
@@ -1277,8 +1285,18 @@ class SiteDoCurso(CelularDoVolume):
             partes = ["Carregando o mapa…"]
         elif self.avisos_abertos:
             partes = []
+        elif self.mapa_no_link == "direta" and self.vista_em_lista:
+            partes = ([f"Tópico {n} do mapa" for n in range(1, 10)] if self.tela_do_link == 0 else ["Fim do mapa"])
+        elif self.mapa_no_link and self.vista_em_lista:
+            partes = (["1. Tópico um do mapa", "1.1 Ideia do tópico um", "2. Tópico dois do mapa"]
+                      if self.tela_do_link == 0 else ["3. Tópico três do mapa", "Fim do mapa"])
+        elif self.mapa_no_link:
+            # O título do site com a palavra lista, que nunca é a opção do menu (só o que o menu traz conta).
+            partes = ["Lista de presentes do site"]
         nos = "".join(f'<node class="android.widget.TextView" resource-id="" text="{texto}" content-desc="" '
                       f'bounds="[42,{400 + 100 * n}][1021,{480 + 100 * n}]" />' for n, texto in enumerate(partes))
+        if self.mapa_no_link and not self.leituras_carregando:
+            nos += self._botoes_do_mapa()
         for aviso in sorted(self.avisos_abertos):
             for classe, texto, caixa in NOS_DOS_AVISOS[aviso]:
                 toque = "true" if classe == "Button" else "false"
@@ -1288,6 +1306,44 @@ class SiteDoCurso(CelularDoVolume):
                 f'resource-id="com.android.chrome:id/url_bar" clickable="true" text="{barra}" content-desc="" '
                 'bounds="[211,120][691,267]" /><node class="android.webkit.WebView" resource-id="" text="" '
                 f'content-desc="" bounds="[0,267][1080,2394]">{nos}</node></hierarchy>')
+
+    # Os botões do mapa mental (P306 1): a Vista do mapa, o menos do zoom, o zoom e o mais, no pé da página; com o
+    # menu aberto, as opções dele, depois dos botões.
+    BOTOES_DO_MAPA = {"Vista do mapa": "[80,2240][300,2300]", "Diminuir zoom": "[320,2240][380,2300]",
+                      "Aumentar zoom": "[470,2240][530,2300]"}
+    OPCOES_DO_MAPA = {"Vista do mapa": "[80,1900][500,1980]", "Vista de esboço": "[80,2000][500,2080]",
+                      "Organograma": "[80,2100][500,2180]"}
+
+    def _botoes_do_mapa(self):
+        nos = "".join(f'<node class="android.widget.Button" resource-id="" clickable="true" text="{texto}" '
+                      f'content-desc="" bounds="{caixa}" />' for texto, caixa in self.BOTOES_DO_MAPA.items())
+        if self.mapa_no_link != "sem número":
+            nos += (f'<node class="android.widget.TextView" resource-id="" clickable="false" text="{self.zoom}%" '
+                    'content-desc="" bounds="[390,2240][460,2300]" />')
+        if self.menu_do_mapa:
+            for texto, caixa in self.OPCOES_DO_MAPA.items():
+                if texto == "Vista de esboço" and self.mapa_no_link != "lista":
+                    continue
+                nos += (f'<node class="android.widget.Button" resource-id="" clickable="true" text="{texto}" '
+                        f'content-desc="" bounds="{caixa}" />')
+        return nos
+
+    def _tocar_no_mapa(self, x, y):
+        """O toque na página do mapa mental: True com um dos botões do mapa (o resto fica em toques_fora)."""
+        if (x, y) == (190, 2270) and self.mapa_no_link == "direta":
+            self.vista_em_lista, self.tela_do_link = True, 0
+        elif (x, y) == (190, 2270):
+            self.menu_do_mapa = not self.menu_do_mapa
+        elif (x, y) == (350, 2270):
+            self.zoom = max(20, self.zoom - 20)
+            self.zooms.append(self.zoom)
+        elif self.menu_do_mapa and (x, y) == (290, 2040) and self.mapa_no_link == "lista":
+            self.vista_em_lista, self.menu_do_mapa, self.tela_do_link = True, False, 0
+        elif self.menu_do_mapa and (x, y) == (290, 1940):
+            self.menu_do_mapa = False
+        else:
+            return False
+        return True
 
     def app_start(self, pacote, wait=False):
         self.abertos.append(pacote)
@@ -1378,6 +1434,9 @@ class SiteDoCurso(CelularDoVolume):
 
     def swipe(self, x1, y1, x2, y2, duracao=None):
         self.rolagens.append((x1, y1, x2, y2))
+        if self.pagina_do_link and self.mapa_no_link and not self.vista_em_lista:
+            self.arrastos_do_mapa.append((x1, y1, x2, y2))
+            return
         if self.pagina_do_link:
             self.tela_do_link = 1 if y1 > y2 else self.tela_do_link
             return
@@ -1416,9 +1475,11 @@ class SiteDoCurso(CelularDoVolume):
                     self.avisos_abertos.discard(aviso)
                     self.avisos_fechados.append(rotulo)
                     return
+        if self.pagina_do_link and self.mapa_no_link and not self.avisos_abertos and self._tocar_no_mapa(x, y):
+            return
         if self.na_frente == TELEGRAM or self.pagina_do_link:
-            # Nas páginas dos links, só o Fechar e o Aceitar dos avisos que a tampam (P305 1); nada no app que elas
-            # abrem: o outro toque fica em toques_fora, e o teste vê.
+            # Nas páginas dos links, só o Fechar e o Aceitar dos avisos que a tampam (P305 1) e os botões do mapa
+            # mental (P306 1); nada no app que elas abrem: o outro toque fica em toques_fora, e o teste vê.
             self.toques_fora.append((x, y))
             return
         if self.nova_guia and 100 <= x <= 840 and 540 <= y <= 626 and not self.barra_em_foco:
@@ -1480,6 +1541,7 @@ class SiteDoCurso(CelularDoVolume):
                 self.na_frente, self.pagina_do_link, self.tela_do_link = CHROME, endereco, 0
                 self.leituras_carregando = self.carregando
                 self.avisos_abertos = set(AVISOS_DO_LINK.get(self.avisos_no_link, ()))
+                self.menu_do_mapa, self.vista_em_lista, self.zoom = False, False, 100
             return types.SimpleNamespace(output="", exit_code=0)
         if partes[:2] == ["input", "text"] and not self.barra_em_foco:
             self.na_pagina.append(partes[2])
@@ -2066,6 +2128,95 @@ def test_so_os_botoes_dos_avisos_de_dentro_da_pagina_e_o_aceitar_so_com_cookie()
     so_o_fechar = tela(("Fechar", "[940,320][1020,400]"), cookie=False)
     assert cursos_robo.avisos_que_tampam(so_o_fechar) == [("Fechar", (980, 360))]
     assert cursos_robo.avisos_que_tampam("") == []
+
+
+def _guardar_a_aula_com_o_mapa(monkeypatch, tmp_path, **opcoes):
+    """A aula de documento guardada (o passo curso:guardar) com o link num mapa mental: (ok, site, pasta, link)."""
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True, **opcoes)
+    ok, _resumo = cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA)
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    pasta = os.path.join(tmp_path / "aulas", pasta)
+    with open(os.path.join(pasta, "links.json"), encoding="utf-8") as arquivo:
+        links = json.load(arquivo)
+    return ok, site, pasta, next(link for link in links if link.get("mapa"))
+
+
+def test_o_mapa_mental_do_link_e_lido_pela_vista_em_lista_do_proprio_mapa(bm, monkeypatch, tmp_path):
+    # P306 1 (26/11/2026): o mapa mental da aula 4 do curso 4 era maior que a tela (só o título e os números dos
+    # tópicos apareciam). O robô toca na Vista do mapa e escolhe a vista em lista que o menu traz: o texto dos tópicos
+    # vem inteiro, rolando a lista. O título do site com a palavra lista e o Organograma do menu ficam sem toque, e o
+    # zoom e o arrasto não são usados.
+    ok, site, pasta, link = _guardar_a_aula_com_o_mapa(monkeypatch, tmp_path, mapa_no_link="lista",
+                                                       avisos_no_link="cookies")
+    with open(os.path.join(pasta, "link_01.txt"), encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert ok and site.toques_fora == [] and site.zooms == [] and site.arrastos_do_mapa == []
+    assert "1. Tópico um do mapa" in texto and "3. Tópico três do mapa" in texto and "Fim do mapa" in texto
+    assert link["mapa"]["vista"] == "lista" and link["mapa"]["opcoes"] == ["Vista de esboço", "Organograma"]
+    assert sorted(link["fechados"]) == ["Aceitar todos", "Fechar"] and link["avisos"] == 2
+    assert os.path.exists(os.path.join(pasta, "link_01_menu.jpg"))
+    with open(os.path.join(pasta, "texto.txt"), encoding="utf-8") as arquivo:
+        assert "mapa mental na vista em lista" in arquivo.read()
+
+
+def test_sem_a_vista_em_lista_o_mapa_vai_em_partes_com_o_zoom_menor(bm, monkeypatch, tmp_path):
+    # Sem a lista no menu, ele fecha pelo mesmo botão, o menos do zoom vai até 60% e o mapa é arrastado pelo meio
+    # (longe do alto e do pé da página), com um print de cada parte no tamanho inteiro da tela: o meio, a direita, a
+    # esquerda, embaixo e em cima. O mais do zoom e o Organograma nunca são tocados.
+    from PIL import Image
+    ok, site, pasta, link = _guardar_a_aula_com_o_mapa(monkeypatch, tmp_path, mapa_no_link="sem lista")
+    assert ok and site.toques_fora == [] and site.zooms == [80, 60] and not site.menu_do_mapa
+    assert site.toques.count((190, 2270)) == 2 and (500, 2270) not in site.toques
+    assert link["mapa"] == {"vista": "zoom", "opcoes": ["Organograma"], "zoom": "100% → 60%", "partes": 5}
+    assert len(site.arrastos_do_mapa) == 7
+    assert all(150 <= x <= 930 and 700 <= y <= 1900 for x1, y1, x2, y2 in site.arrastos_do_mapa
+               for x, y in ((x1, y1), (x2, y2)))
+    for parte in range(1, 6):
+        with Image.open(os.path.join(pasta, f"link_01_mapa_{parte:02d}.jpg")) as imagem:
+            assert imagem.size == (1080, 2400)
+    with open(os.path.join(pasta, "texto.txt"), encoding="utf-8") as arquivo:
+        assert "mapa mental em 5 parte(s), zoom 100% → 60%" in arquivo.read()
+
+
+def test_a_vista_que_ja_vem_em_texto_nao_ganha_outro_toque(bm, monkeypatch, tmp_path):
+    # O toque na Vista do mapa que já mostra os tópicos em texto (sem menu) basta: nenhum outro toque, para nunca
+    # tocar num tópico com a palavra lista tomado por opção do menu.
+    ok, site, pasta, link = _guardar_a_aula_com_o_mapa(monkeypatch, tmp_path, mapa_no_link="direta")
+    with open(os.path.join(pasta, "link_01.txt"), encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert ok and site.toques_fora == [] and site.toques.count((190, 2270)) == 1 and site.zooms == []
+    assert link["mapa"] == {"vista": "lista", "opcoes": [], "zoom": "", "partes": 0}
+    assert "Tópico 9 do mapa" in texto and "Fim do mapa" in texto
+
+
+def test_sem_o_numero_do_zoom_o_menos_e_tocado_so_duas_vezes(bm, monkeypatch, tmp_path):
+    # Sem o número do zoom na tela, não dá para saber onde parar: o menos é tocado só duas vezes, e o mapa vai em
+    # partes do mesmo jeito.
+    ok, site, _pasta, link = _guardar_a_aula_com_o_mapa(monkeypatch, tmp_path, mapa_no_link="sem número")
+    assert ok and site.toques_fora == [] and len(site.zooms) == 2
+    assert link["mapa"] == {"vista": "zoom", "opcoes": ["Organograma"], "zoom": "", "partes": 5}
+
+
+def test_o_mapa_mental_so_pela_vista_e_o_zoom_de_dentro_da_pagina_e_a_lista_so_do_menu():
+    def pagina(*rotulos, fora=()):
+        botoes = "".join(f'<node class="android.widget.Button" clickable="true" text="{texto}" content-desc="" '
+                         f'bounds="[{100 * n},2240][{100 * n + 90},2300]" />' for n, texto in enumerate(rotulos))
+        de_fora = "".join(f'<node class="android.widget.Button" clickable="true" text="{texto}" content-desc="" '
+                          'bounds="[0,120][120,267]" />' for texto in fora)
+        return (f'<hierarchy>{de_fora}<node class="android.webkit.WebView" text="" content-desc="" '
+                f'bounds="[0,267][1080,2394]">{botoes}</node></hierarchy>')
+    assert cursos_robo.mapa_mental_na_tela(pagina("Vista do mapa", "Diminuir zoom", "100%"))
+    assert not cursos_robo.mapa_mental_na_tela(pagina("Vista do mapa"))
+    assert not cursos_robo.mapa_mental_na_tela(pagina("Diminuir zoom", fora=("Vista do mapa",)))
+    assert cursos_robo.zoom_do_mapa(pagina("Vista do mapa", "85 %")) == 85
+    assert cursos_robo.zoom_do_mapa(pagina("Vista do mapa")) is None
+    antes = [("Lista de presentes", (10, 10)), ("Vista do mapa", (20, 20))]
+    menu = antes + [("Vista do mapa", (30, 30)), ("Organograma", (40, 40)), ("Lista", (50, 50)),
+                    ("Vista de esboço", (60, 60))]
+    assert cursos_robo.opcao_da_lista(antes, menu) == ("Vista de esboço", (60, 60))
+    assert cursos_robo.opcao_da_lista(antes, menu[:-1]) == ("Lista", (50, 50))
+    assert cursos_robo.opcao_da_lista(antes, menu[:4]) is None
 
 
 def test_o_link_que_nao_e_pagina_da_internet_so_fica_anotado(bm, monkeypatch, tmp_path):
