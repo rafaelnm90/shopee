@@ -1939,7 +1939,8 @@ def test_produtos_ja_postados_pelo_robo_e_pelo_assistente():
     assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v1"), momento("2026-11-05 11:00"))[0] == "marcado"
     robo.assistente.registrar("v2", "enviado", "", agora=momento("2026-11-05 10:00"), item="70")   # sem o Postei
     robo.assistente.registrar("v4", "enviado", "", agora=momento("2026-10-28 10:00"), item="61")
-    assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v4"), momento("2026-10-28 11:00"))[0] == "marcado"
+    marcado = robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v4"), momento("2026-10-28 11:00"))
+    assert marcado[0] == "marcado"
     assert robo.produtos_ja_postados(agora) == {"10", "11", "20", "30", "31", "33", "60"}
     # Passados 7 dias do último post, o produto volta (em outro vídeo); o que espera a aprovação, nunca.
     assert robo.produtos_ja_postados(momento("2026-11-12 12:00")) == {"10", "11", "20"}
@@ -3063,8 +3064,8 @@ def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, a
     monkeypatch.setattr(robo, "VIDEOS_SEM_OFERTA_POR_RODADA", 1)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     resultado = robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
-    assert resultado == ("os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado ou já postados, ou vídeos "
-                         "já usados")
+    assert resultado == ("os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado ou já postados, ou "
+                         "vídeos já usados")
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
 
 
