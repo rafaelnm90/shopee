@@ -175,7 +175,17 @@ def sem_ia_de_verdade(monkeypatch):
     import api_gemini
 
     class SemRede:
+        """Cada parte do cliente (models, files...) existe e fica a mesma, para o teste pôr a sua no lugar com o
+        monkeypatch; o pedido feito por ela falha na hora."""
+
         def __getattr__(self, nome):
+            if nome.startswith("__"):
+                raise AttributeError(nome)
+            parte = SemRede()
+            object.__setattr__(self, nome, parte)
+            return parte
+
+        def __call__(self, *args, **kwargs):
             raise RuntimeError("os testes não chamam a IA de verdade")
 
     monkeypatch.setattr(api_gemini, "client_genai", SemRede())
