@@ -1061,6 +1061,62 @@ def acender_tela():
     return tela_acesa()
 
 
+# A tela do celular do robô sempre em pé (P301 2, 26/11/2026; DECISOES.md, Trabalho com o Claude): a rotação
+# automática desligada de vez e a tela na posição em pé. O app da Shopee fica em pé sozinho, mas o Chrome gira com o
+# celular: na madrugada de 26/11, com o celular de lado, a página da aula ficou deitada, sem a lista de aulas na tela.
+# No Android, accelerometer_rotation 0 é a rotação automática desligada, e user_rotation 0, a tela em pé; a ordem
+# importa, porque com a rotação automática ligada a posição escolhida não vale.
+TELA_EM_PE = (("accelerometer_rotation", "0"), ("user_rotation", "0"))
+JA_EM_PE = "já em pé"
+POSTA_EM_PE = "posta em pé"
+NAO_FICOU_EM_PE = "não ficou em pé"
+
+
+def _no_celular(d, partes):
+    """O que um comando no celular escreveu, pelo d do uiautomator2 ou, sem ele, pelo adb; None sem resposta."""
+    if d is not None:
+        try:
+            return getattr(d.shell(partes), "output", None)
+        except Exception:
+            return None
+    alvo = endereco()
+    if not alvo or shutil.which("adb") is None:
+        return None
+    r = av._rodar("adb", "-s", alvo, "shell", *partes, timeout=15)
+    return r[1] if av._ok(r) else None
+
+
+def _rotacao(d):
+    """{configuração: valor} da rotação da tela, ou None sem a leitura."""
+    valores = {}
+    for nome, _ in TELA_EM_PE:
+        saida = _no_celular(d, ["settings", "get", "system", nome])
+        if saida is None or not saida.strip():
+            return None
+        valores[nome] = saida.strip()
+    return valores
+
+
+def deixar_a_tela_em_pe(d=None):
+    """
+    A rotação automática desligada e a tela em pé (P301 2): muda só o que está diferente e confere pela leitura de
+    novo. JA_EM_PE quando nada precisou mudar, POSTA_EM_PE quando mudou e ficou, NAO_FICOU_EM_PE quando mudou e a
+    leitura não confirmou, None sem a leitura. d: o celular do uiautomator2 (a noite do curso e o explorar); sem ele,
+    o adb do servidor (a rodada do robô).
+    """
+    antes = _rotacao(d)
+    if antes is None:
+        return None
+    if all(antes.get(nome) == valor for nome, valor in TELA_EM_PE):
+        return JA_EM_PE
+    for nome, valor in TELA_EM_PE:
+        if antes.get(nome) != valor:
+            _no_celular(d, ["settings", "put", "system", nome, valor])
+    depois = _rotacao(d)
+    ficou = bool(depois) and all(depois.get(nome) == valor for nome, valor in TELA_EM_PE)
+    return POSTA_EM_PE if ficou else NAO_FICOU_EM_PE
+
+
 def descrever_energia(energia):
     """A carga e o Manter ativado em palavras fixas e números (o motivo da parada e o registro)."""
     if not energia:
