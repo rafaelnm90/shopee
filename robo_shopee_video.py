@@ -86,7 +86,7 @@ import sys
 import time
 import unicodedata
 from collections import namedtuple
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import android_virtual as av
 import apelacoes_shopee_video as apelacoes
@@ -3318,9 +3318,11 @@ def de_onde_veio_o_video(video, fonte):
                 f"postado (P232 1 e P234 1).\n{flow.legenda_da_producao(video['video_ia'])}")
     if video.get("valor") is not None:
         vendas, nota = video.get("vendas") or 0, video.get("nota") or 0
+        epoca = (f" Combina com a época de {video['epoca']}: conta como se pagasse "
+                 f"{round((BONUS_DA_EPOCA - 1) * 100)}% a mais (P310 1)." if video.get("epoca") else "")
         return (f"Vídeo: o de maior valor pelas vendas entre os próximos {VIDEOS_NA_ESCOLHA} de {nome_da_fonte} ainda "
                 f"não usados: {assistente._reais(video['valor'])} por venda, {_milhar(vendas)} vendidos (vale "
-                f"{peso_dos_vendidos(vendas)}x) e {_a_nota(nota)} (P194 1 e P308 1).")
+                f"{peso_dos_vendidos(vendas)}x) e {_a_nota(nota)} (P194 1 e P308 1).{epoca}")
     return f"Vídeo: o mais novo de {nome_da_fonte} ainda não usado."
 
 
@@ -3347,6 +3349,128 @@ def _deixar_de_lado_no_dia(ids, config, agora=None):
     estado = estado_do_dia(config, agora)
     estado["abaixo_do_minimo"] = sorted(set(estado.get("abaixo_do_minimo", [])) | set(ids))
     db.salvar_config(CHAVE_DIA, estado)
+
+
+# --- A época (P310 1) ---
+
+# A próxima data do comércio, a até DIAS_DA_EPOCA dias: a IA diz, num pedido só, quais produtos da escolha do vídeo
+# combinam com ela (o tema da data ou o presente típico dela; o produto comum, que serve de presente em qualquer época,
+# não), e o que combina conta como se pagasse BONUS_DA_EPOCA vezes mais. As datas de promoção geral (Black Friday,
+# 11.11, Dia do Consumidor) ficam de fora: nelas todo produto vende. Sem data no prazo ou sem a resposta da IA, a
+# escolha fica como antes. A resposta de cada produto (o número dele e se combina, nunca o nome) vale até a data passar
+# (CHAVE_DA_EPOCA). O cupom do dia vem depois: o Claude mapeia onde o app mostra os cupons do dia e pergunta. Escolha
+# do Rafael (26/11/2026, P310 1): DECISOES.md, Shopee Vídeo.
+DIAS_DA_EPOCA = 30
+BONUS_DA_EPOCA = 1.5
+CHAVE_DA_EPOCA = "shopee_video_epoca"
+PROCESSO_DA_EPOCA = "escolha pela época"
+PROMPT_DA_EPOCA = """Hoje é {hoje}. A próxima data do comércio no Brasil é {nome}, em {data}. Para cada produto da \
+lista, diga se ele combina com essa data: se as pessoas procuram esse produto por causa dela (o tema da data, como a \
+decoração, a fantasia, a roupa, a comida ou o utensílio da festa, ou o presente típico dela, o que as lojas mostram na \
+vitrine da data). O produto comum, que serve de presente em qualquer época do ano, não combina.
+
+Responda SOMENTE com um JSON, sem nada antes ou depois: uma lista com um objeto por produto, na ordem da lista, cada \
+um com "n" (o número do produto) e "combina" (true ou false).
+
+Produtos:
+{produtos}"""
+
+
+def _pascoa(ano):
+    """O domingo de Páscoa do ano, pelo cálculo do calendário gregoriano."""
+    a, b, c = ano % 19, ano // 100, ano % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    dias = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * dias) // 451
+    mes, dia = divmod(h + dias - 7 * m + 114, 31)
+    return date(ano, mes, dia + 1)
+
+
+def _domingo_do_mes(ano, mes, qual):
+    """O qual-ésimo domingo do mês (o Dia das Mães e o Dia dos Pais)."""
+    primeiro = date(ano, mes, 1)
+    return primeiro + timedelta(days=(6 - primeiro.weekday()) % 7 + 7 * (qual - 1))
+
+
+def datas_do_comercio(ano):
+    """As datas do comércio do ano que têm produtos próprios, [(data, nome)], da primeira para a última (P310 1)."""
+    pascoa, fevereiro = _pascoa(ano), date(ano, 2, 1)
+    return sorted([(date(ano, 1, 1), "Ano Novo"),
+                   (fevereiro + timedelta(days=(7 - fevereiro.weekday()) % 7), "Volta às Aulas"),
+                   (pascoa - timedelta(days=47), "Carnaval"),
+                   (date(ano, 3, 8), "Dia da Mulher"),
+                   (pascoa, "Páscoa"),
+                   (_domingo_do_mes(ano, 5, 2), "Dia das Mães"),
+                   (date(ano, 6, 12), "Dia dos Namorados"),
+                   (date(ano, 6, 24), "Festa Junina"),
+                   (_domingo_do_mes(ano, 8, 2), "Dia dos Pais"),
+                   (date(ano, 10, 12), "Dia das Crianças"),
+                   (date(ano, 10, 31), "Halloween"),
+                   (date(ano, 12, 25), "Natal")])
+
+
+def proxima_epoca(agora=None):
+    """(data, nome) da próxima data do comércio, de amanhã até DIAS_DA_EPOCA dias, ou None (P310 1)."""
+    hoje = agora_br(agora).date()
+    for data, nome in datas_do_comercio(hoje.year) + datas_do_comercio(hoje.year + 1):
+        if (data - hoje).days > DIAS_DA_EPOCA:
+            return None
+        if (data - hoje).days >= 1:
+            return data, nome
+    return None
+
+
+def ler_a_epoca(resposta, quantos):
+    """[combina, ...] na ordem da lista, da resposta da IA (PROMPT_DA_EPOCA); None quando ela não dá a lista toda."""
+    texto = str(resposta or "")
+    try:
+        lista = json.loads(texto[texto.index("["):texto.rindex("]") + 1])
+        combinam = {int(objeto["n"]): objeto.get("combina") is True for objeto in lista}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+    if set(combinam) != set(range(1, quantos + 1)):
+        return None
+    return [combinam[n] for n in range(1, quantos + 1)]
+
+
+def combinam_com_a_epoca(produtos, agora=None):
+    """
+    ({item: combina}, a época) dos produtos ([{item, nome}]) pela próxima data do comércio (proxima_epoca): a IA
+    pergunta, num pedido só, pelos que ainda não têm a resposta guardada nesta época. ({}, None) sem data no prazo ou
+    sem resposta nenhuma; sem a resposta da IA, valem só os já guardados (o que falta não combina). (P310 1)
+    """
+    epoca = proxima_epoca(agora)
+    if not epoca or not produtos:
+        return {}, epoca
+    data, nome = epoca
+    marca = f"{data.isoformat()} {nome}"
+    guardado = db.ler_config(CHAVE_DA_EPOCA, {}) or {}
+    itens = dict(guardado.get("itens") or {}) if guardado.get("epoca") == marca else {}
+    faltam = list({str(p["item"]): p for p in produtos if str(p["item"]) not in itens}.values())
+    if faltam:
+        lista = "\n".join(f"{n}. {p['nome']}" for n, p in enumerate(faltam, 1))
+        prompt = PROMPT_DA_EPOCA.format(hoje=agora_br(agora).strftime("%d/%m/%Y"), nome=nome,
+                                        data=data.strftime("%d/%m/%Y"), produtos=lista)
+        try:
+            resposta = asyncio.run(ps.api_gemini.gerar_texto_gemini(prompt))
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] A IA da época não respondeu: {type(e).__name__}")
+            resposta = None
+        lidos = ler_a_epoca(resposta, len(faltam))
+        if lidos is None:
+            registro_processos.registrar(REGISTRO, PROCESSO_DA_EPOCA, "sem a resposta da IA",
+                                         f"{len(faltam)} produto(s)", ok=None)
+        else:
+            itens.update({str(p["item"]): combina for p, combina in zip(faltam, lidos)})
+            db.salvar_config(CHAVE_DA_EPOCA, {"epoca": marca, "itens": itens})
+    if not any(str(p["item"]) in itens for p in produtos):
+        # Sem nenhuma resposta, a época não entra na escolha nem no registro dela.
+        return {}, None
+    return {str(p["item"]): bool(itens.get(str(p["item"]))) for p in produtos}, epoca
 
 
 def _produto_do_link_do_video(video):
@@ -3378,7 +3502,8 @@ def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
                     vendas = int(assistente._numero(produto.get("vendas")))
                     melhores.append({"pontos": valor * peso_dos_vendidos(vendas), "valor": valor, "vendas": vendas,
                                      "nota": assistente._numero(produto.get("nota")), "posicao": posicao,
-                                     "video": video})
+                                     "video": video, "item": str(produto.get("item") or ""),
+                                     "nome": produto.get("nome") or "", "epoca": ""})
                 continue
         # O de vários produtos, o sem oferta e o já postado: na vez deles, se nenhum antes paga o mínimo.
         if melhores:
@@ -3395,15 +3520,27 @@ def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
         registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA, "todos abaixo do mínimo",
                                      f"{len(abaixo)} de {len(candidatos)}", ok=None)
         return None, f"os próximos {len(candidatos)} vídeos da fonte pagam menos que o mínimo por venda"
+    # O que combina com a próxima data do comércio vale BONUS_DA_EPOCA vezes mais (P310 1); com um só, nada muda.
+    epoca = None
+    if len(melhores) > 1:
+        combinam, epoca = combinam_com_a_epoca([m for m in melhores if m["item"] and m["nome"]], agora)
+        for melhor in melhores:
+            if combinam.get(melhor["item"]):
+                melhor["pontos"] *= BONUS_DA_EPOCA
+                melhor["epoca"] = epoca[1]
     # A nota abaixo de NOTA_DA_ESCOLHA só entra sem outro de nota boa (P308 1); no empate, o mais novo da fonte.
     de_nota_boa = [melhor for melhor in melhores if melhor["nota"] >= NOTA_DA_ESCOLHA]
     escolhido = max(de_nota_boa or melhores, key=lambda melhor: (melhor["pontos"], -melhor["posicao"]))
+    da_epoca = sum(1 for melhor in melhores if melhor["epoca"])
     registro_processos.registrar(REGISTRO, PROCESSO_DA_ESCOLHA,
-                                 "o de maior valor pelos vendidos" + ("" if de_nota_boa else ", sem nota boa"),
+                                 "o de maior valor pelos vendidos" + ("" if de_nota_boa else ", sem nota boa")
+                                 + (", da época" if escolhido["epoca"] else ""),
                                  f"o {escolhido['posicao']}º de {len(candidatos)}; {len(abaixo)} abaixo do mínimo; "
-                                 f"vale {peso_dos_vendidos(escolhido['vendas'])}x",
+                                 f"vale {peso_dos_vendidos(escolhido['vendas'])}x"
+                                 + (f"; época: {da_epoca} de {len(melhores)}" if epoca else ""),
                                  ok=True)
-    return dict(escolhido["video"], **{campo: escolhido[campo] for campo in ("valor", "vendas", "nota", "posicao")}), ""
+    return dict(escolhido["video"], **{campo: escolhido[campo]
+                                       for campo in ("valor", "vendas", "nota", "posicao", "epoca")}), ""
 
 
 # O Preparar 1 Agora ⚡ que cai num vídeo com problema próprio (em análise na Shopee, a foto do
