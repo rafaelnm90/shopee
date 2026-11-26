@@ -3036,6 +3036,21 @@ def explorar(texto, d=None, celular=False):
         logging.disable(logging.NOTSET)
 
 
+def tela_em_pe(d, pausa=None):
+    """
+    A tela do celular sempre em pé (P301 2, 26/11/2026; DECISOES.md, Trabalho com o Claude): o explorar no celular a
+    põe em pé antes dos passos, como a rodada do robô e a noite do curso. Só o estado vai ao log.
+    """
+    feito = celular_robo.deixar_a_tela_em_pe(d)
+    if feito == celular_robo.POSTA_EM_PE:
+        print("tela: posta em pé (rotação automática desligada, P301 2)")
+        # Posta em pé, o app leva um instante para desenhar a tela de novo.
+        (pausa or time.sleep)(2)
+    elif feito == celular_robo.NAO_FICOU_EM_PE:
+        print("tela: não ficou em pé (a rotação do celular não mudou)")
+    return feito
+
+
 def _explorar(texto, d, celular):
     print("== Explorando o app da Shopee")
     try:
@@ -3063,6 +3078,8 @@ def _explorar(texto, d, celular):
             print("android: desligado; rode o preparar antes")
             return None
         d = conectar(celular)
+        if celular:
+            tela_em_pe(d)
     if eh_verificacao(_tela(d)):
         return parar_na_verificacao(celular)
     # O vídeo de uma aula pode tocar: de madrugada e nos passos que abrem ou tocam uma aula, o celular fica mudo.

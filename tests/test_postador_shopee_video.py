@@ -1178,6 +1178,27 @@ def test_no_celular_so_das_8h_as_22h(hora, comeca, relogio, monkeypatch, capsys)
     assert ("fora do horário das rodadas" in capsys.readouterr().out) is not comeca
 
 
+def test_o_explorar_no_celular_poe_a_tela_em_pe_antes_dos_passos(relogio, monkeypatch, capsys):
+    # P301 2 (26/11/2026): a tela do celular sempre em pé, com a rotação automática desligada de vez. O explorar no
+    # celular a põe em pé antes do 1º passo, como a rodada do robô e a noite do curso; o log diz só o estado.
+    relogio("10:00")
+    aparelho, antes_dos_passos, pausas = Aparelho(), [], []
+    monkeypatch.setattr(ps.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(ps.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(ps, "conectar", lambda celular: aparelho)
+    monkeypatch.setattr(ps.time, "sleep", lambda segundos: pausas.append(segundos))
+    monkeypatch.setattr(ps.celular_robo, "deixar_a_tela_em_pe",
+                        lambda d=None: antes_dos_passos.append(d is aparelho and not aparelho.toques)
+                        or ps.celular_robo.POSTA_EM_PE)
+    assert ps.explorar("xy:10,20", celular=True) is True
+    assert antes_dos_passos == [True] and aparelho.toques == [(10, 20)] and 2 in pausas
+    assert "tela: posta em pé" in capsys.readouterr().out
+    # A que não fica em pé também vai ao log, e o explorar segue (o Shopee fica em pé sozinho).
+    monkeypatch.setattr(ps.celular_robo, "deixar_a_tela_em_pe", lambda d=None: ps.celular_robo.NAO_FICOU_EM_PE)
+    assert ps.tela_em_pe(aparelho) == ps.celular_robo.NAO_FICOU_EM_PE
+    assert "tela: não ficou em pé" in capsys.readouterr().out
+
+
 class AparelhoDoChrome(Aparelho):
     """O Motorola de madrugada: o abrir:chrome traz o Chrome para a frente, e o volume de mídia responde."""
 
@@ -1195,6 +1216,9 @@ class AparelhoDoChrome(Aparelho):
         return {"package": self.na_frente, "activity": "org.chromium.chrome.browser.ChromeTabbedActivity"}
 
     def shell(self, partes):
+        if partes[:3] == ["settings", "get", "system"]:
+            # A tela em pé, com a rotação automática desligada (P301 2): o explorar só lê, nada muda.
+            return Resposta("0")
         if partes[:3] == ["cmd", "media_session", "volume"]:
             if "--set" in partes:
                 self.volume = int(partes[-1])

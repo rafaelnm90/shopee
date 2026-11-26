@@ -415,15 +415,23 @@ SEM_SESSOES = "MEDIA SESSION SERVICE (dumpsys media_session)\nSessions Stack - h
 class CelularDoVolume:
     """O celular de mentira que responde pelo adb ao volume de mídia e à sessão de mídia do Chrome."""
 
-    def __init__(self, volume=2, maximo=15, midia=SEM_SESSOES, muda=True, responde=True, pausa_funciona=True):
+    def __init__(self, volume=2, maximo=15, midia=SEM_SESSOES, muda=True, responde=True, pausa_funciona=True,
+                 rotacao=None, gira=True):
         self.volume, self.maximo, self.midia, self.muda, self.responde = volume, maximo, midia, muda, responde
         self.pausa_funciona, self.comandos = pausa_funciona, []
+        # A rotação da tela (P301 2): {configuração: valor}; None, o celular não responde a ela. gira=False: o
+        # Android não muda a rotação pedida.
+        self.rotacao, self.gira = (dict(rotacao) if rotacao is not None else None), gira
 
     def shell(self, partes):
         import types
         self.comandos.append(partes)
         saida = ""
-        if partes[:3] == ["cmd", "media_session", "volume"] and self.responde:
+        if partes[:3] == ["settings", "get", "system"] and self.rotacao is not None:
+            saida = self.rotacao.get(partes[3], "null") + "\n"
+        elif partes[:3] == ["settings", "put", "system"] and self.rotacao is not None and self.gira:
+            self.rotacao[partes[3]] = partes[4]
+        elif partes[:3] == ["cmd", "media_session", "volume"] and self.responde:
             if "--set" in partes:
                 if self.muda:
                     self.volume = int(partes[-1])
@@ -2901,6 +2909,36 @@ def test_sem_a_leitura_do_volume_a_aula_nao_abre(noite_do_curso):
     surdo = _curso_da_noite(responde=False)
     resumo = noite_do_curso(surdo, AjudanteNaHora())
     assert resumo.endswith("parou: o celular não ficou mudo antes de abrir a aula") and surdo.toques == []
+
+
+def test_a_noite_poe_a_tela_em_pe_antes_de_abrir_a_aula(noite_do_curso):
+    # Madrugada de 26/11/2026: com o celular de lado e a rotação automática ligada, o Chrome veio deitado, e a lista de
+    # aulas do site não aparecia (as duas tentativas pararam). P301 2: a rotação automática desligada de vez e a tela
+    # em pé, antes de qualquer toque, e o registro diz que a noite a pôs em pé.
+    import registro_processos
+    _lista_no_mapa(4)
+    deitado = _curso_da_noite(rotacao={"accelerometer_rotation": "1", "user_rotation": "1"})
+    resumo = noite_do_curso(deitado, AjudanteNaHora())
+    assert resumo.startswith("3 aula(s) gravada(s)")
+    assert deitado.rotacao == {"accelerometer_rotation": "0", "user_rotation": "0"}
+    mudancas = [c for c in deitado.comandos if c[:2] == ["settings", "put"]]
+    assert mudancas == [["settings", "put", "system", "accelerometer_rotation", "0"],
+                        ["settings", "put", "system", "user_rotation", "0"]]
+    # Antes do 1º toque e do celular mudo: a tela em pé é a primeira coisa da aula.
+    assert deitado.comandos.index(mudancas[-1]) < next(n for n, c in enumerate(deitado.comandos)
+                                                       if c[:3] == ["cmd", "media_session", "volume"])
+    assert [(linha[2], linha[3]) for linha in registro_processos.sequencia(
+        "curso", "tela do celular", "2000-01-01 00:00:00")] == [("posta em pé", "rotação automática desligada")]
+
+
+def test_a_tela_que_nao_fica_em_pe_para_a_noite_sem_tocar_em_nada(noite_do_curso):
+    # O Android que não muda a rotação: deitada, a aula não abriria; a noite para antes de tocar, com o porquê.
+    _lista_no_mapa(4)
+    teimoso = _curso_da_noite(rotacao={"accelerometer_rotation": "1", "user_rotation": "1"}, gira=False)
+    resumo = noite_do_curso(teimoso, AjudanteNaHora())
+    assert resumo == ("0 aula(s) gravada(s), 0 guardada(s), 0 pela metade, 0 sem vídeo guardada(s); parou: a tela do "
+                      "celular não ficou em pé")
+    assert teimoso.toques == [] and not cursos_robo.lista_do_curso(4)[0].get("gravada_em")
 
 
 def test_a_aula_sem_video_que_nao_fica_guardada_volta_e_a_noite_segue(noite_do_curso):

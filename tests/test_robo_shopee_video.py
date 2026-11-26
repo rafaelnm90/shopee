@@ -982,16 +982,18 @@ def test_aprovacao_desligada_aprova_sozinho_o_rascunho_novo(monkeypatch, avisos)
                      robo.PROCESSO_DA_APROVACAO) == ("aprovado sozinho", "aprovação desligada", 1)
 
 
-def _tela(monkeypatch, acesa, energia=None, bloqueio=False, acende=None):
+def _tela(monkeypatch, acesa, energia=None, bloqueio=False, acende=None, em_pe=None):
     """
     A tela do celular lida pelo adb (celular_robo), sem o celular de verdade: acesa ou apagada, a carga,
-    a tela de bloqueio e o que a tecla de acender faz. Devolve as vezes em que o robô acendeu a tela.
+    a tela de bloqueio, o que a tecla de acender faz e o que a rotação da tela deu (em_pe; None, sem a leitura).
+    Devolve as vezes em que o robô acendeu a tela.
     """
     acendeu = []
     monkeypatch.setattr(robo.celular_robo, "tela_acesa", lambda: acesa)
     monkeypatch.setattr(robo.celular_robo, "ler_energia", lambda: energia)
     monkeypatch.setattr(robo.celular_robo, "tela_de_bloqueio", lambda: bloqueio)
     monkeypatch.setattr(robo.celular_robo, "acender_tela", lambda: acendeu.append(1) or acende)
+    monkeypatch.setattr(robo.celular_robo, "deixar_a_tela_em_pe", lambda d=None: em_pe)
     return acendeu
 
 
@@ -1084,6 +1086,26 @@ def test_tela_apagada_no_carregador_o_robo_acende_e_segue(monkeypatch, avisos):
     assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     assert acendeu == [1] and _avisos_da_tela(avisos) == []
     assert registros == [("acesa pelo robô", CARGA_NO_CARREGADOR, True)]
+
+
+def test_a_rodada_poe_a_tela_em_pe_e_anota_quando_mudou_ou_nao_ficou(monkeypatch, avisos):
+    # P301 2 (26/11/2026): a tela do celular sempre em pé, com a rotação automática desligada de vez. A cada rodada,
+    # antes de escolher o que fazer, o robô confere; o registro anota quando a pôs em pé e quando ela não ficou, e a
+    # rodada segue nos dois casos (o app da Shopee fica em pé sozinho).
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=2, robo_inicio=0, robo_fim=24)
+    _tela(monkeypatch, True, NO_CARREGADOR, em_pe=robo.celular_robo.POSTA_EM_PE)
+    registros = _registros_da_tela(monkeypatch)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert registros == [("posta em pé", "rotação automática desligada", True)]
+    _tela(monkeypatch, True, NO_CARREGADOR, em_pe=robo.celular_robo.NAO_FICOU_EM_PE)
+    robo.conferir_a_tela(momento("2026-10-22 23:59"))
+    assert registros[-1] == ("não ficou em pé", "a rotação não mudou", False) and _avisos_da_tela(avisos) == []
+    # Já em pé ou sem a leitura: nada a anotar.
+    for em_pe in (robo.celular_robo.JA_EM_PE, None):
+        _tela(monkeypatch, True, NO_CARREGADOR, em_pe=em_pe)
+        robo.conferir_a_tela(momento("2026-10-22 23:59"))
+    assert len(registros) == 2
 
 
 def test_tela_que_nao_acende_ou_acende_na_tela_de_bloqueio_para_e_avisa_cada_problema(monkeypatch, avisos):

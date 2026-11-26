@@ -3156,6 +3156,11 @@ VOLTAS_DA_NOITE = 200
 # O que para a aula sem ser falha: ela volta depois, inteira (P295 1), e a noite acaba aqui.
 PARADAS_DA_AULA = ("o robô pediu o celular", "a madrugada acabou")
 SEM_O_MUDO = "o celular não ficou mudo antes de abrir a aula"
+# A tela sempre em pé (P301 2, 26/11/2026; DECISOES.md, Trabalho com o Claude): deitada, a página da aula não mostra a
+# lista de aulas. Posta em pé, o Chrome leva um instante para desenhar a página de novo.
+PROCESSO_DA_TELA = "tela do celular"
+SEM_A_TELA_EM_PE = "a tela do celular não ficou em pé"
+ESPERA_DA_TELA_EM_PE = 2
 
 
 def guardar_o_caso(d, motivo, resultado="não abriu", passo="abrir a aula"):
@@ -3380,6 +3385,14 @@ def noite(conectar=None, pausa=None, ajudante=None, trava=None, conectado=None):
                     break
                 anotar_o_sinal()
                 d = conectar()
+                em_pe = celular_robo.deixar_a_tela_em_pe(d)
+                if em_pe == celular_robo.NAO_FICOU_EM_PE:
+                    motivo = SEM_A_TELA_EM_PE
+                    break
+                if em_pe == celular_robo.POSTA_EM_PE:
+                    registro_processos.registrar(REGISTRO_DO_CURSO, PROCESSO_DA_TELA, "posta em pé",
+                                                 "rotação automática desligada", ok=True)
+                    pausa(ESPERA_DA_TELA_EM_PE)
                 # O vídeo da aula pode começar a tocar sozinho quando a página abre: o celular fica mudo até o gravador
                 # ligar, e então o som vai só ao servidor (o celular fica no quarto do Rafael, pedido dele de
                 # 22/11/2026: DECISOES.md, Trabalho com o Claude).

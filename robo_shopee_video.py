@@ -2503,6 +2503,22 @@ def conferir_a_tela(agora=None):
         raise _sem_a_tela("bloqueio", carga or _carga_do_celular()[1], agora)
     if bloqueio is False:
         _tela_de_volta(agora)
+    _tela_em_pe(agora)
+
+
+def _tela_em_pe(agora=None):
+    """
+    A tela do celular sempre em pé (P301 2, 26/11/2026; DECISOES.md, Trabalho com o Claude): a cada rodada, o robô
+    desliga a rotação automática quando ela foi ligada, e o registro anota quando a tela foi posta em pé ou não ficou.
+    Sem a leitura, a rodada segue como antes.
+    """
+    feito = _ler(celular_robo.deixar_a_tela_em_pe)
+    if feito == celular_robo.POSTA_EM_PE:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, "posta em pé", "rotação automática desligada",
+                                     ok=True, agora=agora)
+    elif feito == celular_robo.NAO_FICOU_EM_PE:
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_TELA, "não ficou em pé", "a rotação não mudou", ok=False,
+                                     agora=agora)
 
 
 def _rodada_sem_a_tela(e, na_hora, preparar, pedido_de_post, treino, saude, pedidos, agora=None):

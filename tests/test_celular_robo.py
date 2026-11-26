@@ -1564,3 +1564,68 @@ def test_rodada_guarda_o_historico_do_celular_e_o_estado_mostra_o_guardado(cr, m
     assert len(cr.marcos_guardados()) == 11
 
 
+
+
+class CelularDaRotacao:
+    """O celular de mentira que responde à rotação da tela pelo d.shell do uiautomator2 (a noite e o explorar)."""
+
+    def __init__(self, rotacao, gira=True, responde=True):
+        self.rotacao, self.gira, self.responde, self.comandos = dict(rotacao), gira, responde, []
+
+    def shell(self, partes):
+        import types
+        self.comandos.append(partes)
+        saida = ""
+        if partes[:3] == ["settings", "get", "system"] and self.responde:
+            saida = self.rotacao.get(partes[3], "null") + "\n"
+        elif partes[:3] == ["settings", "put", "system"] and self.gira:
+            self.rotacao[partes[3]] = partes[4]
+        return types.SimpleNamespace(output=saida, exit_code=0)
+
+    def mudancas(self):
+        return [c for c in self.comandos if c[:2] == ["settings", "put"]]
+
+
+def test_a_tela_fica_sempre_em_pe_com_a_rotacao_automatica_desligada(cr):
+    # P301 2 (26/11/2026): de madrugada, com o celular de lado e a rotação automática ligada, a página da aula ficou
+    # deitada no Chrome. O robô desliga a rotação automática de vez e põe a tela em pé, nessa ordem (com a rotação
+    # automática ligada, a posição escolhida não vale), e confere pela leitura.
+    deitada = CelularDaRotacao({"accelerometer_rotation": "1", "user_rotation": "1"})
+    assert cr.deixar_a_tela_em_pe(deitada) == cr.POSTA_EM_PE
+    assert deitada.rotacao == {"accelerometer_rotation": "0", "user_rotation": "0"}
+    assert deitada.mudancas() == [["settings", "put", "system", "accelerometer_rotation", "0"],
+                                  ["settings", "put", "system", "user_rotation", "0"]]
+    # Já em pé: só lê, nada muda.
+    em_pe = CelularDaRotacao({"accelerometer_rotation": "0", "user_rotation": "0"})
+    assert cr.deixar_a_tela_em_pe(em_pe) == cr.JA_EM_PE and em_pe.mudancas() == []
+    # Só a rotação automática ligada, com a tela em pé: ela é desligada, e a posição fica.
+    automatica = CelularDaRotacao({"accelerometer_rotation": "1", "user_rotation": "0"})
+    assert cr.deixar_a_tela_em_pe(automatica) == cr.POSTA_EM_PE
+    assert automatica.mudancas() == [["settings", "put", "system", "accelerometer_rotation", "0"]]
+    # O Android que não muda: não ficou em pé. O celular que não responde: sem a leitura, e nada é mudado.
+    teimoso = CelularDaRotacao({"accelerometer_rotation": "1", "user_rotation": "1"}, gira=False)
+    assert cr.deixar_a_tela_em_pe(teimoso) == cr.NAO_FICOU_EM_PE
+    calado = CelularDaRotacao({"accelerometer_rotation": "1"}, responde=False)
+    assert cr.deixar_a_tela_em_pe(calado) is None and calado.mudancas() == []
+
+
+def test_a_rodada_do_robo_poe_a_tela_em_pe_pelo_adb_do_servidor(cr, monkeypatch):
+    # Sem o d do uiautomator2 (a rodada do robô), pelo adb do servidor, com o endereço do celular guardado.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    rotacao, pedidos = {"accelerometer_rotation": "1", "user_rotation": "0"}, []
+
+    def adb(*partes, timeout=0):
+        # ("adb", "-s", endereço, "shell", "settings", "get"|"put", "system", nome[, valor])
+        pedidos.append(partes)
+        if partes[4:7] == ("settings", "get", "system"):
+            return 0, rotacao[partes[7]] + "\n"
+        if partes[4:7] == ("settings", "put", "system"):
+            rotacao[partes[7]] = partes[8]
+        return 0, ""
+    monkeypatch.setattr(cr.av, "_rodar", adb)
+    assert cr.deixar_a_tela_em_pe() == cr.POSTA_EM_PE
+    assert rotacao == {"accelerometer_rotation": "0", "user_rotation": "0"}
+    assert ("adb", "-s", f"{IP}:37000", "shell", "settings", "put", "system", "accelerometer_rotation", "0") in pedidos
+    # Sem o celular pareado, nem tenta.
+    cr._gravar(ip="", porta=0)
+    assert cr.deixar_a_tela_em_pe() is None
