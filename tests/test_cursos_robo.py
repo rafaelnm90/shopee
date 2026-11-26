@@ -1075,6 +1075,11 @@ class SiteDoCurso(CelularDoVolume):
     (na_pagina). Tocada já em edição, a barra fica com o que estava escrito, e a escrita vai depois dele; edicao_aberta:
     a barra começa em edição, com esse texto. escrita_lenta: em quantas leituras da tela a barra mostra só a metade do
     escrito. A tecla voltar tira o teclado, depois a edição e, fora dela, volta a página (voltas_da_pagina).
+    O dedo segurado num link da página abre o menu do Chrome, com o endereço no alto e o "Copiar endereço do link", que
+    o põe na área de transferência (enderecos: o endereço de cada link pelo texto; sem_a_copia: o menu sem a cópia). O
+    endereço aberto pelo Android (am start) abre a página do link numa guia nova (em duas telas: a 2ª depois de rolar),
+    ou o app do Telegram (o link do t.me, com app_do_telegram), e a tecla voltar fecha a guia (o Chrome sai da frente)
+    ou sai do app (links_abertos: os endereços abertos; toques_longos: onde o dedo foi segurado).
     """
 
     def __init__(self, aulas, aberta=0, no_alto=False, play_toca=True, na_frente=CHROME, abre_o_chrome=True,
@@ -1082,8 +1087,13 @@ class SiteDoCurso(CelularDoVolume):
                  barra_escondida=False, rolagem_funciona=True, sessao_vencida=False, inicio_na_guia_nova=False,
                  outro_site=False, baixa=True, aviso=2, atraso_do_proximo=0, baixar_sai=False,
                  texto_na_videoaula=False, slides=4, carrossel_volta=False, em_branco=0, branco_ate_voltar=False,
-                 edicao_lenta=0, abre_a_edicao=True, edicao_aberta=None, escrita_lenta=0, **opcoes):
+                 edicao_lenta=0, abre_a_edicao=True, edicao_aberta=None, escrita_lenta=0, enderecos=None,
+                 sem_a_copia=False, app_do_telegram=False, **opcoes):
         super().__init__(**opcoes)
+        self.enderecos = dict(ENDERECOS_DOS_LINKS if enderecos is None else enderecos)
+        self.sem_a_copia, self.app_do_telegram = sem_a_copia, app_do_telegram
+        self.menu_do_link, self.copiado, self.pagina_do_link, self.tela_do_link = None, "", None, 0
+        self.links_abertos, self.toques_longos, self.toques_fora = [], [], []
         self.edicao_lenta, self.abre_a_edicao, self.escrita_lenta = edicao_lenta, abre_a_edicao, escrita_lenta
         self.abrindo, self.faltam_letras, self.na_pagina, self.voltas_da_pagina = 0, 0, [], 0
         # A guia em branco depois do Enter (24/11/2026): em_branco leituras da tela sem nada da página, ou, com
@@ -1188,6 +1198,52 @@ class SiteDoCurso(CelularDoVolume):
     def app_current(self):
         return {"package": self.na_frente, "activity": ""}
 
+    @property
+    def clipboard(self):
+        return self.copiado
+
+    def set_clipboard(self, texto):
+        self.copiado = texto
+
+    def _links_da_pagina(self):
+        """Os links da página aberta, [(texto, caixa)], como _sem_video e o texto da videoaula os desenham."""
+        if self._tipo(self.aberta) == "documento":
+            return [("Clique aqui e entre no grupo", (42, 1920, 787, 1965))]
+        if self._com_video(self.aberta) and self.texto_na_videoaula:
+            return [("Planilha de apoio", (42, 1300, 787, 1345))]
+        return []
+
+    def long_click(self, x, y):
+        self.toques_longos.append((x, y))
+        for texto, (x1, y1, x2, y2) in self._links_da_pagina():
+            if x1 <= x <= x2 and y1 <= y <= y2 and not self.pagina_do_link:
+                self.menu_do_link = texto
+
+    def _tela_do_menu(self):
+        endereco = self.enderecos.get(self.menu_do_link, "")
+        nos = ['<node class="android.widget.TextView" resource-id="com.android.chrome:id/context_menu_url" '
+               f'clickable="false" text="{endereco}" content-desc="" bounds="[60,700][1020,760]" />',
+               '<node class="android.widget.TextView" resource-id="com.android.chrome:id/menu_row_text" '
+               'clickable="false" text="Abrir em nova guia" content-desc="" bounds="[60,800][1020,880]" />']
+        if not self.sem_a_copia:
+            nos.append('<node class="android.widget.TextView" resource-id="com.android.chrome:id/menu_row_text" '
+                       'clickable="false" text="Copiar endereço do link" content-desc="" '
+                       'bounds="[60,900][1020,980]" />')
+        nos.append('<node class="android.widget.TextView" resource-id="com.android.chrome:id/menu_row_text" '
+                   'clickable="false" text="Copiar texto do link" content-desc="" bounds="[60,1000][1020,1080]" />')
+        return "".join(nos)
+
+    def _tela_da_pagina_do_link(self):
+        barra = self.pagina_do_link.removeprefix("https://")
+        partes = (["Página do link", "Texto do começo da página"] if self.tela_do_link == 0
+                  else ["Texto do fim da página", "Rodapé da página"])
+        nos = "".join(f'<node class="android.widget.TextView" resource-id="" text="{texto}" content-desc="" '
+                      f'bounds="[42,{400 + 100 * n}][1021,{480 + 100 * n}]" />' for n, texto in enumerate(partes))
+        return ('<hierarchy rotation="0"><node class="android.widget.EditText" '
+                f'resource-id="com.android.chrome:id/url_bar" clickable="true" text="{barra}" content-desc="" '
+                'bounds="[211,120][691,267]" /><node class="android.webkit.WebView" resource-id="" text="" '
+                f'content-desc="" bounds="[0,267][1080,2394]">{nos}</node></hierarchy>')
+
     def app_start(self, pacote, wait=False):
         self.abertos.append(pacote)
         if self.abre_o_chrome and pacote == CHROME and self.na_frente != CHROME:
@@ -1196,6 +1252,13 @@ class SiteDoCurso(CelularDoVolume):
             self.na_frente = pacote
 
     def dump_hierarchy(self):
+        if self.na_frente == TELEGRAM:
+            return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="false" '
+                    'text="Grupo de teste" content-desc="" bounds="[100,500][980,580]" /><node '
+                    'class="android.widget.TextView" resource-id="" clickable="true" text="ENTRAR NO GRUPO" '
+                    'content-desc="" bounds="[100,2200][980,2300]" /></hierarchy>')
+        if self.na_frente == CHROME and self.pagina_do_link:
+            return self._tela_da_pagina_do_link()
         if self.na_frente != CHROME:
             return ('<hierarchy rotation="0"><node class="android.widget.TextView" resource-id="" clickable="true" '
                     'text="Eu" content-desc="" bounds="[880,2250][1080,2394]" /></hierarchy>')
@@ -1254,7 +1317,8 @@ class SiteDoCurso(CelularDoVolume):
                         'clickable="false" text="Download concluído" content-desc="" bounds="[0,2200][1080,2300]" />')
         pagina = ('<node class="android.webkit.WebView" resource-id="" text="" content-desc="" '
                   'bounds="[0,267][1080,2394]">' + "".join(nos) + "</node>")
-        return '<hierarchy rotation="0">' + "".join(fora[:1]) + pagina + "".join(fora[1:]) + "</hierarchy>"
+        menu = self._tela_do_menu() if self.menu_do_link else ""
+        return '<hierarchy rotation="0">' + "".join(fora[:1]) + pagina + "".join(fora[1:]) + menu + "</hierarchy>"
 
     def screenshot(self):
         from PIL import Image, ImageDraw
@@ -1268,6 +1332,9 @@ class SiteDoCurso(CelularDoVolume):
 
     def swipe(self, x1, y1, x2, y2, duracao=None):
         self.rolagens.append((x1, y1, x2, y2))
+        if self.pagina_do_link:
+            self.tela_do_link = 1 if y1 > y2 else self.tela_do_link
+            return
         if y2 > y1 and not self.barra_escondida and not self.rolada and not self.pagina and not self.nova_guia:
             # No alto da página, o arrasto para baixo é o "puxar para atualizar" do Chrome: a página recarrega o
             # endereço da barra, que o Próximo não muda (a aula aberta pela barra volta).
@@ -1292,6 +1359,15 @@ class SiteDoCurso(CelularDoVolume):
 
     def click(self, x, y):
         self.toques.append((x, y))
+        if self.menu_do_link:
+            if (x, y) == (540, 940) and not self.sem_a_copia:
+                self.copiado = self.enderecos.get(self.menu_do_link, "")
+            self.menu_do_link = None
+            return
+        if self.na_frente == TELEGRAM or self.pagina_do_link:
+            # Nada se toca nas páginas dos links nem no app que eles abrem: o toque fica em toques_fora, e o teste vê.
+            self.toques_fora.append((x, y))
+            return
         if self.nova_guia and 100 <= x <= 840 and 540 <= y <= 626 and not self.barra_em_foco:
             self._tocar_na_barra()
         elif 211 <= x <= 691 and 120 <= y <= 267 and (not self.barra_escondida or self.barra_em_foco):
@@ -1316,6 +1392,16 @@ class SiteDoCurso(CelularDoVolume):
 
     def press(self, tecla):
         self.teclas.append(tecla)
+        if tecla == "back" and self.menu_do_link:
+            self.menu_do_link = None
+            return
+        if tecla == "back" and self.na_frente == TELEGRAM:
+            self.na_frente = CHROME
+            return
+        if tecla == "back" and self.pagina_do_link and self.na_frente == CHROME:
+            # A guia aberta pelo Android fecha, e o Chrome sai da frente (volta a quem o abriu).
+            self.pagina_do_link, self.tela_do_link, self.na_frente = None, 0, "com.android.launcher"
+            return
         if tecla == "back" and self.barra_em_foco and self.teclado:
             self.teclado = False
         elif tecla == "back" and self.barra_em_foco:
@@ -1332,6 +1418,14 @@ class SiteDoCurso(CelularDoVolume):
 
     def shell(self, partes):
         import types
+        if partes[:2] == ["am", "start"] and "android.intent.action.VIEW" in partes:
+            endereco = partes[partes.index("-d") + 1]
+            self.links_abertos.append(endereco)
+            if self.app_do_telegram and "t.me/" in endereco:
+                self.na_frente = TELEGRAM
+            else:
+                self.na_frente, self.pagina_do_link, self.tela_do_link = CHROME, endereco, 0
+            return types.SimpleNamespace(output="", exit_code=0)
         if partes[:2] == ["input", "text"] and not self.barra_em_foco:
             self.na_pagina.append(partes[2])
         elif partes[:2] == ["input", "text"] and self.escreve:
@@ -1364,6 +1458,12 @@ class SiteDoCurso(CelularDoVolume):
             self.baixados = [item for item in self.baixados if item[0] not in partes]
             self.marcado = self.marcado and cursos_robo.MARCA_DO_CURSO not in partes
         return super().shell(partes)
+
+
+# Os endereços dos links das páginas de mentira (domínios inventados) e o app do Telegram.
+ENDERECOS_DOS_LINKS = {"Clique aqui e entre no grupo": "https://t.me/+grupoDeTeste",
+                       "Planilha de apoio": "https://docs.exemplo.com/planilha-de-apoio"}
+TELEGRAM = "org.telegram.messenger"
 
 
 # As páginas fora das aulas: (o endereço na barra, o resto da tela).
@@ -1774,10 +1874,106 @@ def test_o_explorar_guarda_a_aula_sem_video_aberta(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
     site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True)
     assert cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA) == (
-        True, "aula sem vídeo guardada: 1 tela(s), 5 linha(s), 1 link(s), documento de 2 KB")
+        True, "aula sem vídeo guardada: 1 tela(s), 5 linha(s), 1 link(s) (1 aberto(s)), documento de 2 KB")
     (pasta,) = os.listdir(tmp_path / "aulas")
     assert pasta.endswith("-c00-a000") and site.baixados == []
-    assert not cursos_robo.toca_aula("curso", "guardar")
+    # O guardar abre os links da página, que podem tocar: também de dia, com o celular mudo.
+    assert cursos_robo.toca_aula("curso", "guardar")
+
+
+def test_o_endereco_do_link_vem_do_menu_do_chrome_sem_abrir_a_pagina():
+    # Pedido do Rafael de 26/11/2026 ("sempre analisar os links"): o endereço de cada link vem antes, sem abrir nada. O
+    # dedo segurado no link abre o menu do Chrome, e o "Copiar endereço do link" o põe na área de transferência.
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True)
+    site.copiado = "o que estava copiado antes"
+    assert cursos_robo.endereco_do_link(site, (414, 1942), SEM_ESPERA["pausa"]) == "https://t.me/+grupoDeTeste"
+    assert site.menu_do_link is None and site.voltas_da_pagina == 0 and site.links_abertos == []
+
+
+def test_o_menu_sem_a_copia_deixa_o_link_sem_o_endereco_e_a_aula_no_lugar():
+    # Sem o "Copiar endereço do link" no menu, a tela vai a um caso (ao_falhar) e o menu sai pela tecla voltar, que só
+    # é apertada com ele na tela: sem o menu, ela voltaria a página da aula.
+    casos = []
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True, sem_a_copia=True)
+    assert cursos_robo.endereco_do_link(site, (414, 1942), SEM_ESPERA["pausa"], lambda: casos.append(True)) == ""
+    assert casos == [True] and site.menu_do_link is None and site.voltas_da_pagina == 0
+    fora_do_link = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True)
+    assert cursos_robo.endereco_do_link(fora_do_link, (900, 600), SEM_ESPERA["pausa"]) == ""
+    assert fora_do_link.teclas == [] and fora_do_link.voltas_da_pagina == 0
+
+
+def test_a_pagina_do_link_e_guardada_sem_tocar_em_nada_e_a_aula_volta(bm, monkeypatch, tmp_path):
+    # Cada link abre numa guia nova, pelo Android (o endereço nunca é escrito na barra da aula). A página dele é
+    # guardada para o Claude ler, com as telas e os textos, rolando, sem nenhum toque nela, e a aula volta pela tecla
+    # voltar, que fecha a guia (o Chrome volta à frente).
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True)
+    ok, _resumo = cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA)
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    pasta = os.path.join(tmp_path / "aulas", pasta)
+    assert ok and site.links_abertos == ["https://t.me/+grupoDeTeste"] and site.toques_fora == []
+    assert site.pagina_do_link is None and site.na_frente == CHROME and site.barra_em_foco is False
+    with open(os.path.join(pasta, "link_01.txt"), encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert texto.startswith("https://t.me/+grupoDeTeste\n")
+    assert "Texto do começo da página" in texto and "Rodapé da página" in texto
+    assert {"link_01_tela_01.jpg", "link_01_tela_02.jpg"} <= set(os.listdir(pasta))
+    with open(os.path.join(pasta, "links.json"), encoding="utf-8") as arquivo:
+        (link,) = json.load(arquivo)
+    assert (link["texto"], link["telas"], link["app"], link["voltou"], link["problema"]) == (
+        "Clique aqui e entre no grupo", 2, "chrome", True, "")
+    with open(os.path.join(pasta, "texto.txt"), encoding="utf-8") as arquivo:
+        assert "Clique aqui e entre no grupo: https://t.me/+grupoDeTeste; 2 tela(s)" in arquivo.read()
+
+
+def test_o_link_que_abre_o_telegram_fica_com_uma_tela_dele_sem_nenhum_toque(bm, monkeypatch, tmp_path):
+    # O link do grupo que abre o app do Telegram: uma tela dele, sem rolar e sem tocar em nada (nunca o "Entrar no
+    # grupo" por conta própria), e a tecla voltar devolve o Chrome com a aula.
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True, app_do_telegram=True)
+    ok, _resumo = cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA)
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    with open(os.path.join(tmp_path / "aulas", pasta, "links.json"), encoding="utf-8") as arquivo:
+        (link,) = json.load(arquivo)
+    assert ok and (link["app"], link["telas"], link["voltou"]) == ("outro app", 1, True)
+    assert site.toques_fora == [] and site.na_frente == CHROME
+
+
+def test_o_link_que_nao_e_pagina_da_internet_so_fica_anotado(bm, monkeypatch, tmp_path):
+    # O e-mail ou o telefone de um link não abre nada (abriria outro app para escrever ou ligar).
+    monkeypatch.setattr(cursos_robo, "PASTA_DAS_AULAS", str(tmp_path / "aulas"))
+    site = SiteDoCurso([AULA_DE_DOCUMENTO], no_alto=True,
+                       enderecos={"Clique aqui e entre no grupo": "mailto:suporte@exemplo.com"})
+    assert cursos_robo.curso_no_explorar(site, "guardar", **SEM_ESPERA)[1].startswith(
+        "aula sem vídeo guardada: 1 tela(s), 5 linha(s), 1 link(s) (0 aberto(s))")
+    (pasta,) = os.listdir(tmp_path / "aulas")
+    with open(os.path.join(tmp_path / "aulas", pasta, "links.json"), encoding="utf-8") as arquivo:
+        assert json.load(arquivo)[0]["problema"] == cursos_robo.NAO_E_PAGINA
+    assert site.links_abertos == []
+
+
+def test_o_mesmo_endereco_achado_duas_vezes_abre_uma_vez_so(monkeypatch, tmp_path):
+    # O mesmo link visto em duas telas seguidas é lido duas vezes, mas a página dele abre uma vez só, pelo endereço.
+    abertos = []
+    monkeypatch.setattr(cursos_robo, "abrir_o_link", lambda d, endereco, pasta, numero, pausa, vigiar: abertos.append(
+        (endereco, numero)) or {"telas": 1})
+    achados = [("Assista aqui", "https://videos.exemplo.com/1"), ("Assista aqui", "https://videos.exemplo.com/1"),
+               ("Assista aqui", "https://videos.exemplo.com/2"), ("Sem endereço", "")]
+    resultado, porque = cursos_robo._abrir_os_links(None, str(tmp_path), achados, None, lambda: "")
+    assert porque == "" and abertos == [("https://videos.exemplo.com/1", 1), ("https://videos.exemplo.com/2", 2)]
+    assert [item.get("problema", "") for item in resultado] == ["", "", cursos_robo.SEM_O_MENU]
+
+
+def test_o_robo_que_pede_o_celular_no_meio_dos_links_para_a_leitura(monkeypatch, tmp_path):
+    # A preferência do robô (pedido do Rafael de 22/11/2026) vale também entre um link e outro.
+    monkeypatch.setattr(cursos_robo, "abrir_o_link", lambda *a: {"telas": 1})
+    vezes = []
+    def vigiar():
+        vezes.append(True)
+        return "o robô pediu o celular" if len(vezes) > 1 else ""
+    achados = [("Um", "https://a.exemplo.com"), ("Dois", "https://b.exemplo.com")]
+    resultado, porque = cursos_robo._abrir_os_links(None, str(tmp_path), achados, None, vigiar)
+    assert porque == "o robô pediu o celular" and len(resultado) == 1
 
 
 def test_o_explorar_guarda_a_pagina_da_videoaula_sem_tocar_no_play(bm, monkeypatch, tmp_path):
@@ -1788,9 +1984,12 @@ def test_o_explorar_guarda_a_pagina_da_videoaula_sem_tocar_no_play(bm, monkeypat
         False, "a página da videoaula não foi guardada (a página da aula não mostrou texto nem documento)")
     com_texto = SiteDoCurso(AULAS_DO_SITE, no_alto=True, texto_na_videoaula=True)
     assert cursos_robo.curso_no_explorar(com_texto, "guardar", **SEM_ESPERA) == (
-        True, "página da videoaula guardada: 1 tela(s), 2 linha(s), 1 link(s), sem documento")
+        True, "página da videoaula guardada: 1 tela(s), 2 linha(s), 1 link(s) (1 aberto(s)), sem documento")
     (pasta,) = os.listdir(tmp_path / "aulas")
-    assert pasta.endswith("-c00-a000") and com_texto.toques == [] and not com_texto._tocando()
+    # O único toque é o "Copiar endereço do link" do menu do Chrome (o dedo segurado no link): nada no player.
+    assert pasta.endswith("-c00-a000") and com_texto.toques == [(540, 940)] and not com_texto._tocando()
+    assert com_texto.toques_longos == [(414, 1322)]
+    assert com_texto.links_abertos == ["https://docs.exemplo.com/planilha-de-apoio"]
     with open(os.path.join(tmp_path / "aulas", pasta, "aula.json"), encoding="utf-8") as arquivo:
         assert json.load(arquivo)["tipo"] == cursos_robo.PAGINA_DA_VIDEOAULA
 
@@ -2858,7 +3057,8 @@ def test_a_noite_grava_as_aulas_na_ordem_da_lista_e_nao_pula_nenhuma(noite_do_cu
         False, False, True, False]
     assert not any(aula.get("vista_em") for aula in lista)
     assert _registro_das_aulas() == [("guardada sem vídeo",
-                                      "curso 4, aula 3: 1 tela(s), 5 linha(s), 1 link(s), documento de 2 KB")]
+                                      "curso 4, aula 3: 1 tela(s), 5 linha(s), 1 link(s) (1 aberto(s)), "
+                                      "documento de 2 KB")]
     (pasta,) = os.listdir(cursos_robo.PASTA_DAS_AULAS)
     assert pasta.endswith("-c04-a003") and not cursos_robo.gravando()
     # O documento saiu do celular, e nenhum link foi tocado.
@@ -2884,7 +3084,9 @@ def test_a_noite_que_comeca_com_a_shopee_na_frente_e_a_sessao_vencida(noite_do_c
     site = _curso_da_noite(na_frente="com.shopee.br", sessao_vencida=True, volume=6)
     resumo = noite_do_curso(site, AjudanteNaHora())
     assert resumo.startswith("3 aula(s) gravada(s)") and noite_do_curso.gravadas[0] == "Aula um"
-    assert site.abertos == [CHROME] and site.logins == [(0, False)]
+    # O Chrome vem à frente antes da 1ª aula e de novo depois da guia do link do documento (fechada, ela o tira da
+    # frente).
+    assert site.abertos == [CHROME, CHROME] and site.logins == [(0, False)]
 
 
 def test_a_aula_so_abre_muda_ou_com_o_gravador_gravando(noite_do_curso):
@@ -3013,10 +3215,12 @@ def test_a_noite_guarda_tambem_a_pagina_de_cada_videoaula(noite_do_curso):
             info = json.load(arquivo)
         assert (info["tipo"], info["linhas"], info["links"], info["documento"]) == (
             cursos_robo.PAGINA_DA_VIDEOAULA, 2, 1, None)
-    assert site.volumes_das_telas == [0, 0, 0]
+    # Cada página com um print dela e dois da página do link (a 2ª depois de rolar), todos com o celular mudo.
+    assert site.volumes_das_telas == [0] * 9
     assert _registro_das_aulas() == [
-        ("página guardada", f"curso 4, aula {numero}: 1 tela(s), 2 linha(s), 1 link(s), sem documento")
+        ("página guardada", f"curso 4, aula {numero}: 1 tela(s), 2 linha(s), 1 link(s) (1 aberto(s)), sem documento")
         for numero in (1, 2, 3)]
+    assert site.links_abertos == ["https://docs.exemplo.com/planilha-de-apoio"] * 3 and site.toques_fora == []
 
 
 def test_o_robo_que_pede_o_celular_na_pagina_da_videoaula_para_a_noite_com_a_aula_gravada(noite_do_curso, monkeypatch):
