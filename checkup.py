@@ -415,6 +415,7 @@ SEM_META = {
     ("notas", "envio de nota fiscal"),
     ("shopee_video", "anexar o produto"), ("shopee_video", "sinais do app no anexar"),
     ("shopee_video", "nome do produto no vídeo"), ("shopee_video", "cupom do produto"),
+    ("shopee_video", "cupom do vídeo: "),
     ("shopee_video", "assistente: envio"), ("shopee_video", "assistente: links a mais"),
     ("shopee_video", "grupo dos amigos: "),
     ("shopee_video", "canal afiliados: "),

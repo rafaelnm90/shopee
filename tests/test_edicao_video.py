@@ -1366,6 +1366,44 @@ def test_textos_da_tela_pede_so_o_do_video_completo(monkeypatch):
     assert edicao_video.lugares_dos_textos({}) is None
 
 
+def test_chamada_fala_do_cupom_do_video_enquanto_ele_vale(monkeypatch, tmp_path):
+    # Escolha do Rafael (26/11/2026, P313 1): enquanto o cupom de frete grátis exclusivo para vídeo vale, a chamada
+    # fala dele, sem prometer mais do que ele diz; só a chamada, e o registro conta se a IA falou dele.
+    import api_gemini
+    import registro_processos as rp
+    cupom = "o cupom de frete grátis da Shopee exclusivo para a compra feita pelo vídeo, sem valor mínimo"
+    sem, com = edicao_video.prompt_dos_textos("Meia"), edicao_video.prompt_dos_textos("Meia", cupom=cupom)
+    assert cupom not in sem and "sem prometer mais do que o cupom diz" not in sem
+    assert com.index('- "chamada"') < com.index(cupom) < com.index("Regras da Shopee Vídeo")
+    assert "única exceção à regra de não falar de promoção" in com and "o nome, a vantagem e a capa" in com
+    pedidos, chamadas = [], iter(["Frete grátis pelo vídeo", "Confira aqui embaixo"])
+
+    async def analisar(video, prompt, imagens=None):
+        pedidos.append(prompt)
+        return ('{"nome": "Meia Térmica", "vantagem": "Aquece o pé", "capa": "Meia quentinha", '
+                f'"chamada": "{next(chamadas)}"}}')
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 10.0)
+    sem_miniatura = edicao_video.SEM_MINIATURA
+    assert edicao_video.textos_da_tela("v.mp4", "Meia", sem_miniatura, cupom=cupom)["chamada"] == (
+        "Frete grátis pelo vídeo")
+    assert edicao_video.textos_da_tela("v.mp4", "Meia", sem_miniatura, cupom=cupom)["chamada"] == "Confira aqui embaixo"
+    assert all(cupom in pedido for pedido in pedidos)
+    linhas = sorted((l[2], l[3], l[5]) for l in rp.contagem("2000-01-01 00:00:00")
+                    if l[1] == edicao_video.PROCESSO_DO_CUPOM_NA_CHAMADA)
+    assert linhas == [("com o cupom", "", 1), ("sem o cupom", "a IA não falou do cupom na chamada", 1)]
+    # A edição do rascunho passa o cupom à IA dos textos só quando ele vem.
+    recebidos = []
+    monkeypatch.setattr(edicao_video, "textos_da_tela",
+                        lambda video, nome, lado, **opcoes: recebidos.append(opcoes.get("cupom", "")) or {})
+    _versoes_de_mentira(monkeypatch)
+    destino = str(tmp_path / "rascunho.mp4")
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Meia", cupom=cupom)
+    edicao_video.editar_para_postar("v.mp4", b"foto", destino, "Meia")
+    assert recebidos == [cupom, ""]
+
+
 def test_texto_da_ia_com_letra_fora_do_portugues_e_corrigido_ou_sai(monkeypatch):
     # 30/10: a capa com chamada saiu com "Por dentro tem pelüia bem macia" (o certo é pelúcia), e o
     # Rafael recusou o rascunho. Letra que não existe no português faz a IA reescrever só o texto;

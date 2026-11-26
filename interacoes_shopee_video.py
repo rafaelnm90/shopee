@@ -1008,6 +1008,16 @@ Escreva UM comentário curto, em português do Brasil, com no máximo {limite} c
 - com palavras que não mostram o gênero de quem escreve;
 - sem hashtags, no máximo 1 emoji e sem aspas."""
 
+# Enquanto o cupom do vídeo vale (o frete grátis exclusivo para a compra feita pelo vídeo, que o robô lê uma vez por
+# dia em Meus Cupons), o comentário de depois do post fala dele, sem prometer mais do que ele diz. É a única exceção à
+# regra do frete acima. Escolha do Rafael (26/11/2026, P313 1): DECISOES.md, Shopee Vídeo.
+CUPOM_NO_PROPRIO = """
+- hoje quem compra pelo vídeo pode usar {cupom}: fale desse cupom no comentário, chamando para comprar pelo \
+vídeo, sem prometer mais do que ele diz (sem dizer que o frete é grátis para tudo, sempre ou para todos, e sem \
+valor, desconto, prazo ou estoque); só neste ponto o frete pode aparecer."""
+# O texto fala do cupom (para o registro, que conta se a IA usou o cupom pedido).
+PALAVRAS_DO_CUPOM = ("cupom", "frete")
+
 
 def texto_simples(texto, limite):
     """
@@ -1073,14 +1083,23 @@ async def gerar_mensagem_da_live(imagem, anteriores=()):
     return await _pedir(prompt, TAMANHO_DO_COMENTARIO, imagens=[(imagem, "image/jpeg")])
 
 
-async def gerar_proprio(produto="", titulo="", anteriores=()):
+def fala_do_cupom(texto):
+    """O texto fala do cupom do vídeo (uma das PALAVRAS_DO_CUPOM)?"""
+    normal = str(texto or "").casefold()
+    return any(palavra in normal for palavra in PALAVRAS_DO_CUPOM)
+
+
+async def gerar_proprio(produto="", titulo="", anteriores=(), cupom=""):
     """
     O comentário do Rafael no próprio vídeo (P148 2): curto, sem hashtag, chamando para comprar,
     diferente dos que já estão no vídeo e dos últimos que o robô escreveu. Volta para a IA
-    uma vez quando o texto sai igual a um deles; None se ela não escreveu um novo.
+    uma vez quando o texto sai igual a um deles; None se ela não escreveu um novo. Com o cupom (o
+    cupom do vídeo que vale agora, P313 1), o comentário fala dele (CUPOM_NO_PROPRIO).
     """
     prompt = PROMPT_PROPRIO.format(produto=produto or "—", titulo=titulo or "—",
                                    anteriores="; ".join(anteriores) or "nenhum", limite=TAMANHO_DO_PROPRIO)
+    if cupom:
+        prompt += CUPOM_NO_PROPRIO.format(cupom=cupom)
     for _ in range(2):
         texto = await _pedir(prompt, TAMANHO_DO_PROPRIO)
         if texto and not any(parecidos(texto, anterior) for anterior in anteriores):

@@ -26,6 +26,7 @@ def momento(texto):
 
 # A leitura da Saúde do Vídeo do dia fica de fora dos testes que não são dela.
 SAUDE_DO_DIA = robo.saude_do_dia_pendente
+CUPOM_DO_DIA = robo.cupom_do_dia_pendente
 # A busca do mesmo produto com mais comissão (P33) também: ela vai à API de afiliado.
 TROCAR = robo.trocar_pela_maior_comissao
 ACHAR = robo.achar_o_produto_do_video
@@ -42,6 +43,8 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    # A leitura do cupom do dia em Meus Cupons, de passagem depois da Saúde (P313 1), tem testes próprios.
+    monkeypatch.setattr(robo, "cupom_do_dia_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "limpeza_fora_da_hora_pendente", lambda agora=None: False)
     monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
     # A busca do produto do vídeo quando o do link é outro (P158 2) tem testes próprios.
@@ -5641,6 +5644,146 @@ def test_saude_anota_os_seguidores_do_perfil(monkeypatch, avisos, ia_da_apelacao
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-24 10:00")))
     assert robo.rodada(d=AppDaSaude(), agora=momento("2026-10-24 10:00")).startswith("saúde lida")
     assert robo.db.ler_config(robo.CHAVE_SEGUIDORES)["dias"] == {"2026-10-24": 1200}
+
+
+def _cartao_de_cupom(numero, topo, selo, titulo, regra, validade):
+    """Um cartão de Meus Cupons como no Motorola (26/11/2026), com os pedaços soltos ao lado dele."""
+    return "".join([_no(ident=f"sectionVoucherCard_{numero}", caixa=(21, topo, 1059, topo + 390), clicavel=False),
+                    _no(selo, caixa=(234, topo + 69, 1035, topo + 101), clicavel=False),
+                    _no(titulo, f"labelVoucherDiscountMainHeader_{numero}", (234, topo + 112, 1035, topo + 154),
+                        clicavel=False),
+                    _no(regra, f"labelVoucherDiscountSubHeader_{numero}", (234, topo + 165, 501, topo + 196),
+                        clicavel=False),
+                    _no(validade, caixa=(45, topo + 300, 287, topo + 332), clicavel=False),
+                    _no("Usar", caixa=(901, topo + 297, 962, topo + 334), clicavel=False)])
+
+
+def _meus_cupons(*cartoes):
+    return _xml(_no("Meus Cupons", caixa=(126, 156, 463, 224), clicavel=False),
+                _no("Inserir código", "buttonInserirCódigo", (26, 410, 539, 536)),
+                _no("Ganhe mais cupons", "buttonGanheMaisCupons", (540, 410, 1053, 536)), *cartoes)
+
+
+class CelularDosCupons:
+    """A lista de Meus Cupons que rola: cada arrasto mostra a tela seguinte, e a última fica no fim."""
+
+    def __init__(self, telas):
+        self.telas, self.vez, self.toques = list(telas), 0, []
+
+    def dump_hierarchy(self):
+        return self.telas[min(self.vez, len(self.telas) - 1)]
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+
+    def swipe(self, *pontos):
+        self.vez += 1
+
+    def window_size(self):
+        return 1080, 2400
+
+
+def _lista_dos_cupons():
+    """3 leituras: o lote do vídeo que começa à noite, o que vale até 29/11 e os que não contam (P313 1)."""
+    primeira = _meus_cupons(
+        _cartao_de_cupom("111", 580, "TODAS AS LOJAS", "Cupom de Frete Grátis", "Compras acima de R$10",
+                         "Válido em: 4 horas"),
+        _cartao_de_cupom("222", 980, "EXCLUSIVO PARA VÍDEO", "Cupom de Frete Grátis", "Sem valor mínimo",
+                         "Válido em: 8 horas"),
+        _no(ident="sectionVoucherCard_333", caixa=(21, 2200, 1059, 2400), clicavel=False),
+        _no("EXCLUSIVO PARA VÍDEO", caixa=(234, 2269, 1035, 2301), clicavel=False))
+    segunda = _meus_cupons(
+        _cartao_de_cupom("333", 580, "EXCLUSIVO PARA VÍDEO", "Cupom de Frete Grátis", "Sem valor mínimo",
+                         "Válido até 29/11/2026"),
+        _cartao_de_cupom("444", 980, "EXCLUSIVO PARA VÍDEO", "R$5 de desconto", "Sem valor mínimo",
+                         "Termina em: 3 horas"),
+        _cartao_de_cupom("555", 1380, "EXCLUSIVO PARA VÍDEO", "Cupom de Frete Grátis", "Compras acima de R$19",
+                         "Válido até 30/11/2026"))
+    return [primeira, segunda, segunda]
+
+
+def test_cupom_do_video_lido_em_meus_cupons_so_lendo_e_guardado_com_a_janela(monkeypatch):
+    # Escolha do Rafael (26/11, P313 1): uma vez por dia, o robô lê Meus Cupons até o fim, sem tocar em nada, e
+    # guarda os lotes do frete grátis exclusivo para vídeo e sem valor mínimo, com a janela em que cada um vale.
+    monkeypatch.setattr(robo, "cupom_do_dia_pendente", CUPOM_DO_DIA)
+    caminhos = []
+    monkeypatch.setattr(robo, "ir_ao_inicio", lambda d: caminhos.append("início"))
+    monkeypatch.setattr(robo, "seguir", lambda d, caminho: caminhos.append([alvo for alvo, *_ in caminho]))
+    monkeypatch.setattr(robo, "voltar", lambda d, ate, vezes=15: caminhos.append(f"voltar até {ate}"))
+    app = CelularDosCupons(_lista_dos_cupons())
+    agora = momento("2026-11-26 15:16")
+    assert robo.cupom_do_dia_pendente(agora)
+    lotes = robo.ler_o_cupom_do_dia(app, agora)
+    assert caminhos == ["início", ["Eu", "Cupons"], "voltar até Eu"]
+    # Só leu e rolou até a lista parar de mudar: nenhum toque, 2 arrastos.
+    assert app.toques == [] and app.vez == 2
+    # O de outra loja, o desconto e o frete com valor mínimo ficam de fora.
+    assert lotes == [{"de": "2026-11-26 15:16:00", "ate": "2026-11-29 23:59:59"},
+                     {"de": "2026-11-27 00:16:00", "ate": "2026-11-27 12:16:00"}]
+    assert robo.cupom_do_video(momento("2026-11-26 15:30")) == robo.CUPOM_DO_VIDEO
+    assert robo.cupom_do_video(momento("2026-11-29 23:00")) == robo.CUPOM_DO_VIDEO
+    assert robo.cupom_do_video(momento("2026-11-30 08:00")) == ""
+    assert not robo.cupom_do_dia_pendente(momento("2026-11-26 22:00"))
+    assert robo.cupom_do_dia_pendente(momento("2026-11-27 04:30"))
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_LEITURA_DOS_CUPONS) == (
+        "com o cupom do vídeo valendo", "5 cupom(ns) na lista; 4 exclusivo(s) para vídeo; "
+        "2 lote(s) do frete grátis sem valor mínimo", 1)
+
+
+def test_cupom_do_dia_que_para_fica_no_registro_e_a_leitura_de_antes_vale(monkeypatch):
+    monkeypatch.setattr(robo, "cupom_do_dia_pendente", CUPOM_DO_DIA)
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO, {"lido_em": "2026-11-25 05:00:00", "lotes": [
+        {"de": "2026-11-25 05:00:00", "ate": "2026-11-29 23:59:59"}]})
+
+    def sem_a_lista(d, agora=None):
+        raise robo.Parada(robo.MOTIVO_SEM_MEUS_CUPONS)
+
+    monkeypatch.setattr(robo, "ler_meus_cupons", sem_a_lista)
+    agora = momento("2026-11-26 05:00")
+    robo._ler_o_cupom_do_dia_junto(object(), agora)
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_LEITURA_DOS_CUPONS) == ("parou", robo.MOTIVO_SEM_MEUS_CUPONS, 0)
+    # A tentativa é a do dia, e o lote lido na véspera continua valendo até o fim dele.
+    assert not robo.cupom_do_dia_pendente(momento("2026-11-26 10:00"))
+    assert robo.cupom_do_video(momento("2026-11-26 10:00")) == robo.CUPOM_DO_VIDEO
+    # Lido hoje, não lê de novo.
+    monkeypatch.setattr(robo, "ler_meus_cupons", lambda d, agora=None: pytest.fail("leu duas vezes no dia"))
+    robo._ler_o_cupom_do_dia_junto(object(), momento("2026-11-26 11:00"))
+    # A Verificação na tela para a rodada, como sempre.
+
+    def verificacao(d, agora=None):
+        raise robo.Verificacao()
+
+    monkeypatch.setattr(robo, "ler_meus_cupons", verificacao)
+    with pytest.raises(robo.Verificacao):
+        robo._ler_o_cupom_do_dia_junto(object(), momento("2026-11-27 05:00"))
+
+
+def test_chamada_com_o_cupom_do_video_so_enquanto_ele_vale(monkeypatch, tmp_path):
+    # Escolha do Rafael (26/11, P313 1): enquanto o cupom do vídeo vale, a edição pede a chamada com ele.
+    monkeypatch.setattr(robo.ps, "anuncio_do_produto",
+                        lambda video: {"foto": b"foto do anuncio", "nome": VESTIDO, "preco": 59.9})
+    cupons = []
+
+    def editar_para_postar(video, foto, destino, produto="", **opcoes):
+        cupons.append(opcoes.get("cupom", ""))
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return "", robo.edicao_video.COM_LEGENDAS, ""
+
+    monkeypatch.setattr(robo.edicao_video, "editar_para_postar", editar_para_postar)
+    ativar(edicao_ligada=True)
+    video = {"arquivo": os.path.abspath("v.mp4"), "link": "https://s.shopee.com.br/x"}
+    robo.copiar_para_o_rascunho(video, "autorais", str(tmp_path / "sem.mp4"), [VESTIDO])
+    agora = robo.agora_br()
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO, {"lotes": [
+        {"de": robo._momento(agora - robo.timedelta(hours=1)), "ate": robo._momento(agora + robo.timedelta(hours=1))}]})
+    robo.copiar_para_o_rascunho(video, "autorais", str(tmp_path / "com.mp4"), [VESTIDO])
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO, {"lotes": [
+        {"de": robo._momento(agora + robo.timedelta(hours=2)), "ate": robo._momento(agora + robo.timedelta(hours=9))}]})
+    robo.copiar_para_o_rascunho(video, "autorais", str(tmp_path / "depois.mp4"), [VESTIDO])
+    assert cupons == ["", robo.CUPOM_DO_VIDEO, ""]
 
 
 def test_seguidores_na_tela_e_os_dias_guardados():
