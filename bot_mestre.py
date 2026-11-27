@@ -1061,6 +1061,21 @@ def quando_publica_no_canal(data_alvo, agora=None):
 PROCESSO_ROBO_NO_CANAL = "canal afiliados: vídeo do robô"
 # Erro ao pôr na fila (o banco, o Telegram): tenta de novo nas próximas voltas, até estas.
 TENTATIVAS_DO_ROBO_NO_CANAL = 3
+# O link do post no registro do "na fila": o checkup conta quantos saíram convertidos.
+LINK_DO_POST_CONVERTIDO = "link do post convertido"
+LINK_DO_POST_SEM_CONVERSAO = "link do post sem conversão"
+
+
+async def link_do_post_no_canal(link_post):
+    """
+    O link do vídeo que o robô postou, no post do canal: convertido em link de afiliado, com a etiqueta do Canal
+    Afiliados, para quem abre o vídeo por ele ficar com o cookie de 7 dias do Rafael (os links dos produtos já iam
+    assim). A API que não converte (recusa, sem resposta) devolve o link como o app copiou, que vai como antes, e o
+    api_shopee anota a falha, que o diagnóstico conta. Devolve (o link, se saiu convertido).
+    Escolha do Rafael (P320 2): DECISOES.md, Canal principal.
+    """
+    link = await converter_link_shopee(link_post, api_shopee.ETIQUETA_CANAL_AFILIADOS)
+    return (link, True) if link and link != link_post else (link_post, False)
 
 
 async def levar_videos_do_robo_ao_canal():
@@ -1107,13 +1122,15 @@ async def _levar_video_do_robo_ao_canal(pedido):
         logger.warning(f"⚠️ [Canal Afiliados] A IA não deu o item do vídeo do robô: {type(e).__name__}")
         resposta = ""
     titulo = legendas.titulo_do_item(resposta, numero, pedido.get("produto", ""))
-    legenda, _ = legendas.legenda_do_canal_que_cabe(titulo, shopee=(pedido["link_post"], pedido.get("links") or []))
+    link_do_video, convertido = await link_do_post_no_canal(pedido["link_post"])
+    legenda, _ = legendas.legenda_do_canal_que_cabe(titulo, shopee=(link_do_video, pedido.get("links") or []))
     agora = datetime.now(fuso_horario)
     data_alvo = data_na_fila_do_canal(agora)
     if not adicionar_na_fila_do_canal(arquivo, None, legenda, data_alvo):
         raise RuntimeError("a fila do canal não gravou")
     pedidos_do_canal.concluir(pedido["id"])
-    registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_CANAL, "na fila", ok=True)
+    registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_CANAL, "na fila",
+                                 LINK_DO_POST_CONVERTIDO if convertido else LINK_DO_POST_SEM_CONVERSAO, ok=True)
     if data_alvo == "2000-01-01" or data_alvo <= agora.strftime("%Y-%m-%d"):
         agendar_fila_postagens()
     sem_links = "" if pedido.get("links") else ("\n\n⚠️ Foi sem os links dos produtos (a API de afiliado não os "

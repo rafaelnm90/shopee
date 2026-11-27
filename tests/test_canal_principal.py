@@ -481,6 +481,8 @@ def test_zerar_uma_fila_nao_apaga_arquivos_das_outras(bm, Msg, Est):
 
 LINK_DO_POST = "https://sv.shopee.com.br/share-video/abc"
 LINKS = ["https://s.shopee.com.br/canal1", "https://s.shopee.com.br/canal2"]
+# O link do post convertido pela API de afiliado, com a etiqueta do canal (P320 2).
+POST_CONVERTIDO = "https://s.shopee.com.br/canalafiliados-post"
 
 
 def test_criar_postagem_usa_o_padrao_do_canal_e_o_numero_reservado(bm, Msg, Est, monkeypatch):
@@ -503,7 +505,8 @@ def test_criar_postagem_usa_o_padrao_do_canal_e_o_numero_reservado(bm, Msg, Est,
 def canal(bm, monkeypatch, tmp_path):
     """O que o bot manda no privado, o que a IA responde e um pedido do robô com a cópia do vídeo."""
     import pedidos_do_canal
-    estado = SimpleNamespace(avisos=[], prompts=[], resposta="Vídeo 99\n📦 Item: Copo Térmico", agendados=0)
+    estado = SimpleNamespace(avisos=[], prompts=[], resposta="Vídeo 99\n📦 Item: Copo Térmico", agendados=0,
+                             convertidos=[], converte=True)
 
     async def send_message(chat_id, texto, **k):
         estado.avisos.append(texto)
@@ -515,9 +518,15 @@ def canal(bm, monkeypatch, tmp_path):
     def agendar():
         estado.agendados += 1
 
+    async def converter(link, etiqueta):
+        # A API recusada devolve o link como veio (api_shopee.converter_link_shopee).
+        estado.convertidos.append((link, etiqueta))
+        return POST_CONVERTIDO if estado.converte and link == LINK_DO_POST else link
+
     monkeypatch.setattr(bm.bot, "send_message", send_message)
     monkeypatch.setattr(bm, "analisar_video_gemini", analisar)
     monkeypatch.setattr(bm, "agendar_fila_postagens", agendar)
+    monkeypatch.setattr(bm, "converter_link_shopee", converter)
     bm.salvar_contador(7)
 
     def pedir(links=LINKS, produto="Copo Térmico Inox Com Tampa 500ml Para Café"):
@@ -535,14 +544,29 @@ def test_video_do_robo_entra_na_fila_do_canal_com_o_numero_e_o_padrao(bm, canal)
     rodar(bm.levar_videos_do_robo_ao_canal())
     legenda, caminho, video_id, data_alvo = consultar("SELECT legenda, caminho_video, video_id, data_alvo "
                                                       "FROM fila_postagens")
-    # O número é o do contador, nunca o que a IA escreveu.
-    assert legenda == legendas.legenda_do_canal("Vídeo 7\n📦 Item: Copo Térmico", shopee=(LINK_DO_POST, LINKS))
+    # O número é o do contador, nunca o que a IA escreveu. O link do post vai convertido, com a etiqueta do canal
+    # (P320 2), como os dos produtos.
+    assert legenda == legendas.legenda_do_canal("Vídeo 7\n📦 Item: Copo Térmico", shopee=(POST_CONVERTIDO, LINKS))
+    assert canal.convertidos == [(LINK_DO_POST, "canalafiliados")] and LINK_DO_POST not in legenda
     assert (caminho, video_id, data_alvo) == (copia, None, "2000-01-01")   # o Bom Dia de hoje não saiu
     assert canal.prompts == [legendas.prompt_do_item(7)] and bm.ler_contador() == 8
     assert canal.pedidos.pendentes() == [] and canal.agendados == 1
     assert len(canal.avisos) == 1 and "Vídeo #7</b>" in canal.avisos[0] and "Publica" in canal.avisos[0]
-    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = ?",
-                     bm.PROCESSO_ROBO_NO_CANAL) == ("na fila", 1)
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     bm.PROCESSO_ROBO_NO_CANAL) == ("na fila", bm.LINK_DO_POST_CONVERTIDO, 1)
+
+
+def test_link_do_post_que_a_api_nao_converte_vai_como_o_app_copiou(bm, canal):
+    # P320 2: sem a conversão (a API recusou ou não respondeu), o vídeo entra na fila do canal com o link de hoje, e o
+    # registro diz que ele foi sem a conversão.
+    import legendas
+    canal.converte = False
+    canal.pedir()
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    legenda = consultar("SELECT legenda FROM fila_postagens")[0]
+    assert legenda == legendas.legenda_do_canal("Vídeo 7\n📦 Item: Copo Térmico", shopee=(LINK_DO_POST, LINKS))
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     bm.PROCESSO_ROBO_NO_CANAL) == ("na fila", bm.LINK_DO_POST_SEM_CONVERSAO, 1)
 
 
 def test_sem_a_ia_o_item_e_o_nome_do_produto_e_sem_links_o_aviso_diz(bm, canal):
@@ -551,7 +575,7 @@ def test_sem_a_ia_o_item_e_o_nome_do_produto_e_sem_links_o_aviso_diz(bm, canal):
     rodar(bm.levar_videos_do_robo_ao_canal())
     legenda = consultar("SELECT legenda FROM fila_postagens")[0]
     assert legenda.startswith("<b>Vídeo 7 | 📦 Item: Copo Térmico Inox Com Tampa 500ml Para Café</b>")
-    assert "Links dos Produtos" not in legenda and LINK_DO_POST in legenda
+    assert "Links dos Produtos" not in legenda and POST_CONVERTIDO in legenda
     assert "sem os links dos produtos" in canal.avisos[0]
 
 
