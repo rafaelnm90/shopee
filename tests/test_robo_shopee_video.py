@@ -4169,6 +4169,43 @@ def test_link_que_nao_sai_em_tres_buscas_vai_ao_rafael_como_antes(monkeypatch, a
                      robo.PROCESSO_DO_PROPRIO) == ("sem o link do post", "3 buscas")
 
 
+def test_comentario_para_colar_a_mao_sai_curto_e_sem_a_ia_vai_o_do_gem(monkeypatch, avisos):
+    # P315 1 (27/11): o comentário que vai ao Rafael para colar à mão, quando o robô não comenta no vídeo que foi ao ar,
+    # sai no padrão do comentário do robô depois do post: curto, com o cupom do vídeo enquanto ele vale e diferente dos
+    # já feitos no post e dos últimos. Sem a resposta da IA, vai o do Gem guardado no rascunho, como antes.
+    curto = "Corre que hoje tem frete grátis pelo vídeo! 🚚"
+    pedidos, respostas = [], [curto, None, RuntimeError("a IA caiu")]
+
+    async def proprio(produto="", titulo="", anteriores=(), cupom=""):
+        pedidos.append((produto, titulo, list(anteriores), cupom))
+        resposta = respostas.pop(0)
+        if isinstance(resposta, Exception):
+            raise resposta
+        return resposta
+
+    monkeypatch.setattr(robo.interacoes, "gerar_proprio", proprio)
+    robo.gravar_estado(proprio_textos=["Esse vale muito a pena!"])
+    robo.db.salvar_config(robo.CHAVE_DO_CUPOM_DO_VIDEO,
+                          {"lotes": [{"de": "2000-01-01 00:00:00", "ate": "2999-12-31 23:59:59"}]})
+    ident = _rascunho("postado", comentarios_proprios=["Amei esse vestido!"])
+    robo._comentar_a_mao(robo.pegar(ident), robo.MOTIVO_DO_POST_EM_ANALISE, momento("2026-10-22 13:00"))
+    assert "não consegui comentar" in avisos[-3]
+    assert avisos[-2:] == [robo.ps.AVISO_COMENTARIO, curto]
+    assert pedidos == [(VESTIDO, TITULO, ["Amei esse vestido!", "Esse vale muito a pena!"], robo.CUPOM_DO_VIDEO)]
+    # O curto entra nos últimos comentários do robô, para o seguinte não sair igual.
+    assert robo.ler_estado()["proprio_textos"] == ["Esse vale muito a pena!", curto]
+    # Sem a resposta da IA, o do Gem, como antes.
+    robo._comentar_a_mao(robo.pegar(ident), agora=momento("2026-10-22 13:30"))
+    assert avisos[-2:] == [robo.ps.AVISO_COMENTARIO, "Amei! #achadinhos"]
+    # A IA que cai no meio também dá lugar ao do Gem, sem levantar: isto roda também logo depois de um post.
+    robo._comentar_a_mao(robo.pegar(ident), agora=momento("2026-10-22 14:00"))
+    assert avisos[-2:] == [robo.ps.AVISO_COMENTARIO, "Amei! #achadinhos"]
+    linhas = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DO_COMENTARIO_A_MAO,
+                                               "2000-01-01 00:00:00")
+    assert [(resultado, detalhe) for _m, _p, resultado, detalhe, _o in linhas] == [
+        ("curto", "com o cupom"), ("o do Gem", "sem a resposta da IA"), ("o do Gem", "sem a resposta da IA")]
+
+
 def test_outro_post_antes_do_link_desiste_do_anterior(monkeypatch, avisos):
     # Outro vídeo do robô no ar vira o mais novo da grade: o link do anterior não é mais buscado.
     primeiro = _rascunho("aprovado", postar_em="2026-10-22 12:00:00")

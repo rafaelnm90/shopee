@@ -4842,7 +4842,7 @@ def _textos_da_ia(video, nomes=None):
     comeco = time.monotonic()
     ps.api_gemini.zerar_tempos_da_ia()
     # Enquanto o cupom do vídeo vale, o comentário do Gem (o que vai ao Rafael quando o robô não comenta depois do
-    # post, _comentar_a_mao) também fala dele, como o comentário do robô (P313 1 e P314 1).
+    # post e a IA não escreve o curto, _comentar_a_mao) também fala dele, como o comentário do robô (P313 1 e P314 1).
     cupom = cupom_do_video()
     try:
         for vez in range(TENTATIVAS_DO_TITULO):
@@ -11383,20 +11383,64 @@ def _comentar_no_aberto(d, video, onde, produto, titulo, feitos=(), agora=None, 
     return ("comentado" if apareceu else "não confirmado"), texto, (curtiu_o_video, curtiu_o_comentario)
 
 
-def _comentar_a_mao(rascunho, motivo=""):
-    """Sem o comentário do robô, o do Gem vai ao Rafael para ele comentar à mão, como antes da P148."""
+# Sem o comentário do robô no vídeo que foi ao ar, o Rafael recebe um para colar à mão, no padrão do comentário do
+# robô depois do post (interacoes.gerar_proprio, P148 2): curto, sem hashtag, chamando para comprar, com o cupom do
+# vídeo enquanto ele vale (P313 1) e diferente dos já feitos nesse post e dos últimos dos vídeos dele. Sem a resposta da
+# IA, vai o comentário do Gem guardado no rascunho, como antes. Escolha do Rafael (27/11/2026, P315 1): DECISOES.md,
+# Shopee Vídeo.
+PROCESSO_DO_COMENTARIO_A_MAO = "próprio post: comentário para colar à mão"
+
+
+def _comentario_curto_para_colar(rascunho, agora=None):
+    """
+    O comentário curto para o Rafael colar à mão e o cupom pedido nele ("" sem cupom valendo); None sem a resposta da
+    IA. O texto entra nos últimos comentários do robô, para o seguinte não sair igual. Nada aqui levanta: isto roda
+    também logo depois de um post (desistir_do_link), que não pode parecer que não saiu.
+    """
+    try:
+        recentes = ler_estado().get("proprio_textos") or []
+        anteriores = list(dict.fromkeys(list(rascunho.get("comentarios_proprios") or []) + recentes))
+        produto = (rascunho.get("produtos") or [""])[0]
+        cupom = cupom_do_video(agora)
+        texto = asyncio.run(interacoes.gerar_proprio(produto, rascunho.get("titulo") or "", anteriores,
+                                                     **({"cupom": cupom} if cupom else {})))
+        if texto:
+            gravar_estado(proprio_textos=(recentes + [texto])[-TEXTOS_GUARDADOS_DO_PROPRIO:])
+        return texto, cupom
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O comentário curto para colar não saiu: {type(e).__name__}")
+        return None, ""
+
+
+def _comentar_a_mao(rascunho, motivo="", agora=None):
+    """
+    Sem o comentário do robô, o Rafael recebe um para comentar à mão: o curto (P315 1) ou, sem a resposta da IA, o do
+    Gem. O registro diz qual foi e, com o cupom valendo, se o curto falou dele; nunca o texto.
+    """
     if motivo:
         avisar(f"⚠️ Robô da Shopee Vídeo: não consegui comentar no vídeo que foi ao ar ({motivo}).")
-    if rascunho.get("comentario"):
+    texto, cupom = _comentario_curto_para_colar(rascunho, agora)
+    if texto:
+        falou = ps.fala_do_cupom(texto)
+        detalhe = ("com o cupom" if falou else "sem o cupom - a IA não falou do cupom") if cupom else ""
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_A_MAO, "curto", detalhe, ok=True, agora=agora)
+    elif rascunho.get("comentario"):
+        texto = rascunho["comentario"]
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_A_MAO, "o do Gem", "sem a resposta da IA",
+                                     ok=False, agora=agora)
+    else:
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_A_MAO, "nenhum",
+                                     "sem a resposta da IA e sem o do Gem", ok=False, agora=agora)
+    if texto:
         avisar(ps.AVISO_COMENTARIO)
-        avisar(rascunho["comentario"])
+        avisar(texto)
 
 
 def comentar_depois_do_post(d, ident, agora=None):
     """
     Logo depois do post, o comentário no vídeo (P148 2). Nada aqui desfaz nem para o post: o que
     não dá certo fica no registro e volta nas rodadas seguintes (comentario_do_post_pendente). Sem
-    o link do post, o comentário do Gem vai ao Rafael para ele comentar à mão.
+    o link do post, o comentário para colar vai ao Rafael para ele comentar à mão (_comentar_a_mao).
     """
     try:
         rascunho = pegar(ident)
@@ -11404,7 +11448,7 @@ def comentar_depois_do_post(d, ident, agora=None):
             return ""
         if not rascunho.get("link_post"):
             registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "sem o link do post", ok=False, agora=agora)
-            _comentar_a_mao(rascunho)
+            _comentar_a_mao(rascunho, agora=agora)
             return "sem o link do post"
         return tentar_o_comentario_do_post(d, rascunho, agora)
     except Exception as e:
@@ -11417,7 +11461,7 @@ def tentar_o_comentario_do_post(d, rascunho, agora=None):
     """
     Uma tentativa do comentário de depois do post. Nunca para a rodada: o que não deu certo conta
     uma tentativa e volta depois de INTERVALO_DO_PROPRIO; na última, o Rafael recebe o comentário
-    do Gem para fazer à mão. Devolve "comentado", "não confirmado" ou "parou".
+    para fazer à mão (_comentar_a_mao). Devolve "comentado", "não confirmado" ou "parou".
     """
     marca = interacoes.marca_do_post(rascunho["link_post"])
     try:
@@ -11449,7 +11493,7 @@ def tentar_o_comentario_do_post(d, rascunho, agora=None):
         interacoes.guardar(marca, interacoes.TIPO_DO_POST, "desistiu", agora)
         registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "desistiu", motivo, ok=False, origem=marca,
                                      agora=agora)
-        _comentar_a_mao(rascunho, motivo)
+        _comentar_a_mao(rascunho, motivo, agora)
     return "parou"
 
 
@@ -11617,13 +11661,13 @@ def link_do_post_pendente(agora=None):
 
 def desistir_do_link(rascunho, motivo, agora=None):
     """
-    O post fica sem o link de vez: o comentário do Gem vai ao Rafael para ele comentar à mão
-    (P148 2), e o aviso diz que o vídeo não foi ao Canal Afiliados (P63).
+    O post fica sem o link de vez: o comentário para colar vai ao Rafael para ele comentar à mão
+    (_comentar_a_mao, P148 2 e P315 1), e o aviso diz que o vídeo não foi ao Canal Afiliados (P63).
     """
     busca = dict(rascunho["busca_do_link"] or {})
     atualizar(rascunho["id"], busca_do_link={**busca, "fim": "desistiu"})
     registro_processos.registrar(REGISTRO, PROCESSO_DO_PROPRIO, "sem o link do post", motivo, ok=False, agora=agora)
-    _comentar_a_mao(rascunho)
+    _comentar_a_mao(rascunho, agora=agora)
     levar_ao_canal(rascunho, "")
 
 
