@@ -811,6 +811,44 @@ def captura_por_origem(agora=None):
     }
 
 
+# O que o motor_userbot grava no erros_logs quando o Espelhador desiste de postar um vídeo numa rota, na 3ª tentativa
+# (motor_userbot.py): o nome da rota entre as aspas e a etapa (um texto fixo do código) entre os parênteses.
+DESISTENCIA_DO_ESPELHADOR = re.compile(r"^Espelhador desistiu após 3 tentativas na rota '(.*)' \(([^)]*)\): ")
+
+
+def rotas_que_nao_postam(agora=None):
+    """
+    As rotas do Espelhador que desistiram de postar nas últimas 24 h, pela posição na lista de rotas do painel, nunca
+    pelo nome: [(nº, vezes, etapa)], da que mais desistiu para a que menos ("fora da lista" para a rota que já saiu do
+    painel). Checkup de 26/11/2026: 22 vídeos desistidos com a conta sem permissão de escrever num destino, e o
+    registro não dizia qual rota.
+    """
+    desde = _momento(_agora(agora) - timedelta(hours=24))
+    posicoes = {str(rota.get("nome")): n for n, rota in enumerate(rotas_espelhador.ler().get("rotas", []), 1)}
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute("SELECT erro FROM erros_logs WHERE timestamp >= ? AND origem = ?",
+                                     (desde, "motor_userbot.py")).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    contagem = {}
+    for (erro,) in linhas:
+        achado = DESISTENCIA_DO_ESPELHADOR.match(str(erro or ""))
+        if achado:
+            chave = (posicoes.get(achado.group(1), "fora da lista"), achado.group(2))
+            contagem[chave] = contagem.get(chave, 0) + 1
+    return sorted(((n, vezes, etapa) for (n, etapa), vezes in contagem.items()), key=lambda r: (-r[1], str(r[0])))
+
+
+def linha_das_rotas_que_nao_postam(agora=None):
+    """A linha do checkup com as rotas do Espelhador que desistiram de postar (rotas_que_nao_postam); "" sem nenhuma."""
+    rotas = rotas_que_nao_postam(agora)
+    if not rotas:
+        return ""
+    return ("   rotas que desistiram de postar em 24 h (pela posição na lista de rotas do painel): "
+            + " | ".join(f"{f'nº {n}' if isinstance(n, int) else n} {vezes}x ({etapa})" for n, vezes, etapa in rotas))
+
+
 def _chave_resolvida(chave, conexao):
     """A chave do link curto trocada pela do produto, quando o espelhador já abriu o link."""
     if not chave or not chave.startswith("curto_"):
@@ -2287,6 +2325,9 @@ def main():
             # A última mensagem (qualquer uma) de cada grupo que parou: recente, o grupo só não
             # postou vídeo com link; nenhuma, ficou quieto ou a conta perdeu o acesso.
             print(f"   última mensagem de cada grupo que parou: {ultimas}")
+        linha = linha_das_rotas_que_nao_postam(agora) if sistema == "Espelhador" else ""
+        if linha:
+            print(linha)
     repetidos = parceiros_repetidos(agora)
     print(f"Parceiros (3 dias): capturas com produto identificado {repetidos['capturas']} | mesmo produto em mais "
           f"de um parceiro {repetidos['entre_parceiros']} | também na conta principal {repetidos['com_a_conta']}")
