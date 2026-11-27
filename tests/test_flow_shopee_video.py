@@ -1156,13 +1156,14 @@ def test_producao_com_mais_um_produto_em_destaque_e_descartada(celular, monkeypa
     async def conferir(caminho, prompt, imagens=None):
         pedidos.append(prompt)
         return ('{"mesmo_produto": true, "diferencas": "", "outro_produto": true, "qual_outro": "um  panetone na '
-                'mesa", "boca_mexendo": false, "defeitos": ""}')
+                'mesa", "boca_nao_combina_com_a_voz": false, "defeitos": ""}')
 
     monkeypatch.setattr(flow.api_gemini, "analisar_video_gemini", conferir)
     atual = flow.comecar_producao("2026-11-27", _escolhido(), 1)
     assert flow.producao_no_celular(celular, atual) is True
     assert flow.conferir_a_producao() == "descartado" and flow.video_pronto() is None
-    assert '"outro_produto": true ou false' in pedidos[0] and '"boca_mexendo": true ou false' in pedidos[0]
+    assert '"outro_produto": true ou false' in pedidos[0]
+    assert '"boca_nao_combina_com_a_voz": true ou false' in pedidos[0]
     atual = flow.producao()
     assert atual["conferencia"]["outro"] is True and atual["conferencia"]["qual_outro"] == "um panetone na mesa"
     assert "aparece outro produto no vídeo: um panetone na mesa" in flow.legenda_da_producao(atual)
@@ -1170,7 +1171,7 @@ def test_producao_com_mais_um_produto_em_destaque_e_descartada(celular, monkeypa
 
 def test_conferencia_le_o_outro_produto_e_a_boca_e_avisa_a_boca_so_na_propaganda():
     lido = flow.ler_conferencia('{"mesmo_produto": true, "diferencas": "", "outro_produto": false, '
-                                '"qual_outro": "", "boca_mexendo": true, "defeitos": ""}')
+                                '"qual_outro": "", "boca_nao_combina_com_a_voz": true, "defeitos": ""}')
     assert (lido["mesmo"], lido["outro"], lido["boca"]) == (True, False, True)
     assert flow.ler_conferencia('{"mesmo_produto": true, "outro_produto": "talvez"}')["outro"] is None
     assert not flow.com_outro_produto(lido) and not flow.com_outro_produto({}) and not flow.com_outro_produto(None)
@@ -1178,14 +1179,33 @@ def test_conferencia_le_o_outro_produto_e_a_boca_e_avisa_a_boca_so_na_propaganda
     assert flow.texto_da_conferencia(lido) == "o produto é o mesmo da foto do anúncio"
     assert flow.texto_da_conferencia({"mesmo": None, "outro": True}) == "aparece outro produto no vídeo: sem detalhes"
     assert flow.texto_da_conferencia({}) == "não deu para conferir"
-    # Na propaganda de TV, só o locutor fala (P270 1): a boca mexendo vai no aviso; nos outros formatos, quem
-    # aparece pode falar, e nada é dito.
+    # Na propaganda de TV, a voz é a do locutor (P270 1): a boca que não combina com ela vai no aviso; nos outros
+    # formatos, quem aparece fala com a própria voz, e nada é dito.
     propaganda = {"formato": flow.ESTILO_DA_PROPAGANDA, "estilo": flow.ESTILO_DA_PROPAGANDA, "conferencia": lido,
                   "fala": "Sua casa mais bonita. Garanta a sua!", "cena": "c", "modelo": "Omni 1.2 Flash"}
     assert flow.BOCA_NA_PROPAGANDA in flow.legenda_da_producao(propaganda)
     assert flow.linha_da_boca(dict(propaganda, formato=flow.ESTILO_DO_VENDEDOR)) == ""
     assert flow.linha_da_boca(dict(propaganda, conferencia=dict(lido, boca=False))) == ""
     assert flow.BOCA_NA_PROPAGANDA in flow.legenda_da_amostra(dict(propaganda, com_personagem=True), lido)
+
+
+def test_conferencia_marca_a_boca_que_nao_combina_com_a_voz_e_nao_a_pessoa_que_fala_a_frase_inteira():
+    # O vídeo de IA de 27/11/2026: a voz do locutor, de um homem novo, saiu na boca de uma senhora, e só em metade da
+    # frase. O Rafael: o problema não é ela falar, é a voz não combinar com ela e a boca mexer só numa parte da fala;
+    # falando a frase inteira, com uma voz que combina com ela, faria sentido manter.
+    pedido = flow.PEDIDO_DA_CONFERENCIA
+    assert "a voz é de outro gênero, de outra idade ou de outro porte" in pedido
+    assert "a boca mexe só numa parte da fala e fica fechada no resto" in pedido
+    assert "quem fala a frase inteira, com uma voz que combina com ele, não conta" in pedido
+    assert "boca_mexendo" not in pedido and "mexe a boca como se falasse" not in pedido
+    # A resposta antiga, da boca que só mexe, não vira o aviso.
+    so_mexe = flow.ler_conferencia('{"mesmo_produto": true, "outro_produto": false, "boca_mexendo": true}')
+    assert so_mexe["boca"] is None
+    propaganda = {"formato": flow.ESTILO_DA_PROPAGANDA, "conferencia": so_mexe}
+    assert flow.linha_da_boca(propaganda) == ""
+    fora_da_voz = flow.ler_conferencia('{"mesmo_produto": true, "boca_nao_combina_com_a_voz": true}')
+    assert flow.linha_da_boca(dict(propaganda, conferencia=fora_da_voz)) == flow.BOCA_NA_PROPAGANDA
+    assert "não combina com a voz" in flow.BOCA_NA_PROPAGANDA and "só numa parte da fala" in flow.BOCA_NA_PROPAGANDA
 
 
 def test_prompt_da_propaganda_termina_com_os_planos_do_produto_e_a_boca_fechada():

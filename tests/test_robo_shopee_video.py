@@ -10948,9 +10948,9 @@ def test_video_de_ia_com_mais_um_produto_em_destaque_nao_vira_rascunho(monkeypat
     assert ("descartado", "a IA viu mais um produto") in _registro_do_video_de_ia()
 
 
-def test_propaganda_com_a_boca_mexendo_vira_rascunho_com_o_aviso(monkeypatch, avisos, tmp_path):
-    # Na propaganda de TV, só o locutor fala (P270 1 e P278 1). A boca mexendo não descarta o vídeo: o aviso diz, e
-    # o registro a conta, só com o rótulo fixo.
+def test_propaganda_com_a_boca_que_nao_combina_com_a_voz_vira_rascunho_com_o_aviso(monkeypatch, avisos, tmp_path):
+    # Na propaganda de TV, a voz é a do locutor (P270 1 e P278 1). A boca que não combina com ela (27/11/2026) não
+    # descarta o vídeo: o aviso diz, e o registro a conta, só com o rótulo fixo.
     _fonte(monkeypatch)
     ativar(fonte="autorais")
     propaganda = robo.flow.ESTILO_DA_PROPAGANDA
@@ -10964,7 +10964,7 @@ def test_propaganda_com_a_boca_mexendo_vira_rascunho_com_o_aviso(monkeypatch, av
     assert resultado == "vídeo de IA: pronto para o rascunho"
     aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
     assert robo.flow.BOCA_NA_PROPAGANDA in aviso
-    assert ("boca conferida", "mexe a boca") in _registro_do_video_de_ia()
+    assert ("boca conferida", "não combina com a voz") in _registro_do_video_de_ia()
 
 
 def test_video_de_ia_parado_no_flow_antes_e_depois_do_gerar(monkeypatch, avisos, tmp_path):

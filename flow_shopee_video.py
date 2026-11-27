@@ -719,21 +719,25 @@ TRECHO_DA_BEBIDA = ", ou é bebida alcoólica (em espera nas diretrizes)"
 MUDA_NA_IA = "muda na IA de vídeo"
 # A conferência do vídeo pronto, que vai com ele no privado do Rafael: o produto é o da foto?
 # Além do produto, a conferência vê o outro produto, a comida ou a bebida que aparece sozinha ou em destaque num
-# plano (o vídeo com ele é descartado, como o de outro produto, P245 1 e P247 1) e a boca de quem está em cena (na
-# propaganda de TV, só o locutor fala: a boca mexendo vai no aviso, linha_da_boca).
+# plano (o vídeo com ele é descartado, como o de outro produto, P245 1 e P247 1) e a boca de quem está em cena que não
+# combina com a voz: a voz de outro gênero, idade ou porte, ou a boca que mexe só numa parte da fala. Quem fala a frase
+# inteira com uma voz que combina com ele não conta (o Rafael, 27/11/2026: DECISOES.md, Shopee Vídeo). O aviso dela
+# sai em linha_da_boca.
 PEDIDO_DA_CONFERENCIA = (
     "Este vídeo foi feito por IA a partir da foto do anúncio que vai junto (a imagem). Compare o "
     "produto do vídeo com o da foto: forma, cor, material, detalhes e o que vem junto. Veja se algum "
     "plano mostra, sozinho ou em destaque, outro produto, comida ou bebida que não está na foto, como se "
     "fosse ele o vendido (móveis, enfeites e o cenário ao fundo não contam), e se alguém na tela mexe a "
-    "boca como se falasse. Veja também o que denuncia a IA no vídeo: mãos ou pés estranhos, objetos que "
-    "se deformam ou mudam de um quadro para outro, letras sem sentido e, se o vídeo tem fala, a fala que "
-    "não está em português do Brasil, que sai cortada ou que não acompanha a boca de quem fala. Responda "
-    "só com um JSON, sem nada antes ou depois:\n"
+    "boca sem combinar com a voz que se ouve: a voz é de outro gênero, de outra idade ou de outro porte "
+    "que o de quem mexe a boca, ou a boca mexe só numa parte da fala e fica fechada no resto (quem fala a "
+    "frase inteira, com uma voz que combina com ele, não conta). Veja também o que denuncia a IA no "
+    "vídeo: mãos ou pés estranhos, objetos que se deformam ou mudam de um quadro para outro, letras sem "
+    "sentido e, se o vídeo tem fala, a fala que não está em português do Brasil, que sai cortada ou que "
+    "não acompanha a boca de quem fala. Responda só com um JSON, sem nada antes ou depois:\n"
     '{"mesmo_produto": true ou false, "diferencas": "o que muda no produto, em até 200 letras; vazio '
     'se nada", "outro_produto": true ou false, "qual_outro": "o outro produto, a comida ou a bebida que '
-    'aparece, em até 80 letras; vazio se nada", "boca_mexendo": true ou false, "defeitos": "o que parece '
-    'falso ou estranho no vídeo, em até 200 letras; vazio se nada"}'
+    'aparece, em até 80 letras; vazio se nada", "boca_nao_combina_com_a_voz": true ou false, '
+    '"defeitos": "o que parece falso ou estranho no vídeo, em até 200 letras; vazio se nada"}'
 )
 ROTULOS_DA_CONFERENCIA = {True: "mesmo produto", False: "produto diferente", None: "sem resposta"}
 # A conferência da fala do vídeo de 16 s pelo servidor (P248 1, conferir_a_fala): a palavra ouvida quase igual a uma
@@ -1946,8 +1950,9 @@ def puxar(d, remoto, local, o_que="o vídeo"):
 def ler_conferencia(texto):
     """
     {"mesmo", "diferencas", "outro", "qual_outro", "boca", "defeitos"} da resposta da IA: "mesmo" (o produto é o da
-    foto), "outro" (outro produto, comida ou bebida sozinho ou em destaque num plano) e "boca" (alguém mexe a boca
-    como se falasse) são True, False ou None (None: não deu para ler).
+    foto), "outro" (outro produto, comida ou bebida sozinho ou em destaque num plano) e "boca" (a boca de quem está
+    em cena não combina com a voz: a voz não parece a dele, ou a boca mexe só numa parte da fala) são True, False ou
+    None (None: não deu para ler).
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     try:
@@ -1965,7 +1970,7 @@ def ler_conferencia(texto):
             "diferencas": " ".join(str(dados.get("diferencas") or "").split())[:200],
             "outro": sim_ou_nao("outro_produto"),
             "qual_outro": " ".join(str(dados.get("qual_outro") or "").split())[:80],
-            "boca": sim_ou_nao("boca_mexendo"),
+            "boca": sim_ou_nao("boca_nao_combina_com_a_voz"),
             "defeitos": " ".join(str(dados.get("defeitos") or "").split())[:200]}
 
 
@@ -1990,13 +1995,19 @@ def texto_da_conferencia(conferencia):
     return "não deu para conferir"
 
 
-# Na propaganda de TV, só o locutor fala (P270 1 e P278 1): a pessoa que mexe a boca parece falar com a voz dele.
-# O vídeo não é descartado por isso; o aviso diz, para o Rafael ver.
-BOCA_NA_PROPAGANDA = "👄 A pessoa mexe a boca como se falasse, mas na propaganda só o locutor fala"
+# Na propaganda de TV, a voz é a do locutor, em off (P270 1 e P278 1), e a IA de vídeo às vezes a põe na boca de quem
+# está em cena: a voz de um homem novo na boca de uma senhora, e só em metade da frase (27/11/2026). O que confunde
+# é a boca que não combina com a voz; a pessoa falar a frase inteira com uma voz que combina com ela não confunde (o
+# Rafael, 27/11/2026). O vídeo não é descartado por isso; o aviso diz, para o Rafael ver.
+BOCA_NA_PROPAGANDA = ("👄 A boca de quem aparece não combina com a voz: a voz não parece a da pessoa, ou a boca mexe "
+                      "só numa parte da fala")
 
 
 def linha_da_boca(atual, conferencia=None):
-    """O aviso da boca mexendo na propaganda de TV (BOCA_NA_PROPAGANDA); "" fora dela ou com a boca parada."""
+    """
+    O aviso da boca que não combina com a voz na propaganda de TV (BOCA_NA_PROPAGANDA); "" fora dela ou com a boca e
+    a voz combinando.
+    """
     conferencia = atual.get("conferencia") if conferencia is None else conferencia
     if atual.get("formato") == ESTILO_DA_PROPAGANDA and (conferencia or {}).get("boca") is True:
         return BOCA_NA_PROPAGANDA
