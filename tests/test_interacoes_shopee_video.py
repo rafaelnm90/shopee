@@ -1438,9 +1438,10 @@ def test_video_em_analise_volta_a_cada_30_min_e_na_3a_vez_o_comentario_vai_ao_ra
     robo.tentar_o_comentario_do_post(app, robo.pegar(ident), momento("2026-11-01 10:32"))
     assert avisos == []
     robo.tentar_o_comentario_do_post(app, robo.pegar(ident), momento("2026-11-01 11:03"))
-    # Na 3ª, desiste: o comentário do Gem vai para ele comentar à mão, e o post não volta mais.
+    # Na 3ª, desiste: o comentário curto, no padrão do comentário do robô (P315 1), vai para ele comentar à mão, e o
+    # post não volta mais.
     assert "não consegui comentar" in avisos[-3] and "em análise" in avisos[-3]
-    assert avisos[-2:] == [robo.ps.AVISO_COMENTARIO, "Amei! #achadinhos"]
+    assert avisos[-2:] == [robo.ps.AVISO_COMENTARIO, "Esse vale muito a pena! 1"]
     assert robo.comentario_do_post_pendente(momento("2026-11-01 12:00")) is None
     assert ("próprio post: comentar", "desistiu") in _passos_do_proprio()
 
