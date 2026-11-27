@@ -1998,9 +1998,19 @@ def texto_da_conferencia(conferencia):
 # Na propaganda de TV, a voz é a do locutor, em off (P270 1 e P278 1), e a IA de vídeo às vezes a põe na boca de quem
 # está em cena: a voz de um homem novo na boca de uma senhora, e só em metade da frase (27/11/2026). O que confunde
 # é a boca que não combina com a voz; a pessoa falar a frase inteira com uma voz que combina com ela não confunde (o
-# Rafael, 27/11/2026). O vídeo não é descartado por isso; o aviso diz, para o Rafael ver.
+# Rafael, 27/11/2026). Esse vídeo é descartado, como o de outro produto, e o aviso do descartado diz por quê.
+# Escolha do Rafael (27/11/2026, P316 1): DECISOES.md, Shopee Vídeo.
 BOCA_NA_PROPAGANDA = ("👄 A boca de quem aparece não combina com a voz: a voz não parece a da pessoa, ou a boca mexe "
                       "só numa parte da fala")
+
+
+def boca_fora_da_voz(atual, conferencia=None):
+    """
+    A propaganda de TV em que a boca de quem aparece não combina com a voz, pela conferência da IA ("boca"): esse
+    vídeo é descartado (P316 1). Fora da propaganda, quem aparece fala com a própria voz, e nada muda.
+    """
+    conferencia = atual.get("conferencia") if conferencia is None else conferencia
+    return atual.get("formato") == ESTILO_DA_PROPAGANDA and (conferencia or {}).get("boca") is True
 
 
 def linha_da_boca(atual, conferencia=None):
@@ -2008,10 +2018,7 @@ def linha_da_boca(atual, conferencia=None):
     O aviso da boca que não combina com a voz na propaganda de TV (BOCA_NA_PROPAGANDA); "" fora dela ou com a boca e
     a voz combinando.
     """
-    conferencia = atual.get("conferencia") if conferencia is None else conferencia
-    if atual.get("formato") == ESTILO_DA_PROPAGANDA and (conferencia or {}).get("boca") is True:
-        return BOCA_NA_PROPAGANDA
-    return ""
+    return BOCA_NA_PROPAGANDA if boca_fora_da_voz(atual, conferencia) else ""
 
 
 def conferir_o_video(caminho, foto):
@@ -2752,7 +2759,8 @@ def _marcar_a_producao(**campos):
 def conferir_a_producao():
     """
     A conferência da IA do vídeo do dia com a foto do anúncio (conferir_o_video): "pronto" ou, com outro
-    produto no vídeo (o produto mudou ou outro aparece sozinho ou em destaque, com_outro_produto), "descartado" (nunca
+    produto no vídeo (o produto mudou ou outro aparece sozinho ou em destaque, com_outro_produto) ou com a boca que não
+    combina com a voz na propaganda (boca_fora_da_voz, P316 1), "descartado" (nunca
     vira rascunho). No pronto com fala (o de 16 s e o de 8 s da P262), o servidor
     ouve a fala e a compara com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o
     vídeo; o aviso vai no rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Com as mesmas palavras
@@ -2761,7 +2769,7 @@ def conferir_a_producao():
     """
     atual = producao()
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
-    estado = "descartado" if com_outro_produto(conferencia) else "pronto"
+    estado = "descartado" if com_outro_produto(conferencia) or boca_fora_da_voz(atual, conferencia) else "pronto"
     extra = {}
     if estado == "pronto" and (atual.get("longa") or atual.get("curta")) and atual.get("fala"):
         ouvidas = videos.palavras_faladas(atual["arquivo"])
