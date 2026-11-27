@@ -10948,9 +10948,10 @@ def test_video_de_ia_com_mais_um_produto_em_destaque_nao_vira_rascunho(monkeypat
     assert ("descartado", "a IA viu mais um produto") in _registro_do_video_de_ia()
 
 
-def test_propaganda_com_a_boca_que_nao_combina_com_a_voz_vira_rascunho_com_o_aviso(monkeypatch, avisos, tmp_path):
-    # Na propaganda de TV, a voz é a do locutor (P270 1 e P278 1). A boca que não combina com ela (27/11/2026) não
-    # descarta o vídeo: o aviso diz, e o registro a conta, só com o rótulo fixo.
+def test_propaganda_com_a_boca_que_nao_combina_com_a_voz_nao_vira_rascunho(monkeypatch, avisos, tmp_path):
+    # Escolha do Rafael (27/11/2026, P316 1): na propaganda de TV, a voz é a do locutor (P270 1 e P278 1), e a boca de
+    # quem aparece que não combina com ela descarta o vídeo, como o de outro produto: ele vai só ao privado, com o
+    # porquê, e o registro conta a conferência e o descarte, só com os rótulos fixos.
     _fonte(monkeypatch)
     ativar(fonte="autorais")
     propaganda = robo.flow.ESTILO_DA_PROPAGANDA
@@ -10959,12 +10960,15 @@ def test_propaganda_com_a_boca_que_nao_combina_com_a_voz_vira_rascunho_com_o_avi
                            "fala": "Sua casa mais bonita. Garanta a sua!"},
                     conferencia={"mesmo": True, "diferencas": "", "outro": False, "qual_outro": "", "boca": True,
                                  "defeitos": ""})
-    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda *args: {"situacao": "igual"})
     resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
-    assert resultado == "vídeo de IA: pronto para o rascunho"
-    aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
-    assert robo.flow.BOCA_NA_PROPAGANDA in aviso
-    assert ("boca conferida", "não combina com a voz") in _registro_do_video_de_ia()
+    assert resultado == "vídeo de IA: a IA viu a boca fora da voz no vídeo; não vira rascunho"
+    assert robo.flow.producao()["estado"] == "descartado" and robo.flow.video_pronto() is None
+    i = next(i for i, a in enumerate(avisos) if isinstance(a, str) and "sem combinar com a voz" in a)
+    assert robo.flow.BOCA_NA_PROPAGANDA in avisos[i] and "foto do anúncio. Ele" not in avisos[i]
+    assert avisos[i + 1] == ("video", robo.LEGENDA_DO_DESCARTADO)
+    registro = _registro_do_video_de_ia()
+    assert ("boca conferida", "não combina com a voz") in registro
+    assert ("descartado", "a IA viu a boca fora da voz") in registro
 
 
 def test_video_de_ia_parado_no_flow_antes_e_depois_do_gerar(monkeypatch, avisos, tmp_path):

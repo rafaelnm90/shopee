@@ -1208,6 +1208,26 @@ def test_conferencia_marca_a_boca_que_nao_combina_com_a_voz_e_nao_a_pessoa_que_f
     assert "não combina com a voz" in flow.BOCA_NA_PROPAGANDA and "só numa parte da fala" in flow.BOCA_NA_PROPAGANDA
 
 
+def test_propaganda_com_a_boca_fora_da_voz_e_descartada_so_na_propaganda(celular, monkeypatch, tmp_path):
+    # Escolha do Rafael (27/11/2026, P316 1): na propaganda de TV, a boca de quem aparece que não combina com a voz
+    # (a voz do locutor, de um homem novo, na boca de uma senhora, e só em metade da frase) descarta o vídeo, como o de
+    # outro produto: ele não vira rascunho, e o aviso do descartado diz por quê.
+    flow.comecar_producao("2026-11-27", _escolhido_da_propaganda(), 1)
+    arquivo = tmp_path / "producao_2026-11-27.mp4"
+    arquivo.write_bytes(b"video")
+    flow.guardar_producao(estado="baixado", arquivo=str(arquivo))
+    boca = {"mesmo": True, "diferencas": "", "outro": False, "qual_outro": "", "boca": True, "defeitos": ""}
+    monkeypatch.setattr(flow, "conferir_o_video", lambda caminho, foto: dict(boca))
+    assert flow.conferir_a_producao() == "descartado" and flow.video_pronto() is None
+    assert flow.BOCA_NA_PROPAGANDA in flow.legenda_da_producao(flow.producao())
+    # A conferência que não marca a boca deixa a propaganda seguir; fora da propaganda (as amostras dos outros
+    # formatos), quem aparece fala com a própria voz, e nada é descartado por isso.
+    assert flow.boca_fora_da_voz({"formato": flow.ESTILO_DA_PROPAGANDA, "conferencia": boca})
+    assert not flow.boca_fora_da_voz({"formato": flow.ESTILO_DA_PROPAGANDA, "conferencia": dict(boca, boca=False)})
+    assert not flow.boca_fora_da_voz({"formato": flow.ESTILO_DA_PROPAGANDA, "conferencia": dict(boca, boca=None)})
+    assert not flow.boca_fora_da_voz({"formato": flow.ESTILO_DO_VENDEDOR, "conferencia": boca})
+
+
 def test_prompt_da_propaganda_termina_com_os_planos_do_produto_e_a_boca_fechada():
     # As frases vão fixas no fim do prompt, mesmo que a IA que escreve o pedido as esqueça; a da boca, só com o
     # personagem em cena (P278 1).

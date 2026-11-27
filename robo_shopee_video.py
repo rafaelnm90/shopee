@@ -4211,12 +4211,28 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
     if atual.get("silencio"):
         # O silêncio cortado ou o vídeo mantido inteiro (P262): a duração pedida, os porquês fixos e os números.
         _anotar_o_silencio(atual, agora)
+    if atual.get("formato") == flow.ESTILO_DA_PROPAGANDA:
+        # Na propaganda de TV, a voz é a do locutor: a boca de quem está em cena que não combina com ela descarta o
+        # vídeo (P316 1), e o registro conta cada conferência, só com o rótulo fixo.
+        boca = (atual.get("conferencia") or {}).get("boca")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "boca conferida",
+                                     {True: "não combina com a voz", False: "sem problema"}.get(boca, "sem resposta"),
+                                     ok=None, agora=agora)
     if estado == "descartado":
         _soltar_a_fonte_do_video_de_ia(atual)
-        # O produto do anúncio está no vídeo, mas outro produto, comida ou bebida aparece sozinho ou em destaque
-        # num plano (o plano final de um comercial com outra coisa da época): descartado como o de outro produto.
-        mais_um = (atual.get("conferencia") or {}).get("mesmo") is not False
-        visto = "a IA viu mais um produto" if mais_um else "a IA viu outro produto"
+        conferencia = atual.get("conferencia") or {}
+        if conferencia.get("mesmo") is False:
+            visto, como = "a IA viu outro produto", ("saiu com outro produto, pela conferência da IA com a foto do "
+                                                     "anúncio")
+        elif conferencia.get("outro") is True:
+            # O produto do anúncio está no vídeo, mas outro produto, comida ou bebida aparece sozinho ou em destaque
+            # num plano (o plano final de um comercial com outra coisa da época): descartado como o de outro produto.
+            visto, como = "a IA viu mais um produto", ("mostra outro produto além do anúncio, num plano sozinho ou em "
+                                                       "destaque, pela conferência da IA com a foto do anúncio")
+        else:
+            # A propaganda com a boca de quem aparece sem combinar com a voz do locutor (P316 1).
+            visto, como = "a IA viu a boca fora da voz", ("saiu com a boca de quem aparece sem combinar com a voz, "
+                                                          "pela conferência da IA")
         registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "descartado", visto, ok=False, agora=agora)
         registrar_tentativa("video_ia", "descartado", f"vídeo de IA: {visto} no vídeo",
                             produto=atual.get("nome", ""), agora=agora, video=atual.get("id_video", ""))
@@ -4225,20 +4241,10 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
                                                "dia ainda tiver espaço para vídeo de IA.")
         else:
             qual, depois = "de hoje", ", e o de amanhã sai normalmente."
-        como = ("mostra outro produto além do anúncio, num plano sozinho ou em destaque" if mais_um
-                else "saiu com outro produto")
         mandar_o_video_de_ia_descartado(atual, (
-            f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} {como}, pela conferência da IA com a "
-            f"foto do anúncio. Ele não vira rascunho{depois}\n\n"
+            f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} {como}. Ele não vira rascunho{depois}\n\n"
             f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}"), agora)
         return f"vídeo de IA: {visto} no vídeo; não vira rascunho"
-    if atual.get("formato") == flow.ESTILO_DA_PROPAGANDA:
-        # Na propaganda de TV, a voz é a do locutor: a boca de quem está em cena que não combina com ela vai no aviso
-        # (flow.linha_da_boca), e o registro a conta, só com o rótulo fixo.
-        boca = (atual.get("conferencia") or {}).get("boca")
-        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "boca conferida",
-                                     {True: "não combina com a voz", False: "sem problema"}.get(boca, "sem resposta"),
-                                     ok=None, agora=agora)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "pronto",
                                  atual.get("resolucao") or "sem a janela da resolução", ok=True, agora=agora)
     registrar_tentativa("video_ia", "pronto", produto=atual.get("nome", ""), agora=agora,
