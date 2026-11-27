@@ -1422,6 +1422,78 @@ def test_links_a_mais_so_com_os_da_faixa_do_mais_barato(monkeypatch):
     assert registro[-1][2] == "1 a mais" and "3 confirmados, 2 fora da faixa do mais barato" in registro[-1][3]
 
 
+def test_links_a_mais_dizem_no_registro_por_que_nenhum_foi(monkeypatch):
+    # Pergunta do Rafael (26/11): por que os vídeos dos amigos saem com 1 link só. O registro passa a dizer por que os
+    # de nome parecido não foram à IA (o próprio produto do vídeo, repetidos, sem a nota ou os vendidos, mais caros),
+    # quantas fotos não baixaram, quando a IA não respondeu (o motivo fixo do código, nunca o que ela escreve) e quando
+    # ela só achou o mesmo modelo em outra cor (P142 1). Antes, tudo saía como "a IA não confirmou nenhum" ou
+    # "nenhum de nome e preço parecidos".
+    import postador_shopee_video as ps
+    import robo_shopee_video as robo
+    original = {"nome": "Garrafa Térmica Inox 500ml Azul", "preco": 50.0, "comissao": 10.0, "imagem": "foto-1",
+                "item": "1"}
+    ofertas = [_oferta("Garrafa Térmica Inox 500ml Azul", 50.0, 10.0, "1"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja A", 52.0, 20.0, "2"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja B", 52.0, 20.0, "3", nota="4.2"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Cara", 70.0, 30.0, "4"),
+               _oferta("Garrafa Térmica Inox 500ml Azul Loja C", 51.0, 20.0, "5")]
+    fotos_que_baixam = {"foto-1", "foto-2"}
+    respostas = []
+
+    async def buscar(termo, limite=10, sort_type=2, **kw):
+        return ofertas
+
+    def conferir(video, nome, anuncios, recusas=None, outra_cor=None, **kw):
+        return respostas.pop(0)(len(anuncios), recusas, outra_cor)
+
+    def nao_respondeu(quantos, recusas, outra_cor):
+        return [], "a IA não respondeu à conferência dos produtos a mais (1ª vez)"
+
+    def nenhum_igual(quantos, recusas, outra_cor):
+        recusas["outro produto"] = quantos
+        return [], "Uma frase da IA sobre o anúncio"
+
+    def so_outra_cor(quantos, recusas, outra_cor):
+        recusas["outro produto"] = 0
+        outra_cor.add(0)
+        return [0], ""
+
+    monkeypatch.setattr(robo, "foto_do_anuncio", lambda endereco: b"foto" if endereco in fotos_que_baixam else None)
+    monkeypatch.setattr(robo, "sem_os_a_mais", lambda: None)
+    monkeypatch.setattr(robo, "OUTRA_COR_NOS_PRODUTOS", False)
+    monkeypatch.setattr(asv.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(ps, "ia_confere_iguais", conferir)
+
+    def ultimo():
+        _momento, _processo, resultado, detalhe, _origem = asv.registro_processos.sequencia(
+            "shopee_video", asv.PROCESSO_DOS_LINKS, "2000-01-01 00:00:00")[-1]
+        return resultado, detalhe
+
+    # A busca traz as mesmas 5 ofertas nas duas ordens: a 2ª vez de cada uma conta como repetida, o próprio produto do
+    # vídeo duas vezes, e a de nota 4,2 e a 40% mais cara ficam de fora as duas vezes.
+    fora = ("10 na busca, 10 de nome parecido (mais caros 2, o mais perto +40%; o do rascunho 2; repetidos 2; "
+            "sem nota ou vendidos 2)")
+    respostas.append(nao_respondeu)
+    assert rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original], do_rafael=False)) == []
+    assert ultimo() == ("nenhum - sem a resposta da IA", f"{fora}, 1 na IA, 1 sem a foto - a IA não respondeu à "
+                                                         "conferência dos produtos a mais (1ª vez)")
+    # A IA respondeu que nenhum é o mesmo produto: o que ela escreveu não vai ao registro.
+    respostas.append(nenhum_igual)
+    rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original], do_rafael=False))
+    assert ultimo() == ("nenhum - a IA não confirmou nenhum",
+                        f"{fora}, 1 na IA, 1 sem a foto, 0 confirmados, 0 fora da faixa do mais barato")
+    # Só o mesmo modelo em outra cor: de fora pela P142 1, contado à parte.
+    respostas.append(so_outra_cor)
+    rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original], do_rafael=False))
+    assert ultimo() == ("nenhum - só de outra cor", f"{fora}, 1 na IA, 1 sem a foto, 0 confirmados, "
+                                                    "0 fora da faixa do mais barato, 1 de outra cor")
+    # Nenhuma foto dos anúncios baixou: nada vai à IA, e o registro diz isso.
+    fotos_que_baixam.discard("foto-2")
+    rodar(asv.links_a_mais({"arquivo": "v.mp4"}, [original], do_rafael=False))
+    assert ultimo() == ("nenhum - sem a foto dos anúncios", f"{fora}, 0 na IA, 2 sem a foto")
+    assert respostas == []
+
+
 def test_produto_que_o_amigo_ja_recebeu_fica_para_os_outros(monkeypatch):
     # P271 2: o produto só não repete para a mesma pessoa. O vídeo dele fica na fonte, sem ser anotado, e vai o
     # próximo; outro amigo (e o Rafael) ainda pode receber esse produto.

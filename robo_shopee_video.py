@@ -5975,8 +5975,11 @@ def _minutos(segundos):
     return f"{segundos / 60:.1f}".replace(".", ",")
 
 
-def _fora_do_preco(fora):
-    """Por que os achados na API ficaram de fora do preço (candidatos_da_foto), em texto curto, só números."""
+def fora_do_preco_em_texto(fora):
+    """
+    Por que os achados na API ficaram de fora do preço (candidatos_da_foto), em texto curto, só números: o registro
+    dos espaços livres e o dos links a mais do modo assistente.
+    """
     partes = [f"mais caros {fora['mais caro']}, o mais perto +{fora['o mais perto']}%"] if fora.get("mais caro") else []
     partes += [f"{rotulo} {fora[chave]}" for chave, rotulo in
                (("o do rascunho", "o do rascunho"), ("repetido", "repetidos"), ("sem dados", "sem dados"),
@@ -6070,7 +6073,8 @@ def espacos_livres(d, video, principal, original, vistos, prazo, inicio=None, re
         fora = f" (sem o nome {perdas.get('nome', 0)}, outro preço {perdas.get('preço', 0)})" if perdas else ""
         diferentes = len({str(oferta.get("itemId") or "") for _cartao, oferta in achados} - {""})
         contagem = (f"{len(cartoes)} na busca ({parecidos} com o nome parecido), {len(achados)} na API{fora}, "
-                    f"{diferentes} anúncio(s) diferente(s), {len(candidatos)} no preço{_fora_do_preco(fora_do_preco)}")
+                    f"{diferentes} anúncio(s) diferente(s), {len(candidatos)} no preço"
+                    f"{fora_do_preco_em_texto(fora_do_preco)}")
         fotos = []
         for candidato in candidatos:
             try:

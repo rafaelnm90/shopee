@@ -7331,7 +7331,7 @@ def test_candidatos_da_foto_so_com_anuncio_de_nota_e_vendidos():
     candidatos = robo.candidatos_da_foto({"preco": 50.0}, "7", achados, fora)
     assert [c["item"] for c in candidatos] == ["3"] and (candidatos[0]["vendas"], candidatos[0]["nota"]) == (500, 4.8)
     assert fora == {"sem nota ou vendidos": 2}
-    assert robo._fora_do_preco(fora) == " (sem nota ou vendidos 2)"
+    assert robo.fora_do_preco_em_texto(fora) == " (sem nota ou vendidos 2)"
 
 
 def test_candidatos_da_foto_contam_por_que_cada_achado_ficou_de_fora():
@@ -7344,10 +7344,11 @@ def test_candidatos_da_foto_contam_por_que_cada_achado_ficou_de_fora():
     fora = {}
     assert [c["item"] for c in robo.candidatos_da_foto({"preco": 50.0}, "7", achados, fora)] == ["1"]
     assert fora == {"o do rascunho": 2, "mais caro": 2, "o mais perto": 26, "repetido": 1, "sem dados": 1}
-    assert robo._fora_do_preco(fora) == " (mais caros 2, o mais perto +26%; o do rascunho 2; repetidos 1; sem dados 1)"
+    assert robo.fora_do_preco_em_texto(fora) == (" (mais caros 2, o mais perto +26%; o do rascunho 2; repetidos 1; "
+                                                 "sem dados 1)")
     fora = {}
     assert robo.candidatos_da_foto({"preco": 0}, "7", achados, fora) == [] and fora == {"sem o preço do post": 1}
-    assert robo._fora_do_preco(fora) == " (sem o preço do post)" and robo._fora_do_preco({}) == ""
+    assert robo.fora_do_preco_em_texto(fora) == " (sem o preço do post)" and robo.fora_do_preco_em_texto({}) == ""
     # O que passa do teto por pouco nunca aparece como os 25% dele.
     fora = {}
     assert robo.candidatos_da_foto({"preco": 50.0}, "", [({}, _oferta_da_foto(3, 62.51, 10))], fora) == []
@@ -7591,7 +7592,7 @@ def test_espacos_livres_anotam_os_anuncios_diferentes_o_que_ficou_fora_do_preco_
     # A contagem mais longa ainda cabe no detalhe do registro.
     longa = ("5 a mais; 20 na busca (18 com o nome parecido), 15 na API (sem o nome 4, outro preço 1), "
              "12 anúncio(s) diferente(s), 8 no preço"
-             + robo._fora_do_preco({"mais caro": 3, "o mais perto": 135, "o do rascunho": 2, "repetido": 1,
+             + robo.fora_do_preco_em_texto({"mais caro": 3, "o mais perto": 135, "o do rascunho": 2, "repetido": 1,
                                     "sem dados": 1})
              + ", 8 na IA, 5 confirmados")
     assert len(longa) <= robo.registro_processos.TAMANHO_DO_DETALHE

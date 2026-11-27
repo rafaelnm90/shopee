@@ -593,34 +593,50 @@ async def links_a_mais(video, produtos, do_rafael=True):
         parecidas = [(None, oferta) for oferta in ofertas
                      if ps.parecido_entre([oferta.get("productName") or ""], original["nome"])[0]
                      >= robo.PARECIDO_NA_BUSCA]
-        candidatos = robo.candidatos_da_foto(original, original.get("item"), parecidas)
+        fora_do_preco = {}
+        candidatos = robo.candidatos_da_foto(original, original.get("item"), parecidas, fora_do_preco)
         # Os mais baratos que o do vídeo também vão à IA: são eles que dão o começo da faixa (P284 1).
         baratos = sorted((c for c in candidatos if c["preco"] < original["preco"]),
                          key=lambda c: c["preco"])[:robo.MAIS_BARATOS_NA_IA]
+        escolhidos = baratos + [c for c in candidatos if c not in baratos][:robo.CANDIDATOS_DOS_ESPACOS - len(baratos)]
         fotos = []
-        for candidato in baratos + [c for c in candidatos if c not in baratos][
-                :robo.CANDIDATOS_DOS_ESPACOS - len(baratos)]:
+        for candidato in escolhidos:
             foto = await asyncio.to_thread(robo.foto_do_anuncio, candidato["imagem"])
             if foto:
                 fotos.append((candidato, foto))
-        contagem = f"{len(ofertas)} na busca, {len(parecidas)} de nome parecido, {len(fotos)} na IA"
+        # O registro diz por que os de nome parecido não foram à IA (mais caros, repetidos, sem a nota ou os
+        # vendidos, o próprio produto do vídeo) e quantas fotos não baixaram: só números.
+        sem_foto = len(escolhidos) - len(fotos)
+        contagem = (f"{len(ofertas)} na busca, {len(parecidas)} de nome parecido"
+                    f"{robo.fora_do_preco_em_texto(fora_do_preco)}, {len(fotos)} na IA"
+                    + (f", {sem_foto} sem a foto" if sem_foto else ""))
         if not fotos:
-            anotar("nenhum - nenhum de nome e preço parecidos", contagem)
+            anotar("nenhum - sem a foto dos anúncios" if escolhidos else "nenhum - nenhum de nome e preço parecidos",
+                   contagem)
             return []
-        de_outra_cor = set()
-        posicoes, _ = await asyncio.to_thread(ps.ia_confere_iguais, video, original["nome"],
-                                              [(c["nome"], f) for c, f in fotos], capa=capa,
-                                              precos=[c["preco"] for c, _f in fotos],
-                                              preco_do_post=original["preco"], outra_cor=de_outra_cor)
+        de_outra_cor, recusas = set(), {}
+        posicoes, motivo_da_ia = await asyncio.to_thread(ps.ia_confere_iguais, video, original["nome"],
+                                                         [(c["nome"], f) for c, f in fotos], capa=capa,
+                                                         recusas=recusas, precos=[c["preco"] for c, _f in fotos],
+                                                         preco_do_post=original["preco"], outra_cor=de_outra_cor)
+        if not posicoes and "outro produto" not in recusas:
+            # A IA não respondeu (ou faltou o vídeo para ela ver): o motivo é um texto fixo do código, nunca o que a
+            # IA escreveu, que só existe quando ela responde.
+            anotar("nenhum - sem a resposta da IA", f"{contagem} - {motivo_da_ia}")
+            return []
         chaves = ("nome", "preco", "comissao", "endereco", "valor", "item")
         confirmados = [{chave: fotos[i][0][chave] for chave in chaves}
                        for i in posicoes if robo.OUTRA_COR_NOS_PRODUTOS or i not in de_outra_cor]
+        # O mesmo modelo em outra cor fica de fora (P142 1): contado à parte, para não parecer recusa da IA.
+        fora_pela_cor = len(posicoes) - len(confirmados)
         da_faixa = sorted(robo.na_faixa([original["preco"]], confirmados), key=lambda p: -p["valor"])
         mais = [{chave: p[chave] for chave in ("nome", "preco", "comissao", "endereco", "item")}
                 for p in da_faixa][:LINKS_DO_VIDEO - 1]
-        contagem += f", {len(confirmados)} confirmados, {len(confirmados) - len(da_faixa)} fora da faixa do mais barato"
+        contagem += (f", {len(confirmados)} confirmados, "
+                     f"{len(confirmados) - len(da_faixa)} fora da faixa do mais barato"
+                     + (f", {fora_pela_cor} de outra cor" if fora_pela_cor else ""))
         anotar(f"{len(mais)} a mais" if mais else "nenhum - fora da faixa do mais barato" if confirmados
-               else "nenhum - a IA não confirmou nenhum", contagem)
+               else "nenhum - só de outra cor" if fora_pela_cor else "nenhum - a IA não confirmou nenhum", contagem)
         return mais
     except Exception as e:
         anotar("erro", type(e).__name__)
