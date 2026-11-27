@@ -4233,11 +4233,11 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
             f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}"), agora)
         return f"vídeo de IA: {visto} no vídeo; não vira rascunho"
     if atual.get("formato") == flow.ESTILO_DA_PROPAGANDA:
-        # Na propaganda de TV, só o locutor fala: a boca mexendo vai no aviso (flow.linha_da_boca), e o registro a
-        # conta, só com o rótulo fixo.
+        # Na propaganda de TV, a voz é a do locutor: a boca de quem está em cena que não combina com ela vai no aviso
+        # (flow.linha_da_boca), e o registro a conta, só com o rótulo fixo.
         boca = (atual.get("conferencia") or {}).get("boca")
         registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "boca conferida",
-                                     {True: "mexe a boca", False: "boca parada"}.get(boca, "sem resposta"),
+                                     {True: "não combina com a voz", False: "sem problema"}.get(boca, "sem resposta"),
                                      ok=None, agora=agora)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "pronto",
                                  atual.get("resolucao") or "sem a janela da resolução", ok=True, agora=agora)
