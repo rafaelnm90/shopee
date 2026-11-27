@@ -104,6 +104,7 @@ import pedidos_do_canal
 import postador_shopee_video as ps
 import registro_processos
 import tendencia_shopee_video as tendencia
+import vendas
 import videos
 import visualizacoes_shopee_video as visualizacoes
 from api_shopee import eh_video, link_para_converter
@@ -9477,6 +9478,15 @@ PROCESSO_DOS_FIXADOS = "fixados: visualizações anotadas"
 # com o link copiado antes do Desafixar; o que para em TENTATIVAS_DO_TIRADO leituras sai). Um por leitura, com o
 # aviso no privado e o comentário, como no fixar. DECISOES.md, Shopee Vídeo.
 TENTATIVAS_DO_TIRADO = 3
+# Os vendidos na escolha dos fixados (resposta do Rafael, 27/11/2026, P317 1): as unidades que os vídeos dele venderam
+# pela Shopee Vídeo nos últimos DIAS_DAS_VENDAS_DOS_FIXADOS dias, pelo relatório de afiliado
+# (vendas.vendidos_pelos_videos), somadas pelos produtos de cada post do robô (o do vídeo, o do post e os a mais).
+# Entra o post do robô que mais vendeu e não está fixado, mesmo sem MINIMO_DE_CURTIDAS curtidas, aberto pelo link
+# do post, e sai o fixado que menos vendeu; no empate, as curtidas e as visualizações, como antes (P263 1 e P300 1).
+# O vídeo que viraliza pelas curtidas só entra no lugar de um fixado que vendeu o mesmo que ele ou menos. O vídeo
+# sem o post do robô (postado à mão, ou sem a capa guardada no post) conta como 0 vendido. O post que mais vendeu e
+# se mostra fixado, removido ou em análise sai da conta por ESPERA_DO_JA_VISTO. DECISOES.md, Shopee Vídeo.
+DIAS_DAS_VENDAS_DOS_FIXADOS = 7
 
 
 def _juntar_curtidas(d, xml, curtidas, agora=None):
@@ -9593,9 +9603,13 @@ def fixar_o_que_viraliza(d, agora=None):
 
 def _fixar_um(d, agora):
     """
-    O fixar de uma leitura (fixar_o_que_viraliza): o primeiro dos candidatos com as curtidas em alta que dá certo, ou
-    o que parou; sem nenhum que fique, o lugar vazio entre os fixados (_encher_o_lugar_vazio, P299 1).
+    O fixar de uma leitura (fixar_o_que_viraliza): primeiro o post que mais vendeu pelos vídeos
+    (_fixar_o_que_mais_vendeu, P317 1); sem troca por ele, o primeiro dos candidatos com as curtidas em alta que dá
+    certo, ou o que parou; sem nenhum que fique, o lugar vazio entre os fixados (_encher_o_lugar_vazio, P299 1).
     """
+    feito = _sem_parar(d, agora, lambda: _fixar_o_que_mais_vendeu(d, agora))
+    if feito:
+        return feito
     vistos = _ja_vistos(agora)
     mais_curtidos = interacoes.videos_mais_curtidos(agora)
     curtidos = [v for v in mais_curtidos if not any(
@@ -9664,6 +9678,158 @@ def _encher_o_lugar_vazio(d, agora, curtidos):
     if feito:
         return feito
     return _fixar_o_ultimo_tirado(d, agora, len(fixados))
+
+
+def _vendidos_por_item(agora=None):
+    """
+    {itemId: unidades} que os vídeos do Rafael venderam pela Shopee Vídeo nos últimos DIAS_DAS_VENDAS_DOS_FIXADOS dias,
+    contando hoje, pelo relatório de afiliado que o bot_mestre guarda de hora em hora (P317 1).
+    """
+    desde = (agora_br(agora) - timedelta(days=DIAS_DAS_VENDAS_DOS_FIXADOS - 1)).strftime("%Y-%m-%d")
+    return vendas.vendidos_pelos_videos(db.ler_config("banco_pedidos", {}) or {}, desde)
+
+
+def _itens_que_o_post_vende(rascunho):
+    """Os produtos (itemId) da sacolinha do post do robô: o do vídeo, o do post e os a mais (P317 1)."""
+    return ({str(item) for item in rascunho["itens_do_video"] if item}
+            | {str(item.get("item")) for item in rascunho["itens"] if item.get("item")})
+
+
+def vendidos_dos_posts(agora=None):
+    """
+    Os posts do robô com as unidades que os produtos deles venderam pelos vídeos (_vendidos_por_item, P317 1):
+    [{"rascunho", "vendidos"}], do mais novo para o mais velho. O produto que está em dois posts conta nos dois: a
+    venda não diz de qual vídeo ela veio.
+    """
+    vendidos = _vendidos_por_item(agora)
+    posts = [{"rascunho": r, "vendidos": sum(vendidos.get(item, 0) for item in _itens_que_o_post_vende(r))}
+             for r in listar("postado")]
+    return sorted(posts, key=lambda p: p["rascunho"]["postado_em"] or p["rascunho"]["criado_em"] or "", reverse=True)
+
+
+def _vendidos_dos_fixados(marcas, posts):
+    """
+    (vendidos, ids) dos fixados da grade (marcas: as capas deles, na ordem): as unidades de cada um, pelo post do robô
+    de capa parecida (visualizacoes.casar, como nas visualizações da P76), e os ids dos posts achados entre eles; 0 no
+    fixado sem o post do robô (postado à mão) ou sem a capa (P317 1).
+    """
+    procurados = [(p["rascunho"]["id"], p["rascunho"]["marca"]) for p in posts]
+    achados = visualizacoes.casar([(marca, i) for i, marca in enumerate(marcas)], procurados)
+    quadro_do_post = {i: ident for ident, i in achados.items()}
+    do_post = {p["rascunho"]["id"]: p["vendidos"] for p in posts}
+    return [do_post[quadro_do_post[i]] if i in quadro_do_post else 0 for i in range(len(marcas))], set(achados)
+
+
+def _vendidos_pela_legenda(legenda, posts):
+    """As unidades do post do robô de legenda igual à do vídeo do player (legenda_do_post); 0 sem ele (P317 1)."""
+    return next((p["vendidos"] for p in posts if p["rascunho"]["titulo"]
+                 and legenda_do_post(legenda, p["rascunho"]["titulo"])), 0)
+
+
+def _vistos_pelas_vendas(agora=None):
+    """Os ids dos posts fora da entrada pelas vendas: os que se mostraram fixados, removidos ou em análise há menos de
+    ESPERA_DO_JA_VISTO (P317 1)."""
+    limite = _momento(agora_br(agora) - ESPERA_DO_JA_VISTO)
+    return {v["id"] for v in ler_estado().get("fixar_vendidos_vistos") or [] if (v.get("em") or "") >= limite}
+
+
+def _anotar_visto_pelas_vendas(ident, agora=None):
+    """O post (o id do rascunho) sai da entrada pelas vendas por ESPERA_DO_JA_VISTO; os mais velhos saem do estado."""
+    limite = _momento(agora_br(agora) - ESPERA_DO_JA_VISTO)
+
+    def anotar(dados):
+        vistos = [v for v in dados.get("fixar_vendidos_vistos") or [] if (v.get("em") or "") >= limite]
+        dados["fixar_vendidos_vistos"] = vistos + [{"id": ident, "em": _momento(agora)}]
+
+    db.atualizar_config(CHAVE_ESTADO, anotar)
+
+
+def _unidades(numero):
+    return f"{numero} unidade" + ("s" if numero != 1 else "")
+
+
+def _fixar_o_que_mais_vendeu(d, agora):
+    """
+    A entrada pelas vendas (P317 1): o post do robô que mais vendeu pelos vídeos e não está entre os fixados entra
+    quando há lugar entre eles ou quando vendeu mais que o fixado que menos vendeu, que sai
+    (_desfixar_o_que_esfriou, pelas vendas). Ele abre pelo link do post e é conferido na folha do compartilhar e
+    nos fixados da grade (pela legenda); o fixar, a volta do que saiu, o aviso, o comentário e as anotações são os do
+    fixar das curtidas. Sem nenhuma venda, nada no celular. Devolve o que fez, ou "" quando as vendas não mudam os
+    fixados, para o fixar pelas curtidas.
+    """
+    posts = vendidos_dos_posts(agora)
+    if not any(p["vendidos"] for p in posts):
+        return ""
+    fixados, marcas = anotar_os_fixados(d, agora)
+    vendidos, ids_fixados = _vendidos_dos_fixados(marcas, posts)
+    vistos = _vistos_pelas_vendas(agora)
+    de_fora = [p for p in posts if p["vendidos"] and p["rascunho"]["link_post"]
+               and p["rascunho"]["id"] not in ids_fixados | vistos
+               and not interacoes.resultado_de(interacoes.marca_do_post(p["rascunho"]["link_post"]),
+                                               interacoes.TIPO_DO_REMOVIDO)]
+    # No empate, o mais novo (posts vem do mais novo para o mais velho, e o max fica com o primeiro).
+    candidato = max(de_fora, key=lambda p: p["vendidos"], default=None)
+    menos = min(vendidos, default=0) if len(fixados) >= FIXADOS_NO_PERFIL else -1
+    if not candidato or candidato["vendidos"] <= menos:
+        de_fora_vendeu = candidato["vendidos"] if candidato else 0
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "pelas vendas: nenhuma troca",
+                                     f"o que mais vendeu fora dos fixados com {de_fora_vendeu}; o fixado que menos "
+                                     f"vendeu com {max(menos, 0)}", ok=None, agora=agora)
+        return ""
+    rascunho, link = candidato["rascunho"], candidato["rascunho"]["link_post"]
+    try:
+        legenda = _abrir_o_video_do_post(d, link)["legenda"]
+    except Parada as e:
+        if e.motivo not in (MOTIVO_DO_POST_REMOVIDO, MOTIVO_DO_POST_EM_ANALISE):
+            raise
+        _anotar_visto_pelas_vendas(rascunho["id"], agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "pulado", "pelas vendas: o post " + (
+            "removido" if e.motivo == MOTIVO_DO_POST_REMOVIDO else "em análise"), ok=None, agora=agora)
+        return ""
+    situacao = interacoes.estado_do_fixar(_abrir_a_folha(d))
+    if situacao == "desfixar":
+        _fechar_a_folha(d)
+        _anotar_visto_pelas_vendas(rascunho["id"], agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "já fixado", "pelas vendas: o que mais vendeu",
+                                     ok=None, agora=agora)
+        return ""
+    if situacao != "fixar":
+        raise Parada(MOTIVO_DO_FIXAR + "sem o Fixar na folha do compartilhar")
+    _fechar_a_folha(d)
+    curtidas = []
+    if _entre_os_fixados(d, legenda, curtidas):
+        _anotar_visto_pelas_vendas(rascunho["id"], agora)
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "já fixado",
+                                     "pelas vendas: conferido nos fixados do Perfil", ok=None, agora=agora)
+        return ""
+    fixados = _fixados_do_perfil(d)
+    cheio = len(fixados) >= FIXADOS_NO_PERFIL
+    if cheio and candidato["vendidos"] <= min(_vendidos_dos_fixados(_marcas_dos_fixados(d, fixados), posts)[0]):
+        # Os fixados mudaram no meio da leitura (um fixado à mão ocupou o lugar vazio): nenhum sai pelas vendas.
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "pelas vendas: nenhuma troca",
+                                     "os fixados mudaram no meio da leitura", ok=None, agora=agora)
+        return ""
+    saiu = _desfixar_o_que_esfriou(d, fixados, agora, curtidas, posts) if cheio else None
+    para_que = (f"para dar lugar ao que mais vendeu ({_unidades(candidato['vendidos'])} nos últimos "
+                f"{DIAS_DAS_VENDAS_DOS_FIXADOS} dias, pelos seus vídeos)")
+    _anotar_visto_pelas_vendas(rascunho["id"], agora)
+    if not _fixar_ou_devolver(d, lambda: _fixar_o_video(d, None, legenda, link=link), saiu, link, para_que, agora):
+        return _ja_fixado_depois(d, {"video": rascunho["marca"] or MARCA_SEM_A_CAPA, "curtidas": 0}, link, saiu, agora,
+                                 "pelas vendas; ", comentar=False, para_que=para_que)
+    resultado, porque, aviso, feito = _o_que_o_fixar_diz(None, link, saiu, vendidos=candidato["vendidos"])
+    registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, resultado, porque, ok=True, agora=agora)
+    avisar(aviso)
+    corte = _momento(agora_br(agora) - timedelta(days=interacoes.DIAS_ENTRE_COMENTARIOS))
+    if interacoes.ultimo_comentario(link) > corte:
+        # O post já ganhou o comentário do robô nesses dias (o de depois do post ou o de post antigo, P148 2).
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_COMENTARIO_FIXADO, "já comentado",
+                                     f"no post, há menos de {interacoes.DIAS_ENTRE_COMENTARIOS} dias", ok=None,
+                                     agora=agora)
+        comentario = "já tinha comentado nele"
+    else:
+        comentario = _comentar_no_fixado(d, rascunho["marca"] or MARCA_SEM_A_CAPA, link, agora)
+    _anotar_os_fixados_junto(d, agora)
+    return f"fixar no perfil: {feito}; {comentario}"
 
 
 def _o_tirado():
@@ -9802,28 +9968,22 @@ def _fixar_no_perfil(d, candidato, agora, no_lugar_vazio=False):
         registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "lugar ocupado", "no meio da leitura", ok=None,
                                      agora=agora)
         return "fixar no perfil: o lugar vazio entre os fixados foi ocupado no meio da leitura"
+    cheio = len(fixados) >= FIXADOS_NO_PERFIL
+    # O vídeo que viraliza só entra no lugar de um fixado que vendeu o mesmo que ele ou menos (P317 1).
+    posts = vendidos_dos_posts(agora) if cheio else []
+    if any(p["vendidos"] for p in posts):
+        do_video = _vendidos_pela_legenda(legenda, posts)
+        menos = min(_vendidos_dos_fixados(_marcas_dos_fixados(d, fixados), posts)[0], default=0)
+        if do_video < menos:
+            _anotar_visto(candidato["video"], agora)
+            registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "pulado",
+                                         f"pelas vendas: o vídeo que viraliza com {do_video}; o fixado que menos "
+                                         f"vendeu com {menos}", ok=None, agora=agora)
+            return ""
     # Com 1 ou 2 fixados, nenhum sai: o vídeo que viraliza só entra (pedido do Rafael, 25/11/2026).
-    saiu = _desfixar_o_que_esfriou(d, fixados, agora, curtidas) if len(fixados) >= FIXADOS_NO_PERFIL else None
-    try:
-        fixou = _fixar_o_video(d, candidato["video"], legenda)
-    except Parada as e:
-        if saiu:
-            # O registro e o aviso saem mesmo quando a volta para no meio (a Verificação, um erro do celular).
-            voltou = False
-            try:
-                voltou = _devolver_o_desfixado(d, saiu)
-            finally:
-                registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "devolvido" if voltou else "não devolvido",
-                                             "o desfixado, depois do fixar que parou", ok=voltou, agora=agora)
-                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil {_qual_saiu(saiu)}, "
-                       f"para dar lugar ao que está viralizando ({candidato['curtidas']} curtidas nas últimas 24 h), "
-                       f"mas não consegui fixar o novo ({e.motivo.removeprefix(MOTIVO_DO_FIXAR)}). "
-                       + ("Pus de volta o que tinha tirado, e o seu Perfil continua com os "
-                          f"{FIXADOS_NO_PERFIL} fixados. Tento de novo na próxima leitura das Notificações." if voltou
-                          else "E não consegui pôr de volta o que tirei: se quiser, fixe-o à mão, para o Perfil "
-                          f"voltar a ter os {FIXADOS_NO_PERFIL} fixados.")
-                       + f"\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}\n📌 O que ia entrar: {link or SEM_O_LINK}")
-        raise
+    saiu = _desfixar_o_que_esfriou(d, fixados, agora, curtidas, posts) if cheio else None
+    para_que = f"para dar lugar ao que está viralizando ({candidato['curtidas']} curtidas nas últimas 24 h)"
+    fixou = _fixar_ou_devolver(d, lambda: _fixar_o_video(d, candidato["video"], legenda), saiu, link, para_que, agora)
     if not fixou:
         return _ja_fixado_depois(d, candidato, link, saiu, agora, antes, comentar=comentar)
     _anotar_visto(candidato["video"], agora)
@@ -9836,34 +9996,82 @@ def _fixar_no_perfil(d, candidato, agora, no_lugar_vazio=False):
     return f"fixar no perfil: {feito}; {comentario}"
 
 
-def _o_que_o_fixar_diz(candidato, link, saiu, no_lugar_vazio=False):
+def _fixar_ou_devolver(d, fixar, saiu, link, para_que, agora):
+    """
+    fixar() depois de tirar saiu dos fixados (None: nenhum saiu). A Parada no meio devolve o que saiu
+    (_devolver_o_desfixado) e avisa o Rafael com os dois links; para_que: por que o novo ia entrar, no aviso.
+    """
+    try:
+        return fixar()
+    except Parada as e:
+        if saiu:
+            # O registro e o aviso saem mesmo quando a volta para no meio (a Verificação, um erro do celular).
+            voltou = False
+            try:
+                voltou = _devolver_o_desfixado(d, saiu)
+            finally:
+                registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "devolvido" if voltou else "não devolvido",
+                                             "o desfixado, depois do fixar que parou", ok=voltou, agora=agora)
+                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil {_qual_saiu(saiu)}, {para_que}, "
+                       f"mas não consegui fixar o novo ({e.motivo.removeprefix(MOTIVO_DO_FIXAR)}). "
+                       + ("Pus de volta o que tinha tirado, e o seu Perfil continua com os "
+                          f"{FIXADOS_NO_PERFIL} fixados. Tento de novo na próxima leitura das Notificações." if voltou
+                          else "E não consegui pôr de volta o que tirei: se quiser, fixe-o à mão, para o Perfil "
+                          f"voltar a ter os {FIXADOS_NO_PERFIL} fixados.")
+                       + f"\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}\n📌 O que ia entrar: {link or SEM_O_LINK}")
+        raise
+
+
+def _o_que_o_fixar_diz(candidato, link, saiu, no_lugar_vazio=False, vendidos=None):
     """
     O que o fixar que deu certo anota e diz: (resultado, porque) para o registro, o aviso no privado e o que fez, para
-    a rodada. A troca diz o que saiu (P300 1); o lugar vazio (P299 1), as curtidas do vídeo que entrou.
+    a rodada. A troca diz o que saiu (P300 1 e P317 1); o lugar vazio (P299 1), as curtidas do vídeo que entrou.
+    vendidos: as unidades do vídeo que entrou pelas vendas (P317 1); None no que entrou pelas curtidas.
     """
+    if vendidos is not None:
+        vendidas = f"{_unidades(vendidos)} vendida" + ("s" if vendidos != 1 else "")
+        aviso = (f"📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que mais vendeu nos últimos "
+                 f"{DIAS_DAS_VENDAS_DOS_FIXADOS} dias ({vendidas} pelos seus vídeos).\n\n"
+                 f"📌 Fixado agora: {link or SEM_O_LINK}")
+        if not saiu:
+            aviso += f"\n\nAinda havia lugar entre os {FIXADOS_NO_PERFIL} fixados: nenhum saiu."
+            return "fixado", "pelas vendas: no lugar vazio", aviso, "fixei o vídeo que mais vendeu"
+        return ("trocado", f"pelas vendas: no lugar do fixado {_qual(saiu)}", aviso + _linha_do_que_saiu(saiu),
+                f"troquei o fixado {_qual(saiu)} pelo vídeo que mais vendeu")
     if no_lugar_vazio:
         curtidas = f"{candidato['curtidas']} curtida" + ("s" if candidato["curtidas"] != 1 else "")
         aviso = (f"📌 Robô da Shopee Vídeo: havia um lugar vazio entre os {FIXADOS_NO_PERFIL} fixados do seu Perfil, "
                  f"e fixei nele o seu vídeo com mais curtidas nas últimas 24 h que não estava fixado ({curtidas} nas "
                  f"Notificações, menos de {MINIMO_DE_CURTIDAS}).\n\n📌 Fixado agora: {link or SEM_O_LINK}")
         return "fixado", "no lugar vazio: o mais curtido em 24 h", aviso, "fixei no lugar vazio o mais curtido em 24 h"
-    esfriou = bool(saiu) and saiu["ritmo"] is not None
-    porque = (("no lugar do fixado que menos cresceu" if esfriou else "no lugar do fixado de menos visualizações")
-              if saiu else f"com menos de {FIXADOS_NO_PERFIL} fixados no Perfil")
+    porque = f"no lugar do fixado {_qual(saiu)}" if saiu else f"com menos de {FIXADOS_NO_PERFIL} fixados no Perfil"
     aviso = (f"📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que está viralizando ({candidato['curtidas']} "
              f"curtidas nas últimas 24 h, nas Notificações).\n\n📌 Fixado agora: {link or SEM_O_LINK}")
-    if esfriou:
-        dias = f"{saiu['dias']} dia" + ("s" if saiu["dias"] != 1 else "")
-        aviso += (f"\n📤 Saiu dos fixados (o que menos cresceu: {_com_pontos(saiu['ritmo'])} visualizações por dia "
-                  f"em {dias}; {_com_pontos(saiu['vistas'])} no total): {saiu['link'] or SEM_O_LINK}")
-    elif saiu:
-        aviso += (f"\n📤 Saiu dos fixados (o de menos visualizações, {_com_pontos(saiu['vistas'])}): "
-                  f"{saiu['link'] or SEM_O_LINK}")
-    else:
-        aviso += f"\n\nAinda havia lugar entre os {FIXADOS_NO_PERFIL} fixados: nenhum saiu."
-    qual = "que menos cresceu" if esfriou else "de menos visualizações"
-    feito = f"troquei o fixado {qual} pelo vídeo que viraliza" if saiu else "fixei o vídeo que viraliza"
+    aviso += (_linha_do_que_saiu(saiu) if saiu
+              else f"\n\nAinda havia lugar entre os {FIXADOS_NO_PERFIL} fixados: nenhum saiu.")
+    feito = f"troquei o fixado {_qual(saiu)} pelo vídeo que viraliza" if saiu else "fixei o vídeo que viraliza"
     return ("trocado" if saiu else "fixado"), porque, aviso, feito
+
+
+def _qual(saiu):
+    """Como o fixado que saiu é chamado: o que menos vendeu (P317 1), o que menos cresceu (P300 1) ou o de menos
+    visualizações."""
+    if saiu.get("pelas_vendas"):
+        return "que menos vendeu"
+    return "que menos cresceu" if saiu.get("ritmo") is not None else "de menos visualizações"
+
+
+def _linha_do_que_saiu(saiu):
+    """A linha do aviso com o fixado que saiu e o link dele."""
+    if saiu.get("pelas_vendas"):
+        return (f"\n📤 Saiu dos fixados (o que menos vendeu nos últimos {DIAS_DAS_VENDAS_DOS_FIXADOS} dias: "
+                f"{_unidades(saiu['vendidos'])}): {saiu['link'] or SEM_O_LINK}")
+    if saiu.get("ritmo") is not None:
+        dias = f"{saiu['dias']} dia" + ("s" if saiu["dias"] != 1 else "")
+        return (f"\n📤 Saiu dos fixados (o que menos cresceu: {_com_pontos(saiu['ritmo'])} visualizações por dia "
+                f"em {dias}; {_com_pontos(saiu['vistas'])} no total): {saiu['link'] or SEM_O_LINK}")
+    return (f"\n📤 Saiu dos fixados (o de menos visualizações, {_com_pontos(saiu['vistas'])}): "
+            f"{saiu['link'] or SEM_O_LINK}")
 
 
 def _com_pontos(numero):
@@ -9872,8 +10080,9 @@ def _com_pontos(numero):
 
 
 def _qual_saiu(saiu):
-    """O fixado que saiu, nos avisos: o que menos cresceu (P300 1) ou, sem o ritmo dele, o de menos visualizações."""
-    return "o vídeo que menos cresceu" if saiu.get("ritmo") is not None else "o vídeo de menos visualizações"
+    """O fixado que saiu, nos avisos: o que menos vendeu (P317 1), o que menos cresceu (P300 1) ou, sem o ritmo dele,
+    o de menos visualizações."""
+    return f"o vídeo {_qual(saiu)}"
 
 
 def _entre_os_fixados(d, legenda, curtidas=None):
@@ -10148,10 +10357,11 @@ def _ritmo_do_fixado(notas, marca, vistas, agora=None):
     return {"ritmo": ritmo, "dias": max(1, round(horas / 24)), "primeira": primeira["em"]}
 
 
-def _o_que_esfriou(fixados, marcas, agora=None, curtidas=None):
+def _o_que_esfriou(fixados, marcas, agora=None, curtidas=None, vendidos=None):
     """
     O fixado que sai na troca (P300 1), entre os que mostram o número na grade: (quadro, ritmo, porque), ritmo o
-    {"ritmo", "dias"} dele. Sai o de menor ritmo (_ritmo_do_fixado); no empate, o de menos curtidas no coração
+    {"ritmo", "dias"} dele. vendidos (as unidades de cada fixado, na ordem deles, P317 1): sai o que menos vendeu, e
+    o resto vale no empate. Sai o de menor ritmo (_ritmo_do_fixado); no empate, o de menos curtidas no coração
     (curtidas: as de cada fixado, na ordem deles, lidas em _entre_os_fixados; sem o número de algum, não desempatam) e
     depois o de menos visualizações. O fixado sem o ritmo (o recém-fixado) fica. Sem o ritmo de nenhum, sai o de menos
     visualizações, menos o que tem a 1ª anotação mais nova que a dos outros (fixado depois deles), e o ritmo vai None.
@@ -10163,34 +10373,50 @@ def _o_que_esfriou(fixados, marcas, agora=None, curtidas=None):
     for i, (quadro, marca) in enumerate(zip(fixados, marcas)):
         if quadro["vistas"] is not None:
             ritmo = _ritmo_do_fixado(notas, marca, quadro["vistas"], agora)
-            lidos.append({"quadro": quadro, "coracao": curtidas[i] if i < len(curtidas) else None, **ritmo})
+            lidos.append({"quadro": quadro, "coracao": curtidas[i] if i < len(curtidas) else None,
+                          "vendidos": vendidos[i] if vendidos and i < len(vendidos) else 0, **ritmo})
     if not lidos:
         return None, None, ""
+    antes = ""
+    menos = min(f["vendidos"] for f in lidos)
+    if any(f["vendidos"] > menos for f in lidos):
+        lidos, antes = [f for f in lidos if f["vendidos"] == menos], "o que menos vendeu"
+        if len(lidos) == 1:
+            alvo = lidos[0]
+            return alvo["quadro"], ({"ritmo": alvo["ritmo"], "dias": alvo["dias"]}
+                                    if alvo["ritmo"] is not None else None), antes
+    no_empate = (antes + "; no empate, ") if antes else ""
     com_ritmo = [f for f in lidos if f["ritmo"] is not None]
     if not com_ritmo:
         mais_velha = min((f["primeira"] for f in lidos if f["primeira"]), default=None)
         antigos = [f for f in lidos if f["primeira"] in (None, mais_velha)]
-        return min(antigos, key=lambda f: f["quadro"]["vistas"])["quadro"], None, "o de menos visualizações"
+        return (min(antigos, key=lambda f: f["quadro"]["vistas"])["quadro"], None,
+                no_empate + "o de menos visualizações")
     menor = min(f["ritmo"] for f in com_ritmo)
     empatados = [f for f in com_ritmo if f["ritmo"] == menor]
     pelo_coracao = (len({f["coracao"] for f in empatados}) > 1
                     and all(f["coracao"] is not None for f in empatados))
     alvo = min(empatados, key=lambda f: ((f["coracao"] if pelo_coracao else 0), f["quadro"]["vistas"]))
-    porque = "o que menos cresceu" + ("; no empate, o de menos curtidas" if pelo_coracao else "")
+    porque = no_empate + "o que menos cresceu" + ("; no empate, o de menos curtidas" if pelo_coracao else "")
     return alvo["quadro"], {"ritmo": alvo["ritmo"], "dias": alvo["dias"]}, porque
 
 
-def _desfixar_o_que_esfriou(d, fixados, agora, curtidas=None):
+def _desfixar_o_que_esfriou(d, fixados, agora, curtidas=None, posts=None):
     """
     Tira dos fixados o que esfriou (_o_que_esfriou, P300 1), pelas capas na tela da grade: abre o vídeo, confere o
     Desfixar na folha do compartilhar, copia o link, toca no Desfixar e confere com a folha aberta de novo (o Fixar no
-    lugar). Devolve {"link", "vistas", "ritmo", "dias"}, o ritmo None quando saiu o de menos visualizações. O que saiu
-    fica guardado (_anotar_o_tirado): ele volta no lugar vazio sem vídeo curtido para ele (P299 1).
+    lugar). posts (vendidos_dos_posts, P317 1): sai o que menos vendeu, e o resto vale no empate. Devolve {"link",
+    "vistas", "ritmo", "dias", "vendidos", "pelas_vendas"}, o ritmo None quando saiu o de menos visualizações e
+    pelas_vendas True quando outro fixado vendeu mais que ele. O que saiu fica guardado (_anotar_o_tirado): ele volta
+    no lugar vazio sem vídeo curtido para ele (P299 1).
     """
     marcas = _marcas_dos_fixados(d, fixados)
-    alvo, ritmo, porque = _o_que_esfriou(fixados, marcas, agora, curtidas)
+    vendidos = _vendidos_dos_fixados(marcas, posts)[0] if posts else None
+    alvo, ritmo, porque = _o_que_esfriou(fixados, marcas, agora, curtidas, vendidos)
     if not alvo:
         raise Parada(MOTIVO_DO_FIXAR + "sem as visualizações dos fixados na grade")
+    dele = vendidos[fixados.index(alvo)] if vendidos else 0
+    pelas_vendas = bool(vendidos) and any(v > dele for v in vendidos)
     xml, ponto = tela(d), ps._centro(alvo)
     if ps.proibido_no_ponto(xml, *ponto):
         raise Parada(ps.RECUSA)
@@ -10210,7 +10436,8 @@ def _desfixar_o_que_esfriou(d, fixados, agora, curtidas=None):
     _fechar_a_folha(d)
     _anotar_o_tirado(link, marcas[fixados.index(alvo)], agora)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_FIXAR, "desfixado", porque, ok=True, agora=agora)
-    return {"link": link, "vistas": alvo["vistas"], **(ritmo or {"ritmo": None, "dias": 0})}
+    return {"link": link, "vistas": alvo["vistas"], **(ritmo or {"ritmo": None, "dias": 0}), "vendidos": dele,
+            "pelas_vendas": pelas_vendas}
 
 
 def _mesmo_video(legenda, outra):
@@ -10230,15 +10457,18 @@ def _comeco_da_legenda(texto):
     return ps._o_que_conta(re.split(r"\.\.\.|…|Veja mais", texto or "")[0])
 
 
-def _fixar_o_video(d, video, legenda):
+def _fixar_o_video(d, video, legenda, link=""):
     """
-    Abre de novo o vídeo das curtidas pela linha dele (o mesmo vídeo: a legenda confere) e o fixa
-    (_tocar_no_fixar). True quando fixou; False, sem tocar em nada, quando a folha já mostra o Desfixar (o vídeo já
-    estava fixado: o app só mostrou agora, ou o Rafael o fixou no meio).
+    Abre de novo o vídeo das curtidas pela linha dele, ou pelo link do post (o que mais vendeu, P317 1), confere que é o
+    mesmo vídeo (pela legenda) e o fixa (_tocar_no_fixar). True quando fixou; False, sem tocar em nada, quando a folha
+    já mostra o Desfixar (o vídeo já estava fixado: o app só mostrou agora, ou o Rafael o fixou no meio).
     """
-    xml = _abrir_pela_curtida(d, video)
-    if not _mesmo_video(legenda, interacoes.video_do_feed(xml)["legenda"]):
-        raise Parada(MOTIVO_DO_FIXAR + "outro vídeo abriu pela curtida")
+    if link:
+        aberto, de_onde = _abrir_o_video_do_post(d, link), "pelo link do post"
+    else:
+        aberto, de_onde = interacoes.video_do_feed(_abrir_pela_curtida(d, video)), "pela curtida"
+    if not _mesmo_video(legenda, aberto["legenda"]):
+        raise Parada(MOTIVO_DO_FIXAR + f"outro vídeo abriu {de_onde}")
     if interacoes.estado_do_fixar(_abrir_a_folha(d)) == "desfixar":
         _fechar_a_folha(d)
         return False
@@ -10281,12 +10511,14 @@ def _devolver_o_desfixado(d, saiu):
         return False
 
 
-def _ja_fixado_depois(d, candidato, link, saiu, agora, antes="", comentar=True):
+def _ja_fixado_depois(d, candidato, link, saiu, agora, antes="", comentar=True,
+                      para_que="para dar lugar ao que está viralizando"):
     """
     O vídeo que viraliza que só se mostrou fixado quando abriu de novo para o Fixar: já estava fixado, e a troca não
     devia ter acontecido. O que saiu dos fixados volta (_devolver_o_desfixado); sem voltar, o Rafael recebe o link dele
     para fixar à mão. Depois, como no já fixado (_ja_fixado), com o vídeo que viraliza aberto de novo para o comentário.
-    antes: o começo do registro (o do lugar vazio, P299 1); comentar: como no _ja_fixado.
+    antes: o começo do registro (o do lugar vazio, P299 1, e o das vendas, P317 1); comentar: como no _ja_fixado;
+    para_que: por que o vídeo ia entrar, no aviso.
     """
     detalhe = antes + "ao abrir de novo"
     if saiu:
@@ -10296,10 +10528,10 @@ def _ja_fixado_depois(d, candidato, link, saiu, agora, antes="", comentar=True):
             voltou = _devolver_o_desfixado(d, saiu)
         finally:
             if not voltou:
-                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil {_qual_saiu(saiu)} para "
-                       f"dar lugar ao que está viralizando, mas ele já estava fixado, e não consegui fixar de novo o "
-                       f"que tirei. Se quiser, fixe-o à mão, para o Perfil voltar a ter os {FIXADOS_NO_PERFIL} "
-                       f"fixados.\n\n📤 Saiu: {saiu['link'] or SEM_O_LINK}")
+                avisar(f"⚠️ Robô da Shopee Vídeo: tirei dos fixados do seu Perfil {_qual_saiu(saiu)} {para_que}, "
+                       f"mas ele já estava fixado, e não consegui fixar de novo o que tirei. Se quiser, fixe-o à mão, "
+                       f"para o Perfil voltar a ter os {FIXADOS_NO_PERFIL} fixados.\n\n📤 Saiu: "
+                       f"{saiu['link'] or SEM_O_LINK}")
         detalhe = antes + "depois do desfixar; o desfixado " + ("voltou" if voltou else "não voltou")
 
     def abrir():

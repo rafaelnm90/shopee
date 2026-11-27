@@ -14,6 +14,7 @@ from PIL import Image
 import interacoes_shopee_video as it
 import postador_shopee_video as ps
 import robo_shopee_video as robo
+import vendas
 import visualizacoes_shopee_video as vz
 from conftest import inserir
 from fuso import fuso_horario
@@ -1136,3 +1137,180 @@ def test_ultimo_tirado_sem_o_link_nao_e_guardado():
     robo._anotar_o_tirado("", MARCAS[1], AGORA + timedelta(hours=1))
     assert robo._o_tirado() == {"link": "https://s.shopee.com.br/T3", "marca": MARCAS[0], "em": robo._momento(AGORA),
                                 "falhas": 0}
+
+
+# --- Os vendidos na escolha dos fixados (P317 1) ---
+
+def _post(video, itens, marca=True, legenda=None, postado="2026-11-20 10:00:00"):
+    """
+    O post do robô do vídeo (o nome dele no celular de mentira): a capa da grade dele (sem ela, marca=False), a legenda
+    do player no começo do título e o link, com os produtos (itemId) da sacolinha.
+    """
+    ident = robo.criar(f"v{video}", AGORA - timedelta(days=7))
+    robo.atualizar(ident, estado="postado", postado_em=postado, itens=[{"item": i, "a_mais": False} for i in itens],
+                   marca=vz.marca_da_capa(_capa_na_grade(video), (0, 0, 358, 476)) if marca else "",
+                   titulo=legenda or f"Legenda do {video} ✨ #achadinhos", link_post=f"https://s.shopee.com.br/{video}")
+    return ident
+
+
+def _vendas(unidades, dias_atras=1):
+    """O relatório de afiliado com as unidades de cada produto (itemId) vendidas pelos vídeos dias_atras dias atrás."""
+    dia = (AGORA - timedelta(days=dias_atras)).strftime("%Y-%m-%d")
+    pedidos = robo.db.ler_config("banco_pedidos", {}) or {}
+    pedidos.update({f"p{item}-{dias_atras}": {"data": dia, "status": "COMPLETED", "itens": [
+        {"id": item, "qtd": qtd, "tipo": vendas.ORIGEM_DO_VIDEO}]} for item, qtd in unidades.items()})
+    robo.db.salvar_config("banco_pedidos", pedidos)
+
+
+def test_vendidos_dos_posts_somam_o_produto_do_video_o_do_post_e_os_a_mais():
+    # Resposta do Rafael (27/11/2026, P317 1): as unidades que os produtos de cada post do robô venderam pelos vídeos
+    # dele nos últimos 7 dias; o produto que está em dois posts conta nos dois.
+    um = robo.criar("v1", AGORA)
+    robo.atualizar(um, estado="postado", postado_em="2026-11-20 10:00:00", itens_do_video=["10", "11"],
+                   itens=[{"item": "11", "a_mais": False}, {"item": "12", "a_mais": True}])
+    dois = robo.criar("v2", AGORA)
+    robo.atualizar(dois, estado="postado", postado_em="2026-11-21 09:00:00", itens_do_video=["12"])
+    esperando = robo.criar("v3", AGORA)
+    robo.atualizar(esperando, estado="rascunho", itens_do_video=["10"])
+    _vendas({"10": 1, "12": 2})
+    # A venda de 8 dias atrás fica de fora, e a dos links das redes também.
+    _vendas({"11": 4}, dias_atras=8)
+    pedidos = robo.db.ler_config("banco_pedidos", {})
+    pedidos["redes"] = {"data": "2026-11-20", "status": "COMPLETED",
+                        "itens": [{"id": "11", "qtd": 5, "tipo": "Social Medias"}]}
+    robo.db.salvar_config("banco_pedidos", pedidos)
+    assert [(p["rascunho"]["id"], p["vendidos"]) for p in robo.vendidos_dos_posts(AGORA)] == [(dois, 2), (um, 3)]
+
+
+def test_o_post_que_mais_vendeu_entra_no_lugar_do_fixado_que_menos_vendeu(avisos, comentarios, monkeypatch):
+    # P317 1: entra o vídeo que mais vendeu nos últimos 7 dias, mesmo sem 10 curtidas, aberto pelo link do post, e sai
+    # o fixado que menos vendeu. O T2 foi postado à mão: sem o post do robô, conta como 0 vendido.
+    abertos = _abrir_pelo_link(monkeypatch)
+    monkeypatch.setitem(VISTAS, "V", "900")
+    for video, itens in (("T1", ["11"]), ("T3", ["13"]), ("V", ["20", "21"])):
+        _post(video, itens)
+    _vendas({"11": 2, "13": 1, "20": 3, "21": 1})
+    app = CelularDasCurtidas([TOPO], capas=True)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado que menos vendeu pelo vídeo "
+                                                     "que mais vendeu; comentei nele")
+    assert app.fixados == ["V", "T1", "T3"]
+    # Antes do Desafixar, o V foi conferido nos 3 fixados da grade; ele abre pelo link, antes e depois do Desafixar.
+    assert app.abertos == ["T1", "T2", "T3", "T2"]
+    assert abertos == ["https://s.shopee.com.br/V"] * 2
+    assert avisos == ["📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que mais vendeu nos últimos 7 dias "
+                      "(4 unidades vendidas pelos seus vídeos).\n\n📌 Fixado agora: https://s.shopee.com.br/V\n📤 "
+                      "Saiu dos fixados (o que menos vendeu nos últimos 7 dias: 0 unidades): "
+                      "https://s.shopee.com.br/T2", _aviso_do_comentario(1, "V")]
+    assert [c["aberto"] for c in comentarios["chamadas"]] == ["V"]
+    assert _registro() == [("desfixado", "o que menos vendeu"),
+                           ("trocado", "pelas vendas: no lugar do fixado que menos vendeu")]
+    # Uma troca por leitura; na seguinte, o V está nos fixados, e o que vendeu mais que o fixado que menos vendeu fica.
+    robo.contar_leitura(AGORA + timedelta(hours=3))
+    assert robo.fixar_o_que_viraliza(app, AGORA + timedelta(hours=3)) == ""
+    assert _registro()[-2] == ("pelas vendas: nenhuma troca",
+                               "o que mais vendeu fora dos fixados com 0; o fixado que menos vendeu com 1")
+
+
+def test_lugar_vazio_recebe_primeiro_o_post_que_mais_vendeu(avisos, comentarios, monkeypatch):
+    # P317 1: o post que mais vendeu entra também no lugar vazio, antes do mais curtido (P299 1), e nenhum sai.
+    _abrir_pelo_link(monkeypatch)
+    monkeypatch.setitem(VISTAS, "V", "900")
+    _post("V", ["20"])
+    _vendas({"20": 1})
+    app = CelularDasCurtidas(_curtidas("A", 6) + [TOPO], fixados=("T1", "T3"), capas=True)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == "fixar no perfil: fixei o vídeo que mais vendeu; comentei nele"
+    assert app.fixados == ["V", "T1", "T3"] and "Desfixar" not in app.toques
+    assert avisos[0] == ("📌 Robô da Shopee Vídeo: fixei no seu Perfil o vídeo que mais vendeu nos últimos 7 dias "
+                         "(1 unidade vendida pelos seus vídeos).\n\n📌 Fixado agora: https://s.shopee.com.br/V\n\n"
+                         "Ainda havia lugar entre os 3 fixados: nenhum saiu.")
+    assert _registro() == [("fixado", "pelas vendas: no lugar vazio")]
+
+
+def test_video_que_viraliza_e_vendeu_menos_que_os_fixados_nao_entra(avisos, comentarios):
+    # P317 1: o vídeo que viraliza pelas curtidas só entra no lugar de um fixado que vendeu o mesmo que ele ou menos.
+    for video, item in (("T1", "11"), ("T2", "12"), ("T3", "13")):
+        _post(video, [item])
+    _vendas({"11": 1, "12": 2, "13": 1})
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], capas=True)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: nenhum dos vídeos com as curtidas em alta "
+                                                     "ficou para fixar")
+    assert app.fixados == ["T1", "T2", "T3"] and "Desfixar" not in app.toques and avisos == []
+    assert _registro() == [
+        ("pelas vendas: nenhuma troca", "o que mais vendeu fora dos fixados com 0; o fixado que menos vendeu com 1"),
+        ("pulado", "pelas vendas: o vídeo que viraliza com 0; o fixado que menos vendeu com 1")]
+
+
+def test_no_empate_das_vendas_o_que_viraliza_entra_e_sai_o_de_menos_visualizacoes_entre_os_que_menos_venderam(
+        avisos, comentarios, monkeypatch):
+    # P317 1: o vídeo que viraliza vendeu 1 unidade, como o T1 e o T2: no empate das vendas, ele entra, e sai o que
+    # menos vendeu, pelas visualizações entre os dois (P300 1, sem 1 dia de anotações); o T3, que vendeu 3, fica.
+    monkeypatch.setitem(VISTAS, "Achado bom", "900")
+    for video, item in (("T1", "11"), ("T2", "12"), ("T3", "13"), ("Achado bom", "30")):
+        _post(video, [item])
+    _vendas({"11": 1, "12": 1, "13": 3, "30": 1})
+    app = CelularDasCurtidas(_curtidas("Achado bom", 10) + [TOPO], capas=True)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado que menos vendeu pelo vídeo "
+                                                     "que viraliza; comentei nele")
+    assert app.fixados == ["Achado bom", "T1", "T3"]
+    assert _registro() == [
+        # Pelas vendas, o que mais vendeu fora dos fixados (o próprio Achado bom) não vendeu mais que o T1 e o T2.
+        ("pelas vendas: nenhuma troca", "o que mais vendeu fora dos fixados com 1; o fixado que menos vendeu com 1"),
+        ("desfixado", "o que menos vendeu; no empate, o de menos visualizações"),
+        ("trocado", "no lugar do fixado que menos vendeu")]
+    assert ("📤 Saiu dos fixados (o que menos vendeu nos últimos 7 dias: 1 unidade): https://s.shopee.com.br/T2"
+            in avisos[0])
+
+
+def test_sai_o_fixado_que_menos_vendeu_e_no_empate_o_que_menos_cresceu():
+    # P317 1: sai o que menos vendeu; no empate das vendas, o que menos cresceu entre eles (P300 1); com as mesmas
+    # vendas em todos, como antes.
+    dez_dias = AGORA - timedelta(days=10)
+    _notas((MARCAS[0], 230000, dez_dias), (MARCAS[1], 263500, dez_dias), (MARCAS[2], 900, dez_dias))
+    fixados = _fixados(235200, 263800, 1000)
+    # Por dia: o 1º ganhou 520, o 2º 30 e o 3º 10.
+    alvo, ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA, vendidos=[0, 1, 2])
+    assert alvo is fixados[0] and ritmo == {"ritmo": 520, "dias": 10} and porque == "o que menos vendeu"
+    alvo, ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA, vendidos=[0, 3, 0])
+    assert alvo is fixados[2] and ritmo == {"ritmo": 10, "dias": 10}
+    assert porque == "o que menos vendeu; no empate, o que menos cresceu"
+    alvo, _ritmo, porque = robo._o_que_esfriou(fixados, list(MARCAS), AGORA, vendidos=[2, 2, 2])
+    assert alvo is fixados[2] and porque == "o que menos cresceu"
+
+
+def test_post_que_mais_vendeu_ja_fixado_sem_a_capa_guardada_sai_da_conta_por_um_dia(avisos, comentarios, monkeypatch):
+    # P317 1: o post do T2 ficou sem a capa guardada, e a grade não o reconhece entre os fixados: ele abre pelo link, a
+    # folha mostra o Desfixar, e ele sai da entrada pelas vendas por um dia, sem tocar em nada.
+    abertos = _abrir_pelo_link(monkeypatch)
+    _post("T2", ["12"], marca=False)
+    _vendas({"12": 2})
+    app = CelularDasCurtidas([TOPO], capas=True)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ""
+    assert abertos == ["https://s.shopee.com.br/T2"] and app.fixados == ["T1", "T2", "T3"]
+    assert "Desfixar" not in app.toques and avisos == []
+    assert ("já fixado", "pelas vendas: o que mais vendeu") in _registro()
+    depois = AGORA + timedelta(hours=3)
+    robo.contar_leitura(depois)
+    assert robo.fixar_o_que_viraliza(app, depois) == "" and abertos == ["https://s.shopee.com.br/T2"]
+
+
+def test_post_que_mais_vendeu_removido_sai_da_conta_e_o_fixar_das_curtidas_segue(avisos, comentarios, monkeypatch):
+    # P317 1: o post que mais vendeu e foi removido não para o fixar: sai da entrada pelas vendas, e o vídeo que
+    # viraliza pelas curtidas entra como antes.
+    def removido(d, link):
+        raise robo.Parada(robo.MOTIVO_DO_POST_REMOVIDO)
+
+    monkeypatch.setattr(robo, "_abrir_o_video_do_post", removido)
+    _post("V", ["20"])
+    _vendas({"20": 3})
+    app = CelularDasCurtidas(_curtidas("A", 10) + [TOPO], capas=True)
+    _leitura(app)
+    assert robo.fixar_o_que_viraliza(app, AGORA) == ("fixar no perfil: troquei o fixado de menos visualizações pelo "
+                                                     "vídeo que viraliza; comentei nele")
+    assert app.fixados == ["A", "T1", "T3"]
+    assert _registro()[0] == ("pulado", "pelas vendas: o post removido")
+    assert robo._vistos_pelas_vendas(AGORA) == {robo.listar("postado")[0]["id"]}

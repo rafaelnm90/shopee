@@ -269,3 +269,22 @@ def test_relatorio_cifrado_so_abre_com_a_chave_do_registro_privado(monkeypatch, 
     aberto = registro_privado.abrir(texto, registro_privado.chave().decode("ascii"))
     assert "# Vendas por canal (P13)" in aberto and "Copo Térmico" in aberto
     assert "# Tendência dos vídeos da fonte (P135)" in aberto
+
+
+def test_vendidos_pelos_videos_contam_so_a_shopee_video_sem_os_cancelados():
+    # Resposta do Rafael (27/11/2026, P317 1): a escolha dos fixados do Perfil pesa as unidades vendidas pelos vídeos
+    # dele (a origem que a Shopee informa em cada produto), sem os pedidos cancelados ou sem pagamento.
+    video, redes = vendas.ORIGEM_DO_VIDEO, "Social Medias"
+    pedidos = {
+        "1": {"data": "2026-11-25", "status": "COMPLETED",
+              "itens": [{"id": "10", "qtd": 2, "tipo": video}, {"id": "11", "qtd": 1, "tipo": redes}]},
+        "2": {"data": "2026-11-26", "status": "PENDING", "itens": [{"id": "10", "qtd": 1, "tipo": video}]},
+        "3": {"data": "2026-11-26", "status": "CANCELLED", "itens": [{"id": "10", "qtd": 5, "tipo": video}]},
+        "4": {"data": "2026-11-26", "status": "UNPAID", "itens": [{"id": "12", "qtd": 1, "tipo": video}]},
+        "5": {"data": "2026-11-19", "status": "COMPLETED", "itens": [{"id": "10", "qtd": 7, "tipo": video}]},
+        # Sem a quantidade, 1; o pedido de antes de o bot guardar a origem não conta.
+        "6": {"data": "2026-11-27", "status": "PENDING", "itens": [{"id": "13", "tipo": video}, {"id": "14"}]},
+    }
+    assert vendas.vendidos_pelos_videos(pedidos, "2026-11-21") == {"10": 3, "13": 1}
+    assert vendas.vendidos_pelos_videos(pedidos, "2026-11-19", ate="2026-11-25") == {"10": 9}
+    assert vendas.vendidos_pelos_videos({}, "2026-11-21") == {}
