@@ -925,6 +925,26 @@ def test_captura_por_grupo_de_origem_mostra_quem_parou_pela_posicao():
     assert pontos() == ["Espião: pararam de mandar vídeo (mandavam todo dia nos 2 dias antes): nº 2 da lista do painel"]
 
 
+def test_rotas_do_espelhador_que_desistiram_de_postar_pela_posicao():
+    # Checkup de 26/11/2026: 22 vídeos do Espelhador desistidos com a conta sem permissão de escrever num destino, e
+    # nada dizia qual rota. O checkup conta as desistências do erros_logs pela posição da rota no painel, sem o nome.
+    db.salvar_config("espelhador_rotas", {"rotas": [{"nome": "Rota secreta A", "origens": ["@a"]},
+                                                    {"nome": "Rota secreta (B)", "origens": ["@b"]}]})
+    texto = "Espelhador desistiu após 3 tentativas na rota '{}' (enviar ao destino): You can't write in this chat"
+    for horas, rota in ((1, "Rota secreta (B)"), (2, "Rota secreta (B)"), (3, "Rota secreta A"),
+                        (30, "Rota secreta A"), (4, "Rota secreta antiga")):
+        _erro(horas, texto.format(rota), origem="motor_userbot.py")
+    # Outro erro do motor_userbot não conta.
+    _erro(1, "processar_fila_espelhador_loop: falhou", origem="motor_userbot.py")
+    assert checkup.rotas_que_nao_postam(AGORA) == [(2, 2, "enviar ao destino"), (1, 1, "enviar ao destino"),
+                                                  ("fora da lista", 1, "enviar ao destino")]
+    linha = checkup.linha_das_rotas_que_nao_postam(AGORA)
+    assert linha == ("   rotas que desistiram de postar em 24 h (pela posição na lista de rotas do painel): "
+                     "nº 2 2x (enviar ao destino) | nº 1 1x (enviar ao destino) | fora da lista 1x (enviar ao destino)")
+    assert "secreta" not in linha
+    assert checkup.linha_das_rotas_que_nao_postam(AGORA + timedelta(days=2)) == ""
+
+
 def test_grupo_que_parou_mostra_a_ultima_mensagem_que_chegou_dele():
     # Checkup de 06/11/2026: o nº 17 do Espião e o nº 13 do Espelhador pararam de mandar vídeo, e
     # não dava para saber se o grupo só não postou vídeo com link (mas manda mensagem) ou se nada
