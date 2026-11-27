@@ -2300,13 +2300,14 @@ def lugar_dos_textos(textos):
     return SEM_LUGAR if textos.get("texto_no_video") else LUGAR_PADRAO
 
 
-# A IA erra o lugar do produto quando o diz em palavras: no rascunho de 13/11 que o Rafael mostrou, ela deu o
-# alto como ocupado pelo produto ou um rosto nos 3 momentos, e nenhum dos nossos textos entrou, com o alto livre
-# no vídeo todo (pergunta dele: "Pq não veio legenda de incentivo?"). Como a do canto da miniatura
-# (_conferir_o_canto), uma 2ª pergunta confere cada momento em que ela deu o alto dos textos como ocupado: ela
-# vê os quadros do momento com o retângulo dos textos desenhado e diz só se ele cobre o produto ou um rosto.
-# Livre em todos os quadros, o texto do momento entra; coberto, ou sem a resposta, vale a 1ª (P220 1).
-# DECISOES.md, Shopee Vídeo.
+# A IA erra o lugar do produto e do rosto quando o diz em palavras, para os dois lados: no rascunho de 13/11 que o
+# Rafael mostrou, ela deu o alto como ocupado pelo produto ou um rosto nos 3 momentos, e nenhum dos nossos textos
+# entrou, com o alto livre no vídeo todo (pergunta dele: "Pq não veio legenda de incentivo?"); no post de 27/11 que
+# ele mostrou, uma moça com os frascos na mão, ela deu o alto como livre, e os 3 textos ficaram em cima do rosto
+# dela. Como a do canto da miniatura (_conferir_o_canto), uma 2ª pergunta confere todos os momentos dos nossos
+# textos: ela vê os quadros de cada momento com o retângulo do texto daquele momento desenhado (caixas_do_alto) e
+# diz só se ele cobre o produto ou um rosto. A resposta dela decide: livre em todos os quadros, o texto do momento
+# entra; coberto, não aparece; sem a resposta, vale a 1ª (P220 1). DECISOES.md, Shopee Vídeo.
 QUADROS_DO_ALTO = 3                     # quadros de cada momento conferido, espalhados nele
 # A folha de cada momento vai à IA em JPEG, com a cor inteira em cada ponto (sem a subamostragem), para o
 # retângulo ficar nítido: uns 100 a 150 KB, um quinto do PNG.
@@ -2315,13 +2316,16 @@ QUALIDADE_DOS_QUADROS = 85
 # com uma folga de uns 5 px: o maior texto mede uns 396 x 141 px a partir de LUGARES_DOS_TEXTOS["alto"] (o que
 # não cabe em 2 linhas fica com 3, na letra menor).
 CAIXA_DO_ALTO = (68, 150, 470, 296)
+# A folga em volta do retângulo de cada texto (caixas_do_alto), em px: a caixa cresce um pouco no pulinho (P240 1).
+FOLGA_DA_CAIXA_DO_ALTO = 6
 VERMELHO_DA_CONFERENCIA = (255, 0, 0)
 PROMPT_DO_ALTO = (
     "Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.\n"
     "Cada imagem é um momento do vídeo, com {quadros} quadros dele lado a lado. O retângulo vermelho é onde vai "
     "entrar um texto nosso por cima do vídeo. Diga, para cada imagem, na ordem, se em algum dos quadros dela o "
-    "retângulo vermelho fica em cima de alguma parte do produto ({nome}) ou do rosto de alguém. O fundo, a mesa, "
-    "as mãos e as outras coisas da cena que não são o produto nem um rosto não contam.\n"
+    "retângulo vermelho fica em cima de alguma parte do produto ({nome}) ou de alguma parte do rosto de alguém (a "
+    "testa, os olhos, o nariz, a boca ou o queixo). O fundo, a mesa, as mãos e as outras coisas da cena que não são "
+    "o produto nem um rosto não contam.\n"
     "Responda só com um JSON: {{\"cobre\": [true ou false para cada imagem, na ordem]}}"
 )
 PROCESSO_DO_ALTO = "edição do vídeo: alto conferido nos quadros"
@@ -2333,6 +2337,27 @@ def caixa_do_alto(lado=MINIATURA_A_DIREITA):
     """O retângulo dos nossos textos no alto (CAIXA_DO_ALTO), do lado oposto ao da miniatura (lado)."""
     x1, y1, x2, y2 = CAIXA_DO_ALTO
     return (TELA[0] - x2, y1, TELA[0] - x1, y2) if lado == MINIATURA_A_ESQUERDA else CAIXA_DO_ALTO
+
+
+def caixas_do_alto(textos, lado=MINIATURA_A_DIREITA):
+    """
+    [(x1, y1, x2, y2)], em px do vídeo de 720x1280: o retângulo de cada texto da tela no alto, do lado oposto ao da
+    miniatura (lado), na ordem dos momentos (momentos_dos_textos: o nome, a vantagem e a chamada), do tamanho dele
+    (_letreiro_no_lugar, como o _letreiros o põe) e com a folga FOLGA_DA_CAIXA_DO_ALTO, para a 2ª pergunta do alto
+    ver o lugar de cada um. Quando falta ou se repete um dos 3, os tempos dos que ficam mudam (horarios_dos_textos),
+    e cada momento leva o retângulo dos maiores (caixa_do_alto).
+    """
+    escritos = [str(textos.get(chave) or "") for chave in TEXTOS_DA_TELA]
+    if not all(escritos) or len(set(escritos)) < len(escritos):
+        return [caixa_do_alto(lado)] * len(escritos)
+    caixas = []
+    for texto, fundo in zip(escritos, (caixa_dos_textos(), caixa_dos_textos(), FUNDO_DA_CHAMADA)):
+        imagem, x, y = _letreiro_no_lugar(texto, fundo, LUGAR_PADRAO, lado)
+        largura, altura = _medidas_do_png(imagem)
+        caixas.append((max(0, x - FOLGA_DA_CAIXA_DO_ALTO), max(0, y - FOLGA_DA_CAIXA_DO_ALTO),
+                       min(TELA[0], x + largura + FOLGA_DA_CAIXA_DO_ALTO),
+                       min(TELA[1], y + altura + FOLGA_DA_CAIXA_DO_ALTO)))
+    return caixas
 
 
 def _quadros_do_momento(video, inicio, fim, caixa):
@@ -2361,12 +2386,15 @@ def _quadros_do_momento(video, inicio, fim, caixa):
 
 def conferir_o_alto(video, textos, lado=MINIATURA_A_DIREITA, nome=""):
     """
-    Confere nos quadros (_quadros_do_momento e PROMPT_DO_ALTO) os momentos dos nossos textos em que a IA deu o alto
-    do lado dos textos (o oposto ao da miniatura, lado) como ocupado pelo produto ou um rosto: o momento em que a 2ª
-    pergunta vê o retângulo livre em todos os quadros ganha o alto entre os livres. Sem os lugares de cada momento,
-    os 3 momentos (momentos_dos_textos) partem da lista do vídeo todo. Muda textos["lugares_nos_momentos"] só com a
-    resposta e devolve (conferidos, livres): quantos momentos foram conferidos e em quantos o alto estava livre
-    (None sem a resposta); (0, 0) sem nada a conferir.
+    Confere nos quadros (_quadros_do_momento e PROMPT_DO_ALTO) todos os momentos dos nossos textos, cada um com o
+    retângulo do texto daquele momento no alto (caixas_do_alto), do lado oposto ao da miniatura (lado). Com a
+    resposta, ela decide: o momento em que o retângulo fica livre em todos os quadros ganha o alto entre os livres,
+    e o coberto o perde, também quando a 1ª resposta da IA o deu como livre. Sem os lugares de cada momento, os 3
+    momentos (momentos_dos_textos) partem da lista do vídeo todo e, sem ela, do lugar único ou do alto livre (o de
+    quando a IA não disse). Muda textos["lugares_nos_momentos"] só com a resposta e devolve (conferidos, livres,
+    discordou): quantos momentos foram conferidos, em quantos o alto estava livre nos quadros (None sem a
+    resposta) e em quantos a 1ª resposta discordou dos quadros ({"livre": dados como livres e cobertos nos quadros,
+    "ocupado": dados como ocupados e livres nos quadros}); (0, 0, {}) sem nada a conferir.
     """
     alto = "alto_direita" if lado == MINIATURA_A_ESQUERDA else "alto_esquerda"
     momentos = []
@@ -2376,36 +2404,53 @@ def conferir_o_alto(video, textos, lado=MINIATURA_A_DIREITA, nome=""):
         except (TypeError, ValueError, IndexError):
             momentos = []
             break
-    if not momentos and isinstance(textos.get("lugares"), list):
-        momentos = [[inicio, fim, list(textos["lugares"])] for inicio, fim in momentos_dos_textos(videos.duracao(video))]
-    ocupados = [momento for momento in momentos if alto not in momento[2]]
-    if not ocupados:
-        return 0, 0
-    caixa = caixa_do_alto(lado)
+    if not momentos:
+        if isinstance(textos.get("lugares"), list):
+            inicial = list(textos["lugares"])
+        else:
+            livres = lugares_dos_textos(textos, lado)
+            inicial = [alto] if livres is None or LUGAR_PADRAO in livres else []
+        momentos = [[inicio, fim, list(inicial)] for inicio, fim in momentos_dos_textos(videos.duracao(video))]
+    conferidos = list(zip(momentos, caixas_do_alto(textos, lado)))
+    if not conferidos:
+        return 0, 0, {}
     imagens = []
-    for inicio, fim, _livres in ocupados:
+    for (inicio, fim, _livres), caixa in conferidos:
         imagem = _quadros_do_momento(video, inicio, fim, caixa)
         if imagem is None:
-            return len(ocupados), None
+            return len(conferidos), None, {}
         imagens.append((imagem, "image/jpeg"))
     resposta = _json_das_fotos(PROMPT_DO_ALTO.format(quadros=QUADROS_DO_ALTO, nome=nome or "o produto anunciado"),
                                imagens) or {}
     cobre = resposta.get("cobre")
-    if not isinstance(cobre, list) or len(cobre) != len(ocupados) or not all(isinstance(c, bool) for c in cobre):
-        return len(ocupados), None
-    for momento, coberto in zip(ocupados, cobre):
-        if not coberto:
+    if not isinstance(cobre, list) or len(cobre) != len(conferidos) or not all(isinstance(c, bool) for c in cobre):
+        return len(conferidos), None, {}
+    discordou = {"livre": 0, "ocupado": 0}
+    for (momento, _caixa), coberto in zip(conferidos, cobre):
+        if coberto and alto in momento[2]:
+            momento[2] = [lugar for lugar in momento[2] if lugar != alto]
+            discordou["livre"] += 1
+        elif not coberto and alto not in momento[2]:
             momento[2].append(alto)
+            discordou["ocupado"] += 1
     textos["lugares_nos_momentos"] = momentos
-    return len(ocupados), cobre.count(False)
+    return len(conferidos), cobre.count(False), discordou
 
 
-def resultado_do_alto(conferidos, livres):
-    """(resultado, detalhe) da 2ª pergunta do alto, para o registro (PROCESSO_DO_ALTO): só textos fixos e números."""
+def resultado_do_alto(conferidos, livres, discordou=None):
+    """
+    (resultado, detalhe) da 2ª pergunta do alto, para o registro (PROCESSO_DO_ALTO): só textos fixos e números, com
+    os momentos em que a 1ª resposta da IA discordou dos quadros (discordou, o de conferir_o_alto), quando algum.
+    """
     if livres is None:
         return ALTO_SEM_RESPOSTA, f"{conferidos} momento(s) a conferir"
     resultado = ALTO_LIVRE if livres == conferidos else ALTO_OCUPADO if not livres else ALTO_LIVRE_EM_PARTE
-    return resultado, f"{livres} de {conferidos} momento(s) com o alto livre nos quadros"
+    detalhe = f"{livres} de {conferidos} momento(s) com o alto livre nos quadros"
+    if (discordou or {}).get("livre"):
+        detalhe += f"; {discordou['livre']} livre(s) pela 1ª resposta e coberto(s) nos quadros"
+    if (discordou or {}).get("ocupado"):
+        detalhe += f"; {discordou['ocupado']} ocupado(s) pela 1ª resposta e livre(s) nos quadros"
+    return resultado, detalhe
 
 
 def _momentos_conferidos(video, textos, lado=MINIATURA_A_DIREITA, nome=""):
@@ -3850,13 +3895,13 @@ def editar_para_postar(video, foto, destino, produto="", avisos=False, outras_fo
                                      por_que_a_miniatura(textos, canto)
                                      + (f"; {textos['outro_canto']}" if textos.get("outro_canto") else ""))
     avisado = _avisado(avisos, bool(capa), musica, miniatura, outras_fotos, escolhas, cor, lado)
-    # O alto dos textos que a IA deu como ocupado pelo produto ou um rosto em algum momento é conferido nos quadros,
-    # com o retângulo dos textos desenhado (conferir_o_alto); o registro conta o que a 2ª pergunta viu. O Editar ✏️
-    # guarda os lugares já conferidos.
+    # O alto dos textos em cada momento é conferido nos quadros, com o retângulo do texto daquele momento desenhado
+    # (conferir_o_alto), também onde a 1ª resposta da IA o deu como livre; o registro conta o que a 2ª pergunta viu
+    # e em quantos momentos ela discordou da 1ª. O Editar ✏️ guarda os lugares já conferidos.
     if lugar_dos_textos(textos) != SEM_LUGAR and any(textos.get(chave) for chave in TEXTOS_DA_TELA):
-        conferidos, livres = conferir_o_alto(video, textos, canto, produto)
+        conferidos, livres, discordou = conferir_o_alto(video, textos, canto, produto)
         if conferidos:
-            resultado, detalhe = resultado_do_alto(conferidos, livres)
+            resultado, detalhe = resultado_do_alto(conferidos, livres, discordou)
             registro_processos.registrar("shopee_video", PROCESSO_DO_ALTO, resultado, detalhe, ok=None)
     # As legendas da fala (P118): só o que alguém fala, num vídeo que ainda não a tem escrita na tela,
     # no tempo do áudio, palavra por palavra; nenhuma com ela desligada no painel (P192 1).
