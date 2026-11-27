@@ -6570,11 +6570,15 @@ class AppDosFavoritos(AppDeMentira):
     estão lá; remover_pega=False: o Sim não tira nada.
     """
 
-    def __init__(self, favoritos=6, marcar_tudo=True, invalidos=(), comprador=0, editando=False, remover_pega=True):
+    def __init__(self, favoritos=6, marcar_tudo=True, invalidos=(), comprador=0, editando=False, remover_pega=True,
+                 botao="Like", pergunta_ao_tirar=False):
         super().__init__()
         self.favoritos = [f"Produto {i}" for i in range(favoritos)]
         self.invalidos = {f"Produto {i}" for i in invalidos}
         self.marcados, self.marcar_tudo, self.topo = [], marcar_tudo, 0
+        # botao: o nome do botão da barra que tira os marcados (o Like; o Excluir desde a versão 3.85.37 do app, em
+        # 27/11/2026). pergunta_ao_tirar: o app pergunta antes de tirar, com o Excluir da pergunta por cima da barra.
+        self.botao, self.pergunta_ao_tirar, self.pergunta_dos_favoritos = botao, pergunta_ao_tirar, False
         self.comprador = [f"Item {i}" for i in range(comprador)]
         self.editando, self.remover_pega, self.pergunta, self.marcados_de_comprador = editando, remover_pega, False, []
 
@@ -6601,7 +6605,11 @@ class AppDosFavoritos(AppDeMentira):
                     nos.append(_no("Inválido", caixa=(140, y + 200, 300, y + 240), clicavel=False))
             nos += [_no(caixa=(30, 2290, 96, 2356), ident=CAIXA),
                     _no(f"Selecionado {len(self.marcados)}/50", caixa=(120, 2300, 380, 2350), clicavel=False),
-                    _no("Like", caixa=(600, 2290, 750, 2356)), _no("Compartilhar", caixa=(800, 2290, 1010, 2356))]
+                    _no(self.botao, caixa=(600, 2290, 750, 2356)), _no("Compartilhar", caixa=(800, 2290, 1010, 2356))]
+            if self.pergunta_dos_favoritos:
+                # A pergunta vem por último na leitura da tela, por cima da barra, que continua nela.
+                nos += [_no("Excluir os produtos selecionados?", caixa=(123, 1136, 978, 1238), clicavel=False),
+                        _no("Cancelar", caixa=(70, 1304, 538, 1430)), _no("Excluir", caixa=(541, 1304, 1010, 1430))]
             return nos
         if self.atual == "comprador":
             return self._nos_de_comprador()
@@ -6684,9 +6692,16 @@ class AppDosFavoritos(AppDeMentira):
             self.atual = "afiliado"
         elif self.atual == "afiliado" and "Meus favoritos" in tocados:
             self.atual, self.topo = "favoritos", 0
-        elif self.atual == "favoritos" and "Like" in tocados:
-            self.favoritos = [f for f in self.favoritos if f not in self.marcados or f in self.invalidos]
-            self.marcados, self.topo = [f for f in self.marcados if f in self.invalidos], 0
+        elif self.atual == "favoritos" and self.pergunta_dos_favoritos:
+            # Com a pergunta aberta, só o Excluir dela tira; o toque fora dela (no da barra, atrás) só a fecha.
+            self.pergunta_dos_favoritos = False
+            if "Excluir" in tocados and 1304 <= y <= 1430:
+                self._tirar_os_marcados()
+        elif self.atual == "favoritos" and self.botao in tocados:
+            if self.pergunta_ao_tirar:
+                self.pergunta_dos_favoritos = True
+            else:
+                self._tirar_os_marcados()
         elif self.atual == "favoritos" and 30 <= x <= 96 and 2290 <= y <= 2356:
             if self.marcar_tudo:
                 self.marcados = self.favoritos[:50]
@@ -6701,10 +6716,27 @@ class AppDosFavoritos(AppDeMentira):
             return super().click(x, y)
         self.toques.append(next(iter(tocados), (x, y)))
 
+    def _tirar_os_marcados(self):
+        self.favoritos = [f for f in self.favoritos if f not in self.marcados or f in self.invalidos]
+        self.marcados, self.topo = [f for f in self.marcados if f in self.invalidos], 0
+
     def swipe(self, *pontos):
         self.toques.append("rolar")
         if self.atual == "favoritos":
             self.topo = min(self.topo + 3, max(0, len(self.favoritos) - 1))
+
+
+@pytest.mark.parametrize("pergunta", [False, True])
+def test_a_barra_com_o_excluir_no_lugar_do_like_tambem_limpa(monkeypatch, avisos, pergunta):
+    # Na versão 3.85.37 do app (Motorola, 27/11/2026), o Like da barra de Meus favoritos virou Excluir, e a limpeza
+    # das 4h parou 7 vezes ("a barra de Meus favoritos não mostrou o Like"). Com a pergunta do app por cima, o
+    # Excluir tocado é o dela; sem a pergunta, o da barra não é tocado de novo.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=6, botao="Excluir", pergunta_ao_tirar=pergunta)
+    resultado = robo.rodada(d=app, agora=momento("2026-11-27 04:05"))
+    assert resultado == "6 produto(s) descurtido(s) em Meus favoritos; nada em Meus Favoritos de comprador"
+    assert app.favoritos == [] and robo.lista_limpa()
+    assert app.toques.count("Excluir") == (2 if pergunta else 1)
 
 
 def test_as_4h_descurte_tudo_em_meus_favoritos_pelo_caminho_de_afiliado(monkeypatch, avisos):
