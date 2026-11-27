@@ -10868,7 +10868,7 @@ def test_ofertas_do_video_de_ia_em_alta_e_pelos_nichos_quando_a_api_nao_da(monke
 FALA_DO_VESTIDO = "Vestido que gira? Olha só! Garanta o seu!"
 
 
-def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False, extra=None):
+def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False, extra=None, conferencia=None):
     monkeypatch.setattr(robo.flow, "PASTA", str(tmp_path))
     escolhido = {"id": "ia:2026-10-22", "link": LINK, "nome": VESTIDO, "foto": b"\xff\xd8jpg", "estilo": "comedia",
                  "prompt": "p", "cena": "Uma menina gira com o vestido.", "item": "2", "valor": 5.99, "posicao": 1,
@@ -10890,8 +10890,8 @@ def _flow_que_baixa(monkeypatch, tmp_path, mesmo=True, longo=False, extra=None):
         return True
 
     monkeypatch.setattr(robo.flow, "producao_no_celular", no_celular)
-    monkeypatch.setattr(robo.flow, "conferir_o_video", lambda caminho, foto: {
-        "mesmo": mesmo, "diferencas": "" if mesmo else "outra estampa", "defeitos": ""})
+    monkeypatch.setattr(robo.flow, "conferir_o_video", lambda caminho, foto: dict(conferencia or {
+        "mesmo": mesmo, "diferencas": "" if mesmo else "outra estampa", "defeitos": ""}))
     return vezes
 
 
@@ -10929,6 +10929,42 @@ def test_video_de_ia_com_outro_produto_nao_vira_rascunho(monkeypatch, avisos, tm
     # Nunca outro Gerar no mesmo dia.
     monkeypatch.setattr(robo, "video_de_ia_pendente", VIDEO_DE_IA_PENDENTE)
     assert not robo.video_de_ia_pendente(robo.ler_config(), agora)
+
+
+def test_video_de_ia_com_mais_um_produto_em_destaque_nao_vira_rascunho(monkeypatch, avisos, tmp_path):
+    # O vídeo de IA de 27/11/2026: o produto do anúncio estava no comercial, e o plano final mostrava um panetone.
+    # O outro produto, comida ou bebida em destaque descarta o vídeo, como o de outro produto (P245 1 e P247 1).
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    _flow_que_baixa(monkeypatch, tmp_path, conferencia={
+        "mesmo": True, "diferencas": "", "outro": True, "qual_outro": "um panetone", "boca": False, "defeitos": ""})
+    agora = momento("2026-10-22 08:05")
+    assert robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), agora) == \
+        "vídeo de IA: a IA viu mais um produto no vídeo; não vira rascunho"
+    assert robo.flow.producao()["estado"] == "descartado" and robo.flow.video_pronto() is None
+    i = next(i for i, a in enumerate(avisos) if isinstance(a, str) and "mostra outro produto além do anúncio" in a)
+    assert "aparece outro produto no vídeo: um panetone" in avisos[i]
+    assert avisos[i + 1] == ("video", robo.LEGENDA_DO_DESCARTADO)
+    assert ("descartado", "a IA viu mais um produto") in _registro_do_video_de_ia()
+
+
+def test_propaganda_com_a_boca_mexendo_vira_rascunho_com_o_aviso(monkeypatch, avisos, tmp_path):
+    # Na propaganda de TV, só o locutor fala (P270 1 e P278 1). A boca mexendo não descarta o vídeo: o aviso diz, e
+    # o registro a conta, só com o rótulo fixo.
+    _fonte(monkeypatch)
+    ativar(fonte="autorais")
+    propaganda = robo.flow.ESTILO_DA_PROPAGANDA
+    _flow_que_baixa(monkeypatch, tmp_path,
+                    extra={"formato": propaganda, "estilo": propaganda, "duracao_pedida": 8,
+                           "fala": "Sua casa mais bonita. Garanta a sua!"},
+                    conferencia={"mesmo": True, "diferencas": "", "outro": False, "qual_outro": "", "boca": True,
+                                 "defeitos": ""})
+    monkeypatch.setattr(robo.flow, "conferir_a_fala", lambda *args: {"situacao": "igual"})
+    resultado = robo.fazer_o_video_de_ia(Intocavel(), robo.ler_config(), momento("2026-10-22 08:05"))
+    assert resultado == "vídeo de IA: pronto para o rascunho"
+    aviso = next(a for a in avisos if isinstance(a, str) and "fiz o vídeo de IA do dia" in a)
+    assert robo.flow.BOCA_NA_PROPAGANDA in aviso
+    assert ("boca conferida", "mexe a boca") in _registro_do_video_de_ia()
 
 
 def test_video_de_ia_parado_no_flow_antes_e_depois_do_gerar(monkeypatch, avisos, tmp_path):

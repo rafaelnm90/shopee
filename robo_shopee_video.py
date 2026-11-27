@@ -4213,20 +4213,32 @@ def fazer_o_video_de_ia(d, config, agora=None, do_botao=False):
         _anotar_o_silencio(atual, agora)
     if estado == "descartado":
         _soltar_a_fonte_do_video_de_ia(atual)
-        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "descartado", "a IA viu outro produto",
-                                     ok=False, agora=agora)
-        registrar_tentativa("video_ia", "descartado", "vídeo de IA: a IA viu outro produto no vídeo",
+        # O produto do anúncio está no vídeo, mas outro produto, comida ou bebida aparece sozinho ou em destaque
+        # num plano (o plano final de um comercial com outra coisa da época): descartado como o de outro produto.
+        mais_um = (atual.get("conferencia") or {}).get("mesmo") is not False
+        visto = "a IA viu mais um produto" if mais_um else "a IA viu outro produto"
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "descartado", visto, ok=False, agora=agora)
+        registrar_tentativa("video_ia", "descartado", f"vídeo de IA: {visto} no vídeo",
                             produto=atual.get("nome", ""), agora=agora, video=atual.get("id_video", ""))
         if atual.get("do_botao"):
             qual, depois = "que você pediu", (". Toque de novo em Preparar 1 Agora ⚡ → De IA ✨ para tentar outro, se o "
                                                "dia ainda tiver espaço para vídeo de IA.")
         else:
             qual, depois = "de hoje", ", e o de amanhã sai normalmente."
+        como = ("mostra outro produto além do anúncio, num plano sozinho ou em destaque" if mais_um
+                else "saiu com outro produto")
         mandar_o_video_de_ia_descartado(atual, (
-            f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} saiu com outro produto, pela conferência da IA com a "
+            f"⚠️ Robô da Shopee Vídeo: o vídeo de IA {qual} {como}, pela conferência da IA com a "
             f"foto do anúncio. Ele não vira rascunho{depois}\n\n"
             f"Produto: {atual.get('nome', '')}\n{flow.legenda_da_producao(atual)}"), agora)
-        return "vídeo de IA: a IA viu outro produto no vídeo; não vira rascunho"
+        return f"vídeo de IA: {visto} no vídeo; não vira rascunho"
+    if atual.get("formato") == flow.ESTILO_DA_PROPAGANDA:
+        # Na propaganda de TV, só o locutor fala: a boca mexendo vai no aviso (flow.linha_da_boca), e o registro a
+        # conta, só com o rótulo fixo.
+        boca = (atual.get("conferencia") or {}).get("boca")
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "boca conferida",
+                                     {True: "mexe a boca", False: "boca parada"}.get(boca, "sem resposta"),
+                                     ok=None, agora=agora)
     registro_processos.registrar(REGISTRO, PROCESSO_DO_VIDEO_DE_IA, "pronto",
                                  atual.get("resolucao") or "sem a janela da resolução", ok=True, agora=agora)
     registrar_tentativa("video_ia", "pronto", produto=atual.get("nome", ""), agora=agora,

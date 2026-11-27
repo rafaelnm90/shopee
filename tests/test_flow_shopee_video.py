@@ -775,8 +775,9 @@ def test_envio_recusado_fica_para_o_proximo_teste(celular, monkeypatch, capsys):
 
 def test_conferencia_e_legenda():
     assert flow.ler_conferencia('ok {"mesmo_produto": false, "diferencas": "a  tampa\\nmudou", "defeitos": ""}') == \
-        {"mesmo": False, "diferencas": "a tampa mudou", "defeitos": ""}
-    assert flow.ler_conferencia("sem json") == {"mesmo": None, "diferencas": "", "defeitos": ""}
+        {"mesmo": False, "diferencas": "a tampa mudou", "outro": None, "qual_outro": "", "boca": None, "defeitos": ""}
+    assert flow.ler_conferencia("sem json") == {"mesmo": None, "diferencas": "", "outro": None, "qual_outro": "",
+                                                "boca": None, "defeitos": ""}
     assert flow.ler_conferencia('{"mesmo_produto": "sim"}')["mesmo"] is None
     teste = {"nome": "Copo Térmico Inox", "cena": "O copo na bancada.", "estilo": "fala"}
     diferente = flow.legenda_do_video(teste, "Omni 1.1 Flash", 12, {"mesmo": False, "diferencas": "a tampa mudou",
@@ -1144,6 +1145,63 @@ def test_producao_com_outro_produto_no_video_e_descartada(celular, monkeypatch):
     assert flow.producao_no_celular(celular, atual) is True
     assert flow.conferir_a_producao() == "descartado" and flow.video_pronto() is None
     assert "o produto muda: a tampa é outra" in flow.legenda_da_producao(flow.producao())
+
+
+def test_producao_com_mais_um_produto_em_destaque_e_descartada(celular, monkeypatch):
+    # O vídeo de IA de 27/11/2026: o produto do anúncio estava no comercial, mas o plano final mostrava um panetone,
+    # e a conferência, que só comparava o produto com a foto, deixou passar. O outro produto, comida ou bebida em
+    # destaque descarta o vídeo, como o de outro produto (P245 1 e P247 1).
+    pedidos = []
+
+    async def conferir(caminho, prompt, imagens=None):
+        pedidos.append(prompt)
+        return ('{"mesmo_produto": true, "diferencas": "", "outro_produto": true, "qual_outro": "um  panetone na '
+                'mesa", "boca_mexendo": false, "defeitos": ""}')
+
+    monkeypatch.setattr(flow.api_gemini, "analisar_video_gemini", conferir)
+    atual = flow.comecar_producao("2026-11-27", _escolhido(), 1)
+    assert flow.producao_no_celular(celular, atual) is True
+    assert flow.conferir_a_producao() == "descartado" and flow.video_pronto() is None
+    assert '"outro_produto": true ou false' in pedidos[0] and '"boca_mexendo": true ou false' in pedidos[0]
+    atual = flow.producao()
+    assert atual["conferencia"]["outro"] is True and atual["conferencia"]["qual_outro"] == "um panetone na mesa"
+    assert "aparece outro produto no vídeo: um panetone na mesa" in flow.legenda_da_producao(atual)
+
+
+def test_conferencia_le_o_outro_produto_e_a_boca_e_avisa_a_boca_so_na_propaganda():
+    lido = flow.ler_conferencia('{"mesmo_produto": true, "diferencas": "", "outro_produto": false, '
+                                '"qual_outro": "", "boca_mexendo": true, "defeitos": ""}')
+    assert (lido["mesmo"], lido["outro"], lido["boca"]) == (True, False, True)
+    assert flow.ler_conferencia('{"mesmo_produto": true, "outro_produto": "talvez"}')["outro"] is None
+    assert not flow.com_outro_produto(lido) and not flow.com_outro_produto({}) and not flow.com_outro_produto(None)
+    assert flow.com_outro_produto({"mesmo": False}) and flow.com_outro_produto({"mesmo": True, "outro": True})
+    assert flow.texto_da_conferencia(lido) == "o produto é o mesmo da foto do anúncio"
+    assert flow.texto_da_conferencia({"mesmo": None, "outro": True}) == "aparece outro produto no vídeo: sem detalhes"
+    assert flow.texto_da_conferencia({}) == "não deu para conferir"
+    # Na propaganda de TV, só o locutor fala (P270 1): a boca mexendo vai no aviso; nos outros formatos, quem
+    # aparece pode falar, e nada é dito.
+    propaganda = {"formato": flow.ESTILO_DA_PROPAGANDA, "estilo": flow.ESTILO_DA_PROPAGANDA, "conferencia": lido,
+                  "fala": "Sua casa mais bonita. Garanta a sua!", "cena": "c", "modelo": "Omni 1.2 Flash"}
+    assert flow.BOCA_NA_PROPAGANDA in flow.legenda_da_producao(propaganda)
+    assert flow.linha_da_boca(dict(propaganda, formato=flow.ESTILO_DO_VENDEDOR)) == ""
+    assert flow.linha_da_boca(dict(propaganda, conferencia=dict(lido, boca=False))) == ""
+    assert flow.BOCA_NA_PROPAGANDA in flow.legenda_da_amostra(dict(propaganda, com_personagem=True), lido)
+
+
+def test_prompt_da_propaganda_termina_com_os_planos_do_produto_e_a_boca_fechada():
+    # As frases vão fixas no fim do prompt, mesmo que a IA que escreve o pedido as esqueça; a da boca, só com o
+    # personagem em cena (P278 1).
+    so_o_produto = flow.prompt_da_propaganda("Premium TV commercial of the tree.")
+    assert so_o_produto == (f"Premium TV commercial of the tree. {flow.PLANOS_DO_PRODUTO} {flow.DICCAO_CLARA}")
+    com_pessoa = flow.prompt_da_propaganda("Premium TV commercial of the tree.", com_pessoa=True)
+    assert com_pessoa.endswith(f"{flow.PLANOS_DO_PRODUTO} {flow.BOCA_FECHADA} {flow.DICCAO_CLARA}")
+    # Sem repetir a frase que o prompt já tem, sem mudar o que já está pronto e sem passar das letras do prompt.
+    assert flow.prompt_da_propaganda(com_pessoa, com_pessoa=True) == com_pessoa
+    assert flow.prompt_da_propaganda("") == ""
+    comprido = flow.prompt_da_propaganda("word " * 300, com_pessoa=True)
+    assert len(comprido) <= flow.LETRAS_DO_PROMPT
+    assert flow.BOCA_FECHADA in comprido and flow.PLANOS_DO_PRODUTO in comprido
+    assert comprido.endswith(flow.DICCAO_CLARA)
 
 
 def test_producao_ja_gerada_so_baixa_sem_gerar_outro(celular):
@@ -2240,7 +2298,9 @@ def test_pedido_da_propaganda_de_tv_tem_os_planos_de_comercial_e_o_locutor_sem_n
                    "o plano final do produto fica só com a trilha", "the voice-over ends before the final hero shot",
                    "o produto sozinho no centro do quadro",
                    "idêntico ao da foto em todos os planos", "palavras curtas, comuns e fáceis de falar",
-                   "sem preço", "Luminária de Mesa", '{"serve": true ou false'):
+                   "sem preço", "Luminária de Mesa", '{"serve": true ou false',
+                   "Todo plano mostra o produto da foto, e o plano final é ele mesmo",
+                   "nenhum plano só de cenário, de comida, de bebida ou de outro objeto"):
         assert trecho in tv, trecho
     assert f"até {flow.PALAVRAS_DA_FALA_INTEIRA} palavras" not in tv and "até perto do fim" not in tv
     pedidos, respostas = [], []
@@ -2259,7 +2319,8 @@ def test_pedido_da_propaganda_de_tv_tem_os_planos_de_comercial_e_o_locutor_sem_n
     assert serve is True and len(pedidos) == 1 and "premium TV commercial" in pedidos[0]
     assert escolhido["estilo"] == escolhido["formato"] == flow.ESTILO_DA_PROPAGANDA
     assert escolhido["fala"] == FALA_DO_LOCUTOR and "continuacao" not in escolhido
-    assert escolhido["prompt"] == flow.com_a_diccao("Premium TV commercial of the lamp.")
+    assert escolhido["prompt"] == flow.prompt_da_propaganda("Premium TV commercial of the lamp.")
+    assert flow.PLANOS_DO_PRODUTO in escolhido["prompt"] and flow.BOCA_FECHADA not in escolhido["prompt"]
     # Sem a fala do locutor, a resposta não vale.
     respostas[:] = ['{"serve": true, "muda_na_ia": false, "motivo": "", "prompt": "Lamp.", "fala": "", "cena": "c"}']
     assert flow.pedido_para_o_anuncio(link, "Luminária", _jpeg(), propaganda=True) == (None, None)
@@ -2362,11 +2423,14 @@ def test_amostra_da_propaganda_com_personagem_comeca_pela_imagem_dele_e_vai_so_a
     assert flow.TRECHO_DO_SO_O_PRODUTO not in pedidos[0][0]
     pela_imagem = pedidos[2][0]
     for trecho in ("A pessoa da imagem é a atriz ou o ator do comercial", "mas não fala", "o personagem Vovó",
-                   "the person from the first frame acts without speaking", "no one speaks on camera"):
+                   "the person from the first frame acts without speaking", "no one speaks on camera",
+                   "Todo plano mostra o produto da foto, com a pessoa ou sozinho",
+                   "A pessoa fica de boca fechada, num sorriso de lábios fechados",
+                   "o rosto dela não aparece em close"):
         assert trecho in pela_imagem, trecho
     assert celular.fotos_das_imagens == [True] and celular.geracoes == 1 and celular.extensoes == 0
-    assert celular.texto == flow.com_a_diccao("Premium TV commercial: the grandma from the first frame uses the lamp "
-                                              "without speaking.")
+    assert celular.texto == flow.prompt_da_propaganda("Premium TV commercial: the grandma from the first frame uses "
+                                                      "the lamp without speaking.", com_pessoa=True)
     # O vídeo sai da imagem do personagem, e não da foto do anúncio.
     assert galeria[0].endswith("amostra_referencia.jpg") and galeria[-1].endswith("amostra_imagem.jpg")
     (caminho, legenda), = celular.mandados
@@ -3304,8 +3368,8 @@ def test_producao_da_propaganda_com_personagem_sai_da_imagem_dele_com_a_fala_cur
                    "the person from the first frame acts without speaking"):
         assert trecho in pela_imagem[0], trecho
     assert celular.fotos_das_imagens == [True] and celular.geracoes == 1 and celular.extensoes == 0
-    assert celular.texto == flow.com_a_diccao("Premium TV commercial: the grandma from the first frame uses the lamp "
-                                              "without speaking.")
+    assert celular.texto == flow.prompt_da_propaganda("Premium TV commercial: the grandma from the first frame uses "
+                                                      "the lamp without speaking.", com_pessoa=True)
     # O vídeo sai da imagem do personagem, e não da foto do anúncio.
     assert galeria[-1].endswith("producao_2026-11-22_imagem.jpg")
     atual = flow.producao()
