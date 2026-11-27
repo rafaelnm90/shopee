@@ -423,6 +423,14 @@ _FALA_SEM_EMBOLAR = (
 DICCAO_CLARA = "Clear Brazilian Portuguese diction, every word pronounced clearly."
 # O tanto de letras que o prompt e a continuação guardam.
 LETRAS_DO_PROMPT = 1000
+# Na propaganda de TV (P269 3), o comercial vende só o produto da foto, e a única voz é a do locutor, em off. Sem as
+# frases abaixo, a IA de vídeo põe no comercial outra coisa da época (um panetone no plano final de um produto de
+# Natal, 27/11/2026) e mexe a boca de quem está em cena enquanto o locutor fala, como se a voz fosse dela. As frases
+# vão fixas no fim do prompt, em inglês, pelo servidor, mesmo que a IA que escreve o pedido as esqueça
+# (prompt_da_propaganda); a da boca, só com alguém em cena (o personagem, P278 1).
+PLANOS_DO_PRODUTO = "Every shot features the product from the photo, and the final hero shot is that same product."
+BOCA_FECHADA = ("The person keeps a closed-mouth smile and never moves their lips; the only voice is the "
+                "off-screen narrator.")
 # A cena e as regras da fala, iguais no pedido de 16 s e no de 8 s (P262).
 _REGRAS_DA_FALA = (
     "- cena: uma frase em português que descreve a cena, para o Rafael.\n"
@@ -679,7 +687,9 @@ PEDIDO_DA_PROPAGANDA = (
     "pede demais; por isso, o produto aparece idêntico ao da foto em todos os planos, do jeito que é usado (vestido, "
     "montado, no lugar), sem mudar de forma, cor, tamanho ou estado; no plano de uso, um gesto só, o mais simples "
     "(acender, apoiar, passar, segurar), sem abrir, montar, desmontar, encaixar, despejar ou trocar peça; e não "
-    "aparece outro produto nem objeto que se confunda com ele. Responda só com um JSON, sem nada antes ou depois:\n"
+    "aparece outro produto nem objeto que se confunda com ele. Todo plano mostra o produto da foto, e o plano final é "
+    "ele mesmo: nenhum plano só de cenário, de comida, de bebida ou de outro objeto, nem outra coisa da época no lugar "
+    "dele. Responda só com um JSON, sem nada antes ou depois:\n"
     '{{"serve": true ou false, "muda_na_ia": true ou false, "motivo": "...", "prompt": "...", "fala": "...", '
     '"cena": "..."}}\n'
     + REGRAS_DA_FOTO +
@@ -708,15 +718,22 @@ TRECHO_DA_BEBIDA = ", ou é bebida alcoólica (em espera nas diretrizes)"
 # descartam depois de gasto o crédito. Escolha do Rafael (16/11/2026, P245 1): DECISOES.md, Shopee Vídeo.
 MUDA_NA_IA = "muda na IA de vídeo"
 # A conferência do vídeo pronto, que vai com ele no privado do Rafael: o produto é o da foto?
+# Além do produto, a conferência vê o outro produto, a comida ou a bebida que aparece sozinha ou em destaque num
+# plano (o vídeo com ele é descartado, como o de outro produto, P245 1 e P247 1) e a boca de quem está em cena (na
+# propaganda de TV, só o locutor fala: a boca mexendo vai no aviso, linha_da_boca).
 PEDIDO_DA_CONFERENCIA = (
     "Este vídeo foi feito por IA a partir da foto do anúncio que vai junto (a imagem). Compare o "
-    "produto do vídeo com o da foto: forma, cor, material, detalhes e o que vem junto. Veja também o "
-    "que denuncia a IA no vídeo: mãos ou pés estranhos, objetos que se deformam ou mudam de um quadro "
-    "para outro, letras sem sentido e, se o vídeo tem fala, a fala que não está em português do Brasil, "
-    "que sai cortada ou que não acompanha a boca de quem fala. Responda só com um JSON, sem nada antes "
-    "ou depois:\n"
+    "produto do vídeo com o da foto: forma, cor, material, detalhes e o que vem junto. Veja se algum "
+    "plano mostra, sozinho ou em destaque, outro produto, comida ou bebida que não está na foto, como se "
+    "fosse ele o vendido (móveis, enfeites e o cenário ao fundo não contam), e se alguém na tela mexe a "
+    "boca como se falasse. Veja também o que denuncia a IA no vídeo: mãos ou pés estranhos, objetos que "
+    "se deformam ou mudam de um quadro para outro, letras sem sentido e, se o vídeo tem fala, a fala que "
+    "não está em português do Brasil, que sai cortada ou que não acompanha a boca de quem fala. Responda "
+    "só com um JSON, sem nada antes ou depois:\n"
     '{"mesmo_produto": true ou false, "diferencas": "o que muda no produto, em até 200 letras; vazio '
-    'se nada", "defeitos": "o que parece falso ou estranho no vídeo, em até 200 letras; vazio se nada"}'
+    'se nada", "outro_produto": true ou false, "qual_outro": "o outro produto, a comida ou a bebida que '
+    'aparece, em até 80 letras; vazio se nada", "boca_mexendo": true ou false, "defeitos": "o que parece '
+    'falso ou estranho no vídeo, em até 200 letras; vazio se nada"}'
 )
 ROTULOS_DA_CONFERENCIA = {True: "mesmo produto", False: "produto diferente", None: "sem resposta"}
 # A conferência da fala do vídeo de 16 s pelo servidor (P248 1, conferir_a_fala): a palavra ouvida quase igual a uma
@@ -778,6 +795,22 @@ def com_a_diccao(texto):
     return f"{texto[:LETRAS_DO_PROMPT - len(DICCAO_CLARA) - 1].rstrip()} {DICCAO_CLARA}"
 
 
+def prompt_da_propaganda(texto, com_pessoa=False):
+    """
+    O prompt da propaganda de TV (P269 3) com as frases fixas do fim: PLANOS_DO_PRODUTO e, com alguém em cena (o
+    personagem, P278 1), BOCA_FECHADA; depois, a dicção clara (com_a_diccao), tudo dentro das LETRAS_DO_PROMPT. O
+    vazio fica vazio, e a frase que o prompt já tem não se repete.
+    """
+    texto = " ".join(str(texto or "").split())
+    if not texto:
+        return texto
+    fixas = " ".join(frase for frase in (PLANOS_DO_PRODUTO, BOCA_FECHADA if com_pessoa else "")
+                     if frase and frase not in texto)
+    if fixas:
+        texto = f"{texto[:LETRAS_DO_PROMPT - len(fixas) - len(DICCAO_CLARA) - 2].rstrip()} {fixas}"
+    return com_a_diccao(texto)
+
+
 def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False, curto=False, propaganda=False):
     """
     {"serve", "muda_na_ia", "motivo", "estilo", "prompt", "cena"} da resposta da IA; None quando ela não
@@ -797,8 +830,11 @@ def ler_resposta(texto, longo=False, unboxing=False, maos_e_voz=False, curto=Fal
             return None
         estilo = (ESTILO_DA_PROPAGANDA if propaganda else ESTILO_DAS_MAOS_E_VOZ if maos_e_voz
                   else ESTILO_DO_VENDEDOR)
-        return dict(resposta, estilo=estilo, fala=fala,
-                    prompt=com_a_diccao(resposta["prompt"]) if fala else resposta["prompt"])
+        if propaganda:
+            prompt = prompt_da_propaganda(resposta["prompt"])
+        else:
+            prompt = com_a_diccao(resposta["prompt"]) if fala else resposta["prompt"]
+        return dict(resposta, estilo=estilo, fala=fala, prompt=prompt)
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
         return None
@@ -1908,18 +1944,63 @@ def puxar(d, remoto, local, o_que="o vídeo"):
 
 
 def ler_conferencia(texto):
-    """{"mesmo": True, False ou None, "diferencas", "defeitos"} da resposta da IA (None: não deu para ler)."""
+    """
+    {"mesmo", "diferencas", "outro", "qual_outro", "boca", "defeitos"} da resposta da IA: "mesmo" (o produto é o da
+    foto), "outro" (outro produto, comida ou bebida sozinho ou em destaque num plano) e "boca" (alguém mexe a boca
+    como se falasse) são True, False ou None (None: não deu para ler).
+    """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     try:
         dados = json.loads(achado.group(0)) if achado else None
     except ValueError:
         dados = None
     if not isinstance(dados, dict):
-        return {"mesmo": None, "diferencas": "", "defeitos": ""}
-    mesmo = dados.get("mesmo_produto")
-    return {"mesmo": mesmo if isinstance(mesmo, bool) else None,
+        return {"mesmo": None, "diferencas": "", "outro": None, "qual_outro": "", "boca": None, "defeitos": ""}
+
+    def sim_ou_nao(campo):
+        valor = dados.get(campo)
+        return valor if isinstance(valor, bool) else None
+
+    return {"mesmo": sim_ou_nao("mesmo_produto"),
             "diferencas": " ".join(str(dados.get("diferencas") or "").split())[:200],
+            "outro": sim_ou_nao("outro_produto"),
+            "qual_outro": " ".join(str(dados.get("qual_outro") or "").split())[:80],
+            "boca": sim_ou_nao("boca_mexendo"),
             "defeitos": " ".join(str(dados.get("defeitos") or "").split())[:200]}
+
+
+def com_outro_produto(conferencia):
+    """
+    O vídeo tem outro produto, pela conferência da IA: o produto mudou ou outro produto, comida ou bebida aparece
+    sozinho ou em destaque num plano. Esse vídeo é descartado (P245 1 e P247 1).
+    """
+    conferencia = conferencia or {}
+    return conferencia.get("mesmo") is False or conferencia.get("outro") is True
+
+
+def texto_da_conferencia(conferencia):
+    """O que a IA conferiu no vídeo, para a linha "🔎 A IA conferiu" dos avisos."""
+    conferencia = conferencia or {}
+    if conferencia.get("mesmo") is False:
+        return f"o produto muda: {conferencia.get('diferencas') or 'sem detalhes'}"
+    if conferencia.get("outro") is True:
+        return f"aparece outro produto no vídeo: {conferencia.get('qual_outro') or 'sem detalhes'}"
+    if conferencia.get("mesmo") is True:
+        return "o produto é o mesmo da foto do anúncio"
+    return "não deu para conferir"
+
+
+# Na propaganda de TV, só o locutor fala (P270 1 e P278 1): a pessoa que mexe a boca parece falar com a voz dele.
+# O vídeo não é descartado por isso; o aviso diz, para o Rafael ver.
+BOCA_NA_PROPAGANDA = "👄 A pessoa mexe a boca como se falasse, mas na propaganda só o locutor fala"
+
+
+def linha_da_boca(atual, conferencia=None):
+    """O aviso da boca mexendo na propaganda de TV (BOCA_NA_PROPAGANDA); "" fora dela ou com a boca parada."""
+    conferencia = atual.get("conferencia") if conferencia is None else conferencia
+    if atual.get("formato") == ESTILO_DA_PROPAGANDA and (conferencia or {}).get("boca") is True:
+        return BOCA_NA_PROPAGANDA
+    return ""
 
 
 def conferir_o_video(caminho, foto):
@@ -2116,12 +2197,7 @@ def texto_do_corte(corte, com_fala):
 def legenda_do_video(teste, modelo, custo, conferencia):
     """O texto que vai com o vídeo no privado do Rafael (até 1000 letras): o modelo, o custo, o produto, a cena e a conferência."""
     numero = numero_do_modelo(modelo)
-    if conferencia["mesmo"] is True:
-        conferido = "o produto é o mesmo da foto do anúncio"
-    elif conferencia["mesmo"] is False:
-        conferido = f"o produto muda: {conferencia['diferencas'] or 'sem detalhes'}"
-    else:
-        conferido = "não deu para conferir"
+    conferido = texto_da_conferencia(conferencia)
     linhas = [f"🎬 Teste do Flow (P229 1): vídeo {numero} de {len(MODELOS_DO_TESTE)}",
               f"🤖 Modelo: {modelo} ({custo} créditos de IA)",
               f"📦 Produto: {teste.get('nome', '')}",
@@ -2665,7 +2741,8 @@ def _marcar_a_producao(**campos):
 def conferir_a_producao():
     """
     A conferência da IA do vídeo do dia com a foto do anúncio (conferir_o_video): "pronto" ou, com outro
-    produto no vídeo, "descartado" (nunca vira rascunho). No pronto com fala (o de 16 s e o de 8 s da P262), o servidor
+    produto no vídeo (o produto mudou ou outro aparece sozinho ou em destaque, com_outro_produto), "descartado" (nunca
+    vira rascunho). No pronto com fala (o de 16 s e o de 8 s da P262), o servidor
     ouve a fala e a compara com a pedida (conferir_a_fala, "fala_conferida"): a embolada ou cortada não descarta o
     vídeo; o aviso vai no rascunho, para o Rafael decidir na aprovação (P248 1 e P247 1). Com as mesmas palavras
     ouvidas, decide o silêncio (P262, decidir_o_silencio): cortado, o rascunho sai do vídeo sem ele ("arquivo"; o
@@ -2673,7 +2750,7 @@ def conferir_a_producao():
     """
     atual = producao()
     conferencia = conferir_o_video(atual["arquivo"], atual["foto"])
-    estado = "descartado" if conferencia["mesmo"] is False else "pronto"
+    estado = "descartado" if com_outro_produto(conferencia) else "pronto"
     extra = {}
     if estado == "pronto" and (atual.get("longa") or atual.get("curta")) and atual.get("fala"):
         ouvidas = videos.palavras_faladas(atual["arquivo"])
@@ -2781,12 +2858,7 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     16 s, linha_da_duracao) e o silêncio cortado ou mantido (linha_do_silencio).
     """
     conferencia = atual.get("conferencia") or {}
-    if conferencia.get("mesmo") is True:
-        conferido = "o produto é o mesmo da foto do anúncio"
-    elif conferencia.get("mesmo") is False:
-        conferido = f"o produto muda: {conferencia.get('diferencas') or 'sem detalhes'}"
-    else:
-        conferido = "não deu para conferir"
+    conferido = texto_da_conferencia(conferencia)
     custo = atual.get("custo", 0)
     duracao = f", {atual['duracao']} s" if atual.get("duracao") else ""
     partes = (f": {custo - CUSTO_DO_ESTENDER} dos 8 s gerados e {CUSTO_DO_ESTENDER} do Estender"
@@ -2811,6 +2883,8 @@ def legenda_da_producao(atual, com_a_conferencia=True):
     # O silêncio cortado ou o vídeo mantido inteiro (P262).
     if linha_do_silencio(atual):
         linhas.append(linha_do_silencio(atual))
+    if linha_da_boca(atual):
+        linhas.append(linha_da_boca(atual))
     if conferencia.get("defeitos"):
         linhas.append(f"⚠️ O que parece IA: {conferencia['defeitos']}")
     return "\n".join(linhas)
@@ -3602,7 +3676,10 @@ PEDIDO_DA_PROPAGANDA_PELA_IMAGEM = (
     "pede demais; por isso, a mesma pessoa da imagem em todos os planos (mesmo rosto, cabelo, tom de pele e roupa), o "
     "produto idêntico ao da foto em todos os planos, sem mudar de forma, cor, tamanho ou estado, sem abrir, montar, "
     "desmontar, encaixar, despejar ou trocar peça, e não aparece outra pessoa, outro produto nem objeto que se "
-    "confunda com ele. Responda só com um JSON, sem nada antes ou depois:\n"
+    "confunda com ele. Todo plano mostra o produto da foto, com a pessoa ou sozinho, e o plano final é ele mesmo: "
+    "nenhum plano só de cenário, de comida, de bebida ou de outro objeto, nem outra coisa da época no lugar dele. A "
+    "pessoa fica de boca fechada, num sorriso de lábios fechados, do começo ao fim, porque a voz é só a do locutor, "
+    "e o rosto dela não aparece em close. Responda só com um JSON, sem nada antes ou depois:\n"
     '{{"prompt": "...", "fala": "...", "cena": "..."}}\n'
     "- prompt: em inglês, até 100 palavras, o comercial de 8 segundos a partir da imagem, com os planos em ordem e o "
     "que se vê em cada um: a pessoa da imagem e o produto, idêntico ao da foto do anúncio (mesma forma, cor, "
@@ -3703,7 +3780,9 @@ def pedido_pela_imagem(nome, imagem, foto, chave, comedia=False, curto=False, pr
     if not (partes["prompt"] and (curto or partes["continuacao"]) and partes["fala"]):
         return None
     estilo = ESTILO_DA_PROPAGANDA if propaganda else ESTILO_DA_COMEDIA if comedia else ESTILO_DO_VENDEDOR
-    escrito = {"estilo": estilo, "prompt": com_a_diccao(partes["prompt"]),
+    escrito = {"estilo": estilo,
+               "prompt": (prompt_da_propaganda(partes["prompt"], com_pessoa=True) if propaganda
+                          else com_a_diccao(partes["prompt"])),
                "fala": partes["fala"][:400], "cena": partes["cena"][:300]}
     if not curto:
         escrito["continuacao"] = com_a_diccao(partes["continuacao"])
@@ -3877,12 +3956,7 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
     que o servidor ouviu no vídeo (fala_ouvida, de conferir_a_fala; P248 1); a da fala do começo ao fim (P255 1) com
     o tempo com fala (com_fala) e o corte do parado (corte, de cortar_o_parado).
     """
-    if conferencia["mesmo"] is True:
-        conferido = "o produto é o mesmo da foto do anúncio"
-    elif conferencia["mesmo"] is False:
-        conferido = f"o produto muda: {conferencia['diferencas'] or 'sem detalhes'}"
-    else:
-        conferido = "não deu para conferir"
+    conferido = texto_da_conferencia(conferencia)
     custo = atual.get("custo", 0)
     paga = (f"💰 Paga {assistente._reais(atual.get('valor') or 0)} por venda (o que paga mais entre "
             f"{atual.get('origem') or 'a lista da Shopee'}, ainda não postado)")
@@ -3896,6 +3970,8 @@ def legenda_da_amostra(atual, conferencia, fala_ouvida=None, corte=None, com_fal
         if linha_do_personagem(atual):
             linhas.append(linha_do_personagem(atual))
         linhas += [f"🎙️ Locutor: {atual.get('fala', '')}", f"🔎 A IA conferiu: {conferido}"]
+        if linha_da_boca(atual, conferencia):
+            linhas.append(linha_da_boca(atual, conferencia))
         if fala_ouvida:
             linhas.append(texto_da_fala(fala_ouvida))
         if com_fala is not None:
