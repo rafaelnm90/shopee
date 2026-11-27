@@ -937,6 +937,22 @@ def test_robo_nao_pega_de_volta_o_video_que_levou_ao_canal(monkeypatch):
     assert robo.assistente.proximo_video("autorais")["id"] == "a2"
 
 
+def test_robo_pega_o_video_de_link_de_video_que_o_pedido_do_amigo_so_pulou(monkeypatch):
+    # 26/11, 21:00: o pedido de um amigo passou por 5 vídeos de link de vídeo, que o assistente deixa de lado sem o
+    # produto do link, e o robô, que abre o link de vídeo pelo Ver Produtos, deixava de ver os 5. Só o vídeo mandado
+    # não vai a mais ninguém (P271 2 e P277 1).
+    _fonte_de_video(monkeypatch)
+    robo.assistente.registrar("a1", "sem_edicao", robo.assistente.SEM_PRODUTO_NO_LINK, amigo="77")
+    assert robo.assistente.proximo_video("autorais") is None
+    video = robo.proximo_video(robo.ler_config())
+    assert video["id"] == "a1" and video["de_video"]
+    # O que ficou de lado depois da IA (a violação) e o mandado continuam fora do robô.
+    robo.assistente.registrar("a1", "violacao", "marca", amigo="77")
+    assert robo.proximo_video(robo.ler_config()) is None
+    robo.assistente.registrar("a1", "enviado", "", amigo="77")
+    assert robo.proximo_video(robo.ler_config()) is None
+
+
 def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypatch, avisos):
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)

@@ -371,6 +371,21 @@ def registrar(id_unico, status, motivo="", agora=None, cobrindo=False, item="", 
                      assinatura or ""))
 
 
+def fora_da_fonte_do_robo(con):
+    """
+    Os ids da tabela dos mandados que o robô automático não pega: todos, menos o vídeo que o
+    assistente ou o pedido de um amigo só deixou de lado porque o link não diz o produto (o de
+    link de vídeo, que o robô abre pelo Ver Produtos, ou sem oferta), sem a IA e sem a edição. Só
+    o vídeo mandado não vai a mais ninguém, e o robô não muda com o grupo dos amigos (P271 2 e
+    P277 1): no pedido de um amigo de 26/11, às 21:00, os 5 vídeos de link de vídeo que ele pulou
+    tinham saído da fonte do robô também.
+    """
+    _criar_tabela(con)
+    return {linha[0] for linha in con.execute(
+        "SELECT id_unico FROM shopee_video_enviados WHERE NOT (status = 'sem_edicao' AND COALESCE(motivo, '') = ?)",
+        (SEM_PRODUTO_NO_LINK,))}
+
+
 def itens_do_amigo(amigo):
     """Os números (itemId) dos produtos dos vídeos que o amigo já recebeu no grupo dos amigos (P271 2)."""
     with db.conexao() as con:

@@ -514,8 +514,11 @@ def test_o_que_nao_sai_editado_fica_de_lado_e_vai_o_proximo_sem_gastar_a_ia(monk
           ("video", LEGENDA_VIDEO, "archive/video.mp4", "2026-10-02 10:00"))
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
     assert conteudos == [b"editado com foto"] and set(ias) == {"archive/produto.mp4"}
-    # O de link de vídeo (sem uma foto só) ficou de lado e não volta.
+    # O de link de vídeo (sem uma foto só) ficou de lado e não volta ao assistente, mas continua na fonte do robô,
+    # que abre o link de vídeo pelo Ver Produtos (P277 1: só o mandado não vai a mais ninguém).
     assert asv.proximo_video() is None and asv.enviados_hoje() == 1
+    with asv.db.conexao() as con:
+        assert asv.fora_da_fonte_do_robo(con) == {"produto"}
     # Sem o celular, o link de vídeo não tem a foto do anúncio: de lado, sem contar como falha
     # (28/10: o checkup cobrava 9 falhas assim) e sem tentar a edição.
     assert consultar("SELECT ok FROM registro_processos WHERE processo = 'assistente: envio' AND resultado = ?",
