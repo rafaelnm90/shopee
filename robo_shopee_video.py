@@ -3233,12 +3233,13 @@ def _videos_da_fonte(config, evitar=(), agora=None):
     fora os de evitar (os que esgotaram as tentativas hoje e os que pagam menos que o mínimo,
     evitar_hoje) e o arquivo que o robô já levou ao Canal Afiliados, que volta pelo Viral (o
     loop; pedido do Rafael, 30/10: DECISOES.md, Shopee Vídeo), do mais novo para o mais velho.
+    O que o assistente ou um amigo só pulou sem o produto do link continua aqui
+    (assistente.fora_da_fonte_do_robo).
     """
     fonte = config.get("fonte", assistente.FONTE_PADRAO)
     usados = ids_usados(agora) | set(evitar)
     with db.conexao() as con:
-        assistente._criar_tabela(con)
-        mandados = {linha[0] for linha in con.execute("SELECT id_unico FROM shopee_video_enviados")}
+        mandados = assistente.fora_da_fonte_do_robo(con)
     for id_video, arquivo, link, legenda in assistente._candidatos(fonte if fonte in assistente.FONTES
                                                                       else assistente.FONTE_PADRAO):
         if (id_video in mandados or id_video in usados or not arquivo or not link
