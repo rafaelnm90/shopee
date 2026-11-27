@@ -1526,6 +1526,60 @@ def test_o_mesmo_video_nao_vai_ao_amigo(monkeypatch):
     assert consultar("SELECT amigo, assinatura FROM shopee_video_enviados WHERE id_unico = 'velho'") == ("7", outro)
 
 
+def _cinco_de_link_de_video_e_um_de_produto(monkeypatch):
+    """
+    Edição ligada; os 5 vídeos mais novos da fonte são de link de vídeo (sem o produto no link), e o 6º é de produto.
+    """
+    conteudos, ias = [], []
+    _com_edicao(monkeypatch, conteudos, ias)
+
+    async def converter(link, etiqueta):
+        return link
+
+    async def nenhum(video, produtos, do_rafael=True):
+        return []
+
+    monkeypatch.setattr(asv.api_shopee, "converter_link_shopee", converter)
+    monkeypatch.setattr(asv, "links_a_mais", nenhum)
+    _fila(*[(f"v{i}", LEGENDA_VIDEO, f"archive/v{i}.mp4", f"2026-10-02 1{i}:00") for i in range(1, 6)],
+          ("produto", LEGENDA, "archive/produto.mp4", "2026-10-02 09:00"))
+    return ias
+
+
+def test_pedido_do_amigo_passa_pelos_videos_sem_o_produto_no_link_sem_contar_nas_tentativas(monkeypatch):
+    # P318 1: no grupo, o vídeo de link de vídeo (ou sem oferta) fica de lado sem gastar a IA nem a edição e não conta
+    # nas 5 tentativas: com os 5 mais novos assim, o amigo recebe o 6º no mesmo toque (em 26/11, às 21:00, recebeu o
+    # "toque de novo mais tarde").
+    ias = _cinco_de_link_de_video_e_um_de_produto(monkeypatch)
+    bot = BotDoGrupo()
+    assert rodar(asv.preparar_para_o_amigo(bot, 42, AMIGO, _as("14:00"))) == asv.MANDADO_AO_AMIGO
+    assert set(ias) == {"archive/produto.mp4"} and [e["chat"] for e in bot.envios] == [-1001, -1001]
+    assert consultar("SELECT amigo FROM shopee_video_enviados WHERE id_unico = 'produto'") == ("7",)
+    assert consultar("SELECT COUNT(*), MAX(ok) FROM registro_processos WHERE processo = ? AND resultado = ?",
+                     asv.PROCESSO_DO_AMIGO, asv.SEM_PRODUTO_NO_LINK) == (5, None)
+
+
+def test_pedido_do_rafael_no_grupo_tambem_passa_por_eles_e_o_privado_continua_com_as_5(monkeypatch):
+    # P318 1 vale também para o pedido do Rafael pelo botão do grupo; o Enviar 1 Agora e o plano do dia, no privado,
+    # continuam contando cada vídeo nas 5 tentativas.
+    ias = _cinco_de_link_de_video_e_um_de_produto(monkeypatch)
+    rafael = {"id": 42, "mencao": "@rafa_teste", "grupo": -1001, "responder_a": 77}
+    assert rodar(asv.preparar_e_enviar(BotDoGrupo(), 42, _as("14:00"), no_grupo=rafael)) == asv.MANDADO_NO_PRIVADO
+    assert set(ias) == {"archive/produto.mp4"}
+    inserir("DELETE FROM shopee_video_enviados")
+    resultado = rodar(asv.preparar_e_enviar(BotDoGrupo(), 42, _as("15:00")))
+    assert resultado.startswith(f"nenhum dos {asv.VIDEOS_POR_ENVIO} próximos vídeos deu para mandar")
+
+
+def test_pedido_no_grupo_desiste_depois_de_passar_por_30_sem_gastar_a_ia(monkeypatch):
+    # O teto dos que o pedido passa sem contar (PASSADOS_POR_PEDIDO): o pedido termina, e o que sobra fica na fonte.
+    _cinco_de_link_de_video_e_um_de_produto(monkeypatch)
+    monkeypatch.setattr(asv, "PASSADOS_POR_PEDIDO", 3)
+    assert rodar(asv.preparar_para_o_amigo(BotDoGrupo(), 42, AMIGO, _as("14:00"))) == asv.NENHUM_PARA_O_AMIGO
+    assert consultar("SELECT COUNT(*) FROM shopee_video_enviados") == (3,)
+    assert asv.proximo_video()["id"] == "v2"
+
+
 def test_amigo_sem_video_na_fonte_e_com_a_ia_sem_resposta(monkeypatch):
     _preparar_do_amigo(monkeypatch, textos=None)
     bot = BotDoGrupo()

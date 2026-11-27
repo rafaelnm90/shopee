@@ -343,7 +343,8 @@ def proximo_video(fonte=FONTE_PADRAO, pular=()):
     {"id", "arquivo", "link", "nome"} do vídeo mais novo da fonte que ainda tem o
     arquivo e o link e não foi mandado, fora o arquivo que o robô já levou ao Canal
     Afiliados (o loop); None se não há nenhum. pular: os ids que quem chama já olhou e deixou
-    para outra pessoa (o produto que o amigo já recebeu, amigos_shopee_video).
+    para outra pessoa (o produto que o amigo já recebeu, amigos_shopee_video) ou passou sem
+    contar nas tentativas (SEM_CUSTO, P318 1).
     """
     try:
         candidatos = _candidatos(fonte if fonte in FONTES else FONTE_PADRAO)
@@ -1142,8 +1143,9 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobri
     celular, e o vídeo postado conta no plano do dia dele (P156 1). no_grupo ({"mencao", "grupo",
     "responder_a"}): o pedido do Rafael no grupo dos amigos, e o mesmo vídeo vai também ao grupo (P281 1).
     """
-    for _ in range(VIDEOS_POR_ENVIO):
-        video = proximo_video(fonte)
+    pular, tentativas = set(), 0
+    while tentativas < VIDEOS_POR_ENVIO and len(pular) < PASSADOS_POR_PEDIDO:
+        video = proximo_video(fonte, pular)
         if not video:
             registro_processos.registrar("shopee_video", "assistente: envio", "sem vídeo na fonte", ok=False)
             return f"{SEM_VIDEO_NO_ENVIO}{FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
@@ -1163,6 +1165,12 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO, cobri
                                      else resultado == MANDADO_NO_PRIVADO)
         if resultado not in (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, JA_POSTADO, MESMO_VIDEO):
             return resultado
+        if no_grupo and resultado in SEM_CUSTO:
+            # O pedido do Rafael no grupo passa pelo vídeo que fica de lado sem gastar a IA nem a edição sem contar nas
+            # tentativas (P318 1); no privado, cada um conta, como antes.
+            pular.add(video["id"])
+            continue
+        tentativas += 1
     return (f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos deu para mandar (só vai o vídeo editado, de produto que "
             "não foi ao ar nos últimos 7 dias, e nunca um vídeo já usado); tento de novo no próximo horário")
 
@@ -1177,8 +1185,14 @@ MANDADO_AO_AMIGO = "vídeo mandado no grupo dos amigos"
 SEM_VIDEO_PARA_O_AMIGO = "sem vídeo na fonte para o amigo"
 JA_COM_OUTRO = "vídeo de lado: o robô pegou este vídeo enquanto ele era preparado"
 NENHUM_PARA_O_AMIGO = "nenhum dos próximos vídeos deu para mandar ao amigo"
-# Os vídeos de produto que o amigo já recebeu que um pedido passa, antes de desistir: não gastam a IA nem a edição.
-JA_RECEBIDOS_POR_PEDIDO = 30
+# O que um pedido feito no grupo (o de um amigo ou o do Rafael) passa sem contar nas VIDEOS_POR_ENVIO tentativas, que
+# valem só para o vídeo que gasta a IA ou a edição: o de produto que o amigo já recebeu, o do link que não diz o produto
+# (link de vídeo ou sem oferta), o vídeo já usado e o de produto que o Rafael postou nos últimos 7 dias. Sem a regra, os
+# 5 mais novos de link de vídeo deixavam o amigo sem vídeo (26/11, às 21:00). Escolha do Rafael (P318 1): DECISOES.md,
+# Shopee Vídeo.
+SEM_CUSTO = (JA_RECEBIDO, SEM_PRODUTO_NO_LINK, MESMO_VIDEO, JA_POSTADO)
+# Os vídeos que um pedido passa assim, antes de desistir.
+PASSADOS_POR_PEDIDO = 30
 # O que fica de lado pelo próprio vídeo: o próximo vai no lugar, no mesmo pedido. A IA sem resposta para o pedido
 # (o próximo vídeo também ficaria sem o texto, e cada um que passa sai da fonte).
 DE_LADO = (SEM_EDICAO, SEM_AVISOS, SEM_PRODUTO_NO_LINK, SEM_BEBIDA, VIOLACAO, JA_COM_OUTRO, MESMO_VIDEO)
@@ -1192,7 +1206,7 @@ async def preparar_para_o_amigo(bot, admin_id, amigo, agora=None, fonte=FONTE_PA
     Rafael (admin_id). Devolve a frase do que aconteceu.
     """
     pular, tentativas = set(), 0
-    while tentativas < VIDEOS_POR_ENVIO and len(pular) < JA_RECEBIDOS_POR_PEDIDO:
+    while tentativas < VIDEOS_POR_ENVIO and len(pular) < PASSADOS_POR_PEDIDO:
         video = proximo_video(fonte, pular)
         if not video:
             registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, SEM_VIDEO_PARA_O_AMIGO, ok=False)
@@ -1204,13 +1218,14 @@ async def preparar_para_o_amigo(bot, admin_id, amigo, agora=None, fonte=FONTE_PA
             registrar(video["id"], "erro", type(e).__name__, agora, amigo=amigo["id"])
             registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, "erro", type(e).__name__, ok=False)
             raise
-        if resultado == JA_RECEBIDO:
+        if resultado != JA_RECEBIDO:
+            registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, resultado,
+                                         ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, MESMO_VIDEO)
+                                         else resultado == MANDADO_AO_AMIGO)
+        if resultado in SEM_CUSTO:
             pular.add(video["id"])
             continue
         tentativas += 1
-        registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, resultado,
-                                     ok=None if resultado in (SEM_PRODUTO_NO_LINK, SEM_BEBIDA, MESMO_VIDEO)
-                                     else resultado == MANDADO_AO_AMIGO)
         if resultado not in DE_LADO:
             return resultado
     registro_processos.registrar("shopee_video", PROCESSO_DO_AMIGO, NENHUM_PARA_O_AMIGO, ok=False)
