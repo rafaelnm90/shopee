@@ -4911,8 +4911,8 @@ def _duracao(segundos):
 # lista de afiliado (AN_MyLikesListPage), a mesma do Minhas Curtidas do Adicionar Produto (o
 # Meus Favoritos de comprador, direto na aba Eu, é outra lista). Cada produto tem uma caixa de
 # marcar; na barra de baixo ficam a caixa de marcar tudo, o "Selecionado N/50" (até 50 de cada
-# vez), o Like, que tira os marcados ("Removido das Minhas Curtidas com sucesso!"), e o
-# Compartilhar. O robô marca e tira de novo, até a lista acabar, em VOLTAS_DO_DESCURTIR voltas
+# vez), o Like (desde 27/11/2026, o Excluir), que tira os marcados ("Removido das Minhas Curtidas
+# com sucesso!"), e o Compartilhar. O robô marca e tira de novo, até a lista acabar, em VOLTAS_DO_DESCURTIR voltas
 # por rodada. Nunca toca em Compartilhar nem no Substituir Tudo do aviso do alto da lista.
 CRIADORES_E_AFILIADOS = "Criadores & Afiliados"
 MEUS_FAVORITOS = "Meus favoritos"
@@ -4926,7 +4926,9 @@ FILTRO_DOS_FAVORITOS = "Melhor Oferta"
 # filtro com o mesmo nome, que não é selo de produto.
 SELO_INVALIDO = "Inválido"
 CAIXA_DE_MARCAR = "AN_Checkbox_CheckedIconUnCheckIcon_Img"
-BOTAO_LIKE = "Like"
+# O botão da barra de baixo que tira os marcados: o Like; na versão 3.85.37 do app (Motorola, 27/11/2026), o mesmo
+# botão passou a se chamar Excluir. O robô aceita os dois.
+BOTOES_DE_TIRAR = ("Like", "Excluir")
 NUNCA_NOS_FAVORITOS = ("compartilhar", "substituir")
 LIMITE_DA_SELECAO = 50
 VOLTAS_DO_DESCURTIR = 10
@@ -5014,13 +5016,19 @@ def _seguro(xml, ponto):
                    for el in ps.elementos(xml))
 
 
-def _confirmar_remocao(d):
-    """Se o app pergunta antes de remover, toca no botão que confirma."""
+def _confirmar_remocao(d, fora_de=None):
+    """
+    Se o app pergunta antes de remover, toca no botão que confirma: o da pergunta, por cima da tela, que vem por último
+    na leitura dela. O botão da barra que acabou de ser tocado (fora_de: o ponto dele), que pode ter o mesmo nome do da
+    pergunta (o Excluir), nunca é tocado de novo: sem a pergunta, nada é tocado.
+    """
     xml = tela(d)
     for alvo in CONFIRMAR_REMOCAO:
-        ponto = _ponto_exato(xml, alvo)
-        if ponto and not ps.proibido_no_ponto(xml, *ponto):
-            d.click(*ponto)
+        pontos = [ps._centro(el) for el in ps.elementos(xml)
+                  if ((alvo.startswith("@") and el["id"] == alvo[1:]) or ps._normal(el["texto"]) == ps._normal(alvo))
+                  and not (fora_de and ps._dentro(fora_de, el["caixa"]))]
+        if pontos and not ps.proibido_no_ponto(xml, *pontos[-1]):
+            d.click(*pontos[-1])
             pausa(3)
             return
 
@@ -5147,12 +5155,12 @@ def _descurtir_os_de_afiliado(d, agora=None):
         if not marcados:
             raise Parada("marquei os produtos de Meus favoritos, mas nenhum ficou marcado")
         xml = tela(d)
-        ponto = _ponto_exato(xml, BOTAO_LIKE)
+        ponto = next(filter(None, (_ponto_exato(xml, botao) for botao in BOTOES_DE_TIRAR)), None)
         if not ponto or not _seguro(xml, ponto):
-            raise Parada("a barra de Meus favoritos não mostrou o Like")
+            raise Parada("a barra de Meus favoritos não mostrou o Like nem o Excluir")
         d.click(*ponto)
         pausa(3)
-        _confirmar_remocao(d)
+        _confirmar_remocao(d, fora_de=ponto)
         pausa(2)
         xml = tela(d)
         restantes = _marcados(xml)
