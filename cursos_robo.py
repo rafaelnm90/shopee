@@ -2394,15 +2394,146 @@ def textos_da_aula(xml):
     return textos
 
 
+def _e_link(no):
+    return no["clicavel"] and no["classe"] == "View" and bool(no["descricao"]) and not no["id"]
+
+
 def links_da_aula(xml):
-    """Os links da aula à vista (o texto de cada um), como a página os mostra (o endereço fica no site)."""
-    return [texto for texto, _ponto in links_na_tela(xml)]
+    """
+    Os links da aula (o texto de cada um), como a página os mostra (o endereço fica no site), também os escondidos
+    embaixo da caixa que rola por dentro: a lista do texto da aula.
+    """
+    return [no["descricao"] for no in _nos_da_aula(xml) if _e_link(no)]
 
 
 def links_na_tela(xml):
-    """Os links da aula à vista, [(texto, centro)], na ordem da página (o mesmo nome pode levar a outros endereços)."""
-    return [(no["descricao"], _centro(no["caixa"])) for no in _nos_da_aula(xml)
-            if no["clicavel"] and no["classe"] == "View" and no["descricao"] and not no["id"]]
+    """
+    Os links da aula à vista, [(texto, centro)], na ordem da página (o mesmo nome pode levar a outros endereços): só os
+    que aparecem na tela (_nos_da_aula_a_vista), os únicos que o dedo pode segurar.
+    """
+    return [(no["descricao"], _centro(no["caixa"])) for no in _nos_da_aula_a_vista(xml) if _e_link(no)]
+
+
+def _caixa_do_elemento(elemento):
+    dados = _no(elemento)
+    return dados["caixa"] if dados else None
+
+
+def _cortar(caixa, recorte):
+    """A parte da caixa dentro do recorte; None quando não sobra nada."""
+    if recorte is None:
+        return caixa
+    x1, y1 = max(caixa[0], recorte[0]), max(caixa[1], recorte[1])
+    x2, y2 = min(caixa[2], recorte[2]), min(caixa[3], recorte[3])
+    return (x1, y1, x2, y2) if x2 > x1 and y2 > y1 else None
+
+
+def _dentro_da_caixa(ponto, caixa):
+    return caixa[0] <= ponto[0] <= caixa[2] and caixa[1] <= ponto[1] <= caixa[3]
+
+
+def _com_recorte(elemento, recorte=None):
+    """
+    Os elementos da página, do alto para baixo (como a leitura da tela), cada um com o recorte das caixas que rolam em
+    volta dele: a própria página e a caixa da descrição que rola por dentro dela. [(elemento, recorte ou None)]
+    """
+    pilha, saida = [(elemento, recorte)], []
+    while pilha:
+        atual, corte = pilha.pop()
+        saida.append((atual, corte))
+        caixa = _caixa_do_elemento(atual)
+        if atual.get("scrollable") == "true" and caixa:
+            corte = _cortar(caixa, corte) or (0, 0, 0, 0)
+        pilha.extend((filho, corte) for filho in reversed(atual.findall("node")))
+    return saida
+
+
+def _pagina_com_recorte(xml):
+    """Os elementos da página da aula até as abas, com o recorte de cada um (_com_recorte); [] fora da aula."""
+    try:
+        raiz = ET.fromstring(xml or "")
+    except ET.ParseError:
+        return []
+    pagina = next((no for no in raiz.iter("node") if no.get("class") == "android.webkit.WebView"), None)
+    if pagina is None:
+        return []
+    elementos = []
+    for elemento, recorte in _com_recorte(pagina):
+        if elemento.get("resource-id", "").endswith(ID_DAS_ABAS):
+            break
+        elementos.append((elemento, recorte))
+    return elementos
+
+
+def _nos_da_aula_a_vista(xml):
+    """
+    Os nós da página da aula (_nos_da_aula) que aparecem na tela: o centro dentro das caixas que rolam em volta deles.
+    O Chrome dá a caixa do nó sem o corte da caixa da descrição que rola por dentro da página: o link escondido embaixo
+    dela vem com a caixa fora dela, em cima de outra coisa (o título da aula), e o dedo segurado nele cairia nela
+    (curso 1, aulas 1 e 5, noite de 27/11/2026: o título selecionado e o link sem o endereço).
+    """
+    vistos = []
+    for elemento, recorte in _pagina_com_recorte(xml):
+        dados = _no(elemento)
+        if dados and (recorte is None or _dentro_da_caixa(_centro(dados["caixa"]), recorte)):
+            vistos.append(dados)
+    return vistos
+
+
+# A caixa da descrição que rola por dentro da página da aula: rolada por dentro até o link escondido embaixo dela
+# aparecer, no máximo estas vezes por aula, cada vez uns 3/5 da parte à vista dela, devagar (sem embalo, nada passa
+# direto pela parte à vista).
+ROLAGENS_DA_CAIXA = 6
+ALTURA_MINIMA_DA_CAIXA = 300
+PARTE_DA_ROLAGEM_DA_CAIXA = 0.6
+TEMPO_DA_ROLAGEM_DA_CAIXA = 0.8
+MARGEM_DA_CAIXA = 40
+
+
+def caixa_com_link_embaixo(xml):
+    """
+    A parte à vista da caixa que rola por dentro da página da aula (a da descrição) com um link escondido embaixo
+    dela, para rolar por dentro até ele aparecer (rolar_a_caixa); None sem ela. O texto escondido não pede a rolagem:
+    o Chrome já o dá inteiro na leitura da tela. Só antes das abas: a lista da aba Módulos também rola por dentro, e
+    não é da aula.
+    """
+    for elemento, recorte in _pagina_com_recorte(xml):
+        caixa = _caixa_do_elemento(elemento)
+        if elemento.get("scrollable") != "true" or not caixa or recorte is None:
+            continue
+        visivel = _cortar(caixa, recorte)
+        if not visivel or visivel[3] - visivel[1] < ALTURA_MINIMA_DA_CAIXA:
+            continue
+        for dentro in elemento.iter("node"):
+            dados = _no(dentro) if dentro is not elemento else None
+            if dados and _e_link(dados) and _centro(dados["caixa"])[1] > visivel[3]:
+                return visivel
+    return None
+
+
+def rolar_a_caixa(d, xml, caixa):
+    """
+    A caixa que rola por dentro, uns 3/5 da parte à vista dela para cima, com o dedo dentro dela e subindo (como
+    rolar_a_pagina: a página nunca é arrastada para baixo), longe do Próximo, da bolha do chat e da barra do Chrome.
+    False quando a parte à vista é pequena demais para o dedo.
+    """
+    x1, y1, x2, y2 = caixa
+    baixo = min(y2, _topo_do_proximo(xml)) - MARGEM_DA_CAIXA
+    alto = max(y1, 300 if texto_da_barra(xml) is not None else 0) + MARGEM_DA_CAIXA
+    if baixo - alto < ALTURA_MINIMA_DA_CAIXA // 2:
+        return False
+    x = (x1 + x2) // 2
+    bx1, by1, bx2, by2 = BOLHA_DO_CHAT
+    if bx1 <= x <= bx2 and by1 <= baixo and alto <= by2:
+        x = x1 + (bx1 - x1) // 2
+    d.swipe(x, baixo, x, int(baixo - (baixo - alto) * PARTE_DA_ROLAGEM_DA_CAIXA), TEMPO_DA_ROLAGEM_DA_CAIXA)
+    return True
+
+
+def _retrato_da_aula(xml):
+    """Os textos da aula com a altura de cada um: muda quando a página ou a caixa que rola por dentro andam."""
+    return [(no["texto"] or no["descricao"], no["caixa"][1]) for no in _nos_da_aula(xml)
+            if no["texto"] or no["descricao"]]
 
 
 # Os links das aulas (pedidos do Rafael de 23/11/2026, às 08:44, e de 26/11/2026, de manhã: "sempre analisar os
@@ -2881,7 +3012,8 @@ def _abrir_os_links(d, pasta, achados, pausa, vigiar):
 
 
 def _botao_da_aula(xml, rotulo):
-    return next((_centro(no["caixa"]) for no in _nos_da_aula(xml)
+    # Só o botão à vista: o escondido embaixo da caixa que rola por dentro vem com a caixa em cima de outra coisa.
+    return next((_centro(no["caixa"]) for no in _nos_da_aula_a_vista(xml)
                  if no["clicavel"] and rotulo in (no["texto"], no["descricao"])), None)
 
 
@@ -3060,6 +3192,10 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
     """
     textos, links, telas, ver_mais, documento, anterior, slides = [], [], 0, 0, None, None, None
     achados, toques, com_caso = [], 0, []
+    # A caixa da descrição que rola por dentro: o Chrome dá todos os textos dela, à vista ou não, e só a altura de cada
+    # um muda quando ela anda (_retrato_da_aula). Rolada até o link escondido embaixo dela aparecer; a que não anda
+    # mais dá a vez à página.
+    retrato_anterior, rolou_a_caixa, caixa_acabou, rolagens_da_caixa = None, False, False, 0
 
     def guardar_o_caso_do_menu():
         # Uma vez por aula: a tela com o que o dedo segurado abriu, para o Claude ver por que a cópia não veio.
@@ -3093,23 +3229,33 @@ def _ler_a_aula(d, pasta, pausa, vigiar):
             tela = esperar_o_aviso_sair(d, pausa)
             if not botao_de_baixar(tela) and not pagina_da_aula_pronta(tela):
                 return {}, "a página da aula saiu da tela depois do Baixar"
-        atuais = textos_da_aula(tela)
-        if atuais == anterior:
+        atuais, retrato = textos_da_aula(tela), _retrato_da_aula(tela)
+        mudou = atuais != anterior or (rolou_a_caixa and retrato != retrato_anterior)
+        if not mudou and not rolou_a_caixa:
             break
-        textos = juntar_os_textos(textos, atuais)
-        links += [link for link in links_da_aula(tela) if link not in links]
-        guardar_a_tela(d, os.path.join(pasta, f"tela_{numero:02d}.jpg"))
-        telas += 1
-        # O endereço de cada link à vista, depois do print da tela (o menu do Chrome não fica nele). O mesmo link visto
-        # em duas telas seguidas é lido de novo e sai depois, pelo endereço.
-        for texto, ponto in links_na_tela(tela):
-            if toques >= TOQUES_LONGOS_POR_AULA or not _livre_para_tocar(tela, ponto):
-                continue
-            toques += 1
-            achados.append((texto, endereco_do_link(d, ponto, pausa, guardar_o_caso_do_menu)))
+        if mudou:
+            textos = juntar_os_textos(textos, atuais)
+            links += [link for link in links_da_aula(tela) if link not in links]
+            guardar_a_tela(d, os.path.join(pasta, f"tela_{numero:02d}.jpg"))
+            telas += 1
+            # O endereço de cada link à vista, depois do print da tela (o menu do Chrome não fica nele). O mesmo link
+            # visto em duas telas seguidas é lido de novo e sai depois, pelo endereço.
+            for texto, ponto in links_na_tela(tela):
+                if toques >= TOQUES_LONGOS_POR_AULA or not _livre_para_tocar(tela, ponto):
+                    continue
+                toques += 1
+                achados.append((texto, endereco_do_link(d, ponto, pausa, guardar_o_caso_do_menu)))
+        else:
+            caixa_acabou = True
+        anterior, retrato_anterior, rolou_a_caixa = atuais, retrato, False
+        caixa_da_aula = None if caixa_acabou else caixa_com_link_embaixo(tela)
+        if caixa_da_aula and rolagens_da_caixa < ROLAGENS_DA_CAIXA and rolar_a_caixa(d, tela, caixa_da_aula):
+            rolagens_da_caixa += 1
+            rolou_a_caixa = True
+            pausa(ESPERA_DA_ROLAGEM)
+            continue
         if abas_na_tela(tela):
             break
-        anterior = atuais
         rolar_a_pagina(d)
         pausa(ESPERA_DA_ROLAGEM)
     if not textos and not documento and not slides:

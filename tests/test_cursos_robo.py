@@ -4204,3 +4204,85 @@ def test_a_aula_lida_sem_a_duracao_fica_com_a_da_leitura_anterior(bm):
         {"modulo": "Módulo", "nome": "Texto", "segundos": None, "aula": "3142"}])
     assert de_antes == 2 and [aula["segundos"] for aula in cursos_robo.lista_do_curso(4)] == [121, 90, None]
     assert cursos_robo.guardar_a_lista(4, cursos_robo.lista_do_curso(4)) == 0
+
+
+# --- O link escondido embaixo da caixa que rola por dentro (curso 1, aulas 1 e 5, noite de 27/11/2026) ---
+
+def _tela_com_a_caixa(deslocamento=0):
+    """
+    A página da aula com a descrição numa caixa que rola por dentro, como a do curso 1: o Chrome dá o link da descrição
+    com a caixa sem o corte dela, embaixo da caixa, em cima do título da aula. deslocamento: quanto a caixa já rolou.
+    """
+    def no(classe, caixa, texto="", descricao="", clicavel=False, rolavel=False, ident="", filhos=""):
+        x1, y1, x2, y2 = caixa
+        return (f'<node class="{classe}" text="{texto}" content-desc="{descricao}" resource-id="{ident}" '
+                f'clickable="{str(clicavel).lower()}" scrollable="{str(rolavel).lower()}" '
+                f'bounds="[{x1},{y1}][{x2},{y2}]">{filhos}</node>')
+
+    def y(valor):
+        return valor - deslocamento
+    caixa = no("android.view.View", (65, 408, 1039, 1411), rolavel=True, filhos=(
+        no("android.widget.TextView", (65, y(450), 971, y(508)), texto="Texto do começo da aula")
+        + no("android.widget.TextView", (65, y(1059), 971, y(1117)), texto="Regras do grupo:")
+        + no("android.view.View", (65, y(1479), 790, y(1527)), descricao="[Link de teste]", clicavel=True,
+             filhos=no("android.widget.TextView", (65, y(1479), 790, y(1527)), texto="[Link de teste]"))))
+    titulo = no("android.widget.TextView", (42, 1579, 1021, 1674), texto="Aula 7 - Título da aula")
+    abas = no("android.view.View", (42, 1880, 1038, 2060), ident="trigger-modules",
+              filhos=no("android.widget.TextView", (100, 1950, 300, 2000), texto="Módulos"))
+    proximo = no("android.widget.Button", (0, 2175, 1080, 2394), texto="Próximo: Aula seguinte", clicavel=True)
+    pagina = no("android.webkit.WebView", (0, 120, 1080, 2394), rolavel=True, filhos=caixa + titulo + abas + proximo)
+    return f"<hierarchy>{pagina}</hierarchy>"
+
+
+def test_o_link_escondido_embaixo_da_caixa_que_rola_nao_e_segurado_onde_o_chrome_diz():
+    # O Chrome dá a caixa do link sem o corte da caixa da descrição: embaixo dela, em cima do título da aula. O dedo
+    # segurado ali selecionou o título (aula 5) ou nem foi tentado (aula 1). O link escondido continua na lista do
+    # texto da aula, e a caixa com ele embaixo é a que rola.
+    escondido = _tela_com_a_caixa()
+    assert cursos_robo.links_na_tela(escondido) == []
+    assert cursos_robo.links_da_aula(escondido) == ["[Link de teste]"]
+    assert cursos_robo.caixa_com_link_embaixo(escondido) == (65, 408, 1039, 1411)
+    # Rolada a caixa, o link aparece dentro dela e é o único ponto para o dedo; nada mais embaixo.
+    a_vista = _tela_com_a_caixa(deslocamento=600)
+    assert cursos_robo.links_na_tela(a_vista) == [("[Link de teste]", (427, 903))]
+    assert cursos_robo.caixa_com_link_embaixo(a_vista) is None
+
+
+class PaginaComACaixa:
+    """O celular com a página da aula da caixa que rola por dentro: o dedo subindo dentro da caixa a rola."""
+
+    def __init__(self):
+        self.deslocamento, self.arrastos = 0, []
+
+    def dump_hierarchy(self):
+        return _tela_com_a_caixa(self.deslocamento)
+
+    def screenshot(self):
+        from PIL import Image
+        return Image.new("RGB", (1080, 2400), (20, 20, 20))
+
+    def swipe(self, x1, y1, x2, y2, duracao=None):
+        self.arrastos.append((x1, y1, x2, y2))
+        if 65 <= x1 <= 1039 and 408 <= y1 <= 1411 and y2 < y1:
+            self.deslocamento = 600
+
+
+def test_a_aula_rola_a_caixa_ate_o_link_aparecer_e_so_entao_o_dedo_o_segura(monkeypatch, tmp_path):
+    # Curso 1, aula 5 (noite de 27/11/2026): as abas já estavam na tela, e a leitura parava sem o link; o dedo caía no
+    # título. Agora a caixa rola por dentro (o dedo subindo dentro dela, nunca a página para baixo) até o link
+    # aparecer, e só então o dedo o segura, no lugar em que ele aparece.
+    segurados = []
+    monkeypatch.setattr(cursos_robo, "endereco_do_link",
+                        lambda d, ponto, pausa, ao_falhar=None: segurados.append(ponto) or "https://exemplo.com/ficha")
+    monkeypatch.setattr(cursos_robo, "_abrir_os_links", lambda d, pasta, achados, pausa, vigiar: (
+        [{"texto": texto, "endereco": endereco, "telas": 1, "linhas": 2, "app": "chrome"}
+         for texto, endereco in achados], ""))
+    celular = PaginaComACaixa()
+    info, porque = cursos_robo._ler_a_aula(celular, str(tmp_path), SEM_ESPERA["pausa"], lambda: "")
+    assert porque == "" and segurados == [(427, 903)]
+    assert (info["links"], info["links_abertos"], info["telas"]) == (1, 1, 2)
+    ((x1, y1, x2, y2),) = celular.arrastos
+    assert 65 <= x1 <= 1039 and 408 <= y1 <= 1411 and y2 < y1 and x1 == x2
+    with open(tmp_path / "texto.txt", encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert texto.count("Regras do grupo:") == 1 and "[Link de teste]: https://exemplo.com/ficha" in texto
