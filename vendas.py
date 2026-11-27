@@ -140,6 +140,30 @@ def vendas_dos_produtos_a_mais(pedidos, postados, desde, ate=None):
     return contas
 
 
+# A origem das vendas feitas pelos vídeos da Shopee Vídeo do Rafael, no tipo de canal que a Shopee informa em cada
+# produto (channelType); a dos links das redes é outra ("Social Medias"). A escolha dos fixados do Perfil conta só
+# estas (P317 1).
+ORIGEM_DO_VIDEO = "Shopee Video"
+
+
+def vendidos_pelos_videos(pedidos, desde, ate=None):
+    """
+    {itemId: unidades} vendidas pelos vídeos da Shopee Vídeo do Rafael (a origem ORIGEM_DO_VIDEO) nos pedidos de
+    desde a ate (datas "AAAA-MM-DD"), sem os cancelados e os sem pagamento: a escolha dos fixados do Perfil pelas
+    vendas (P317 1). Só números.
+    """
+    vendidos = {}
+    for p in pedidos.values():
+        data = p.get("data") or ""
+        if data < desde or (ate and data > ate) or not _vale(p):
+            continue
+        for item in p.get("itens") or []:
+            numero = str(item.get("id") or "")
+            if numero and item.get("tipo") == ORIGEM_DO_VIDEO:
+                vendidos[numero] = vendidos.get(numero, 0) + int(item.get("qtd") or 1)
+    return vendidos
+
+
 def _reais(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
