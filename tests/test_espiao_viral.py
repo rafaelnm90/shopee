@@ -108,6 +108,30 @@ def test_clone_que_falha_por_rede_volta_para_a_fila(bm, espiao, monkeypatch):
     assert item_da_fila(bm, "D")["processado"] is True
 
 
+def test_clone_acima_do_limite_do_telegram_fica_de_lado_na_hora(bm, espiao, monkeypatch):
+    # Checkup de 27/11: um clone acima do limite da Bot API (TelegramEntityTooLarge, que o aiogram põe entre os
+    # erros de rede) foi mandado 7 vezes, de 10 em 10 min, como se a rede tivesse caído. Ele nunca passa: fica de
+    # lado na 1ª vez, como as outras falhas.
+    from aiogram.exceptions import TelegramEntityTooLarge
+    agora = datetime.now(bm.fuso_horario)
+    vencido = (agora - timedelta(minutes=5)).strftime(FMT)
+    open("temp/g.mp4", "wb").write(b"v")
+    bm.salvar_fila_clonagem({"fila": [
+        {"id": "G", "processado": False, "horario_disparo": vencido, "caminho_video": "temp/g.mp4",
+         "link_original": "https://s.shopee.com.br/g", "legenda_ia": "Produto\n#Casa", "data_captura": vencido}]})
+    envios = []
+
+    async def grande_demais(**k):
+        envios.append(1)
+        raise TelegramEntityTooLarge(method=None, message="Request Entity Too Large")
+
+    monkeypatch.setattr(bm.bot, "send_video", grande_demais)
+    rodar(bm.processar_fila_espiao())
+    item = item_da_fila(bm, "G")
+    assert item["processado"] is True and not item.get("falhas_de_rede") and len(envios) == 1
+    assert bm.falha_de_rede(TelegramEntityTooLarge(method=None, message="x")) is False
+
+
 @pytest.mark.parametrize("rotina, segura", [
     ("promo_achadinhos_viral", True),
     ("promo_publico_viral", True),
