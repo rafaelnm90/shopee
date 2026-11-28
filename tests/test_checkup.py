@@ -507,6 +507,46 @@ def test_aprovados_postados_mostram_o_atraso_sobre_o_previsto():
     assert "Robô da Shopee Vídeo: 1 aprovado(s) foram ao ar com mais de 30 min de atraso (o maior: 60 min)" in pontos
 
 
+
+def test_aprovado_do_fim_do_horario_conta_o_atraso_do_comeco_do_horario_seguinte(monkeypatch):
+    # 27/11: o aprovado às 23:42, previsto para as 23:52, saiu às 04:23 (a última rodada foi às 23:50), e o checkup
+    # apontou 270 min de atraso. O que não cabe no dia sai no começo do Horário do Robô seguinte (DECISOES.md, Shopee
+    # Vídeo): a espera da noite não é atraso, e o atraso conta do começo do Horário.
+    import cursos_robo
+    import robo_shopee_video as robo
+    monkeypatch.setattr(cursos_robo, "CURSO_EM_ANDAMENTO", True)
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_inicio": 0, "robo_fim": 24})
+    assert checkup._janela_do_robo_sv() == (4, 24)                  # o Dia Todo sem a madrugada do curso (P296 1)
+    assert checkup.horario_seguinte(datetime(2026, 11, 27, 23, 44), (4, 24)) is None
+    assert checkup.horario_seguinte(datetime(2026, 11, 27, 23, 45), (4, 24)) == datetime(2026, 11, 28, 4, 0)
+    assert checkup.horario_seguinte(datetime(2026, 11, 27, 21, 50), (8, 22)) == datetime(2026, 11, 28, 8, 0)
+    assert checkup.horario_seguinte(datetime(2026, 11, 27, 23, 52), (0, 24)) is None     # as rodadas seguem
+    agora = datetime(2026, 11, 28, 8, 10, tzinfo=fuso_horario)
+    noite = robo.criar("v1", agora - timedelta(hours=9))
+    robo.atualizar(noite, estado="postado", aprovado_em="2026-11-27 23:42:00", postar_em="2026-11-27 23:52:00",
+                   postado_em="2026-11-28 04:23:00")
+    na_ultima = robo.criar("v2", agora - timedelta(hours=9))        # a rodada das 23:50 veio: conta do previsto
+    robo.atualizar(na_ultima, estado="postado", aprovado_em="2026-11-27 23:30:00", postar_em="2026-11-27 23:46:00",
+                   postado_em="2026-11-27 23:51:00")
+    tarde = robo.criar("v3", agora - timedelta(hours=9))            # na manhã, o atraso passa dos 30 min
+    robo.atualizar(tarde, estado="postado", aprovado_em="2026-11-27 23:40:00", postar_em="2026-11-27 23:55:00",
+                   postado_em="2026-11-28 04:50:00")
+    robo.registrar_tentativa("descurtir", "descurtido", agora=datetime(2026, 11, 28, 4, 10, tzinfo=fuso_horario))
+    r = checkup.robo_da_shopee_video(agora)
+    assert sorted(r["postados"]) == [
+        ("23:30", "23:46", "23:51", 5, ""),
+        ("23:40", "23:55", "04:50", 50, "saiu no Horário seguinte, das 04:00; no meio: descurtir 1"),
+        ("23:42", "23:52", "04:23", 23, "saiu no Horário seguinte, das 04:00")]
+    pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, agora)
+    assert "Robô da Shopee Vídeo: 1 aprovado(s) foram ao ar com mais de 30 min de atraso (o maior: 50 min)" in pontos
+    # O aprovado que ainda espera: de madrugada, não passou da hora; no Horário, conta do começo dele.
+    esperando = robo.criar("v4", agora - timedelta(hours=9))
+    robo.atualizar(esperando, estado="aprovado", postar_em="2026-11-27 23:52:00")
+    assert checkup.aprovados_atrasados(datetime(2026, 11, 28, 0, 30, tzinfo=fuso_horario)) == (0, 0)
+    assert checkup.aprovados_atrasados(datetime(2026, 11, 28, 4, 45, tzinfo=fuso_horario)) == (1, 45)
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_inicio": 8, "robo_fim": 22})
+    assert checkup.aprovados_atrasados(datetime(2026, 11, 28, 0, 30, tzinfo=fuso_horario)) == (1, 38)
+
 def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     # Pergunta do Rafael (25/10): uma tarefa em cima da outra pode atrapalhar; o checkup mostra
     # quando o robô fez outra coisa na hora do descurtir antes de a limpeza acabar, as leituras das

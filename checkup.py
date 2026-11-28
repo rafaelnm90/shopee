@@ -42,6 +42,7 @@ from datetime import datetime, timedelta
 import apelacoes_shopee_video
 import backup_dados
 import casos_robo
+import cursos_robo
 import db
 import inventario
 import links_shopee
@@ -95,6 +96,9 @@ FAIXA_PADRAO_DO_ROBO_SV, FAIXA_PADRAO_DO_ASSISTENTE_SV = (1, 2), (5, 10)
 RESULTADOS_RUINS = ("erro", "parou", "verificação", "treino parou")
 # O aprovado que passou da hora de ir ao ar há mais que isso (a rodada é a cada 15 min).
 ATRASO_DO_APROVADO = timedelta(minutes=30)
+# O painel chama a rodada do robô a cada 15 min: o aprovado previsto para depois da última rodada do Horário
+# do Robô só sai no começo do Horário seguinte (horario_seguinte).
+RODADA_DO_ROBO_SV = timedelta(minutes=15)
 # O vídeo postado pelo robô que espera mais que isso (em minutos) para entrar na fila do
 # Canal Afiliados: o bot_mestre confere os pedidos a cada 5 min.
 ESPERA_DO_CANAL = 30
@@ -1433,14 +1437,42 @@ def _linhas_dos_lugares_da_ia(achados):
     return linhas
 
 
+def _janela_do_robo_sv():
+    """(início, fim) do Horário do Robô que vale, em horas: o do painel, sem a madrugada do curso (P296 1)."""
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    return cursos_robo.horario_do_robo(config.get("robo_inicio", HORARIO_DO_ROBO_SV[0]),
+                                       config.get("robo_fim", HORARIO_DO_ROBO_SV[1]))
+
+
+def horario_seguinte(previsto, janela):
+    """
+    O começo do Horário do Robô seguinte, quando o aprovado foi previsto para depois da última rodada do dia (nos
+    últimos RODADA_DO_ROBO_SV antes do fim do Horário, a rodada pode não vir), ou None. Esse aprovado sai no começo
+    do Horário seguinte, como manda a regra do que não cabe no dia (DECISOES.md, Shopee Vídeo), e a espera da noite
+    não é atraso: em 27/11, o aprovado às 23:42, previsto para as 23:52, saiu às 04:23 (a última rodada foi às 23:50),
+    e o checkup apontou 270 min de atraso.
+    """
+    inicio, fim = janela
+    minutos = previsto.hour * 60 + previsto.minute
+    if inicio <= 0 and fim >= 24:
+        return None                         # no Dia Todo, as rodadas seguem pela meia-noite
+    if not fim * 60 - RODADA_DO_ROBO_SV.total_seconds() // 60 <= minutos < fim * 60:
+        return None
+    dia = previsto.date() + timedelta(days=1)
+    return datetime(dia.year, dia.month, dia.day, inicio)
+
+
 def aprovados_postados(agora=None):
     """
     Os aprovados que foram ao ar nas últimas 24 h: [(aprovado HH:MM, previsto HH:MM,
     postado HH:MM, atraso em min, o que o robô fez no meio)]. O atraso é do postado sobre o
     previsto: diz se outra tarefa (um preparo longo segurando o celular, a pausa) atrasou o
     post; no que atrasou mais de ATRASO_DO_APROVADO, o que ele fez no meio (no_meio_do_atraso).
+    O previsto para depois da última rodada do dia que saiu no Horário seguinte conta o atraso
+    do começo dele (horario_seguinte).
     """
     agora = _agora(agora)
+    janela = _janela_do_robo_sv()
     try:
         with db.conexao() as conexao:
             linhas = conexao.execute(
@@ -1452,11 +1484,18 @@ def aprovados_postados(agora=None):
     postados = []
     for aprovado, previsto, postado in linhas:
         try:
-            atraso = int((datetime.strptime(postado, "%Y-%m-%d %H:%M:%S")
-                          - datetime.strptime(previsto, "%Y-%m-%d %H:%M:%S")).total_seconds() // 60)
+            quando_previsto = datetime.strptime(previsto, "%Y-%m-%d %H:%M:%S")
+            quando_postado = datetime.strptime(postado, "%Y-%m-%d %H:%M:%S")
         except (TypeError, ValueError):
             continue
-        no_meio = no_meio_do_atraso(previsto, postado) if atraso > ATRASO_DO_APROVADO.total_seconds() // 60 else ""
+        seguinte = horario_seguinte(quando_previsto, janela)
+        no_dia_seguinte = seguinte is not None and quando_postado >= seguinte
+        de_onde = seguinte if no_dia_seguinte else quando_previsto
+        atraso = int((quando_postado - de_onde).total_seconds() // 60)
+        no_meio = (no_meio_do_atraso(_momento(de_onde), postado)
+                   if atraso > ATRASO_DO_APROVADO.total_seconds() // 60 else "")
+        if no_dia_seguinte:
+            no_meio = "; ".join(p for p in (f"saiu no Horário seguinte, das {seguinte:%H:%M}", no_meio) if p)
         postados.append(((aprovado or "")[11:16] or "?", previsto[11:16], postado[11:16], atraso, no_meio))
     return postados
 
@@ -1561,24 +1600,31 @@ def _linhas_dos_que_voltam(por_passo):
 def aprovados_atrasados(agora=None):
     """
     Os rascunhos que o Rafael aprovou e passaram da hora de ir ao ar há mais de
-    ATRASO_DO_APROVADO: quantos e há quantos minutos está o mais atrasado.
+    ATRASO_DO_APROVADO: quantos e há quantos minutos está o mais atrasado. O previsto para
+    depois da última rodada do dia conta do começo do Horário seguinte (horario_seguinte).
     """
     agora = _agora(agora)
     try:
         with db.conexao() as conexao:
-            qtd, mais_antigo = conexao.execute(
-                "SELECT COUNT(*), MIN(postar_em) FROM shopee_video_rascunhos WHERE estado = 'aprovado' "
+            linhas = conexao.execute(
+                "SELECT postar_em FROM shopee_video_rascunhos WHERE estado = 'aprovado' "
                 "AND postar_em IS NOT NULL AND postar_em <= ?",
-                (_momento(agora - ATRASO_DO_APROVADO),)).fetchone()
+                (_momento(agora - ATRASO_DO_APROVADO),)).fetchall()
     except sqlite3.OperationalError:
         return 0, 0
-    if not qtd:
+    if not linhas:
         return 0, 0
-    try:
-        antes = datetime.strptime(mais_antigo, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return qtd, 0
-    return qtd, int((agora.replace(tzinfo=None) - antes).total_seconds() // 60)
+    janela, agora_local, atrasos = _janela_do_robo_sv(), agora.replace(tzinfo=None), []
+    for (postar_em,) in linhas:
+        try:
+            previsto = datetime.strptime(postar_em, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            atrasos.append(0)
+            continue
+        de_onde = horario_seguinte(previsto, janela) or previsto
+        if agora_local - de_onde > ATRASO_DO_APROVADO:
+            atrasos.append(int((agora_local - de_onde).total_seconds() // 60))
+    return len(atrasos), max(atrasos, default=0)
 
 
 def _linha_da_tentativa(tentativa):
