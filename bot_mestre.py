@@ -42,7 +42,7 @@ from aiogram import BaseMiddleware
 from typing import Callable, Dict, Any, Awaitable
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
+from aiogram.exceptions import TelegramEntityTooLarge, TelegramNetworkError, TelegramRetryAfter
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
@@ -15580,6 +15580,15 @@ MAX_FALHAS_DE_REDE_DO_CLONE = 7
 ESPERA_DA_REDE_DO_CLONE_MIN = 10
 
 
+def falha_de_rede(erro):
+    """
+    A falha do envio ao Telegram que passa com o tempo (a rede, a conexão fechada no deploy). O arquivo acima do
+    limite da Bot API (TelegramEntityTooLarge, que o aiogram põe entre os erros de rede) nunca passa: tentar de novo
+    só manda o mesmo arquivo grande outra vez.
+    """
+    return isinstance(erro, TelegramNetworkError) and not isinstance(erro, TelegramEntityTooLarge)
+
+
 async def processar_fila_espiao(forcar=False):
     """
     Motor do Espião, de minuto em minuto: trata os atrasados, distribui os horários
@@ -15846,7 +15855,7 @@ async def processar_fila_espiao(forcar=False):
             except: pass
         except Exception as e:
             falhas_de_rede = item_pendente.get("falhas_de_rede", 0) + 1
-            if isinstance(e, TelegramNetworkError) and falhas_de_rede < MAX_FALHAS_DE_REDE_DO_CLONE:
+            if falha_de_rede(e) and falhas_de_rede < MAX_FALHAS_DE_REDE_DO_CLONE:
                 # A rede falhou (o deploy, por exemplo, fecha a conexão do bot no meio do envio):
                 # o clone não saiu e volta para a fila daqui a pouco, em vez de se perder.
                 item_pendente["falhas_de_rede"] = falhas_de_rede
@@ -17901,7 +17910,7 @@ async def mandar_copia_fora(pacote, tentativa=1):
                                      f"{tamanho / 1024 / 1024:.1f} MB", ok=True)
         logger.info(f"💾 [Backup] Cópia cifrada no privado do admin ({tamanho / 1024 / 1024:.1f} MB).")
     except Exception as e:
-        if isinstance(e, TelegramNetworkError) and tentativa < TENTATIVAS_DA_COPIA_NA_REDE:
+        if falha_de_rede(e) and tentativa < TENTATIVAS_DA_COPIA_NA_REDE:
             agendar_copia_de_novo(pacote, tentativa)
             return
         logger.error(f"❌ [Backup] A cópia fora do servidor falhou ({type(e).__name__})")
