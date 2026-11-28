@@ -15790,7 +15790,19 @@ async def processar_fila_espiao(forcar=False):
             item_pendente["processado"] = True
             salvar_fila_clonagem(fila_data)
             continue
-            
+        if os.path.getsize(caminho_video) > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
+            # O arquivo acima do teto da Bot API nunca sai (o Telegram devolve TelegramEntityTooLarge): fica de fora
+            # antes da IA, sem gastar a análise, como na fila do Público, com um aviso, não um erro (checkup de 27/11).
+            logger.warning(f"🚫 [Espião] Clone {item_id} tem {os.path.getsize(caminho_video) / (1024**2):.1f} MB, "
+                           f"acima do teto de {LIMITE_UPLOAD_BOT_MB} MB da Bot API: fica de fora.")
+            registro_processos.registrar("bot_mestre", "postagem Viral",
+                                         f"de fora - acima de {LIMITE_UPLOAD_BOT_MB} MB", ok=None)
+            try: os.rename(caminho_video, caminho_video + ".pendente")
+            except Exception: pass
+            item_pendente["processado"] = True
+            salvar_fila_clonagem(fila_data)
+            continue
+
         logger.info(f"🕵️ Processando clone agendado: {item_id}")
         link_final = await converter_link_shopee(link_original, api_shopee.ETIQUETA_VIRAL)
         
@@ -15867,8 +15879,14 @@ async def processar_fila_espiao(forcar=False):
                                f"{ESPERA_DA_REDE_DO_CLONE_MIN} min.")
                 registro_processos.registrar("bot_mestre", "postagem Viral", "adiada (rede)", type(e).__name__, ok=None)
                 continue
-            logger.error(f"❌ Falha ao postar clone: {e}")
-            registro_processos.registrar("bot_mestre", "postagem Viral", "falhou", type(e).__name__, ok=False)
+            if isinstance(e, TelegramEntityTooLarge):
+                # Passou do teto da Bot API mesmo abaixo dos LIMITE_UPLOAD_BOT_MB: nunca sai, e não é erro do código.
+                logger.warning(f"🚫 [Espião] Clone {item_id} acima do limite de envio do Telegram: fica de fora.")
+                registro_processos.registrar("bot_mestre", "postagem Viral", "de fora - acima do limite do Telegram",
+                                             ok=None)
+            else:
+                logger.error(f"❌ Falha ao postar clone: {e}")
+                registro_processos.registrar("bot_mestre", "postagem Viral", "falhou", type(e).__name__, ok=False)
             try: os.rename(caminho_video, caminho_video + ".pendente")
             except: pass
             
