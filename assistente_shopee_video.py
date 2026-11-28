@@ -107,8 +107,9 @@ SEM_PRODUTO_NO_LINK = "vídeo de lado: o link não diz o produto (link de vídeo
 # O produto que foi ao ar há menos de 7 dias, ou que vai, ainda não volta: o do vídeo, pelo número do anúncio,
 # conferido como o robô confere (os rascunhos dele que esperam a aprovação e os aprovados, os postados nos últimos 7
 # dias e os vídeos daqui marcados com Postei ✅ nesses dias). Fica de lado, sem gastar a edição nem a IA, e vai o
-# próximo da fonte. Passados os 7 dias, o produto volta em outro vídeo; o mesmo vídeo, nunca (MESMO_VIDEO). Escolhas
-# do Rafael (06/11, P167 1; 26/11/2026, P307): DECISOES.md, Shopee Vídeo.
+# próximo da fonte. Passados os 7 dias, o produto volta em outro vídeo; o mesmo vídeo, nunca (MESMO_VIDEO). O campeão,
+# que vendeu pelos vídeos do Rafael, volta antes, como no robô (robo_shopee_video.campeoes_de_volta). Escolhas do
+# Rafael (06/11, P167 1; 26/11/2026, P307; 28/11/2026, P323 1): DECISOES.md, Shopee Vídeo.
 JA_POSTADO = "vídeo de lado: o produto já foi postado há menos de 7 dias (pelo robô ou marcado com Postei ✅)"
 # O vídeo que o robô ou o assistente já usou fica de lado, também noutro arquivo (a assinatura da imagem,
 # videos.assinatura_do_video), aqui e no grupo dos amigos (cada vídeo vai a uma pessoa só) (P307).
@@ -397,16 +398,22 @@ def itens_do_amigo(amigo):
 
 
 def produtos_ja_postados(agora=None):
-    """Os números (itemId) dos produtos que ainda não voltam, os mesmos que o robô confere (P167 1 e P307)."""
+    """
+    Os números (itemId) dos produtos cujo vídeo ainda não volta, os mesmos que o robô confere nos vídeos da fonte: a
+    regra dos 7 dias, menos o campeão que volta antes (P167 1, P307 e P323 1).
+    """
     # O robô importa este módulo: o import fica aqui dentro.
     import robo_shopee_video
-    return robo_shopee_video.produtos_ja_postados(agora)
+    return robo_shopee_video.produtos_que_nao_voltam(agora)
 
 
-def _anotar_onde_ja_foi(item, agora=None):
-    """O registro diz onde estava o produto do vídeo deixado de lado, como no robô (P167 1)."""
+def _o_produto_volta(item, agora=None):
+    """
+    Se o vídeo do produto pode ir ao Rafael, como no robô: o que não volta fica anotado onde estava, e o campeão que
+    volta antes dos 7 dias, no registro dele (P167 1, P307 e P323 1).
+    """
     import robo_shopee_video
-    robo_shopee_video.anotar_onde_ja_foi(item, "assistente", agora)
+    return robo_shopee_video.o_produto_volta(item, "assistente", agora)
 
 
 def itens_postados(desde=""):
@@ -414,11 +421,19 @@ def itens_postados(desde=""):
     Os números (itemId) dos produtos dos vídeos mandados que o Rafael marcou com Postei ✅ (P166 1); com desde
     (AAAA-MM-DD HH:MM:SS), só os marcados dali em diante (os 7 dias da P307).
     """
+    return [item for item, _quando in postei_com_a_hora(desde)]
+
+
+def postei_com_a_hora(desde=""):
+    """
+    [(itemId, postado_em)] dos vídeos mandados que o Rafael marcou com Postei ✅ de desde em diante: os vídeos de cada
+    produto nos últimos dias, que o campeão conta (P323 1).
+    """
     with db.conexao() as con:
         _criar_tabela(con)
-        return [linha[0] for linha in con.execute(
-            "SELECT item FROM shopee_video_enviados WHERE status = 'enviado' AND COALESCE(postado_em, '') != '' "
-            "AND COALESCE(item, '') != '' AND postado_em >= ?", (desde or "",))]
+        return [(linha[0], linha[1]) for linha in con.execute(
+            "SELECT item, postado_em FROM shopee_video_enviados WHERE status = 'enviado' "
+            "AND COALESCE(postado_em, '') != '' AND COALESCE(item, '') != '' AND postado_em >= ?", (desde or "",))]
 
 
 def assinaturas_mandadas():
@@ -1282,10 +1297,10 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         # O produto que o amigo já recebeu fica para os outros: o vídeo não é anotado e continua na fonte (P271 2).
         if item and item in itens_do_amigo(dono):
             return JA_RECEBIDO
-    elif item and item in produtos_ja_postados(agora):
-        # O produto postado nos últimos 7 dias fica de lado antes da edição e da IA (P167 1 e P307).
+    elif item and not _o_produto_volta(item, agora):
+        # O produto postado nos últimos 7 dias fica de lado antes da edição e da IA, menos o campeão que volta antes
+        # (P167 1, P307 e P323 1); o registro diz onde ele estava, como no robô.
         registrar(video["id"], "ja_postado", JA_POSTADO, agora, item=item)
-        _anotar_onde_ja_foi(item, agora)
         return JA_POSTADO
     # O vídeo que o robô ou o assistente já usou não volta, nem noutro arquivo, para ninguém (P307).
     assinatura = await asyncio.to_thread(_assinatura_do, video)

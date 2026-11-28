@@ -582,6 +582,34 @@ def test_produto_postado_ha_7_dias_volta_no_assistente(monkeypatch):
     assert set(ias) == {"archive/repetido.mp4"} and len(conteudos) == 1
 
 
+def test_produto_campeao_volta_antes_no_assistente(monkeypatch):
+    # P323 1: o produto marcado com Postei ✅ há 2 dias, com venda pelos vídeos, volta em outro vídeo antes dos 7 dias,
+    # como no robô, e o registro diz que o campeão voltou.
+    import robo_shopee_video as robo
+    import vendas
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+
+    async def produtos(link):
+        return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g",
+                 "item": "22"}], link
+
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    _fila(("repetido", LEGENDA, "archive/repetido.mp4", "2026-10-02 11:00"))
+    antes = datetime(2026, 11, 6, 10, 0, tzinfo=asv.fuso_horario)
+    asv.registrar("antes", "enviado", "", antes, item="22")
+    asv.marcar_postado(asv.chave_do_envio("antes"), antes)
+    agora = datetime(2026, 11, 8, 10, 1, tzinfo=asv.fuso_horario)
+    assert asv.produtos_ja_postados(agora) == {"22"}
+    asv.db.salvar_config("banco_pedidos", {"p1": {"data": "2026-11-07", "status": "COMPLETED", "itens": [
+        {"id": "22", "qtd": 1, "tipo": vendas.ORIGEM_DO_VIDEO}]}})
+    assert asv.produtos_ja_postados(agora) == set()
+    assert rodar(asv.preparar_e_enviar(bot, 42, agora)) == "postagem mandada no seu privado"
+    assert set(ias) == {"archive/repetido.mp4"} and len(conteudos) == 1
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_CAMPEAO) == ("de volta", "assistente; 1 vendido(s) e 1 vídeo(s) em 7 dias")
+
+
 def test_o_mesmo_video_nunca_vai_de_novo_nem_noutro_arquivo(monkeypatch):
     # P307: o vídeo que o robô ou o assistente já usou fica de lado pela assinatura da imagem, mesmo noutro arquivo e
     # com outro id na fonte, e vai o próximo; o mandado guarda a dele.

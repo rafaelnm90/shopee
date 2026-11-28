@@ -155,6 +155,16 @@ DIAS_ENTRE_O_MESMO_PRODUTO = 7
 # O produto do vídeo de IA, nos avisos: sem post e sem vídeo de IA nesses dias (P307 e P312 1).
 SEM_POST_NEM_VIDEO_DE_IA = f"sem post nem vídeo de IA nos últimos {DIAS_ENTRE_O_MESMO_PRODUTO} dias"
 PRODUTO_JA_POSTADO = "o produto deste vídeo já foi postado há menos de 7 dias (pelo robô ou pelo assistente)"
+# O produto campeão volta antes (resposta do Rafael, 28/11/2026, P323 1, a ideia 7 do curso): o que vendeu pelo menos
+# VENDAS_DO_CAMPEAO unidade pelos vídeos dele nos últimos dias (o relatório de afiliado, como no fixar pelas vendas
+# da P317 1) volta já no dia seguinte ao último vídeo dele, sempre em outro vídeo (MESMO_VIDEO), até
+# VIDEOS_DO_CAMPEAO vídeos nos últimos DIAS_ENTRE_O_MESMO_PRODUTO dias (os posts do robô e os Postei ✅ do
+# assistente); o rascunho esperando a aprovação e o aprovado continuam segurando o produto. Vale nos vídeos da fonte,
+# no robô e no assistente (produtos_que_nao_voltam); o vídeo de IA continua com os 7 dias (produtos_ja_postados).
+# DECISOES.md, Shopee Vídeo.
+VENDAS_DO_CAMPEAO = 1
+VIDEOS_DO_CAMPEAO = 3
+PROCESSO_DO_CAMPEAO = "produto do vídeo: campeão de volta"
 # O vídeo que o robô ou o modo assistente já usou (o mesmo vídeo noutro arquivo também, pela assinatura da imagem:
 # videos.assinatura_do_video) fica de lado, e vai o próximo da fonte (video_ja_usado; P307).
 MESMO_VIDEO = "o mesmo vídeo já foi usado (pelo robô ou pelo assistente), também noutro arquivo"
@@ -1263,8 +1273,99 @@ def _itens_do_post(rascunho):
 
 
 def produtos_ja_postados(agora=None):
-    """Os números (itemId) dos produtos que ainda não voltam (onde_os_produtos_foram). (P166 1 e P307)"""
+    """
+    Os números (itemId) dos produtos que ainda não voltam pela regra dos 7 dias (onde_os_produtos_foram), a do vídeo de
+    IA; nos vídeos da fonte, o campeão volta antes (produtos_que_nao_voltam). (P166 1, P307 e P323 1)
+    """
     return set(onde_os_produtos_foram(agora))
+
+
+def _videos_dos_produtos(itens, agora=None):
+    """
+    {itemId: {"esperando", "dias"}} dos produtos (itens), como em onde_os_produtos_foram: "esperando", com um rascunho
+    do robô esperando a aprovação ou aprovado; "dias", o dia de cada vídeo dele que foi ao ar nos últimos
+    DIAS_ENTRE_O_MESMO_PRODUTO dias (os posts do robô e os Postei ✅ do assistente; o produto duas vezes no mesmo post
+    conta um vídeo). Os produtos a mais não contam. (P323 1)
+    """
+    desde = inicio_do_prazo(agora)
+    videos = {str(item): {"esperando": False, "dias": []} for item in itens}
+    for rascunho in listar("rascunho", "aprovado", "refazer", "postado"):
+        quando = rascunho["postado_em"] or rascunho["criado_em"] or ""
+        for item in {str(item) for item in _itens_do_post(rascunho) if item} & set(videos):
+            if rascunho["estado"] != "postado":
+                videos[item]["esperando"] = True
+            elif quando >= desde:
+                videos[item]["dias"].append(quando[:10])
+    for item, quando in assistente.postei_com_a_hora(desde):
+        if str(item) in videos:
+            videos[str(item)]["dias"].append(quando[:10])
+    return videos
+
+
+def campeoes_de_volta(agora=None, presos=None):
+    """
+    Os números (itemId) dos campeões que voltam hoje, antes dos 7 dias (P323 1): entre os que ainda não voltam (presos,
+    os produtos_ja_postados, quando o chamador já os tem), os que venderam VENDAS_DO_CAMPEAO unidade ou mais pelos
+    vídeos do Rafael (_vendidos_por_item), sem rascunho esperando a aprovação nem aprovado, sem vídeo hoje e com menos
+    de VIDEOS_DO_CAMPEAO vídeos nos últimos dias. Sem as vendas lidas, nenhum: fica a regra dos 7 dias.
+    """
+    presos = produtos_ja_postados(agora) if presos is None else presos
+    if not presos:
+        return set()
+    try:
+        vendidos = _vendidos_por_item(agora)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] As vendas do produto campeão não foram lidas: {type(e).__name__}")
+        return set()
+    campeoes = {item for item in presos if vendidos.get(item, 0) >= VENDAS_DO_CAMPEAO}
+    if not campeoes:
+        return set()
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    videos = _videos_dos_produtos(campeoes, agora)
+    return {item for item in campeoes if not videos[item]["esperando"] and hoje not in videos[item]["dias"]
+            and len(videos[item]["dias"]) < VIDEOS_DO_CAMPEAO}
+
+
+def produtos_que_nao_voltam(agora=None):
+    """
+    Os números (itemId) dos produtos cujo vídeo da fonte ainda não volta, no robô e no assistente: os de
+    produtos_ja_postados, menos os campeões que voltam hoje (campeoes_de_volta). (P307 e P323 1)
+    """
+    presos = produtos_ja_postados(agora)
+    return presos - campeoes_de_volta(agora, presos)
+
+
+def o_produto_volta(item, quem, agora=None):
+    """
+    Se o vídeo do produto (item) pode ir agora, no robô ou no assistente (quem): o que ainda não volta é anotado onde
+    estava (anotar_onde_ja_foi), e o campeão que volta antes dos 7 dias, no registro dele (anotar_o_campeao). Sem o
+    item, vai. (P307 e P323 1)
+    """
+    item = str(item or "")
+    presos = produtos_ja_postados(agora)
+    if not item or item not in presos:
+        return True
+    if item in campeoes_de_volta(agora, presos):
+        anotar_o_campeao(item, quem, agora)
+        return True
+    anotar_onde_ja_foi(item, quem, agora)
+    return False
+
+
+def anotar_o_campeao(item, quem, agora=None):
+    """
+    Anota no registro o campeão que voltou antes dos 7 dias (P323 1): só o rótulo fixo, quem o deixou voltar ("robô" ou
+    "assistente") e os números (as unidades vendidas pelos vídeos e os vídeos dele nos últimos dias). Nada aqui segura
+    o robô.
+    """
+    try:
+        vendidos = _vendidos_por_item(agora).get(str(item), 0)
+        videos = len(_videos_dos_produtos({str(item)}, agora)[str(item)]["dias"])
+        registro_processos.registrar(REGISTRO, PROCESSO_DO_CAMPEAO, "de volta",
+                                     f"{quem}; {vendidos} vendido(s) e {videos} vídeo(s) em "
+                                     f"{DIAS_ENTRE_O_MESMO_PRODUTO} dias", ok=None)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] O campeão de volta não foi anotado: {type(e).__name__}")
 
 
 def anotar_onde_ja_foi(item, quem, agora=None):
@@ -3517,16 +3618,21 @@ def _produto_do_link_do_video(video):
     return produtos[0] if produtos else None
 
 
-def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
+def escolher_o_video(config, evitar=(), agora=None, ja_postados=None, de_volta=()):
     """
     (o vídeo do próximo rascunho, ""), ou (None, o porquê) sem nenhum (P194 1). O de produto ganha
     "valor" (o que paga por venda), "vendas" e "nota" (do anúncio) e "posicao" (na fila dos próximos
     VIDEOS_NA_ESCOLHA). Entre os de produto, ganha o de maior valor pelos vendidos, com a nota boa na frente (P308 1).
+    ja_postados: os produtos que ainda não voltam (produtos_que_nao_voltam); de_volta: os campeões que voltam antes,
+    para o registro (P323 1).
     """
     candidatos = list(itertools.islice(_videos_da_fonte(config, evitar, agora), VIDEOS_NA_ESCOLHA))
     if not candidatos:
         return None, SEM_VIDEO_NA_FONTE
-    ja_postados = produtos_ja_postados(agora) if ja_postados is None else ja_postados
+    if ja_postados is None:
+        presos = produtos_ja_postados(agora)
+        de_volta = campeoes_de_volta(agora, presos)
+        ja_postados = presos - de_volta
     melhores, abaixo = [], []
     for posicao, video in enumerate(candidatos, 1):
         if not video["de_video"]:
@@ -3575,7 +3681,8 @@ def escolher_o_video(config, evitar=(), agora=None, ja_postados=None):
                                  + (", da época" if escolhido["epoca"] else ""),
                                  f"o {escolhido['posicao']}º de {len(candidatos)}; {len(abaixo)} abaixo do mínimo; "
                                  f"vale {peso_dos_vendidos(escolhido['vendas'])}x"
-                                 + (f"; época: {da_epoca} de {len(melhores)}" if epoca else ""),
+                                 + (f"; época: {da_epoca} de {len(melhores)}" if epoca else "")
+                                 + ("; campeão de volta" if escolhido["item"] in de_volta else ""),
                                  ok=True)
     return dict(escolhido["video"], **{campo: escolhido[campo]
                                        for campo in ("valor", "vendas", "nota", "posicao", "epoca")}), ""
@@ -4536,7 +4643,10 @@ def preparar_rascunho(d, config, agora=None, de=None):
     de (o Preparar 1 Agora ⚡, P243): "fonte" fica só com os vídeos da fonte; "ia", só com o vídeo de IA pronto.
     """
     evitar = evitar_hoje(config, agora)
+    # O vídeo de IA fica com os 7 dias (P307); os vídeos da fonte, com o campeão que volta antes (P323 1).
     ja_postados = produtos_ja_postados(agora)
+    de_volta = campeoes_de_volta(agora, ja_postados)
+    nao_voltam = ja_postados - de_volta
     # Desligado no painel, o vídeo de IA pronto espera o Rafael ligar de novo; o De IA ✨ do botão o usa mesmo assim.
     usa_o_de_ia = de == "ia" or (de is None and video_de_ia_ligado(config))
     do_flow = video_de_ia_para_o_rascunho(evitar, ja_postados) if usa_o_de_ia else None
@@ -4547,7 +4657,7 @@ def preparar_rascunho(d, config, agora=None, de=None):
     video = do_flow
     for _ in range(0 if do_flow else VIDEOS_SEM_OFERTA_POR_RODADA):
         # O de produto que paga mais por venda entre os próximos da fonte (P194 1).
-        video, sem_video = escolher_o_video(config, evitar, agora, ja_postados)
+        video, sem_video = escolher_o_video(config, evitar, agora, nao_voltam, de_volta)
         if not video:
             registrar_tentativa("rascunho", "sem vídeo", sem_video, agora=agora)
             return sem_video
@@ -4561,9 +4671,10 @@ def preparar_rascunho(d, config, agora=None, de=None):
         else:
             motivo = SEM_OFERTA
             if ps.nome_do_produto(video):
-                # O produto do link que foi ao ar há menos de 7 dias ainda não volta (P307).
+                # O produto do link que foi ao ar há menos de 7 dias ainda não volta, menos o campeão (P307 e
+                # P323 1).
                 video["item_do_link"] = item_do_video(video)
-                if video["item_do_link"] not in ja_postados:
+                if video["item_do_link"] not in nao_voltam:
                     break
                 motivo = PRODUTO_JA_POSTADO
                 anotar_onde_ja_foi(video["item_do_link"], "robô", agora)
@@ -7318,10 +7429,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         do_ver_produtos = trocar_os_do_ver_produtos(d, video, nomes, fotos_da_pagina, vistos, curtidos, prazo,
                                                     {nome for nome, _foto in variacoes})
         nomes = [p["nome"] for p in do_ver_produtos]
-        # O 1º produto (o que dá a foto da edição) que foi ao ar há menos de 7 dias ainda não volta (P307).
+        # O 1º produto (o que dá a foto da edição) que foi ao ar há menos de 7 dias ainda não volta, menos o campeão
+        # (P307 e P323 1).
         atualizar(ident, itens_do_video=[p["item"] for p in do_ver_produtos if p.get("do_video") and p.get("item")])
-        if do_ver_produtos and do_ver_produtos[0].get("item") in produtos_ja_postados(agora):
-            anotar_onde_ja_foi(do_ver_produtos[0]["item"], "robô", agora)
+        if do_ver_produtos and not o_produto_volta(do_ver_produtos[0].get("item"), "robô", agora):
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         # O mínimo por venda, que só o celular deixa ver no vídeo de link de vídeo (P200 1).
         conferir_o_minimo_do_ver_produtos(do_ver_produtos)
@@ -7403,10 +7514,10 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
                      "comissao": troca["comissao"] if troca else original.get("comissao", 0)}
         principal["valor"] = valor_por_venda(principal["preco"], principal["comissao"])
         principal["item"] = item_do_link(video["link"])
-        # O produto que vai ao post (o da troca ou o achado pela IA) também não pode ter ido há menos de 7 dias (P307).
+        # O produto que vai ao post (o da troca ou o achado pela IA) também não pode ter ido há menos de 7 dias, menos
+        # o campeão (P307 e P323 1).
         atualizar(ident, itens_do_video=[i for i in dict.fromkeys((video.get("item_do_link"), principal["item"])) if i])
-        if principal["item"] and principal["item"] in produtos_ja_postados(agora):
-            anotar_onde_ja_foi(principal["item"], "robô", agora)
+        if not o_produto_volta(principal["item"], "robô", agora):
             raise Parada(PRODUTO_JA_POSTADO, do_video=True)
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
