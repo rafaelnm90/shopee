@@ -93,3 +93,47 @@ def test_faxina_do_disco_do_bot_tira_as_copias_do_canal(bm, tmp_path):
     os.utime(sobra, (velho, velho))
     removidos, liberados = bm.limpar_arquivos_orfaos()
     assert (removidos, liberados) == (1, 4) and not os.path.exists(sobra)
+
+
+def test_o_video_do_grupo_publico_tem_copia_propria_e_sai_com_ela(tmp_path):
+    # P320 2 e P322 1: o vídeo que espera o Grupo Público tem a própria cópia (a do canal sai depois do post no
+    # canal), o mesmo rascunho não dobra, e o enviado guarda a hora para o espaço até o próximo.
+    copia = pedidos.guardar_para_o_publico(7, _video(tmp_path, conteudo=b"postado"), "Copo Térmico", LINK_DO_POST,
+                                           agora=AGORA)
+    assert os.path.basename(copia) == "7_publico.mp4" and open(copia, "rb").read() == b"postado"
+    pedidos.guardar_para_o_publico(7, _video(tmp_path, conteudo=b"postado"), "Copo Térmico", LINK_DO_POST,
+                                   agora=AGORA)
+    [entrada] = pedidos.para_o_publico()
+    assert (entrada["nome"], entrada["link"], entrada["tentativas"], entrada["guardado_em"]) == (
+        "Copo Térmico", LINK_DO_POST, 0, "2026-10-28 15:00:00")
+    pedidos.atualizar_no_publico(7, tentativas=2)
+    assert pedidos.para_o_publico()[0]["tentativas"] == 2
+    assert pedidos.ultimo_envio_ao_publico() == ""
+    pedidos.tirar_do_publico(7, enviado_em="2026-10-28 15:05:00")
+    assert pedidos.para_o_publico() == [] and not os.path.exists(copia)
+    assert pedidos.ultimo_envio_ao_publico() == "2026-10-28 15:05:00"
+
+
+@pytest.mark.parametrize("pronto, prazo", [
+    ("07:10", "28 20:00"),     # antes da janela: vai quando ela abre
+    ("15:30", "28 20:00"),     # dentro dela: vai na hora
+    ("19:59", "28 20:00"),
+    ("20:00", "29 20:00"),     # depois dela: vai na do dia seguinte
+    ("23:30", "29 20:00"),
+])
+def test_o_prazo_do_grupo_publico_e_o_fim_da_primeira_janela_depois_de_pronto(pronto, prazo):
+    hora, minuto = (int(x) for x in pronto.split(":"))
+    desde = AGORA.replace(hour=hora, minute=minuto)
+    assert pedidos.fim_da_primeira_janela(desde, 20).strftime("%d %H:%M") == prazo
+    # A janela até a meia-noite fecha no começo do dia seguinte.
+    assert pedidos.fim_da_primeira_janela(desde, 24).strftime("%d %H:%M") == "29 00:00"
+
+
+def test_faxina_nao_tira_a_copia_que_espera_o_grupo_publico(tmp_path):
+    inserir("CREATE TABLE IF NOT EXISTS fila_postagens (id_unico TEXT, caminho_video TEXT, status TEXT)")
+    copia = pedidos.guardar_para_o_publico(9, _video(tmp_path), "Copo", LINK_DO_POST)
+    velho = time.time() - (pedidos.HORAS_PROTEGIDAS + 1) * 3600
+    os.utime(copia, (velho, velho))
+    assert pedidos.faxina() == (0, 0) and os.path.exists(copia)
+    pedidos.tirar_do_publico(9)
+    assert not os.path.exists(copia)

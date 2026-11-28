@@ -235,6 +235,9 @@ ETIQUETA_CANAL_AFILIADOS = "canalafiliados"
 # O link de cada vídeo que vai ao grupo dos amigos (amigos_shopee_video.py), o do Rafael: a compra
 # de quem abre o link, nos 7 dias da Shopee, fica com ele (pedido de 22/11).
 ETIQUETA_GRUPO_DOS_AMIGOS = "grupoamigos"
+# O link do post do robô da Shopee Vídeo que vai ao Grupo Público na janela dos reposts (P320 2 e P322 1:
+# pedidos_do_canal.py): a compra de quem abre o vídeo por ele conta como do Grupo Público.
+ETIQUETA_GRUPO_PUBLICO = "grupopublico"
 
 
 def etiquetas(sub_ids):

@@ -481,8 +481,10 @@ def test_zerar_uma_fila_nao_apaga_arquivos_das_outras(bm, Msg, Est):
 
 LINK_DO_POST = "https://sv.shopee.com.br/share-video/abc"
 LINKS = ["https://s.shopee.com.br/canal1", "https://s.shopee.com.br/canal2"]
-# O link do post convertido pela API de afiliado, com a etiqueta do canal (P320 2).
+# O link do post convertido pela API de afiliado, com a etiqueta do canal (P320 2); no Grupo Público, com a do grupo.
 POST_CONVERTIDO = "https://s.shopee.com.br/canalafiliados-post"
+POST_DO_GRUPO = "https://s.shopee.com.br/grupopublico-post"
+GRUPO_PUBLICO = "-1009"
 
 
 def test_criar_postagem_usa_o_padrao_do_canal_e_o_numero_reservado(bm, Msg, Est, monkeypatch):
@@ -521,7 +523,7 @@ def canal(bm, monkeypatch, tmp_path):
     async def converter(link, etiqueta):
         # A API recusada devolve o link como veio (api_shopee.converter_link_shopee).
         estado.convertidos.append((link, etiqueta))
-        return POST_CONVERTIDO if estado.converte and link == LINK_DO_POST else link
+        return f"https://s.shopee.com.br/{etiqueta}-post" if estado.converte and link == LINK_DO_POST else link
 
     monkeypatch.setattr(bm.bot, "send_message", send_message)
     monkeypatch.setattr(bm, "analisar_video_gemini", analisar)
@@ -529,10 +531,10 @@ def canal(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(bm, "converter_link_shopee", converter)
     bm.salvar_contador(7)
 
-    def pedir(links=LINKS, produto="Copo Térmico Inox Com Tampa 500ml Para Café"):
-        video = tmp_path / "rascunho.mp4"
-        video.write_bytes(b"video aprovado")
-        return pedidos_do_canal.pedir(5, str(video), LINK_DO_POST, links, produto)
+    def pedir(links=LINKS, produto="Copo Térmico Inox Com Tampa 500ml Para Café", ident=5):
+        video = tmp_path / f"rascunho_{ident}.mp4"
+        video.write_bytes(f"video aprovado {ident}".encode())
+        return pedidos_do_canal.pedir(ident, str(video), LINK_DO_POST, links, produto)
 
     estado.pedir, estado.pedidos = pedir, pedidos_do_canal
     return estado
@@ -596,6 +598,151 @@ def test_copia_que_sumiu_sai_dos_pedidos_com_aviso(bm, canal):
     rodar(bm.levar_videos_do_robo_ao_canal())
     assert canal.pedidos.pendentes() == [] and "a cópia do vídeo sumiu" in canal.avisos[0]
     assert consultar("SELECT COUNT(*) FROM fila_postagens")[0] == 0 and bm.ler_contador() == 7
+
+
+@pytest.fixture
+def publico(bm, canal, monkeypatch):
+    """O Grupo Público ligado, com a janela dos reposts das 10h às 20h no tópico 5, e o que o bot manda nele."""
+    bm.salvar_submissao_config({**bm.ler_submissao_config(), "ativo": True, "grupo_id": GRUPO_PUBLICO,
+                                "topico_destino": 5, "repost_inicio": 10, "repost_fim": 20})
+    estado = SimpleNamespace(enviados=[], falhas=0)
+
+    async def send_video(chat_id=None, video=None, caption=None, parse_mode=None, message_thread_id=None, **k):
+        if estado.falhas > 0:
+            estado.falhas -= 1
+            raise RuntimeError("Telegram fora do ar")
+        estado.enviados.append((chat_id, message_thread_id, caption, os.path.basename(video.path)))
+        return SimpleNamespace(message_id=1)
+
+    async def credito():
+        return "@Rafaelnm"
+    monkeypatch.setattr(bm.bot, "send_video", send_video)
+    monkeypatch.setattr(bm, "obter_credito_repost", credito)
+    return estado
+
+
+def _no_publico(bm):
+    """O que o registro diz do vídeo do robô no Grupo Público, na ordem: (resultado, detalhe, ok)."""
+    conexao = sqlite3.connect("banco_dados.db")
+    linhas = conexao.execute("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ? "
+                             "ORDER BY rowid", (bm.PROCESSO_ROBO_NO_PUBLICO,)).fetchall()
+    conexao.close()
+    return [tuple(linha) for linha in linhas]
+
+
+def test_video_do_robo_vai_ao_grupo_publico_na_janela_com_o_link_do_grupo(bm, canal, publico, relogio):
+    # P320 2 e P322 1: dentro da janela dos reposts, o vídeo que o robô postou vai ao Grupo Público uns minutos
+    # depois do post (na mesma volta em que entra na fila do canal), no padrão do grupo, com o link do post
+    # convertido com a etiqueta do grupo.
+    import legendas
+    import repetidos_publico
+    relogio("15:00")
+    copia_do_canal = canal.pedir()
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    [(chat, topico, legenda, arquivo)] = publico.enviados
+    assert (chat, topico, arquivo) == (GRUPO_PUBLICO, 5, "5_publico.mp4")
+    assert legenda == legendas.legenda_grupo_publico("@Rafaelnm", "Copo Térmico", link_shopee=POST_DO_GRUPO)
+    assert (LINK_DO_POST, "grupopublico") in canal.convertidos
+    # A cópia do grupo sai depois do envio; a do canal fica para o post do canal.
+    assert canal.pedidos.para_o_publico() == [] and not os.path.exists(os.path.join(canal.pedidos.PASTA,
+                                                                                    "5_publico.mp4"))
+    assert os.path.exists(copia_do_canal) and consultar("SELECT caminho_video FROM fila_postagens")[0] == copia_do_canal
+    assert repetidos_publico.ja_foi(repetidos_publico.chaves_do_video(None, copia_do_canal))
+    assert _no_publico(bm) == [("na espera", "", 1), ("postado", bm.LINK_DO_POST_CONVERTIDO, 1)]
+    # A volta seguinte não manda de novo.
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert len(publico.enviados) == 1
+
+
+def test_video_postado_antes_da_janela_espera_ela_abrir_e_os_que_esperam_saem_espacados(bm, canal, publico,
+                                                                                        relogio):
+    # P322 1: o postado fora da janela vai quando ela abre; os que esperam saem a 15 min um do outro.
+    relogio("07:10")
+    canal.pedir(ident=5)
+    canal.pedir(ident=6)
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert publico.enviados == [] and [e["id"] for e in canal.pedidos.para_o_publico()] == [5, 6]
+    relogio("10:00")
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert [e[3] for e in publico.enviados] == ["5_publico.mp4"]
+    relogio("10:05")
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert len(publico.enviados) == 1
+    relogio("10:16")
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert [e[3] for e in publico.enviados] == ["5_publico.mp4", "6_publico.mp4"]
+    assert canal.pedidos.para_o_publico() == []
+
+
+def test_video_postado_depois_da_janela_espera_a_do_dia_seguinte(bm, canal, publico, relogio):
+    # P322 1: pronto depois do fim da janela, o vídeo espera a do dia seguinte, sem sair de madrugada.
+    relogio("21:00")
+    canal.pedir()
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    relogio("23:55")
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert publico.enviados == [] and len(canal.pedidos.para_o_publico()) == 1
+
+
+def test_com_a_repostagem_pausada_ou_o_painel_desligado_o_video_do_robo_nao_vai_ao_grupo(bm, canal, publico,
+                                                                                          relogio):
+    # P322 1: com a Repostagem pausada ou o painel do grupo desligado no post, o vídeo não vai ao grupo, e o
+    # registro diz por quê; o canal segue igual.
+    relogio("15:00")
+    config = bm.ler_submissao_config()
+    bm.salvar_submissao_config({**config, "repost_pausado": True})
+    canal.pedir(ident=5)
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    bm.salvar_submissao_config({**config, "ativo": False})
+    canal.pedir(ident=6)
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert publico.enviados == [] and canal.pedidos.para_o_publico() == []
+    assert consultar("SELECT COUNT(*) FROM fila_postagens")[0] == 2
+    assert _no_publico(bm) == [("fora - repostagem pausada", "", 1), ("fora - painel do grupo desligado", "", 1)]
+
+
+def test_pausa_depois_do_post_segura_o_video_e_o_que_passa_do_prazo_fica_de_fora(bm, canal, publico, relogio):
+    # P322 1: o vídeo que já espera e encontra a Repostagem pausada fica esperando; despausada, ele vai. O que passa
+    # do fim da 1ª janela sem ir ao grupo fica de fora, e a cópia dele sai do disco.
+    relogio("07:00")
+    config = bm.ler_submissao_config()
+    canal.pedir()
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    bm.salvar_submissao_config({**config, "repost_pausado": True})
+    relogio("10:00")
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert publico.enviados == [] and len(canal.pedidos.para_o_publico()) == 1
+    bm.salvar_submissao_config(config)
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert len(publico.enviados) == 1
+    ontem = datetime.now(bm.fuso_horario) - timedelta(days=1)
+    copia = canal.pedidos.guardar_para_o_publico(8, canal.pedir(ident=8), "Copo", LINK_DO_POST,
+                                                 agora=ontem.replace(hour=9))
+    canal.pedidos.concluir(8)
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert len(publico.enviados) == 1 and canal.pedidos.para_o_publico() == [] and not os.path.exists(copia)
+    assert _no_publico(bm)[-1] == ("fora - a janela passou", "", 1)
+
+
+def test_envio_ao_grupo_que_falha_tenta_de_novo_e_desiste_na_terceira(bm, canal, publico, relogio):
+    relogio("15:00")
+    publico.falhas = 3
+    canal.pedir()
+    for tentativa in (1, 2):
+        rodar(bm.levar_videos_do_robo_ao_canal())
+        [entrada] = canal.pedidos.para_o_publico()
+        assert entrada["tentativas"] == tentativa
+    rodar(bm.levar_videos_do_robo_ao_canal())
+    assert canal.pedidos.para_o_publico() == [] and publico.enviados == []
+    assert any("não foi ao grupo depois de 3 tentativas" in aviso for aviso in canal.avisos)
+    assert _no_publico(bm)[-1] == ("desistiu", "RuntimeError", 0)
+
+
+def test_destino_do_repost_le_o_grupo_e_o_topico_do_painel(bm):
+    assert bm.destino_do_repost({"repost_destino": "-100123:5", "grupo_id": -1001}) == ("-100123", 5)
+    assert bm.destino_do_repost({"repost_destino": "-100123", "topico_destino": 7}) == ("-100123", None)
+    assert bm.destino_do_repost({"grupo_id": -1001, "topico_destino": 7}) == (-1001, 7)
+    assert bm.destino_do_repost({}) == (None, None)
 
 
 def test_cancelados_e_nao_pagos_ficam_no_canc_com_o_valor_e_a_quantidade(bm, monkeypatch, Msg, Est):

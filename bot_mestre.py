@@ -502,6 +502,20 @@ def ler_submissao_config():
 def salvar_submissao_config(dados):
     db.salvar_config("submissao_config", dados)
 
+def destino_do_repost(config):
+    """
+    Onde saem os reposts do Grupo Público (os dos Autorais, o Disparar Repost Autoral e os vídeos do robô da Shopee
+    Vídeo): o repost_destino do painel ("-100123:5", o grupo e o tópico, ou só o grupo) ou, sem ele, o grupo e o
+    tópico de postagem. Devolve (grupo, tópico); sem tópico, None.
+    """
+    repost_destino = config.get("repost_destino")
+    if repost_destino:
+        if ":" in str(repost_destino):
+            grupo, topico = str(repost_destino).split(":")[:2]
+            return grupo, int(topico)
+        return str(repost_destino), None
+    return config.get("grupo_id"), config.get("topico_destino")
+
 class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
@@ -1064,17 +1078,26 @@ TENTATIVAS_DO_ROBO_NO_CANAL = 3
 # O link do post no registro do "na fila": o checkup conta quantos saíram convertidos.
 LINK_DO_POST_CONVERTIDO = "link do post convertido"
 LINK_DO_POST_SEM_CONVERSAO = "link do post sem conversão"
+# O mesmo vídeo vai também ao Grupo Público, como os reposts do grupo: na janela, sem a Repostagem pausada e com o
+# painel ligado (P320 2 e P322 1: DECISOES.md, Canal principal). O nome começa com "postagem ", como os dos outros
+# posts do grupo, que o checkup conta sem meta.
+PROCESSO_ROBO_NO_PUBLICO = "postagem Grupo Público: vídeo do robô"
+# O envio ao grupo que falha (o Telegram, a rede) tenta de novo nas voltas seguintes, até estas.
+TENTATIVAS_DO_ROBO_NO_PUBLICO = 3
+# Entre dois vídeos do robô no grupo, pelo menos isto: os que esperam a janela abrir não saem um colado no outro. O
+# mesmo piso dos reposts do grupo (o espacamento_base_min do motor_repost_publico_step).
+MINUTOS_ENTRE_OS_DO_ROBO_NO_PUBLICO = 15
 
 
-async def link_do_post_no_canal(link_post):
+async def link_do_post_no_canal(link_post, etiqueta=api_shopee.ETIQUETA_CANAL_AFILIADOS):
     """
-    O link do vídeo que o robô postou, no post do canal: convertido em link de afiliado, com a etiqueta do Canal
-    Afiliados, para quem abre o vídeo por ele ficar com o cookie de 7 dias do Rafael (os links dos produtos já iam
-    assim). A API que não converte (recusa, sem resposta) devolve o link como o app copiou, que vai como antes, e o
-    api_shopee anota a falha, que o diagnóstico conta. Devolve (o link, se saiu convertido).
-    Escolha do Rafael (P320 2): DECISOES.md, Canal principal.
+    O link do vídeo que o robô postou, no post do canal (ou, com a etiqueta do grupo, no do Grupo Público):
+    convertido em link de afiliado, com a etiqueta de onde vai, para quem abre o vídeo por ele ficar com o cookie de
+    7 dias do Rafael (os links dos produtos já iam assim). A API que não converte (recusa, sem resposta) devolve o
+    link como o app copiou, que vai como antes, e o api_shopee anota a falha, que o diagnóstico conta. Devolve (o
+    link, se saiu convertido). Escolha do Rafael (P320 2): DECISOES.md, Canal principal.
     """
-    link = await converter_link_shopee(link_post, api_shopee.ETIQUETA_CANAL_AFILIADOS)
+    link = await converter_link_shopee(link_post, etiqueta)
     return (link, True) if link and link != link_post else (link_post, False)
 
 
@@ -1099,6 +1122,11 @@ async def levar_videos_do_robo_ao_canal():
             pedidos_do_canal.concluir(pedido["id"])
             await _avisar_do_canal("📺 <b>Canal Afiliados:</b> o vídeo que o robô postou na Shopee Vídeo não "
                                    f"entrou na fila do canal depois de {tentativas} tentativas ({type(e).__name__}).")
+    try:
+        await levar_videos_do_robo_ao_publico()
+    except Exception as e:
+        logger.error(f"❌ [Grupo Público] O vídeo do robô não foi ao grupo: {type(e).__name__}")
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, f"erro ({type(e).__name__})", ok=False)
 
 
 async def _levar_video_do_robo_ao_canal(pedido):
@@ -1131,6 +1159,7 @@ async def _levar_video_do_robo_ao_canal(pedido):
     pedidos_do_canal.concluir(pedido["id"])
     registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_CANAL, "na fila",
                                  LINK_DO_POST_CONVERTIDO if convertido else LINK_DO_POST_SEM_CONVERSAO, ok=True)
+    _guardar_para_o_publico(pedido, arquivo, titulo)
     if data_alvo == "2000-01-01" or data_alvo <= agora.strftime("%Y-%m-%d"):
         agendar_fila_postagens()
     sem_links = "" if pedido.get("links") else ("\n\n⚠️ Foi sem os links dos produtos (a API de afiliado não os "
@@ -1138,6 +1167,128 @@ async def _levar_video_do_robo_ao_canal(pedido):
     await _avisar_do_canal(f"📺 <b>Canal Afiliados:</b> o vídeo que o robô postou na Shopee Vídeo entrou na fila "
                            f"do canal como <b>Vídeo #{numero}</b>.\n\n📅 Publica {quando_publica_no_canal(data_alvo, agora)}"
                            f"{sem_links}")
+
+
+def _guardar_para_o_publico(pedido, arquivo, titulo):
+    """
+    Deixa o vídeo do robô, que acabou de entrar na fila do canal, esperando a vez no Grupo Público (P320 2): com o
+    painel do grupo ligado, a Repostagem sem pausa e o destino dos reposts. Senão, não vai, e o registro diz por quê
+    (P322 1). O item do título do canal é o nome no post do grupo. Nada daqui atrapalha o canal: o erro fica no
+    registro.
+    """
+    try:
+        config = ler_submissao_config()
+        grupo, _ = destino_do_repost(config)
+        if not config.get("ativo"):
+            fora = "fora - painel do grupo desligado"
+        elif config.get("repost_pausado", False):
+            fora = "fora - repostagem pausada"
+        elif not grupo:
+            fora = "fora - sem o destino do grupo"
+        elif not pedido.get("link_post"):
+            fora = "fora - sem o link do post"
+        else:
+            fora = ""
+        if fora:
+            registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, fora, ok=True)
+            return
+        achado = re.search(r"📦\s*Item:\s*([^\n<]+)", titulo or "")
+        nome = achado.group(1).strip() if achado else ""
+        pedidos_do_canal.guardar_para_o_publico(pedido["id"], arquivo, nome, pedido["link_post"])
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "na espera", ok=True)
+    except Exception as e:
+        logger.error(f"❌ [Grupo Público] O vídeo do robô não ficou esperando o grupo: {type(e).__name__}")
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, f"erro ({type(e).__name__})", ok=False)
+
+
+async def levar_videos_do_robo_ao_publico():
+    """
+    Leva ao Grupo Público o vídeo do robô que espera há mais tempo (P320 2 e P322 1), um por volta do
+    levar_videos_do_robo_ao_canal (5 min), com o padrão do grupo (o crédito, o nome e o link do post convertido com a
+    etiqueta do grupo): só com o painel do grupo ligado, a Repostagem sem pausa, dentro da janela dos reposts e a
+    MINUTOS_ENTRE_OS_DO_ROBO_NO_PUBLICO do anterior. O que passa do fim da 1ª janela sem ir (a pausa ou o painel
+    desligado o tempo todo) fica de fora. Decisões do Rafael: DECISOES.md, Canal principal.
+    """
+    esperando = pedidos_do_canal.para_o_publico()
+    if not esperando:
+        return
+    config = ler_submissao_config()
+    agora = datetime.now(fuso_horario)
+    inicio, fim = int(config.get("repost_inicio", 10)), int(config.get("repost_fim", 20))
+    for entrada in esperando:
+        try:
+            guardado = datetime.strptime(entrada.get("guardado_em") or "", "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            guardado = agora.replace(tzinfo=None)
+        if agora >= pedidos_do_canal.fim_da_primeira_janela(guardado.replace(tzinfo=fuso_horario), fim):
+            pedidos_do_canal.tirar_do_publico(entrada["id"])
+            registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "fora - a janela passou", ok=True)
+    esperando = pedidos_do_canal.para_o_publico()
+    grupo, topico = destino_do_repost(config)
+    if (not esperando or not config.get("ativo") or config.get("repost_pausado", False) or not grupo
+            or not inicio <= agora.hour < fim):
+        return
+    try:
+        desde_o_ultimo = agora.replace(tzinfo=None) - datetime.strptime(pedidos_do_canal.ultimo_envio_ao_publico(),
+                                                                        "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        desde_o_ultimo = None
+    if desde_o_ultimo is not None and desde_o_ultimo < timedelta(minutes=MINUTOS_ENTRE_OS_DO_ROBO_NO_PUBLICO):
+        return
+    entrada = esperando[0]
+    copia = entrada.get("arquivo") or ""
+    if not os.path.exists(copia):
+        pedidos_do_canal.tirar_do_publico(entrada["id"])
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "de fora - vídeo perdido", ok=False)
+        return
+    if os.path.getsize(copia) > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
+        pedidos_do_canal.tirar_do_publico(entrada["id"])
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO,
+                                     f"de fora - acima de {LIMITE_UPLOAD_BOT_MB} MB", ok=False)
+        return
+    chaves = repetidos_publico.chaves_do_video(None, copia)
+    if repetidos_publico.ja_foi(chaves):
+        pedidos_do_canal.tirar_do_publico(entrada["id"])
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "fora - já foi ao grupo", ok=True)
+        return
+    link, convertido = await link_do_post_no_canal(entrada.get("link") or "", api_shopee.ETIQUETA_GRUPO_PUBLICO)
+    legenda = legendas.legenda_grupo_publico(await obter_credito_repost(), entrada.get("nome") or "",
+                                             link_shopee=link)
+    # A pausa de agora: a conversão do link e o crédito levam alguns segundos.
+    config = ler_submissao_config()
+    if not config.get("ativo") or config.get("repost_pausado", False):
+        return
+    try:
+        await bot.send_video(chat_id=grupo, video=FSInputFile(copia), caption=legenda, parse_mode="HTML",
+                             message_thread_id=int(topico) if topico else None)
+    except Exception as e:
+        tentativas = int(entrada.get("tentativas") or 0) + 1
+        logger.error(f"❌ [Grupo Público] O vídeo do robô não foi ao grupo ({tentativas}/"
+                     f"{TENTATIVAS_DO_ROBO_NO_PUBLICO}): {type(e).__name__}")
+        if tentativas < TENTATIVAS_DO_ROBO_NO_PUBLICO:
+            pedidos_do_canal.atualizar_no_publico(entrada["id"], tentativas=tentativas)
+            registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "falhou, tenta de novo",
+                                         type(e).__name__, ok=False)
+            return
+        pedidos_do_canal.tirar_do_publico(entrada["id"])
+        registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "desistiu", type(e).__name__, ok=False)
+        await _avisar_do_canal("👥 <b>Grupo Público:</b> o vídeo que o robô postou na Shopee Vídeo não foi ao "
+                               f"grupo depois de {tentativas} tentativas ({type(e).__name__}).")
+        return
+    # Enviado: daqui em diante nada pode fazê-lo sair de novo. A marca do vídeo vem antes; sem a espera tirada, a
+    # cópia sai do disco, e a volta seguinte cai no "vídeo perdido" em vez de mandar outra vez.
+    repetidos_publico.registrar(chaves, f"robo_{entrada['id']}")
+    try:
+        pedidos_do_canal.tirar_do_publico(entrada["id"], enviado_em=agora.strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception as e:
+        logger.error(f"❌ [Grupo Público] O vídeo do robô foi ao grupo, mas a espera não saiu: {type(e).__name__}")
+        try:
+            os.remove(copia)
+        except OSError:
+            pass
+    registrar_ultimo_post(grupo, "video")
+    registro_processos.registrar("bot_mestre", PROCESSO_ROBO_NO_PUBLICO, "postado",
+                                 LINK_DO_POST_CONVERTIDO if convertido else LINK_DO_POST_SEM_CONVERSAO, ok=True)
 
 
 async def _avisar_do_canal(texto):
@@ -5468,22 +5619,7 @@ async def motor_repost_publico_step():
         if not config.get("ativo") or config.get("repost_pausado", False):
             return
             
-        # Destino: repost_destino ("-100123:5" ou só o grupo) ou o tópico de postagem.
-        grupo_id_base = config.get("grupo_id")
-        topico_destino_base = config.get("topico_destino")
-        repost_destino = config.get("repost_destino")
-        
-        if repost_destino:
-            if ":" in str(repost_destino):
-                grupo_id = str(repost_destino).split(":")[0]
-                topico_destino = int(str(repost_destino).split(":")[1])
-            else:
-                grupo_id = str(repost_destino)
-                topico_destino = None
-        else:
-            grupo_id = grupo_id_base
-            topico_destino = topico_destino_base
-            
+        grupo_id, topico_destino = destino_do_repost(config)
         if not grupo_id:
             return
 
@@ -10266,22 +10402,7 @@ async def manual_repost_autoral(message: types.Message):
     
     config_pub = ler_submissao_config()
     
-    # Destino: repost_destino ou o tópico de postagem do Público.
-    grupo_id_base = config_pub.get("grupo_id")
-    topico_destino_base = config_pub.get("topico_destino")
-    repost_destino = config_pub.get("repost_destino")
-    
-    if repost_destino:
-        if ":" in str(repost_destino):
-            chat_destino = str(repost_destino).split(":")[0]
-            topico_vitrine = int(str(repost_destino).split(":")[1])
-        else:
-            chat_destino = str(repost_destino)
-            topico_vitrine = None
-    else:
-        chat_destino = grupo_id_base
-        topico_vitrine = topico_destino_base
-    
+    chat_destino, topico_vitrine = destino_do_repost(config_pub)
     if not config_pub.get("ativo") or not chat_destino:
         await message.answer("⚠️ <b>Ação Bloqueada:</b> O Painel do Grupo Público está desativado ou não possui um destino configurado.", parse_mode="HTML")
         return
