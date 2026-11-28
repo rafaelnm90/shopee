@@ -2000,6 +2000,77 @@ def test_produto_postado_ha_7_dias_volta_em_outro_video(monkeypatch, avisos):
     assert robo.esperando_aprovacao()[0]["id_video"] == "b2" and robo.listar("pulado") == []
 
 
+def _vendas_pelos_videos(unidades, dia):
+    """O relatório de afiliado com as unidades de cada produto (itemId) vendidas pelos vídeos no dia (P323 1)."""
+    pedidos = robo.db.ler_config("banco_pedidos", {}) or {}
+    pedidos.update({f"p{item}-{dia}": {"data": dia, "status": "COMPLETED", "itens": [
+        {"id": item, "qtd": qtd, "tipo": robo.vendas.ORIGEM_DO_VIDEO}]} for item, qtd in unidades.items()})
+    robo.db.salvar_config("banco_pedidos", pedidos)
+
+
+def test_produto_campeao_volta_antes_dos_7_dias():
+    # Resposta do Rafael (28/11/2026, P323 1): o produto que vendeu pelo menos 1 unidade pelos vídeos dele nos últimos
+    # 7 dias volta já no dia seguinte ao último vídeo, até 3 vídeos nesses dias (os posts do robô e os Postei ✅ do
+    # assistente); o rascunho esperando a aprovação segura o produto; sem venda, a regra dos 7 dias; e o vídeo de IA
+    # fica com os 7 dias.
+    _rascunho("postado", postado_em="2026-11-23 10:00:00", itens_do_video=["555"])   # o copo, na segunda
+    _rascunho("postado", postado_em="2026-11-23 11:00:00", itens_do_video=["777"])   # o que não vendeu
+    _vendas_pelos_videos({"555": 2}, "2026-11-24")
+    # No dia do post, nem o campeão volta; no dia seguinte, ele volta, e o que não vendeu continua de lado.
+    assert robo.produtos_que_nao_voltam(momento("2026-11-23 18:00")) == {"555", "777"}
+    quarta = momento("2026-11-25 09:00")
+    assert robo.campeoes_de_volta(quarta) == {"555"} and robo.produtos_que_nao_voltam(quarta) == {"777"}
+    assert robo.produtos_ja_postados(quarta) == {"555", "777"}
+    # O registro diz quando o campeão voltou, e onde estava o que não volta.
+    assert robo.o_produto_volta("555", "robô", quarta) and not robo.o_produto_volta("777", "robô", quarta)
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_CAMPEAO) == ("de volta", "robô; 2 vendido(s) e 1 vídeo(s) em 7 dias")
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_JA_POSTADO) == (robo.ONDE_JA_FOI["postado"],)
+    # O 2º vídeo, na quarta: nesse dia, o copo não volta mais.
+    _rascunho("postado", postado_em="2026-11-25 10:00:00", itens_do_video=["555"])
+    assert "555" in robo.produtos_que_nao_voltam(momento("2026-11-25 18:00"))
+    # O rascunho esperando a aprovação segura o produto, como sempre.
+    esperando = _rascunho("rascunho", criado="2026-11-26 08:00:00", itens_do_video=["555"])
+    assert "555" in robo.produtos_que_nao_voltam(momento("2026-11-26 09:00"))
+    robo.atualizar(esperando, estado="recusado")
+    assert "555" not in robo.produtos_que_nao_voltam(momento("2026-11-26 09:00"))
+    # O 3º vídeo, marcado com Postei ✅ no assistente na quinta: com 3 vídeos em 7 dias, o 4º espera.
+    robo.assistente.registrar("v1", "enviado", "", agora=momento("2026-11-26 10:00"), item="555")
+    assert robo.assistente.marcar_postado(robo.assistente.chave_do_envio("v1"),
+                                          momento("2026-11-26 10:30"))[0] == "marcado"
+    assert "555" in robo.produtos_que_nao_voltam(momento("2026-11-27 09:00"))
+    # Saído o post de segunda dos 7 dias, voltam os 2 vídeos, e o campeão volta outra vez.
+    assert "555" not in robo.produtos_que_nao_voltam(momento("2026-11-30 10:01"))
+    # Sem venda nos últimos 7 dias, ele espera os 7 dias do último vídeo, como antes (P307).
+    assert "555" in robo.produtos_que_nao_voltam(momento("2026-12-02 10:01"))
+
+
+def test_video_do_campeao_vira_rascunho_antes_dos_7_dias(monkeypatch, avisos):
+    # P323 1: o vídeo do copo, postado há 2 dias e com venda pelos vídeos, vira o rascunho; o registro diz que o
+    # campeão voltou, na escolha e na conferência do produto do post.
+    _fonte(monkeypatch)
+    with open("archive/copo.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "b2", "archive/copo.mp4",
+            "Copo 🥤\nhttps://s.shopee.com.br/repetido", "2026-10-22 10:00:00")
+
+    async def produtos_do_link(link):
+        return [{"nome": VESTIDO, "preco": 59.9, "comissao": 10.0, "item": "555" if "repetido" in link else "2"}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(robo, "item_do_link", lambda link: "555")
+    _rascunho("postado", postado_em="2026-10-20 10:00:00", itens=[{"item": "555", "a_mais": False}])
+    _vendas_pelos_videos({"555": 1}, "2026-10-21")
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 10:01")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["id_video"] == "b2" and robo.listar("pulado") == []
+    assert "campeão de volta" in consultar("SELECT detalhe FROM registro_processos WHERE processo = ?",
+                                           robo.PROCESSO_DA_ESCOLHA)[0]
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DO_CAMPEAO) == ("de volta", "robô; 1 vendido(s) e 1 vídeo(s) em 7 dias")
+
+
 def test_o_mesmo_video_nunca_volta_nem_noutro_arquivo(monkeypatch, avisos):
     # P307: o mesmo produto pode voltar, mas o mesmo vídeo nunca. O vídeo que já virou rascunho (aqui, postado com
     # outro id na fonte) fica de lado pela assinatura da imagem, mesmo noutro arquivo, e vai o próximo da fonte.
@@ -11354,7 +11425,7 @@ def test_do_grupo_fica_com_a_fonte_e_deixa_o_video_de_ia_pronto_esperando(monkey
     ativar()
     vistos = []
 
-    def escolher(config, evitar, agora, ja_postados):
+    def escolher(config, evitar, agora, ja_postados, de_volta=()):
         vistos.append(1)
         return None, "a fonte não tem vídeo novo"
 
