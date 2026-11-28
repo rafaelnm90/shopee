@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import rodar
+from conftest import consultar, rodar
 
 FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -130,6 +130,28 @@ def test_clone_acima_do_limite_do_telegram_fica_de_lado_na_hora(bm, espiao, monk
     item = item_da_fila(bm, "G")
     assert item["processado"] is True and not item.get("falhas_de_rede") and len(envios) == 1
     assert bm.falha_de_rede(TelegramEntityTooLarge(method=None, message="x")) is False
+    # Não é erro do código: fica no registro como de fora, sem o "falhou".
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'postagem Viral'") == (
+        "de fora - acima do limite do Telegram", None)
+
+
+def test_clone_acima_de_50_mb_fica_de_fora_antes_da_ia(bm, espiao, monkeypatch):
+    # Checkup de 27/11: o clone acima do teto da Bot API foi analisado pela IA e mandado ao Telegram, que o recusou
+    # ("Falha ao postar clone"). O arquivo acima dos LIMITE_UPLOAD_BOT_MB fica de fora antes da IA e do envio, como
+    # na fila do Público.
+    agora = datetime.now(bm.fuso_horario)
+    vencido = (agora - timedelta(minutes=5)).strftime(FMT)
+    open("temp/h.mp4", "wb").write(b"v" * 2048)
+    bm.salvar_fila_clonagem({"fila": [
+        {"id": "H", "processado": False, "horario_disparo": vencido, "caminho_video": "temp/h.mp4",
+         "link_original": "https://s.shopee.com.br/h", "data_captura": vencido}]})
+    monkeypatch.setattr(bm, "LIMITE_UPLOAD_BOT_MB", 0.001)          # 1 KB: o arquivo de 2 KB passa do teto
+    rodar(bm.processar_fila_espiao())
+    assert item_da_fila(bm, "H")["processado"] is True
+    assert espiao.chamadas_ia == 0 and espiao.enviados == []
+    assert not os.path.exists("temp/h.mp4") and os.path.exists("temp/h.mp4.pendente")
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'postagem Viral'") == (
+        "de fora - acima de 0.001 MB", None)
 
 
 @pytest.mark.parametrize("rotina, segura", [
