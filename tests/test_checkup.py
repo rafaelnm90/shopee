@@ -1481,6 +1481,60 @@ def test_o_que_espera_o_rafael_sai_dos_pontos_de_atencao():
     assert ficam == pontos and esperando == []
 
 
+def test_rota_do_espelhador_sem_permissao_no_destino_espera_o_rafael():
+    # Checkup de 27/11: a rota nº 1 do Espelhador não posta desde 26/11 porque o dono do grupo de destino fechou o
+    # envio para os membros (o item 5i do lembrete do Rafael). Os 3 pontos que vêm só dela, conferidos pelos números,
+    # vão para "Esperando o Rafael"; o log com outra linha de erro e outra falha no envio voltam a contar.
+    import registro_processos
+    for _ in range(2):
+        registro_processos.registrar("espelhador", "envio da rota", "falhou, tenta de novo",
+                                     "ChatWriteForbiddenError em enviar ao destino", ok=False, agora=AGORA)
+    registro_processos.registrar("espelhador", "envio da rota", "desistiu após 3 tentativas",
+                                 "ChatWriteForbiddenError em enviar ao destino", ok=False, agora=AGORA)
+    pontos = ["erro novo: 1x motor_userbot.py:762 ((sem rastro), origem motor_userbot.py)",
+              "motor_userbot_bot: 3 linha(s) de erro no log (mais comum: motor_userbot.py:743, 3x)",
+              "espelhador: envio da rota: 3 falha(s) e 0 acerto(s) (mais comum: falhou, tenta de novo - "
+              "ChatWriteForbiddenError em enviar ao destino, 2x)",
+              "Viral: 2 item(ns) atrasado(s) na fila"]
+    ficam, esperando = checkup.separar_o_que_espera_o_rafael(pontos, checkup.processos_do_dia(AGORA))
+    assert ficam == ["Viral: 2 item(ns) atrasado(s) na fila"]
+    assert [p for p, _o in esperando] == pontos[:3] and "Espelhador sem permissão" in esperando[0][1]
+
+    # Uma linha de erro do motor_userbot que não é da rota: o ponto do log volta a contar.
+    com_outro = ["motor_userbot_bot: 4 linha(s) de erro no log (mais comum: motor_userbot.py:743, 3x)"]
+    assert checkup.separar_o_que_espera_o_rafael(com_outro, checkup.processos_do_dia(AGORA))[0] == com_outro
+    # Outra falha no envio (não a permissão): nada sai dos pontos de atenção.
+    registro_processos.registrar("espelhador", "envio da rota", "falhou, tenta de novo", "FloodWaitError em enviar",
+                                 ok=False, agora=AGORA)
+    ficam, esperando = checkup.separar_o_que_espera_o_rafael(pontos, checkup.processos_do_dia(AGORA))
+    assert ficam == pontos and esperando == []
+
+
+def test_vendas_dos_posts_do_robo_contam_os_produtos_da_sacolinha_de_cada_post():
+    # P317 1: sem post do robô com venda pelos vídeos nos 7 dias, a entrada pelas vendas do fixar não anota nada; o
+    # checkup mostra as vendas para isso ficar conferível.
+    import robo_shopee_video as robo
+    import vendas
+    assert checkup.DIAS_DAS_VENDAS_DOS_FIXADOS == robo.DIAS_DAS_VENDAS_DOS_FIXADOS
+    um = robo.criar("v1", AGORA)
+    robo.atualizar(um, estado="postado", postado_em="2026-10-22 10:00:00", itens_do_video=["10"],
+                   itens=[{"item": "11", "a_mais": False}, {"item": "12", "a_mais": True}])
+    dois = robo.criar("v2", AGORA)
+    robo.atualizar(dois, estado="postado", postado_em="2026-10-22 11:00:00", itens_do_video=["20"])
+    dia = (AGORA - timedelta(days=1)).strftime("%Y-%m-%d")
+    db.salvar_config("banco_pedidos", {"p1": {"data": dia, "status": "COMPLETED", "itens": [
+        {"id": "12", "qtd": 2, "tipo": vendas.ORIGEM_DO_VIDEO}, {"id": "99", "qtd": 1, "tipo": vendas.ORIGEM_DO_VIDEO},
+        {"id": "20", "qtd": 5, "tipo": "Social Medias"}]}})
+    v = checkup.vendas_dos_posts_do_robo(AGORA)
+    assert v == {"pelos_videos": 3, "posts": 1, "dos_posts": 2}
+    assert [(p["rascunho"]["id"], p["vendidos"]) for p in robo.vendidos_dos_posts(AGORA) if p["vendidos"]] == [(um, 2)]
+    assert checkup.linha_das_vendas_dos_posts(v) == (
+        "Fixar pelas vendas (P317 1): vendas pelos vídeos em 7 dias: 3 unidade(s) | posts do robô com venda: 1 "
+        "(2 unidade(s))")
+    assert checkup.linha_das_vendas_dos_posts({"pelos_videos": 0, "posts": 0, "dos_posts": 0}).endswith(
+        "sem post com venda, a entrada pelas vendas não anota nada")
+
+
 def test_senha_da_copia_diz_se_foi_guardada_e_se_o_lugar_esta_no_painel():
     # O lembrete diário cobra o Guardei a senha ✅: o checkup mostra se ele foi tocado e se o
     # lugar da senha está no Acessos do Servidor, sem nunca mostrar o lugar.

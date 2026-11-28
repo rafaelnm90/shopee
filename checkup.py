@@ -1895,6 +1895,41 @@ def comentarios_do_dia_sv(tipo, agora=None):
         return {"lives": 0, "antigos": POSTS_ANTIGOS_POR_DIA, "feed": VIDEOS_NO_FEED_POR_DIA}[tipo], False
 
 
+# Os dias das vendas do fixar pelas vendas (o robo_shopee_video.DIAS_DAS_VENDAS_DOS_FIXADOS; o tests/test_checkup.py
+# confere).
+DIAS_DAS_VENDAS_DOS_FIXADOS = 7
+
+
+def vendas_dos_posts_do_robo(agora=None):
+    """
+    As vendas pelos vídeos nos dias do fixar pelas vendas (P317 1): as unidades de todos os produtos e quantos posts do
+    robô venderam, pelos produtos da sacolinha de cada um (o do vídeo, o do post e os a mais), como o
+    robo_shopee_video.vendidos_dos_posts. Sem nenhum post com venda, a entrada pelas vendas não faz nada nem anota no
+    registro. Só números.
+    """
+    agora = _agora(agora)
+    desde = (agora - timedelta(days=DIAS_DAS_VENDAS_DOS_FIXADOS - 1)).strftime("%Y-%m-%d")
+    vendidos = vendas.vendidos_pelos_videos(db.ler_config("banco_pedidos", {}) or {}, desde)
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute("SELECT itens_do_video, itens FROM shopee_video_rascunhos "
+                                     "WHERE estado = 'postado'").fetchall()
+    except sqlite3.OperationalError:
+        linhas = []
+    posts = unidades = 0
+    for itens_do_video, itens in linhas:
+        try:
+            do_video, do_post = json.loads(itens_do_video or "[]"), json.loads(itens or "[]")
+        except ValueError:
+            continue
+        produtos = ({str(item) for item in do_video if item}
+                    | {str(item.get("item")) for item in do_post if isinstance(item, dict) and item.get("item")})
+        vendeu = sum(vendidos.get(produto, 0) for produto in produtos)
+        posts += bool(vendeu)
+        unidades += vendeu
+    return {"pelos_videos": sum(vendidos.values()), "posts": posts, "dos_posts": unidades}
+
+
 def interacoes_da_shopee_video(agora=None):
     """
     As respostas aos comentários dos vídeos e o feed, pelo registro de processos: cada
@@ -2014,7 +2049,12 @@ def senha_da_copia():
 SEM_CONTA_DE_REPOSTAGEM = "sem conta de repostagem"
 O_QUE_ESPERA_O_RAFAEL = {
     "chips": "chips novos dos Autorais (Outros Canais → Vídeos Autorais 🎥 → Contas 👥 → Cadastrar Conta ➕)",
+    "rota": ("a rota do Espelhador sem permissão de postar no destino (Outros Canais 🗂️ → Espelhador de Canais 🔄 → "
+             "Remover Espelho 🗑️, ou Editar Espelho ✏️ → a rota → 🎯 Editar Destino)"),
 }
+# O erro do Telethon no detalhe do envio do Espelhador quando o dono do grupo de destino fechou o envio para os
+# membros: só ele abre de novo, ou o Rafael tira ou troca a rota (o item 5i do lembrete dele, 26/11).
+SEM_PERMISSAO_NO_DESTINO = "ChatWriteForbiddenError"
 
 
 def _sem_conta_de_repostagem(processos):
@@ -2023,14 +2063,51 @@ def _sem_conta_de_repostagem(processos):
     return bool(p) and not p["ok"] and any(r[0] == SEM_CONTA_DE_REPOSTAGEM and not r[2] for r in p["resultados"])
 
 
+def linha_das_vendas_dos_posts(v):
+    """A linha do fixar pelas vendas (P317 1): sem post do robô com venda, a entrada pelas vendas não anota nada."""
+    return (f"Fixar pelas vendas (P317 1): vendas pelos vídeos em {DIAS_DAS_VENDAS_DOS_FIXADOS} dias: "
+            f"{v['pelos_videos']} unidade(s) | posts do robô com venda: {v['posts']} ({v['dos_posts']} unidade(s))"
+            + ("" if v["posts"] else " | sem post com venda, a entrada pelas vendas não anota nada"))
+
+
+def _rota_sem_permissao(processos):
+    """
+    (falhas, desistências) do envio do Espelhador quando, nas últimas 24 h, toda falha dele foi a falta de permissão
+    no destino (SEM_PERMISSAO_NO_DESTINO); com outra falha no meio, None.
+    """
+    p = (processos or {}).get(("espelhador", "envio da rota"))
+    falhas = [r for r in (p or {}).get("resultados", []) if r[2] == 0]
+    if not falhas or any(SEM_PERMISSAO_NO_DESTINO not in (r[1] or "") for r in falhas):
+        return None
+    return sum(r[3] for r in falhas), sum(r[3] for r in falhas if r[0].startswith("desistiu"))
+
+
+def _da_rota_sem_permissao(ponto, rota):
+    """
+    O ponto que vem só da rota sem permissão, conferido pelos números: o envio da rota, as linhas de erro do
+    motor_userbot (uma por falha) e o erro gravado no erros_logs (um por desistência).
+    """
+    falhas, desistencias = rota
+    if ponto.startswith("espelhador: envio da rota:"):
+        return True
+    do_log = re.match(r"motor_userbot_bot: (\d+) linha\(s\) de erro no log", ponto)
+    if do_log:
+        return int(do_log.group(1)) == falhas
+    do_banco = re.match(r"erro (?:novo|repetido): (\d+)x motor_userbot\.py:\d+ ", ponto)
+    return bool(do_banco) and int(do_banco.group(1)) == desistencias
+
+
 def separar_o_que_espera_o_rafael(pontos, processos):
     """(pontos de atenção, [(ponto, o que ele precisa fazer)]) — os que esperam o Rafael à parte."""
     esperando, ficam = [], []
     sem_conta = _sem_conta_de_repostagem(processos)
+    rota = _rota_sem_permissao(processos)
     for ponto in pontos:
         if sem_conta and (ponto.startswith("autorais: repostagem ao grupo:")
                           or re.match(r"Autorais: \d+ item\(ns\) atrasado\(s\) na fila", ponto)):
             esperando.append((ponto, O_QUE_ESPERA_O_RAFAEL["chips"]))
+        elif rota and _da_rota_sem_permissao(ponto, rota):
+            esperando.append((ponto, O_QUE_ESPERA_O_RAFAEL["rota"]))
         else:
             ficam.append(ponto)
     return ficam, esperando
@@ -2430,6 +2507,7 @@ def main():
     seguidores = interacoes["seguidores"]
     print(f"Seguidores (Shopee Vídeo): lidos hoje: {'sim' if seguidores['lido_hoje'] else 'não'} | em 1 dia: "
           f"{_variacao(seguidores['dia'])} | em 7 dias: {_variacao(seguidores['semana'])}")
+    print(linha_das_vendas_dos_posts(vendas_dos_posts_do_robo(agora)))
 
     print("\n== Sobreposições (uma tarefa no horário de outra, 24 h)")
     sobre = sobreposicoes(agora)
