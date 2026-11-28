@@ -13,11 +13,16 @@ Contra o loop (pedido do Rafael, 30/10): o Espião traz o canal para a fila do V
 robô e o modo assistente pegam os vídeos do Viral. Eles deixam de fora o que veio do canal
 (CANAL) e o arquivo que o robô já levou ao canal (ja_foi_ao_canal, pela marca guardada no
 pedido), venha de onde vier.
+
+O mesmo vídeo vai também ao Grupo Público (P320 2), na janela dos reposts do grupo (P322 1): o
+bot_mestre guarda aqui, junto do pedido do canal, a cópia, o nome e o link do post de cada um
+(guardar_para_o_publico, na lista "publico" da mesma chave) e o leva ao grupo quando a janela
+abre (para_o_publico, tirar_do_publico). Decisões do Rafael: DECISOES.md, Canal principal.
 """
 import os
 import shutil
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, time as hora_do_dia, timedelta
 
 import db
 import videos
@@ -95,14 +100,83 @@ def parados(minutos, agora=None):
     return sum(1 for pedido in pendentes() if (pedido.get("pedido_em") or "") <= limite)
 
 
+def guardar_para_o_publico(ident, arquivo, nome, link, agora=None):
+    """
+    Guarda o vídeo do rascunho ident para o Grupo Público (P320 2): uma cópia própria (a da fila do canal sai depois
+    do post no canal), o nome do produto, o link do post e quando ficou pronto para o grupo (guardado_em), de onde
+    sai o prazo dele (fim_da_primeira_janela). O mesmo rascunho guardado de novo troca, não dobra. Devolve o caminho
+    da cópia.
+    """
+    os.makedirs(PASTA, exist_ok=True)
+    copia = os.path.join(PASTA, f"{ident}_publico.mp4")
+    shutil.copyfile(arquivo, copia)
+    entrada = {"id": ident, "arquivo": copia, "nome": nome or "", "link": link or "", "tentativas": 0,
+               "guardado_em": (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")}
+
+    def trocar(dados):
+        dados["publico"] = [p for p in dados.get("publico", []) if p.get("id") != ident] + [entrada]
+    db.atualizar_config(CHAVE, trocar)
+    return copia
+
+
+def para_o_publico():
+    """Os vídeos do robô que esperam a vez de ir ao Grupo Público, do mais velho para o mais novo."""
+    return list(db.ler_config(CHAVE, {}).get("publico", []))
+
+
+def atualizar_no_publico(ident, **campos):
+    """Muda campos do vídeo que espera o Grupo Público (as tentativas)."""
+    def mudar(dados):
+        for entrada in dados.get("publico", []):
+            if entrada.get("id") == ident:
+                entrada.update(campos)
+    db.atualizar_config(CHAVE, mudar)
+
+
+def tirar_do_publico(ident, enviado_em=None):
+    """
+    Tira o vídeo da espera do Grupo Público e apaga a cópia dele: foi ao grupo (enviado_em, "AAAA-MM-DD HH:MM:SS",
+    que ultimo_envio_ao_publico devolve depois) ou ficou de fora de vez.
+    """
+    arquivos = []
+
+    def tirar(dados):
+        arquivos.extend(p.get("arquivo") for p in dados.get("publico", []) if p.get("id") == ident)
+        dados["publico"] = [p for p in dados.get("publico", []) if p.get("id") != ident]
+        if enviado_em:
+            dados["publico_ultimo_envio"] = enviado_em
+    db.atualizar_config(CHAVE, tirar)
+    for arquivo in arquivos:
+        try:
+            os.remove(arquivo)
+        except (OSError, TypeError):
+            pass
+
+
+def ultimo_envio_ao_publico():
+    """Quando o último vídeo do robô foi ao Grupo Público ("AAAA-MM-DD HH:MM:SS"), ou "" se nenhum foi."""
+    return db.ler_config(CHAVE, {}).get("publico_ultimo_envio", "")
+
+
+def fim_da_primeira_janela(desde, fim):
+    """
+    O fim (a hora fim) da 1ª janela dos reposts do Grupo Público que ainda não fechou em desde (datetime, quando o
+    vídeo ficou pronto para o grupo): o pronto antes do fim da janela do dia vai nela; o pronto depois, na do dia
+    seguinte (P322 1). O vídeo que passa dela sem ir ao grupo (a Repostagem pausada ou o painel desligado o tempo
+    todo) fica de fora.
+    """
+    dia = desde.date() if desde.hour < fim else desde.date() + timedelta(days=1)
+    return datetime.combine(dia, hora_do_dia(0), tzinfo=desde.tzinfo) + timedelta(hours=fim)
+
+
 def faxina():
     """
-    Apaga da PASTA as cópias que nem um pedido nem um vídeo pendente da fila do canal
-    usam mais, passadas HORAS_PROTEGIDAS. Devolve (quantas, bytes).
+    Apaga da PASTA as cópias que nem um pedido, nem um vídeo que espera o Grupo Público, nem um vídeo pendente da
+    fila do canal usam mais, passadas HORAS_PROTEGIDAS. Devolve (quantas, bytes).
     """
     if not os.path.isdir(PASTA):
         return 0, 0
-    em_uso = {os.path.abspath(pedido["arquivo"]) for pedido in pendentes() if pedido.get("arquivo")}
+    em_uso = {os.path.abspath(pedido["arquivo"]) for pedido in pendentes() + para_o_publico() if pedido.get("arquivo")}
     with db.conexao() as conexao:
         em_uso |= {os.path.abspath(caminho) for (caminho,) in conexao.execute(
             "SELECT caminho_video FROM fila_postagens WHERE status = 'PENDENTE' AND caminho_video IS NOT NULL")}
